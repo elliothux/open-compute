@@ -33,4 +33,4 @@ fi
 if [ -n "$archive" ]; then
   set -- "$@" --archive "$archive"
 fi
-exec "$root/target/debug/platformd" "$@"
+exec "$bin" "$@"
