@@ -1,0 +1,42 @@
+[package]
+name = "open-compute-artifacts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SigV4 S3-compatible artifact store, preflight, and verified local cache"
+publish.workspace = true
+
+[features]
+default = []
+test-support = ["open-compute-core/test-support"]
+
+[dependencies]
+aws-credential-types.workspace = true
+aws-sdk-s3.workspace = true
+aws-smithy-http-client.workspace = true
+aws-smithy-runtime-api.workspace = true
+aws-smithy-types.workspace = true
+base64.workspace = true
+bytes.workspace = true
+futures.workspace = true
+hex.workspace = true
+open-compute-core = { path = "../core" }
+rand.workspace = true
+rustix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
+webpki-root-certs.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+open-compute-core = { path = "../core", features = ["test-support"] }
+tempfile = "3.20.0"
+
+[lints]
+workspace = true

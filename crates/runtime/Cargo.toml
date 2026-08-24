@@ -1,0 +1,49 @@
+[package]
+name = "open-compute-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Pinned workerd supply chain, binary verification, and static config compilation"
+publish.workspace = true
+
+[features]
+default = []
+test-support = ["open-compute-core/test-support", "dep:signal-hook"]
+
+[dependencies]
+command-fds = "0.3.2"
+flate2.workspace = true
+hex.workspace = true
+open-compute-core = { path = "../core" }
+rand.workspace = true
+rustix = { workspace = true, features = ["alloc", "process"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+signal-hook = { version = "0.3.18", optional = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+open-compute-core = { path = "../core", features = ["test-support"] }
+rustix = { workspace = true, features = ["process"] }
+serde_json.workspace = true
+sha2.workspace = true
+tempfile = "3.20.0"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[[test]]
+name = "supervisor"
+required-features = ["test-support"]
+
+[[bin]]
+name = "open-compute-supervisor-fixture"
+path = "src/bin/supervisor_fixture.rs"
+required-features = ["test-support"]
+
+[lints]
+workspace = true

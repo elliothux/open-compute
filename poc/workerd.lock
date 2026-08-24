@@ -1,0 +1,27 @@
+{
+  "release": "v1.20260823.1",
+  "version": "1.20260823.1",
+  "versionOutput": "workerd 2026-08-23",
+  "binarySourceUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-darwin-arm64.gz",
+  "package": null,
+  "artifact": {
+    "name": "workerd-darwin-arm64.gz",
+    "url": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-darwin-arm64.gz",
+    "sha256": "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb"
+  },
+  "binary": {
+    "name": "workerd",
+    "sha256": "8c6562229cc652bcb8d926f5cd3a80e4947d723567588635fbaaebca9fdd7577"
+  },
+  "sha256": "8c6562229cc652bcb8d926f5cd3a80e4947d723567588635fbaaebca9fdd7577",
+  "targetOs": "darwin",
+  "targetArch": "arm64",
+  "compatibilityDate": "2026-08-22",
+  "requiredProcessFlags": ["--experimental"],
+  "compatibilityFlags": ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
+  "upstream": {
+    "commitOrTag": "v1.20260823.1",
+    "releaseUrl": "https://github.com/cloudflare/workerd/releases/tag/v1.20260823.1",
+    "releaseNotesUrl": "https://github.com/cloudflare/workerd/releases/tag/v1.20260823.1"
+  }
+}

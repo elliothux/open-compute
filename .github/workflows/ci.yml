@@ -1,0 +1,110 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@v2
+      - name: MSRV 1.98 check
+        run: cargo check --workspace --all-targets
+
+  lint-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: tests
+        run: cargo test --workspace --all-targets --all-features -- --test-threads=1
+      - name: no-default-features
+        run: cargo check --workspace --no-default-features
+      - name: metadata
+        run: cargo metadata --no-deps --format-version 1
+      - name: dependency boundaries
+        run: chmod +x scripts/check-boundaries && ./scripts/check-boundaries
+
+  coverage:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Prepare formally pinned workerd
+        run: |
+          chmod +x scripts/package-release scripts/coverage
+          dest="$RUNNER_TEMP/open-compute-coverage-release"
+          ./scripts/package-release --dest "$dest" --download
+          echo "OPEN_COMPUTE_TEST_WORKERD=$dest/bin/workerd" >> "$GITHUB_ENV"
+      - name: Enforce 90 percent Rust line coverage
+        run: ./scripts/coverage
+
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Package pinned offline release
+        run: |
+          chmod +x scripts/package-release scripts/test-p0-1 scripts/test-p0-2 scripts/test-p0-2-egress-linux
+          cargo build -p open-compute-service --bin platformd
+          dest="$RUNNER_TEMP/open-compute-release"
+          ./scripts/package-release --dest "$dest" --download
+          test -x "$dest/bin/workerd"
+          test -x "$dest/bin/platformd"
+          test -f "$dest/runtime/workerd.lock.json"
+      - name: P0.1 three-round process Gate
+        run: |
+          dest="$RUNNER_TEMP/open-compute-release"
+          OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" ./scripts/test-p0-1
+      - name: P0.2 three-round Worker Gate (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          dest="$RUNNER_TEMP/open-compute-release"
+          OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" ./scripts/test-p0-2
+      - name: P0.2 three-round Worker and controlled egress Gate (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          dest="$RUNNER_TEMP/open-compute-release"
+          OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" \
+          OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
+            ./scripts/test-p0-2-egress-linux

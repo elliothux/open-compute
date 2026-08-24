@@ -1,0 +1,42 @@
+[package]
+name = "open-compute-workers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Worker bundles, immutable deployments, routing, and runtime source"
+publish.workspace = true
+
+[features]
+default = []
+test-support = [
+    "open-compute-core/test-support",
+    "open-compute-storage/test-support",
+    "open-compute-artifacts/test-support",
+]
+
+[dependencies]
+base64.workspace = true
+bytes.workspace = true
+futures.workspace = true
+hex.workspace = true
+open-compute-artifacts = { path = "../artifacts" }
+open-compute-core = { path = "../core" }
+open-compute-storage = { path = "../storage" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+unicode-normalization.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+open-compute-artifacts = { path = "../artifacts", features = ["test-support"] }
+open-compute-core = { path = "../core", features = ["test-support"] }
+open-compute-storage = { path = "../storage", features = ["test-support"] }
+rusqlite.workspace = true
+tempfile = "3.20.0"
+
+[lints]
+workspace = true

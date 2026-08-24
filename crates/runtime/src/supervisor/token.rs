@@ -1,0 +1,149 @@
+//! Fresh 256-bit internal tokens and non-secret fingerprints.
+
+use crate::digest::{TOKEN_HEX_LEN, validate_token};
+use open_compute_core::{PlatformError, SecretString};
+use sha2::{Digest, Sha256};
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone)]
+struct ActiveGeneration {
+    token: SecretString,
+    claimed_generation: Option<String>,
+}
+
+/// Generation-scoped internal authentication shared with a loopback service.
+#[derive(Clone, Default)]
+pub struct GenerationAuthRegistry {
+    active: Arc<Mutex<Option<ActiveGeneration>>>,
+}
+
+/// Opaque credential for platform-owned calls into the current workerd generation.
+///
+/// Its formatting and serialization surface never exposes the token. Callers should
+/// borrow it only while constructing a loopback request.
+#[derive(Clone)]
+pub struct GenerationCredential(SecretString);
+
+impl GenerationCredential {
+    /// Borrow the raw token for an immediate loopback authentication header.
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        self.0.expose()
+    }
+}
+
+impl std::fmt::Debug for GenerationCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GenerationCredential([REDACTED])")
+    }
+}
+
+impl std::fmt::Debug for GenerationAuthRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GenerationAuthRegistry")
+            .field("active", &self.active_fingerprint())
+            .finish()
+    }
+}
+
+impl GenerationAuthRegistry {
+    /// Construct an empty registry that rejects every request.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn activate(&self, token: SecretString) {
+        *self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ActiveGeneration {
+            token,
+            claimed_generation: None,
+        });
+    }
+
+    pub(crate) fn clear(&self) {
+        *self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    /// Authenticate a token and bind its first bounded process-generation claim.
+    /// Subsequent requests must present the same claim.
+    pub fn authorize(&self, token: &str, generation: &str) -> bool {
+        if generation.is_empty()
+            || generation.len() > 128
+            || generation.bytes().any(|byte| byte.is_ascii_control())
+        {
+            return false;
+        }
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(active) = guard.as_mut() else {
+            return false;
+        };
+        if !constant_time_equal(token.as_bytes(), active.token.expose().as_bytes()) {
+            return false;
+        }
+        match &active.claimed_generation {
+            Some(claimed) => constant_time_equal(generation.as_bytes(), claimed.as_bytes()),
+            None => {
+                active.claimed_generation = Some(generation.to_owned());
+                true
+            }
+        }
+    }
+
+    /// Non-secret active token fingerprint for tests and diagnostics.
+    #[must_use]
+    pub fn active_fingerprint(&self) -> Option<String> {
+        self.active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|active| token_fingerprint(&active.token))
+    }
+
+    /// Snapshot the active credential for one platform-owned loopback request.
+    /// A concurrent generation change may make the credential fail closed.
+    #[must_use]
+    pub fn credential(&self) -> Option<GenerationCredential> {
+        self.active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|active| GenerationCredential(active.token.clone()))
+    }
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    let len = left.len().max(right.len());
+    let mut diff = left.len() ^ right.len();
+    for index in 0..len {
+        diff |= usize::from(
+            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
+        );
+    }
+    diff == 0
+}
+
+/// Generate a cryptographically random 256-bit lowercase hex token.
+pub fn generate_internal_token() -> Result<SecretString, PlatformError> {
+    let mut bytes = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::rng(), &mut bytes);
+    let token = SecretString::new(hex::encode(bytes));
+    validate_token(&token)?;
+    debug_assert_eq!(token.expose().len(), TOKEN_HEX_LEN);
+    Ok(token)
+}
+
+/// Non-secret uniqueness proof: truncated SHA-256 of the token bytes.
+#[must_use]
+pub fn token_fingerprint(token: &SecretString) -> String {
+    let digest = Sha256::digest(token.expose().as_bytes());
+    hex::encode(&digest[..8])
+}

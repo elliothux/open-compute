@@ -1,0 +1,2381 @@
+//! Real filesystem, lock, control-database, and AEAD tests.
+
+use crate::data_dir::{expected_directories, future_resource_paths};
+use crate::fs as sfs;
+use crate::master_key;
+use crate::migrations::MigrationFault;
+use crate::{
+    DataDir, DeploymentState, IdempotencyReservation, NewDeployment, PlatformStorage, SecretCrypto,
+    StoredDeploymentSecret, WorkerRepository, atomic_write,
+};
+use open_compute_core::clock::{DeterministicClock, SystemClock};
+use open_compute_core::config::StorageConfig;
+use open_compute_core::{AccountId, DeploymentId, ErrorCode, SecretBytes, WorkerId};
+use rusqlite::Connection;
+use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::thread;
+use std::time::{Duration, UNIX_EPOCH};
+use tempfile::TempDir;
+
+fn storage_config(root: &Path) -> StorageConfig {
+    StorageConfig {
+        data_dir: root.to_path_buf(),
+        master_key_file: root.join("keys/master.key"),
+        master_key_env: None,
+        sqlite_busy_timeout_ms: 5_000,
+        free_space_soft_bytes: 1_073_741_824,
+        free_space_hard_bytes: 268_435_456,
+    }
+}
+
+fn unique_root() -> (TempDir, PathBuf) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("data");
+    (tmp, root)
+}
+
+fn restore_writable(path: &Path) {
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let _ = fs::set_permissions(&p, fs::Permissions::from_mode(0o700));
+        }
+    }
+}
+
+#[test]
+fn clean_and_repeat_bootstrap_preserves_identity() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let clock = DeterministicClock::new(UNIX_EPOCH + Duration::from_secs(1_700_000_000));
+    let first = PlatformStorage::bootstrap(&config, &clock).expect("first");
+    let platform_id = first.identity().platform_id;
+    let account = first.identity().default_account_id;
+    let created = first.identity().created_at_ms;
+    drop(first);
+    clock.advance(Duration::from_secs(60));
+    let second = PlatformStorage::bootstrap(&config, &clock).expect("second");
+    assert_eq!(second.identity().platform_id, platform_id);
+    assert_eq!(second.identity().default_account_id, account);
+    assert_eq!(second.identity().created_at_ms, created);
+    assert_eq!(
+        second
+            .db()
+            .query_meta("last_started_version")
+            .unwrap()
+            .as_deref(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn lock_released_after_failed_bootstrap() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let err = PlatformStorage::bootstrap_with_fault(
+        &config,
+        &SystemClock,
+        Some(MigrationFault::BeforeExecution),
+    )
+    .expect_err("fault");
+    assert_eq!(err.code(), ErrorCode::MigrationFailed);
+    PlatformStorage::bootstrap(&config, &SystemClock).expect("retry after failed bootstrap");
+}
+
+#[test]
+fn relative_and_symlink_root_rejected() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let mut relative = storage_config(tmp.path());
+    relative.data_dir = PathBuf::from("relative-data");
+    let err = DataDir::acquire(&relative).expect_err("relative");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+
+    let real = tmp.path().join("real");
+    fs::create_dir(&real).unwrap();
+    fs::set_permissions(&real, fs::Permissions::from_mode(0o700)).unwrap();
+    let link = tmp.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let mut cfg = storage_config(&link);
+    cfg.master_key_file = link.join("keys/master.key");
+    let err = DataDir::acquire(&cfg).expect_err("symlink root");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+}
+
+#[test]
+fn child_symlink_and_fifo_rejected() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let owned = DataDir::acquire(&config).expect("acquire");
+    drop(owned);
+
+    let outside = _tmp.path().join("outside");
+    fs::write(&outside, b"x").unwrap();
+    let keys = root.join("keys");
+    fs::remove_dir_all(&keys).unwrap();
+    std::os::unix::fs::symlink(&outside, &keys).unwrap();
+    let err = DataDir::acquire(&config).expect_err("symlink child");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+    fs::remove_file(&keys).unwrap();
+    fs::create_dir(&keys).unwrap();
+    fs::set_permissions(&keys, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let fifo = root.join("runtime").join("fifo");
+    let status = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    assert!(status.success());
+    let err = sfs::validate_contained(&root, &fifo).expect_err("fifo");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+    let _ = fs::remove_file(&fifo);
+}
+
+#[test]
+fn world_writable_root_rejected() {
+    let (_tmp, root) = unique_root();
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o777)).unwrap();
+    let config = storage_config(&root);
+    let err = DataDir::acquire(&config).expect_err("world");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+    restore_writable(&root);
+}
+
+#[test]
+fn filesystem_and_lock_helpers_reject_missing_special_and_escaping_paths() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("root");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let parent_file = root.join("parent-file");
+    fs::write(&parent_file, b"x").unwrap();
+    assert_eq!(
+        sfs::create_dir_secure(&parent_file.join("child"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+    assert_eq!(
+        sfs::create_root_first_run(Path::new("/"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+    assert_eq!(
+        sfs::create_root_first_run(&root.join("missing/child"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+    assert_eq!(
+        sfs::validate_contained(&root.join("missing"), &root.join("missing/child"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+    let outside = tmp.path().join("outside");
+    fs::write(&outside, b"outside").unwrap();
+    assert_eq!(
+        sfs::validate_contained(&root, &outside).unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+    assert_eq!(
+        atomic_write(Path::new("/"), b"x").unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+    assert_eq!(
+        sfs::chmod(&root.join("missing"), 0o600).unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+
+    assert_eq!(
+        crate::DataDirLock::classify_path(&root.join("missing")),
+        crate::FilesystemDurability::Unclassified
+    );
+    assert!(
+        crate::FilesystemDurability::ApparentlyLocal
+            .doctor_warning()
+            .is_none()
+    );
+    assert!(
+        crate::FilesystemDurability::NetworkOrRemote
+            .doctor_warning()
+            .unwrap()
+            .contains("network")
+    );
+    assert!(
+        crate::FilesystemDurability::Unclassified
+            .doctor_warning()
+            .unwrap()
+            .contains("could not be classified")
+    );
+    assert_eq!(
+        crate::InspectLock::try_acquire(&root.join("missing.lock"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+}
+
+#[test]
+fn identity_bootstrap_rejects_corrupt_existing_authority_rows() {
+    enum Corruption {
+        Platform(Vec<u8>),
+        Created(Vec<u8>),
+        Account(String),
+    }
+    for corruption in [
+        Corruption::Platform(b"bad-platform".to_vec()),
+        Corruption::Platform(vec![0xff]),
+        Corruption::Created(b"not-a-number".to_vec()),
+        Corruption::Account("bad-account".to_owned()),
+    ] {
+        let (_tmp, root) = unique_root();
+        let config = storage_config(&root);
+        let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+        let fingerprint = storage.crypto().fingerprint_key_id().to_owned();
+        drop(storage);
+        let db_path = root.join("control.sqlite");
+        let conn = Connection::open(&db_path).unwrap();
+        match corruption {
+            Corruption::Platform(value) => {
+                conn.execute(
+                    "UPDATE platform_meta SET value = ?1 WHERE key = 'platform_id'",
+                    [value],
+                )
+                .unwrap();
+            }
+            Corruption::Created(value) => {
+                conn.execute(
+                    "UPDATE platform_meta SET value = ?1 WHERE key = 'created_at_ms'",
+                    [value],
+                )
+                .unwrap();
+            }
+            Corruption::Account(value) => {
+                conn.execute(
+                    "UPDATE accounts SET id = ?1 WHERE name = 'default'",
+                    [value],
+                )
+                .unwrap();
+            }
+        }
+        drop(conn);
+        let db = crate::control_db::ControlDb::open(&db_path, 5_000).unwrap();
+        assert!(crate::identity::bootstrap(&db, &SystemClock, &fingerprint).is_err());
+    }
+}
+
+#[test]
+fn exact_layout_and_no_future_files() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).expect("boot");
+    for dir in expected_directories(&root) {
+        assert!(dir.is_dir(), "{}", dir.display());
+        let mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "{}", dir.display());
+    }
+    assert!(root.join("platform.lock").is_file());
+    assert!(root.join("control.sqlite").is_file());
+    for future in future_resource_paths(&root) {
+        assert!(!future.exists(), "{}", future.display());
+    }
+    drop(storage);
+}
+
+#[test]
+fn deployment_staging_is_private_and_crash_residue_is_cleared_under_lock() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).expect("boot");
+    let staging = storage.data_dir().deployment_staging_dir();
+    assert_eq!(
+        fs::metadata(&staging).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    drop(storage);
+
+    let stale = staging.join("interrupted.upload");
+    fs::write(&stale, b"partial tenant source").unwrap();
+    fs::set_permissions(&stale, fs::Permissions::from_mode(0o600)).unwrap();
+    let data_dir = DataDir::acquire(&config).expect("reacquire");
+    assert!(!stale.exists());
+    drop(data_dir);
+}
+
+#[test]
+fn atomic_replace_and_temp_cleanup() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let dir = tmp.path().join("d");
+    fs::create_dir(&dir).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let dest = dir.join("file");
+    atomic_write(&dest, b"one").expect("write1");
+    atomic_write(&dest, b"two").expect("write2");
+    assert_eq!(fs::read(&dest).unwrap(), b"two");
+    let leftovers: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".tmp-"))
+        .collect();
+    assert!(leftovers.is_empty());
+}
+
+#[test]
+fn pragmas_schema_strict_and_partial_index() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).expect("boot");
+    assert_eq!(
+        storage
+            .db()
+            .pragma_display("journal_mode")
+            .unwrap()
+            .to_lowercase(),
+        "wal"
+    );
+    let sync = storage.db().pragma_display("synchronous").unwrap();
+    assert!(sync == "2" || sync.eq_ignore_ascii_case("full"));
+    assert_eq!(storage.db().pragma_display("foreign_keys").unwrap(), "1");
+    assert_eq!(storage.db().pragma_display("trusted_schema").unwrap(), "0");
+    for table in ["schema_migrations", "platform_meta", "accounts"] {
+        let sql = storage.db().table_sql(table).unwrap().expect("sql");
+        assert!(sql.to_ascii_uppercase().contains("STRICT"), "{sql}");
+    }
+    let idx = storage
+        .db()
+        .index_sql("accounts_live_name")
+        .unwrap()
+        .unwrap();
+    assert!(idx.to_ascii_uppercase().contains("UNIQUE"));
+    assert!(idx.contains("deleted_at_ms"));
+}
+
+fn raw_user_version(path: &Path) -> i64 {
+    let conn = Connection::open(path).unwrap();
+    conn.pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap()
+}
+
+#[test]
+fn migration_faults_checksum_future_and_restart() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    for fault in [
+        MigrationFault::BeforeExecution,
+        MigrationFault::DuringDdl,
+        MigrationFault::BeforeMigrationRow,
+    ] {
+        let (_t, r) = unique_root();
+        let c = storage_config(&r);
+        let err =
+            PlatformStorage::bootstrap_with_fault(&c, &SystemClock, Some(fault)).expect_err("f");
+        assert_eq!(err.code(), ErrorCode::MigrationFailed);
+        assert_eq!(raw_user_version(&r.join("control.sqlite")), 0);
+        PlatformStorage::bootstrap(&c, &SystemClock).expect("recover");
+        assert_eq!(raw_user_version(&c.data_dir.join("control.sqlite")), 2);
+    }
+
+    let err = PlatformStorage::bootstrap_with_fault(
+        &config,
+        &SystemClock,
+        Some(MigrationFault::AfterCommit),
+    )
+    .expect_err("after commit reports failure");
+    assert_eq!(err.code(), ErrorCode::MigrationFailed);
+    assert_eq!(raw_user_version(&root.join("control.sqlite")), 1);
+    PlatformStorage::bootstrap(&config, &SystemClock).expect("restart sees committed migration");
+
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    conn.execute(
+        "UPDATE schema_migrations SET checksum_sha256 = ?1",
+        [vec![0u8; 32]],
+    )
+    .unwrap();
+    drop(conn);
+    let checksum_err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("checksum");
+    assert_eq!(checksum_err.code(), ErrorCode::MigrationFailed);
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    conn.pragma_update(None, "user_version", 99).unwrap();
+    drop(conn);
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("future");
+    assert_eq!(err.code(), ErrorCode::SchemaTooNew);
+}
+
+#[test]
+fn p0_2_migration_ddl_fault_rolls_back_to_schema_one() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let first = PlatformStorage::bootstrap_with_fault(
+        &config,
+        &SystemClock,
+        Some(MigrationFault::AfterCommit),
+    )
+    .expect_err("migration one commits, then reports the injected fault");
+    assert_eq!(first.code(), ErrorCode::MigrationFailed);
+    assert_eq!(raw_user_version(&root.join("control.sqlite")), 1);
+
+    let second = PlatformStorage::bootstrap_with_fault(
+        &config,
+        &SystemClock,
+        Some(MigrationFault::DuringDdl),
+    )
+    .expect_err("migration two must roll back its entire trigger/table batch");
+    assert_eq!(second.code(), ErrorCode::MigrationFailed);
+    assert_eq!(raw_user_version(&root.join("control.sqlite")), 1);
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    let workers_exist: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='workers')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!workers_exist, "migration two DDL must be atomic");
+    drop(conn);
+
+    drop(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
+    assert_eq!(raw_user_version(&root.join("control.sqlite")), 2);
+}
+
+#[test]
+fn master_key_modes_and_failures() {
+    let (_tmp, root) = unique_root();
+    let mut config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).expect("auto");
+    let fp = storage.identity().master_key_id.clone();
+    let key_bytes = fs::read_to_string(&config.master_key_file).unwrap();
+    assert!(key_bytes.starts_with("ocmk1:"));
+    drop(storage);
+
+    let env_name = "PLATFORM_STORAGE_TEST_MASTER_KEY";
+    master_key::set_test_env(env_name, key_bytes.trim());
+    config.master_key_env = Some(env_name.to_string());
+    let both = PlatformStorage::bootstrap(&config, &SystemClock).expect("both");
+    assert_eq!(both.identity().master_key_id, fp);
+    drop(both);
+
+    master_key::set_test_env(
+        env_name,
+        "ocmk1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    );
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("mismatch both");
+    assert_eq!(err.code(), ErrorCode::MasterKeyMismatch);
+
+    let (_t2, root2) = unique_root();
+    let mut env_only = storage_config(&root2);
+    env_only.master_key_env = Some(env_name.to_string());
+    fs::create_dir_all(root2.join("keys")).unwrap();
+    fs::set_permissions(root2.join("keys"), fs::Permissions::from_mode(0o700)).unwrap();
+    master_key::set_test_env(env_name, key_bytes.trim());
+    let env_boot = PlatformStorage::bootstrap(&env_only, &SystemClock).expect("env only");
+    assert!(
+        !env_only.master_key_file.exists(),
+        "env-only must not persist plaintext"
+    );
+    drop(env_boot);
+    master_key::clear_test_env();
+
+    let mut loose = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o644)
+        .open(&config.master_key_file)
+        .unwrap();
+    loose.write_all(key_bytes.as_bytes()).unwrap();
+    drop(loose);
+    fs::set_permissions(&config.master_key_file, fs::Permissions::from_mode(0o644)).unwrap();
+    config.master_key_env = None;
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("loose");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+    fs::set_permissions(&config.master_key_file, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&config.master_key_file, b"ocmk1:not-valid!!!").unwrap();
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("corrupt");
+    assert_eq!(err.code(), ErrorCode::MasterKeyMismatch);
+}
+
+#[test]
+fn db_fingerprint_mismatch_fails_closed() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let first = PlatformStorage::bootstrap(&config, &SystemClock).expect("first");
+    drop(first);
+    fs::remove_file(&config.master_key_file).unwrap();
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("new key vs db");
+    assert_eq!(err.code(), ErrorCode::MasterKeyMismatch);
+    assert!(config.master_key_file.exists());
+}
+
+#[test]
+fn aead_roundtrip_nonce_context_tamper_key() {
+    let key = SecretBytes::new(vec![7u8; 32]);
+    let fp = master_key::fingerprint_for_test(key.expose());
+    let crypto = SecretCrypto::new(&key, &fp).unwrap();
+    let account = AccountId::generate();
+    let worker = WorkerId::generate();
+    let deployment = DeploymentId::generate();
+    let pt = SecretBytes::new(b"super-secret-value".to_vec());
+    let e1 = crypto
+        .encrypt(&pt, account, worker, deployment, "BINDING")
+        .unwrap();
+    let e2 = crypto
+        .encrypt(&pt, account, worker, deployment, "BINDING")
+        .unwrap();
+    assert_ne!(e1.nonce, e2.nonce);
+    let back = crypto
+        .decrypt(&e1, account, worker, deployment, "BINDING")
+        .unwrap();
+    assert_eq!(back.expose(), b"super-secret-value");
+    assert!(
+        crypto
+            .decrypt(&e1, AccountId::generate(), worker, deployment, "BINDING")
+            .is_err()
+    );
+    let mut tampered = e1.clone();
+    tampered.ciphertext[0] ^= 0xff;
+    assert!(
+        crypto
+            .decrypt(&tampered, account, worker, deployment, "BINDING")
+            .is_err()
+    );
+    let other_key = SecretBytes::new(vec![9u8; 32]);
+    let other_fp = master_key::fingerprint_for_test(other_key.expose());
+    let other = SecretCrypto::new(&other_key, &other_fp).unwrap();
+    assert_eq!(
+        other
+            .decrypt(&e1, account, worker, deployment, "BINDING")
+            .unwrap_err()
+            .code(),
+        ErrorCode::MasterKeyMismatch
+    );
+}
+
+#[test]
+fn no_secrets_in_db_debug_json_or_errors() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).expect("boot");
+    let key_file = fs::read_to_string(&config.master_key_file).unwrap();
+    let secret_body = key_file.trim().strip_prefix("ocmk1:").unwrap();
+    let debug = format!("{storage:?}");
+    let json_lock = fs::read_to_string(root.join("platform.lock")).unwrap();
+    let db_bytes = storage.db().dump_bytes().unwrap();
+    let db_text = String::from_utf8_lossy(&db_bytes);
+    let err = open_compute_core::PlatformError::new(
+        ErrorCode::MasterKeyMismatch,
+        "master key fingerprint mismatch",
+    );
+    let err_json = serde_json::to_string(&err).unwrap();
+    for hay in [
+        debug.as_str(),
+        json_lock.as_str(),
+        db_text.as_ref(),
+        err_json.as_str(),
+    ] {
+        assert!(!hay.contains(secret_body), "leaked key material");
+        assert!(!hay.contains("super-secret-value"));
+    }
+    let raw = fs::read(root.join("control.sqlite")).unwrap();
+    assert!(
+        !raw.windows(secret_body.len())
+            .any(|w| w == secret_body.as_bytes())
+    );
+}
+
+#[test]
+fn lock_metadata_is_diagnostic_only() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).expect("boot");
+    let meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("platform.lock")).unwrap()).unwrap();
+    assert!(meta.get("startup_id").is_some());
+    assert!(meta.get("pid").is_some());
+    assert!(meta.get("release_version").is_some());
+    assert!(
+        storage
+            .data_dir()
+            .filesystem_durability()
+            .doctor_warning()
+            .is_none()
+            || storage
+                .data_dir()
+                .filesystem_durability()
+                .doctor_warning()
+                .is_some()
+    );
+    drop(storage);
+}
+
+#[test]
+fn subprocess_lock_contention() {
+    if std::env::var("PLATFORM_STORAGE_HOLD_LOCK").ok().as_deref() == Some("1") {
+        let root = PathBuf::from(std::env::var("PLATFORM_STORAGE_HOLD_ROOT").unwrap());
+        let config = storage_config(&root);
+        let _owned = DataDir::acquire(&config).expect("child lock");
+        let ready = PathBuf::from(std::env::var("PLATFORM_STORAGE_HOLD_READY").unwrap());
+        File::create(&ready).unwrap();
+        loop {
+            if PathBuf::from(std::env::var("PLATFORM_STORAGE_HOLD_STOP").unwrap()).exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        return;
+    }
+
+    let (_tmp, root) = unique_root();
+    fs::create_dir_all(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let ready = _tmp.path().join("ready");
+    let stop = _tmp.path().join("stop");
+    let exe = std::env::current_exe().unwrap();
+    let mut child = Command::new(&exe)
+        .env("PLATFORM_STORAGE_HOLD_LOCK", "1")
+        .env("PLATFORM_STORAGE_HOLD_ROOT", &root)
+        .env("PLATFORM_STORAGE_HOLD_READY", &ready)
+        .env("PLATFORM_STORAGE_HOLD_STOP", &stop)
+        .args([
+            "--exact",
+            "tests::subprocess_lock_contention",
+            "--nocapture",
+        ])
+        .spawn()
+        .expect("spawn");
+    let start = std::time::Instant::now();
+    while !ready.exists() {
+        if start.elapsed() > Duration::from_secs(15) {
+            let _ = child.kill();
+            panic!("child did not acquire lock");
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let config = storage_config(&root);
+    let err = DataDir::acquire(&config).expect_err("contended");
+    assert_eq!(err.code(), ErrorCode::DataDirInUse);
+    File::create(&stop).unwrap();
+    let _ = child.wait();
+    DataDir::acquire(&config).expect("after child release");
+}
+
+#[test]
+fn readonly_root_rejects_mutation() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let owned = DataDir::acquire(&config).expect("create");
+    drop(owned);
+    let keys = root.join("keys");
+    fs::set_permissions(&keys, fs::Permissions::from_mode(0o500)).unwrap();
+    let dest = keys.join("x");
+    let result = atomic_write(&dest, b"nope");
+    restore_writable(&keys);
+    restore_writable(&root);
+    assert!(result.is_err());
+}
+
+#[test]
+fn durability_does_not_claim_safety_when_unclassified() {
+    use crate::FilesystemDurability;
+    assert!(
+        FilesystemDurability::ApparentlyLocal
+            .doctor_warning()
+            .is_none()
+    );
+    assert!(
+        FilesystemDurability::NetworkOrRemote
+            .doctor_warning()
+            .is_some()
+    );
+    assert!(
+        FilesystemDurability::Unclassified
+            .doctor_warning()
+            .is_some()
+    );
+}
+
+#[test]
+fn partially_created_key_is_rejected() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let _ = DataDir::acquire(&config).unwrap();
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&config.master_key_file)
+        .unwrap();
+    let err = master_key::resolve(&config).expect_err("empty key");
+    assert_eq!(err.code(), ErrorCode::MasterKeyMismatch);
+}
+
+#[test]
+fn lock_symlink_and_loose_mode_are_rejected_without_side_effects() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let root = tmp.path().join("data");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let outside = tmp.path().join("outside.lock");
+    fs::write(&outside, b"outside-target").unwrap();
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o644)).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("platform.lock")).unwrap();
+    let config = storage_config(&root);
+    let err = DataDir::acquire(&config).expect_err("symlink lock");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+    assert_eq!(fs::read(&outside).unwrap(), b"outside-target");
+    assert_eq!(
+        fs::metadata(&outside).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+
+    fs::remove_file(root.join("platform.lock")).unwrap();
+    let lock_path = root.join("platform.lock");
+    let mut loose = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o622)
+        .open(&lock_path)
+        .unwrap();
+    loose.write_all(b"loose").unwrap();
+    drop(loose);
+    fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o622)).unwrap();
+    let err = DataDir::acquire(&config).expect_err("loose lock");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+    assert_eq!(fs::read(&lock_path).unwrap(), b"loose");
+    assert_eq!(
+        fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777,
+        0o622
+    );
+}
+
+#[test]
+fn sqlite_and_key_symlinks_are_rejected() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let _owned = DataDir::acquire(&config).unwrap();
+    drop(_owned);
+    let outside = _tmp.path().join("outside.sqlite");
+    fs::write(&outside, b"x").unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("control.sqlite")).unwrap();
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("db symlink");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+    assert_eq!(fs::read(&outside).unwrap(), b"x");
+
+    fs::remove_file(root.join("control.sqlite")).unwrap();
+    let key_outside = _tmp.path().join("outside.key");
+    fs::write(
+        &key_outside,
+        b"ocmk1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("keys")).unwrap();
+    fs::set_permissions(root.join("keys"), fs::Permissions::from_mode(0o700)).unwrap();
+    std::os::unix::fs::symlink(&key_outside, &config.master_key_file).unwrap();
+    let err = master_key::resolve(&config).expect_err("key symlink");
+    assert_eq!(err.code(), ErrorCode::PathInvalid);
+    assert_eq!(
+        fs::read(&key_outside).unwrap(),
+        b"ocmk1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    );
+}
+
+#[test]
+fn missing_master_key_env_fails_closed() {
+    let (_tmp, root) = unique_root();
+    let mut config = storage_config(&root);
+    config.master_key_env = Some("PLATFORM_STORAGE_MISSING_KEY".to_string());
+    master_key::clear_test_env();
+    let _owned = DataDir::acquire(&config).unwrap();
+    drop(_owned);
+    let err = master_key::resolve(&config).expect_err("missing env");
+    assert_eq!(err.code(), ErrorCode::MasterKeyMismatch);
+    assert!(!root.join("control.sqlite").exists());
+    assert!(!config.master_key_file.exists());
+}
+
+#[test]
+fn key_file_rejects_trailing_bytes_and_does_not_overwrite() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let _owned = DataDir::acquire(&config).unwrap();
+    drop(_owned);
+    let first = master_key::resolve(&config).expect("generate");
+    let original = fs::read(&config.master_key_file).unwrap();
+    drop(first);
+
+    let extra = {
+        let mut v = original.clone();
+        v.push(b'\n');
+        v
+    };
+    fs::write(&config.master_key_file, &extra).unwrap();
+    fs::set_permissions(&config.master_key_file, fs::Permissions::from_mode(0o600)).unwrap();
+    let err = master_key::resolve(&config).expect_err("newline");
+    assert_eq!(err.code(), ErrorCode::MasterKeyMismatch);
+    assert_eq!(fs::read(&config.master_key_file).unwrap(), extra);
+
+    fs::write(&config.master_key_file, &original).unwrap();
+    let raced = master_key::resolve(&config).expect("existing wins");
+    assert_eq!(fs::read(&config.master_key_file).unwrap(), original);
+    drop(raced);
+
+    let leftover = root.join("keys").join(".tmp-master-partial");
+    fs::write(&leftover, b"partial").unwrap();
+    fs::set_permissions(&leftover, fs::Permissions::from_mode(0o600)).unwrap();
+    master_key::resolve(&config).expect("ignores leftover temp");
+    assert_eq!(fs::read(&config.master_key_file).unwrap(), original);
+    crate::fs::fsync_dir(&root.join("keys")).expect("dir fsync path");
+}
+
+#[test]
+fn seeded_inconsistent_migrations_fail_closed() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    conn.execute("DELETE FROM schema_migrations", []).unwrap();
+    drop(conn);
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("missing rows");
+    assert_eq!(err.code(), ErrorCode::MigrationFailed);
+
+    let (_t2, root2) = unique_root();
+    let c2 = storage_config(&root2);
+    PlatformStorage::bootstrap(&c2, &SystemClock).unwrap();
+    let conn = Connection::open(root2.join("control.sqlite")).unwrap();
+    conn.pragma_update(None, "user_version", 0).unwrap();
+    drop(conn);
+    let err = PlatformStorage::bootstrap(&c2, &SystemClock).expect_err("uv0 with rows");
+    assert_eq!(err.code(), ErrorCode::MigrationFailed);
+
+    let (_t3, root3) = unique_root();
+    let c3 = storage_config(&root3);
+    PlatformStorage::bootstrap(&c3, &SystemClock).unwrap();
+    let conn = Connection::open(root3.join("control.sqlite")).unwrap();
+    conn.execute(
+        "INSERT INTO schema_migrations (version, name, checksum_sha256, applied_at_ms, app_version)
+         VALUES (99, 'future', ?1, 1, 'x')",
+        [vec![0u8; 32]],
+    )
+    .unwrap();
+    drop(conn);
+    let err = PlatformStorage::bootstrap(&c3, &SystemClock).expect_err("row too new");
+    assert_eq!(err.code(), ErrorCode::SchemaTooNew);
+}
+
+#[test]
+fn incomplete_identity_fails_without_mutation() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let first = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    first.db().quick_check().unwrap();
+    let last = first
+        .db()
+        .query_meta("last_started_version")
+        .unwrap()
+        .expect("last");
+    let fp = first.identity().master_key_id.clone();
+    drop(first);
+
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    conn.execute("DELETE FROM accounts", []).unwrap();
+    drop(conn);
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("missing account");
+    assert_eq!(err.code(), ErrorCode::MigrationFailed);
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    let still: String = conn
+        .query_row(
+            "SELECT CAST(value AS TEXT) FROM platform_meta WHERE key = 'last_started_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(still, last);
+    conn.execute(
+        "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms) VALUES ('acct_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'default', 1, NULL)",
+        [],
+    )
+    .ok();
+    conn.execute("DELETE FROM platform_meta WHERE key = 'created_at_ms'", [])
+        .unwrap();
+    drop(conn);
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("missing created");
+    assert_eq!(err.code(), ErrorCode::MigrationFailed);
+
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    conn.execute(
+        "INSERT INTO platform_meta (key, value, updated_at_ms) VALUES ('created_at_ms', CAST('1' AS BLOB), 1)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE platform_meta SET value = CAST('2' AS BLOB) WHERE key = 'artifact_schema_version'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let err = PlatformStorage::bootstrap(&config, &SystemClock).expect_err("artifact");
+    assert_eq!(err.code(), ErrorCode::MigrationFailed);
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    let stored_fp: Vec<u8> = conn
+        .query_row(
+            "SELECT value FROM platform_meta WHERE key = 'master_key_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_fp, fp.as_bytes());
+}
+
+#[test]
+fn aead_rejects_empty_overlong_name_and_invalid_key_id() {
+    let key = SecretBytes::new(vec![7u8; 32]);
+    let fp = master_key::fingerprint_for_test(key.expose());
+    let crypto = SecretCrypto::new(&key, &fp).unwrap();
+    let account = AccountId::generate();
+    let worker = WorkerId::generate();
+    let deployment = DeploymentId::generate();
+    let pt = SecretBytes::new(b"x".to_vec());
+    let err = crypto
+        .encrypt(&pt, account, worker, deployment, "")
+        .unwrap_err();
+    assert_eq!(err.code(), ErrorCode::ConfigInvalid);
+    let long = "a".repeat(4097);
+    let err = crypto
+        .encrypt(&pt, account, worker, deployment, &long)
+        .unwrap_err();
+    assert_eq!(err.code(), ErrorCode::ConfigInvalid);
+    assert!(SecretCrypto::new(&key, "deadbeef").is_err());
+    assert!(SecretCrypto::new(&key, &"A".repeat(64)).is_err());
+}
+
+#[test]
+fn inspect_lock_holds_and_releases_flock() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    drop(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
+    let held = crate::InspectLock::try_acquire(&config.data_lock_path())
+        .unwrap()
+        .expect("available");
+    assert!(!crate::DataDirLock::probe_available(&config.data_lock_path()).unwrap());
+    drop(held);
+    assert!(crate::DataDirLock::probe_available(&config.data_lock_path()).unwrap());
+}
+
+#[test]
+fn inspect_control_db_accepts_uri_special_path_chars() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("data?x#y%z");
+    let config = storage_config(&root);
+    drop(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
+    let inspect = crate::inspect_data_root(&config).unwrap();
+    assert!(inspect.lock_available);
+    let (version, identity) =
+        crate::inspect_control_db(&inspect.root.join("control.sqlite"), 5_000).unwrap();
+    assert_eq!(version, 2);
+    assert!(!identity.master_key_id.is_empty());
+}
+
+#[test]
+fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let repo = WorkerRepository::new(storage.db());
+    let request = open_compute_core::RequestId::generate();
+    let (worker, route) = repo
+        .create_worker(account, "hello-worker", request, 1_000)
+        .unwrap();
+    assert_eq!(
+        route.path_prefix,
+        format!("/__workers/{account}/hello-worker/")
+    );
+    assert_eq!(
+        repo.create_worker(account, "hello-worker", request, 1_001)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkerNameConflict
+    );
+
+    let deployment = DeploymentId::generate();
+    let revision = uuid::Uuid::now_v7().to_string();
+    let envelope = storage
+        .crypto()
+        .encrypt_revision(
+            &SecretBytes::new(b"never-persist-plaintext".to_vec()),
+            account,
+            worker.id,
+            deployment,
+            "API_TOKEN",
+            &revision,
+        )
+        .unwrap();
+    let mut vars = BTreeMap::new();
+    vars.insert("MODE".to_owned(), br#""production""#.to_vec());
+    let mut secrets = BTreeMap::new();
+    secrets.insert(
+        "API_TOKEN".to_owned(),
+        StoredDeploymentSecret {
+            name: "API_TOKEN".to_owned(),
+            revision_id: revision.clone(),
+            envelope,
+        },
+    );
+    let created = repo
+        .insert_staging_deployment(&NewDeployment {
+            id: deployment,
+            account_id: account,
+            worker_id: worker.id,
+            artifact_sha256: [1; 32],
+            artifact_size: 123,
+            artifact_schema_version: 1,
+            main_module: "index.js".to_owned(),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: vec!["rpc".to_owned()],
+            limits: serde_json::json!({"profile": "default"}),
+            worker_code_sha256: [2; 32],
+            vars,
+            secrets,
+            request_id: request,
+            now_ms: 2_000,
+        })
+        .unwrap();
+    assert_eq!(created.version_number, 1);
+    assert_eq!(created.state, DeploymentState::Staging);
+    repo.begin_validation(deployment).unwrap();
+    repo.mark_ready(deployment, 2_100).unwrap();
+    let promoted = repo
+        .promote(account, worker.id, deployment, None, request, 2_200)
+        .unwrap();
+    assert_eq!(promoted.active_deployment_id, Some(deployment));
+    let resolved = repo
+        .resolve_route(None, &format!("{}path", route.path_prefix))
+        .unwrap();
+    assert_eq!(resolved.deployment.id, deployment);
+    let snapshot = repo
+        .deployment_snapshot(account, worker.id, deployment, false)
+        .unwrap();
+    let secret = snapshot.secrets.get("API_TOKEN").unwrap();
+    let plaintext = storage
+        .crypto()
+        .decrypt_revision(
+            &secret.envelope,
+            account,
+            worker.id,
+            deployment,
+            "API_TOKEN",
+            &revision,
+        )
+        .unwrap();
+    assert_eq!(plaintext.expose(), b"never-persist-plaintext");
+
+    let db_path = root.join("control.sqlite");
+    let conn = Connection::open(&db_path).unwrap();
+    assert!(
+        conn.execute(
+            "UPDATE worker_deployments SET main_module = 'changed.js' WHERE id = ?1",
+            [deployment.to_string()],
+        )
+        .is_err()
+    );
+    drop(conn);
+    assert_eq!(
+        repo.tombstone_deployment(account, worker.id, deployment, request, 3_000)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentActive
+    );
+
+    let fingerprint = storage.crypto().fingerprint_request(b"canonical request");
+    assert_eq!(
+        repo.reserve_idempotency(
+            account,
+            "worker.create",
+            "key-1",
+            storage.crypto().fingerprint_key_id(),
+            &fingerprint,
+            4_000,
+            5_000,
+        )
+        .unwrap(),
+        IdempotencyReservation::Reserved
+    );
+    repo.complete_idempotency(
+        account,
+        "worker.create",
+        "key-1",
+        &fingerprint,
+        br#"{"ok":true}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        repo.reserve_idempotency(
+            account,
+            "worker.create",
+            "key-1",
+            storage.crypto().fingerprint_key_id(),
+            &fingerprint,
+            4_001,
+            5_001,
+        )
+        .unwrap(),
+        IdempotencyReservation::Complete(br#"{"ok":true}"#.to_vec())
+    );
+    let other = storage.crypto().fingerprint_request(b"different request");
+    assert_eq!(
+        repo.reserve_idempotency(
+            account,
+            "worker.create",
+            "key-1",
+            storage.crypto().fingerprint_key_id(),
+            &other,
+            4_002,
+            5_002,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::IdempotencyConflict
+    );
+
+    let raw = fs::read(db_path).unwrap();
+    assert!(
+        !raw.windows(b"never-persist-plaintext".len())
+            .any(|window| window == b"never-persist-plaintext")
+    );
+}
+
+#[test]
+fn p0_2_delete_referrer_recovery_and_worker_identity_are_fenced() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let repo = WorkerRepository::new(storage.db());
+    let request = open_compute_core::RequestId::generate();
+    let (worker, route) = repo
+        .create_worker(account, "delete-gate", request, 1)
+        .unwrap();
+    let a = insert_ready(&repo, account, worker.id, [9; 32], request, 10);
+    repo.promote(account, worker.id, a, None, request, 11)
+        .unwrap();
+    let b = insert_ready(&repo, account, worker.id, [9; 32], request, 12);
+
+    repo.add_deployment_referrer(b, "control_idempotency", "safe-ref", 13)
+        .unwrap();
+    assert_eq!(repo.deployment_referrers(b).unwrap().len(), 1);
+    assert_eq!(
+        repo.begin_deployment_delete(account, worker.id, b)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentReferenced
+    );
+    repo.remove_deployment_referrer(b, "control_idempotency", "safe-ref")
+        .unwrap();
+    repo.begin_deployment_delete(account, worker.id, b).unwrap();
+    assert_eq!(repo.deleting_deployments().unwrap(), vec![b]);
+    drop(storage); // crash boundary: deleting is committed, finalization is retryable.
+
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let repo = WorkerRepository::new(storage.db());
+    assert_eq!(repo.deleting_deployments().unwrap(), vec![b]);
+    assert_eq!(
+        repo.recover_deleting_deployments(request, 20, 64).unwrap(),
+        1
+    );
+    assert!(repo.deleting_deployments().unwrap().is_empty());
+    assert_eq!(
+        repo.get_deployment(account, worker.id, b).unwrap().state,
+        DeploymentState::Tombstoned
+    );
+    let refs = repo.referenced_artifacts().unwrap();
+    assert_eq!(refs, vec![([9; 32], 100)]);
+    assert_eq!(
+        repo.begin_deployment_delete(account, worker.id, a)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentActive
+    );
+
+    let old = insert_ready(&repo, account, worker.id, [7; 32], request, 40);
+    let newest = insert_ready(&repo, account, worker.id, [8; 32], request, 41);
+    let candidates = repo.retention_candidates(1_000, 1, 1, 1, 64).unwrap();
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.deployment_id == old)
+    );
+    assert!(
+        !candidates
+            .iter()
+            .any(|candidate| candidate.deployment_id == newest)
+    );
+
+    repo.delete_worker(account, worker.id, request, 30).unwrap();
+    assert_eq!(
+        repo.resolve_route(None, &format!("{}x", route.path_prefix))
+            .unwrap_err()
+            .code(),
+        ErrorCode::RouteNotFound
+    );
+    let (replacement, replacement_route) = repo
+        .create_worker(account, "delete-gate", request, 31)
+        .unwrap();
+    assert_ne!(replacement.id, worker.id);
+    assert_ne!(replacement.do_storage_id, worker.do_storage_id);
+    assert_ne!(replacement_route.id, route.id);
+}
+
+#[test]
+fn p0_2_concurrent_promotions_have_one_linearization_winner() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let repo = WorkerRepository::new(storage.db());
+    let request = open_compute_core::RequestId::generate();
+    let (worker, _) = repo
+        .create_worker(account, "promotion-race", request, 1)
+        .unwrap();
+    let a = insert_ready(&repo, account, worker.id, [1; 32], request, 10);
+    let b = insert_ready(&repo, account, worker.id, [2; 32], request, 11);
+    let c = insert_ready(&repo, account, worker.id, [3; 32], request, 12);
+    let active = repo
+        .promote(account, worker.id, a, None, request, 13)
+        .unwrap();
+    let generation = active.route_generation;
+
+    let (left, right) = thread::scope(|scope| {
+        let left = scope.spawn(|| {
+            repo.promote_checked(
+                account,
+                worker.id,
+                b,
+                Some(a),
+                Some(generation),
+                request,
+                14,
+            )
+        });
+        let right = scope.spawn(|| {
+            repo.promote_checked(
+                account,
+                worker.id,
+                c,
+                Some(a),
+                Some(generation),
+                request,
+                14,
+            )
+        });
+        (left.join().unwrap(), right.join().unwrap())
+    });
+    assert_ne!(left.is_ok(), right.is_ok());
+    let loser = left.err().or_else(|| right.err()).unwrap();
+    assert_eq!(loser.code(), ErrorCode::IdempotencyConflict);
+    let current = repo.get_worker(account, worker.id).unwrap();
+    assert!(matches!(current.active_deployment_id, Some(id) if id == b || id == c));
+    assert_eq!(current.route_generation, generation + 1);
+}
+
+#[test]
+fn filesystem_helpers_cover_secure_success_and_failure_paths() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("root");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+
+    assert!(sfs::require_absolute(&root).is_ok());
+    assert!(sfs::require_absolute(Path::new("relative")).is_err());
+    assert!(sfs::require_absolute(Path::new("/tmp/../escape")).is_err());
+    assert!(sfs::validate_root(&root).is_ok());
+    assert!(sfs::validate_root(&root.join("missing")).is_err());
+
+    let owned_dir = root.join("owned");
+    sfs::create_dir_secure(&owned_dir).unwrap();
+    sfs::create_dir_secure(&owned_dir).unwrap();
+    assert!(sfs::validate_owned_dir(&owned_dir).is_ok());
+    let file = root.join("authority");
+    sfs::ensure_file_secure(&file).unwrap();
+    sfs::ensure_file_secure(&file).unwrap();
+    assert!(sfs::validate_owned_file(&file, true).is_ok());
+    assert!(sfs::validate_owned_dir(&file).is_err());
+    assert!(sfs::validate_owned_file(&owned_dir, true).is_err());
+
+    let loose = root.join("loose");
+    fs::write(&loose, b"x").unwrap();
+    fs::set_permissions(&loose, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(sfs::validate_owned_file(&loose, false).is_ok());
+    assert!(sfs::validate_owned_file(&loose, true).is_err());
+    sfs::chmod(&loose, 0o600).unwrap();
+    assert!(sfs::validate_owned_file(&loose, true).is_ok());
+    assert!(sfs::chmod(&root.join("missing"), 0o600).is_err());
+
+    let link = root.join("link");
+    std::os::unix::fs::symlink(&file, &link).unwrap();
+    assert!(sfs::validate_owned_file(&link, true).is_err());
+    assert!(sfs::open_nofollow(&link, false, false).is_err());
+    assert!(sfs::validate_contained(&root, &link).is_err());
+
+    let opened = sfs::open_nofollow(&file, false, false).unwrap();
+    sfs::validate_authority_fd(&opened).unwrap();
+    let directory_fd = File::open(&owned_dir).unwrap();
+    assert!(sfs::validate_authority_fd(&directory_fd).is_err());
+    let loose_fd = File::open(&loose).unwrap();
+    sfs::validate_authority_fd(&loose_fd).unwrap();
+    assert!(sfs::open_nofollow(Path::new("relative"), false, false).is_err());
+    assert!(sfs::open_nofollow(&root.join("does-not-exist"), false, false).is_err());
+    let created = root.join("created");
+    drop(sfs::open_nofollow(&created, true, true).unwrap());
+    assert!(created.is_file());
+
+    assert!(sfs::validate_contained(&root, &file).is_ok());
+    assert!(sfs::validate_contained(&root, &root.join("future")).is_ok());
+    assert!(sfs::validate_contained(&root, tmp.path()).is_err());
+    assert!(sfs::validate_contained(&root, &root.join("missing-parent/future")).is_err());
+    assert!(sfs::inspect(&root.join("missing")).is_err());
+    sfs::fsync_dir(&root).unwrap();
+    assert!(sfs::fsync_dir(&root.join("missing")).is_err());
+
+    let nested = tmp.path().join("new-root");
+    sfs::create_root_first_run(&nested).unwrap();
+    assert!(sfs::create_root_first_run(&nested).is_err());
+    assert!(sfs::create_root_first_run(&tmp.path().join("missing-parent/root")).is_err());
+    let root_file = tmp.path().join("root-file");
+    fs::write(&root_file, b"x").unwrap();
+    assert!(sfs::validate_root(&root_file).is_err());
+    let root_link = tmp.path().join("root-link");
+    std::os::unix::fs::symlink(&root, &root_link).unwrap();
+    assert!(sfs::validate_root(&root_link).is_err());
+
+    let atomic = root.join("atomic");
+    atomic_write(&atomic, b"one").unwrap();
+    atomic_write(&atomic, b"two").unwrap();
+    assert_eq!(fs::read(&atomic).unwrap(), b"two");
+    assert!(atomic_write(Path::new("relative"), b"x").is_err());
+    assert!(atomic_write(&root.join("missing-parent/value"), b"x").is_err());
+}
+
+#[test]
+fn control_db_read_write_helpers_and_failures_are_enforced() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let db = storage.db();
+    assert!(db.table_exists("accounts").unwrap());
+    assert!(!db.table_exists("not_a_table").unwrap());
+    assert!(db.table_sql("accounts").unwrap().is_some());
+    assert!(db.table_sql("not_a_table").unwrap().is_none());
+    assert!(db.index_sql("not_an_index").unwrap().is_none());
+    assert!(!db.dump_bytes().unwrap().is_empty());
+    assert_eq!(db.pragma_display("user_version").unwrap(), "2");
+    assert!(db.pragma_display("not_a_pragma").is_err());
+
+    db.with_exclusive(|tx| {
+        tx.execute(
+            "INSERT INTO platform_meta (key, value, updated_at_ms) VALUES ('invalid_utf8', ?1, 1)",
+            [vec![0xff]],
+        )
+        .map_err(|_| open_compute_core::PlatformError::new(ErrorCode::Internal, "insert"))?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        db.query_meta("invalid_utf8").unwrap_err().code(),
+        ErrorCode::ConfigInvalid
+    );
+    assert!(db.query_meta("absent").unwrap().is_none());
+    let expected = open_compute_core::PlatformError::new(ErrorCode::Internal, "callback");
+    assert_eq!(
+        db.with_immediate::<()>(|_| Err(expected.clone()))
+            .unwrap_err()
+            .code(),
+        ErrorCode::Internal
+    );
+
+    let mut raw = Connection::open_in_memory().unwrap();
+    raw.pragma_update(None, "foreign_keys", "OFF").unwrap();
+    assert!(crate::control_db::verify_foreign_keys_on(&raw).is_err());
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+    crate::control_db::verify_foreign_keys_on(&raw).unwrap();
+    let tx = raw.transaction().unwrap();
+    crate::control_db::set_user_version(&tx, 7).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        raw.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+
+    let db_path = root.join("control.sqlite");
+    drop(storage);
+    let readonly = crate::ControlDb::open_readonly(&db_path, 100).unwrap();
+    assert_eq!(readonly.user_version().unwrap(), 2);
+    readonly.quick_check().unwrap();
+    assert!(crate::ControlDb::open_readonly(&root.join("missing.sqlite"), 100).is_err());
+    assert!(crate::ControlDb::open(&root.join("missing/child.sqlite"), 100).is_err());
+    let target = root.join("real.sqlite");
+    fs::write(&target, b"").unwrap();
+    let link = root.join("linked.sqlite");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    assert!(crate::ControlDb::open(&link, 100).is_err());
+}
+
+#[test]
+fn master_key_inspection_rejects_missing_malformed_and_ambiguous_sources() {
+    let (_tmp, root) = unique_root();
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let keys = root.join("keys");
+    fs::create_dir(&keys).unwrap();
+    fs::set_permissions(&keys, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut config = storage_config(&root);
+    assert_eq!(
+        master_key::inspect_existing(&config).unwrap_err().code(),
+        ErrorCode::MasterKeyMismatch
+    );
+    let key = master_key::resolve(&config).unwrap();
+    assert_eq!(key.bytes().expose().len(), 32);
+    assert_eq!(key.fingerprint().len(), 64);
+    assert!(!format!("{key:?}").contains("ocmk1:"));
+    master_key::inspect_existing(&config).unwrap();
+
+    for value in [
+        "bad-prefix",
+        "ocmk1:not-valid!!!",
+        "ocmk1:AA",
+        "ocmk1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+    ] {
+        fs::write(&config.master_key_file, value).unwrap();
+        fs::set_permissions(&config.master_key_file, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            master_key::inspect_existing(&config).unwrap_err().code(),
+            ErrorCode::MasterKeyMismatch
+        );
+    }
+
+    fs::remove_file(&config.master_key_file).unwrap();
+    fs::create_dir(&config.master_key_file).unwrap();
+    assert!(master_key::inspect_existing(&config).is_err());
+    fs::remove_dir(&config.master_key_file).unwrap();
+    let outside = root.join("outside");
+    fs::write(
+        &outside,
+        "ocmk1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    )
+    .unwrap();
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o600)).unwrap();
+    std::os::unix::fs::symlink(&outside, &config.master_key_file).unwrap();
+    assert!(master_key::inspect_existing(&config).is_err());
+    fs::remove_file(&config.master_key_file).unwrap();
+
+    let env_name = "OPEN_COMPUTE_STORAGE_EMPTY_MASTER_KEY";
+    config.master_key_env = Some(env_name.to_owned());
+    master_key::set_test_env(env_name, "");
+    assert_eq!(
+        master_key::inspect_existing(&config).unwrap_err().code(),
+        ErrorCode::MasterKeyMismatch
+    );
+    master_key::clear_test_env();
+
+    config.master_key_file = PathBuf::from("relative-key");
+    config.master_key_env = None;
+    assert_eq!(
+        master_key::resolve(&config).unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+}
+
+#[test]
+fn master_key_inspection_covers_env_file_utf8_and_mismatch_paths() {
+    let (_tmp, root) = unique_root();
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir(root.join("keys")).unwrap();
+    fs::set_permissions(root.join("keys"), fs::Permissions::from_mode(0o700)).unwrap();
+    let mut config = storage_config(&root);
+    let generated = master_key::resolve(&config).unwrap();
+    let encoded = fs::read_to_string(&config.master_key_file).unwrap();
+    let env_name = "OPEN_COMPUTE_STORAGE_INSPECT_MASTER_KEY";
+    config.master_key_env = Some(env_name.to_owned());
+    master_key::set_test_env(env_name, &encoded);
+    let both = master_key::inspect_existing(&config).unwrap();
+    assert_eq!(both.fingerprint(), generated.fingerprint());
+
+    master_key::set_test_env(
+        env_name,
+        "ocmk1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    );
+    assert_eq!(
+        master_key::inspect_existing(&config).unwrap_err().code(),
+        ErrorCode::MasterKeyMismatch
+    );
+    fs::remove_file(&config.master_key_file).unwrap();
+    let env_only = master_key::inspect_existing(&config).unwrap();
+    assert_eq!(env_only.bytes().expose().len(), 32);
+
+    config.master_key_env = None;
+    let mut invalid_utf8 = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&config.master_key_file)
+        .unwrap();
+    invalid_utf8.write_all(&[0xff, 0xfe]).unwrap();
+    drop(invalid_utf8);
+    assert_eq!(
+        master_key::inspect_existing(&config).unwrap_err().code(),
+        ErrorCode::MasterKeyMismatch
+    );
+    master_key::clear_test_env();
+
+    let (_tmp2, root2) = unique_root();
+    fs::create_dir(&root2).unwrap();
+    fs::set_permissions(&root2, fs::Permissions::from_mode(0o700)).unwrap();
+    let missing_parent = storage_config(&root2);
+    assert_eq!(
+        master_key::resolve(&missing_parent).unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+}
+
+#[test]
+fn master_key_process_environment_modes_are_covered_in_isolated_processes() {
+    const MARKER: &str = "OPEN_COMPUTE_MASTER_KEY_CHILD_MODE";
+    const KEY_ENV: &str = "OPEN_COMPUTE_MASTER_KEY_CHILD_VALUE";
+    if let Ok(mode) = std::env::var(MARKER) {
+        let (_tmp, root) = unique_root();
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::create_dir(root.join("keys")).unwrap();
+        fs::set_permissions(root.join("keys"), fs::Permissions::from_mode(0o700)).unwrap();
+        let mut config = storage_config(&root);
+        config.master_key_env = Some(KEY_ENV.to_owned());
+        let result = master_key::inspect_existing(&config);
+        match mode.as_str() {
+            "valid" => assert_eq!(result.unwrap().bytes().expose(), &[0_u8; 32]),
+            "empty" | "missing" | "invalid-utf8" => {
+                assert_eq!(result.unwrap_err().code(), ErrorCode::MasterKeyMismatch);
+            }
+            _ => panic!("unexpected child mode"),
+        }
+        return;
+    }
+
+    use std::os::unix::ffi::OsStringExt;
+    let current = std::env::current_exe().unwrap();
+    for mode in ["valid", "empty", "missing", "invalid-utf8"] {
+        let mut command = Command::new(&current);
+        command.args([
+            "--exact",
+            "tests::master_key_process_environment_modes_are_covered_in_isolated_processes",
+            "--test-threads=1",
+        ]);
+        command.env(MARKER, mode);
+        match mode {
+            "valid" => {
+                command.env(KEY_ENV, "ocmk1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+            }
+            "empty" => {
+                command.env(KEY_ENV, "");
+            }
+            "missing" => {
+                command.env_remove(KEY_ENV);
+            }
+            "invalid-utf8" => {
+                command.env(KEY_ENV, std::ffi::OsString::from_vec(vec![0xff]));
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            command.status().unwrap().success(),
+            "child mode {mode} failed"
+        );
+    }
+}
+
+#[test]
+fn aead_revision_and_envelope_validation_matrix() {
+    let key = SecretBytes::new(vec![3_u8; 32]);
+    let fingerprint = master_key::fingerprint_for_test(key.expose());
+    let crypto = SecretCrypto::new(&key, &fingerprint).unwrap();
+    assert_eq!(
+        SecretCrypto::new(&SecretBytes::new(vec![0_u8; 31]), &fingerprint)
+            .unwrap_err()
+            .code(),
+        ErrorCode::MasterKeyMismatch
+    );
+    assert_eq!(crypto.key_id(), fingerprint);
+    assert_eq!(crypto.fingerprint_key_id().len(), 64);
+    assert_ne!(
+        crypto.fingerprint_request(b"one"),
+        crypto.fingerprint_request(b"two")
+    );
+    assert!(format!("{crypto:?}").contains("XCHACHA20-POLY1305"));
+
+    let account = AccountId::generate();
+    let worker = WorkerId::generate();
+    let deployment = DeploymentId::generate();
+    let plaintext = SecretBytes::new(b"revision-secret".to_vec());
+    let envelope = crypto
+        .encrypt_revision(
+            &plaintext,
+            account,
+            worker,
+            deployment,
+            "TOKEN",
+            "revision-1",
+        )
+        .unwrap();
+    assert_eq!(
+        crypto
+            .decrypt_revision(
+                &envelope,
+                account,
+                worker,
+                deployment,
+                "TOKEN",
+                "revision-1",
+            )
+            .unwrap()
+            .expose(),
+        b"revision-secret"
+    );
+    assert!(
+        crypto
+            .decrypt_revision(
+                &envelope,
+                account,
+                worker,
+                deployment,
+                "TOKEN",
+                "revision-2",
+            )
+            .is_err()
+    );
+    for revision in ["", &"r".repeat(4097)] {
+        assert_eq!(
+            crypto
+                .encrypt_revision(&plaintext, account, worker, deployment, "TOKEN", revision,)
+                .unwrap_err()
+                .code(),
+            ErrorCode::SecretInvalid
+        );
+    }
+
+    for mutate in [
+        |value: &mut crate::SecretEnvelope| value.version = 2,
+        |value: &mut crate::SecretEnvelope| value.algorithm = "OTHER".to_owned(),
+        |value: &mut crate::SecretEnvelope| value.nonce.clear(),
+    ] {
+        let mut invalid = envelope.clone();
+        mutate(&mut invalid);
+        assert!(
+            crypto
+                .decrypt_revision(&invalid, account, worker, deployment, "TOKEN", "revision-1",)
+                .is_err()
+        );
+    }
+    let other_key = SecretBytes::new(vec![4_u8; 32]);
+    let other_fingerprint = master_key::fingerprint_for_test(other_key.expose());
+    let other = SecretCrypto::new(&other_key, &other_fingerprint).unwrap();
+    assert_eq!(
+        other
+            .decrypt_revision(
+                &envelope,
+                account,
+                worker,
+                deployment,
+                "TOKEN",
+                "revision-1",
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::MasterKeyMismatch
+    );
+    let legacy = crypto
+        .encrypt(&plaintext, account, worker, deployment, "TOKEN")
+        .unwrap();
+    for mutate in [
+        |value: &mut crate::SecretEnvelope| value.version = 2,
+        |value: &mut crate::SecretEnvelope| value.algorithm = "OTHER".to_owned(),
+        |value: &mut crate::SecretEnvelope| value.nonce.clear(),
+    ] {
+        let mut invalid = legacy.clone();
+        mutate(&mut invalid);
+        assert!(
+            crypto
+                .decrypt(&invalid, account, worker, deployment, "TOKEN")
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn inspection_layout_migration_and_repository_helpers_are_covered() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let data = storage.data_dir();
+    assert_eq!(data.root(), root);
+    assert_eq!(data.control_db_path(), root.join("control.sqlite"));
+    assert_eq!(data.keys_dir(), root.join("keys"));
+    assert_eq!(data.runtime_dir(), root.join("runtime"));
+    assert_eq!(data.artifact_cache_dir(), root.join("cache/artifacts"));
+    assert_eq!(data.lock().path(), config.data_lock_path());
+    assert_ne!(data.lock().startup_id().to_string(), "");
+    assert_eq!(
+        data.filesystem_durability(),
+        data.lock().filesystem_durability()
+    );
+
+    let busy = crate::inspect_data_root(&config).unwrap();
+    assert!(!busy.lock_available);
+    assert!(!busy.holds_inspect_lock());
+    drop(storage);
+    let available = crate::inspect_data_root(&config).unwrap();
+    assert!(available.lock_available);
+    assert!(available.holds_inspect_lock());
+    assert_eq!(available.root, root);
+    drop(available);
+
+    let mut relative = config.clone();
+    relative.data_dir = PathBuf::from("relative");
+    assert_eq!(
+        crate::inspect_data_root(&relative).unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+    let (_missing_tmp, missing_root) = unique_root();
+    assert!(crate::inspect_data_root(&storage_config(&missing_root)).is_err());
+    assert_eq!(
+        crate::inspect_control_db(Path::new("relative.sqlite"), 100)
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+    assert_eq!(
+        crate::inspect_control_db(&root.join("missing.sqlite"), 100)
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+
+    assert_eq!(crate::migrations::current_schema_version(), 2);
+    assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
+    assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
+    assert!(crate::migrations::expected_checksum(1).is_ok());
+    assert!(crate::migrations::expected_checksum(2).is_ok());
+    assert_eq!(
+        crate::migrations::expected_checksum(3).unwrap_err().code(),
+        ErrorCode::SchemaTooNew
+    );
+    assert_eq!(
+        crate::migrations::expected_checksum(0).unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+    let uri = crate::control_db::sqlite_readonly_uri(Path::new("/tmp/a b?#%.sqlite"));
+    assert_eq!(uri, "file:/tmp/a%20b%3F%23%25.sqlite?mode=ro&immutable=1");
+    assert!(crate::ControlDb::open(Path::new("/"), 100).is_err());
+
+    use crate::workers::{
+        array32, db_error, deployment_not_found, idempotency_ref_id, invariant, route_not_found,
+        validate_exact_route, validate_referrer, validate_worker_name, worker_not_found,
+    };
+    for state in [
+        DeploymentState::Staging,
+        DeploymentState::Validating,
+        DeploymentState::Ready,
+        DeploymentState::Rejected,
+        DeploymentState::Deleting,
+        DeploymentState::Tombstoned,
+    ] {
+        assert_eq!(DeploymentState::parse(state.as_str()).unwrap(), state);
+    }
+    assert!(DeploymentState::parse("bad").is_err());
+    assert_eq!(
+        crate::RouteKind::parse("platform_path").unwrap(),
+        crate::RouteKind::PlatformPath
+    );
+    assert_eq!(
+        crate::RouteKind::parse("exact_host").unwrap(),
+        crate::RouteKind::ExactHost
+    );
+    assert!(crate::RouteKind::parse("bad").is_err());
+    for valid in ["a", "worker-1"] {
+        validate_worker_name(valid).unwrap();
+    }
+    for invalid in ["", "-bad", "bad-", "Upper", &"a".repeat(64)] {
+        assert!(validate_worker_name(invalid).is_err());
+    }
+    validate_referrer("route", "host/path:one").unwrap();
+    assert!(validate_referrer("", "id").is_err());
+    assert!(validate_referrer("kind", "bad value").is_err());
+    validate_exact_route("example.com", "/path", Some("handler_1$")).unwrap();
+    for (host, path, entrypoint) in [
+        ("", "/", None),
+        ("UPPER.example", "/", None),
+        ("example.com", "relative", None),
+        ("example.com", "/bad?query", None),
+        ("example.com", "/", Some("bad-name")),
+    ] {
+        assert!(validate_exact_route(host, path, entrypoint).is_err());
+    }
+    let account = AccountId::generate();
+    assert_eq!(idempotency_ref_id(account, "scope", "key").len(), 64);
+    assert!(array32(&[0_u8; 32]).is_ok());
+    assert!(array32(&[0_u8; 31]).is_err());
+    assert_eq!(worker_not_found().code(), ErrorCode::WorkerNotFound);
+    assert_eq!(deployment_not_found().code(), ErrorCode::DeploymentNotFound);
+    assert_eq!(route_not_found().code(), ErrorCode::RouteNotFound);
+    assert_eq!(invariant().code(), ErrorCode::DeploymentInvariantViolation);
+    assert_eq!(db_error().code(), ErrorCode::Internal);
+}
+
+fn inspect_identity_after(sql: &str) -> ErrorCode {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    drop(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
+    let conn = Connection::open(root.join("control.sqlite")).unwrap();
+    conn.pragma_update(None, "ignore_check_constraints", "ON")
+        .unwrap();
+    conn.execute_batch(sql).unwrap();
+    drop(conn);
+    let db = crate::ControlDb::open(&root.join("control.sqlite"), 100).unwrap();
+    crate::identity::inspect_stored(&db).unwrap_err().code()
+}
+
+#[test]
+fn inspect_stored_identity_rejects_every_malformed_authority_field() {
+    let cases = [
+        (
+            "DELETE FROM platform_meta WHERE key = 'platform_id'",
+            ErrorCode::MigrationFailed,
+        ),
+        (
+            "UPDATE platform_meta SET value = CAST('bad' AS BLOB) WHERE key = 'platform_id'",
+            ErrorCode::ConfigInvalid,
+        ),
+        (
+            "DELETE FROM platform_meta WHERE key = 'created_at_ms'",
+            ErrorCode::MigrationFailed,
+        ),
+        (
+            "UPDATE platform_meta SET value = CAST('bad' AS BLOB) WHERE key = 'created_at_ms'",
+            ErrorCode::ConfigInvalid,
+        ),
+        (
+            "DELETE FROM platform_meta WHERE key = 'master_key_id'",
+            ErrorCode::MigrationFailed,
+        ),
+        (
+            "DELETE FROM platform_meta WHERE key = 'artifact_schema_version'",
+            ErrorCode::MigrationFailed,
+        ),
+        (
+            "UPDATE platform_meta SET value = CAST('2' AS BLOB) WHERE key = 'artifact_schema_version'",
+            ErrorCode::MigrationFailed,
+        ),
+        ("DELETE FROM accounts", ErrorCode::MigrationFailed),
+        (
+            "UPDATE accounts SET id = 'invalid' WHERE name = 'default'",
+            ErrorCode::ConfigInvalid,
+        ),
+        (
+            "UPDATE platform_meta SET value = X'FF' WHERE key = 'platform_id'",
+            ErrorCode::ConfigInvalid,
+        ),
+    ];
+    for (sql, expected) in cases {
+        assert_eq!(inspect_identity_after(sql), expected, "{sql}");
+    }
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn insert_ready(
+    repo: &WorkerRepository<'_>,
+    account: AccountId,
+    worker: WorkerId,
+    digest: [u8; 32],
+    request: open_compute_core::RequestId,
+    now: i64,
+) -> DeploymentId {
+    let id = DeploymentId::generate();
+    repo.insert_staging_deployment(&NewDeployment {
+        id,
+        account_id: account,
+        worker_id: worker,
+        artifact_sha256: digest,
+        artifact_size: 100,
+        artifact_schema_version: 1,
+        main_module: "index.js".to_owned(),
+        compatibility_date: "2026-08-22".to_owned(),
+        compatibility_flags: Vec::new(),
+        limits: serde_json::json!({"profile":"default"}),
+        worker_code_sha256: digest,
+        vars: BTreeMap::new(),
+        secrets: BTreeMap::new(),
+        request_id: request,
+        now_ms: now,
+    })
+    .unwrap();
+    repo.begin_validation(id).unwrap();
+    repo.mark_ready(id, now + 1).unwrap();
+    id
+}
+
+#[test]
+fn worker_repository_rejects_invalid_state_and_ownership_operations() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let repo = WorkerRepository::new(storage.db());
+    let account = storage.identity().default_account_id;
+    let request = open_compute_core::RequestId::generate();
+
+    assert_eq!(
+        repo.create_worker(AccountId::generate(), "missing-account", request, 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::AccountNotFound
+    );
+
+    let (worker, _) = repo
+        .create_worker(account, "state-matrix", request, 2)
+        .unwrap();
+    let ready = insert_ready(&repo, account, worker.id, [3; 32], request, 10);
+    assert_eq!(
+        repo.mark_rejected(ready, DeploymentState::Ready, ErrorCode::BundleInvalid, 12)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentInvariantViolation
+    );
+    assert_eq!(
+        repo.begin_validation(DeploymentId::generate())
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotReady
+    );
+    assert_eq!(
+        repo.promote(
+            account,
+            worker.id,
+            DeploymentId::generate(),
+            None,
+            request,
+            13,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::DeploymentNotFound
+    );
+
+    let staging = DeploymentId::generate();
+    repo.insert_staging_deployment(&NewDeployment {
+        id: staging,
+        account_id: account,
+        worker_id: worker.id,
+        artifact_sha256: [4; 32],
+        artifact_size: 100,
+        artifact_schema_version: 1,
+        main_module: "index.js".to_owned(),
+        compatibility_date: "2026-08-22".to_owned(),
+        compatibility_flags: Vec::new(),
+        limits: serde_json::json!({"profile":"default"}),
+        worker_code_sha256: [4; 32],
+        vars: BTreeMap::new(),
+        secrets: BTreeMap::new(),
+        request_id: request,
+        now_ms: 14,
+    })
+    .unwrap();
+    assert_eq!(
+        repo.promote(account, worker.id, staging, None, request, 15)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotReady
+    );
+    assert_eq!(
+        repo.add_deployment_referrer(staging, "control_idempotency", "ref", 16)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotReady
+    );
+    assert_eq!(
+        repo.add_deployment_referrer(DeploymentId::generate(), "control_idempotency", "ref", 16,)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotReady
+    );
+
+    let fingerprint = [9; 32];
+    assert_eq!(
+        repo.complete_idempotency(account, "scope", "missing", &fingerprint, b"{}")
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    assert_eq!(
+        repo.complete_idempotency_with_deployment_ref(
+            account,
+            "scope",
+            "missing",
+            &fingerprint,
+            b"{}",
+            ready,
+            "wrong-ref",
+            17,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::DeploymentInvariantViolation
+    );
+    let expected_ref = crate::workers::idempotency_ref_id(account, "scope", "missing");
+    assert_eq!(
+        repo.complete_idempotency_with_deployment_ref(
+            account,
+            "scope",
+            "missing",
+            &fingerprint,
+            b"{}",
+            ready,
+            &expected_ref,
+            17,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    assert_eq!(
+        repo.fail_idempotency(account, "scope", "missing", &fingerprint, b"{}")
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+
+    assert_eq!(
+        repo.begin_deployment_delete(account, worker.id, DeploymentId::generate())
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotFound
+    );
+    repo.begin_deployment_delete(account, worker.id, ready)
+        .unwrap();
+    repo.begin_deployment_delete(account, worker.id, ready)
+        .unwrap();
+    assert_eq!(
+        repo.finalize_deployment_delete(account, worker.id, staging, request, 18)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotFound
+    );
+
+    assert_eq!(
+        repo.deployment_snapshot(account, worker.id, staging, false)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotReady
+    );
+    let promotable = insert_ready(&repo, account, worker.id, [10; 32], request, 19);
+    assert_eq!(
+        repo.promote_checked(
+            account,
+            worker.id,
+            promotable,
+            Some(DeploymentId::generate()),
+            None,
+            request,
+            19,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    repo.promote(account, worker.id, promotable, None, request, 20)
+        .unwrap();
+    assert_eq!(
+        repo.create_exact_route(
+            account,
+            worker.id,
+            "conflict.example",
+            "/",
+            None,
+            Some(DeploymentId::generate()),
+            request,
+            21,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    let route = repo
+        .create_exact_route(
+            account,
+            worker.id,
+            "conflict.example",
+            "/",
+            None,
+            Some(promotable),
+            request,
+            22,
+        )
+        .unwrap();
+    assert_eq!(
+        repo.create_exact_route(
+            account,
+            worker.id,
+            "conflict.example",
+            "/",
+            None,
+            Some(promotable),
+            request,
+            23,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::RouteConflict
+    );
+    assert_eq!(
+        repo.delete_route(account, worker.id, "missing-route", request, 24)
+            .unwrap_err()
+            .code(),
+        ErrorCode::RouteNotFound
+    );
+    repo.delete_route(account, worker.id, &route.id, request, 25)
+        .unwrap();
+
+    let invalid_state_fingerprint = [11; 32];
+    repo.reserve_idempotency(
+        account,
+        "invalid-state",
+        "key",
+        "fingerprint-key",
+        &invalid_state_fingerprint,
+        26,
+        100,
+    )
+    .unwrap();
+    storage
+        .db()
+        .with_read(|conn| {
+            conn.execute(
+                "UPDATE control_idempotency SET state = 'complete', response_json = NULL
+                 WHERE account_id = ?1 AND scope = 'invalid-state' AND idempotency_key = 'key'",
+                [account.to_string()],
+            )
+            .map_err(|_| {
+                open_compute_core::PlatformError::new(ErrorCode::Internal, "test update failed")
+            })?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        repo.reserve_idempotency(
+            account,
+            "invalid-state",
+            "key",
+            "fingerprint-key",
+            &invalid_state_fingerprint,
+            27,
+            100,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::Internal
+    );
+
+    let referenced = insert_ready(&repo, account, worker.id, [12; 32], request, 30);
+    repo.begin_deployment_delete(account, worker.id, referenced)
+        .unwrap();
+    storage
+        .db()
+        .with_read(|conn| {
+            conn.execute(
+                "INSERT INTO deployment_referrers
+                 (deployment_id, kind, ref_id, created_at_ms) VALUES (?1, 'test', 'late', 31)",
+                [referenced.to_string()],
+            )
+            .map_err(|_| {
+                open_compute_core::PlatformError::new(ErrorCode::Internal, "test insert failed")
+            })?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        repo.finalize_deployment_delete(account, worker.id, referenced, request, 32)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentReferenced
+    );
+
+    let tombstone = insert_ready(&repo, account, worker.id, [13; 32], request, 33);
+    repo.tombstone_deployment(account, worker.id, tombstone, request, 34)
+        .unwrap();
+
+    for args in [(0, 1, 1), (1, 0, 1), (1, 1, 0), (1, 1, 10_001)] {
+        assert_eq!(
+            repo.retention_candidates(40, 0, args.0, args.1, args.2)
+                .unwrap_err()
+                .code(),
+            ErrorCode::LimitInvalid
+        );
+    }
+
+    repo.delete_worker(account, worker.id, request, 41).unwrap();
+    assert_eq!(
+        repo.deployment_snapshot(account, worker.id, ready, false)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkerDeleted
+    );
+    assert_eq!(
+        repo.delete_worker(account, worker.id, request, 42)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkerDeleted
+    );
+
+    for invalid in [0, 10_001] {
+        assert_eq!(
+            repo.recover_deleting_deployments(request, 19, invalid)
+                .unwrap_err()
+                .code(),
+            ErrorCode::LimitInvalid
+        );
+        assert_eq!(
+            repo.prune_expired_idempotency(19, invalid)
+                .unwrap_err()
+                .code(),
+            ErrorCode::LimitInvalid
+        );
+    }
+}
+
+fn inspect_schema_after_raw_sql(sql: &str) -> ErrorCode {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("control.sqlite");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(sql).unwrap();
+    drop(conn);
+    let db = crate::ControlDb::open(&path, 100).unwrap();
+    crate::migrations::inspect_schema(&db).unwrap_err().code()
+}
+
+#[test]
+fn schema_consistency_rejects_missing_malformed_and_duplicate_rows() {
+    assert_eq!(
+        inspect_schema_after_raw_sql("PRAGMA user_version = 1;"),
+        ErrorCode::MigrationFailed
+    );
+
+    let checksum_1 = hex::encode(crate::migrations::migration_001_checksum());
+    let checksum_2 = hex::encode(crate::migrations::migration_002_checksum());
+    let cases = [
+        format!(
+            "CREATE TABLE schema_migrations(version INTEGER, checksum_sha256 BLOB);\
+             INSERT INTO schema_migrations VALUES(2, X'{checksum_2}');\
+             PRAGMA user_version = 1;"
+        ),
+        "CREATE TABLE schema_migrations(version INTEGER, checksum_sha256 BLOB);\
+         INSERT INTO schema_migrations VALUES(0, X'00');\
+         PRAGMA user_version = 2;"
+            .to_owned(),
+        format!(
+            "CREATE TABLE schema_migrations(version INTEGER, checksum_sha256 BLOB);\
+             INSERT INTO schema_migrations VALUES(1, X'{checksum_1}');\
+             INSERT INTO schema_migrations VALUES(1, X'{checksum_1}');\
+             PRAGMA user_version = 1;"
+        ),
+        format!(
+            "CREATE TABLE schema_migrations(version INTEGER, checksum_sha256 BLOB);\
+             INSERT INTO schema_migrations VALUES(2, X'{checksum_2}');\
+             PRAGMA user_version = 2;"
+        ),
+        "CREATE TABLE schema_migrations(version INTEGER); PRAGMA user_version = 1;".to_owned(),
+        "CREATE TABLE schema_migrations(version INTEGER, checksum_sha256 TEXT);\
+         INSERT INTO schema_migrations VALUES(1, 'not-a-blob');\
+         PRAGMA user_version = 1;"
+            .to_owned(),
+    ];
+    for sql in cases {
+        assert_eq!(
+            inspect_schema_after_raw_sql(&sql),
+            ErrorCode::MigrationFailed,
+            "{sql}"
+        );
+    }
+}
+
+#[test]
+fn bootstrap_with_no_fault_matches_normal_bootstrap_and_rejects_nonregular_staging() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap_with_fault(&config, &SystemClock, None).unwrap();
+    let staging = storage.data_dir().deployment_staging_dir();
+    drop(storage);
+
+    fs::create_dir(staging.join("nested")).unwrap();
+    assert_eq!(
+        DataDir::acquire(&config).unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+    fs::remove_dir(staging.join("nested")).unwrap();
+
+    let target = _tmp.path().join("outside");
+    fs::write(&target, b"outside").unwrap();
+    std::os::unix::fs::symlink(&target, staging.join("link")).unwrap();
+    assert_eq!(
+        DataDir::acquire(&config).unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+}
+
+#[test]
+fn control_db_operations_fail_closed_when_foreign_keys_are_disabled() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("control.sqlite");
+    let db = crate::ControlDb::open(&path, 100).unwrap();
+    db.migrate(&SystemClock).unwrap();
+    db.with_read(|conn| {
+        conn.pragma_update(None, "foreign_keys", "OFF")
+            .map_err(|_| open_compute_core::PlatformError::new(ErrorCode::Internal, "test"))?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        db.quick_check().unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+    assert_eq!(
+        db.user_version().unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+    assert_eq!(
+        db.with_read(|_| Ok(())).unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+    assert_eq!(
+        db.with_immediate(|_| Ok(())).unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+    assert_eq!(
+        db.with_exclusive(|_| Ok(())).unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+    assert_eq!(
+        db.table_exists("schema_migrations").unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+    assert_eq!(
+        db.migrate(&SystemClock).unwrap_err().code(),
+        ErrorCode::MigrationFailed
+    );
+    assert_eq!(
+        db.migrate_with_fault(&SystemClock, None)
+            .unwrap_err()
+            .code(),
+        ErrorCode::MigrationFailed
+    );
+}

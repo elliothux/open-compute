@@ -1,0 +1,65 @@
+[package]
+name = "open-compute-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "platformd production service, health, doctor, and CLI"
+publish.workspace = true
+
+[features]
+default = []
+test-support = [
+    "open-compute-core/test-support",
+    "open-compute-storage/test-support",
+    "open-compute-artifacts/test-support",
+    "open-compute-runtime/test-support",
+    "open-compute-workers/test-support",
+]
+
+[dependencies]
+axum.workspace = true
+bytes.workspace = true
+clap.workspace = true
+hex.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+open-compute-artifacts = { path = "../artifacts" }
+open-compute-core = { path = "../core" }
+open-compute-runtime = { path = "../runtime" }
+open-compute-storage = { path = "../storage" }
+open-compute-workers = { path = "../workers" }
+rustix = { workspace = true, features = ["alloc", "fs", "process"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+futures.workspace = true
+hex.workspace = true
+open-compute-artifacts = { path = "../artifacts", features = ["test-support"] }
+open-compute-core = { path = "../core", features = ["test-support"] }
+open-compute-runtime = { path = "../runtime", features = ["test-support"] }
+open-compute-storage = { path = "../storage", features = ["test-support"] }
+open-compute-workers = { path = "../workers", features = ["test-support"] }
+rusqlite.workspace = true
+tempfile = "3.20.0"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal"] }
+tower = { version = "0.5.2", features = ["util"] }
+
+[[bin]]
+name = "platformd"
+path = "src/bin/platformd.rs"
+
+[lints]
+workspace = true

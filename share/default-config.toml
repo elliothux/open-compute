@@ -1,0 +1,35 @@
+# Example operator config. Secrets are referenced, never inlined.
+
+[server]
+public_bind = "127.0.0.1:8787"
+
+[storage]
+data_dir = "/var/lib/open-compute"
+master_key_file = "/var/lib/open-compute/keys/master.key"
+
+[s3]
+endpoint = "https://s3.example.com"
+region = "auto"
+bucket = "open-compute"
+force_path_style = true
+access_key_id_env = "S3_ACCESS_KEY_ID"
+secret_access_key_env = "S3_SECRET_ACCESS_KEY"
+prefix = "system/"
+
+[runtime]
+binary = "/opt/open-compute/bin/workerd"
+lock_file = "/opt/open-compute/runtime/workerd.lock.json"
+assets_dir = "/opt/open-compute/runtime"
+startup_timeout_ms = 20000
+shutdown_grace_ms = 10000
+
+[workers]
+max_bundle_bytes = 17825792
+max_request_body_bytes = 16777216
+delete_drain_timeout_ms = 5000
+artifact_gc_grace_ms = 86400000
+artifact_gc_interval_ms = 60000
+delete_recovery_batch = 64
+retain_ready_deployments = 10
+retain_rejected_deployments = 10
+deployment_min_retention_ms = 86400000

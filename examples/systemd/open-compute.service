@@ -1,0 +1,30 @@
+[Unit]
+Description=Open Compute platformd
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=open-compute
+Group=open-compute
+ExecStart=/opt/open-compute/bin/platformd --config /etc/open-compute/config.toml run
+WorkingDirectory=/var/lib/open-compute
+# Restart on process death / liveness failure. Readiness (503) must not restart the unit.
+Restart=on-failure
+RestartSec=2
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=30
+# Do not ExecStartPost-curl /health/live: a one-shot race during STARTING must
+# not fail or restart a healthy process. Operators should run an ongoing
+# liveness monitor against GET /health/live and restart only on process exit
+# or persistent live failure. Never restart on /health/ready 503.
+EnvironmentFile=-/etc/open-compute/environment
+# Credentials stay in EnvironmentFile or files referenced by config. Never embed here.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/open-compute
+ReadOnlyPaths=/opt/open-compute
+
+[Install]
+WantedBy=multi-user.target

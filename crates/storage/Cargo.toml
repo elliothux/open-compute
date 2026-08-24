@@ -1,0 +1,38 @@
+[package]
+name = "open-compute-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Secure data directory, control database, identity, and secret crypto"
+publish.workspace = true
+build = "build.rs"
+
+[features]
+default = []
+test-support = ["open-compute-core/test-support"]
+
+[dependencies]
+base64.workspace = true
+chacha20poly1305.workspace = true
+hex.workspace = true
+hmac.workspace = true
+open-compute-core = { path = "../core" }
+rand.workspace = true
+rusqlite.workspace = true
+rustix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[build-dependencies]
+sha2.workspace = true
+
+[dev-dependencies]
+open-compute-core = { path = "../core", features = ["test-support"] }
+tempfile = "3.20.0"
+
+[lints]
+workspace = true

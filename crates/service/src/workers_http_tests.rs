@@ -1,0 +1,648 @@
+use super::*;
+use open_compute_artifacts::{
+    ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
+};
+use open_compute_core::{PlatformConfig, StorageConfig, SystemClock};
+use open_compute_runtime::GenerationAuthRegistry;
+use open_compute_storage::{NewDeployment, PlatformStorage};
+use open_compute_workers::{CanonicalBundle, ModuleInput, ModuleType};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use tempfile::TempDir;
+
+fn storage_config(root: &Path) -> StorageConfig {
+    StorageConfig {
+        data_dir: root.to_owned(),
+        master_key_file: root.join("keys/master.key"),
+        master_key_env: None,
+        sqlite_busy_timeout_ms: 5_000,
+        free_space_soft_bytes: 1_073_741_824,
+        free_space_hard_bytes: 268_435_456,
+    }
+}
+
+async fn worker_api_fixture() -> (TempDir, MockS3, WorkerApiState, AccountId) {
+    let temp = TempDir::new().unwrap();
+    let storage = Arc::new(
+        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
+            .unwrap(),
+    );
+    let account = storage.identity().default_account_id;
+    let mock = MockS3::spawn("open-compute").await;
+    let config = PlatformConfig::from_toml_str(&format!(
+        r#"
+[s3]
+endpoint = "{}"
+region = "us-east-1"
+bucket = "open-compute"
+force_path_style = true
+access_key_id_env = "S3_ACCESS_KEY_ID"
+secret_access_key_env = "S3_SECRET_ACCESS_KEY"
+prefix = "system/"
+max_retries = 1
+retry_backoff_ms = 10
+connect_timeout_ms = 500
+request_timeout_ms = 1500
+"#,
+        mock.endpoint
+    ))
+    .unwrap()
+    .s3;
+    let env = MapEnv::new()
+        .with("S3_ACCESS_KEY_ID", "AKIAEXAMPLEKEYID01")
+        .with(
+            "S3_SECRET_ACCESS_KEY",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        );
+    let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
+    let client = S3ArtifactClient::connect(&config, &credentials, 64 * 1024).unwrap();
+    let api = WorkerApiState::new(
+        storage,
+        ArtifactStore::new(client),
+        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
+        DeploymentPins::new(),
+        BundleLimits::default(),
+        Duration::from_millis(10),
+    );
+    (temp, mock, api, account)
+}
+
+#[test]
+fn host_and_route_validation_are_canonical_and_bounded() {
+    assert_eq!(canonical_hostname("EXAMPLE.com.").unwrap(), "example.com");
+    assert!(canonical_hostname("").is_err());
+    assert!(canonical_hostname(&"x".repeat(254)).is_err());
+    assert!(canonical_hostname("bad/path").is_err());
+    assert!(canonical_hostname("example.com:443").is_err());
+    assert_eq!(
+        canonical_request_host("EXAMPLE.com:443").unwrap(),
+        "example.com"
+    );
+    assert!(canonical_request_host("bad host").is_err());
+    assert!(validate_route_parts("/api/", Some("Named_1")).is_ok());
+    assert!(validate_route_parts("relative", None).is_err());
+    assert!(validate_route_parts("/bad?query", None).is_err());
+    assert!(validate_route_parts("/", Some("bad-name")).is_err());
+    assert!(validate_route_parts("/", Some("")).is_err());
+    assert!(validate_route_parts("/", Some("9bad")).is_err());
+}
+
+#[tokio::test]
+async fn request_metadata_json_ids_and_idempotency_are_strict() {
+    let account = AccountId::generate();
+    let worker = WorkerId::generate();
+    let deployment = DeploymentId::generate();
+    assert_eq!(parse_account(&account.to_string()).unwrap(), account);
+    assert_eq!(
+        parse_ids(&account.to_string(), &worker.to_string()).unwrap(),
+        (account, worker)
+    );
+    assert_eq!(
+        parse_deployment_ids(
+            &account.to_string(),
+            &worker.to_string(),
+            &deployment.to_string()
+        )
+        .unwrap(),
+        (account, worker, deployment)
+    );
+    assert!(parse_account("bad").is_err());
+    assert!(parse_ids(&account.to_string(), "bad").is_err());
+    assert!(parse_deployment_ids(&account.to_string(), &worker.to_string(), "bad").is_err());
+
+    let valid = Request::builder()
+        .header(IDEMPOTENCY_HEADER, "key-1")
+        .header(
+            DEPLOYMENT_METADATA_HEADER,
+            r#"{"mainModule":"index.js","compatibilityDate":"2026-08-22"}"#,
+        )
+        .body(Body::from(r#"{"name":"worker"}"#))
+        .unwrap();
+    assert_eq!(idempotency_key(&valid).unwrap(), "key-1");
+    let metadata = deployment_metadata(&valid).unwrap();
+    assert_eq!(metadata.main_module, "index.js");
+    assert_eq!(metadata.limits, default_limits());
+    let body: CreateWorkerBody = read_json(valid, MAX_JSON_BODY).await.unwrap();
+    assert_eq!(body.name, "worker");
+
+    let missing = Request::new(Body::empty());
+    assert!(idempotency_key(&missing).is_err());
+    assert!(deployment_metadata(&missing).is_err());
+    let oversized_metadata = Request::builder()
+        .header(
+            DEPLOYMENT_METADATA_HEADER,
+            "x".repeat(MAX_DEPLOYMENT_METADATA_HEADER_BYTES + 1),
+        )
+        .body(Body::empty())
+        .unwrap();
+    let Err(error) = deployment_metadata(&oversized_metadata) else {
+        panic!("oversized deployment metadata unexpectedly accepted");
+    };
+    assert_eq!(error.code(), ErrorCode::LimitInvalid);
+    let whitespace = Request::builder()
+        .header(IDEMPOTENCY_HEADER, "has space")
+        .body(Body::empty())
+        .unwrap();
+    assert!(idempotency_key(&whitespace).is_err());
+    let too_long = Request::builder()
+        .header(IDEMPOTENCY_HEADER, "x".repeat(129))
+        .body(Body::empty())
+        .unwrap();
+    assert!(idempotency_key(&too_long).is_err());
+
+    let invalid_json = Request::new(Body::from(b"{".as_slice()));
+    assert!(
+        read_json::<CreateWorkerBody>(invalid_json, 32)
+            .await
+            .is_err()
+    );
+    let oversized_json = Request::new(Body::from(vec![b'x'; 33]));
+    assert!(
+        read_json::<CreateWorkerBody>(oversized_json, 32)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn staged_upload_is_bounded_canonical_and_cleaned_on_drop() {
+    let dir = TempDir::new().unwrap();
+    let limits = BundleLimits::default();
+    let bundle = CanonicalBundle::build(
+        "index.js",
+        vec![ModuleInput {
+            name: "index.js".to_owned(),
+            module_type: ModuleType::EsModule,
+            bytes: b"export default { fetch() {} };".to_vec(),
+        }],
+        limits,
+    )
+    .unwrap();
+    let bytes = bundle.into_bytes();
+    let staged = stage_bundle(
+        Body::from(bytes.clone()),
+        dir.path().to_path_buf(),
+        limits,
+        bytes.len(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    drop(staged);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+
+    let Err(too_large) = stage_bundle(
+        Body::from(bytes.clone()),
+        dir.path().to_path_buf(),
+        limits,
+        bytes.len() - 1,
+    )
+    .await
+    else {
+        panic!("oversized bundle unexpectedly staged");
+    };
+    assert_eq!(too_large.code(), ErrorCode::BundleTooLarge);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+
+    let Err(invalid) = stage_bundle(
+        Body::from(b"not-a-bundle".as_slice()),
+        dir.path().to_path_buf(),
+        limits,
+        1024,
+    )
+    .await
+    else {
+        panic!("invalid bundle unexpectedly staged");
+    };
+    assert_eq!(invalid.code(), ErrorCode::BundleInvalid);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+
+    let missing_dir = dir.path().join("missing");
+    let Err(create_error) = stage_bundle(Body::from(bytes), missing_dir, limits, usize::MAX).await
+    else {
+        panic!("missing staging directory unexpectedly accepted");
+    };
+    assert_eq!(create_error.code(), ErrorCode::DiskHardLimit);
+
+    let failed_body = Body::from_stream(futures::stream::once(async {
+        Err::<Bytes, std::io::Error>(std::io::Error::other("stream failed"))
+    }));
+    let Err(stream_error) =
+        stage_bundle(failed_body, dir.path().to_path_buf(), limits, usize::MAX).await
+    else {
+        panic!("failed body stream unexpectedly staged");
+    };
+    assert_eq!(stream_error.code(), ErrorCode::BundleInvalid);
+}
+
+#[tokio::test]
+async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
+    let request_id = RequestId::generate();
+    let mappings = [
+        (ErrorCode::AdminAuthRequired, StatusCode::UNAUTHORIZED),
+        (ErrorCode::AccountNotFound, StatusCode::NOT_FOUND),
+        (ErrorCode::WorkerNotFound, StatusCode::NOT_FOUND),
+        (ErrorCode::EntrypointNotFound, StatusCode::NOT_FOUND),
+        (ErrorCode::WorkerNameConflict, StatusCode::CONFLICT),
+        (ErrorCode::RouteConflict, StatusCode::CONFLICT),
+        (ErrorCode::DeploymentNotReady, StatusCode::CONFLICT),
+        (ErrorCode::DeploymentReferenced, StatusCode::CONFLICT),
+        (ErrorCode::BundleTooLarge, StatusCode::PAYLOAD_TOO_LARGE),
+        (
+            ErrorCode::BundleRuntimeInvalid,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            ErrorCode::CompatibilityUnsupported,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            ErrorCode::RuntimeUnavailable,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            ErrorCode::ArtifactUnavailable,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            ErrorCode::ResourceLimitExceeded,
+            StatusCode::TOO_MANY_REQUESTS,
+        ),
+        (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR),
+        (
+            ErrorCode::RuntimeResultUnknown,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        (
+            ErrorCode::DeploymentInvariantViolation,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        (ErrorCode::ConfigInvalid, StatusCode::BAD_REQUEST),
+    ];
+    for (code, status) in mappings {
+        let response = error_response(PlatformError::new(code, "safe"), request_id);
+        assert_eq!(response.status(), status);
+    }
+
+    let ok = result_response(Ok(serde_json::json!({"ok": true})), request_id);
+    assert_eq!(ok.status(), StatusCode::OK);
+    let created = idempotent_response(
+        Ok(br#"{"ok":true}"#.to_vec()),
+        StatusCode::CREATED,
+        request_id,
+    );
+    assert_eq!(created.status(), StatusCode::CREATED);
+    assert_eq!(
+        created.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
+    let conflict = idempotent_response(
+        Err(PlatformError::new(
+            ErrorCode::IdempotencyConflict,
+            "conflict",
+        )),
+        StatusCode::CREATED,
+        request_id,
+    );
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+
+    assert_eq!(
+        replayed_failure(br#"{"code":"WORKER_NOT_FOUND"}"#).code(),
+        ErrorCode::WorkerNotFound
+    );
+    assert_eq!(replayed_failure(b"invalid").code(), ErrorCode::Internal);
+    assert_eq!(error_code("UNKNOWN"), ErrorCode::Internal);
+    assert_eq!(error_code("ROUTE_NOT_FOUND"), ErrorCode::RouteNotFound);
+    assert_eq!(internal().code(), ErrorCode::Internal);
+    assert_eq!(
+        idempotency_ref_id(AccountId::generate(), "scope", "key").len(),
+        64
+    );
+
+    let deployment = DeploymentId::generate();
+    let pins = DeploymentPins::new();
+    let pin = pins.pin(deployment).unwrap();
+    let response = pin_response((StatusCode::OK, "body").into_response(), pin);
+    assert_eq!(pins.count(deployment), 1);
+    assert!(!response.body().is_end_stream());
+    assert_eq!(response.body().size_hint().exact(), Some(4));
+    assert_eq!(
+        to_bytes(response.into_body(), 16).await.unwrap(),
+        Bytes::from_static(b"body")
+    );
+    assert_eq!(pins.count(deployment), 0);
+}
+
+#[test]
+fn request_id_extension_is_preserved_or_generated() {
+    let expected = RequestId::generate();
+    let mut request = Request::new(Body::empty());
+    request.extensions_mut().insert(expected);
+    assert_eq!(request_id(&request), expected);
+    assert_ne!(request_id(&Request::new(Body::empty())), expected);
+}
+
+#[tokio::test]
+async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
+    let (_temp, _mock, api, account) = worker_api_fixture().await;
+    let scope = "coverage/sync";
+    let canonical = br#"{"value":1}"#;
+    let key = "running";
+    let mut input = Vec::new();
+    input.extend_from_slice(scope.as_bytes());
+    input.push(0);
+    input.extend_from_slice(canonical);
+    let fingerprint = api.storage.crypto().fingerprint_request(&input);
+    let repo = WorkerRepository::new(api.storage.db());
+    assert_eq!(
+        repo.reserve_idempotency(
+            account,
+            scope,
+            key,
+            api.storage.crypto().fingerprint_key_id(),
+            &fingerprint,
+            now_ms(),
+            now_ms().saturating_add(IDEMPOTENCY_TTL_MS),
+        )
+        .unwrap(),
+        open_compute_storage::IdempotencyReservation::Reserved
+    );
+    assert_eq!(
+        run_idempotent(
+            &api,
+            account,
+            scope,
+            key,
+            canonical,
+            RequestId::generate(),
+            None,
+            || Ok(serde_json::json!({"unexpected": true})),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::IdempotencyConflict
+    );
+
+    let failed = || {
+        run_idempotent(
+            &api,
+            account,
+            "coverage/failure",
+            "failed",
+            b"failure",
+            RequestId::generate(),
+            None,
+            || Err(PlatformError::new(ErrorCode::WorkerNotFound, "missing")),
+        )
+    };
+    assert_eq!(failed().unwrap_err().code(), ErrorCode::WorkerNotFound);
+    assert_eq!(failed().unwrap_err().code(), ErrorCode::WorkerNotFound);
+
+    let async_scope = "coverage/async";
+    let async_canonical = b"async";
+    let async_key = "complete";
+    let first = run_idempotent_async(
+        &api,
+        account,
+        async_scope,
+        async_key,
+        async_canonical,
+        RequestId::generate(),
+        None,
+        || async { Ok(serde_json::json!({"ok": true})) },
+    )
+    .await
+    .unwrap();
+    let second = run_idempotent_async(
+        &api,
+        account,
+        async_scope,
+        async_key,
+        async_canonical,
+        RequestId::generate(),
+        None,
+        || async { panic!("completed async operation must replay") },
+    )
+    .await
+    .unwrap();
+    assert_eq!(first, second);
+
+    let (worker, _) = repo
+        .create_worker(account, "ref-worker", RequestId::generate(), now_ms())
+        .unwrap();
+    let deployment = DeploymentId::generate();
+    repo.insert_staging_deployment(&NewDeployment {
+        id: deployment,
+        account_id: account,
+        worker_id: worker.id,
+        artifact_sha256: [7; 32],
+        artifact_size: 7,
+        artifact_schema_version: 1,
+        main_module: "index.js".to_owned(),
+        compatibility_date: "2026-08-22".to_owned(),
+        compatibility_flags: Vec::new(),
+        limits: serde_json::json!({}),
+        worker_code_sha256: [8; 32],
+        vars: BTreeMap::new(),
+        secrets: BTreeMap::new(),
+        request_id: RequestId::generate(),
+        now_ms: now_ms(),
+    })
+    .unwrap();
+    let sync_ref = run_idempotent(
+        &api,
+        account,
+        "coverage/sync-ref",
+        "sync-ref",
+        b"sync-ref",
+        RequestId::generate(),
+        Some(deployment),
+        || Ok(serde_json::json!({"deploymentId": deployment})),
+    )
+    .unwrap();
+    assert!(
+        String::from_utf8(sync_ref)
+            .unwrap()
+            .contains(&deployment.to_string())
+    );
+    let body = run_idempotent_async(
+        &api,
+        account,
+        "coverage/ref",
+        "ref",
+        b"ref",
+        RequestId::generate(),
+        Some(deployment),
+        || async { Ok(serde_json::json!({"deploymentId": deployment})) },
+    )
+    .await
+    .unwrap();
+    assert!(
+        String::from_utf8(body)
+            .unwrap()
+            .contains(&deployment.to_string())
+    );
+
+    let async_running_scope = "coverage/async-running";
+    let async_running_key = "running";
+    let mut async_input = Vec::new();
+    async_input.extend_from_slice(async_running_scope.as_bytes());
+    async_input.push(0);
+    async_input.extend_from_slice(b"running");
+    let async_fingerprint = api.storage.crypto().fingerprint_request(&async_input);
+    repo.reserve_idempotency(
+        account,
+        async_running_scope,
+        async_running_key,
+        api.storage.crypto().fingerprint_key_id(),
+        &async_fingerprint,
+        now_ms(),
+        now_ms().saturating_add(IDEMPOTENCY_TTL_MS),
+    )
+    .unwrap();
+    assert_eq!(
+        run_idempotent_async(
+            &api,
+            account,
+            async_running_scope,
+            async_running_key,
+            b"running",
+            RequestId::generate(),
+            None,
+            || async { Ok(serde_json::json!({"unexpected": true})) },
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        ErrorCode::IdempotencyConflict
+    );
+
+    for _ in 0..2 {
+        assert_eq!(
+            run_idempotent_async(
+                &api,
+                account,
+                "coverage/async-failure",
+                "failed",
+                b"failed",
+                RequestId::generate(),
+                None,
+                || async {
+                    Err(PlatformError::new(
+                        ErrorCode::DeploymentNotReady,
+                        "not ready",
+                    ))
+                },
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            ErrorCode::DeploymentNotReady
+        );
+    }
+
+    let delete_deployment = DeploymentId::generate();
+    repo.insert_staging_deployment(&NewDeployment {
+        id: delete_deployment,
+        account_id: account,
+        worker_id: worker.id,
+        artifact_sha256: [9; 32],
+        artifact_size: 9,
+        artifact_schema_version: 1,
+        main_module: "index.js".to_owned(),
+        compatibility_date: "2026-08-22".to_owned(),
+        compatibility_flags: Vec::new(),
+        limits: serde_json::json!({}),
+        worker_code_sha256: [10; 32],
+        vars: BTreeMap::new(),
+        secrets: BTreeMap::new(),
+        request_id: RequestId::generate(),
+        now_ms: now_ms(),
+    })
+    .unwrap();
+    repo.mark_rejected(
+        delete_deployment,
+        open_compute_storage::DeploymentState::Staging,
+        ErrorCode::BundleInvalid,
+        now_ms(),
+    )
+    .unwrap();
+    let deleted = run_deployment_delete(
+        &api,
+        account,
+        worker.id,
+        delete_deployment,
+        "delete-complete",
+        RequestId::generate(),
+    )
+    .await
+    .unwrap();
+    let replayed = run_deployment_delete(
+        &api,
+        account,
+        worker.id,
+        delete_deployment,
+        "delete-complete",
+        RequestId::generate(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(deleted, replayed);
+
+    let missing_deployment = DeploymentId::generate();
+    for _ in 0..2 {
+        assert_eq!(
+            run_deployment_delete(
+                &api,
+                account,
+                worker.id,
+                missing_deployment,
+                "delete-failed",
+                RequestId::generate(),
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            ErrorCode::DeploymentNotFound
+        );
+    }
+
+    let running_deployment = DeploymentId::generate();
+    let running_scope = format!("deployment.delete/{}/{}", worker.id, running_deployment);
+    let running_canonical = serde_json::to_vec(&serde_json::json!({
+        "workerId": worker.id,
+        "deploymentId": running_deployment,
+    }))
+    .unwrap();
+    let mut running_input = Vec::new();
+    running_input.extend_from_slice(running_scope.as_bytes());
+    running_input.push(0);
+    running_input.extend_from_slice(&running_canonical);
+    let running_fingerprint = api.storage.crypto().fingerprint_request(&running_input);
+    repo.reserve_idempotency(
+        account,
+        &running_scope,
+        "delete-running",
+        api.storage.crypto().fingerprint_key_id(),
+        &running_fingerprint,
+        now_ms(),
+        now_ms().saturating_add(IDEMPOTENCY_TTL_MS),
+    )
+    .unwrap();
+    assert_eq!(
+        run_deployment_delete(
+            &api,
+            account,
+            worker.id,
+            running_deployment,
+            "delete-running",
+            RequestId::generate(),
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        ErrorCode::IdempotencyConflict
+    );
+}

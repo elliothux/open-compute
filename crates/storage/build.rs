@@ -1,0 +1,35 @@
+//! Emit compile-time SHA-256 checksums for versioned migration SQL files.
+
+use sha2::{Digest, Sha256};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+
+fn main() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
+    let migrations = [
+        ("001_init", "MIGRATION_001_SHA256"),
+        ("002_workers_runtime", "MIGRATION_002_SHA256"),
+    ];
+    let mut generated = String::new();
+    for (file, constant) in migrations {
+        let sql_path = manifest_dir.join("migrations").join(format!("{file}.sql"));
+        println!("cargo:rerun-if-changed={}", sql_path.display());
+        let sql = fs::read(&sql_path).unwrap_or_else(|_| panic!("read migration {file}"));
+        let digest = Sha256::digest(&sql);
+        let mut literal = String::from("[");
+        for (i, byte) in digest.iter().enumerate() {
+            if i > 0 {
+                literal.push_str(", ");
+            }
+            literal.push_str(&format!("0x{byte:02x}"));
+        }
+        literal.push(']');
+        generated.push_str(&format!(
+            "/// SHA-256 of `{file}.sql` captured at build time.\npub const {constant}: [u8; 32] = {literal};\n"
+        ));
+    }
+
+    let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("migration_hashes.rs");
+    fs::write(out, generated).expect("write migration hashes");
+}

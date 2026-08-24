@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+"use strict";
+
+const path = require("node:path");
+
+const USAGE = `Usage:
+  ./poc/g0 test bootstrap
+  ./poc/g0 test loader
+  ./poc/g0 test binding
+  ./poc/g0 test durable-object
+  ./poc/g0 test recovery
+  ./poc/g0 test all
+`;
+
+const IMPLEMENTED = new Set(["bootstrap", "loader", "binding", "durable-object", "recovery", "all"]);
+
+async function main() {
+  const argv = process.argv.slice(2);
+  if (argv[0] !== "test" || !argv[1]) {
+    process.stderr.write(USAGE);
+    process.exit(2);
+  }
+  const suite = argv[1];
+  if (IMPLEMENTED.has(suite)) {
+    const { run } = require(path.join(__dirname, "tests", `${suite}.js`));
+    const code = await run();
+    process.exit(code ?? 0);
+  }
+  process.stderr.write(`unknown suite: ${suite}\n${USAGE}`);
+  process.exit(2);
+}
+
+main().catch((err) => {
+  process.stderr.write(String(err && err.stack ? err.stack : err) + "\n");
+  process.exit(1);
+});
