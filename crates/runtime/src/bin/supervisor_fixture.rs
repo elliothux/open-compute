@@ -11,7 +11,6 @@ use std::net::TcpListener;
 #[cfg(not(target_os = "linux"))]
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-#[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -202,9 +201,9 @@ fn hold_pipes_ignore_term() {
 
 fn spawn_hold_pipes_descendant(path: Option<&std::path::Path>) {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/bin/sleep"));
-    let mut cmd = std::process::Command::new(exe);
+    let mut cmd = Command::new(exe);
     cmd.arg("--hold-pipes");
-    cmd.stdin(std::process::Stdio::null());
+    cmd.stdin(Stdio::null());
     if let Ok(child) = cmd.spawn() {
         if let Some(path) = path {
             let _ = fs::write(path, child.id().to_string());
@@ -214,11 +213,11 @@ fn spawn_hold_pipes_descendant(path: Option<&std::path::Path>) {
 }
 
 fn spawn_descendant(path: Option<&std::path::Path>) {
-    let mut cmd = std::process::Command::new("/bin/sleep");
+    let mut cmd = Command::new("/bin/sleep");
     cmd.arg("60");
-    cmd.stdin(std::process::Stdio::null());
-    cmd.stdout(std::process::Stdio::null());
-    cmd.stderr(std::process::Stdio::null());
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
     if let Ok(child) = cmd.spawn() {
         if let Some(path) = path {
             let _ = fs::write(path, child.id().to_string());
