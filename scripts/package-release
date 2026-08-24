@@ -17,10 +17,10 @@ if [ -z "$dest" ]; then
   echo "DEST or --dest is required" >&2
   exit 2
 fi
-bin="$root/target/debug/platformd"
+bin="$root/target/release/platformd"
 # Always ask Cargo to validate freshness. Incremental no-op builds are cheap,
 # while reusing an arbitrary executable left in target/ can package stale code.
-cargo build -q -p open-compute-service --bin platformd
+cargo build -q --release -p open-compute-service --bin platformd
 set -- package-release \
   --dest "$dest" \
   --lock "$root/runtime/workerd.lock.json" \

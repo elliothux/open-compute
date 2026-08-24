@@ -695,6 +695,7 @@ pub(crate) fn remove_file_nofollow(path: &Path) -> Result<(), PlatformError> {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn remove_empty_dir_nofollow(path: &Path) -> Result<(), PlatformError> {
     let (parent, name) = open_parent_dir(path)?;
     match unlinkat(&parent, name.as_os_str(), AtFlags::REMOVEDIR) {

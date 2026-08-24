@@ -8,10 +8,13 @@ use rustix::process::{
 };
 use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::{Read, Seek, Write};
+#[cfg(target_os = "macos")]
+use std::io::Seek;
+use std::io::{Read, Write};
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
 use std::os::fd::{AsFd, OwnedFd};
+#[cfg(target_os = "macos")]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -107,6 +110,7 @@ impl Drop for ExecImage {
     }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(clippy::unnecessary_wraps))]
 fn exec_path_for(
     file: &mut File,
     staging_lease: Option<(&Path, &str)>,
@@ -267,6 +271,7 @@ pub(crate) fn clear_staging_journal(lease_path: &Path) -> Result<(), PlatformErr
     crate::fsutil::remove_file_nofollow(&path)
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(clippy::unnecessary_wraps))]
 pub(crate) fn recover_unleased_staging(
     lease_path: &Path,
     expected_digest: &str,
@@ -431,6 +436,7 @@ fn cleanup_staging_dir(directory: &Path) {
     let _ = fs::remove_dir(directory);
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn cleanup_staging_dir_strict(directory: &Path) -> Result<(), PlatformError> {
     match fs::symlink_metadata(directory) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),

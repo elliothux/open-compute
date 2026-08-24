@@ -21,7 +21,11 @@ jobs:
         run: cargo check --workspace --all-targets
 
   lint-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -46,7 +50,7 @@ jobs:
         run: chmod +x scripts/check-boundaries && ./scripts/check-boundaries
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -68,7 +72,11 @@ jobs:
         run: ./scripts/coverage
 
   integration:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -78,6 +86,7 @@ jobs:
       - name: Package pinned offline release
         run: |
           chmod +x scripts/package-release scripts/test-p0-1 scripts/test-p0-2 scripts/test-p0-2-egress-linux
+          cargo build -p open-compute-service --bin platformd
           dest="$RUNNER_TEMP/open-compute-release"
           ./scripts/package-release --dest "$dest" --download
           test -x "$dest/bin/workerd"
@@ -87,7 +96,13 @@ jobs:
         run: |
           dest="$RUNNER_TEMP/open-compute-release"
           OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" ./scripts/test-p0-1
+      - name: P0.2 three-round Worker Gate (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          dest="$RUNNER_TEMP/open-compute-release"
+          OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" ./scripts/test-p0-2
       - name: P0.2 three-round Worker and controlled egress Gate (Linux)
+        if: runner.os == 'Linux'
         run: |
           dest="$RUNNER_TEMP/open-compute-release"
           OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" \
