@@ -18,6 +18,7 @@ use std::pin::pin;
 use std::time::{Duration, SystemTime};
 
 const META_SHA256: &str = "sha256";
+const KV_BACKUP_PREFIX: &str = "backups/kv/";
 
 /// Remote object listed under the internal artifact prefix.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,6 +40,300 @@ impl ArtifactStore {
     #[must_use]
     pub fn new(client: S3ArtifactClient) -> Self {
         Self { client }
+    }
+
+    /// Construct a host-owned KV backup key below the configured system prefix.
+    pub fn kv_backup_key(&self, relative: &str) -> Result<String, PlatformError> {
+        if relative.is_empty()
+            || relative.contains("..")
+            || relative.starts_with('/')
+            || !relative.starts_with(KV_BACKUP_PREFIX)
+        {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "KV backup object key is outside the system prefix",
+            ));
+        }
+        Ok(format!("{}{relative}", self.client.prefix()))
+    }
+
+    /// Upload one verified KV backup file to its immutable host-generated key.
+    pub async fn put_kv_backup_file(
+        &self,
+        relative: &str,
+        path: &Path,
+        expected_sha256: &str,
+        expected_size: u64,
+    ) -> Result<String, PlatformError> {
+        let expected = parse_sha256(expected_sha256)?;
+        if expected_size > self.client.max_artifact_bytes() {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "KV backup exceeds the configured object limit",
+            ));
+        }
+        let key = self.kv_backup_key(relative)?;
+        let mut file = std::fs::File::open(path).map_err(|_| {
+            PlatformError::new(
+                ErrorCode::DiskHardLimit,
+                "KV backup staging file is unavailable",
+            )
+        })?;
+        let metadata = file.metadata().map_err(|_| error::integrity_error())?;
+        if !metadata.file_type().is_file() || metadata.len() != expected_size {
+            return Err(error::integrity_error());
+        }
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut total = 0_u64;
+        loop {
+            let count = file
+                .read(&mut buffer)
+                .map_err(|_| error::integrity_error())?;
+            if count == 0 {
+                break;
+            }
+            total = total.saturating_add(count as u64);
+            if total > expected_size {
+                return Err(error::integrity_error());
+            }
+            hasher.update(&buffer[..count]);
+        }
+        if total != expected_size || hasher.finalize().as_slice() != expected {
+            return Err(error::integrity_error());
+        }
+        file.rewind().map_err(|_| error::integrity_error())?;
+        let body = ByteStream::read_from()
+            .file(tokio::fs::File::from_std(file))
+            .length(Length::Exact(expected_size))
+            .buffer_size(64 * 1024)
+            .build()
+            .await
+            .map_err(|_| error::integrity_error())?;
+        let put = self
+            .client
+            .inner()
+            .put_object()
+            .bucket(self.client.bucket())
+            .key(&key)
+            .body(body)
+            .content_length(expected_size as i64)
+            .metadata(META_SHA256, expected_sha256)
+            .if_none_match("*")
+            .send()
+            .await;
+        if let Err(err) = put {
+            if let SdkError::ServiceError(service) = &err
+                && matches!(service.raw().status().as_u16(), 409 | 412)
+            {
+                self.verify_kv_backup_head(&key, expected_sha256, expected_size)
+                    .await?;
+                self.download_kv_backup(&key, expected_sha256, expected_size, &mut std::io::sink())
+                    .await?;
+                return Ok(key);
+            }
+            return Err(error::from_put(&err));
+        }
+        self.verify_kv_backup_head(&key, expected_sha256, expected_size)
+            .await?;
+        Ok(key)
+    }
+
+    /// Upload one small immutable JSON manifest below the KV backup prefix.
+    pub async fn put_kv_backup_manifest(
+        &self,
+        relative: &str,
+        bytes: Bytes,
+    ) -> Result<String, PlatformError> {
+        if bytes.is_empty() || bytes.len() > 64 * 1024 {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "KV backup manifest is outside the fixed size limit",
+            ));
+        }
+        let key = self.kv_backup_key(relative)?;
+        let digest = hex::encode(Sha256::digest(&bytes));
+        let size = bytes.len() as u64;
+        let put = self
+            .client
+            .inner()
+            .put_object()
+            .bucket(self.client.bucket())
+            .key(&key)
+            .body(ByteStream::from(bytes.clone()))
+            .content_length(size as i64)
+            .content_type("application/json")
+            .metadata(META_SHA256, &digest)
+            .if_none_match("*")
+            .send()
+            .await;
+        if let Err(err) = put
+            && !matches!(
+                &err,
+                SdkError::ServiceError(service)
+                    if matches!(service.raw().status().as_u16(), 409 | 412)
+            )
+        {
+            return Err(error::from_put(&err));
+        }
+        self.verify_kv_backup_head(&key, &digest, size).await?;
+        let stored = self.get_kv_backup_manifest(&key).await?;
+        if stored != bytes {
+            return Err(error::integrity_error());
+        }
+        Ok(key)
+    }
+
+    /// Download a small manifest while verifying its declared digest and size.
+    pub async fn get_kv_backup_manifest(&self, key: &str) -> Result<Bytes, PlatformError> {
+        self.validate_kv_backup_key(key)?;
+        let head = self
+            .client
+            .inner()
+            .head_object()
+            .bucket(self.client.bucket())
+            .key(key)
+            .send()
+            .await
+            .map_err(|err| error::from_head(&err))?;
+        let size = u64::try_from(head.content_length().unwrap_or(-1)).unwrap_or(u64::MAX);
+        if size == 0 || size > 64 * 1024 {
+            return Err(error::integrity_error());
+        }
+        let digest = head
+            .metadata()
+            .and_then(|metadata| metadata.get(META_SHA256))
+            .ok_or_else(error::integrity_error)?;
+        let expected = parse_sha256(digest)?;
+        let got = self
+            .client
+            .inner()
+            .get_object()
+            .bucket(self.client.bucket())
+            .key(key)
+            .send()
+            .await
+            .map_err(|err| error::from_get(&err))?;
+        let mut body = pin!(got.body);
+        let mut bytes = Vec::with_capacity(size as usize);
+        let mut hasher = Sha256::new();
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(|_| error::unavailable(S3Stage::Server))?;
+            if bytes.len().saturating_add(chunk.len()) > size as usize {
+                return Err(error::integrity_error());
+            }
+            hasher.update(&chunk);
+            bytes.extend_from_slice(&chunk);
+        }
+        if bytes.len() != size as usize || hasher.finalize().as_slice() != expected {
+            return Err(error::integrity_error());
+        }
+        Ok(Bytes::from(bytes))
+    }
+
+    /// Derive the sibling manifest object from a persisted data object key.
+    pub fn kv_backup_manifest_key(&self, data_key: &str) -> Result<String, PlatformError> {
+        self.validate_kv_backup_key(data_key)?;
+        data_key
+            .strip_suffix("/data.sqlite")
+            .map(|prefix| format!("{prefix}/manifest.json"))
+            .ok_or_else(|| {
+                PlatformError::new(
+                    ErrorCode::ConfigInvalid,
+                    "KV backup data object key is not canonical",
+                )
+            })
+    }
+
+    /// Download and verify one persisted host-owned KV backup object.
+    pub async fn download_kv_backup<W: std::io::Write>(
+        &self,
+        key: &str,
+        expected_sha256: &str,
+        expected_size: u64,
+        writer: &mut W,
+    ) -> Result<(), PlatformError> {
+        let expected = parse_sha256(expected_sha256)?;
+        self.validate_kv_backup_key(key)?;
+        self.verify_kv_backup_head(key, expected_sha256, expected_size)
+            .await?;
+        let got = self
+            .client
+            .inner()
+            .get_object()
+            .bucket(self.client.bucket())
+            .key(key)
+            .send()
+            .await
+            .map_err(|err| error::from_get(&err))?;
+        let mut body = pin!(got.body);
+        let mut hasher = Sha256::new();
+        let mut total = 0_u64;
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(|_| error::unavailable(S3Stage::Server))?;
+            total = total.saturating_add(chunk.len() as u64);
+            if total > expected_size {
+                return Err(error::integrity_error());
+            }
+            hasher.update(&chunk);
+            writer.write_all(&chunk).map_err(|_| {
+                PlatformError::new(ErrorCode::DiskHardLimit, "failed to stage KV backup")
+            })?;
+        }
+        if total != expected_size || hasher.finalize().as_slice() != expected {
+            return Err(error::integrity_error());
+        }
+        Ok(())
+    }
+
+    /// Delete one exact host-owned KV backup object.
+    pub async fn delete_kv_backup(&self, key: &str) -> Result<(), PlatformError> {
+        self.validate_kv_backup_key(key)?;
+        self.client
+            .inner()
+            .delete_object()
+            .bucket(self.client.bucket())
+            .key(key)
+            .send()
+            .await
+            .map_err(|err| error::from_delete(&err))?;
+        Ok(())
+    }
+
+    async fn verify_kv_backup_head(
+        &self,
+        key: &str,
+        expected_sha256: &str,
+        expected_size: u64,
+    ) -> Result<(), PlatformError> {
+        let head = self
+            .client
+            .inner()
+            .head_object()
+            .bucket(self.client.bucket())
+            .key(key)
+            .send()
+            .await
+            .map_err(|err| error::from_head(&err))?;
+        let size = u64::try_from(head.content_length().unwrap_or(-1)).unwrap_or(u64::MAX);
+        let digest = head
+            .metadata()
+            .and_then(|metadata| metadata.get(META_SHA256));
+        if size != expected_size || digest.is_none_or(|value| value != expected_sha256) {
+            return Err(error::integrity_error());
+        }
+        Ok(())
+    }
+
+    fn validate_kv_backup_key(&self, key: &str) -> Result<(), PlatformError> {
+        let prefix = format!("{}{}", self.client.prefix(), KV_BACKUP_PREFIX);
+        if !key.starts_with(&prefix) || key.contains("..") {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "KV backup object key is outside the system prefix",
+            ));
+        }
+        Ok(())
     }
 
     /// Stream bytes to S3, verifying digest and size before success.

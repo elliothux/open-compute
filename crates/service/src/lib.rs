@@ -10,6 +10,8 @@ pub mod doctor;
 pub mod exit;
 pub mod health;
 pub mod http;
+pub mod kv_backend;
+pub mod kv_http;
 pub mod metrics;
 pub mod run;
 pub mod runtime_bridge;
@@ -22,6 +24,8 @@ pub use binding_backend::{
 pub use cli::{Cli, Command, execute};
 pub use exit::{ExitClass, emit_failure, exit_code};
 pub use health::{HealthCoordinator, map_supervisor};
+pub use kv_backend::{KvCommand, KvCommandResult, KvStreamPart, SqliteKvBindingExecutor};
+pub use kv_http::KvApiState;
 pub use metrics::MetricsRegistry;
 pub use run::run_platform;
 #[cfg(any(test, feature = "test-support"))]

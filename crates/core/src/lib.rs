@@ -17,8 +17,9 @@ pub mod secret;
 
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    CacheConfig, DiagnosticsConfig, MetricsConfig, PlatformConfig, RuntimeConfig, S3Config,
-    SecretReference, ServerConfig, StorageConfig, WorkersConfig, validate_bootstrap_config_path,
+    CacheConfig, DiagnosticsConfig, KvConfig, MetricsConfig, PlatformConfig, RuntimeConfig,
+    S3Config, SecretReference, ServerConfig, StorageConfig, WorkersConfig,
+    validate_bootstrap_config_path,
 };
 pub use error::{ErrorCode, PlatformError, ReadinessReason};
 pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus};

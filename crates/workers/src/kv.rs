@@ -1,0 +1,233 @@
+//! P0.4 KV namespace lifecycle driver.
+
+use crate::{ReconcileOutcome, ResourceDriver, ResourceHealth};
+use open_compute_core::{
+    BindingKind, ErrorCode, PlatformError, ResourceAvailability, ResourceState,
+};
+use open_compute_storage::{
+    KV_SCHEMA_VERSION, KvEngine, KvNamespaceRepository, KvPaths, PlatformStorage, ResourceRecord,
+};
+
+/// Static filesystem and SQLite driver for `kv_namespace` resources.
+#[derive(Debug)]
+pub struct KvResourceDriver<'a> {
+    storage: &'a PlatformStorage,
+    quota_bytes: u64,
+}
+
+impl<'a> KvResourceDriver<'a> {
+    /// Bind platform authority and the frozen quota used for new namespaces.
+    #[must_use]
+    pub const fn new(storage: &'a PlatformStorage, quota_bytes: u64) -> Self {
+        Self {
+            storage,
+            quota_bytes,
+        }
+    }
+
+    fn paths(&self) -> Result<KvPaths, PlatformError> {
+        KvPaths::open(self.storage.data_dir().root())
+    }
+
+    fn catalog(
+        &self,
+        resource: &ResourceRecord,
+    ) -> Result<open_compute_storage::KvNamespaceRecord, PlatformError> {
+        KvNamespaceRepository::new(self.storage.db()).get(resource.account_id, resource.id)
+    }
+
+    fn verify_live(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
+        let paths = self.paths()?;
+        let record = self.catalog(resource)?;
+        let path =
+            paths.resolve_storage_key(&record.storage_key, resource.account_id, resource.id)?;
+        KvEngine::from_record(path, &record).map(|_| ())
+    }
+}
+
+impl ResourceDriver for KvResourceDriver<'_> {
+    fn kind(&self) -> BindingKind {
+        BindingKind::KvNamespace
+    }
+
+    fn create(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
+        if resource.state != ResourceState::Creating
+            || resource.kind != BindingKind::KvNamespace
+            || self.quota_bytes < 256 * 1024 * 1024
+        {
+            return Err(invariant());
+        }
+        let paths = self.paths()?;
+        let storage_key = KvPaths::storage_key(resource.account_id, resource.id);
+        let record = KvNamespaceRepository::new(self.storage.db()).ensure_namespace(
+            resource,
+            &storage_key,
+            KV_SCHEMA_VERSION,
+            self.quota_bytes,
+        )?;
+        if record.restore_backup_id.is_some() {
+            return Err(PlatformError::new(
+                ErrorCode::ResourceNotReady,
+                "KV restore must resume through its product controller",
+            ));
+        }
+        let live = paths.resolve_storage_key(&storage_key, resource.account_id, resource.id)?;
+        if live.exists() {
+            return KvEngine::from_record(live, &record).map(|_| ());
+        }
+        let candidates = paths.namespace_staging_candidates(resource.id)?;
+        if candidates.len() > 1 {
+            return Err(invariant());
+        }
+        if let Some(staging) = candidates.first() {
+            let staged_db = staging.join("data.sqlite");
+            if KvEngine::from_record(staged_db, &record).is_ok() {
+                return paths.publish_staging(staging, resource.account_id, resource.id);
+            }
+            paths.remove_namespace_staging(staging)?;
+        }
+        let staging = paths.create_namespace_staging(resource.id)?;
+        let result = (|| {
+            KvEngine::create(
+                &staging.join("data.sqlite"),
+                resource.account_id,
+                resource.id,
+                resource.created_at_ms,
+                self.quota_bytes,
+            )?;
+            paths.publish_staging(&staging, resource.account_id, resource.id)?;
+            self.verify_live(resource)
+        })();
+        if result.is_err() && staging.exists() {
+            let _ = paths.remove_namespace_staging(&staging);
+        }
+        result
+    }
+
+    fn reconcile(&self, resource: &ResourceRecord) -> Result<ReconcileOutcome, PlatformError> {
+        let paths = self.paths()?;
+        match resource.state {
+            ResourceState::Creating => {
+                let record = match self.catalog(resource) {
+                    Ok(record) => record,
+                    Err(error) if error.code() == ErrorCode::ResourceNotFound => {
+                        return Ok(ReconcileOutcome::Absent);
+                    }
+                    Err(error) => return Err(error),
+                };
+                let live = paths.resolve_storage_key(
+                    &record.storage_key,
+                    resource.account_id,
+                    resource.id,
+                )?;
+                if live.exists() {
+                    let engine = KvEngine::from_record(live, &record)?;
+                    if engine.restore_backup_id()? != record.restore_backup_id {
+                        return Err(invariant());
+                    }
+                    return Ok(ReconcileOutcome::Ready);
+                }
+                let candidates = paths.namespace_staging_candidates(resource.id)?;
+                if candidates.len() > 1 {
+                    return Err(invariant());
+                }
+                let Some(staging) = candidates.first() else {
+                    return Ok(if record.restore_backup_id.is_some() {
+                        ReconcileOutcome::Deferred
+                    } else {
+                        ReconcileOutcome::Absent
+                    });
+                };
+                let staged = staging.join("data.sqlite");
+                let Ok(engine) = KvEngine::from_record(staged, &record) else {
+                    paths.remove_namespace_staging(staging)?;
+                    return Ok(if record.restore_backup_id.is_some() {
+                        ReconcileOutcome::Deferred
+                    } else {
+                        ReconcileOutcome::Absent
+                    });
+                };
+                if engine.restore_backup_id()? != record.restore_backup_id {
+                    return Err(invariant());
+                }
+                paths.publish_staging(staging, resource.account_id, resource.id)?;
+                Ok(ReconcileOutcome::Ready)
+            }
+            ResourceState::Ready => {
+                self.verify_live(resource)?;
+                Ok(ReconcileOutcome::Ready)
+            }
+            ResourceState::Deleting => {
+                if paths
+                    .namespace_dir(resource.account_id, resource.id)
+                    .exists()
+                {
+                    Ok(ReconcileOutcome::Ready)
+                } else {
+                    Ok(ReconcileOutcome::Deleted)
+                }
+            }
+            ResourceState::Tombstoned => Ok(ReconcileOutcome::Deleted),
+        }
+    }
+
+    fn begin_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
+        let paths = self.paths()?;
+        let live = paths.namespace_dir(resource.account_id, resource.id);
+        if !live.exists() {
+            return Ok(());
+        }
+        let record = self.catalog(resource)?;
+        let engine = KvEngine::from_record(live.join("data.sqlite"), &record)?;
+        engine.checkpoint(true)?;
+        paths.quarantine(resource.account_id, resource.id)?;
+        Ok(())
+    }
+
+    fn finalize_delete(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
+        let paths = self.paths()?;
+        if paths
+            .namespace_dir(resource.account_id, resource.id)
+            .exists()
+        {
+            return Err(invariant());
+        }
+        for quarantine in paths.quarantine_candidates(resource.id)? {
+            paths.remove_quarantine(&quarantine)?;
+        }
+        Ok(())
+    }
+
+    fn health(&self, resource: &ResourceRecord) -> Result<ResourceHealth, PlatformError> {
+        match self.verify_live(resource) {
+            Ok(()) => Ok(ResourceHealth::healthy()),
+            Err(error) if error.code() == ErrorCode::KvCorrupt => Ok(ResourceHealth {
+                availability: ResourceAvailability::Unavailable,
+                code: Some("KV_CORRUPT"),
+            }),
+            Err(error)
+                if matches!(
+                    error.code(),
+                    ErrorCode::KvUnavailable | ErrorCode::KvBusy | ErrorCode::PathInvalid
+                ) =>
+            {
+                Ok(ResourceHealth {
+                    availability: ResourceAvailability::Unavailable,
+                    code: Some("KV_UNAVAILABLE"),
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+fn invariant() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::ResourceInvariantViolation,
+        "KV lifecycle reconciliation invariant failed",
+    )
+}
+
+#[cfg(test)]
+#[path = "kv_tests.rs"]
+mod tests;

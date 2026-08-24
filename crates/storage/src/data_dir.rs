@@ -87,6 +87,12 @@ impl DataDir {
         self.root.join(DEPLOYMENT_STAGING)
     }
 
+    /// Private staging directory for online backups and verified restores.
+    #[must_use]
+    pub fn backup_staging_dir(&self) -> PathBuf {
+        self.root.join(BACKUP_STAGING)
+    }
+
     /// Held lock.
     #[must_use]
     pub fn lock(&self) -> &DataDirLock {

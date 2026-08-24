@@ -125,6 +125,36 @@ pub enum ErrorCode {
     BindingLimitExceeded,
     /// A binding mutation may have committed before transport failure.
     BindingResultUnknown,
+    /// A KV key is empty or otherwise outside the documented key grammar.
+    KvKeyInvalid,
+    /// A KV key exceeds the 512-byte UTF-8 limit.
+    KvKeyTooLarge,
+    /// A KV value exceeds the 25 MiB limit.
+    KvValueTooLarge,
+    /// KV metadata is not canonical JSON-compatible data.
+    KvMetadataInvalid,
+    /// Canonical KV metadata exceeds 1024 bytes.
+    KvMetadataTooLarge,
+    /// KV expiration, cache, list, or type options are invalid.
+    KvInvalidOptions,
+    /// A KV multi-get contains more than 100 keys.
+    KvTooManyKeys,
+    /// A KV aggregate response exceeds the 25 MiB response budget.
+    KvResponseTooLarge,
+    /// A KV list cursor is malformed, expired, or scoped incorrectly.
+    KvCursorInvalid,
+    /// A KV namespace writer or connection is temporarily busy.
+    KvBusy,
+    /// KV storage quota or the platform disk safety floor was reached.
+    KvStorageFull,
+    /// One KV namespace is temporarily unavailable.
+    KvUnavailable,
+    /// One KV namespace database failed integrity validation.
+    KvCorrupt,
+    /// A KV mutation may have committed before its result was observed.
+    KvResultUnknown,
+    /// The private KV adapter protocol was malformed.
+    KvInternalProtocolError,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -191,6 +221,21 @@ impl ErrorCode {
             Self::BindingProtocolError => "BINDING_PROTOCOL_ERROR",
             Self::BindingLimitExceeded => "BINDING_LIMIT_EXCEEDED",
             Self::BindingResultUnknown => "BINDING_RESULT_UNKNOWN",
+            Self::KvKeyInvalid => "KV_KEY_INVALID",
+            Self::KvKeyTooLarge => "KV_KEY_TOO_LARGE",
+            Self::KvValueTooLarge => "KV_VALUE_TOO_LARGE",
+            Self::KvMetadataInvalid => "KV_METADATA_INVALID",
+            Self::KvMetadataTooLarge => "KV_METADATA_TOO_LARGE",
+            Self::KvInvalidOptions => "KV_INVALID_OPTIONS",
+            Self::KvTooManyKeys => "KV_TOO_MANY_KEYS",
+            Self::KvResponseTooLarge => "KV_RESPONSE_TOO_LARGE",
+            Self::KvCursorInvalid => "KV_CURSOR_INVALID",
+            Self::KvBusy => "KV_BUSY",
+            Self::KvStorageFull => "KV_STORAGE_FULL",
+            Self::KvUnavailable => "KV_UNAVAILABLE",
+            Self::KvCorrupt => "KV_CORRUPT",
+            Self::KvResultUnknown => "KV_RESULT_UNKNOWN",
+            Self::KvInternalProtocolError => "KV_INTERNAL_PROTOCOL_ERROR",
             Self::Internal => "INTERNAL",
         }
     }

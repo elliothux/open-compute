@@ -2,6 +2,7 @@
 
 use crate::auth::{bearer_matches, resolve_admin_auth};
 use crate::health::HealthCoordinator;
+use crate::kv_http::{self, KvApiState};
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
 use crate::workers_http::{self, WorkerApiState};
 use axum::body::Body;
@@ -36,6 +37,7 @@ pub struct HttpState {
     admin_secret: Option<Arc<SecretString>>,
     supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
     worker_api: Option<Arc<WorkerApiState>>,
+    kv_api: Option<Arc<KvApiState>>,
 }
 
 impl std::fmt::Debug for HttpState {
@@ -44,6 +46,7 @@ impl std::fmt::Debug for HttpState {
             .field("metrics_enabled", &self.metrics_enabled)
             .field("admin_auth", &self.admin_secret.is_some())
             .field("worker_api", &self.worker_api.is_some())
+            .field("kv_api", &self.kv_api.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -89,6 +92,7 @@ impl HttpState {
             admin_secret,
             supervisor,
             worker_api: None,
+            kv_api: None,
         })
     }
 
@@ -107,6 +111,7 @@ impl HttpState {
             admin_secret: admin_secret.map(Arc::new),
             supervisor: Arc::new(|| None),
             worker_api: None,
+            kv_api: None,
         }
     }
 
@@ -121,6 +126,25 @@ impl HttpState {
     #[must_use]
     pub(crate) fn worker_api(&self) -> Option<&Arc<WorkerApiState>> {
         self.worker_api.as_ref()
+    }
+
+    /// Attach the P0.4 KV control plane to this listener state.
+    #[must_use]
+    pub fn with_kv_api(mut self, kv_api: KvApiState) -> Self {
+        self.kv_api = Some(Arc::new(kv_api));
+        self
+    }
+
+    /// Borrow the optional P0.4 API state.
+    #[must_use]
+    pub(crate) fn kv_api(&self) -> Option<&Arc<KvApiState>> {
+        self.kv_api.as_ref()
+    }
+
+    /// Borrow the fixed-series metrics registry from product control handlers.
+    #[must_use]
+    pub(crate) const fn metrics(&self) -> &Arc<MetricsRegistry> {
+        &self.metrics
     }
 }
 
@@ -144,7 +168,9 @@ pub fn admin_router(state: HttpState) -> Router {
     if metrics_enabled {
         router = router.route("/metrics", get(metrics_handler));
     }
-    router = router.merge(workers_http::control_router());
+    router = router
+        .merge(workers_http::control_router())
+        .merge(kv_http::control_router());
     router
         .fallback(fallback)
         .layer(axum::middleware::from_fn(bounds_middleware))
@@ -163,6 +189,7 @@ pub fn merged_router(state: HttpState) -> Router {
     }
     router
         .merge(workers_http::control_router())
+        .merge(kv_http::control_router())
         .fallback(workers_http::public_ingress)
         .layer(axum::middleware::from_fn(bounds_middleware))
         .with_state(state)

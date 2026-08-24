@@ -1,12 +1,12 @@
 //! Production `run` composition and shutdown.
 
-use crate::binding_backend::{
-    UnavailableKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_metrics,
-};
+use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_metrics};
 use crate::config_load::LoadedConfig;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState, SanitizedSupervisor};
-use crate::metrics::{MetricsRegistry, SqliteOp, StartResult, StartStage};
+use crate::kv_backend::SqliteKvBindingExecutor;
+use crate::kv_http::KvApiState;
+use crate::metrics::{KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage};
 use crate::runtime_bridge::{WorkerdTransport, bind_runtime_source, serve_runtime_source};
 use crate::workers_http::WorkerApiState;
 use open_compute_artifacts::{
@@ -118,7 +118,21 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let storage_started = Instant::now();
     let storage = match tokio::task::spawn_blocking({
         let cfg = loaded.config.storage.clone();
-        move || PlatformStorage::bootstrap(&cfg, &clock)
+        let recovery_batch = loaded.config.workers.delete_recovery_batch;
+        move || {
+            let storage = PlatformStorage::bootstrap(&cfg, &clock)?;
+            open_compute_storage::KvPaths::open(storage.data_dir().root())?
+                .cleanup_write_staging()?;
+            let maintenance_now = unix_ms();
+            WorkerRepository::new(storage.db())
+                .prune_expired_idempotency(maintenance_now, recovery_batch)?;
+            WorkerRepository::new(storage.db()).recover_deleting_deployments(
+                RequestId::generate(),
+                maintenance_now,
+                recovery_batch,
+            )?;
+            Ok::<_, PlatformError>(storage)
+        }
     })
     .await
     {
@@ -136,14 +150,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         }
     };
     let storage = Arc::new(storage);
-    let maintenance_now = unix_ms();
-    WorkerRepository::new(storage.db())
-        .prune_expired_idempotency(maintenance_now, loaded.config.workers.delete_recovery_batch)?;
-    WorkerRepository::new(storage.db()).recover_deleting_deployments(
-        RequestId::generate(),
-        maintenance_now,
-        loaded.config.workers.delete_recovery_batch,
-    )?;
     metrics.observe_sqlite(SqliteOp::Open, storage_started.elapsed());
     metrics.observe_sqlite(SqliteOp::Migrate, storage_started.elapsed());
     record(&opts, "storage");
@@ -217,7 +223,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let client = match S3ArtifactClient::connect(
         &loaded.config.s3,
         &creds,
-        loaded.config.cache.max_artifact_bytes,
+        loaded
+            .config
+            .cache
+            .max_artifact_bytes
+            .max(loaded.config.kv.namespace_quota_bytes),
     ) {
         Ok(c) => c,
         Err(err) => {
@@ -363,6 +373,13 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         deployment_pins.clone(),
         bundle_limits,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
+    ))
+    .with_kv_api(KvApiState::new(
+        storage.clone(),
+        store.clone(),
+        resource_pins.clone(),
+        loaded.config.kv.clone(),
+        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     ));
 
     let public_listener = match http::bind(public_addr).await {
@@ -408,7 +425,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let maintenance_store = store.clone();
     let maintenance_cache = cache.clone();
     let maintenance_config = loaded.config.workers.clone();
+    let maintenance_kv_config = loaded.config.kv.clone();
     let maintenance_pins = deployment_pins;
+    let maintenance_resource_pins = resource_pins.clone();
+    let maintenance_metrics = metrics.clone();
     let maintenance_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(
             maintenance_config.artifact_gc_interval_ms,
@@ -423,6 +443,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                         &maintenance_cache,
                         &maintenance_pins,
                         &maintenance_config,
+                    ).await;
+                    run_kv_maintenance(
+                        &maintenance_storage,
+                        &maintenance_resource_pins,
+                        &maintenance_kv_config,
+                        &maintenance_metrics,
                     ).await;
                 }
             }
@@ -445,6 +471,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     });
     let mut shutdown_binding = shutdown_rx.clone();
     let binding_storage = storage.clone();
+    let binding_executor = Arc::new(
+        SqliteKvBindingExecutor::with_config(
+            storage.clone(),
+            Arc::new(SystemClock),
+            &loaded.config.kv,
+        )
+        .with_metrics(metrics.clone()),
+    );
     let binding_auth = binding_generation_auth.clone();
     let binding_metrics = metrics.clone();
     let binding_backend_task = tokio::spawn(async move {
@@ -453,7 +487,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             binding_storage,
             binding_auth,
             resource_pins,
-            Arc::new(UnavailableKvBindingExecutor),
+            binding_executor,
             Some(binding_metrics),
             async move {
                 let _ = shutdown_binding.changed().await;
@@ -741,6 +775,95 @@ async fn run_worker_maintenance(
             code = error.code().as_str(),
             "Worker cache eviction pass failed"
         );
+    }
+}
+
+pub(crate) async fn run_kv_maintenance(
+    storage: &Arc<PlatformStorage>,
+    pins: &ResourcePins,
+    config: &open_compute_core::KvConfig,
+    metrics: &Arc<MetricsRegistry>,
+) {
+    let storage = storage.clone();
+    let pins = pins.clone();
+    let metrics = metrics.clone();
+    let batch = usize::try_from(config.max_connections.min(64)).unwrap_or(64);
+    let pass = tokio::task::spawn_blocking(move || {
+        let account = storage.identity().default_account_id;
+        let catalog = open_compute_storage::KvNamespaceRepository::new(storage.db());
+        let resources = open_compute_storage::ResourceRepository::new(storage.db());
+        let paths = open_compute_storage::KvPaths::open(storage.data_dir().root())?;
+        let now = unix_ms();
+        for record in catalog.list(account)?.into_iter().take(batch) {
+            if record.resource.state != open_compute_core::ResourceState::Ready
+                || pins.count(record.resource.id) != 0
+            {
+                continue;
+            }
+            let path = paths.resolve_storage_key(
+                &record.storage_key,
+                record.resource.account_id,
+                record.resource.id,
+            )?;
+            let engine = match open_compute_storage::KvEngine::from_record(path, &record) {
+                Ok(engine) => engine,
+                Err(error) => {
+                    metrics.inc_kv_corruption(2);
+                    let code = if error.code() == ErrorCode::KvCorrupt {
+                        "KV_CORRUPT"
+                    } else {
+                        "KV_UNAVAILABLE"
+                    };
+                    let _ = resources.set_availability(
+                        record.resource.account_id,
+                        record.resource.id,
+                        open_compute_core::ResourceAvailability::Unavailable,
+                        Some(code),
+                        now,
+                    );
+                    continue;
+                }
+            };
+            if let Ok(wal_bytes) = engine.wal_bytes() {
+                metrics.observe_kv_wal_bytes(wal_bytes);
+            }
+            metrics.inc_kv_maintenance(KvMaintenance::Gc, engine.gc_expired(now, 256).is_ok());
+            if record
+                .last_quick_check_ms
+                .is_none_or(|last| now.saturating_sub(last) >= 60 * 60 * 1000)
+            {
+                match engine.quick_check() {
+                    Ok(()) => {
+                        let _ = catalog.record_quick_check(record.resource.id, now);
+                    }
+                    Err(error) => {
+                        metrics.inc_kv_corruption(2);
+                        let code = if error.code() == ErrorCode::KvCorrupt {
+                            "KV_CORRUPT"
+                        } else {
+                            "KV_UNAVAILABLE"
+                        };
+                        let _ = resources.set_availability(
+                            record.resource.account_id,
+                            record.resource.id,
+                            open_compute_core::ResourceAvailability::Unavailable,
+                            Some(code),
+                            now,
+                        );
+                    }
+                }
+            }
+            metrics.inc_kv_maintenance(KvMaintenance::Checkpoint, engine.checkpoint(false).is_ok());
+        }
+        Ok::<_, PlatformError>(())
+    })
+    .await;
+    match pass {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(code = error.code().as_str(), "KV maintenance pass failed");
+        }
+        Err(_) => tracing::warn!("KV maintenance task failed"),
     }
 }
 

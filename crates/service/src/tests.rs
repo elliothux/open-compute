@@ -10,12 +10,13 @@ use crate::exit::{ExitClass, emit_failure, exit_class_for, exit_code};
 use crate::health::{HealthCoordinator, map_supervisor};
 use crate::http::{self, HttpState, REQUEST_ID_HEADER};
 use crate::metrics::{
-    MetricsRegistry, REQUIRED_SERIES, RestartReason, S3Op, S3Result, SqliteOp, StartResult,
-    StartStage,
+    KvGauge, KvGaugeGuard, KvLifecycle, KvLifecycleGuard, KvMaintenance, KvOperation,
+    KvStagingGauge, MetricsRegistry, REQUIRED_SERIES, RestartReason, S3Op, S3Result, SqliteOp,
+    StartResult, StartStage,
 };
 use crate::run::{
-    FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_platform,
-    run_platform_with,
+    FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_kv_maintenance,
+    run_platform, run_platform_with,
 };
 use crate::runtime_bridge::WorkerdTransport;
 use crate::workers_http::WorkerApiState;
@@ -1469,7 +1470,7 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
             .code(),
         ErrorCode::LimitInvalid
     );
-    let reg = MetricsRegistry::new(&cfg, "v1", "workerd").unwrap();
+    let reg = Arc::new(MetricsRegistry::new(&cfg, "v1", "workerd").unwrap());
     assert_eq!(
         reg.set_workerd_version(&"w".repeat(33)).unwrap_err().code(),
         ErrorCode::LimitInvalid
@@ -1490,8 +1491,48 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
         reg.observe_s3(op, S3Result::Failure, Duration::from_millis(2));
         assert_eq!(reg.s3_total(op, S3Result::Failure), 1);
     }
+    for op in [
+        KvOperation::Get,
+        KvOperation::GetWithMetadata,
+        KvOperation::GetMany,
+        KvOperation::Put,
+        KvOperation::Delete,
+        KvOperation::List,
+    ] {
+        reg.observe_kv_operation(op, true, 3, 5, Duration::from_millis(4));
+    }
+    let successful = KvLifecycleGuard::new(reg.clone(), KvLifecycle::Backup);
+    successful.success();
+    drop(KvLifecycleGuard::new(reg.clone(), KvLifecycle::Restore));
+    reg.inc_kv_maintenance(KvMaintenance::Gc, true);
+    reg.inc_kv_maintenance(KvMaintenance::Checkpoint, false);
+    reg.inc_kv_corruption(usize::MAX);
+    reg.observe_kv_wal_bytes(2 * 1024 * 1024);
+    {
+        let _reader = KvGaugeGuard::new(&reg, KvGauge::ReaderConnection);
+        let _writer = KvGaugeGuard::new(&reg, KvGauge::WriterConnection);
+        let mut staging = KvStagingGauge::new(Some(&reg));
+        staging.add(7);
+        let active = reg.render(&PlatformStatus::starting());
+        assert!(active.contains("kv_open_connections{role=\"reader\"} 1"));
+        assert!(active.contains("kv_open_connections{role=\"writer\"} 1"));
+        assert!(active.contains("kv_active_streams 1"));
+        assert!(active.contains("kv_staging_bytes 7"));
+    }
     let rendered = reg.render(&PlatformStatus::starting());
     assert!(rendered.contains("workerd_process_up 1"));
+    assert!(rendered.contains(
+        "kv_operations_total{operation=\"get_with_metadata\",outcome=\"success\",type=\"raw\"} 1"
+    ));
+    assert!(rendered.contains("kv_backup_total{outcome=\"success\"} 1"));
+    assert!(rendered.contains("kv_restore_total{outcome=\"failure\"} 1"));
+    assert!(rendered.contains("kv_gc_entries_total{outcome=\"success\"} 1"));
+    assert!(rendered.contains("kv_checkpoint_total{outcome=\"failure\"} 1"));
+    assert!(rendered.contains("kv_corruption_total{class=\"sqlite\"} 1"));
+    assert!(rendered.contains("kv_open_connections{role=\"reader\"} 0"));
+    assert!(rendered.contains("kv_active_streams 0"));
+    assert!(rendered.contains("kv_staging_bytes 0"));
+    assert!(rendered.contains("kv_wal_bytes_bucket{le=\"4194304\"} 1"));
 }
 
 fn content_snapshot(root: &Path) -> Vec<(String, u64, Option<SystemTime>, String)> {
@@ -2697,6 +2738,110 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
         .unwrap()
         .unwrap();
     assert_eq!(mock.object_count(), 0);
+}
+
+#[tokio::test]
+async fn kv_maintenance_gc_skip_checkpoint_and_corruption_isolation() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("data");
+    let storage = Arc::new(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &open_compute_core::StorageConfig {
+                data_dir: root.clone(),
+                master_key_file: root.join("keys/master.key"),
+                master_key_env: None,
+                sqlite_busy_timeout_ms: 5_000,
+                free_space_soft_bytes: 1_073_741_824,
+                free_space_hard_bytes: 268_435_456,
+            },
+            &open_compute_core::SystemClock,
+        )
+        .unwrap(),
+    );
+    let account = storage.identity().default_account_id;
+    let pins = open_compute_workers::ResourcePins::new();
+    let created = open_compute_workers::ResourceController::new(
+        &storage,
+        pins.clone(),
+        open_compute_workers::KvResourceDriver::new(&storage, 256 * 1024 * 1024),
+    )
+    .create(&open_compute_workers::CreateResourceRequest {
+        account_id: account,
+        kind: open_compute_core::BindingKind::KvNamespace,
+        name: "maintenance".to_owned(),
+        idempotency_key: "maintenance-create".to_owned(),
+        driver_schema_version: 1,
+        request_id: open_compute_core::RequestId::generate(),
+        now_ms: 1,
+    })
+    .unwrap();
+    let resource = match created {
+        open_compute_workers::CreateResourceOutcome::Applied(value) => value.resource_id,
+        open_compute_workers::CreateResourceOutcome::Replay(_) => unreachable!(),
+    };
+    let catalog = open_compute_storage::KvNamespaceRepository::new(storage.db());
+    let record = catalog.get(account, resource).unwrap();
+    let database = open_compute_storage::KvPaths::open(storage.data_dir().root())
+        .unwrap()
+        .resolve_storage_key(&record.storage_key, account, resource)
+        .unwrap();
+    let engine = open_compute_storage::KvEngine::from_record(database.clone(), &record).unwrap();
+    engine
+        .put(
+            "expired",
+            b"value",
+            &open_compute_storage::KvPutOptions {
+                expires_at_ms: Some(60_001),
+                metadata_json: None,
+            },
+            1,
+        )
+        .unwrap();
+    let metrics =
+        Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
+    let pin = pins.try_pin(resource).unwrap();
+    run_kv_maintenance(
+        &storage,
+        &pins,
+        &open_compute_core::KvConfig::default(),
+        &metrics,
+    )
+    .await;
+    assert!(engine.get("expired", 1).unwrap().is_some());
+    drop(pin);
+    run_kv_maintenance(
+        &storage,
+        &pins,
+        &open_compute_core::KvConfig::default(),
+        &metrics,
+    )
+    .await;
+    assert!(engine.get("expired", i64::MAX).unwrap().is_none());
+    let conn = rusqlite::Connection::open(database).unwrap();
+    conn.execute(
+        "UPDATE kv_meta SET value = ?1 WHERE key = 'resource_id'",
+        [b"wrong".as_slice()],
+    )
+    .unwrap();
+    drop(conn);
+    run_kv_maintenance(
+        &storage,
+        &pins,
+        &open_compute_core::KvConfig::default(),
+        &metrics,
+    )
+    .await;
+    let isolated = open_compute_storage::ResourceRepository::new(storage.db())
+        .get(account, resource)
+        .unwrap();
+    assert_eq!(
+        isolated.availability,
+        open_compute_core::ResourceAvailability::Unavailable
+    );
+    let rendered = metrics.render(&PlatformStatus::starting());
+    assert!(rendered.contains("kv_gc_entries_total{outcome=\"success\"} 1"));
+    assert!(rendered.contains("kv_checkpoint_total{outcome=\"success\"} 1"));
+    assert!(rendered.contains("kv_corruption_total{class=\"sqlite\"} 1"));
 }
 
 #[tokio::test]

@@ -24,6 +24,8 @@ pub enum ReconcileOutcome {
     Ready,
     /// Live identity is inaccessible and deletion may be finalized.
     Deleted,
+    /// Durable product intent exists but requires its product controller to resume.
+    Deferred,
 }
 
 /// Stable driver health observation.
@@ -275,9 +277,11 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
                 continue;
             }
             match resource.state {
-                ResourceState::Creating => {
-                    self.reconcile_create(resource, now_ms)?;
-                }
+                ResourceState::Creating => match self.reconcile_create(resource, now_ms) {
+                    Ok(_) => {}
+                    Err(error) if error.code() == ErrorCode::ResourceNotReady => continue,
+                    Err(error) => return Err(error),
+                },
                 ResourceState::Deleting => {
                     self.driver.begin_delete(&resource)?;
                     self.driver.finalize_delete(&resource)?;
@@ -339,6 +343,12 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
             ReconcileOutcome::Absent => self.driver.create(&resource)?,
             ReconcileOutcome::Ready => {}
             ReconcileOutcome::Deleted => return Err(invariant()),
+            ReconcileOutcome::Deferred => {
+                return Err(PlatformError::new(
+                    ErrorCode::ResourceNotReady,
+                    "resource create requires its product controller to resume",
+                ));
+            }
         }
         if self.driver.reconcile(&resource)? != ReconcileOutcome::Ready {
             return Err(invariant());

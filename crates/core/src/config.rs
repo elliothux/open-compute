@@ -42,6 +42,8 @@ pub struct PlatformConfig {
     pub diagnostics: DiagnosticsConfig,
     /// Worker ingress, deletion, and artifact retention policy.
     pub workers: WorkersConfig,
+    /// Workers KV local database, connection, and stream limits.
+    pub kv: KvConfig,
 }
 
 impl PlatformConfig {
@@ -64,6 +66,7 @@ impl PlatformConfig {
         self.metrics.validate()?;
         self.diagnostics.validate()?;
         self.workers.validate()?;
+        self.kv.validate()?;
         Ok(())
     }
 }
@@ -596,6 +599,64 @@ impl WorkersConfig {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
                 "Worker host policy exceeds the hard platform ceiling",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// P0.4 Workers KV local storage and concurrency policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct KvConfig {
+    /// Frozen per-namespace SQLite quota for newly created namespaces.
+    pub namespace_quota_bytes: u64,
+    /// Global maximum concurrently opened SQLite connections.
+    pub max_connections: u32,
+    /// Maximum read connections admitted for one namespace.
+    pub max_readers_per_namespace: u32,
+    /// Global maximum active value streams.
+    pub max_active_streams: u32,
+    /// Per-namespace maximum active value streams.
+    pub max_active_streams_per_namespace: u32,
+    /// Idle handle lifetime before it is eligible for eviction.
+    pub idle_handle_ttl_ms: u64,
+    /// Foreground KV operation timeout.
+    pub operation_timeout_ms: u64,
+}
+
+impl Default for KvConfig {
+    fn default() -> Self {
+        Self {
+            namespace_quota_bytes: 1024 * 1024 * 1024,
+            max_connections: 64,
+            max_readers_per_namespace: 2,
+            max_active_streams: 16,
+            max_active_streams_per_namespace: 4,
+            idle_handle_ttl_ms: 60_000,
+            operation_timeout_ms: 30_000,
+        }
+    }
+}
+
+impl KvConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        const MIN_QUOTA: u64 = 256 * 1024 * 1024;
+        if self.namespace_quota_bytes < MIN_QUOTA
+            || self.max_connections == 0
+            || self.max_connections > 1024
+            || self.max_readers_per_namespace == 0
+            || self.max_readers_per_namespace > 64
+            || self.max_active_streams == 0
+            || self.max_active_streams > 1024
+            || self.max_active_streams_per_namespace == 0
+            || self.max_active_streams_per_namespace > self.max_active_streams
+            || self.idle_handle_ttl_ms == 0
+            || self.operation_timeout_ms == 0
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "KV host policy is outside the hard platform bounds",
             ));
         }
         Ok(())

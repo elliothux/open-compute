@@ -9,6 +9,7 @@ pub mod data_dir;
 pub mod fs;
 pub mod identity;
 pub mod inspect;
+pub mod kv;
 pub mod lock;
 pub mod master_key;
 pub mod migrations;
@@ -26,6 +27,14 @@ pub use identity::{ARTIFACT_SCHEMA_VERSION, StableIdentity};
 pub use inspect::{
     DataRootInspect, ResourceInspect, inspect_control_db, inspect_data_root, inspect_master_key,
     inspect_resources,
+};
+pub use kv::{
+    KV_CAPABILITY_VERSION, KV_DEFAULT_LIST_LIMIT, KV_MAX_KEY_BYTES, KV_MAX_LIST_LIMIT,
+    KV_MAX_METADATA_BYTES, KV_MAX_MULTI_GET_KEYS, KV_MAX_MULTI_GET_RESPONSE_BYTES,
+    KV_MAX_VALUE_BYTES, KV_MIN_CACHE_TTL_SECONDS, KV_MIN_EXPIRATION_TTL_SECONDS, KV_SCHEMA_VERSION,
+    KvBackupRecord, KvBackupState, KvEngine, KvEntry, KvEntryInfo, KvListPage, KvListRow,
+    KvNamespaceRecord, KvNamespaceRepository, KvPaths, KvPutOptions, canonical_metadata,
+    validate_key,
 };
 pub use lock::{DataDirLock, FilesystemDurability, InspectLock};
 pub use master_key::MasterKey;
@@ -54,6 +63,7 @@ pub struct PlatformStorage {
     db: ControlDb,
     crypto: SecretCrypto,
     identity: StableIdentity,
+    free_space_hard_bytes: u64,
 }
 
 impl PlatformStorage {
@@ -72,6 +82,7 @@ impl PlatformStorage {
             db,
             crypto,
             identity,
+            free_space_hard_bytes: config.free_space_hard_bytes,
         })
     }
 
@@ -95,6 +106,7 @@ impl PlatformStorage {
             db,
             crypto,
             identity,
+            free_space_hard_bytes: config.free_space_hard_bytes,
         })
     }
 
@@ -120,6 +132,12 @@ impl PlatformStorage {
     #[must_use]
     pub fn identity(&self) -> &StableIdentity {
         &self.identity
+    }
+
+    /// Filesystem safety floor below which new durable bytes are refused.
+    #[must_use]
+    pub const fn free_space_hard_bytes(&self) -> u64 {
+        self.free_space_hard_bytes
     }
 }
 

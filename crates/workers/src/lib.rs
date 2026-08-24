@@ -4,6 +4,7 @@
 
 pub mod bundle;
 pub mod descriptor;
+pub mod kv;
 pub mod pins;
 pub mod pipeline;
 pub mod resource_lifecycle;
@@ -19,6 +20,7 @@ pub use descriptor::{
     canonicalize_vars, ciphertext_sha256, loader_key, parse_loader_key, validate_compatibility,
     validate_env_name,
 };
+pub use kv::KvResourceDriver;
 pub use pins::{DeploymentPin, DeploymentPins};
 pub use pipeline::{
     CreateDeploymentOutcome, CreateDeploymentRequest, CreateDeploymentResult,

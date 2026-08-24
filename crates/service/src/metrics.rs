@@ -8,13 +8,20 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[path = "metrics_kv.rs"]
+mod kv;
 #[path = "metrics_resource.rs"]
 mod resource;
+pub(crate) use kv::{
+    KvGauge, KvGaugeGuard, KvLifecycle, KvLifecycleGuard, KvMaintenance, KvOperation,
+    KvStagingGauge,
+};
+use kv::{lifecycle_index, maintenance_index, operation_index, write_kv_metrics};
 pub use resource::{BindingBackendOperation, ResourceOperation};
 use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
 
 /// Compile-time series required by the platform and P0.3 binding framework.
-pub const REQUIRED_SERIES: u64 = 85;
+pub const REQUIRED_SERIES: u64 = 135;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 32;
 
@@ -188,6 +195,18 @@ struct Inner {
     binding_backend_requests: [u64; 8],
     binding_backend_bytes: [u64; 2],
     binding_protocol_errors: u64,
+    kv_operations: [u64; 12],
+    kv_operation_duration: [f64; 6],
+    kv_operation_bytes: [u64; 12],
+    kv_open_connections: [u64; 2],
+    kv_active_streams: u64,
+    kv_staging_bytes: u64,
+    kv_wal_bytes: [u64; 5],
+    kv_gc: [u64; 2],
+    kv_checkpoint: [u64; 2],
+    kv_backup: [u64; 2],
+    kv_restore: [u64; 2],
+    kv_corruption: [u64; 3],
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -240,6 +259,18 @@ impl MetricsRegistry {
                 binding_backend_requests: [0; 8],
                 binding_backend_bytes: [0; 2],
                 binding_protocol_errors: 0,
+                kv_operations: [0; 12],
+                kv_operation_duration: [0.0; 6],
+                kv_operation_bytes: [0; 12],
+                kv_open_connections: [0; 2],
+                kv_active_streams: 0,
+                kv_staging_bytes: 0,
+                kv_wal_bytes: [0; 5],
+                kv_gc: [0; 2],
+                kv_checkpoint: [0; 2],
+                kv_backup: [0; 2],
+                kv_restore: [0; 2],
+                kv_corruption: [0; 3],
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -450,6 +481,53 @@ impl MetricsRegistry {
         guard.binding_protocol_errors = guard.binding_protocol_errors.saturating_add(1);
     }
 
+    pub(crate) fn observe_kv_operation(
+        &self,
+        operation: KvOperation,
+        success: bool,
+        ingress_bytes: u64,
+        egress_bytes: u64,
+        duration: Duration,
+    ) {
+        let index = operation_index(operation);
+        let mut guard = self.lock();
+        guard.kv_operations[index * 2 + usize::from(success)] =
+            guard.kv_operations[index * 2 + usize::from(success)].saturating_add(1);
+        guard.kv_operation_duration[index] = duration.as_secs_f64();
+        guard.kv_operation_bytes[index * 2] =
+            guard.kv_operation_bytes[index * 2].saturating_add(ingress_bytes);
+        guard.kv_operation_bytes[index * 2 + 1] =
+            guard.kv_operation_bytes[index * 2 + 1].saturating_add(egress_bytes);
+    }
+
+    pub(crate) fn inc_kv_lifecycle(&self, lifecycle: KvLifecycle, success: bool) {
+        let index = usize::from(success);
+        let mut guard = self.lock();
+        let values = if lifecycle_index(lifecycle) == 0 {
+            &mut guard.kv_backup
+        } else {
+            &mut guard.kv_restore
+        };
+        values[index] = values[index].saturating_add(1);
+    }
+
+    pub(crate) fn inc_kv_maintenance(&self, maintenance: KvMaintenance, success: bool) {
+        let index = usize::from(success);
+        let mut guard = self.lock();
+        let values = if maintenance_index(maintenance) == 0 {
+            &mut guard.kv_gc
+        } else {
+            &mut guard.kv_checkpoint
+        };
+        values[index] = values[index].saturating_add(1);
+    }
+
+    pub(crate) fn inc_kv_corruption(&self, class: usize) {
+        let mut guard = self.lock();
+        let index = class.min(guard.kv_corruption.len() - 1);
+        guard.kv_corruption[index] = guard.kv_corruption[index].saturating_add(1);
+    }
+
     /// Prometheus text exposition, deterministically ordered.
     pub fn render(&self, status: &PlatformStatus) -> String {
         let g = self.lock();
@@ -617,6 +695,7 @@ impl MetricsRegistry {
         )
         .ok();
         write_resource_metrics(&mut out, &g);
+        write_kv_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }

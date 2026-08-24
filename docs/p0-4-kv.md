@@ -1,6 +1,6 @@
 # P0.4：KV 详细设计
 
-> 状态：Implementation Plan
+> 状态：Implemented and verified（2026-08-25）
 >
 > 前置依赖：[P0.3：Resource 与 Binding Framework](./p0-3-resource-binding-framework.md)
 >
@@ -13,6 +13,22 @@
 P0.4 是 P0.3 framework 的第一个真实产品。它使用“一 KV namespace 一 SQLite database”，以
 P0.3 的 resource lifecycle 管理文件，以 custom JSRPC binding 向 Dynamic Worker 暴露
 `KVNamespace` 常用方法。单节点读写是强一致的；`cacheTtl` 仅做参数兼容，不建立 edge cache。
+
+当前实现证据：
+
+- `crates/storage/src/kv/`：namespace catalog、typed paths、SQLite engine、WAL/backup/restore；
+- `crates/workers/src/kv.rs`：P0.3 resource lifecycle driver；
+- `crates/service/src/kv_backend.rs`、`kv_http.rs`、`binding_backend.rs`：control plane、真实执行器与
+  bounded private frame/stream protocol；
+- `runtime/system-workers/loader-host.js`：tenant `KVNamespace` adapter；
+- `crates/service/tests/p0_4_kv_gate.rs`、`scripts/test-p0-4`：stock-workerd Gate 和 P0.3/P0.2 回归；
+- fresh `./scripts/coverage` 已通过 90.00% 门槛，实际 Rust line coverage 为 90.06%。
+
+`binding_backend.rs` 保留完整 private protocol authentication/frame/stream/error matrix，`kv_http.rs`
+保留 backup/restore 的 durable orchestration，`engine.rs` 保留 namespace schema/transaction/blob invariant；
+这三个 cohesive authority/protocol source 因此超过 800 行。对应测试已拆到独立 `*_tests.rs`，没有把
+production logic 放进 coverage exclusion；`binding_backend_tests.rs` 作为共享同一 authenticated
+protocol fixture 的完整 legacy/P0.4 failure matrix 也保持在一个 test module 中。
 
 ## 1. 交付目标
 
@@ -205,7 +221,8 @@ CREATE TABLE kv_namespaces (
   created_at_ms        INTEGER NOT NULL,
   last_opened_at_ms    INTEGER,
   last_quick_check_ms  INTEGER,
-  last_backup_at_ms    INTEGER
+  last_backup_at_ms    INTEGER,
+  restore_backup_id    TEXT REFERENCES kv_backups(id)
 ) STRICT;
 ```
 
@@ -224,7 +241,7 @@ v1/<account-id>/<resource-id>/data.sqlite
 
 ```sql
 CREATE TABLE kv_backups (
-  id                    TEXT PRIMARY KEY,
+  id                    TEXT PRIMARY KEY CHECK(length(id) = 36 AND id = lower(id)),
   source_resource_id    TEXT NOT NULL REFERENCES resources(id),
   state                 TEXT NOT NULL CHECK(state IN (
                           'creating', 'ready', 'failed', 'deleting', 'tombstoned'
@@ -232,10 +249,13 @@ CREATE TABLE kv_backups (
   object_key            TEXT,
   sha256                BLOB CHECK(sha256 IS NULL OR length(sha256) = 32),
   size_bytes            INTEGER CHECK(size_bytes IS NULL OR size_bytes >= 0),
-  kv_schema_version     INTEGER NOT NULL,
+  kv_schema_version     INTEGER NOT NULL CHECK(kv_schema_version >= 1),
   created_at_ms         INTEGER NOT NULL,
   completed_at_ms       INTEGER,
   error_code            TEXT,
+  idempotency_key       TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 128),
+  request_fingerprint   BLOB NOT NULL CHECK(length(request_fingerprint) = 32),
+  UNIQUE(source_resource_id, idempotency_key),
   CHECK((state = 'ready') =
         (object_key IS NOT NULL AND sha256 IS NOT NULL AND size_bytes IS NOT NULL))
 ) STRICT;
@@ -787,33 +807,31 @@ foreground operation timeout: 30s (stream 使用独立 idle/total limit)
 ```text
 KvHandle {
   resource_id + spec_generation
-  lifecycle epoch
-  writer lane
-  bounded reader pool
+  serialized writer lane
+  bounded reader/stream admission gates
   stream semaphore
   last_used
-  closing flag
-  ResourcePin ownership
 }
 ```
 
 - cache key 不用 namespace name/path；
 - first open per key singleflight；
-- open 验证 `kv_meta` identity/schema，再提供 connection；
+- cold open 验证 `kv_meta` identity/schema；每次 operation 使用受全局和 per-namespace gate 约束的新
+  connection，不保留 idle SQLite FD；
 - one writer lane 使用 `BEGIN IMMEDIATE`；
-- read connection 在 blob stream EOF/cancel 前不可回池；
-- global LRU eviction 只选 idle/unpinned handle；
-- eviction：mark closing -> stop checkout -> checkpoint best effort -> close -> drop pin；
+- read connection 在 blob stream EOF/cancel 前不释放；
+- global LRU eviction 只选没有 active caller 的 handle；
+- eviction：从 handle cache 移除 -> checkpoint best effort -> drop；
 - delete fence 走强制 checkpoint/close，失败则 resource 保持 deleting/unavailable，不误删文件；
 - 所有 rusqlite 操作在 bounded blocking executor；async task 只做 orchestration/stream。
 
 ### 13.3 Fairness
 
-- 每 namespace writer FIFO，避免一个 hot writer reorder；
-- global blocking executor 有 product/per-resource semaphore，避免一个 namespace 占满；
+- 每 namespace mutation 串行化，不承诺跨异步请求的到达顺序；
+- global/per-resource connection 和 stream gate 避免一个 namespace 占满；
 - long stream 受独立配额，不占 writer connection；
 - GC/backup/checkpoint 使用 background priority，在 foreground backlog 时暂停；
-- SQLite busy 不进行无限指数 retry；在 5 秒内少量 jitter 后返回 `KV_BUSY`。
+- SQLite busy 不进行无限指数 retry；超过 bounded busy/operation timeout 返回 `KV_BUSY`。
 
 ## 14. WAL、checkpoint 与 disk pressure
 
@@ -821,8 +839,9 @@ KvHandle {
 
 - SQLite auto-checkpoint 提供常规控制；
 - handle idle eviction、backup前后和 resource delete 执行显式 checkpoint；
-- 长 reader 导致 WAL 无法 truncate 时记录 bounded metric，不强制中断正常短读；
-- WAL 超过 operator 阈值时停止新的长 stream/list，待 active reader drain 后 checkpoint；
+- maintenance 采样 WAL size 到固定 bucket metric，不记录 resource label；
+- V1 不另设 WAL admission threshold；active stream hard bound、SQLite auto-checkpoint、idle/maintenance
+  checkpoint 与 filesystem safety floor 共同限制增长；
 - restart 后 SQLite 正常 WAL recovery，随后验证 identity/schema。
 
 ### 14.2 Disk safety
@@ -831,9 +850,9 @@ Mutation 前后检查：
 
 - namespace `max_page_count`/quota；
 - data filesystem free-space safety floor；
-- global staging bytes；
-- WAL/SHM abnormal growth；
-- SQLite `FULL`/I/O error。
+- global/per-resource active staging count × 25 MiB 单值上限形成的确定 byte ceiling；
+- WAL size bucket 与 SQLite `FULL`/I/O signal；
+- mutation failure 后旧 committed value 保持可见。
 
 Disk pressure 时：
 
@@ -1230,6 +1249,15 @@ restore rebind 均有确定结果。
 - 三轮 fresh-process stock-workerd Gate 通过；
 - 无 child、listener、FD、connection、WAL、staging file、resource pin 泄漏；
 - compatibility/deviation 被 API matrix 和本文固定，未实现能力不伪装成功。
+
+2026-08-25 验证记录：
+
+- `cargo fmt --all --check`、workspace clippy（`-D warnings`）、no-default-features、Rust 1.98 MSRV、
+  metadata、dependency boundaries、`git diff --check` 全部通过；
+- `cargo test --workspace --all-targets --all-features -- --test-threads=1` 全部通过；
+- `./scripts/test-p0-4`：P0.4、P0.3、P0.2 各三轮 fresh process 全部通过；
+- `./scripts/coverage` 从 clean coverage state 运行全部测试和真实 P0.1–P0.4 Gate，
+  `22166 / 24612` production Rust lines covered，90.06%。
 
 ## 23. 参考资料
 

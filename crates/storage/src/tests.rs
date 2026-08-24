@@ -378,7 +378,7 @@ fn migration_faults_checksum_future_and_restart() {
         assert_eq!(err.code(), ErrorCode::MigrationFailed);
         assert_eq!(raw_user_version(&r.join("control.sqlite")), 0);
         PlatformStorage::bootstrap(&c, &SystemClock).expect("recover");
-        assert_eq!(raw_user_version(&c.data_dir.join("control.sqlite")), 3);
+        assert_eq!(raw_user_version(&c.data_dir.join("control.sqlite")), 4);
     }
 
     let err = PlatformStorage::bootstrap_with_fault(
@@ -440,7 +440,7 @@ fn p0_2_migration_ddl_fault_rolls_back_to_schema_one() {
     drop(conn);
 
     drop(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
-    assert_eq!(raw_user_version(&root.join("control.sqlite")), 3);
+    assert_eq!(raw_user_version(&root.join("control.sqlite")), 4);
 }
 
 #[test]
@@ -977,7 +977,7 @@ fn inspect_control_db_accepts_uri_special_path_chars() {
     assert!(inspect.lock_available);
     let (version, identity) =
         crate::inspect_control_db(&inspect.root.join("control.sqlite"), 5_000).unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert!(!identity.master_key_id.is_empty());
 }
 
@@ -1371,7 +1371,7 @@ fn control_db_read_write_helpers_and_failures_are_enforced() {
     assert!(db.table_sql("not_a_table").unwrap().is_none());
     assert!(db.index_sql("not_an_index").unwrap().is_none());
     assert!(!db.dump_bytes().unwrap().is_empty());
-    assert_eq!(db.pragma_display("user_version").unwrap(), "3");
+    assert_eq!(db.pragma_display("user_version").unwrap(), "4");
     assert!(db.pragma_display("not_a_pragma").is_err());
 
     db.with_exclusive(|tx| {
@@ -1413,7 +1413,7 @@ fn control_db_read_write_helpers_and_failures_are_enforced() {
     let db_path = root.join("control.sqlite");
     drop(storage);
     let readonly = crate::ControlDb::open_readonly(&db_path, 100).unwrap();
-    assert_eq!(readonly.user_version().unwrap(), 3);
+    assert_eq!(readonly.user_version().unwrap(), 4);
     readonly.quick_check().unwrap();
     assert!(crate::ControlDb::open_readonly(&root.join("missing.sqlite"), 100).is_err());
     assert!(crate::ControlDb::open(&root.join("missing/child.sqlite"), 100).is_err());
@@ -1763,15 +1763,17 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 3);
+    assert_eq!(crate::migrations::current_schema_version(), 4);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
+    assert_eq!(crate::migrations::migration_004_checksum().len(), 32);
     assert!(crate::migrations::expected_checksum(1).is_ok());
     assert!(crate::migrations::expected_checksum(2).is_ok());
     assert!(crate::migrations::expected_checksum(3).is_ok());
+    assert!(crate::migrations::expected_checksum(4).is_ok());
     assert_eq!(
-        crate::migrations::expected_checksum(4).unwrap_err().code(),
+        crate::migrations::expected_checksum(5).unwrap_err().code(),
         ErrorCode::SchemaTooNew
     );
     assert_eq!(

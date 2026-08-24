@@ -33,3 +33,12 @@ delete_recovery_batch = 64
 retain_ready_deployments = 10
 retain_rejected_deployments = 10
 deployment_min_retention_ms = 86400000
+
+[kv]
+namespace_quota_bytes = 1073741824
+max_connections = 64
+max_readers_per_namespace = 2
+max_active_streams = 16
+max_active_streams_per_namespace = 4
+idle_handle_ttl_ms = 60000
+operation_timeout_ms = 30000

@@ -572,7 +572,10 @@ fn map_resource(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceRecord> {
     map_resource_offset(row, 0)
 }
 
-fn map_resource_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<ResourceRecord> {
+pub(crate) fn map_resource_offset(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<ResourceRecord> {
     let id: String = row.get(offset)?;
     let account: String = row.get(offset + 1)?;
     let kind: String = row.get(offset + 2)?;
