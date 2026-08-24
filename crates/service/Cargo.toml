@@ -21,6 +21,7 @@ test-support = [
 axum.workspace = true
 bytes.workspace = true
 clap.workspace = true
+futures.workspace = true
 hex.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true

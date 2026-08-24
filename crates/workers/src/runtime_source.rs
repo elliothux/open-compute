@@ -2,7 +2,8 @@
 
 use crate::bundle::{BundleLimits, CanonicalBundle, ModuleType};
 use crate::descriptor::{
-    SecretDescriptor, WorkerCodeDescriptorV1, ciphertext_sha256, parse_loader_key,
+    BindingDescriptorV1, SecretDescriptor, WorkerCodeDescriptorV1, ciphertext_sha256,
+    parse_loader_key,
 };
 use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
@@ -35,6 +36,15 @@ pub struct RuntimeModule {
     pub bytes: Vec<u8>,
 }
 
+/// One verified binding descriptor and its persisted canonical digest.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuntimeBinding {
+    /// Canonical descriptor supplied only to the loader-side binding factory.
+    pub descriptor: BindingDescriptorV1,
+    /// Lowercase SHA-256 expected by the private backend.
+    pub descriptor_sha256: String,
+}
+
 impl std::fmt::Debug for RuntimeModule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RuntimeModule")
@@ -64,6 +74,8 @@ pub struct RuntimeSnapshot {
     pub vars: BTreeMap<String, serde_json::Value>,
     /// Decrypted secret values. Empty in validation scope.
     pub secrets: BTreeMap<String, SecretString>,
+    /// Verified runtime bindings. Empty in validation and probe scopes.
+    pub bindings: Vec<RuntimeBinding>,
     /// Immutable resource limits.
     pub limits: serde_json::Value,
 }
@@ -77,6 +89,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("module_count", &self.modules.len())
             .field("var_count", &self.vars.len())
             .field("secret_count", &self.secrets.len())
+            .field("binding_count", &self.bindings.len())
             .finish_non_exhaustive()
     }
 }
@@ -229,6 +242,29 @@ impl RuntimeSource {
                 ),
             });
         }
+        let mut binding_descriptors = Vec::with_capacity(snapshot.bindings.len());
+        let mut runtime_bindings = Vec::with_capacity(snapshot.bindings.len());
+        for binding in &snapshot.bindings {
+            let descriptor = BindingDescriptorV1::new(
+                binding.id,
+                binding.name.clone(),
+                binding.kind,
+                binding.resource_id,
+                binding.resource_spec_generation,
+                binding.capability_version,
+                binding.permissions,
+                binding.config,
+            )?;
+            let digest = descriptor.sha256()?;
+            if digest != binding.descriptor_sha256 {
+                return Err(invariant());
+            }
+            binding_descriptors.push(descriptor.clone());
+            runtime_bindings.push(RuntimeBinding {
+                descriptor,
+                descriptor_sha256: hex::encode(digest),
+            });
+        }
         let descriptor = WorkerCodeDescriptorV1::new(
             account_id,
             worker_id,
@@ -239,6 +275,7 @@ impl RuntimeSource {
             snapshot.deployment.compatibility_flags.clone(),
             vars.clone(),
             secret_descriptors,
+            binding_descriptors,
             snapshot.deployment.limits.clone(),
             snapshot.deployment.loader_schema_version,
         )?;
@@ -274,6 +311,9 @@ impl RuntimeSource {
                 secrets.insert(secret.name.clone(), SecretString::new(text));
             }
         }
+        if scope != RuntimeScope::Runtime {
+            runtime_bindings.clear();
+        }
         Ok(RuntimeSnapshot {
             loader_key: key.to_owned(),
             worker_code_sha256: hex::encode(actual_descriptor),
@@ -283,6 +323,7 @@ impl RuntimeSource {
             modules,
             vars,
             secrets,
+            bindings: runtime_bindings,
             limits: snapshot.deployment.limits,
         })
     }
@@ -308,7 +349,15 @@ impl RuntimeSource {
             compatibility_flags: &'a [String],
             modules: Vec<Module<'a>>,
             env: BTreeMap<&'a str, serde_json::Value>,
+            bindings: Vec<BindingPayload<'a>>,
             limits: &'a serde_json::Value,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BindingPayload<'a> {
+            #[serde(flatten)]
+            descriptor: &'a BindingDescriptorV1,
+            descriptor_sha256: &'a str,
         }
         let modules = snapshot
             .modules
@@ -330,6 +379,14 @@ impl RuntimeSource {
                 serde_json::Value::String(value.expose().to_owned()),
             );
         }
+        let bindings = snapshot
+            .bindings
+            .iter()
+            .map(|binding| BindingPayload {
+                descriptor: &binding.descriptor,
+                descriptor_sha256: &binding.descriptor_sha256,
+            })
+            .collect();
         let bytes = serde_json::to_vec(&Payload {
             schema_version: 1,
             loader_key: &snapshot.loader_key,
@@ -339,6 +396,7 @@ impl RuntimeSource {
             compatibility_flags: &snapshot.compatibility_flags,
             modules,
             env,
+            bindings,
             limits: &snapshot.limits,
         })
         .map_err(|_| invariant())?;

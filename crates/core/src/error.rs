@@ -99,6 +99,32 @@ pub enum ErrorCode {
     RuntimeResultUnknown,
     /// A request or runtime resource limit was exceeded.
     ResourceLimitExceeded,
+    /// Requested resource does not exist in the authorized account.
+    ResourceNotFound,
+    /// A live resource already owns the requested display name.
+    ResourceNameConflict,
+    /// Resource lifecycle does not currently admit the requested operation.
+    ResourceNotReady,
+    /// Resource still has a retained referrer or in-flight pin.
+    ResourceReferenced,
+    /// One resource is unavailable without making the platform unavailable.
+    ResourceUnavailable,
+    /// Persisted resource identity, schema, or catalog data is inconsistent.
+    ResourceInvariantViolation,
+    /// Runtime binding authority row is missing.
+    BindingNotFound,
+    /// Binding kind does not match its adapter or resource.
+    BindingTypeMismatch,
+    /// Binding permission set rejects the requested method.
+    BindingPermissionDenied,
+    /// Binding capability version is not implemented by the static registry.
+    BindingCapabilityUnsupported,
+    /// Private binding transport frame is malformed or truncated.
+    BindingProtocolError,
+    /// Binding request, response, or stream exceeded its fixed budget.
+    BindingLimitExceeded,
+    /// A binding mutation may have committed before transport failure.
+    BindingResultUnknown,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -152,6 +178,19 @@ impl ErrorCode {
             Self::RuntimeUnavailable => "RUNTIME_UNAVAILABLE",
             Self::RuntimeResultUnknown => "RUNTIME_RESULT_UNKNOWN",
             Self::ResourceLimitExceeded => "RESOURCE_LIMIT_EXCEEDED",
+            Self::ResourceNotFound => "RESOURCE_NOT_FOUND",
+            Self::ResourceNameConflict => "RESOURCE_NAME_CONFLICT",
+            Self::ResourceNotReady => "RESOURCE_NOT_READY",
+            Self::ResourceReferenced => "RESOURCE_REFERENCED",
+            Self::ResourceUnavailable => "RESOURCE_UNAVAILABLE",
+            Self::ResourceInvariantViolation => "RESOURCE_INVARIANT_VIOLATION",
+            Self::BindingNotFound => "BINDING_NOT_FOUND",
+            Self::BindingTypeMismatch => "BINDING_TYPE_MISMATCH",
+            Self::BindingPermissionDenied => "BINDING_PERMISSION_DENIED",
+            Self::BindingCapabilityUnsupported => "BINDING_CAPABILITY_UNSUPPORTED",
+            Self::BindingProtocolError => "BINDING_PROTOCOL_ERROR",
+            Self::BindingLimitExceeded => "BINDING_LIMIT_EXCEEDED",
+            Self::BindingResultUnknown => "BINDING_RESULT_UNKNOWN",
             Self::Internal => "INTERNAL",
         }
     }

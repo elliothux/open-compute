@@ -1,7 +1,10 @@
 //! Immutable `WorkerCode` descriptor and loader key grammar.
 
 use crate::bundle::{ModuleManifest, WorkerBundleManifest};
-use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, WorkerId};
+use open_compute_core::{
+    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
+    ErrorCode, PlatformError, ResourceId, WorkerId,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,6 +23,80 @@ pub struct SecretDescriptor {
     pub revision_id: String,
     /// Digest of nonce plus ciphertext.
     pub ciphertext_sha256: String,
+}
+
+/// Canonical immutable descriptor for one deployment resource binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BindingDescriptorV1 {
+    /// Descriptor schema version. P0.3 supports exactly one.
+    pub schema_version: u32,
+    /// Immutable binding identity.
+    pub binding_id: BindingId,
+    /// Tenant environment name.
+    pub name: String,
+    /// Static adapter and resource kind.
+    pub kind: BindingKind,
+    /// Frozen logical resource identity.
+    pub resource_id: ResourceId,
+    /// Frozen binding-breaking resource generation.
+    pub resource_spec_generation: u64,
+    /// Static adapter capability version.
+    pub capability_version: u32,
+    /// Canonical method permissions.
+    pub permissions: CanonicalPermissions,
+    /// Canonical product configuration.
+    pub config: CanonicalBindingConfig,
+}
+
+impl BindingDescriptorV1 {
+    /// Validate and build the P0.3 capability version implemented by the static registry.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        binding_id: BindingId,
+        name: String,
+        kind: BindingKind,
+        resource_id: ResourceId,
+        resource_spec_generation: u64,
+        capability_version: u32,
+        permissions: CanonicalPermissions,
+        config: CanonicalBindingConfig,
+    ) -> Result<Self, PlatformError> {
+        validate_env_name(&name)?;
+        if name.len() > 64 || resource_spec_generation == 0 {
+            return Err(binding_invariant());
+        }
+        if capability_version != 1 {
+            return Err(PlatformError::new(
+                ErrorCode::BindingCapabilityUnsupported,
+                "binding capability version is not supported",
+            ));
+        }
+        Ok(Self {
+            schema_version: 1,
+            binding_id,
+            name,
+            kind,
+            resource_id,
+            resource_spec_generation,
+            capability_version,
+            permissions,
+            config,
+        })
+    }
+
+    /// Canonical typed JSON bytes persisted and hashed at staging.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, PlatformError> {
+        if self.schema_version != 1 || self.capability_version != 1 {
+            return Err(binding_invariant());
+        }
+        serde_json::to_vec(self).map_err(|_| binding_invariant())
+    }
+
+    /// SHA-256 of canonical descriptor bytes.
+    pub fn sha256(&self) -> Result<[u8; 32], PlatformError> {
+        Ok(Sha256::digest(self.canonical_bytes()?).into())
+    }
 }
 
 /// Canonical hash input for every runtime-effective deployment field.
@@ -46,8 +123,8 @@ pub struct WorkerCodeDescriptorV1 {
     pub canonical_vars: BTreeMap<String, serde_json::Value>,
     /// Sorted secret revision descriptors.
     pub secret_revisions: Vec<SecretDescriptor>,
-    /// P0.2 has no production bindings; the field is reserved for P0.3.
-    pub binding_descriptors: Vec<serde_json::Value>,
+    /// Canonically sorted immutable resource binding descriptors.
+    pub binding_descriptors: Vec<BindingDescriptorV1>,
     /// Immutable limits profile document.
     pub limits: serde_json::Value,
     /// Public egress policy version.
@@ -69,6 +146,7 @@ impl WorkerCodeDescriptorV1 {
         compatibility_flags: Vec<String>,
         canonical_vars: BTreeMap<String, serde_json::Value>,
         mut secret_revisions: Vec<SecretDescriptor>,
+        mut binding_descriptors: Vec<BindingDescriptorV1>,
         limits: serde_json::Value,
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
@@ -105,6 +183,22 @@ impl WorkerCodeDescriptorV1 {
                 ));
             }
         }
+        binding_descriptors.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+        for binding in &binding_descriptors {
+            if binding.schema_version != 1
+                || binding.capability_version != 1
+                || binding.resource_spec_generation == 0
+            {
+                return Err(binding_invariant());
+            }
+            validate_env_name(&binding.name)?;
+            if binding.name.len() > 64 || !env_names.insert(&binding.name) {
+                return Err(PlatformError::new(
+                    ErrorCode::BindingTypeMismatch,
+                    "deployment binding names are duplicate or conflict with env",
+                ));
+            }
+        }
         validate_limits(&limits)?;
         Ok(Self {
             schema_version: 1,
@@ -117,7 +211,7 @@ impl WorkerCodeDescriptorV1 {
             compatibility_flags,
             canonical_vars,
             secret_revisions,
-            binding_descriptors: Vec::new(),
+            binding_descriptors,
             limits,
             global_outbound_policy_version: GLOBAL_OUTBOUND_POLICY_VERSION,
             loader_schema_version,
@@ -360,5 +454,12 @@ fn invalid_limits() -> PlatformError {
     PlatformError::new(
         ErrorCode::ResourceLimitExceeded,
         "deployment limits profile is invalid",
+    )
+}
+
+fn binding_invariant() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::DeploymentInvariantViolation,
+        "binding descriptor invariant failed",
     )
 }

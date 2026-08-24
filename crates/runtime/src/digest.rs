@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 const DIGEST_TAG: &[u8] = b"open-compute-static-config-v1\0";
 pub(crate) const TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_INTERNAL_TOKEN__";
+pub(crate) const BINDING_TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_BINDING_TOKEN__";
 pub(crate) const TOKEN_HEX_LEN: usize = 64;
 
 /// Platform release identity mixed into the config digest.
@@ -126,6 +127,32 @@ pub(crate) fn render_config(template: &str, token: &SecretString) -> Result<Stri
     Ok(template.replace(TOKEN_PLACEHOLDER, token.expose()))
 }
 
+pub(crate) fn render_config_with_tokens(
+    template: &str,
+    token: &SecretString,
+    binding_token: &SecretString,
+) -> Result<String, PlatformError> {
+    validate_token(token)?;
+    validate_token(binding_token)?;
+    if token.expose() == binding_token.expose() {
+        return Err(PlatformError::new(
+            ErrorCode::RuntimeInvalid,
+            "internal service tokens must be distinct",
+        ));
+    }
+    if template.matches(TOKEN_PLACEHOLDER).count() != 1
+        || template.matches(BINDING_TOKEN_PLACEHOLDER).count() != 1
+    {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigCompileFailed,
+            "config template must contain each internal token placeholder exactly once",
+        ));
+    }
+    Ok(template
+        .replace(TOKEN_PLACEHOLDER, token.expose())
+        .replace(BINDING_TOKEN_PLACEHOLDER, binding_token.expose()))
+}
+
 pub(crate) fn validate_token(token: &SecretString) -> Result<(), PlatformError> {
     let value = token.expose();
     if value.len() != TOKEN_HEX_LEN || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -143,6 +170,7 @@ pub(crate) fn validate_token(token: &SecretString) -> Result<(), PlatformError> 
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn digest_for(
     assets_dir: &Path,
     lock: &RuntimeLock,
@@ -150,6 +178,20 @@ pub(crate) fn digest_for(
     runtime: &VerifiedRuntime,
     platform: &PlatformReleaseMeta,
     token: &SecretString,
+) -> Result<(String, String, WorkerFiles), PlatformError> {
+    digest_for_with_tokens(
+        assets_dir, lock, lock_bytes, runtime, platform, token, token,
+    )
+}
+
+pub(crate) fn digest_for_with_tokens(
+    assets_dir: &Path,
+    lock: &RuntimeLock,
+    lock_bytes: &[u8],
+    runtime: &VerifiedRuntime,
+    platform: &PlatformReleaseMeta,
+    token: &SecretString,
+    binding_token: &SecretString,
 ) -> Result<(String, String, WorkerFiles), PlatformError> {
     let _ = lock;
     let (template, workers, _) = load_assets(assets_dir)?;
@@ -159,7 +201,18 @@ pub(crate) fn digest_for(
             "config template is not UTF-8",
         )
     })?;
-    let rendered = render_config(template_str, token)?;
+    let rendered = if token.expose() == binding_token.expose() {
+        let once = render_config(template_str, token)?;
+        if once.matches(BINDING_TOKEN_PLACEHOLDER).count() != 1 {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigCompileFailed,
+                "config template must contain exactly one binding token placeholder",
+            ));
+        }
+        once.replace(BINDING_TOKEN_PLACEHOLDER, binding_token.expose())
+    } else {
+        render_config_with_tokens(template_str, token, binding_token)?
+    };
     let digest = config_input_digest(&DigestInputs {
         config_template: &template,
         workers: &workers,

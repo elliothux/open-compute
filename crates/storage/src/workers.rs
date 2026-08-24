@@ -147,6 +147,8 @@ pub struct DeploymentSnapshot {
     pub vars: BTreeMap<String, Vec<u8>>,
     /// Encrypted secrets keyed by env name.
     pub secrets: BTreeMap<String, StoredDeploymentSecret>,
+    /// Immutable typed resource bindings ordered by env name.
+    pub bindings: Vec<crate::DeploymentBindingRecord>,
 }
 
 /// Route kind supported by P0.2.
@@ -417,6 +419,15 @@ impl<'a> WorkerRepository<'a> {
         &self,
         input: &NewDeployment,
     ) -> Result<DeploymentRecord, PlatformError> {
+        self.insert_staging_deployment_with_bindings(input, &[])
+    }
+
+    /// Insert deployment metadata, env, and immutable resource bindings atomically.
+    pub fn insert_staging_deployment_with_bindings(
+        &self,
+        input: &NewDeployment,
+        bindings: &[crate::NewDeploymentBinding],
+    ) -> Result<DeploymentRecord, PlatformError> {
         let flags_json = serde_json::to_vec(&input.compatibility_flags).map_err(|_| invariant())?;
         let limits_json = serde_json::to_vec(&input.limits).map_err(|_| invariant())?;
         self.db.with_immediate(|tx| {
@@ -483,6 +494,7 @@ impl<'a> WorkerRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             }
+            crate::bindings::insert_staging_bindings(tx, input.id, bindings, input.now_ms)?;
             audit(
                 tx,
                 input.account_id,
@@ -749,12 +761,14 @@ impl<'a> WorkerRepository<'a> {
             }
             let vars = read_vars(conn, deployment_id)?;
             let secrets = read_secrets(conn, deployment_id)?;
+            let bindings = crate::bindings::read_deployment_bindings_conn(conn, deployment_id)?;
             Ok(DeploymentSnapshot {
                 account_id,
                 worker,
                 deployment,
                 vars,
                 secrets,
+                bindings,
             })
         })
     }
@@ -1433,6 +1447,11 @@ impl<'a> WorkerRepository<'a> {
                 ));
             }
             tx.execute(
+                "DELETE FROM deployment_bindings WHERE deployment_id = ?1",
+                [deployment_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
                 "DELETE FROM deployment_vars WHERE deployment_id = ?1",
                 [deployment_id.to_string()],
             )
@@ -1538,6 +1557,11 @@ impl<'a> WorkerRepository<'a> {
             };
             let mut recovered = 0_u32;
             for (deployment, _worker, account) in candidates {
+                tx.execute(
+                    "DELETE FROM deployment_bindings WHERE deployment_id = ?1",
+                    [&deployment],
+                )
+                .map_err(|_| db_error())?;
                 tx.execute(
                     "DELETE FROM deployment_vars WHERE deployment_id = ?1",
                     [&deployment],

@@ -116,6 +116,7 @@ pub struct StaticConfigCompiler {
     deadline: Duration,
     redactor: Redactor,
     generation_auth: Option<GenerationAuthRegistry>,
+    binding_generation_auth: Option<GenerationAuthRegistry>,
 }
 
 impl Debug for StaticConfigCompiler {
@@ -148,6 +149,7 @@ impl StaticConfigCompiler {
             deadline,
             redactor,
             generation_auth: None,
+            binding_generation_auth: None,
         }
     }
 
@@ -155,6 +157,13 @@ impl StaticConfigCompiler {
     #[must_use]
     pub fn with_generation_auth(mut self, auth: GenerationAuthRegistry) -> Self {
         self.generation_auth = Some(auth);
+        self
+    }
+
+    /// Activate a distinct generation credential for the private binding backend.
+    #[must_use]
+    pub fn with_binding_generation_auth(mut self, auth: GenerationAuthRegistry) -> Self {
+        self.binding_generation_auth = Some(auth);
         self
     }
 }
@@ -166,8 +175,10 @@ impl ConfigCompiler for StaticConfigCompiler {
         _startup_id: StartupId,
     ) -> Pin<Box<dyn Future<Output = Result<CompiledConfig, PlatformError>> + Send + '_>> {
         Box::pin(async move {
+            let binding_token = generate_internal_token()?;
             let mut redactor = self.redactor.clone();
             redactor.register_secret_string(&token);
+            redactor.register_secret_string(&binding_token);
             let compiled = compile_static_config(CompileRequest {
                 runtime: &self.runtime,
                 lock_path: &self.lock_path,
@@ -175,6 +186,7 @@ impl ConfigCompiler for StaticConfigCompiler {
                 runtime_data_dir: &self.runtime_data_dir,
                 platform: &self.platform,
                 token: &token,
+                binding_token: &binding_token,
                 deadline: self.deadline,
                 redactor: &redactor,
             })
@@ -182,7 +194,12 @@ impl ConfigCompiler for StaticConfigCompiler {
             if compiled.is_ok()
                 && let Some(auth) = &self.generation_auth
             {
-                auth.activate(token);
+                auth.activate(token.clone());
+            }
+            if compiled.is_ok()
+                && let Some(auth) = &self.binding_generation_auth
+            {
+                auth.activate(binding_token);
             }
             compiled
         })
@@ -307,6 +324,24 @@ impl WorkerdSupervisor {
         K: Clock + 'static,
         J: JitterRng + 'static,
     {
+        Self::new_with_external_services_and_auth(
+            opts,
+            external_services,
+            generation_auth.into_iter().collect(),
+        )
+    }
+
+    /// Create a supervisor with loopback services and all generation credentials it must revoke.
+    pub fn new_with_external_services_and_auth<C, K, J>(
+        opts: WorkerdSupervisorOptions<C, K, J>,
+        external_services: Vec<ExternalServiceAddress>,
+        generation_auths: Vec<GenerationAuthRegistry>,
+    ) -> Self
+    where
+        C: ConfigCompiler,
+        K: Clock + 'static,
+        J: JitterRng + 'static,
+    {
         let now = opts.clock.now();
         let snap = SupervisorSnapshot::initial(now, opts.runtime.binary_sha256().to_owned());
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -338,7 +373,7 @@ impl WorkerdSupervisor {
             lease_active: false,
             recovery_failed: false,
             external_services: Arc::from(external_services),
-            generation_auth,
+            generation_auths: Arc::from(generation_auths),
         };
         let task = tokio::spawn(actor.run());
         Self {
@@ -446,7 +481,7 @@ struct Actor {
     lease_active: bool,
     recovery_failed: bool,
     external_services: Arc<[ExternalServiceAddress]>,
-    generation_auth: Option<GenerationAuthRegistry>,
+    generation_auths: Arc<[GenerationAuthRegistry]>,
 }
 
 impl Actor {
@@ -517,11 +552,15 @@ impl Actor {
     }
 
     fn fail_closed_after_teardown(&mut self) {
-        if let Some(auth) = &self.generation_auth {
-            auth.clear();
-        }
+        self.clear_generation_auths();
         self.recovery_failed = true;
         self.permanent_fail(ErrorCode::RuntimeInvalid);
+    }
+
+    fn clear_generation_auths(&self) {
+        for auth in self.generation_auths.iter() {
+            auth.clear();
+        }
     }
 
     async fn on_tick(&mut self) {
@@ -662,9 +701,7 @@ impl Actor {
                 self.teardown_child().await?;
             }
             Ok(AttemptOutcome::Failed(fail)) => {
-                if let Some(auth) = &self.generation_auth {
-                    auth.clear();
-                }
+                self.clear_generation_auths();
                 if let Some(report) = fail.completion {
                     self.record_completion(report);
                 }
@@ -673,9 +710,7 @@ impl Actor {
                 }
             }
             Ok(AttemptOutcome::Cancelled) | Err(_) => {
-                if let Some(auth) = &self.generation_auth {
-                    auth.clear();
-                }
+                self.clear_generation_auths();
             }
         }
         Ok(())
@@ -710,9 +745,7 @@ impl Actor {
                 );
             }
             AttemptOutcome::Failed(fail) => {
-                if let Some(auth) = &self.generation_auth {
-                    auth.clear();
-                }
+                self.clear_generation_auths();
                 let report = fail.completion.clone();
                 if let Some(report) = fail.completion {
                     self.record_completion(report);
@@ -740,9 +773,7 @@ impl Actor {
                     .await;
             }
             AttemptOutcome::Cancelled => {
-                if let Some(auth) = &self.generation_auth {
-                    auth.clear();
-                }
+                self.clear_generation_auths();
                 if self.shutting_down {
                     self.transition(
                         SupervisorState::Stopped,
@@ -929,9 +960,7 @@ impl Actor {
     }
 
     async fn teardown_child(&mut self) -> Result<Option<OwnerCompletion>, PlatformError> {
-        if let Some(auth) = &self.generation_auth {
-            auth.clear();
-        }
+        self.clear_generation_auths();
         let report = if let Some(live) = self.child.take() {
             let pid = live.pid();
             let pgid = live.pgid();

@@ -2,6 +2,9 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 
 const SOURCE_PATH = "/internal/runtime/v1/deployments/resolve";
 const TOKEN_HEADER = "x-open-compute-internal-token";
+const BINDING_TOKEN_HEADER = "x-open-compute-binding-token";
+const BINDING_CONTENT_TYPE = "application/vnd.open-compute.kv.v1+json";
+const MAX_BINDING_KEY_BYTES = 1024;
 let startupGeneration;
 const assembling = new Map();
 const seenHashes = new Map();
@@ -147,6 +150,134 @@ function assembleOnce(key, build) {
   return pending;
 }
 
+function bindingError(code) {
+  const error = new Error(code);
+  error.name = "Error";
+  error.stableCode = code;
+  error.stack = `Error: ${code}`;
+  return error;
+}
+
+function assertKey(key) {
+  if (typeof key !== "string" || !key || new TextEncoder().encode(key).byteLength > MAX_BINDING_KEY_BYTES) {
+    throw new TypeError("binding key must be a bounded non-empty string");
+  }
+}
+
+function trustedBindingProps(descriptor, deploymentId) {
+  return Object.freeze({
+    bindingId: descriptor.bindingId,
+    deploymentId,
+    descriptorSha256: descriptor.descriptorSha256,
+    resourceSpecGeneration: descriptor.resourceSpecGeneration,
+    permissions: Object.freeze({
+      read: descriptor.permissions.read === true,
+      write: descriptor.permissions.write === true,
+    }),
+  });
+}
+
+export class KVNamespace extends WorkerEntrypoint {
+  #props() {
+    const props = this.ctx.props;
+    if (!props
+      || typeof props.bindingId !== "string"
+      || typeof props.deploymentId !== "string"
+      || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
+      || !Number.isSafeInteger(props.resourceSpecGeneration)
+      || props.resourceSpecGeneration < 1) {
+      throw bindingError("BINDING_PROTOCOL_ERROR");
+    }
+    return props;
+  }
+
+  async #request(operation, body, permission, contentType = BINDING_CONTENT_TYPE) {
+    const props = this.#props();
+    if (!props.permissions[permission]) {
+      throw bindingError("BINDING_PERMISSION_DENIED");
+    }
+    const response = await this.env.BINDING_BACKEND.fetch(
+      `http://binding-backend/internal/bindings/v1/kv/${props.bindingId}/${operation}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": contentType,
+          [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
+          "x-open-compute-startup-generation": currentStartupGeneration(),
+          "x-open-compute-deployment-id": props.deploymentId,
+          "x-open-compute-descriptor-sha256": props.descriptorSha256,
+          "x-open-compute-request-id": crypto.randomUUID(),
+        },
+        body,
+      },
+    );
+    if (!response.ok) {
+      const code = response.headers.get("x-open-compute-error-code") || "BINDING_PROTOCOL_ERROR";
+      try { await response.body?.cancel(); } catch { /* best effort */ }
+      throw bindingError(code);
+    }
+    return response;
+  }
+
+  async get(key) {
+    assertKey(key);
+    const response = await this.#request("get", JSON.stringify({ key }), "read");
+    const payload = await response.json();
+    return payload.value ?? null;
+  }
+
+  async put(key, value) {
+    assertKey(key);
+    if (typeof value !== "string") throw new TypeError("binding value must be a string");
+    await this.#request("put", JSON.stringify({ key, value }), "write");
+  }
+
+  async delete(key) {
+    assertKey(key);
+    await this.#request("delete", JSON.stringify({ key }), "write");
+  }
+
+  async echoStream(stream) {
+    if (!(stream instanceof ReadableStream)) {
+      throw new TypeError("binding stream must be a byte ReadableStream");
+    }
+    const response = await this.#request(
+      "echo",
+      stream,
+      "read",
+      "application/vnd.open-compute.kv.v1+octet-stream",
+    );
+    return response.body;
+  }
+
+  async fetch() {
+    throw bindingError("BINDING_PERMISSION_DENIED");
+  }
+}
+
+function makeBinding(ctx, descriptor, deploymentId) {
+  const capability = `${descriptor.kind}@${descriptor.capabilityVersion}`;
+  switch (capability) {
+    case "kv_namespace@1":
+      return ctx.exports.KVNamespace({
+        props: trustedBindingProps(descriptor, deploymentId),
+      });
+    default:
+      throw bindingError("BINDING_CAPABILITY_UNSUPPORTED");
+  }
+}
+
+function tenantEnv(snapshot, ctx, deploymentId) {
+  const env = { ...snapshot.env };
+  for (const descriptor of snapshot.bindings || []) {
+    if (Object.prototype.hasOwnProperty.call(env, descriptor.name)) {
+      throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    }
+    env[descriptor.name] = makeBinding(ctx, descriptor, deploymentId);
+  }
+  return env;
+}
+
 function tenantRequest(request) {
   const headers = new Headers(request.headers);
   const method = request.headers.get("x-open-compute-original-method") || "GET";
@@ -184,14 +315,15 @@ async function handle(request, env, ctx, validation) {
     seenHashes.set(envelope.runtimeKey, snapshot.workerCodeSha256);
     const code = await assembleOnce(envelope.runtimeKey, async () => {
       const built = modulesFor(snapshot, validation, validationEntrypoint);
+      const deploymentId = envelope.loaderKey.split("/")[2];
       return {
         compatibilityDate: snapshot.compatibilityDate,
         compatibilityFlags: snapshot.compatibilityFlags,
         mainModule: built.mainModule,
         modules: built.modules,
-        env: validation ? {} : snapshot.env,
+        env: validation ? {} : tenantEnv(snapshot, ctx, deploymentId),
         globalOutbound: validation ? null : ctx.exports.OutboundGateway({
-          props: { deploymentId: envelope.loaderKey.split("/")[2], policyVersion: 1 },
+          props: { deploymentId, policyVersion: 1 },
         }),
         limits: PROFILE,
       };

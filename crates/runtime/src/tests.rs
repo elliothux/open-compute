@@ -5,8 +5,8 @@ use crate::compile::{
     set_after_config_rename_hook,
 };
 use crate::digest::{
-    DigestInputs, PlatformReleaseMeta, config_input_digest, digest_for, load_assets, render_config,
-    validate_token,
+    BINDING_TOKEN_PLACEHOLDER, DigestInputs, PlatformReleaseMeta, config_input_digest, digest_for,
+    load_assets, render_config, render_config_with_tokens, validate_token,
 };
 use crate::fetch::{PackageReleaseRequest, install_official_release, package_release_bundle};
 use crate::fsutil::{
@@ -187,6 +187,7 @@ fn compile_req<'a>(
         runtime_data_dir: data,
         platform,
         token,
+        binding_token: token,
         deadline,
         redactor,
     }
@@ -518,6 +519,32 @@ fn digest_assets_tokens_and_supervisor_auth_are_fail_closed() {
     assert_eq!(
         render_config(RuntimeLock::token_placeholder(), &valid).unwrap(),
         TOKEN
+    );
+    let binding = SecretString::new(TOKEN_B);
+    let rendered = render_config_with_tokens(
+        &format!(
+            "{}:{}",
+            RuntimeLock::token_placeholder(),
+            BINDING_TOKEN_PLACEHOLDER
+        ),
+        &valid,
+        &binding,
+    )
+    .unwrap();
+    assert_eq!(rendered, format!("{TOKEN}:{TOKEN_B}"));
+    assert_eq!(
+        render_config_with_tokens(
+            &format!(
+                "{}:{}",
+                RuntimeLock::token_placeholder(),
+                BINDING_TOKEN_PLACEHOLDER
+            ),
+            &valid,
+            &valid,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::RuntimeInvalid
     );
     for token in [
         SecretString::new("short"),

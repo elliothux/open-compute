@@ -17,8 +17,9 @@ use open_compute_core::{
 };
 use open_compute_storage::{DeploymentRecord, PlatformStorage, WorkerRepository};
 use open_compute_workers::{
-    BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBundle,
-    DeploymentController, DeploymentPin, DeploymentPins, RuntimeValidator, StagedBundle,
+    BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBindingInput,
+    DeploymentBundle, DeploymentController, DeploymentPin, DeploymentPins, RuntimeValidator,
+    StagedBundle,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -263,6 +264,8 @@ struct DeploymentMetadata {
     vars: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     secrets: BTreeMap<String, SecretString>,
+    #[serde(default)]
+    bindings: BTreeMap<String, DeploymentBindingInput>,
     #[serde(default = "default_limits")]
     limits: serde_json::Value,
     #[serde(default)]
@@ -343,6 +346,7 @@ async fn create_deployment(
             compatibility_flags: metadata.compatibility_flags,
             vars: metadata.vars,
             secrets: metadata.secrets,
+            bindings: metadata.bindings,
             limits: metadata.limits,
             promote: metadata.promote,
             request_id,

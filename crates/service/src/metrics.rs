@@ -8,8 +8,13 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Compile-time series required by section 14.2.
-pub const REQUIRED_SERIES: u64 = 53;
+#[path = "metrics_resource.rs"]
+mod resource;
+pub use resource::{BindingBackendOperation, ResourceOperation};
+use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
+
+/// Compile-time series required by the platform and P0.3 binding framework.
+pub const REQUIRED_SERIES: u64 = 85;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 32;
 
@@ -175,6 +180,14 @@ struct Inner {
     cache_entries: u64,
     cache_hits: u64,
     integrity_errors: u64,
+    resource_operations: [u64; 10],
+    resource_duration: [f64; 5],
+    resource_open_handles: u64,
+    resource_pin_wait: f64,
+    resource_reconcile: [u64; 4],
+    binding_backend_requests: [u64; 8],
+    binding_backend_bytes: [u64; 2],
+    binding_protocol_errors: u64,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -219,6 +232,14 @@ impl MetricsRegistry {
                 cache_entries: 0,
                 cache_hits: 0,
                 integrity_errors: 0,
+                resource_operations: [0; 10],
+                resource_duration: [0.0; 5],
+                resource_open_handles: 0,
+                resource_pin_wait: 0.0,
+                resource_reconcile: [0; 4],
+                binding_backend_requests: [0; 8],
+                binding_backend_bytes: [0; 2],
+                binding_protocol_errors: 0,
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -372,6 +393,61 @@ impl MetricsRegistry {
         g.cache_entries = entries;
         g.cache_hits = hits;
         g.integrity_errors = integrity_errors;
+    }
+
+    /// Record one lifecycle operation without identifier-valued labels.
+    pub fn observe_resource_operation(
+        &self,
+        operation: ResourceOperation,
+        success: bool,
+        duration: Duration,
+    ) {
+        let mut guard = self.lock();
+        let index = resource_operation_index(operation);
+        guard.resource_operations[index * 2 + usize::from(success)] =
+            guard.resource_operations[index * 2 + usize::from(success)].saturating_add(1);
+        guard.resource_duration[index] = duration.as_secs_f64();
+    }
+
+    /// Set the P0 KV handle count.
+    pub fn set_resource_open_handles(&self, handles: u64) {
+        self.lock().resource_open_handles = handles;
+    }
+
+    /// Record the last resource-pin drain wait.
+    pub fn observe_resource_pin_wait(&self, duration: Duration) {
+        self.lock().resource_pin_wait = duration.as_secs_f64();
+    }
+
+    /// Record startup reconciliation for a creating or deleting resource.
+    pub fn inc_resource_reconcile(&self, deleting: bool, success: bool) {
+        let index = usize::from(deleting) * 2 + usize::from(success);
+        let mut guard = self.lock();
+        guard.resource_reconcile[index] = guard.resource_reconcile[index].saturating_add(1);
+    }
+
+    /// Record one authenticated binding backend request and bounded byte totals.
+    pub fn observe_binding_backend(
+        &self,
+        operation: BindingBackendOperation,
+        success: bool,
+        ingress_bytes: u64,
+        egress_bytes: u64,
+    ) {
+        let index = binding_operation_index(operation) * 2 + usize::from(success);
+        let mut guard = self.lock();
+        guard.binding_backend_requests[index] =
+            guard.binding_backend_requests[index].saturating_add(1);
+        guard.binding_backend_bytes[0] =
+            guard.binding_backend_bytes[0].saturating_add(ingress_bytes);
+        guard.binding_backend_bytes[1] =
+            guard.binding_backend_bytes[1].saturating_add(egress_bytes);
+    }
+
+    /// Count a malformed private binding frame without exposing its identifiers.
+    pub fn inc_binding_protocol_error(&self) {
+        let mut guard = self.lock();
+        guard.binding_protocol_errors = guard.binding_protocol_errors.saturating_add(1);
     }
 
     /// Prometheus text exposition, deterministically ordered.
@@ -540,6 +616,7 @@ impl MetricsRegistry {
             g.integrity_errors
         )
         .ok();
+        write_resource_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }

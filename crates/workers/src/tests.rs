@@ -669,6 +669,7 @@ fn descriptor_binds_every_runtime_effective_input() {
         vec!["rpc".to_owned(), "rpc".to_owned()],
         vars,
         Vec::new(),
+        Vec::new(),
         serde_json::json!({"profile": "default"}),
         1,
     )
@@ -811,6 +812,7 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             Vec::new(),
             vars,
             secrets,
+            Vec::new(),
             limits,
             1,
         )
@@ -1123,6 +1125,7 @@ fn deployment_request(
         compatibility_flags: Vec::new(),
         vars,
         secrets,
+        bindings: BTreeMap::new(),
         limits: serde_json::json!({"profile": "default"}),
         promote: true,
         request_id: RequestId::generate(),

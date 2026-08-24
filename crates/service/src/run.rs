@@ -1,5 +1,8 @@
 //! Production `run` composition and shutdown.
 
+use crate::binding_backend::{
+    UnavailableKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_metrics,
+};
 use crate::config_load::LoadedConfig;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState, SanitizedSupervisor};
@@ -22,7 +25,7 @@ use open_compute_runtime::{
 };
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::WorkerRepository;
-use open_compute_workers::{BundleLimits, DeploymentPins, RuntimeSource};
+use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins, RuntimeSource};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -279,11 +282,19 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     )?;
 
     let generation_auth = GenerationAuthRegistry::new();
+    let binding_generation_auth = GenerationAuthRegistry::new();
     let runtime_source_listener = bind_runtime_source().await?;
     let runtime_source_addr = runtime_source_listener.local_addr().map_err(|_| {
         PlatformError::new(
             ErrorCode::RuntimeUnavailable,
             "failed to inspect private RuntimeSource listener",
+        )
+    })?;
+    let binding_backend_listener = bind_binding_backend().await?;
+    let binding_backend_addr = binding_backend_listener.local_addr().map_err(|_| {
+        PlatformError::new(
+            ErrorCode::RuntimeUnavailable,
+            "failed to inspect private binding backend listener",
         )
     })?;
     let compiler = StaticConfigCompiler::new(
@@ -297,7 +308,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
         redactor.clone(),
     )
-    .with_generation_auth(generation_auth.clone());
+    .with_generation_auth(generation_auth.clone())
+    .with_binding_generation_auth(binding_generation_auth.clone());
     record(&opts, "compile");
     if let Err(err) = fail_after(
         &opts,
@@ -330,6 +342,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         ..BundleLimits::default()
     };
     let deployment_pins = DeploymentPins::new();
+    let resource_pins = ResourcePins::new();
     let supervisor_for_http = supervisor_handle.clone();
     let state = HttpState::new(
         health.clone(),
@@ -430,6 +443,24 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         )
         .await
     });
+    let mut shutdown_binding = shutdown_rx.clone();
+    let binding_storage = storage.clone();
+    let binding_auth = binding_generation_auth.clone();
+    let binding_metrics = metrics.clone();
+    let binding_backend_task = tokio::spawn(async move {
+        serve_binding_backend_with_metrics(
+            binding_backend_listener,
+            binding_storage,
+            binding_auth,
+            resource_pins,
+            Arc::new(UnavailableKvBindingExecutor),
+            Some(binding_metrics),
+            async move {
+                let _ = shutdown_binding.changed().await;
+            },
+        )
+        .await
+    });
     let public_router = if merged {
         http::merged_router(state.clone())
     } else {
@@ -455,7 +486,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         None
     };
 
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_external_services(
+    let supervisor = Arc::new(WorkerdSupervisor::new_with_external_services_and_auth(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -465,11 +496,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             redactor,
             lease_path: Some(runtime_lease_path),
         },
-        vec![ExternalServiceAddress::loopback(
-            "runtime-source",
-            runtime_source_addr,
-        )?],
-        Some(generation_auth),
+        vec![
+            ExternalServiceAddress::loopback("runtime-source", runtime_source_addr)?,
+            ExternalServiceAddress::loopback("binding-backend", binding_backend_addr)?,
+        ],
+        vec![generation_auth, binding_generation_auth],
     ));
     *supervisor_handle
         .lock()
@@ -504,6 +535,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         public_task,
         admin_task,
         runtime_source_task,
+        binding_backend_task,
         maintenance_task,
     )
     .await;
@@ -517,6 +549,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn wait_signals_and_servers(
     health: &HealthCoordinator,
     supervisor: &WorkerdSupervisor,
@@ -524,6 +557,7 @@ async fn wait_signals_and_servers(
     public_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     admin_task: Option<tokio::task::JoinHandle<Result<(), PlatformError>>>,
     runtime_source_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
+    binding_backend_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     maintenance_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
 ) -> Option<PlatformError> {
     let mut sigterm = signal(SignalKind::terminate()).ok();
@@ -531,6 +565,7 @@ async fn wait_signals_and_servers(
     let mut public_task = public_task;
     let mut admin_task = admin_task;
     let mut runtime_source_task = runtime_source_task;
+    let mut binding_backend_task = binding_backend_task;
     let mut maintenance_task = maintenance_task;
     let mut listener_error = None;
     tokio::select! {
@@ -564,6 +599,9 @@ async fn wait_signals_and_servers(
         res = &mut runtime_source_task => {
             listener_error = Some(join_runtime_source(res));
         }
+        res = &mut binding_backend_task => {
+            listener_error = Some(join_runtime_source(res));
+        }
         res = &mut maintenance_task => {
             listener_error = Some(join_runtime_source(res));
         }
@@ -582,6 +620,9 @@ async fn wait_signals_and_servers(
     }
     if !runtime_source_task.is_finished() {
         let _ = runtime_source_task.await;
+    }
+    if !binding_backend_task.is_finished() {
+        let _ = binding_backend_task.await;
     }
     if !maintenance_task.is_finished() {
         let _ = maintenance_task.await;

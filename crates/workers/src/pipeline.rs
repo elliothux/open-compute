@@ -4,19 +4,21 @@ use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
 use crate::descriptor::{
-    SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256,
-    validate_env_name,
+    BindingDescriptorV1, SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars,
+    ciphertext_sha256, validate_env_name,
 };
 use bytes::Bytes;
 use futures::stream;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, SecretBytes, SecretString,
+    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
+    ErrorCode, PlatformError, RequestId, ResourceId, ResourceState, SecretBytes, SecretString,
     WorkerId,
 };
 use open_compute_storage::{
     DeploymentRecord, DeploymentState, IdempotencyReservation, LOADER_SCHEMA_VERSION,
-    NewDeployment, PlatformStorage, StoredDeploymentSecret, WorkerRepository,
+    NewDeployment, NewDeploymentBinding, PlatformStorage, ResourceRepository,
+    StoredDeploymentSecret, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -33,6 +35,23 @@ const MAX_SECRETS: usize = 64;
 const MAX_SECRET_BYTES: usize = 16 * 1024;
 const MAX_SECRET_TOTAL_BYTES: usize = 64 * 1024;
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Control-plane request for one immutable deployment resource binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentBindingInput {
+    /// Static product kind expected by the adapter.
+    #[serde(rename = "type")]
+    pub kind: BindingKind,
+    /// Existing ready resource identity. Display names are never accepted.
+    pub id: ResourceId,
+    /// Method capability set; defaults to read/write for product compatibility.
+    #[serde(default)]
+    pub permissions: CanonicalPermissions,
+    /// Capability-version-one product configuration.
+    #[serde(default)]
+    pub config: CanonicalBindingConfig,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct FailedResponse {
@@ -107,6 +126,8 @@ pub struct CreateDeploymentRequest {
     pub vars: BTreeMap<String, serde_json::Value>,
     /// Write-only UTF-8 secrets.
     pub secrets: BTreeMap<String, SecretString>,
+    /// Immutable resource bindings keyed by tenant environment name.
+    pub bindings: BTreeMap<String, DeploymentBindingInput>,
     /// Immutable limits profile.
     pub limits: serde_json::Value,
     /// Promote only after runtime validation succeeds.
@@ -261,6 +282,7 @@ impl<'a> DeploymentController<'a> {
         let (canonical_vars, stored_vars) =
             canonicalize_vars(request.vars.clone(), MAX_VARS, MAX_ENV_BYTES)?;
         validate_secret_set(&request.secrets, &canonical_vars)?;
+        validate_binding_set(&request.bindings, &canonical_vars, &request.secrets)?;
         let repo = WorkerRepository::new(self.storage.db());
         // Authentication/account scoping happens before reserving a key, so a
         // nonexistent target cannot strand a running idempotency row.
@@ -353,6 +375,7 @@ impl<'a> DeploymentController<'a> {
             deployment_id,
             &request.secrets,
         )?;
+        let (binding_descriptors, stored_bindings) = self.prepare_bindings(request)?;
         let descriptor = WorkerCodeDescriptorV1::new(
             request.account_id,
             request.worker_id,
@@ -363,6 +386,7 @@ impl<'a> DeploymentController<'a> {
             request.compatibility_flags.clone(),
             canonical_vars,
             secret_descriptors,
+            binding_descriptors,
             request.limits.clone(),
             u32::try_from(LOADER_SCHEMA_VERSION).map_err(|_| invariant())?,
         )?;
@@ -375,23 +399,26 @@ impl<'a> DeploymentController<'a> {
                 "ArtifactStore returned a different immutable artifact",
             ));
         }
-        let mut deployment = repo.insert_staging_deployment(&NewDeployment {
-            id: deployment_id,
-            account_id: request.account_id,
-            worker_id: request.worker_id,
-            artifact_sha256: bundle.sha256(),
-            artifact_size: size,
-            artifact_schema_version: WORKER_BUNDLE_SCHEMA_VERSION,
-            main_module: bundle.manifest().main_module.clone(),
-            compatibility_date: request.compatibility_date.clone(),
-            compatibility_flags: descriptor.compatibility_flags.clone(),
-            limits: request.limits.clone(),
-            worker_code_sha256: descriptor_hash,
-            vars: stored_vars,
-            secrets: stored_secrets,
-            request_id: request.request_id,
-            now_ms: request.now_ms,
-        })?;
+        let mut deployment = repo.insert_staging_deployment_with_bindings(
+            &NewDeployment {
+                id: deployment_id,
+                account_id: request.account_id,
+                worker_id: request.worker_id,
+                artifact_sha256: bundle.sha256(),
+                artifact_size: size,
+                artifact_schema_version: WORKER_BUNDLE_SCHEMA_VERSION,
+                main_module: bundle.manifest().main_module.clone(),
+                compatibility_date: request.compatibility_date.clone(),
+                compatibility_flags: descriptor.compatibility_flags.clone(),
+                limits: request.limits.clone(),
+                worker_code_sha256: descriptor_hash,
+                vars: stored_vars,
+                secrets: stored_secrets,
+                request_id: request.request_id,
+                now_ms: request.now_ms,
+            },
+            &stored_bindings,
+        )?;
         repo.begin_validation(deployment_id)?;
         let candidate = ValidationCandidate {
             account_id: request.account_id,
@@ -484,6 +511,56 @@ impl<'a> DeploymentController<'a> {
         }
         Ok((stored, descriptors))
     }
+
+    fn prepare_bindings(
+        &self,
+        request: &CreateDeploymentRequest,
+    ) -> Result<(Vec<BindingDescriptorV1>, Vec<NewDeploymentBinding>), PlatformError> {
+        let repository = ResourceRepository::new(self.storage.db());
+        let mut descriptors = Vec::with_capacity(request.bindings.len());
+        let mut rows = Vec::with_capacity(request.bindings.len());
+        for (name, input) in &request.bindings {
+            let resource = repository.get(request.account_id, input.id)?;
+            if resource.state != ResourceState::Ready {
+                return Err(PlatformError::new(
+                    ErrorCode::ResourceNotReady,
+                    "deployment binding resource is not ready",
+                ));
+            }
+            if resource.kind != input.kind {
+                return Err(PlatformError::new(
+                    ErrorCode::ResourceNotFound,
+                    "resource was not found in the requested scope",
+                ));
+            }
+            let descriptor = BindingDescriptorV1::new(
+                BindingId::generate(),
+                name.clone(),
+                input.kind,
+                input.id,
+                resource.spec_generation,
+                1,
+                input.permissions,
+                input.config,
+            )?;
+            let permissions_json =
+                serde_json::to_vec(&descriptor.permissions).map_err(|_| invariant())?;
+            let config_json = serde_json::to_vec(&descriptor.config).map_err(|_| invariant())?;
+            rows.push(NewDeploymentBinding {
+                id: descriptor.binding_id,
+                name: descriptor.name.clone(),
+                kind: descriptor.kind,
+                resource_id: descriptor.resource_id,
+                resource_spec_generation: descriptor.resource_spec_generation,
+                capability_version: descriptor.capability_version,
+                permissions_json,
+                config_json,
+                descriptor_sha256: descriptor.sha256()?,
+            });
+            descriptors.push(descriptor);
+        }
+        Ok((descriptors, rows))
+    }
 }
 
 pub(crate) fn idempotency_ref_id(account_id: AccountId, scope: &str, key: &str) -> String {
@@ -526,6 +603,29 @@ pub(crate) fn validate_secret_set(
     Ok(())
 }
 
+pub(crate) fn validate_binding_set(
+    bindings: &BTreeMap<String, DeploymentBindingInput>,
+    vars: &BTreeMap<String, serde_json::Value>,
+    secrets: &BTreeMap<String, SecretString>,
+) -> Result<(), PlatformError> {
+    if bindings.len() > MAX_VARS {
+        return Err(PlatformError::new(
+            ErrorCode::ResourceLimitExceeded,
+            "deployment contains too many bindings",
+        ));
+    }
+    for name in bindings.keys() {
+        validate_env_name(name)?;
+        if name.len() > 64 || vars.contains_key(name) || secrets.contains_key(name) {
+            return Err(PlatformError::new(
+                ErrorCode::BindingTypeMismatch,
+                "binding env name is invalid or conflicts with var or secret",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn request_fingerprint(
     request: &CreateDeploymentRequest,
     bundle: &PreparedBundle,
@@ -551,6 +651,10 @@ fn request_fingerprint(
         frame(&mut canonical, name.as_bytes())?;
         frame(&mut canonical, value.expose().as_bytes())?;
     }
+    frame(
+        &mut canonical,
+        &serde_json::to_vec(&request.bindings).map_err(|_| invariant())?,
+    )?;
     frame(
         &mut canonical,
         &serde_json::to_vec(&request.limits).map_err(|_| invariant())?,
@@ -612,6 +716,19 @@ pub(crate) fn parse_failure_code(code: &str) -> ErrorCode {
         "ARTIFACT_INTEGRITY_ERROR" => ErrorCode::ArtifactIntegrityError,
         "SECRET_INVALID" => ErrorCode::SecretInvalid,
         "RESOURCE_LIMIT_EXCEEDED" => ErrorCode::ResourceLimitExceeded,
+        "RESOURCE_NOT_FOUND" => ErrorCode::ResourceNotFound,
+        "RESOURCE_NAME_CONFLICT" => ErrorCode::ResourceNameConflict,
+        "RESOURCE_NOT_READY" => ErrorCode::ResourceNotReady,
+        "RESOURCE_REFERENCED" => ErrorCode::ResourceReferenced,
+        "RESOURCE_UNAVAILABLE" => ErrorCode::ResourceUnavailable,
+        "RESOURCE_INVARIANT_VIOLATION" => ErrorCode::ResourceInvariantViolation,
+        "BINDING_NOT_FOUND" => ErrorCode::BindingNotFound,
+        "BINDING_TYPE_MISMATCH" => ErrorCode::BindingTypeMismatch,
+        "BINDING_PERMISSION_DENIED" => ErrorCode::BindingPermissionDenied,
+        "BINDING_CAPABILITY_UNSUPPORTED" => ErrorCode::BindingCapabilityUnsupported,
+        "BINDING_PROTOCOL_ERROR" => ErrorCode::BindingProtocolError,
+        "BINDING_LIMIT_EXCEEDED" => ErrorCode::BindingLimitExceeded,
+        "BINDING_RESULT_UNKNOWN" => ErrorCode::BindingResultUnknown,
         "RUNTIME_UNAVAILABLE" => ErrorCode::RuntimeUnavailable,
         "RUNTIME_RESULT_UNKNOWN" => ErrorCode::RuntimeResultUnknown,
         _ => ErrorCode::Internal,

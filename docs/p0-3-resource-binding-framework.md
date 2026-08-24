@@ -1,19 +1,39 @@
 # P0.3：Resource 与 Binding Framework 详细设计
 
-> 状态：Implementation Plan
+> 状态：已实现并通过 Exit Gate（2026-08-25）
 >
 > 前置依赖：[P0.1：Platform Foundation](./p0-1-platform-foundation.md) 与
 > [P0.2：Workers Runtime](./p0-2-workers-runtime.md)
 >
-> 当前基线：P0.1/P0.2 Gate 已由项目方确认跑通；本文以当前 checkout 已有的
-> `WorkerCodeDescriptorV1.binding_descriptors`、`RuntimeSource`、`DeploymentPins`、
-> `deployment_referrers` 和 `ctx.exports.OutboundGateway` 为扩展点。
+> 实现基线：当前 checkout 已实现 typed `BindingDescriptorV1`、`ResourceController`、
+> `ResourcePins`、immutable deployment binding、每次 cold/warm 请求的 `RuntimeSource`
+> 重校验、静态 `ctx.exports.KVNamespace` factory，以及独立 generation capability 的
+> private BindingBackend。
 >
 > 后续消费者：[P0.4：KV](./p0-4-kv.md)、P0.5 R2、P0.6 D1、P0.7 Durable Object
 
 P0.3 不交付一个新的 tenant-facing 存储产品。它交付所有持久化产品共用的资源生命周期、
 deployment binding、运行时 capability、内部 transport、删除 fence 和错误协议。P0.4 的 KV
-是第一个真实消费者；P0.3 自身只保留一个测试专用 fake resource/adapter 来跑通框架 Gate。
+是第一个真实消费者；P0.3 使用测试专用 fake resource/driver/executor 驱动静态 KV adapter，
+以跑通框架 Gate。
+
+## 0. 实现与验证状态
+
+已实现的 production framework 包括：UUIDv7 resource/binding identity、`003` forward-only
+migration、resource/binding/referrer authority、create/delete reconciliation、typed canonical
+descriptor、deployment hash 与 warm-load invariant、静态 loader factory、独立 backend token、
+每次调用的 DB authorization/resource pin、固定 byte/time budget、稳定错误、低基数 metrics 和
+secret-free doctor inspection。P0.3 的 production KV executor 按阶段边界保持 fail closed；真实
+KV 数据引擎仍属于 P0.4。
+
+已验证证据：
+
+- `./scripts/test-p0-3`：RB-01 至 RB-18 连续三轮 fresh-process 全部通过，并继续跑通三轮 P0.2
+  regression Gate；
+- `./scripts/coverage`：workspace 全目标、全 feature 测试通过，Rust 行覆盖率 90.04%，不低于
+  90.00% 门槛；
+- format、Clippy、no-default-features、Rust 1.98 MSRV、metadata、dependency boundary 与 diff
+  whitespace 检查通过。
 
 ## 1. 交付目标
 
@@ -788,4 +808,3 @@ P0.3 通过后，P0.4 只实现 `kv_namespace` 的产品 controller、driver、e
 - [Cloudflare Workers RPC lifecycle](https://developers.cloudflare.com/workers/runtime-apis/rpc/lifecycle/)
 - [workerd configuration schema](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp)
 - [总体方案](./sqlite-workerd-platform.md)
-

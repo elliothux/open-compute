@@ -638,6 +638,8 @@ async fn real_workerd_control_probe_term_kill() {
     cfg.drain_timeout_ms = 10;
     let runtime_source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let runtime_source_addr = runtime_source.local_addr().unwrap();
+    let binding_backend = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let binding_backend_addr = binding_backend.local_addr().unwrap();
     let sup = WorkerdSupervisor::new_with_external_services(
         WorkerdSupervisorOptions {
             runtime,
@@ -648,7 +650,10 @@ async fn real_workerd_control_probe_term_kill() {
             redactor: Redactor::new(),
             lease_path: None,
         },
-        vec![ExternalServiceAddress::loopback("runtime-source", runtime_source_addr).unwrap()],
+        vec![
+            ExternalServiceAddress::loopback("runtime-source", runtime_source_addr).unwrap(),
+            ExternalServiceAddress::loopback("binding-backend", binding_backend_addr).unwrap(),
+        ],
         None,
     );
     sup.start();

@@ -63,6 +63,12 @@ impl GenerationAuthRegistry {
         });
     }
 
+    /// Activate a known credential for private-service integration tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn activate_for_test(&self, token: SecretString) {
+        self.activate(token);
+    }
+
     pub(crate) fn clear(&self) {
         *self
             .active
@@ -106,6 +112,17 @@ impl GenerationAuthRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .map(|active| token_fingerprint(&active.token))
+    }
+
+    /// Return the bounded process-generation claim for integration Gate assertions.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn claimed_generation_for_test(&self) -> Option<String> {
+        self.active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .and_then(|active| active.claimed_generation.clone())
     }
 
     /// Snapshot the active credential for one platform-owned loopback request.

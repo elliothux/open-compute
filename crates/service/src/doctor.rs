@@ -6,12 +6,14 @@ use open_compute_artifacts::{
     ArtifactCache, S3ArtifactClient, preflight_s3, resolve_s3_credentials, sample_cache_integrity,
 };
 use open_compute_core::ids::{PlatformId, StartupId};
-use open_compute_core::{ErrorCode, PlatformError, Redactor, SystemClock};
+use open_compute_core::{ErrorCode, PlatformError, Redactor, ResourceAvailability, SystemClock};
 use open_compute_runtime::{
     ExternalServiceAddress, OsJitter, PlatformReleaseMeta, StaticConfigCompiler, SupervisorState,
     WorkerdSupervisor, WorkerdSupervisorOptions, verify_runtime_binary,
 };
-use open_compute_storage::{inspect_control_db, inspect_data_root, inspect_master_key};
+use open_compute_storage::{
+    inspect_control_db, inspect_data_root, inspect_master_key, inspect_resources,
+};
 use serde::Serialize;
 use std::io::Write;
 
@@ -209,6 +211,10 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                 "identity",
                 "data directory exclusive lock is held by another instance",
             ));
+            checks.push(skipped(
+                "resource_catalog",
+                "data directory exclusive lock is held by another instance",
+            ));
             None
         }
         Some(root) => {
@@ -232,12 +238,60 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                         "stored platform identity is present",
                         Some(bounded),
                     ));
+                    match inspect_resources(
+                        &db_path,
+                        loaded.config.storage.sqlite_busy_timeout_ms,
+                        1_000,
+                    ) {
+                        Ok(resources) if resources.is_empty() => checks.push(ok(
+                            "resource_catalog",
+                            "resource health catalog is empty",
+                            Some("0".to_owned()),
+                        )),
+                        Ok(resources) => {
+                            for resource in resources {
+                                let code = resource.availability_code.as_deref().unwrap_or("-");
+                                let value = format!(
+                                    "{} {} {} {}",
+                                    resource.id,
+                                    resource.kind,
+                                    resource.availability.as_str(),
+                                    code
+                                );
+                                if resource.availability == ResourceAvailability::Healthy {
+                                    checks.push(ok(
+                                        "resource_catalog",
+                                        "resource health probe is healthy",
+                                        Some(bound_value(&value, 256)),
+                                    ));
+                                } else {
+                                    checks.push(warning(
+                                        "resource_catalog",
+                                        "resource health probe requires attention",
+                                        Some(bound_value(&value, 256)),
+                                    ));
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            checks.push(failed(
+                                "resource_catalog",
+                                err.code(),
+                                err.message(),
+                                None,
+                            ));
+                        }
+                    }
                     Some(identity)
                 }
                 Err(err) => {
                     checks.push(failed("sqlite", err.code(), err.message(), None));
                     checks.push(skipped("schema", "control database is not inspectable"));
                     checks.push(skipped("identity", "control database is not inspectable"));
+                    checks.push(skipped(
+                        "resource_catalog",
+                        "control database is not inspectable",
+                    ));
                     None
                 }
             }
@@ -246,6 +300,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
             checks.push(skipped("sqlite", "data directory is missing"));
             checks.push(skipped("schema", "data directory is missing"));
             checks.push(skipped("identity", "data directory is missing"));
+            checks.push(skipped("resource_catalog", "data directory is missing"));
             None
         }
     };
@@ -469,13 +524,40 @@ async fn run_full_extras(
         ));
         return;
     };
-    let external = match ExternalServiceAddress::loopback("runtime-source", runtime_source_addr) {
-        Ok(external) => external,
-        Err(err) => {
-            checks.push(failed("runtime_cycle", err.code(), err.message(), None));
-            return;
-        }
+    let Ok(binding_backend) = tokio::net::TcpListener::bind("127.0.0.1:0").await else {
+        checks.push(failed(
+            "runtime_cycle",
+            ErrorCode::RuntimeUnavailable,
+            "temporary binding-backend listener could not be bound",
+            None,
+        ));
+        return;
     };
+    let Ok(binding_backend_addr) = binding_backend.local_addr() else {
+        checks.push(failed(
+            "runtime_cycle",
+            ErrorCode::RuntimeUnavailable,
+            "temporary binding-backend listener address is unavailable",
+            None,
+        ));
+        return;
+    };
+    let runtime_external =
+        match ExternalServiceAddress::loopback("runtime-source", runtime_source_addr) {
+            Ok(external) => external,
+            Err(err) => {
+                checks.push(failed("runtime_cycle", err.code(), err.message(), None));
+                return;
+            }
+        };
+    let binding_external =
+        match ExternalServiceAddress::loopback("binding-backend", binding_backend_addr) {
+            Ok(external) => external,
+            Err(err) => {
+                checks.push(failed("runtime_cycle", err.code(), err.message(), None));
+                return;
+            }
+        };
     let supervisor = WorkerdSupervisor::new_with_external_services(
         WorkerdSupervisorOptions {
             runtime,
@@ -486,7 +568,7 @@ async fn run_full_extras(
             redactor: Redactor::new(),
             lease_path: None,
         },
-        vec![external],
+        vec![runtime_external, binding_external],
         None,
     );
     supervisor.start();

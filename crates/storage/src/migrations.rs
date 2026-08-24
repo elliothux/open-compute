@@ -10,9 +10,11 @@ include!(concat!(env!("OUT_DIR"), "/migration_hashes.rs"));
 
 const MIGRATION_001_SQL: &str = include_str!("../migrations/001_init.sql");
 const MIGRATION_002_SQL: &str = include_str!("../migrations/002_workers_runtime.sql");
-const CURRENT_VERSION: i64 = 2;
+const MIGRATION_003_SQL: &str = include_str!("../migrations/003_resource_bindings.sql");
+const CURRENT_VERSION: i64 = 3;
 const MIGRATION_001_NAME: &str = "001_init";
 const MIGRATION_002_NAME: &str = "002_workers_runtime";
+const MIGRATION_003_NAME: &str = "003_resource_bindings";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Test-only deterministic fault injection points.
@@ -72,6 +74,18 @@ fn apply_inner(
             MIGRATION_002_NAME,
             MIGRATION_002_SQL,
             &MIGRATION_002_SHA256,
+            #[cfg(any(test, feature = "test-support"))]
+            fault,
+        )?;
+    }
+    if db.user_version()? < 3 {
+        apply_one(
+            db,
+            clock,
+            3,
+            MIGRATION_003_NAME,
+            MIGRATION_003_SQL,
+            &MIGRATION_003_SHA256,
             #[cfg(any(test, feature = "test-support"))]
             fault,
         )?;
@@ -196,6 +210,7 @@ pub(crate) fn expected_checksum(version: i64) -> Result<&'static [u8], PlatformE
     match version {
         1 => Ok(&MIGRATION_001_SHA256),
         2 => Ok(&MIGRATION_002_SHA256),
+        3 => Ok(&MIGRATION_003_SHA256),
         v if v > CURRENT_VERSION => Err(PlatformError::new(
             ErrorCode::SchemaTooNew,
             "on-disk schema is newer than this binary",
@@ -286,6 +301,9 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
             "control_audit_events",
         ]);
     }
+    if version >= 3 {
+        tables.extend(["resources", "deployment_bindings", "resource_referrers"]);
+    }
     for table in tables {
         let sql: String = tx
             .query_row(
@@ -350,6 +368,26 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
             }
         }
     }
+    if version >= 3 {
+        let sql: String = tx
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'resources_live_name'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::MigrationFailed,
+                    "migration invariant: resources_live_name missing",
+                )
+            })?;
+        if !sql.to_ascii_uppercase().contains("UNIQUE") || !sql.contains("tombstoned") {
+            return Err(PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "migration invariant: resources_live_name is not partial unique",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -380,6 +418,12 @@ mod coverage_tests;
 #[must_use]
 pub fn migration_002_checksum() -> &'static [u8; 32] {
     &MIGRATION_002_SHA256
+}
+
+/// Build-time SHA-256 of migration 3 SQL.
+#[must_use]
+pub fn migration_003_checksum() -> &'static [u8; 32] {
+    &MIGRATION_003_SHA256
 }
 
 /// Read-only schema inspection used by doctor.

@@ -55,6 +55,8 @@ fn all_id_kinds_round_trip() {
         RequestId::generate().to_string(),
         WorkerId::generate().to_string(),
         DeploymentId::generate().to_string(),
+        ResourceId::generate().to_string(),
+        BindingId::generate().to_string(),
     ] {
         assert_eq!(s, s.to_ascii_lowercase());
     }

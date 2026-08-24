@@ -24,11 +24,15 @@ use open_compute_service::runtime_bridge::{
     DispatchTarget, LoaderOutcome, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
 use open_compute_service::workers_http::WorkerApiState;
-use open_compute_service::{HealthCoordinator, MetricsRegistry};
+use open_compute_service::{
+    HealthCoordinator, MetricsRegistry, UnavailableKvBindingExecutor, bind_binding_backend,
+    serve_binding_backend,
+};
 use open_compute_storage::{DeploymentState, PlatformStorage, WorkerRepository};
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentController, DeploymentPins, ModuleInput, ModuleType, RuntimeSource, RuntimeValidator,
+    DeploymentController, DeploymentPins, ModuleInput, ModuleType, ResourcePins, RuntimeSource,
+    RuntimeValidator,
 };
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -61,9 +65,13 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         .expect("formal pinned runtime");
 
     let auth = GenerationAuthRegistry::new();
+    let binding_auth = GenerationAuthRegistry::new();
     let source_listener = bind_runtime_source().await.unwrap();
     let source_addr = source_listener.local_addr().unwrap();
+    let binding_listener = bind_binding_backend().await.unwrap();
+    let binding_addr = binding_listener.local_addr().unwrap();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    let mut binding_shutdown_rx = shutdown_tx.subscribe();
     let source_task = tokio::spawn({
         let source =
             RuntimeSource::new(storage.clone(), artifacts.clone(), BundleLimits::default());
@@ -72,6 +80,23 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
             serve_runtime_source(source_listener, source, auth, async move {
                 let _ = shutdown_rx.changed().await;
             })
+            .await
+        }
+    });
+    let binding_task = tokio::spawn({
+        let storage = storage.clone();
+        let auth = binding_auth.clone();
+        async move {
+            serve_binding_backend(
+                binding_listener,
+                storage,
+                auth,
+                ResourcePins::new(),
+                Arc::new(UnavailableKvBindingExecutor),
+                async move {
+                    let _ = binding_shutdown_rx.changed().await;
+                },
+            )
             .await
         }
     });
@@ -87,10 +112,11 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         Duration::from_secs(20),
         Redactor::new(),
     )
-    .with_generation_auth(auth.clone());
+    .with_generation_auth(auth.clone())
+    .with_binding_generation_auth(binding_auth.clone());
     let supervisor_slot = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(auth.clone(), supervisor_slot.clone());
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_external_services(
+    let supervisor = Arc::new(WorkerdSupervisor::new_with_external_services_and_auth(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -100,8 +126,11 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
             redactor: Redactor::new(),
             lease_path: Some(storage.data_dir().runtime_dir().join("p0-2-gate.lease")),
         },
-        vec![ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap()],
-        Some(auth.clone()),
+        vec![
+            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
+            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
+        ],
+        vec![auth.clone(), binding_auth.clone()],
     ));
     *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
     supervisor.start();
@@ -141,6 +170,10 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     assert!(
         !source_task.is_finished(),
         "runtime-source server stopped during deployment validation"
+    );
+    assert!(
+        !binding_task.is_finished(),
+        "binding-backend server stopped during deployment validation"
     );
     let response = dispatch(&transport, account, worker.id, &a, None, "hello-a").await;
     assert_eq!(response.status, 200);
@@ -415,6 +448,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     supervisor.shutdown().await;
     let _ = shutdown_tx.send(true);
     source_task.await.unwrap().unwrap();
+    binding_task.await.unwrap().unwrap();
     assert!(supervisor.snapshot().pid.is_none());
 }
 
@@ -492,6 +526,7 @@ export default {
         compatibility_flags: Vec::new(),
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
+        bindings: BTreeMap::new(),
         limits: serde_json::json!({"profile":"default"}),
         promote: false,
         request_id: RequestId::generate(),
@@ -566,6 +601,7 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
         compatibility_flags: vec!["nodejs_compat".to_owned()],
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
+        bindings: BTreeMap::new(),
         limits: serde_json::json!({"profile":"default"}),
         promote: false,
         request_id: RequestId::generate(),
@@ -1134,6 +1170,7 @@ export default {{
         compatibility_flags: vec!["rpc".to_owned()],
         vars,
         secrets,
+        bindings: BTreeMap::new(),
         limits: serde_json::json!({"profile":"default"}),
         promote,
         request_id: RequestId::generate(),

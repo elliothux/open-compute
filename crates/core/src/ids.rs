@@ -81,6 +81,8 @@ typed_id!(StartupId, "startup generation");
 typed_id!(RequestId, "request");
 typed_id!(WorkerId, "worker");
 typed_id!(DeploymentId, "deployment");
+typed_id!(ResourceId, "resource");
+typed_id!(BindingId, "deployment binding");
 
 fn canonical(uuid: Uuid) -> String {
     uuid.as_hyphenated()

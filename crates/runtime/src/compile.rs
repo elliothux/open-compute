@@ -1,6 +1,6 @@
 //! Static workerd config compiler and on-disk cache.
 
-use crate::digest::digest_for;
+use crate::digest::digest_for_with_tokens;
 use crate::fsutil::{
     FILE_MODE, MAX_LOCK_BYTES, WorkDir, chmod, contained_in, create_dir_secure, fsync_dir,
     hex_sha256, open_dir_nofollow, open_nofollow, read_regular_nofollow_bounded,
@@ -37,6 +37,8 @@ pub struct CompileRequest<'a> {
     pub platform: &'a PlatformReleaseMeta,
     /// Fresh 256-bit hex internal token.
     pub token: &'a SecretString,
+    /// Distinct fresh token scoped only to the private binding backend.
+    pub binding_token: &'a SecretString,
     /// Compile deadline.
     pub deadline: Duration,
     /// Redactor that already includes the token.
@@ -148,13 +150,14 @@ pub async fn compile_static_config(
             "lock path contents do not match the verified lock identity",
         ));
     }
-    let (digest, rendered, workers) = digest_for(
+    let (digest, rendered, workers) = digest_for_with_tokens(
         request.assets_dir,
         request.runtime.lock(),
         &lock_bytes,
         request.runtime,
         request.platform,
         request.token,
+        request.binding_token,
     )?;
 
     create_dir_secure(request.runtime_data_dir)?;

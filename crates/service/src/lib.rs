@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 pub mod auth;
+pub mod binding_backend;
 pub mod cli;
 pub mod config_load;
 pub mod doctor;
@@ -14,6 +15,10 @@ pub mod run;
 pub mod runtime_bridge;
 pub mod workers_http;
 
+pub use binding_backend::{
+    KvBindingExecutor, UnavailableKvBindingExecutor, bind_binding_backend, serve_binding_backend,
+    serve_binding_backend_with_metrics,
+};
 pub use cli::{Cli, Command, execute};
 pub use exit::{ExitClass, emit_failure, exit_code};
 pub use health::{HealthCoordinator, map_supervisor};

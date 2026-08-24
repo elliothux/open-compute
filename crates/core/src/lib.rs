@@ -12,6 +12,7 @@ pub mod error;
 pub mod health;
 pub mod ids;
 pub mod redact;
+pub mod resource;
 pub mod secret;
 
 pub use clock::{Clock, SystemClock};
@@ -21,8 +22,13 @@ pub use config::{
 };
 pub use error::{ErrorCode, PlatformError, ReadinessReason};
 pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus};
-pub use ids::{AccountId, DeploymentId, PlatformId, RequestId, StartupId, WorkerId};
+pub use ids::{
+    AccountId, BindingId, DeploymentId, PlatformId, RequestId, ResourceId, StartupId, WorkerId,
+};
 pub use redact::Redactor;
+pub use resource::{
+    BindingKind, CanonicalBindingConfig, CanonicalPermissions, ResourceAvailability, ResourceState,
+};
 pub use secret::{SecretBytes, SecretString};
 
 #[cfg(any(test, feature = "test-support"))]

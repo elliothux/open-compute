@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+pub mod bindings;
 pub mod control_db;
 pub mod crypto;
 pub mod data_dir;
@@ -11,20 +12,31 @@ pub mod inspect;
 pub mod lock;
 pub mod master_key;
 pub mod migrations;
+pub mod resources;
 pub mod workers;
 
+pub use bindings::{
+    AuthorizedBinding, BindingRepository, DeploymentBindingRecord, NewDeploymentBinding,
+};
 pub use control_db::ControlDb;
 pub use crypto::{SecretCrypto, SecretEnvelope};
 pub use data_dir::{DataDir, expected_directories, future_resource_paths};
 pub use fs::atomic_write;
 pub use identity::{ARTIFACT_SCHEMA_VERSION, StableIdentity};
-pub use inspect::{DataRootInspect, inspect_control_db, inspect_data_root, inspect_master_key};
+pub use inspect::{
+    DataRootInspect, ResourceInspect, inspect_control_db, inspect_data_root, inspect_master_key,
+    inspect_resources,
+};
 pub use lock::{DataDirLock, FilesystemDurability, InspectLock};
 pub use master_key::MasterKey;
 #[cfg(any(test, feature = "test-support"))]
 pub use master_key::{clear_test_env, set_test_env};
 #[cfg(any(test, feature = "test-support"))]
 pub use migrations::MigrationFault;
+pub use resources::{
+    ReserveResourceCreate, ResourceCreateReservation, ResourceRecord, ResourceReferrer,
+    ResourceRepository,
+};
 pub use workers::{
     DeploymentRecord, DeploymentReferrer, DeploymentSnapshot, DeploymentState,
     IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment, RetentionCandidate, RouteKind,

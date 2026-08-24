@@ -9,6 +9,7 @@ const config :Workerd.Config = (
     # The address is deliberately omitted from the compiled config. platformd
     # injects a generation-local loopback listener with --external-addr.
     (name = "runtime-source", external = (http = ())),
+    (name = "binding-backend", external = (http = ())),
     (name = "outbound-gateway", worker = .outboundGatewayWorker),
     (name = "internet", network = (allow = ["public"])),
   ],
@@ -40,6 +41,8 @@ const loaderHostWorker :Workerd.Worker = (
   bindings = [
     (name = "LOADER", workerLoader = (id = "open-compute")),
     (name = "RUNTIME_SOURCE", service = "runtime-source"),
+    (name = "BINDING_BACKEND", service = "binding-backend"),
+    (name = "BINDING_BACKEND_TOKEN", text = "__OPEN_COMPUTE_BINDING_TOKEN__"),
   ],
   globalOutbound = "outbound-gateway",
 );

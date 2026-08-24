@@ -7,8 +7,9 @@ use crate::lock::{DataDirLock, FilesystemDurability, InspectLock};
 use crate::master_key::{self, MasterKey};
 use crate::migrations;
 use open_compute_core::config::StorageConfig;
-use open_compute_core::{ErrorCode, PlatformError};
+use open_compute_core::{BindingKind, ErrorCode, PlatformError, ResourceAvailability, ResourceId};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 /// Snapshot of an existing data root. Never creates files or takes ownership.
 #[derive(Debug)]
@@ -23,6 +24,19 @@ pub struct DataRootInspect {
     pub lock_available: bool,
     /// Exclusive inspect flock; dropped with this snapshot.
     inspect_lock: Option<InspectLock>,
+}
+
+/// Secret-free resource health row for operator inspection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourceInspect {
+    /// Logical resource identity.
+    pub id: ResourceId,
+    /// Static product kind.
+    pub kind: BindingKind,
+    /// Persisted probe-derived availability.
+    pub availability: ResourceAvailability,
+    /// Stable resource-local health code.
+    pub availability_code: Option<String>,
 }
 
 impl DataRootInspect {
@@ -84,6 +98,58 @@ pub fn inspect_control_db(
     let version = migrations::inspect_schema(&db)?;
     let identity = identity::inspect_stored(&db)?;
     Ok((version, identity))
+}
+
+/// Read the bounded, secret-free resource health catalog from an existing database.
+pub fn inspect_resources(
+    path: &Path,
+    busy_timeout_ms: u64,
+    limit: u32,
+) -> Result<Vec<ResourceInspect>, PlatformError> {
+    if limit == 0 || limit > 10_000 {
+        return Err(PlatformError::new(
+            ErrorCode::LimitInvalid,
+            "resource inspection limit is invalid",
+        ));
+    }
+    let db = ControlDb::open_readonly(path, busy_timeout_ms)?;
+    db.with_read(|connection| {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, kind, availability, availability_code
+                 FROM resources WHERE state != 'tombstoned' ORDER BY kind, id LIMIT ?1",
+            )
+            .map_err(|_| inspect_error())?;
+        let rows = statement
+            .query_map([i64::from(limit)], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(|_| inspect_error())?;
+        let mut resources = Vec::new();
+        for row in rows {
+            let (id, kind, availability, availability_code) = row.map_err(|_| inspect_error())?;
+            resources.push(ResourceInspect {
+                id: ResourceId::from_str(&id).map_err(|_| inspect_error())?,
+                kind: BindingKind::from_str(&kind).map_err(|_| inspect_error())?,
+                availability: ResourceAvailability::from_str(&availability)
+                    .map_err(|_| inspect_error())?,
+                availability_code,
+            });
+        }
+        Ok(resources)
+    })
+}
+
+fn inspect_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::ResourceInvariantViolation,
+        "resource health catalog is invalid",
+    )
 }
 
 fn free_bytes(path: &Path) -> Option<u64> {
