@@ -54,6 +54,16 @@ fn host_target() -> &'static str {
     }
 }
 
+fn host_archive() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "workerd-darwin-arm64.gz",
+        ("macos", "x86_64") => "workerd-darwin-64.gz",
+        ("linux", "x86_64") => "workerd-linux-64.gz",
+        ("linux", "aarch64") => "workerd-linux-arm64.gz",
+        other => panic!("unsupported {other:?}"),
+    }
+}
+
 fn write_stub_workerd(bin: &Path, lock: &Path) {
     fs::write(
         bin,
@@ -65,6 +75,7 @@ fn write_stub_workerd(bin: &Path, lock: &Path) {
     fs::set_permissions(bin, perms).unwrap();
     let sha = hex::encode(sha2::Sha256::digest(fs::read(bin).unwrap()));
     let target = host_target();
+    let archive = host_archive();
     fs::write(
         lock,
         format!(
@@ -77,8 +88,8 @@ fn write_stub_workerd(bin: &Path, lock: &Path) {
   "hostCompatibilityFlags": ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
   "targets": {{
     "{target}": {{
-      "archiveName": "workerd-{target}.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-{target}.gz",
+      "archiveName": "{archive}",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}",
       "archiveSha256": "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
       "binarySha256": "{sha}"
     }}
