@@ -355,12 +355,21 @@ fn owner_loop(mut state: OwnerState) {
         let leader_live = !leader_has_exited(state.pid);
         if !leader_live {
             state.leader_alive.store(false, Ordering::SeqCst);
+            // On Linux, kill(-pgid, 0) still reports a zombie group leader as
+            // live. Reap the exited leader first so process_group_live only
+            // reflects surviving descendants.
+            if status.is_none()
+                && let Ok(s) = state.child.wait()
+            {
+                record_wait();
+                status = Some(s);
+            }
         }
 
         if shutting_down {
             let now = Instant::now();
             let group_live = process_group_live(state.pgid);
-            if status.is_none() {
+            if group_live {
                 if !sent_term {
                     terminate_group_term(Some(state.pgid));
                     sent_term = true;
@@ -368,7 +377,7 @@ fn owner_loop(mut state: OwnerState) {
                 } else if !sent_kill {
                     let grace_done =
                         term_at.is_some_and(|t| now.saturating_duration_since(t) >= grace);
-                    if grace_done && (leader_is_live(state.pid) || group_live) {
+                    if grace_done {
                         terminate_group_kill(Some(state.pgid));
                         sent_kill = true;
                         kill_at = Some(now);
@@ -378,7 +387,7 @@ fn owner_loop(mut state: OwnerState) {
             let kill_deadline_hit = sent_kill
                 && kill_at.is_some_and(|t| now.saturating_duration_since(t) >= kill_after);
             let group_gone = !process_group_live(state.pgid);
-            let leader_gone = leader_has_exited(state.pid);
+            let leader_gone = status.is_some() || leader_has_exited(state.pid);
             let finished = (leader_gone && group_gone) || kill_deadline_hit;
             if finished {
                 if status.is_none()
@@ -444,10 +453,6 @@ fn finish_owner(
     if let Some(ack) = ack {
         let _ = ack.send(report);
     }
-}
-
-fn leader_is_live(pid: i32) -> bool {
-    !leader_has_exited(pid)
 }
 
 fn leader_has_exited(pid: i32) -> bool {
