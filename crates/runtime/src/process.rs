@@ -1,7 +1,7 @@
 //! Bounded argv process execution with TERM/KILL/reap of the process group.
 
 use open_compute_core::{ErrorCode, PlatformError, Redactor};
-use rustix::io::{FdFlags, fcntl_getfd, fcntl_setfd};
+use rustix::io::{FdFlags, fcntl_dupfd_cloexec, fcntl_getfd, fcntl_setfd};
 use rustix::process::{
     Pid, Signal, getpgid, kill_process, kill_process_group, test_kill_process,
     test_kill_process_group,
@@ -25,6 +25,7 @@ use tokio::sync::oneshot;
 
 const MAX_STDERR: usize = 64 * 1024;
 const KILL_GRACE: Duration = Duration::from_millis(200);
+const MIN_EXEC_FD: i32 = 4;
 
 /// Result of a bounded child execution. Stderr is already redacted.
 #[derive(Debug)]
@@ -70,7 +71,10 @@ fn exec_image_inner(
     file: &File,
     staging_lease: Option<(&Path, &str)>,
 ) -> Result<ExecImage, PlatformError> {
-    let owned: OwnedFd = rustix::io::dup(file.as_fd()).map_err(|_| {
+    // The supervised child reserves fd 3 for its control channel. Keeping the
+    // executable above that descriptor prevents command-fds from replacing the
+    // `/proc/self/fd/N` executable immediately before exec on Linux.
+    let owned: OwnedFd = fcntl_dupfd_cloexec(file.as_fd(), MIN_EXEC_FD).map_err(|_| {
         PlatformError::new(
             ErrorCode::RuntimeInvalid,
             "failed to duplicate verified executable fd",
