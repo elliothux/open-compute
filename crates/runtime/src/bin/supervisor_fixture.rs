@@ -3,11 +3,16 @@
 #![allow(missing_docs)]
 
 use serde::Deserialize;
-use std::fs::{self, File};
+use std::fs;
+#[cfg(not(target_os = "linux"))]
+use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+#[cfg(not(target_os = "linux"))]
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -148,6 +153,7 @@ fn hang() {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 fn write_control(bytes: &[u8]) {
     if let Ok(mut sock) = File::open("/dev/fd/3") {
         let _ = sock.write_all(bytes);
@@ -157,6 +163,26 @@ fn write_control(bytes: &[u8]) {
     if let Ok(mut sock) = UnixStream::connect("/dev/fd/3") {
         let _ = sock.write_all(bytes);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn write_control(bytes: &[u8]) {
+    // Linux cannot reopen a Unix socket through /dev/fd. Let a short-lived
+    // child inherit fd 3 and bridge stdin to it without claiming raw-fd
+    // ownership in this unsafe-free test fixture.
+    let Ok(mut child) = Command::new("/bin/sh")
+        .args(["-c", "/bin/cat >&3"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(bytes);
+    }
+    let _ = child.wait();
 }
 
 fn write_listen(port: u16) {
