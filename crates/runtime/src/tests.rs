@@ -64,9 +64,23 @@ fn host_target() -> &'static str {
     }
 }
 
+fn archive_for_target(target: &str) -> &'static str {
+    match target {
+        "darwin-arm64" => "workerd-darwin-arm64.gz",
+        "darwin-x64" => "workerd-darwin-64.gz",
+        "linux-x64" => "workerd-linux-64.gz",
+        "linux-arm64" => "workerd-linux-arm64.gz",
+        other => panic!("unsupported test target {other}"),
+    }
+}
+
+fn host_archive() -> &'static str {
+    archive_for_target(host_target())
+}
+
 fn lock_json(binary_sha: &str, extra_target: &str) -> String {
     let target = host_target();
-    let archive = format!("workerd-{target}.gz");
+    let archive = host_archive();
     format!(
         r#"{{
   "schemaVersion": 1,
@@ -251,7 +265,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
     );
     assert!(RuntimeLock::parse(dup_flag.as_bytes()).is_err());
 
-    let archive = format!("workerd-{}.gz", host_target());
+    let archive = host_archive();
     let bad_archive = good.replacen(
         &format!("\"archiveName\": \"{archive}\""),
         "\"archiveName\": \"other.gz\"",
@@ -264,7 +278,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
     } else {
         "linux-x64"
     };
-    let foreign_archive = format!("workerd-{foreign}.gz");
+    let foreign_archive = archive_for_target(foreign);
     let host_named_foreign = good
         .replace(
             &format!("\"archiveName\": \"{archive}\""),
@@ -419,7 +433,7 @@ fn lock_validation_rejects_every_malformed_authority_field() {
 #[test]
 fn lock_target_url_identity_and_accessors_are_strict() {
     let good = lock_json(&"ab".repeat(32), "");
-    let archive = format!("workerd-{}.gz", host_target());
+    let archive = host_archive();
     let url =
         format!("https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}");
     let bad_urls = [

@@ -40,6 +40,16 @@ fn host_target() -> &'static str {
     }
 }
 
+fn host_archive() -> &'static str {
+    match host_target() {
+        "darwin-arm64" => "workerd-darwin-arm64.gz",
+        "darwin-x64" => "workerd-darwin-64.gz",
+        "linux-x64" => "workerd-linux-64.gz",
+        "linux-arm64" => "workerd-linux-arm64.gz",
+        other => panic!("unsupported test target {other}"),
+    }
+}
+
 fn sha256_file(path: &Path) -> String {
     hex::encode(Sha256::digest(fs::read(path).expect("read")))
 }
@@ -53,6 +63,7 @@ fn write_exec(path: &Path, src: &Path) {
 
 fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
     let target = host_target();
+    let archive = host_archive();
     let lock = format!(
         r#"{{
   "schemaVersion": 1,
@@ -63,8 +74,8 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
   "hostCompatibilityFlags": ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
   "targets": {{
     "{target}": {{
-      "archiveName": "workerd-{target}.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-{target}.gz",
+      "archiveName": "{archive}",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}",
       "archiveSha256": "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
       "binarySha256": "{binary_sha}"
     }}
