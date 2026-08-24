@@ -1,0 +1,7 @@
+interface:
+  display_name: "Simplify"
+  short_description: "Simplify recently modified business code"
+  default_prompt: "Use $simplify to simplify recently modified business code while preserving behavior and ownership."
+
+policy:
+  allow_implicit_invocation: false

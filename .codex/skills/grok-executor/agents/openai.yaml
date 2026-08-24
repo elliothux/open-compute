@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grok Executor"
+  short_description: "Delegate approved implementation work to Grok Build"
+  default_prompt: "Use $grok-executor to plan this task in Codex and delegate the approved implementation to Grok Build."

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Anti-Cheating Audit"
+  short_description: "Detect scenario-tuned production logic and prompts"
+  default_prompt: "Use $anti-cheating to strictly audit the current branch for test-specific or scenario-tuned logic in production code, prompts, skills, and tool descriptions."
+
+policy:
+  allow_implicit_invocation: false
