@@ -550,7 +550,7 @@ fn open_existing_component(
             #[cfg(not(target_os = "macos"))]
             {
                 let _ = target;
-                return Err(path_invalid("cache path must be a real directory"));
+                Err(path_invalid("cache path must be a real directory"))
             }
             #[cfg(target_os = "macos")]
             {
