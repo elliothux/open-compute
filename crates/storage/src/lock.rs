@@ -199,7 +199,7 @@ fn classify_statfs(stat: &rustix::fs::StatFs) -> FilesystemDurability {
     const SMB: i64 = 0x517B;
     const FUSE: i64 = 0x6573_5546;
     const AFS: i64 = 0x5346_414F;
-    let fs_type = stat.f_type as i64;
+    let fs_type = stat.f_type;
     if matches!(fs_type, NFS | CIFS | SMB | FUSE | AFS) {
         FilesystemDurability::NetworkOrRemote
     } else {
