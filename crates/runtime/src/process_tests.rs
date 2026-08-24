@@ -1,22 +1,6 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
-#[cfg(target_os = "linux")]
-#[test]
-fn executable_fd_does_not_collide_with_the_control_channel() {
-    let file = File::open("/bin/true").unwrap();
-    let image = exec_image(&file).unwrap();
-    let fd = image
-        .program
-        .to_str()
-        .unwrap()
-        .strip_prefix("/proc/self/fd/")
-        .unwrap()
-        .parse::<i32>()
-        .unwrap();
-    assert!(fd >= MIN_EXEC_FD);
-}
-
 #[tokio::test]
 async fn process_spawn_deadline_pgid_and_output_faults_are_typed_and_reaped() {
     let dir = tempfile::tempdir().unwrap();

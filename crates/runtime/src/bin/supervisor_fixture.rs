@@ -14,6 +14,7 @@ use std::time::Duration;
 
 const READY_PATH: &str = "/internal/ready";
 const TOKEN_HEADER: &str = "x-open-compute-internal-token";
+const VERSION: &str = "workerd 2026-08-23";
 
 #[derive(Debug, Deserialize, Default)]
 struct FixtureConfig {
@@ -35,6 +36,10 @@ fn default_mode() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--version") {
+        println!("{VERSION}");
+        return;
+    }
     if args.first().map(String::as_str) == Some("--hold-pipes") {
         hold_pipes_ignore_term();
         return;

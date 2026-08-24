@@ -18,9 +18,8 @@ use open_compute_runtime::supervisor::{
 use open_compute_runtime::verify::verify_runtime_binary;
 use rustix::process::{Pid, test_kill_process};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File};
+use std::fs;
 use std::future::Future;
-use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -87,24 +86,11 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
     path
 }
 
-fn version_wrapper(inner: &Path) -> String {
-    format!(
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '{VERSION}'; exit 0; fi\nexec '{}' \"$@\"\n",
-        inner.display()
-    )
-}
-
 fn write_versioned_fixture(dir: &Path) -> PathBuf {
     let fixture = PathBuf::from(env!("CARGO_BIN_EXE_open-compute-supervisor-fixture"));
-    let inner = dir.join("fixture-inner");
-    write_exec(&inner, &fixture);
-    let wrap = dir.join("workerd");
-    let mut f = File::create(&wrap).unwrap();
-    f.write_all(version_wrapper(&inner).as_bytes()).unwrap();
-    let mut perms = f.metadata().unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&wrap, perms).unwrap();
-    wrap
+    let binary = dir.join("workerd");
+    write_exec(&binary, &fixture);
+    binary
 }
 
 async fn verified(dir: &Path) -> open_compute_runtime::VerifiedRuntime {
