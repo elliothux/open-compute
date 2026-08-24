@@ -2321,8 +2321,10 @@ sleep 30
         tokio::select! {
             _ = fut.as_mut() => panic!("compile finished before cancellation"),
             _ = tokio::time::sleep(Duration::from_millis(20)) => {
-                if pid_file.exists() {
-                    break fs::read_to_string(&pid_file).unwrap().trim().parse::<i32>().unwrap();
+                if let Ok(contents) = fs::read_to_string(&pid_file)
+                    && let Ok(pid) = contents.trim().parse::<i32>()
+                {
+                    break pid;
                 }
             }
         }
@@ -2389,8 +2391,10 @@ sleep 30
         tokio::select! {
             _ = fut.as_mut() => panic!("compile finished before cancellation"),
             _ = tokio::time::sleep(Duration::from_millis(20)) => {
-                if pid_file.exists() {
-                    break fs::read_to_string(&pid_file).unwrap().trim().parse::<i32>().unwrap();
+                if let Ok(contents) = fs::read_to_string(&pid_file)
+                    && let Ok(pid) = contents.trim().parse::<i32>()
+                {
+                    break pid;
                 }
             }
         }
