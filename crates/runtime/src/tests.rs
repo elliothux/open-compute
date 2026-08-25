@@ -141,7 +141,14 @@ fn copy_formal_assets(dest: &Path) {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
     fs::create_dir_all(dest.join("system-workers")).expect("workers dir");
     fs::copy(src.join("config.capnp"), dest.join("config.capnp")).expect("config");
-    for name in ["ingress.js", "loader-host.js", "outbound-gateway.js"] {
+    for name in [
+        "ingress.js",
+        "loader-host.js",
+        "outbound-gateway.js",
+        "r2-facade.js",
+        "r2-wrapper-generator.js",
+        "r2-transport.js",
+    ] {
         fs::copy(
             src.join("system-workers").join(name),
             dest.join("system-workers").join(name),

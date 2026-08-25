@@ -21,6 +21,7 @@ base64.workspace = true
 bytes.workspace = true
 futures.workspace = true
 hex.workspace = true
+md-5.workspace = true
 open-compute-core = { path = "../core" }
 rand.workspace = true
 rustix.workspace = true

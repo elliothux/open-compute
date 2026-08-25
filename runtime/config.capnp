@@ -37,6 +37,9 @@ const loaderHostWorker :Workerd.Worker = (
   compatibilityFlags = ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
   modules = [
     (name = "loader-host.js", esModule = embed "system-workers/loader-host.js"),
+    (name = "r2-facade-source", text = embed "system-workers/r2-facade.js"),
+    (name = "r2-wrapper-generator.js", esModule = embed "system-workers/r2-wrapper-generator.js"),
+    (name = "r2-transport.js", esModule = embed "system-workers/r2-transport.js"),
   ],
   bindings = [
     (name = "LOADER", workerLoader = (id = "open-compute")),

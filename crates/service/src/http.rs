@@ -4,6 +4,7 @@ use crate::auth::{bearer_matches, resolve_admin_auth};
 use crate::health::HealthCoordinator;
 use crate::kv_http::{self, KvApiState};
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
+use crate::r2_http::{self, R2ApiState};
 use crate::workers_http::{self, WorkerApiState};
 use axum::body::Body;
 use axum::extract::Request;
@@ -38,6 +39,7 @@ pub struct HttpState {
     supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
     worker_api: Option<Arc<WorkerApiState>>,
     kv_api: Option<Arc<KvApiState>>,
+    r2_api: Option<Arc<R2ApiState>>,
 }
 
 impl std::fmt::Debug for HttpState {
@@ -47,6 +49,7 @@ impl std::fmt::Debug for HttpState {
             .field("admin_auth", &self.admin_secret.is_some())
             .field("worker_api", &self.worker_api.is_some())
             .field("kv_api", &self.kv_api.is_some())
+            .field("r2_api", &self.r2_api.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -93,6 +96,7 @@ impl HttpState {
             supervisor,
             worker_api: None,
             kv_api: None,
+            r2_api: None,
         })
     }
 
@@ -112,6 +116,7 @@ impl HttpState {
             supervisor: Arc::new(|| None),
             worker_api: None,
             kv_api: None,
+            r2_api: None,
         }
     }
 
@@ -139,6 +144,19 @@ impl HttpState {
     #[must_use]
     pub(crate) fn kv_api(&self) -> Option<&Arc<KvApiState>> {
         self.kv_api.as_ref()
+    }
+
+    /// Attach the P0.5 R2 logical-bucket control plane.
+    #[must_use]
+    pub fn with_r2_api(mut self, r2_api: R2ApiState) -> Self {
+        self.r2_api = Some(Arc::new(r2_api));
+        self
+    }
+
+    /// Borrow the optional P0.5 R2 control-plane state.
+    #[must_use]
+    pub(crate) fn r2_api(&self) -> Option<&Arc<R2ApiState>> {
+        self.r2_api.as_ref()
     }
 
     /// Borrow the fixed-series metrics registry from product control handlers.
@@ -171,6 +189,7 @@ pub fn admin_router(state: HttpState) -> Router {
     router = router
         .merge(workers_http::control_router())
         .merge(kv_http::control_router());
+    router = router.merge(r2_http::control_router());
     router
         .fallback(fallback)
         .layer(axum::middleware::from_fn(bounds_middleware))
@@ -190,6 +209,7 @@ pub fn merged_router(state: HttpState) -> Router {
     router
         .merge(workers_http::control_router())
         .merge(kv_http::control_router())
+        .merge(r2_http::control_router())
         .fallback(workers_http::public_ingress)
         .layer(axum::middleware::from_fn(bounds_middleware))
         .with_state(state)

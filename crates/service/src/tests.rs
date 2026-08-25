@@ -11,8 +11,9 @@ use crate::health::{HealthCoordinator, map_supervisor};
 use crate::http::{self, HttpState, REQUEST_ID_HEADER};
 use crate::metrics::{
     KvGauge, KvGaugeGuard, KvLifecycle, KvLifecycleGuard, KvMaintenance, KvOperation,
-    KvStagingGauge, MetricsRegistry, REQUIRED_SERIES, RestartReason, S3Op, S3Result, SqliteOp,
-    StartResult, StartStage,
+    KvStagingGauge, MetricsRegistry, R2Operation, R2ProviderError, R2StreamDirection,
+    R2StreamGuard, REQUIRED_SERIES, RestartReason, S3Op, S3Result, SqliteOp, StartResult,
+    StartStage,
 };
 use crate::run::{
     FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_kv_maintenance,
@@ -361,7 +362,14 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         assets.join("config.capnp"),
     )
     .unwrap();
-    for name in ["ingress.js", "loader-host.js", "outbound-gateway.js"] {
+    for name in [
+        "ingress.js",
+        "loader-host.js",
+        "outbound-gateway.js",
+        "r2-facade.js",
+        "r2-wrapper-generator.js",
+        "r2-transport.js",
+    ] {
         fs::copy(
             workspace.join("runtime/system-workers").join(name),
             assets.join("system-workers").join(name),
@@ -1508,16 +1516,30 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     reg.inc_kv_maintenance(KvMaintenance::Checkpoint, false);
     reg.inc_kv_corruption(usize::MAX);
     reg.observe_kv_wal_bytes(2 * 1024 * 1024);
+    reg.observe_r2_operation(R2Operation::Get, true, Duration::from_millis(6));
+    reg.inc_r2_provider_error(R2Operation::Put, R2ProviderError::ResultUnknown);
+    reg.inc_r2_result_unknown(false);
+    reg.inc_r2_condition_failure(true);
+    reg.add_r2_list_head_fanout(3);
+    reg.add_r2_bytes(R2StreamDirection::Upload, 7);
+    reg.add_r2_bytes(R2StreamDirection::Download, 5);
     {
         let _reader = KvGaugeGuard::new(&reg, KvGauge::ReaderConnection);
         let _writer = KvGaugeGuard::new(&reg, KvGauge::WriterConnection);
         let mut staging = KvStagingGauge::new(Some(&reg));
         staging.add(7);
+        let _upload = R2StreamGuard::new(&reg, R2StreamDirection::Upload);
+        let _download = R2StreamGuard::new(&reg, R2StreamDirection::Download);
+        reg.adjust_r2_staging_bytes(11, true);
         let active = reg.render(&PlatformStatus::starting());
         assert!(active.contains("kv_open_connections{role=\"reader\"} 1"));
         assert!(active.contains("kv_open_connections{role=\"writer\"} 1"));
         assert!(active.contains("kv_active_streams 1"));
         assert!(active.contains("kv_staging_bytes 7"));
+        assert!(active.contains("r2_active_streams{direction=\"upload\"} 1"));
+        assert!(active.contains("r2_active_streams{direction=\"download\"} 1"));
+        assert!(active.contains("r2_staging_bytes 11"));
+        reg.adjust_r2_staging_bytes(11, false);
     }
     let rendered = reg.render(&PlatformStatus::starting());
     assert!(rendered.contains("workerd_process_up 1"));
@@ -1533,6 +1555,17 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     assert!(rendered.contains("kv_active_streams 0"));
     assert!(rendered.contains("kv_staging_bytes 0"));
     assert!(rendered.contains("kv_wal_bytes_bucket{le=\"4194304\"} 1"));
+    assert!(rendered.contains("r2_operations_total{operation=\"get\",outcome=\"success\"} 1"));
+    assert!(
+        rendered.contains("r2_provider_errors_total{stage=\"put\",category=\"result_unknown\"} 1")
+    );
+    assert!(rendered.contains("r2_result_unknown_total{operation=\"put\"} 1"));
+    assert!(rendered.contains("r2_condition_failures_total{operation=\"put\"} 1"));
+    assert!(rendered.contains("r2_list_head_fanout_total 3"));
+    assert!(rendered.contains("r2_bytes_total{direction=\"ingress\"} 7"));
+    assert!(rendered.contains("r2_bytes_total{direction=\"egress\"} 5"));
+    assert!(rendered.contains("r2_active_streams{direction=\"upload\"} 0"));
+    assert!(rendered.contains("r2_staging_bytes 0"));
 }
 
 fn content_snapshot(root: &Path) -> Vec<(String, u64, Option<SystemTime>, String)> {

@@ -66,6 +66,38 @@ pub enum ResourceCreateReservation {
     Failed(Vec<u8>),
 }
 
+/// Delete-idempotency reservation outcome.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResourceDeleteReservation {
+    /// New delete operation owns its durable reservation.
+    Reserved(ResourceRecord),
+    /// A prior interrupted delete must continue from persisted resource state.
+    Continue(ResourceRecord),
+    /// The operation already completed; value is the exact response bytes.
+    Complete(Vec<u8>),
+    /// The operation already failed deterministically; value is the persisted envelope.
+    Failed(Vec<u8>),
+}
+
+/// Input for an atomic resource-delete idempotency reservation.
+#[derive(Clone, Debug)]
+pub struct ReserveResourceDelete<'a> {
+    /// Owning account.
+    pub account_id: AccountId,
+    /// Resource selected by the account-scoped route.
+    pub resource_id: ResourceId,
+    /// Required idempotency key.
+    pub idempotency_key: &'a str,
+    /// Master-key fingerprint identifier.
+    pub fingerprint_key_id: &'a str,
+    /// Secret-keyed canonical request fingerprint.
+    pub request_fingerprint: &'a [u8; 32],
+    /// Reservation timestamp.
+    pub now_ms: i64,
+    /// Idempotency expiry timestamp.
+    pub expires_at_ms: i64,
+}
+
 /// Input for atomic resource-create reservation.
 #[derive(Clone, Debug)]
 pub struct ReserveResourceCreate<'a> {
@@ -241,6 +273,106 @@ impl<'a> ResourceRepository<'a> {
                     "UPDATE control_idempotency
                      SET state = 'complete', response_json = ?1
                      WHERE account_id = ?2 AND scope = 'resource.create'
+                       AND idempotency_key = ?3 AND request_fingerprint = ?4
+                       AND resource_id = ?5 AND state = 'running'",
+                    params![
+                        response,
+                        account_id.to_string(),
+                        key,
+                        fingerprint.as_slice(),
+                        resource_id.to_string(),
+                    ],
+                )
+                .map_err(|_| db_error())?;
+            if changed != 1 {
+                return Err(PlatformError::new(
+                    ErrorCode::IdempotencyConflict,
+                    "resource idempotency reservation is no longer owned",
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    /// Reserve or replay one account-scoped resource deletion.
+    pub fn reserve_delete(
+        &self,
+        input: &ReserveResourceDelete<'_>,
+    ) -> Result<ResourceDeleteReservation, PlatformError> {
+        validate_idempotency_key(input.idempotency_key)?;
+        if input.expires_at_ms <= input.now_ms {
+            return Err(resource_invariant());
+        }
+        self.db.with_immediate(|tx| {
+            let resource = read_resource_tx(tx, input.account_id, input.resource_id)?;
+            let existing: Option<ExistingCreate> = tx
+                .query_row(
+                    "SELECT request_fingerprint, state, response_json, resource_id
+                     FROM control_idempotency
+                     WHERE account_id = ?1 AND scope = 'resource.delete'
+                       AND idempotency_key = ?2",
+                    params![input.account_id.to_string(), input.idempotency_key],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .optional()
+                .map_err(|_| db_error())?;
+            if let Some((fingerprint, state, response, stored_resource)) = existing {
+                if fingerprint.as_slice() != input.request_fingerprint
+                    || stored_resource.as_deref() != Some(&input.resource_id.to_string())
+                {
+                    return Err(PlatformError::new(
+                        ErrorCode::IdempotencyConflict,
+                        "idempotency key fingerprint does not match",
+                    ));
+                }
+                return match state.as_str() {
+                    "complete" => response
+                        .map(ResourceDeleteReservation::Complete)
+                        .ok_or_else(resource_invariant),
+                    "failed" => response
+                        .map(ResourceDeleteReservation::Failed)
+                        .ok_or_else(resource_invariant),
+                    "running" => Ok(ResourceDeleteReservation::Continue(resource)),
+                    _ => Err(resource_invariant()),
+                };
+            }
+            tx.execute(
+                "INSERT INTO control_idempotency
+                 (account_id, scope, idempotency_key, fingerprint_key_id,
+                  request_fingerprint, response_json, deployment_id, state,
+                  created_at_ms, expires_at_ms, resource_id)
+                 VALUES (?1, 'resource.delete', ?2, ?3, ?4, NULL, NULL,
+                         'running', ?5, ?6, ?7)",
+                params![
+                    input.account_id.to_string(),
+                    input.idempotency_key,
+                    input.fingerprint_key_id,
+                    input.request_fingerprint.as_slice(),
+                    input.now_ms,
+                    input.expires_at_ms,
+                    input.resource_id.to_string(),
+                ],
+            )
+            .map_err(|_| db_error())?;
+            Ok(ResourceDeleteReservation::Reserved(resource))
+        })
+    }
+
+    /// Mark an owned resource-delete idempotency row complete.
+    pub fn complete_delete(
+        self,
+        account_id: AccountId,
+        key: &str,
+        fingerprint: &[u8; 32],
+        resource_id: ResourceId,
+        response: &[u8],
+    ) -> Result<(), PlatformError> {
+        self.db.with_immediate(|tx| {
+            let changed = tx
+                .execute(
+                    "UPDATE control_idempotency
+                     SET state = 'complete', response_json = ?1
+                     WHERE account_id = ?2 AND scope = 'resource.delete'
                        AND idempotency_key = ?3 AND request_fingerprint = ?4
                        AND resource_id = ?5 AND state = 'running'",
                     params![

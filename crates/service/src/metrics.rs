@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 
 #[path = "metrics_kv.rs"]
 mod kv;
+#[path = "metrics_r2.rs"]
+mod r2;
 #[path = "metrics_resource.rs"]
 mod resource;
 pub(crate) use kv::{
@@ -17,11 +19,13 @@ pub(crate) use kv::{
     KvStagingGauge,
 };
 use kv::{lifecycle_index, maintenance_index, operation_index, write_kv_metrics};
+use r2::write_r2_metrics;
+pub(crate) use r2::{R2Operation, R2ProviderError, R2StreamDirection, R2StreamGuard};
 pub use resource::{BindingBackendOperation, ResourceOperation};
 use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
 
 /// Compile-time series required by the platform and P0.3 binding framework.
-pub const REQUIRED_SERIES: u64 = 135;
+pub const REQUIRED_SERIES: u64 = 176;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 32;
 
@@ -207,6 +211,16 @@ struct Inner {
     kv_backup: [u64; 2],
     kv_restore: [u64; 2],
     kv_corruption: [u64; 3],
+    r2_operations: [u64; 10],
+    r2_operation_duration: [f64; 5],
+    r2_bytes: [u64; 2],
+    r2_active_streams: [u64; 2],
+    r2_staging_bytes: u64,
+    r2_provider_errors: [u64; 15],
+    r2_condition_failures: [u64; 2],
+    r2_list_head_fanout: u64,
+    r2_result_unknown: [u64; 2],
+    r2_force_delete_remaining_batches: u64,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -271,6 +285,16 @@ impl MetricsRegistry {
                 kv_backup: [0; 2],
                 kv_restore: [0; 2],
                 kv_corruption: [0; 3],
+                r2_operations: [0; 10],
+                r2_operation_duration: [0.0; 5],
+                r2_bytes: [0; 2],
+                r2_active_streams: [0; 2],
+                r2_staging_bytes: 0,
+                r2_provider_errors: [0; 15],
+                r2_condition_failures: [0; 2],
+                r2_list_head_fanout: 0,
+                r2_result_unknown: [0; 2],
+                r2_force_delete_remaining_batches: 0,
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -696,6 +720,7 @@ impl MetricsRegistry {
         .ok();
         write_resource_metrics(&mut out, &g);
         write_kv_metrics(&mut out, &g);
+        write_r2_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }

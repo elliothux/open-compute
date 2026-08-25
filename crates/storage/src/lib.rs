@@ -13,6 +13,8 @@ pub mod kv;
 pub mod lock;
 pub mod master_key;
 pub mod migrations;
+pub mod r2;
+pub mod r2_staging;
 pub mod resources;
 pub mod workers;
 
@@ -42,9 +44,11 @@ pub use master_key::MasterKey;
 pub use master_key::{clear_test_env, set_test_env};
 #[cfg(any(test, feature = "test-support"))]
 pub use migrations::MigrationFault;
+pub use r2::{R2_SCHEMA_VERSION, R2BucketRecord, R2BucketRepository};
+pub use r2_staging::R2Staging;
 pub use resources::{
-    ReserveResourceCreate, ResourceCreateReservation, ResourceRecord, ResourceReferrer,
-    ResourceRepository,
+    ReserveResourceCreate, ReserveResourceDelete, ResourceCreateReservation,
+    ResourceDeleteReservation, ResourceRecord, ResourceReferrer, ResourceRepository,
 };
 pub use workers::{
     DeploymentRecord, DeploymentReferrer, DeploymentSnapshot, DeploymentState,

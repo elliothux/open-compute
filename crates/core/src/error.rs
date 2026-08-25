@@ -155,6 +155,36 @@ pub enum ErrorCode {
     KvResultUnknown,
     /// The private KV adapter protocol was malformed.
     KvInternalProtocolError,
+    /// R2 object key type, UTF-8, or segment shape is invalid.
+    R2KeyInvalid,
+    /// R2 object key exceeds its logical bucket's dynamic provider-key budget.
+    R2KeyTooLarge,
+    /// R2 range, conditional, metadata, or list options are invalid.
+    R2InvalidOptions,
+    /// A requested R2 write condition cannot be executed atomically.
+    R2UnsupportedCondition,
+    /// An R2 feature is intentionally outside the P0.5 capability.
+    R2UnsupportedFeature,
+    /// R2 object bytes exceed the bucket's frozen single-part limit.
+    R2ObjectTooLarge,
+    /// Canonical R2 custom metadata exceeds its fixed budget.
+    R2MetadataTooLarge,
+    /// An R2 list cursor is malformed, expired, or scoped incorrectly.
+    R2CursorInvalid,
+    /// A logical R2 bucket is non-empty and force deletion was not requested.
+    R2BucketNotEmpty,
+    /// An R2 conditional operation did not match the current object.
+    R2PreconditionFailed,
+    /// R2 concurrency or staging capacity is temporarily saturated.
+    R2Overloaded,
+    /// The configured R2 provider is unavailable.
+    R2ProviderUnavailable,
+    /// An R2 mutation may have committed before its response was observed.
+    R2ResultUnknown,
+    /// Provider metadata for one R2 object failed validation.
+    R2ObjectMetadataInvalid,
+    /// A logical bucket physical identity marker belongs to another authority.
+    R2PrefixCollision,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -236,6 +266,21 @@ impl ErrorCode {
             Self::KvCorrupt => "KV_CORRUPT",
             Self::KvResultUnknown => "KV_RESULT_UNKNOWN",
             Self::KvInternalProtocolError => "KV_INTERNAL_PROTOCOL_ERROR",
+            Self::R2KeyInvalid => "R2_KEY_INVALID",
+            Self::R2KeyTooLarge => "R2_KEY_TOO_LARGE",
+            Self::R2InvalidOptions => "R2_INVALID_OPTIONS",
+            Self::R2UnsupportedCondition => "R2_UNSUPPORTED_CONDITION",
+            Self::R2UnsupportedFeature => "R2_UNSUPPORTED_FEATURE",
+            Self::R2ObjectTooLarge => "R2_OBJECT_TOO_LARGE",
+            Self::R2MetadataTooLarge => "R2_METADATA_TOO_LARGE",
+            Self::R2CursorInvalid => "R2_CURSOR_INVALID",
+            Self::R2BucketNotEmpty => "R2_BUCKET_NOT_EMPTY",
+            Self::R2PreconditionFailed => "R2_PRECONDITION_FAILED",
+            Self::R2Overloaded => "R2_OVERLOADED",
+            Self::R2ProviderUnavailable => "R2_PROVIDER_UNAVAILABLE",
+            Self::R2ResultUnknown => "R2_RESULT_UNKNOWN",
+            Self::R2ObjectMetadataInvalid => "R2_OBJECT_METADATA_INVALID",
+            Self::R2PrefixCollision => "R2_PREFIX_COLLISION",
             Self::Internal => "INTERNAL",
         }
     }

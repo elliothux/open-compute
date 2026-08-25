@@ -15,6 +15,7 @@ force_path_style = true
 access_key_id_env = "S3_ACCESS_KEY_ID"
 secret_access_key_env = "S3_SECRET_ACCESS_KEY"
 prefix = "system/"
+r2_prefix = "tenant/r2/"
 
 [runtime]
 binary = "/opt/open-compute/bin/workerd"
@@ -42,3 +43,12 @@ max_active_streams = 16
 max_active_streams_per_namespace = 4
 idle_handle_ttl_ms = 60000
 operation_timeout_ms = 30000
+
+[r2]
+max_object_bytes = 536870912
+max_concurrent_uploads = 4
+max_concurrent_downloads = 16
+max_staging_bytes = 2147483648
+max_metadata_head_concurrency = 8
+operation_timeout_ms = 30000
+cursor_ttl_ms = 900000

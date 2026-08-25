@@ -1073,7 +1073,7 @@ fn assert_round_preflight(s3: &MockS3, prefix: &str) {
     let rec: Vec<_> = s3
         .recorded()
         .into_iter()
-        .filter(|r| r.path.contains(prefix.trim_end_matches('/')) || r.path.contains("preflight"))
+        .filter(|r| r.path.contains(prefix.trim_end_matches('/')) && r.path.contains("preflight"))
         .collect();
     let methods: Vec<_> = rec.iter().map(|r| r.method.as_str()).collect();
     assert_eq!(

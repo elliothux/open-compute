@@ -1,17 +1,20 @@
 //! Production `run` composition and shutdown.
 
-use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_metrics};
+use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_r2};
 use crate::config_load::LoadedConfig;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState, SanitizedSupervisor};
 use crate::kv_backend::SqliteKvBindingExecutor;
 use crate::kv_http::KvApiState;
 use crate::metrics::{KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage};
+use crate::r2_backend::R2BindingService;
+use crate::r2_http::R2ApiState;
+use crate::r2_maintenance::R2Maintenance;
 use crate::runtime_bridge::{WorkerdTransport, bind_runtime_source, serve_runtime_source};
 use crate::workers_http::WorkerApiState;
 use open_compute_artifacts::{
-    ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, S3ArtifactClient,
-    preflight_s3, resolve_s3_credentials,
+    ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, R2ObjectStore,
+    S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
@@ -123,6 +126,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             let storage = PlatformStorage::bootstrap(&cfg, &clock)?;
             open_compute_storage::KvPaths::open(storage.data_dir().root())?
                 .cleanup_write_staging()?;
+            open_compute_storage::R2Staging::open(storage.data_dir().root())?.cleanup()?;
             let maintenance_now = unix_ms();
             WorkerRepository::new(storage.db())
                 .prune_expired_idempotency(maintenance_now, recovery_batch)?;
@@ -250,6 +254,17 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             return Err(err);
         }
     }
+    if let Err(err) = preflight_r2(
+        &client,
+        storage.identity().platform_id,
+        StartupId::generate(),
+    )
+    .await
+    {
+        metrics.inc_start(StartResult::Failure, StartStage::S3);
+        drop(storage);
+        return Err(err);
+    }
     record(&opts, "s3");
     if let Err(err) = fail_after(&opts, FailAfterDummy::S3, &metrics, StartStage::S3) {
         drop(storage);
@@ -262,6 +277,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         Some(ReadinessReason::Ready),
     )?;
 
+    let r2_objects = R2ObjectStore::new(client.clone());
     let store = ArtifactStore::new(client);
     let cache = match ArtifactCache::open(
         storage.data_dir().artifact_cache_dir(),
@@ -353,6 +369,24 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     };
     let deployment_pins = DeploymentPins::new();
     let resource_pins = ResourcePins::new();
+    let r2_api = R2ApiState::new(
+        storage.clone(),
+        r2_objects.clone(),
+        resource_pins.clone(),
+        loaded.config.r2.clone(),
+        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
+    )
+    .with_metrics(metrics.clone());
+    r2_api.reconcile_pending().await?;
+    let r2_backend = Arc::new(
+        R2BindingService::new(
+            storage.clone(),
+            resource_pins.clone(),
+            r2_objects.clone(),
+            loaded.config.r2.clone(),
+        )?
+        .with_metrics(metrics.clone()),
+    );
     let supervisor_for_http = supervisor_handle.clone();
     let state = HttpState::new(
         health.clone(),
@@ -380,7 +414,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         resource_pins.clone(),
         loaded.config.kv.clone(),
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-    ));
+    ))
+    .with_r2_api(r2_api);
 
     let public_listener = match http::bind(public_addr).await {
         Ok(l) => l,
@@ -426,10 +461,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let maintenance_cache = cache.clone();
     let maintenance_config = loaded.config.workers.clone();
     let maintenance_kv_config = loaded.config.kv.clone();
+    let maintenance_r2_config = loaded.config.r2.clone();
+    let maintenance_r2_objects = r2_objects;
+    let maintenance_health = health.clone();
     let maintenance_pins = deployment_pins;
     let maintenance_resource_pins = resource_pins.clone();
     let maintenance_metrics = metrics.clone();
     let maintenance_task = tokio::spawn(async move {
+        let mut r2_maintenance = R2Maintenance::default();
         let mut interval = tokio::time::interval(Duration::from_millis(
             maintenance_config.artifact_gc_interval_ms,
         ));
@@ -449,6 +488,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                         &maintenance_resource_pins,
                         &maintenance_kv_config,
                         &maintenance_metrics,
+                    ).await;
+                    r2_maintenance.run(
+                        &maintenance_storage,
+                        &maintenance_r2_objects,
+                        &maintenance_r2_config,
+                        &maintenance_health,
                     ).await;
                 }
             }
@@ -482,13 +527,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let binding_auth = binding_generation_auth.clone();
     let binding_metrics = metrics.clone();
     let binding_backend_task = tokio::spawn(async move {
-        serve_binding_backend_with_metrics(
+        serve_binding_backend_with_r2(
             binding_backend_listener,
             binding_storage,
             binding_auth,
             resource_pins,
             binding_executor,
             Some(binding_metrics),
+            Some(r2_backend),
             async move {
                 let _ = shutdown_binding.changed().await;
             },

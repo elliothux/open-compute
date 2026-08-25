@@ -17,6 +17,7 @@ const DEFAULT_S3_ENDPOINT: &str = "https://s3.example.com";
 const DEFAULT_S3_REGION: &str = "auto";
 const DEFAULT_S3_BUCKET: &str = "open-compute";
 const DEFAULT_S3_PREFIX: &str = "system/";
+const DEFAULT_S3_R2_PREFIX: &str = "tenant/r2/";
 const DEFAULT_RUNTIME_BINARY: &str = "/opt/open-compute/bin/workerd";
 const DEFAULT_RUNTIME_LOCK_FILE: &str = "/opt/open-compute/runtime/workerd.lock.json";
 const DEFAULT_RUNTIME_ASSETS: &str = "/opt/open-compute/runtime";
@@ -44,6 +45,8 @@ pub struct PlatformConfig {
     pub workers: WorkersConfig,
     /// Workers KV local database, connection, and stream limits.
     pub kv: KvConfig,
+    /// Workers R2 object, staging, and concurrency limits.
+    pub r2: R2Config,
 }
 
 impl PlatformConfig {
@@ -67,6 +70,7 @@ impl PlatformConfig {
         self.diagnostics.validate()?;
         self.workers.validate()?;
         self.kv.validate()?;
+        self.r2.validate()?;
         Ok(())
     }
 }
@@ -245,6 +249,8 @@ pub struct S3Config {
     pub secret_access_key_file: Option<PathBuf>,
     /// Internal platform prefix, isolated from tenant prefixes.
     pub prefix: String,
+    /// Tenant R2 namespace prefix, isolated from the internal platform prefix.
+    pub r2_prefix: String,
     /// Bounded retry count.
     pub max_retries: u32,
     /// Initial retry backoff in milliseconds.
@@ -268,6 +274,7 @@ impl Default for S3Config {
             secret_access_key_env: Some("S3_SECRET_ACCESS_KEY".to_string()),
             secret_access_key_file: None,
             prefix: DEFAULT_S3_PREFIX.to_string(),
+            r2_prefix: DEFAULT_S3_R2_PREFIX.to_string(),
             max_retries: 3,
             retry_backoff_ms: 200,
             connect_timeout_ms: 5_000,
@@ -307,7 +314,20 @@ impl S3Config {
             self.secret_access_key_file.as_deref(),
             "s3.secret_access_key",
         )?;
-        validate_s3_prefix(&self.prefix)?;
+        validate_s3_prefix(&self.prefix, "s3.prefix")?;
+        validate_s3_prefix(&self.r2_prefix, "s3.r2_prefix")?;
+        if self.prefix.starts_with(&self.r2_prefix) || self.r2_prefix.starts_with(&self.prefix) {
+            return Err(PlatformError::new(
+                ErrorCode::S3PrefixInvalid,
+                "system and R2 S3 prefixes must be disjoint",
+            ));
+        }
+        if self.prefix.starts_with("tenant/") {
+            return Err(PlatformError::new(
+                ErrorCode::S3PrefixInvalid,
+                "s3.prefix must stay isolated from tenant prefixes",
+            ));
+        }
         require_nonzero(u64::from(self.max_retries), "s3.max_retries")?;
         require_nonzero(self.retry_backoff_ms, "s3.retry_backoff_ms")?;
         require_nonzero(self.connect_timeout_ms, "s3.connect_timeout_ms")?;
@@ -663,6 +683,67 @@ impl KvConfig {
     }
 }
 
+/// P0.5 Workers R2 staging, object, and concurrency policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct R2Config {
+    /// Frozen maximum object size for newly created buckets.
+    pub max_object_bytes: u64,
+    /// Global maximum concurrent single-part uploads.
+    pub max_concurrent_uploads: u32,
+    /// Global maximum active download streams.
+    pub max_concurrent_downloads: u32,
+    /// Global maximum bytes admitted to secure upload staging.
+    pub max_staging_bytes: u64,
+    /// Maximum concurrent metadata HEAD requests used by list include.
+    pub max_metadata_head_concurrency: u32,
+    /// Foreground R2 operation timeout.
+    pub operation_timeout_ms: u64,
+    /// Lifetime of an opaque signed list cursor.
+    pub cursor_ttl_ms: u64,
+}
+
+impl Default for R2Config {
+    fn default() -> Self {
+        Self {
+            max_object_bytes: 512 * 1024 * 1024,
+            max_concurrent_uploads: 4,
+            max_concurrent_downloads: 16,
+            max_staging_bytes: 2 * 1024 * 1024 * 1024,
+            max_metadata_head_concurrency: 8,
+            operation_timeout_ms: 30_000,
+            cursor_ttl_ms: 15 * 60 * 1000,
+        }
+    }
+}
+
+impl R2Config {
+    /// Provider-independent single-part hard ceiling used by P0.5.
+    pub const MAX_OBJECT_BYTES_HARD: u64 = 5 * 1024 * 1024 * 1024 - 5 * 1024 * 1024;
+
+    fn validate(&self) -> Result<(), PlatformError> {
+        if self.max_object_bytes == 0
+            || self.max_object_bytes > Self::MAX_OBJECT_BYTES_HARD
+            || self.max_concurrent_uploads == 0
+            || self.max_concurrent_uploads > 1024
+            || self.max_concurrent_downloads == 0
+            || self.max_concurrent_downloads > 4096
+            || self.max_staging_bytes < self.max_object_bytes
+            || self.max_metadata_head_concurrency == 0
+            || self.max_metadata_head_concurrency > 1024
+            || self.operation_timeout_ms == 0
+            || self.cursor_ttl_ms == 0
+            || self.cursor_ttl_ms > 24 * 60 * 60 * 1000
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "R2 host policy is outside the hard platform bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Env and/or absolute-file secret reference. Values are not loaded here.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -802,23 +883,23 @@ fn validate_s3_endpoint(endpoint: &str) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn validate_s3_prefix(prefix: &str) -> Result<(), PlatformError> {
+fn validate_s3_prefix(prefix: &str, _field: &'static str) -> Result<(), PlatformError> {
     if prefix.is_empty() || !prefix.ends_with('/') {
         return Err(PlatformError::new(
             ErrorCode::S3PrefixInvalid,
             "s3.prefix must be non-empty and end with '/'",
         ));
     }
-    if prefix.starts_with('/') || prefix.contains('\\') || prefix.contains("..") {
+    if prefix.starts_with('/')
+        || prefix.contains('\\')
+        || prefix
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+        || prefix[..prefix.len() - 1].split('/').any(str::is_empty)
+    {
         return Err(PlatformError::new(
             ErrorCode::S3PrefixInvalid,
             "s3.prefix must be a relative internal prefix without '..'",
-        ));
-    }
-    if prefix.starts_with("tenant/") {
-        return Err(PlatformError::new(
-            ErrorCode::S3PrefixInvalid,
-            "s3.prefix must stay isolated from tenant prefixes",
         ));
     }
     Ok(())

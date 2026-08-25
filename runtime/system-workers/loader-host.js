@@ -1,4 +1,12 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import r2FacadeSource from "r2-facade-source";
+import {
+  R2_FACADE_MODULE,
+  R2_RESERVED_MODULES,
+  R2_WRAPPER_MODULE,
+  generateR2Wrapper,
+} from "./r2-wrapper-generator.js";
+import { makeR2TransportBase } from "./r2-transport.js";
 
 const SOURCE_PATH = "/internal/runtime/v1/deployments/resolve";
 const TOKEN_HEADER = "x-open-compute-internal-token";
@@ -84,19 +92,35 @@ function moduleValue(module) {
   }
 }
 
-function modulesFor(snapshot, validation, validationEntrypoint) {
+function modulesFor(snapshot, validation, entrypointName) {
   const modules = {};
   for (const module of snapshot.modules) modules[module.name] = moduleValue(module);
+  const r2Bindings = (snapshot.bindings || [])
+    .filter((binding) => binding.kind === "r2_bucket" && binding.capabilityVersion === 1)
+    .map((binding) => binding.name);
+  let mainModule = snapshot.mainModule;
+  if (r2Bindings.length) {
+    for (const reserved of R2_RESERVED_MODULES) {
+      if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
+        throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+      }
+    }
+    modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
+    modules[R2_WRAPPER_MODULE] = {
+      js: generateR2Wrapper(snapshot.mainModule, r2Bindings, entrypointName),
+    };
+    mainModule = R2_WRAPPER_MODULE;
+  }
   if (validation) {
     const wrapper = "__open_compute_validation__.js";
-    const exportName = validationEntrypoint || "default";
-    modules[wrapper] = { js: `import * as tenant from ${JSON.stringify(snapshot.mainModule)};\nif (!(${JSON.stringify(exportName)} in tenant)) throw new Error(\"missing entrypoint\");\nexport default { fetch() { return new Response(\"open-compute-validation-v1\"); } };` };
+    const exportName = entrypointName || "default";
+    modules[wrapper] = { js: `import * as tenant from ${JSON.stringify(`./${mainModule}`)};\nif (!(${JSON.stringify(exportName)} in tenant)) throw new Error(\"missing entrypoint\");\nexport default { fetch() { return new Response(\"open-compute-validation-v1\"); } };` };
     return { modules, mainModule: wrapper };
   }
-  return { modules, mainModule: snapshot.mainModule };
+  return { modules, mainModule };
 }
 
-function assertEnvelope(request, validation, validationEntrypoint) {
+function assertEnvelope(request, validation, entrypointName) {
   const loaderKey = request.headers.get("x-open-compute-loader-key") || "";
   const expected = request.headers.get("x-open-compute-worker-code-sha256") || "";
   const parts = loaderKey.split("/");
@@ -104,13 +128,13 @@ function assertEnvelope(request, validation, validationEntrypoint) {
     throw new Error("invalid loader key");
   }
   if (!/^[0-9a-f]{64}$/.test(expected)) throw new Error("invalid descriptor hash");
-  if (validationEntrypoint && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(validationEntrypoint)) {
+  if (entrypointName && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypointName)) {
     throw new Error("invalid entrypoint");
   }
   return {
     loaderKey,
     expected,
-    runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}${validation ? `/${expected}/${validationEntrypoint || "default"}` : ""}`,
+    runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}/${expected}/${entrypointName || "default"}`,
   };
 }
 
@@ -642,11 +666,23 @@ export class KVNamespace extends WorkerEntrypoint {
   }
 }
 
+const R2TransportBase = makeR2TransportBase(
+  bindingError,
+  currentStartupGeneration,
+  BINDING_TOKEN_HEADER,
+);
+
+export class R2Transport extends R2TransportBase {}
+
 function makeBinding(ctx, descriptor, deploymentId) {
   const capability = `${descriptor.kind}@${descriptor.capabilityVersion}`;
   switch (capability) {
     case "kv_namespace@1":
       return ctx.exports.KVNamespace({
+        props: trustedBindingProps(descriptor, deploymentId),
+      });
+    case "r2_bucket@1":
+      return ctx.exports.R2Transport({
         props: trustedBindingProps(descriptor, deploymentId),
       });
     default:
@@ -688,11 +724,11 @@ export class OutboundGateway extends WorkerEntrypoint {
 async function handle(request, env, ctx, validation) {
   const requestId = request.headers.get("x-open-compute-request-id") || crypto.randomUUID();
   try {
-    const validationEntrypoint = validation ? (request.headers.get("x-open-compute-entrypoint") || undefined) : undefined;
-    const envelope = assertEnvelope(request, validation, validationEntrypoint);
+    const entrypoint = request.headers.get("x-open-compute-entrypoint") || undefined;
+    const envelope = assertEnvelope(request, validation, entrypoint);
     const internalToken = request.headers.get(TOKEN_HEADER) || "";
     // Resolve and verify on every path, including a warm WorkerLoader key.
-    const snapshot = await resolveSnapshot(env, envelope, validation, Boolean(validationEntrypoint), internalToken);
+    const snapshot = await resolveSnapshot(env, envelope, validation, Boolean(entrypoint), internalToken);
     const prior = seenHashes.get(envelope.runtimeKey);
     if (prior && prior !== snapshot.workerCodeSha256) {
       const error = new Error("DEPLOYMENT_INVARIANT_VIOLATION");
@@ -701,7 +737,7 @@ async function handle(request, env, ctx, validation) {
     }
     seenHashes.set(envelope.runtimeKey, snapshot.workerCodeSha256);
     const code = await assembleOnce(envelope.runtimeKey, async () => {
-      const built = modulesFor(snapshot, validation, validationEntrypoint);
+      const built = modulesFor(snapshot, validation, entrypoint);
       const deploymentId = envelope.loaderKey.split("/")[2];
       return {
         compatibilityDate: snapshot.compatibilityDate,
@@ -720,8 +756,7 @@ async function handle(request, env, ctx, validation) {
       cold = true;
       return code;
     });
-    const entrypoint = validation ? undefined : (request.headers.get("x-open-compute-entrypoint") || undefined);
-    const target = stub.getEntrypoint(entrypoint, { limits: PROFILE });
+    const target = stub.getEntrypoint(validation ? undefined : entrypoint, { limits: PROFILE });
     const response = await target.fetch(validation ? "https://validation.invalid/" : tenantRequest(request));
     if (validation) {
       const body = await response.text();

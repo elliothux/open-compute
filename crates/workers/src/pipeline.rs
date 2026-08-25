@@ -4,8 +4,8 @@ use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
 use crate::descriptor::{
-    BindingDescriptorV1, SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars,
-    ciphertext_sha256, validate_env_name,
+    BindingDescriptorV1, R2_FACADE_MODULE_NAME, R2_WRAPPER_MODULE_NAME, SecretDescriptor,
+    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, validate_env_name,
 };
 use bytes::Bytes;
 use futures::stream;
@@ -283,6 +283,7 @@ impl<'a> DeploymentController<'a> {
             canonicalize_vars(request.vars.clone(), MAX_VARS, MAX_ENV_BYTES)?;
         validate_secret_set(&request.secrets, &canonical_vars)?;
         validate_binding_set(&request.bindings, &canonical_vars, &request.secrets)?;
+        validate_injection_module_collisions(bundle.manifest(), &request.bindings)?;
         let repo = WorkerRepository::new(self.storage.db());
         // Authentication/account scoping happens before reserving a key, so a
         // nonexistent target cannot strand a running idempotency row.
@@ -622,6 +623,30 @@ pub(crate) fn validate_binding_set(
                 "binding env name is invalid or conflicts with var or secret",
             ));
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_injection_module_collisions(
+    manifest: &WorkerBundleManifest,
+    bindings: &BTreeMap<String, DeploymentBindingInput>,
+) -> Result<(), PlatformError> {
+    if !bindings
+        .values()
+        .any(|binding| binding.kind == BindingKind::R2Bucket)
+    {
+        return Ok(());
+    }
+    if manifest.modules.iter().any(|module| {
+        matches!(
+            module.name.as_str(),
+            R2_FACADE_MODULE_NAME | R2_WRAPPER_MODULE_NAME
+        )
+    }) {
+        return Err(PlatformError::new(
+            ErrorCode::BundleInvalid,
+            "tenant bundle collides with a reserved loaded-isolate module",
+        ));
     }
     Ok(())
 }

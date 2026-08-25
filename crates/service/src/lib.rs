@@ -13,13 +13,17 @@ pub mod http;
 pub mod kv_backend;
 pub mod kv_http;
 pub mod metrics;
+pub mod r2_backend;
+pub mod r2_http;
+mod r2_maintenance;
+mod r2_protocol;
 pub mod run;
 pub mod runtime_bridge;
 pub mod workers_http;
 
 pub use binding_backend::{
     KvBindingExecutor, UnavailableKvBindingExecutor, bind_binding_backend, serve_binding_backend,
-    serve_binding_backend_with_metrics,
+    serve_binding_backend_with_metrics, serve_binding_backend_with_r2,
 };
 pub use cli::{Cli, Command, execute};
 pub use exit::{ExitClass, emit_failure, exit_code};
@@ -27,6 +31,8 @@ pub use health::{HealthCoordinator, map_supervisor};
 pub use kv_backend::{KvCommand, KvCommandResult, KvStreamPart, SqliteKvBindingExecutor};
 pub use kv_http::KvApiState;
 pub use metrics::MetricsRegistry;
+pub use r2_backend::R2BindingService;
+pub use r2_http::R2ApiState;
 pub use run::run_platform;
 #[cfg(any(test, feature = "test-support"))]
 pub use run::{FailAfter, RunOptions, run_platform_with};

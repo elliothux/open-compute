@@ -442,6 +442,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
             MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap(),
         )),
         stream_budget: StreamBudget::new(2, 1),
+        r2: None,
     };
     let binding_id = BindingId::generate();
     let path = format!("/internal/bindings/v1/kv/{binding_id}/get");
@@ -1340,6 +1341,7 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
             executor,
             metrics: None,
             stream_budget: StreamBudget::new(2, 1),
+            r2: None,
         };
         dispatch_frame(
             state,

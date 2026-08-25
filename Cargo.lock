@@ -1685,6 +1685,7 @@ dependencies = [
  "bytes",
  "futures",
  "hex",
+ "md-5",
  "open-compute-core",
  "rand",
  "rustix",
@@ -1739,6 +1740,7 @@ dependencies = [
 name = "open-compute-service"
 version = "0.1.0"
 dependencies = [
+ "aws-sdk-s3",
  "axum",
  "base64 0.22.1",
  "bytes",
@@ -1748,6 +1750,7 @@ dependencies = [
  "http-body-util",
  "hyper 1.11.0",
  "hyper-util",
+ "md-5",
  "open-compute-artifacts",
  "open-compute-core",
  "open-compute-runtime",

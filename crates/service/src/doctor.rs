@@ -3,7 +3,8 @@
 use crate::config_load::LoadedConfig;
 use crate::metrics::MetricsRegistry;
 use open_compute_artifacts::{
-    ArtifactCache, S3ArtifactClient, preflight_s3, resolve_s3_credentials, sample_cache_integrity,
+    ArtifactCache, S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
+    sample_cache_integrity,
 };
 use open_compute_core::ids::{PlatformId, StartupId};
 use open_compute_core::{ErrorCode, PlatformError, Redactor, ResourceAvailability, SystemClock};
@@ -428,11 +429,16 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
             "data directory is missing"
         };
         checks.push(skipped("s3_canary", reason));
+        checks.push(skipped("r2_canary", reason));
         checks.push(skipped("runtime_cycle", reason));
     } else {
         checks.push(skipped(
             "s3_canary",
             "full doctor is required for the s3 canary",
+        ));
+        checks.push(skipped(
+            "r2_canary",
+            "full doctor is required for the R2 capability canary",
         ));
         checks.push(skipped(
             "runtime_cycle",
@@ -466,11 +472,29 @@ async fn run_full_extras(
                 Ok(_) => checks.push(ok("s3_canary", "s3 preflight canary succeeded", None)),
                 Err(err) => checks.push(failed("s3_canary", err.code(), err.message(), None)),
             }
+            match preflight_r2(client, platform_id, StartupId::generate()).await {
+                Ok(outcome) => checks.push(ok(
+                    "r2_canary",
+                    "R2 provider capability preflight succeeded",
+                    Some(if outcome.multi_delete {
+                        "multi_delete".to_owned()
+                    } else {
+                        "single_delete_fallback".to_owned()
+                    }),
+                )),
+                Err(err) => checks.push(failed("r2_canary", err.code(), err.message(), None)),
+            }
         }
         _ => checks.push(skipped(
             "s3_canary",
             "s3 canary requires connectivity and stored identity",
         )),
+    }
+    if client.is_none() || platform_id.is_none() {
+        checks.push(skipped(
+            "r2_canary",
+            "R2 canary requires connectivity and stored identity",
+        ));
     }
 
     let runtime = verify_runtime_binary(

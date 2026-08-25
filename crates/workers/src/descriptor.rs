@@ -12,6 +12,44 @@ use std::str::FromStr;
 
 /// Version of the public-only outbound gateway policy in the descriptor.
 pub const GLOBAL_OUTBOUND_POLICY_VERSION: u32 = 1;
+/// Reserved dynamic module containing the tenant-local R2 facade.
+pub const R2_FACADE_MODULE_NAME: &str = "__open_compute_r2_facade__.js";
+/// Reserved deterministic main-module wrapper generated for R2 deployments.
+pub const R2_WRAPPER_MODULE_NAME: &str = "__open_compute_r2_wrapper__.js";
+
+const R2_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/r2-facade.js");
+const R2_WRAPPER_GENERATOR_SOURCE: &[u8] =
+    include_bytes!("../../../runtime/system-workers/r2-wrapper-generator.js");
+
+/// Exact loaded-isolate source identity frozen into an R2 deployment descriptor.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LoadedIsolateInjectionV1 {
+    /// Injection plan schema.
+    pub schema_version: u32,
+    /// Local R2 facade capability version.
+    pub r2_facade_capability_version: u32,
+    /// SHA-256 of the exact injected facade module source.
+    pub r2_facade_sha256: String,
+    /// SHA-256 of the exact deterministic wrapper generator source.
+    pub r2_wrapper_generator_sha256: String,
+}
+
+impl LoadedIsolateInjectionV1 {
+    fn for_bindings(bindings: &[BindingDescriptorV1]) -> Option<Self> {
+        bindings
+            .iter()
+            .any(|binding| binding.kind == BindingKind::R2Bucket)
+            .then(|| Self {
+                schema_version: 1,
+                r2_facade_capability_version: 1,
+                r2_facade_sha256: hex::encode(Sha256::digest(R2_FACADE_SOURCE)),
+                r2_wrapper_generator_sha256: hex::encode(Sha256::digest(
+                    R2_WRAPPER_GENERATOR_SOURCE,
+                )),
+            })
+    }
+}
 
 /// Secret identity included without plaintext.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -125,6 +163,8 @@ pub struct WorkerCodeDescriptorV1 {
     pub secret_revisions: Vec<SecretDescriptor>,
     /// Canonically sorted immutable resource binding descriptors.
     pub binding_descriptors: Vec<BindingDescriptorV1>,
+    /// Exact loaded-isolate facade sources required by product bindings.
+    pub loaded_isolate_injection: Option<LoadedIsolateInjectionV1>,
     /// Immutable limits profile document.
     pub limits: serde_json::Value,
     /// Public egress policy version.
@@ -199,6 +239,7 @@ impl WorkerCodeDescriptorV1 {
                 ));
             }
         }
+        let loaded_isolate_injection = LoadedIsolateInjectionV1::for_bindings(&binding_descriptors);
         validate_limits(&limits)?;
         Ok(Self {
             schema_version: 1,
@@ -212,6 +253,7 @@ impl WorkerCodeDescriptorV1 {
             canonical_vars,
             secret_revisions,
             binding_descriptors,
+            loaded_isolate_injection,
             limits,
             global_outbound_policy_version: GLOBAL_OUTBOUND_POLICY_VERSION,
             loader_schema_version,

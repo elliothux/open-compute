@@ -11,6 +11,7 @@ use aws_smithy_http_client::Builder as HttpBuilder;
 use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
 use aws_smithy_http_client::tls::{Provider as TlsProvider, TlsContext, TrustStore};
 use open_compute_core::{ErrorCode, PlatformError, S3Config};
+use sha2::{Digest as _, Sha256};
 use std::time::Duration;
 
 /// Configured production S3 client plus bucket/prefix context.
@@ -19,6 +20,8 @@ pub struct S3ArtifactClient {
     inner: Client,
     bucket: String,
     prefix: String,
+    r2_prefix: String,
+    authority_sha256: [u8; 32],
     max_artifact_bytes: u64,
 }
 
@@ -67,10 +70,13 @@ impl S3ArtifactClient {
             .request_checksum_calculation(RequestChecksumCalculation::WhenRequired)
             .response_checksum_validation(ResponseChecksumValidation::WhenRequired)
             .build();
+        let authority_sha256 = authority_sha256(config);
         Ok(Self {
             inner: Client::from_conf(conf),
             bucket: config.bucket.clone(),
             prefix: config.prefix.clone(),
+            r2_prefix: config.r2_prefix.clone(),
+            authority_sha256,
             max_artifact_bytes,
         })
     }
@@ -87,6 +93,14 @@ impl S3ArtifactClient {
         &self.prefix
     }
 
+    pub(crate) fn r2_prefix(&self) -> &str {
+        &self.r2_prefix
+    }
+
+    pub(crate) const fn authority_sha256(&self) -> [u8; 32] {
+        self.authority_sha256
+    }
+
     pub(crate) fn max_artifact_bytes(&self) -> u64 {
         self.max_artifact_bytes
     }
@@ -97,6 +111,22 @@ impl S3ArtifactClient {
     pub async fn probe_connectivity(&self) -> Result<(), PlatformError> {
         crate::inspect::probe_connectivity(self).await
     }
+}
+
+fn authority_sha256(config: &S3Config) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    for value in [
+        config.endpoint.as_str(),
+        config.region.as_str(),
+        config.bucket.as_str(),
+        config.prefix.as_str(),
+        config.r2_prefix.as_str(),
+    ] {
+        digest.update(value.len().to_be_bytes());
+        digest.update(value.as_bytes());
+    }
+    digest.update([u8::from(config.force_path_style)]);
+    digest.finalize().into()
 }
 
 fn build_verified_http_client() -> aws_smithy_runtime_api::client::http::SharedHttpClient {

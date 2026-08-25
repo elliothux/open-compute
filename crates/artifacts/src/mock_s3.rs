@@ -22,6 +22,9 @@ pub enum Fault {
     CorruptMetadata,
     CorruptBody,
     DeleteFail,
+    PutResponseLoss,
+    DeleteResponseLoss,
+    MidstreamReset,
     NotFound,
 }
 
@@ -39,6 +42,9 @@ pub struct Recorded {
 pub(crate) struct StoredObject {
     pub body: Vec<u8>,
     pub sha256: String,
+    pub etag: String,
+    pub metadata: HashMap<String, String>,
+    pub response_headers: HashMap<String, String>,
     #[allow(dead_code)]
     pub modified: SystemTime,
 }
@@ -150,8 +156,11 @@ impl MockS3 {
         self.state.lock().expect("lock").objects.insert(
             key.to_string(),
             StoredObject {
+                etag: hex::encode(md5::Md5::digest(&body)),
                 body,
                 sha256,
+                metadata: HashMap::new(),
+                response_headers: HashMap::new(),
                 modified: SystemTime::now(),
             },
         );
@@ -309,8 +318,56 @@ async fn handle_conn(
             && (query.contains("list-type=2") || query.contains("prefix="))
         {
             let list_prefix = query_param(&query, "prefix").unwrap_or_default();
-            let xml = list_xml(&state, &bucket, &list_prefix);
+            let delimiter = query_param(&query, "delimiter");
+            let continuation = query_param(&query, "continuation-token");
+            let max_keys = query_param(&query, "max-keys")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(1000)
+                .min(1000);
+            let xml = list_xml(
+                &state,
+                &bucket,
+                &list_prefix,
+                delimiter.as_deref(),
+                continuation.as_deref(),
+                max_keys,
+            );
             write_xml(&mut stream, 200, &xml).await?;
+            continue;
+        }
+
+        if method == "POST"
+            && (path == format!("/{bucket}") || path == format!("/{bucket}/"))
+            && (query == "delete" || query.starts_with("delete="))
+        {
+            if fault == Fault::DeleteFail {
+                write_s3_err(&mut stream, 500, "InternalError").await?;
+                continue;
+            }
+            let xml = String::from_utf8_lossy(&body);
+            let keys = xml_values(&xml, "Key");
+            {
+                let mut g = state.lock().expect("lock");
+                for key in &keys {
+                    g.objects.remove(key);
+                }
+            }
+            if fault == Fault::DeleteResponseLoss {
+                stream.shutdown().await?;
+                return Ok(());
+            }
+            let deleted = keys
+                .iter()
+                .map(|key| format!("<Deleted><Key>{}</Key></Deleted>", xml_escape(key)))
+                .collect::<String>();
+            write_xml(
+                &mut stream,
+                200,
+                &format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{deleted}</DeleteResult>"
+                ),
+            )
+            .await?;
             continue;
         }
 
@@ -338,11 +395,41 @@ async fn handle_conn(
                     .get("x-amz-meta-sha256")
                     .cloned()
                     .unwrap_or_else(|| hex::encode(Sha256::digest(&body)));
+                let metadata = headers
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        name.strip_prefix("x-amz-meta-")
+                            .map(|name| (name.to_owned(), value.clone()))
+                    })
+                    .collect::<HashMap<_, _>>();
+                let response_headers = headers
+                    .iter()
+                    .filter(|(name, _)| {
+                        matches!(
+                            name.as_str(),
+                            "content-type"
+                                | "content-language"
+                                | "content-disposition"
+                                | "content-encoding"
+                                | "cache-control"
+                                | "expires"
+                        )
+                    })
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect::<HashMap<_, _>>();
+                let etag = hex::encode(md5::Md5::digest(&body));
                 let conflict = {
                     let mut g = state.lock().expect("lock");
-                    if g.objects.contains_key(&key)
-                        && headers.get("if-none-match").is_some_and(|v| v == "*")
-                    {
+                    let current = g.objects.get(&key);
+                    let none_failed = headers.get("if-none-match").is_some_and(|value| {
+                        value == "*" && current.is_some()
+                            || current
+                                .is_some_and(|object| etag_header_matches(value, &object.etag))
+                    });
+                    let match_failed = headers.get("if-match").is_some_and(|value| {
+                        current.is_none_or(|object| !etag_header_matches(value, &object.etag))
+                    });
+                    if none_failed || match_failed {
                         true
                     } else {
                         g.objects.insert(
@@ -350,6 +437,9 @@ async fn handle_conn(
                             StoredObject {
                                 body,
                                 sha256: sha,
+                                etag: etag.clone(),
+                                metadata,
+                                response_headers,
                                 modified: SystemTime::now(),
                             },
                         );
@@ -360,22 +450,57 @@ async fn handle_conn(
                     write_status(&mut stream, 412, "Precondition Failed", b"").await?;
                     continue;
                 }
-                write_status(&mut stream, 200, "OK", b"").await?;
+                if fault == Fault::PutResponseLoss {
+                    stream.shutdown().await?;
+                    return Ok(());
+                }
+                write_object_status(&mut stream, 200, "OK", 0, &HashMap::new(), &etag, None)
+                    .await?;
             }
             "HEAD" => {
                 let found = {
                     let g = state.lock().expect("lock");
                     g.objects.get(&key).map(|obj| {
-                        let mut sha = obj.sha256.clone();
+                        let mut metadata = obj.metadata.clone();
+                        metadata
+                            .entry("sha256".to_owned())
+                            .or_insert_with(|| obj.sha256.clone());
                         if fault == Fault::CorruptMetadata {
-                            sha = "ff".repeat(32);
+                            if metadata.contains_key("oc-r2-schema") {
+                                metadata.insert("oc-r2-schema".to_owned(), "corrupt".to_owned());
+                            } else {
+                                metadata.insert("sha256".to_owned(), "ff".repeat(32));
+                            }
                         }
-                        (obj.body.len(), sha)
+                        (
+                            obj.body.len(),
+                            metadata,
+                            obj.response_headers.clone(),
+                            obj.etag.clone(),
+                        )
                     })
                 };
                 match found {
                     None => write_s3_err(&mut stream, 404, "NoSuchKey").await?,
-                    Some((len, sha)) => write_head(&mut stream, len, &sha).await?,
+                    Some((len, metadata, response_headers, etag)) => {
+                        if headers
+                            .get("if-match")
+                            .is_some_and(|value| !etag_header_matches(value, &etag))
+                        {
+                            write_status(&mut stream, 412, "Precondition Failed", b"").await?;
+                            continue;
+                        }
+                        write_object_status(
+                            &mut stream,
+                            200,
+                            "OK",
+                            len,
+                            &metadata,
+                            &etag,
+                            Some(&response_headers),
+                        )
+                        .await?;
+                    }
                 }
             }
             "GET" => {
@@ -386,14 +511,78 @@ async fn handle_conn(
                         if fault == Fault::CorruptBody {
                             body.push(0x01);
                         }
-                        (body, obj.sha256.clone())
+                        let mut metadata = obj.metadata.clone();
+                        metadata
+                            .entry("sha256".to_owned())
+                            .or_insert_with(|| obj.sha256.clone());
+                        (
+                            body,
+                            metadata,
+                            obj.response_headers.clone(),
+                            obj.etag.clone(),
+                        )
                     });
                     (found, g.get_chunk_size, g.get_chunk_delay)
                 };
                 match found {
                     None => write_s3_err(&mut stream, 404, "NoSuchKey").await?,
-                    Some((body, sha)) => {
-                        write_get(&mut stream, &body, &sha, chunk_size, chunk_delay).await?;
+                    Some((body, metadata, response_headers, etag)) => {
+                        if headers
+                            .get("if-match")
+                            .is_some_and(|value| !etag_header_matches(value, &etag))
+                            || headers
+                                .get("if-none-match")
+                                .is_some_and(|value| etag_header_matches(value, &etag))
+                        {
+                            write_status(&mut stream, 412, "Precondition Failed", b"").await?;
+                            continue;
+                        }
+                        let full_length = body.len();
+                        let range = match headers.get("range") {
+                            Some(value) => match apply_range(value, &body) {
+                                Some(value) => Some(value),
+                                None => {
+                                    write_status(&mut stream, 416, "Range Not Satisfiable", b"")
+                                        .await?;
+                                    continue;
+                                }
+                            },
+                            None => None,
+                        };
+                        let (status, content_range, returned) = match range {
+                            Some((start, end)) => (
+                                206,
+                                Some(format!("bytes {start}-{end}/{full_length}")),
+                                body[start..=end].to_vec(),
+                            ),
+                            None => (200, None, body),
+                        };
+                        if fault == Fault::MidstreamReset {
+                            write_get_prefix_then_reset(
+                                &mut stream,
+                                status,
+                                &returned,
+                                &metadata,
+                                &response_headers,
+                                &etag,
+                                content_range.as_deref(),
+                            )
+                            .await?;
+                            return Ok(());
+                        } else {
+                            write_get(
+                                &mut stream,
+                                status,
+                                &returned,
+                                &metadata,
+                                &response_headers,
+                                &etag,
+                                content_range.as_deref(),
+                                chunk_size,
+                                chunk_delay,
+                            )
+                            .await?;
+                        }
                     }
                 }
             }
@@ -403,6 +592,10 @@ async fn handle_conn(
                     continue;
                 }
                 state.lock().expect("lock").objects.remove(&key);
+                if fault == Fault::DeleteResponseLoss {
+                    stream.shutdown().await?;
+                    return Ok(());
+                }
                 write_status(&mut stream, 204, "No Content", b"").await?;
             }
             _ => {
@@ -493,24 +686,77 @@ async fn read_aws_chunked(
     Ok(out)
 }
 
-fn list_xml(state: &Arc<Mutex<Inner>>, bucket: &str, prefix: &str) -> String {
+fn list_xml(
+    state: &Arc<Mutex<Inner>>,
+    bucket: &str,
+    prefix: &str,
+    delimiter: Option<&str>,
+    continuation: Option<&str>,
+    max_keys: usize,
+) -> String {
     let g = state.lock().expect("lock");
+    let mut rows = g
+        .objects
+        .iter()
+        .filter(|(key, _)| key.starts_with(prefix))
+        .filter(|(key, _)| continuation.is_none_or(|after| key.as_str() > after))
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     let mut contents = String::new();
-    for (key, obj) in &g.objects {
-        if key.starts_with(prefix) {
-            let lm = if g.omit_last_modified {
-                String::new()
-            } else {
-                "<LastModified>2020-01-01T00:00:00.000Z</LastModified>".to_string()
-            };
-            contents.push_str(&format!(
-                "<Contents><Key>{key}</Key>{lm}<ETag>\"etag\"</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass></Contents>",
-                obj.body.len()
-            ));
+    let mut common = std::collections::BTreeSet::new();
+    let mut emitted = 0_usize;
+    let mut truncated = false;
+    let mut last_emitted = None;
+    for (key, obj) in rows {
+        if emitted >= max_keys {
+            truncated = true;
+            break;
         }
+        if let Some(delimiter) = delimiter {
+            let remainder = &key[prefix.len()..];
+            if let Some(position) = remainder.find(delimiter) {
+                let end = prefix.len() + position + delimiter.len();
+                common.insert(key[..end].to_owned());
+                emitted = emitted.saturating_add(1);
+                last_emitted = Some(key.clone());
+                continue;
+            }
+        }
+        let lm = if g.omit_last_modified {
+            String::new()
+        } else {
+            "<LastModified>2020-01-01T00:00:00.000Z</LastModified>".to_string()
+        };
+        contents.push_str(&format!(
+            "<Contents><Key>{}</Key>{lm}<ETag>\"{}\"</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass></Contents>",
+            xml_escape(key),
+            obj.etag,
+            obj.body.len()
+        ));
+        emitted = emitted.saturating_add(1);
+        last_emitted = Some(key.clone());
     }
+    let common = common
+        .iter()
+        .map(|prefix| {
+            format!(
+                "<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>",
+                xml_escape(prefix)
+            )
+        })
+        .collect::<String>();
+    let token = truncated
+        .then_some(last_emitted)
+        .flatten()
+        .map_or_else(String::new, |token| {
+            format!(
+                "<NextContinuationToken>{}</NextContinuationToken>",
+                xml_escape(&token)
+            )
+        });
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name>{bucket}</Name><Prefix>{prefix}</Prefix><IsTruncated>false</IsTruncated>{contents}</ListBucketResult>"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name>{bucket}</Name><Prefix>{}</Prefix><MaxKeys>{max_keys}</MaxKeys><KeyCount>{emitted}</KeyCount><IsTruncated>{truncated}</IsTruncated>{token}{contents}{common}</ListBucketResult>",
+        xml_escape(prefix)
     )
 }
 
@@ -564,27 +810,64 @@ async fn write_s3_err(
     stream.flush().await
 }
 
-async fn write_head(
+async fn write_object_status(
     stream: &mut tokio::net::TcpStream,
+    code: u16,
+    reason: &str,
     len: usize,
-    sha: &str,
+    metadata: &HashMap<String, String>,
+    etag: &str,
+    response_headers: Option<&HashMap<String, String>>,
 ) -> Result<(), std::io::Error> {
+    let mut extra = format!("ETag: \"{etag}\"\r\nLast-Modified: Wed, 01 Jan 2020 00:00:00 GMT\r\n");
+    let mut metadata = metadata.iter().collect::<Vec<_>>();
+    metadata.sort_by(|left, right| left.0.cmp(right.0));
+    for (name, value) in metadata {
+        extra.push_str(&format!("x-amz-meta-{name}: {value}\r\n"));
+    }
+    if let Some(headers) = response_headers {
+        let mut headers = headers.iter().collect::<Vec<_>>();
+        headers.sort_by(|left, right| left.0.cmp(right.0));
+        for (name, value) in headers {
+            extra.push_str(&format!("{name}: {value}\r\n"));
+        }
+    }
     let resp = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nx-amz-meta-sha256: {sha}\r\nConnection: keep-alive\r\n\r\n"
+        "HTTP/1.1 {code} {reason}\r\nContent-Length: {len}\r\n{extra}Connection: keep-alive\r\n\r\n"
     );
     stream.write_all(resp.as_bytes()).await?;
     stream.flush().await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn write_get(
     stream: &mut tokio::net::TcpStream,
+    code: u16,
     body: &[u8],
-    sha: &str,
+    metadata: &HashMap<String, String>,
+    response_headers: &HashMap<String, String>,
+    etag: &str,
+    content_range: Option<&str>,
     chunk_size: usize,
     chunk_delay: Duration,
 ) -> Result<(), std::io::Error> {
+    let reason = if code == 206 { "Partial Content" } else { "OK" };
+    let mut extra = format!("ETag: \"{etag}\"\r\nLast-Modified: Wed, 01 Jan 2020 00:00:00 GMT\r\n");
+    if let Some(content_range) = content_range {
+        extra.push_str(&format!("Content-Range: {content_range}\r\n"));
+    }
+    let mut metadata = metadata.iter().collect::<Vec<_>>();
+    metadata.sort_by(|left, right| left.0.cmp(right.0));
+    for (name, value) in metadata {
+        extra.push_str(&format!("x-amz-meta-{name}: {value}\r\n"));
+    }
+    let mut headers = response_headers.iter().collect::<Vec<_>>();
+    headers.sort_by(|left, right| left.0.cmp(right.0));
+    for (name, value) in headers {
+        extra.push_str(&format!("{name}: {value}\r\n"));
+    }
     let resp = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nx-amz-meta-sha256: {sha}\r\nConnection: keep-alive\r\n\r\n",
+        "HTTP/1.1 {code} {reason}\r\nContent-Length: {}\r\n{extra}Connection: keep-alive\r\n\r\n",
         body.len()
     );
     stream.write_all(resp.as_bytes()).await?;
@@ -598,6 +881,104 @@ async fn write_get(
         }
     }
     stream.flush().await
+}
+
+async fn write_get_prefix_then_reset(
+    stream: &mut tokio::net::TcpStream,
+    code: u16,
+    body: &[u8],
+    metadata: &HashMap<String, String>,
+    response_headers: &HashMap<String, String>,
+    etag: &str,
+    content_range: Option<&str>,
+) -> Result<(), std::io::Error> {
+    let reason = if code == 206 { "Partial Content" } else { "OK" };
+    let mut extra = format!("ETag: \"{etag}\"\r\nLast-Modified: Wed, 01 Jan 2020 00:00:00 GMT\r\n");
+    if let Some(content_range) = content_range {
+        extra.push_str(&format!("Content-Range: {content_range}\r\n"));
+    }
+    let mut metadata = metadata.iter().collect::<Vec<_>>();
+    metadata.sort_by(|left, right| left.0.cmp(right.0));
+    for (name, value) in metadata {
+        extra.push_str(&format!("x-amz-meta-{name}: {value}\r\n"));
+    }
+    let mut headers = response_headers.iter().collect::<Vec<_>>();
+    headers.sort_by(|left, right| left.0.cmp(right.0));
+    for (name, value) in headers {
+        extra.push_str(&format!("{name}: {value}\r\n"));
+    }
+    let response = format!(
+        "HTTP/1.1 {code} {reason}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.write_all(&body[..body.len() / 2]).await?;
+    stream.shutdown().await
+}
+
+fn etag_header_matches(header: &str, etag: &str) -> bool {
+    header
+        .split(',')
+        .map(str::trim)
+        .any(|candidate| candidate == "*" || candidate.trim_matches('"') == etag)
+}
+
+fn apply_range(header: &str, body: &[u8]) -> Option<(usize, usize)> {
+    let value = header.strip_prefix("bytes=")?;
+    if value.contains(',') || body.is_empty() {
+        return None;
+    }
+    let (start, end) = value.split_once('-')?;
+    if start.is_empty() {
+        let suffix = end.parse::<usize>().ok()?;
+        if suffix == 0 {
+            return None;
+        }
+        let start = body.len().saturating_sub(suffix);
+        return Some((start, body.len() - 1));
+    }
+    let start = start.parse::<usize>().ok()?;
+    if start >= body.len() {
+        return None;
+    }
+    let end = if end.is_empty() {
+        body.len() - 1
+    } else {
+        end.parse::<usize>().ok()?.min(body.len() - 1)
+    };
+    (start <= end).then_some((start, end))
+}
+
+fn xml_values(xml: &str, tag: &str) -> Vec<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let mut values = Vec::new();
+    let mut remaining = xml;
+    while let Some(start) = remaining.find(&open) {
+        let after = &remaining[start + open.len()..];
+        let Some(end) = after.find(&close) else { break };
+        values.push(xml_unescape(&after[..end]));
+        remaining = &after[end + close.len()..];
+    }
+    values
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn xml_unescape(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 #[cfg(test)]

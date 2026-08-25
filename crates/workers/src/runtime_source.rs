@@ -311,9 +311,6 @@ impl RuntimeSource {
                 secrets.insert(secret.name.clone(), SecretString::new(text));
             }
         }
-        if scope != RuntimeScope::Runtime {
-            runtime_bindings.clear();
-        }
         Ok(RuntimeSnapshot {
             loader_key: key.to_owned(),
             worker_code_sha256: hex::encode(actual_descriptor),

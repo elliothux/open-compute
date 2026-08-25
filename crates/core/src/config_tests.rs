@@ -22,6 +22,8 @@ fn documented_defaults_validate() {
     );
     assert_eq!(config.storage.sqlite_busy_timeout_ms, 5_000);
     assert_eq!(config.s3.prefix, "system/");
+    assert_eq!(config.s3.r2_prefix, "tenant/r2/");
+    assert_eq!(config.r2.max_object_bytes, 512 * 1024 * 1024);
     assert!(config.s3.verify_tls);
     assert!(config.s3.force_path_style);
     assert_eq!(
@@ -166,6 +168,14 @@ fn s3_prefix_and_timeout_bounds() {
         ErrorCode::S3PrefixInvalid
     );
     assert_eq!(
+        parse_err("[s3]\nr2_prefix = \"system/r2/\"\n").code(),
+        ErrorCode::S3PrefixInvalid
+    );
+    assert_eq!(
+        parse_err("[s3]\nr2_prefix = \"tenant//r2/\"\n").code(),
+        ErrorCode::S3PrefixInvalid
+    );
+    assert_eq!(
         parse_err("[s3]\nmax_retries = 0\n").code(),
         ErrorCode::LimitInvalid
     );
@@ -200,6 +210,21 @@ fn s3_prefix_and_timeout_bounds() {
     let local = parse_ok("[s3]\nendpoint = \"http://127.0.0.1:9000\"\n");
     assert_eq!(local.s3.endpoint, "http://127.0.0.1:9000");
     assert!(local.s3.verify_tls);
+}
+
+#[test]
+fn r2_bounds_fail_closed() {
+    for input in [
+        "[r2]\nmax_object_bytes = 0\n",
+        "[r2]\nmax_object_bytes = 5363466241\n",
+        "[r2]\nmax_concurrent_uploads = 0\n",
+        "[r2]\nmax_staging_bytes = 1\n",
+        "[r2]\nmax_metadata_head_concurrency = 0\n",
+        "[r2]\noperation_timeout_ms = 0\n",
+        "[r2]\ncursor_ttl_ms = 86400001\n",
+    ] {
+        assert_eq!(parse_err(input).code(), ErrorCode::LimitInvalid, "{input}");
+    }
 }
 
 #[test]

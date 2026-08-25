@@ -40,6 +40,7 @@ pub struct SecretCrypto {
     fingerprint_key: [u8; 32],
     fingerprint_key_id: String,
     kv_cursor_key: [u8; 32],
+    r2_cursor_key: [u8; 32],
 }
 
 impl std::fmt::Debug for SecretCrypto {
@@ -84,12 +85,22 @@ impl SecretCrypto {
         })?;
         cursor_derivation.update(b"open-compute/kv-list-cursor/v1");
         let kv_cursor_key: [u8; 32] = cursor_derivation.finalize().into_bytes().into();
+        let mut r2_cursor_derivation =
+            <Hmac<Sha256> as Mac>::new_from_slice(bytes).map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::MasterKeyMismatch,
+                    "failed to derive R2 cursor HMAC key",
+                )
+            })?;
+        r2_cursor_derivation.update(b"open-compute/r2-list-cursor/v1");
+        let r2_cursor_key: [u8; 32] = r2_cursor_derivation.finalize().into_bytes().into();
         Ok(Self {
             cipher,
             key_id: key_id.to_string(),
             fingerprint_key,
             fingerprint_key_id,
             kv_cursor_key,
+            r2_cursor_key,
         })
     }
 
@@ -128,6 +139,25 @@ impl SecretCrypto {
     #[must_use]
     pub fn verify_kv_cursor(&self, payload: &[u8], signature: &[u8]) -> bool {
         let Ok(mut mac) = <Hmac<Sha256> as Mac>::new_from_slice(&self.kv_cursor_key) else {
+            return false;
+        };
+        mac.update(payload);
+        mac.verify_slice(signature).is_ok()
+    }
+
+    /// Sign a canonical R2 list-cursor payload with an independent key.
+    #[must_use]
+    pub fn sign_r2_cursor(&self, payload: &[u8]) -> [u8; 32] {
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.r2_cursor_key)
+            .expect("SHA-256 HMAC accepts a 32-byte key");
+        mac.update(payload);
+        mac.finalize().into_bytes().into()
+    }
+
+    /// Constant-time verification of a canonical R2 list-cursor payload.
+    #[must_use]
+    pub fn verify_r2_cursor(&self, payload: &[u8], signature: &[u8]) -> bool {
+        let Ok(mut mac) = <Hmac<Sha256> as Mac>::new_from_slice(&self.r2_cursor_key) else {
             return false;
         };
         mac.update(payload);
