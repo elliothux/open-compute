@@ -11,7 +11,9 @@
 > private BindingBackend。
 >
 > 后续消费者：[P0.4：KV](./p0-4-kv.md)、[P0.5：R2](./p0-5-r2.md)、
-> [P0.6：D1](./p0-6-d1.md)、P0.7 Durable Object
+> [P0.6：D1](./p0-6-d1.md)、
+> [P0.7：Durable Objects](./p0-7-durable-objects.md)、
+> [P0.8：Scheduler 与 DO Alarms](./p0-8-scheduler-do-alarms.md)
 
 P0.3 不交付一个新的 tenant-facing 存储产品。它交付所有持久化产品共用的资源生命周期、
 deployment binding、运行时 capability、内部 transport、删除 fence 和错误协议。P0.4 的 KV

@@ -551,12 +551,17 @@ Cloudflare 的语义是每个 Durable Object instance 拥有私有、强一致�
 使用 workerd native Durable Object/facet SQLite 和 `localDisk`：
 
 ```text
-doStorageId + className + objectId -> native facet identity
+doStorageId + namespaceId + objectId + objectGeneration
+    -> one native DoHost actor
+        -> one dynamically loaded tenant facet
 ```
 
 workerd 管理物理 SQLite。动态 class 通过 `workerLoader` 加载，再由 host actor 获取
-`getDurableObjectClass()`。可以参考 WDL 为每个 Worker/class 使用固定 host shards 的
-做法，避免为大量对象建立平台级路由记录。
+`getDurableObjectClass()`。WDL 的 fixed supervisor shard 主要服务多副本 owner/placement；本方案
+是单进程单 workerd，P0.7 采用“一 tenant object 一 host actor”，让相同 object 使用 native actor
+ordering、不同 object 真正并行，也避免 namespace 级 supervisor 成为瓶颈。public ID、binding、
+generation fence、delete/recreate 与 workerd storage ownership 见
+[P0.7：Durable Objects 详细设计](./p0-7-durable-objects.md)。
 
 ### 10.2 Storage identity
 
@@ -595,6 +600,10 @@ workerd 管理物理 SQLite。动态 class 通过 `workerLoader` 加载，再由
 - projection 缺失不能删除 object SQLite 中的权威 alarm row。
 
 Alarm delivery 是 at-least-once，handler 必须支持幂等。
+
+完整的 facet alarm Hard Gate、object-local shim table、`scheduler.sqlite` schema、claim lease、
+conditional completion、六次 retry、repair、shutdown 与 crash matrix 见
+[P0.8：Scheduler Kernel 与 DO Alarms 详细设计](./p0-8-scheduler-do-alarms.md)。
 
 ## 11. R2 与 S3
 
@@ -1199,6 +1208,10 @@ DO 依赖 Workers runtime、immutable version、binding framework 和 workerd lo
 相同 object 串行化、不同 object 并行、workerd restart、promotion/rollback 和
 delete/recreate。
 
+详细的 production native-facet Gate、一 object 一 host actor、64-hex ID、loaded-isolate facade、
+deployment generation fence、localDisk ownership、delete reconciliation、basic WebSocket 和测试矩阵见
+[P0.7：Durable Objects 详细设计](./p0-7-durable-objects.md)。
+
 ### P0.8：Scheduler kernel 与 DO alarms
 
 DO alarm 引入后续 Queue/Workflow 共同需要的最小 scheduler primitive：
@@ -1217,6 +1230,10 @@ DO alarm 引入后续 Queue/Workflow 共同需要的最小 scheduler primitive�
 
 P0 不在这里预建 Queue/Workflow 通用抽象；只提取已经被 alarm 实际使用的 scheduler
 primitive。
+
+详细的 facet alarm shim Gate、object SQLite authority、`scheduler.sqlite` due projection、claim
+lease、row/claim token、repair、at-least-once delivery、六次 retry 和 failure matrix 见
+[P0.8：Scheduler Kernel 与 DO Alarms 详细设计](./p0-8-scheduler-do-alarms.md)。
 
 ### P0 Exit Gate
 
