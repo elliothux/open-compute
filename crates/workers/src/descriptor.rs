@@ -20,6 +20,8 @@ pub const D1_FACADE_MODULE_NAME: &str = "__open_compute_d1_facade__.js";
 pub const DO_FACADE_MODULE_NAME: &str = "__open_compute_do_facade__.js";
 /// Reserved dynamic module containing the synchronous Durable Object ID codec.
 pub const DO_ID_CODEC_MODULE_NAME: &str = "__open_compute_do_id_codec__.js";
+/// Reserved dynamic module containing the object-local Durable Object alarm shim.
+pub const DO_ALARM_SHIM_MODULE_NAME: &str = "__open_compute_do_alarm_shim__.js";
 /// Reserved deterministic main-module wrapper generated for local product facades.
 pub const LOADED_ISOLATE_WRAPPER_MODULE_NAME: &str = "__open_compute_loaded_isolate_wrapper__.js";
 
@@ -27,6 +29,8 @@ const R2_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/
 const D1_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/d1-facade.js");
 const DO_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/do-facade.js");
 const DO_ID_CODEC_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/do-id-codec.js");
+const DO_ALARM_SHIM_SOURCE: &[u8] =
+    include_bytes!("../../../runtime/system-workers/do-alarm-shim.js");
 const LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE: &[u8] =
     include_bytes!("../../../runtime/system-workers/loaded-isolate-wrapper-generator.js");
 
@@ -57,6 +61,9 @@ pub struct LoadedIsolateInjectionV1 {
     /// SHA-256 of the exact synchronous Durable Object ID codec.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub do_id_codec_sha256: Option<String>,
+    /// SHA-256 of the exact object-local alarm shim source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub do_alarm_shim_sha256: Option<String>,
     /// SHA-256 of the exact deterministic wrapper generator source.
     pub loaded_isolate_wrapper_generator_sha256: String,
 }
@@ -83,6 +90,8 @@ impl LoadedIsolateInjectionV1 {
                 .then(|| hex::encode(Sha256::digest(DO_FACADE_SOURCE))),
             do_id_codec_sha256: durable_objects
                 .then(|| hex::encode(Sha256::digest(DO_ID_CODEC_SOURCE))),
+            do_alarm_shim_sha256: durable_objects
+                .then(|| hex::encode(Sha256::digest(DO_ALARM_SHIM_SOURCE))),
             loaded_isolate_wrapper_generator_sha256: hex::encode(Sha256::digest(
                 LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE,
             )),

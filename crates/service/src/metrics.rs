@@ -18,6 +18,8 @@ mod kv;
 mod r2;
 #[path = "metrics_resource.rs"]
 mod resource;
+#[path = "metrics_scheduler.rs"]
+mod scheduler;
 use d1::write_d1_metrics;
 pub(crate) use d1::{D1Lifecycle, D1LifecycleGuard, D1Operation};
 use durable_objects::write_do_metrics;
@@ -31,9 +33,11 @@ use r2::write_r2_metrics;
 pub(crate) use r2::{R2Operation, R2ProviderError, R2StreamDirection, R2StreamGuard};
 pub use resource::{BindingBackendOperation, ResourceOperation};
 use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
+use scheduler::write_scheduler_metrics;
+pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
 
 /// Compile-time series required by the platform and P0.3 binding framework.
-pub const REQUIRED_SERIES: u64 = 248;
+pub const REQUIRED_SERIES: u64 = 318;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 32;
 
@@ -251,6 +255,15 @@ struct Inner {
     do_websocket_active: u64,
     do_storage_bytes: u64,
     do_storage_watermark: usize,
+    scheduler_jobs: [u64; 3],
+    scheduler_claim: [u64; 3],
+    scheduler_dispatch_duration: [f64; 6],
+    scheduler_claim_expired: u64,
+    scheduler_in_flight: u64,
+    alarm_mutation: [u64; 6],
+    alarm_delivery: [u64; 42],
+    alarm_repair: [u64; 6],
+    alarm_lag_seconds: f64,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -347,6 +360,15 @@ impl MetricsRegistry {
                 do_websocket_active: 0,
                 do_storage_bytes: 0,
                 do_storage_watermark: 0,
+                scheduler_jobs: [0; 3],
+                scheduler_claim: [0; 3],
+                scheduler_dispatch_duration: [0.0; 6],
+                scheduler_claim_expired: 0,
+                scheduler_in_flight: 0,
+                alarm_mutation: [0; 6],
+                alarm_delivery: [0; 42],
+                alarm_repair: [0; 6],
+                alarm_lag_seconds: 0.0,
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -775,6 +797,7 @@ impl MetricsRegistry {
         write_r2_metrics(&mut out, &g);
         write_d1_metrics(&mut out, &g);
         write_do_metrics(&mut out, &g);
+        write_scheduler_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }
@@ -798,7 +821,7 @@ fn escape(value: &str) -> String {
         .replace('"', "\\\"")
 }
 
-fn component_order() -> [ComponentName; 7] {
+fn component_order() -> [ComponentName; 8] {
     [
         ComponentName::Cache,
         ComponentName::ControlDb,
@@ -807,6 +830,7 @@ fn component_order() -> [ComponentName; 7] {
         ComponentName::Process,
         ComponentName::Runtime,
         ComponentName::S3,
+        ComponentName::Scheduler,
     ]
 }
 

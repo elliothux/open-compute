@@ -16,8 +16,10 @@ const DEPLOYMENT_STAGING: &str = "deployment-staging";
 const BACKUP_STAGING: &str = "backup-staging";
 const DIAGNOSTICS: &str = "diagnostics";
 const FAILED_STARTS: &str = "failed-starts";
+const SCHEDULER_RECOVERY: &str = "scheduler-recovery";
 const LOCK_NAME: &str = "platform.lock";
 const CONTROL_DB_NAME: &str = "control.sqlite";
+const SCHEDULER_DB_NAME: &str = "scheduler.sqlite";
 const DURABLE_OBJECTS: &str = "do";
 const DURABLE_OBJECT_WORKERD: &str = "workerd";
 const DURABLE_OBJECT_MARKER: &str = "format.json";
@@ -76,7 +78,7 @@ pub fn inspect_durable_object_storage(
 }
 
 /// P0.1 layout names that must not be pre-created as tenant resource files.
-pub const FORBIDDEN_PRECREATE: &[&str] = &["do", "kv", "d1", "scheduler.sqlite"];
+pub const FORBIDDEN_PRECREATE: &[&str] = &["do", "kv", "d1"];
 
 /// RAII owner of a data directory and its exclusive lock.
 #[derive(Debug)]
@@ -118,6 +120,12 @@ impl DataDir {
     #[must_use]
     pub fn control_db_path(&self) -> PathBuf {
         self.root.join(CONTROL_DB_NAME)
+    }
+
+    /// Scheduler database path: `<data_dir>/scheduler.sqlite`.
+    #[must_use]
+    pub fn scheduler_db_path(&self) -> PathBuf {
+        self.root.join(SCHEDULER_DB_NAME)
     }
 
     /// Keys directory.
@@ -233,10 +241,122 @@ impl DataDir {
         Ok(db_path)
     }
 
+    /// Create `scheduler.sqlite` as a 0600 regular file under the owned data directory.
+    pub fn ensure_scheduler_db(&self) -> Result<PathBuf, PlatformError> {
+        if self.filesystem_durability() != FilesystemDurability::ApparentlyLocal {
+            return Err(PlatformError::new(
+                open_compute_core::ErrorCode::SchedulerUnavailable,
+                "scheduler database requires a local filesystem",
+            ));
+        }
+        let db_path = self.scheduler_db_path();
+        fs::validate_contained(&self.root, &db_path)?;
+        fs::ensure_file_secure(&db_path)?;
+        fs::validate_contained(&self.root, &db_path)?;
+        Ok(db_path)
+    }
+
+    /// Explicitly quarantine an uninspectable scheduler database and create an empty replacement.
+    ///
+    /// The exclusive data-directory lock must be held by this [`DataDir`], so a running
+    /// `platformd` cannot race the recovery. The caller must subsequently run bounded alarm
+    /// repair after startup to rebuild the projection from live Durable Objects.
+    pub fn recover_corrupt_scheduler_db(
+        &self,
+        backup_name: &str,
+        busy_timeout_ms: u64,
+        now_ms: i64,
+    ) -> Result<PathBuf, PlatformError> {
+        if !valid_scheduler_backup_name(backup_name) {
+            return Err(PlatformError::new(
+                open_compute_core::ErrorCode::PathInvalid,
+                "scheduler recovery backup name is invalid",
+            ));
+        }
+        let source = self.scheduler_db_path();
+        fs::validate_contained(&self.root, &source)?;
+        fs::validate_owned_file(&source, true)?;
+        if crate::scheduler::inspect_scheduler_db(&source, busy_timeout_ms, now_ms).is_ok() {
+            return Err(PlatformError::new(
+                open_compute_core::ErrorCode::ConfigInvalid,
+                "scheduler recovery refuses an intact database",
+            ));
+        }
+
+        let mut sources = Vec::new();
+        for suffix in ["", "-wal", "-shm"] {
+            let path = append_suffix(&source, suffix);
+            if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
+                fs::validate_owned_file(&path, true)?;
+                sources.push(path);
+            }
+        }
+
+        let parent = self.root.join(DIAGNOSTICS).join(SCHEDULER_RECOVERY);
+        fs::validate_contained(&self.root, &parent)?;
+        fs::create_dir_secure(&parent)?;
+        let backup = parent.join(backup_name);
+        fs::validate_contained(&self.root, &backup)?;
+        if backup.exists() || std::fs::symlink_metadata(&backup).is_ok() {
+            return Err(PlatformError::new(
+                open_compute_core::ErrorCode::PathInvalid,
+                "scheduler recovery backup already exists",
+            ));
+        }
+        fs::create_dir_secure(&backup)?;
+
+        let mut moved = Vec::new();
+        for from in sources {
+            let file_name = from.file_name().ok_or_else(recovery_failed)?;
+            let to = backup.join(file_name);
+            if std::fs::rename(&from, &to).is_err() {
+                for (restore_from, restore_to) in moved.into_iter().rev() {
+                    let _ = std::fs::rename(restore_to, restore_from);
+                }
+                let _ = std::fs::remove_dir(&backup);
+                return Err(recovery_failed());
+            }
+            moved.push((from, to));
+        }
+        fs::fsync_dir(&self.root)?;
+        fs::fsync_dir(&backup)?;
+
+        let replacement = self.ensure_scheduler_db()?;
+        match crate::scheduler::SchedulerStore::open(&replacement, busy_timeout_ms, now_ms) {
+            Ok(store) => {
+                drop(store);
+                fs::fsync_dir(&self.root)?;
+                Ok(backup)
+            }
+            Err(error) => {
+                for suffix in ["-shm", "-wal", ""] {
+                    let path = append_suffix(&replacement, suffix);
+                    if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
+                let mut restored = true;
+                for (from, to) in moved.into_iter().rev() {
+                    if std::fs::rename(to, from).is_err() {
+                        restored = false;
+                    }
+                }
+                let _ = std::fs::remove_dir(&backup);
+                let _ = fs::fsync_dir(&self.root);
+                if restored {
+                    Err(error)
+                } else {
+                    Err(recovery_failed())
+                }
+            }
+        }
+    }
+
     fn validate_children(&self) -> Result<(), PlatformError> {
         for rel in [
             LOCK_NAME,
             CONTROL_DB_NAME,
+            SCHEDULER_DB_NAME,
             KEYS,
             RUNTIME,
             CACHE,
@@ -251,6 +371,10 @@ impl DataDir {
         let db_path = self.root.join(CONTROL_DB_NAME);
         if db_path.exists() || std::fs::symlink_metadata(&db_path).is_ok() {
             fs::validate_owned_file(&db_path, true)?;
+        }
+        let scheduler_path = self.root.join(SCHEDULER_DB_NAME);
+        if scheduler_path.exists() || std::fs::symlink_metadata(&scheduler_path).is_ok() {
+            fs::validate_owned_file(&scheduler_path, true)?;
         }
         for dir in [
             self.keys_dir(),
@@ -305,6 +429,27 @@ impl DataDir {
         }
         Ok(())
     }
+}
+
+fn valid_scheduler_backup_name(name: &str) -> bool {
+    (1..=80).contains(&name.len())
+        && name.starts_with("scheduler-corrupt-")
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
+}
+
+fn recovery_failed() -> PlatformError {
+    PlatformError::new(
+        open_compute_core::ErrorCode::PathInvalid,
+        "scheduler corrupt-file recovery failed",
+    )
 }
 
 fn do_storage_unavailable() -> PlatformError {

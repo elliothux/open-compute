@@ -14,13 +14,14 @@ pub mod health;
 pub mod ids;
 pub mod redact;
 pub mod resource;
+pub mod scheduler;
 pub mod secret;
 
 pub use clock::{Clock, SystemClock};
 pub use config::{
     CacheConfig, D1Config, DiagnosticsConfig, DurableObjectsConfig, KvConfig, MetricsConfig,
-    PlatformConfig, R2Config, RuntimeConfig, S3Config, SecretReference, ServerConfig,
-    StorageConfig, WorkersConfig, validate_bootstrap_config_path,
+    PlatformConfig, R2Config, RuntimeConfig, S3Config, SchedulerConfig, SecretReference,
+    ServerConfig, StorageConfig, WorkersConfig, validate_bootstrap_config_path,
 };
 pub use durable_objects::{
     DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAME_MAX_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES,
@@ -35,6 +36,9 @@ pub use redact::Redactor;
 pub use resource::{
     BindingKind, CanonicalBindingConfig, CanonicalPermissions, ResourceAvailability, ResourceState,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use scheduler::DeterministicSchedulerClock;
+pub use scheduler::{SchedulerClock, SystemSchedulerClock};
 pub use secret::{SecretBytes, SecretString};
 
 #[cfg(any(test, feature = "test-support"))]

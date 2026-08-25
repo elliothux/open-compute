@@ -6,7 +6,8 @@ use crate::kv_backend::{
     ensure_storage_headroom,
 };
 use crate::metrics::{
-    BindingBackendOperation, DoOperation, KvOperation, KvStagingGauge, MetricsRegistry,
+    AlarmMutation, BindingBackendOperation, DoOperation, KvOperation, KvStagingGauge,
+    MetricsRegistry,
 };
 use crate::r2_backend::R2BindingService;
 use axum::Router;
@@ -22,7 +23,8 @@ use open_compute_core::{
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
-    AuthorizedBinding, BindingRepository, DurableObjectRepository, PlatformStorage,
+    AlarmProjection, AuthorizedBinding, BindingRepository, DurableObjectRepository,
+    PlatformStorage, SchedulerStore,
 };
 use open_compute_workers::{ResourcePin, ResourcePins};
 use serde::{Deserialize, Serialize};
@@ -210,6 +212,7 @@ struct BackendState {
     r2: Option<Arc<R2BindingService>>,
     d1: Option<Arc<D1BindingService>>,
     do_config: DurableObjectsConfig,
+    scheduler: Option<Arc<SchedulerStore>>,
 }
 
 #[derive(Clone)]
@@ -360,6 +363,27 @@ pub async fn serve_binding_backend_with_products_and_do_config(
     do_config: DurableObjectsConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
+    serve_binding_backend_with_scheduler(
+        listener, storage, auth, pins, executor, metrics, r2, d1, do_config, None, shutdown,
+    )
+    .await
+}
+
+/// Serve every product plane with the independent P0.8 alarm projection authority.
+#[allow(clippy::too_many_arguments)]
+pub async fn serve_binding_backend_with_scheduler(
+    listener: TcpListener,
+    storage: Arc<PlatformStorage>,
+    auth: GenerationAuthRegistry,
+    pins: ResourcePins,
+    executor: Arc<dyn KvBindingExecutor>,
+    metrics: Option<Arc<MetricsRegistry>>,
+    r2: Option<Arc<R2BindingService>>,
+    d1: Option<Arc<D1BindingService>>,
+    do_config: DurableObjectsConfig,
+    scheduler: Option<Arc<SchedulerStore>>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), PlatformError> {
     let (global_streams, resource_streams) = executor.stream_limits();
     let state = BackendState {
         storage,
@@ -371,6 +395,7 @@ pub async fn serve_binding_backend_with_products_and_do_config(
         r2,
         d1,
         do_config,
+        scheduler,
     };
     let router = Router::new().fallback(handle).with_state(state);
     axum::serve(listener, router.into_make_service())
@@ -485,6 +510,20 @@ struct DoReadyRequest {
     object_generation: u64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AlarmRequest {
+    namespace_resource_id: ResourceId,
+    object_id: DurableObjectId,
+    object_generation: u64,
+    #[serde(default)]
+    scheduled_time_ms: Option<i64>,
+    #[serde(default)]
+    retry_count: Option<u8>,
+    #[serde(default)]
+    row_token: Option<String>,
+}
+
 async fn handle(State(state): State<BackendState>, request: Request) -> Response {
     let headers = request.headers();
     let token = header_text(headers, TOKEN_HEADER).unwrap_or("");
@@ -497,6 +536,9 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
             ErrorCode::BindingProtocolError,
             StatusCode::METHOD_NOT_ALLOWED,
         );
+    }
+    if request.uri().path().starts_with("/internal/alarms/v1/") {
+        return handle_alarm_index(state, request).await;
     }
     if request
         .uri()
@@ -659,6 +701,150 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
         observe(dispatch_frame(state.clone(), binding, operation, request_id, request, pin).await)
     } else {
         observe(dispatch(state.executor, binding, operation, request, pin).await)
+    }
+}
+
+async fn handle_alarm_index(state: BackendState, request: Request) -> Response {
+    if !content_type_is(request.headers(), "application/json")
+        || !valid_request_id(request.headers())
+    {
+        return backend_error(
+            ErrorCode::SchedulerInternalProtocolError,
+            StatusCode::BAD_REQUEST,
+        );
+    }
+    let operation = request
+        .uri()
+        .path()
+        .strip_prefix("/internal/alarms/v1/")
+        .unwrap_or("")
+        .to_owned();
+    if !matches!(
+        operation.as_str(),
+        "resolve" | "upsert" | "delete" | "clear"
+    ) {
+        return backend_error(
+            ErrorCode::SchedulerInternalProtocolError,
+            StatusCode::NOT_FOUND,
+        );
+    }
+    let Ok(bytes) = to_bytes(request.into_body(), 4096).await else {
+        return backend_error(
+            ErrorCode::SchedulerInternalProtocolError,
+            StatusCode::PAYLOAD_TOO_LARGE,
+        );
+    };
+    let body = match parse_json::<AlarmRequest>(&bytes) {
+        Ok(value) if value.object_generation > 0 => value,
+        _ => {
+            return backend_error(
+                ErrorCode::SchedulerInternalProtocolError,
+                StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let storage = state.storage.clone();
+    let scheduler = state.scheduler.clone();
+    let metrics = state.metrics.clone();
+    let mutation = match operation.as_str() {
+        "upsert" => Some(AlarmMutation::Set),
+        "delete" => Some(AlarmMutation::Delete),
+        "clear" => Some(AlarmMutation::Clear),
+        _ => None,
+    };
+    let result = tokio::task::spawn_blocking(move || {
+        let authority = DurableObjectRepository::new(&storage).authorize_alarm_dispatch(
+            body.namespace_resource_id,
+            body.object_id,
+            body.object_generation,
+        )?;
+        match operation.as_str() {
+            "resolve" => {
+                if body.scheduled_time_ms.is_some()
+                    || body.retry_count.is_some()
+                    || body.row_token.is_some()
+                {
+                    return Err(alarm_protocol_error());
+                }
+                serde_json::to_vec(&authority)
+                    .map(Some)
+                    .map_err(|_| alarm_protocol_error())
+            }
+            "upsert" => {
+                let store = scheduler.as_ref().ok_or_else(alarm_unavailable)?;
+                let (Some(due_at_ms), Some(retry_count), Some(row_token)) =
+                    (body.scheduled_time_ms, body.retry_count, body.row_token)
+                else {
+                    return Err(alarm_protocol_error());
+                };
+                store.upsert_alarm(
+                    &AlarmProjection {
+                        namespace_resource_id: body.namespace_resource_id,
+                        object_id: body.object_id,
+                        object_generation: body.object_generation,
+                        row_token,
+                        due_at_ms,
+                        target_deployment_id: authority.deployment_id,
+                        execution_generation: authority.route_generation,
+                        retry_count,
+                    },
+                    unix_ms(),
+                )?;
+                Ok(None)
+            }
+            "delete" => {
+                let store = scheduler.as_ref().ok_or_else(alarm_unavailable)?;
+                if body.scheduled_time_ms.is_some() || body.retry_count.is_some() {
+                    return Err(alarm_protocol_error());
+                }
+                let Some(row_token) = body.row_token else {
+                    return Err(alarm_protocol_error());
+                };
+                store.delete_alarm_exact(
+                    body.namespace_resource_id,
+                    body.object_id,
+                    body.object_generation,
+                    &row_token,
+                )?;
+                Ok(None)
+            }
+            "clear" => {
+                let store = scheduler.as_ref().ok_or_else(alarm_unavailable)?;
+                if body.scheduled_time_ms.is_some()
+                    || body.retry_count.is_some()
+                    || body.row_token.is_some()
+                {
+                    return Err(alarm_protocol_error());
+                }
+                store.delete_object(
+                    body.namespace_resource_id,
+                    body.object_id,
+                    body.object_generation,
+                )?;
+                Ok(None)
+            }
+            _ => Err(alarm_protocol_error()),
+        }
+    })
+    .await;
+    if let (Some(metrics), Some(mutation)) = (metrics, mutation) {
+        metrics.inc_alarm_mutation(mutation, matches!(&result, Ok(Ok(_))));
+    }
+    match result {
+        Ok(Ok(Some(bytes))) => {
+            let mut response = Response::new(Body::from(bytes));
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            response
+        }
+        Ok(Ok(None)) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(error)) => platform_error(&error),
+        Err(_) => backend_error(
+            ErrorCode::SchedulerUnavailable,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
     }
 }
 
@@ -1600,7 +1786,10 @@ fn platform_error(error: &PlatformError) -> Response {
         | ErrorCode::KvResultUnknown => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::DoStorageUnavailable
         | ErrorCode::DoStorageLimit
-        | ErrorCode::DoDispatchTimeout => StatusCode::SERVICE_UNAVAILABLE,
+        | ErrorCode::DoDispatchTimeout
+        | ErrorCode::DoAlarmIndexUnavailable
+        | ErrorCode::SchedulerUnavailable
+        | ErrorCode::SchedulerBusy => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::BindingTypeMismatch
         | ErrorCode::BindingCapabilityUnsupported
         | ErrorCode::ResourceInvariantViolation => StatusCode::UNPROCESSABLE_ENTITY,
@@ -1613,11 +1802,12 @@ fn platform_error(error: &PlatformError) -> Response {
         ErrorCode::DoIdInvalid
         | ErrorCode::DoRpcUnsupported
         | ErrorCode::DoPlacementOptionUnsupported
-        | ErrorCode::DoInternalProtocolError => StatusCode::BAD_REQUEST,
+        | ErrorCode::DoInternalProtocolError
+        | ErrorCode::SchedulerInternalProtocolError => StatusCode::BAD_REQUEST,
         ErrorCode::DoClassNotFound | ErrorCode::DoRuntimeException => {
             StatusCode::UNPROCESSABLE_ENTITY
         }
-        ErrorCode::KvCorrupt => StatusCode::UNPROCESSABLE_ENTITY,
+        ErrorCode::KvCorrupt | ErrorCode::SchedulerCorrupt => StatusCode::UNPROCESSABLE_ENTITY,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     backend_error(error.code(), status)
@@ -1676,6 +1866,20 @@ fn protocol_error() -> PlatformError {
     PlatformError::new(
         ErrorCode::BindingProtocolError,
         "binding request payload is invalid",
+    )
+}
+
+fn alarm_protocol_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::SchedulerInternalProtocolError,
+        "alarm projection request is invalid",
+    )
+}
+
+fn alarm_unavailable() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::DoAlarmIndexUnavailable,
+        "alarm projection authority is unavailable",
     )
 }
 

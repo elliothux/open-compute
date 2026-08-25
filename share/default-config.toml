@@ -75,3 +75,14 @@ max_in_flight_dispatches = 256
 disk_high_watermark_percent = 85
 disk_stop_writes_percent = 95
 reconcile_batch = 64
+
+[scheduler]
+poll_interval_ms = 100
+claim_batch = 32
+max_in_flight = 16
+claim_lease_ms = 60000
+dispatch_timeout_ms = 30000
+lease_guard_ms = 5000
+repair_batch = 100
+repair_interval_ms = 30000
+shutdown_drain_ms = 10000

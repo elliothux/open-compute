@@ -334,7 +334,7 @@ impl ControlDb {
     }
 }
 
-fn leaf_nofollow_path(path: &Path) -> Result<std::path::PathBuf, PlatformError> {
+pub(crate) fn leaf_nofollow_path(path: &Path) -> Result<std::path::PathBuf, PlatformError> {
     let parent = path.parent().ok_or_else(|| {
         PlatformError::new(
             ErrorCode::PathInvalid,

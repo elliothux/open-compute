@@ -22,6 +22,8 @@ pub enum ComponentName {
     Cache,
     /// workerd child process.
     Runtime,
+    /// Independent Durable Object alarm scheduler.
+    Scheduler,
 }
 
 impl ComponentName {
@@ -36,6 +38,7 @@ impl ComponentName {
             Self::S3 => "s3",
             Self::Cache => "cache",
             Self::Runtime => "runtime",
+            Self::Scheduler => "scheduler",
         }
     }
 }
@@ -162,6 +165,7 @@ impl PlatformStatus {
                 ComponentHealth::starting(ComponentName::S3),
                 ComponentHealth::starting(ComponentName::Cache),
                 ComponentHealth::starting(ComponentName::Runtime),
+                ComponentHealth::starting(ComponentName::Scheduler),
             ],
         }
     }

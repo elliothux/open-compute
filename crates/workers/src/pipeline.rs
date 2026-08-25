@@ -4,9 +4,10 @@ use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
 use crate::descriptor::{
-    BindingDescriptorV1, D1_FACADE_MODULE_NAME, DO_FACADE_MODULE_NAME, DO_ID_CODEC_MODULE_NAME,
-    LOADED_ISOLATE_WRAPPER_MODULE_NAME, R2_FACADE_MODULE_NAME, SecretDescriptor,
-    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, validate_env_name,
+    BindingDescriptorV1, D1_FACADE_MODULE_NAME, DO_ALARM_SHIM_MODULE_NAME, DO_FACADE_MODULE_NAME,
+    DO_ID_CODEC_MODULE_NAME, LOADED_ISOLATE_WRAPPER_MODULE_NAME, R2_FACADE_MODULE_NAME,
+    SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256,
+    validate_env_name,
 };
 use bytes::Bytes;
 use futures::stream;
@@ -705,6 +706,7 @@ pub(crate) fn validate_injection_module_collisions(
                 | D1_FACADE_MODULE_NAME
                 | DO_FACADE_MODULE_NAME
                 | DO_ID_CODEC_MODULE_NAME
+                | DO_ALARM_SHIM_MODULE_NAME
                 | LOADED_ISOLATE_WRAPPER_MODULE_NAME
         )
     }) {

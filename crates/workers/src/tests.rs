@@ -737,6 +737,40 @@ fn r2_injection_sources_are_descriptor_bound_and_reserved_modules_fail_closed() 
         .r2_facade_sha256 = Some("00".repeat(32));
     assert_ne!(digest, tampered.sha256().unwrap());
 
+    let do_binding = BindingDescriptorV1::new(
+        open_compute_core::BindingId::generate(),
+        "OBJECTS".to_owned(),
+        open_compute_core::BindingKind::DoNamespace,
+        open_compute_core::ResourceId::generate(),
+        1,
+        1,
+        open_compute_core::CanonicalPermissions::default(),
+        open_compute_core::CanonicalBindingConfig::default(),
+    )
+    .unwrap();
+    let do_descriptor = WorkerCodeDescriptorV1::new(
+        account,
+        worker,
+        DeploymentId::generate(),
+        bundle.sha256(),
+        bundle.manifest(),
+        "2026-08-22".to_owned(),
+        Vec::new(),
+        BTreeMap::new(),
+        Vec::new(),
+        vec![do_binding],
+        serde_json::json!({"profile": "default"}),
+        1,
+    )
+    .unwrap();
+    let do_injection = do_descriptor.loaded_isolate_injection.as_ref().unwrap();
+    assert_eq!(do_injection.do_facade_sha256.as_ref().unwrap().len(), 64);
+    assert_eq!(do_injection.do_id_codec_sha256.as_ref().unwrap().len(), 64);
+    assert_eq!(
+        do_injection.do_alarm_shim_sha256.as_ref().unwrap().len(),
+        64
+    );
+
     let collision = CanonicalBundle::build(
         "index.js",
         vec![
@@ -757,6 +791,21 @@ fn r2_injection_sources_are_descriptor_bound_and_reserved_modules_fail_closed() 
     )]);
     assert_eq!(
         validate_injection_module_collisions(collision.manifest(), &bindings)
+            .unwrap_err()
+            .code(),
+        ErrorCode::BundleInvalid
+    );
+    let alarm_collision = CanonicalBundle::build(
+        "index.js",
+        vec![
+            module("index.js", b"export default {}"),
+            module(DO_ALARM_SHIM_MODULE_NAME, b"export default {}"),
+        ],
+        BundleLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        validate_injection_module_collisions(alarm_collision.manifest(), &bindings)
             .unwrap_err()
             .code(),
         ErrorCode::BundleInvalid

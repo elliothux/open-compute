@@ -184,7 +184,10 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         "binding-backend server stopped during deployment validation"
     );
     let response = dispatch(&transport, account, worker.id, &a, None, "hello-a").await;
-    assert_eq!(response.status, 200);
+    assert_eq!(
+        response.status, 200,
+        "unexpected dispatch response: {response:?}"
+    );
     assert_eq!(response.loader_outcome, Some(LoaderOutcome::Cold));
     assert!(response.body.contains("A:hello-a:production:gate-secret"));
     assert!(response.body.ends_with(":API_TOKEN,MODE"));
@@ -196,7 +199,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     assert!(warm.body.contains("A:warm:production:gate-secret"));
 
     let named = dispatch(&transport, account, worker.id, &a, Some("Named"), "named").await;
-    assert_eq!(named.status, 200);
+    assert_eq!(named.status, 200, "unexpected named response: {named:?}");
     assert_eq!(named.body, "named:A:named");
     let missing = dispatch(
         &transport,
@@ -1186,6 +1189,7 @@ export default {{
     }
 }
 
+#[derive(Debug)]
 struct DispatchResponse {
     status: u16,
     body: String,

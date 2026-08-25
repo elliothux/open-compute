@@ -6,6 +6,7 @@ const INTERNAL_PATHS = new Set([
   "/internal/validate-do",
 ]);
 const DO_ADMIN_PATH = "/internal/do-delete";
+const DO_ALARM_PATHS = new Set(["/internal/do-alarm", "/internal/do-alarm-repair"]);
 
 function tokenEquals(left, right) {
   const encoder = new TextEncoder();
@@ -40,6 +41,13 @@ export default {
       return body.byteLength === 0 ? new Response(null, { status: 204 }) : deny();
     }
     if (request.method !== "POST" || !INTERNAL_PATHS.has(url.pathname) || url.search !== "") {
+      if (request.method === "POST" && DO_ALARM_PATHS.has(url.pathname) && url.search === "") {
+        return env.DO_ROUTER.fetch(new Request(`http://do-router${url.pathname}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: request.body,
+        }));
+      }
       if (request.method === "POST" && url.pathname === DO_ADMIN_PATH && url.search === "") {
         return env.DO_ROUTER.fetch(new Request("http://do-router/internal/do-delete", {
           method: "POST",

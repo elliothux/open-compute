@@ -14,11 +14,12 @@ use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, Reque
 use open_compute_runtime::{
     GenerationAuthRegistry, SupervisorState, TOKEN_HEADER, WorkerdSupervisor,
 };
-use open_compute_storage::AuthorizedDurableObjectDelete;
+use open_compute_storage::{AuthorizedDurableObjectDelete, ClaimedJob};
 use open_compute_workers::{
     RuntimeScope, RuntimeSource, RuntimeValidator, ValidationCandidate, loader_key,
 };
 use serde::Deserialize;
+use serde::Serialize;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
@@ -39,6 +40,70 @@ pub enum LoaderOutcome {
     Cold,
     /// The immutable key was already present in the workerd process.
     Warm,
+}
+
+/// Object-local result of one private Durable Object alarm delivery.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct AlarmDispatchResult {
+    /// Stable state-machine outcome.
+    pub outcome: AlarmDispatchOutcome,
+    /// Authoritative due time for `not_due` or `retry`.
+    #[serde(default)]
+    pub scheduled_time_ms: Option<i64>,
+    /// Authoritative retry count for `not_due` or `retry`.
+    #[serde(default)]
+    pub retry_count: Option<u8>,
+    /// Stable low-cardinality tenant error code.
+    #[serde(default)]
+    pub error_code: Option<String>,
+}
+
+/// Stable private alarm delivery outcomes.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum AlarmDispatchOutcome {
+    /// Handler completed and consumed the exact authority row.
+    Success,
+    /// Object authority no longer matches this projection.
+    Stale,
+    /// Object authority is valid but its due time moved forward.
+    NotDue,
+    /// Handler failed and object authority scheduled the next bounded retry.
+    Retry,
+    /// The sixth automatic retry failed and object authority was removed.
+    Exhausted,
+}
+
+/// Strict object-local alarm DTO returned to bounded projection repair.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct AlarmRepairResult {
+    /// Whether valid object-local alarm authority exists.
+    pub exists: bool,
+    /// Authoritative due time when `exists`.
+    #[serde(default)]
+    pub scheduled_time_ms: Option<i64>,
+    /// Authoritative retry count when `exists`.
+    #[serde(default)]
+    pub retry_count: Option<u8>,
+    /// Authoritative row token when `exists`.
+    #[serde(default)]
+    pub row_token: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AlarmObjectRequest<'a> {
+    namespace_resource_id: open_compute_core::ResourceId,
+    object_id: open_compute_core::DurableObjectId,
+    object_generation: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    row_token: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_count: Option<u8>,
 }
 
 /// Immutable target frozen by route resolution or deployment validation.
@@ -279,6 +344,88 @@ impl WorkerdTransport {
         }
     }
 
+    /// Deliver one scheduler claim through the generation-authenticated private alarm path.
+    pub async fn dispatch_alarm(
+        &self,
+        job: &ClaimedJob,
+        timeout: Duration,
+    ) -> Result<AlarmDispatchResult, PlatformError> {
+        let result = self
+            .alarm_request(
+                "/internal/do-alarm",
+                &AlarmObjectRequest {
+                    namespace_resource_id: job.namespace_resource_id,
+                    object_id: job.object_id,
+                    object_generation: job.object_generation,
+                    row_token: Some(&job.row_token),
+                    retry_count: Some(job.retry_count),
+                },
+                timeout,
+            )
+            .await?;
+        validate_alarm_dispatch_result(result)
+    }
+
+    /// Probe one live object for bounded projection repair without exposing arbitrary SQL.
+    pub async fn repair_alarm(
+        &self,
+        namespace_resource_id: open_compute_core::ResourceId,
+        object_id: open_compute_core::DurableObjectId,
+        object_generation: u64,
+        timeout: Duration,
+    ) -> Result<AlarmRepairResult, PlatformError> {
+        let result = self
+            .alarm_request(
+                "/internal/do-alarm-repair",
+                &AlarmObjectRequest {
+                    namespace_resource_id,
+                    object_id,
+                    object_generation,
+                    row_token: None,
+                    retry_count: None,
+                },
+                timeout,
+            )
+            .await?;
+        validate_alarm_repair_result(result)
+    }
+
+    async fn alarm_request<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: &AlarmObjectRequest<'_>,
+        timeout: Duration,
+    ) -> Result<T, PlatformError> {
+        let (port, credential) = self.endpoint()?;
+        let bytes = serde_json::to_vec(body).map_err(|_| alarm_protocol_error())?;
+        let request = hyper::Request::builder()
+            .method(Method::POST)
+            .uri(format!("http://127.0.0.1:{port}{path}"))
+            .header(TOKEN_HEADER, credential.expose())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(bytes))
+            .map_err(|_| alarm_protocol_error())?;
+        let response = tokio::time::timeout(timeout, self.client.request(request))
+            .await
+            .map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::DoDispatchTimeout,
+                    "Durable Object alarm dispatch result is unknown",
+                )
+            })?
+            .map_err(|_| runtime_unavailable())?;
+        if !response.status().is_success() {
+            return Err(PlatformError::new(
+                ErrorCode::DoStorageUnavailable,
+                "Durable Object alarm dispatch failed",
+            ));
+        }
+        let bytes = to_bytes(Body::new(response.into_body()), 4096)
+            .await
+            .map_err(|_| alarm_protocol_error())?;
+        serde_json::from_slice(&bytes).map_err(|_| alarm_protocol_error())
+    }
+
     /// Prove that a named module export exists without invoking tenant `fetch()`.
     pub async fn probe_entrypoint(
         &self,
@@ -443,6 +590,58 @@ impl WorkerdTransport {
     }
 }
 
+fn validate_alarm_dispatch_result(
+    result: AlarmDispatchResult,
+) -> Result<AlarmDispatchResult, PlatformError> {
+    let schedule_valid = result.scheduled_time_ms.is_some_and(|value| value > 0)
+        && result.retry_count.is_some_and(|value| value <= 6);
+    let shape_valid = match result.outcome {
+        AlarmDispatchOutcome::Success | AlarmDispatchOutcome::Stale => {
+            result.scheduled_time_ms.is_none()
+                && result.retry_count.is_none()
+                && result.error_code.is_none()
+        }
+        AlarmDispatchOutcome::NotDue => schedule_valid && result.error_code.is_none(),
+        AlarmDispatchOutcome::Retry => {
+            schedule_valid && result.error_code.as_deref() == Some("DO_RUNTIME_EXCEPTION")
+        }
+        AlarmDispatchOutcome::Exhausted => {
+            result.scheduled_time_ms.is_none()
+                && result.retry_count.is_none()
+                && result.error_code.as_deref() == Some("DO_RUNTIME_EXCEPTION")
+        }
+    };
+    shape_valid
+        .then_some(result)
+        .ok_or_else(alarm_protocol_error)
+}
+
+fn validate_alarm_repair_result(
+    result: AlarmRepairResult,
+) -> Result<AlarmRepairResult, PlatformError> {
+    let shape_valid = if result.exists {
+        result.scheduled_time_ms.is_some_and(|value| value > 0)
+            && result.retry_count.is_some_and(|value| value <= 6)
+            && result
+                .row_token
+                .as_deref()
+                .is_some_and(valid_alarm_row_token)
+    } else {
+        result.scheduled_time_ms.is_none()
+            && result.retry_count.is_none()
+            && result.row_token.is_none()
+    };
+    shape_valid
+        .then_some(result)
+        .ok_or_else(alarm_protocol_error)
+}
+
+fn valid_alarm_row_token(value: &str) -> bool {
+    uuid::Uuid::parse_str(value)
+        .ok()
+        .is_some_and(|token| token.get_version() == Some(uuid::Version::Random))
+}
+
 impl RuntimeValidator for WorkerdTransport {
     fn validate(
         &self,
@@ -587,6 +786,13 @@ fn runtime_unavailable() -> PlatformError {
     PlatformError::new(
         ErrorCode::RuntimeUnavailable,
         "the workerd runtime is unavailable",
+    )
+}
+
+fn alarm_protocol_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::SchedulerInternalProtocolError,
+        "private alarm dispatch response is invalid",
     )
 }
 

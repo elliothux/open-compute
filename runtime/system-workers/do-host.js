@@ -117,6 +117,11 @@ function authorityFromHeaders(headers) {
     /^[0-9a-f]{64}$/,
   );
   const objectId = required(headers, "x-open-compute-object-id", /^[0-9a-f]{64}$/);
+  const namespaceResourceId = required(
+    headers,
+    "x-open-compute-namespace-resource-id",
+    /^[0-9a-f-]{36}$/,
+  );
   const className = required(
     headers,
     "x-open-compute-class-name",
@@ -134,6 +139,7 @@ function authorityFromHeaders(headers) {
     deploymentId,
     workerCodeSha256,
     objectId,
+    namespaceResourceId,
     className,
     routeGeneration,
     objectGeneration,
@@ -202,7 +208,7 @@ export class DoHost extends DurableObject {
     if (snapshot.routeGeneration !== authority.routeGeneration) {
       throw bindingError("DO_DEPLOYMENT_STALE");
     }
-    const built = modulesFor(snapshot, false, authority.className);
+    const built = modulesFor(snapshot, false, authority.className, true);
     const code = {
       compatibilityDate: snapshot.compatibilityDate,
       // Native facet storage has no alarm scheduler until P0.8. Preserve the alarm
@@ -216,6 +222,14 @@ export class DoHost extends DurableObject {
       }),
       limits: PROFILE,
     };
+    Object.defineProperty(code.env, "__OPEN_COMPUTE_PRIVATE_ALARM_INDEX", {
+      value: this.ctx.exports.AlarmIndex({ props: {
+        namespaceResourceId: authority.namespaceResourceId,
+        objectId: authority.objectId,
+        objectGeneration: authority.objectGeneration,
+      } }),
+      enumerable: true,
+    });
     const loaded = this.env.LOADER.get(envelope.runtimeKey, () => code);
     const cls = loaded.getDurableObjectClass(authority.className);
     const facet = this.ctx.facets.get("tenant", () => ({ class: cls, id: authority.objectId }));
@@ -246,6 +260,14 @@ export class DoHost extends DurableObject {
       const value = await this.#dispatchRpc(authority, payload.method, args);
       return Response.json({ value: encodeWire(value) });
     }
+    if (operation === "alarm" || operation === "alarm-repair") {
+      const payload = await request.json();
+      const facet = await this.#tenant(authority);
+      const result = operation === "alarm"
+        ? await facet.__openComputeAlarm(payload)
+        : await facet.__openComputeAlarmRepair();
+      return Response.json(result);
+    }
     const tenantMethod = required(request.headers, "x-open-compute-do-method", /^[A-Z]{1,16}$/);
     const tenantUrl = request.headers.get("x-open-compute-do-url") || "https://do.invalid/";
     const headers = new Headers(request.headers);
@@ -258,7 +280,8 @@ export class DoHost extends DurableObject {
 
   async #dispatchRpc(authority, method, args) {
     if (!authority || typeof authority !== "object" || typeof method !== "string"
-        || FORBIDDEN_RPC.has(method) || !PUBLIC_METHOD.test(method) || !Array.isArray(args)) {
+        || FORBIDDEN_RPC.has(method) || method.startsWith("__openCompute")
+        || !PUBLIC_METHOD.test(method) || !Array.isArray(args)) {
       throw bindingError("DO_RPC_UNSUPPORTED");
     }
     const facet = await this.#tenant(authority);

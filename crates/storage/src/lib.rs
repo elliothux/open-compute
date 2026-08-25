@@ -18,6 +18,7 @@ pub mod migrations;
 pub mod r2;
 pub mod r2_staging;
 pub mod resources;
+pub mod scheduler;
 pub mod workers;
 
 pub use bindings::{
@@ -65,6 +66,10 @@ pub use r2_staging::R2Staging;
 pub use resources::{
     ReserveResourceCreate, ReserveResourceDelete, ResourceCreateReservation,
     ResourceDeleteReservation, ResourceRecord, ResourceReferrer, ResourceRepository,
+};
+pub use scheduler::{
+    AlarmProjection, ClaimResult, ClaimedJob, SchedulerInspection, SchedulerStore,
+    SchedulerSummary, inspect_scheduler_db,
 };
 pub use workers::{
     DeploymentRecord, DeploymentReferrer, DeploymentSnapshot, DeploymentState,

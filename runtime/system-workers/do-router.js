@@ -1,6 +1,7 @@
 export { DoHost } from "./do-host.js";
-import { doPolicy } from "./loader-host.js";
+import { currentStartupGeneration, doPolicy } from "./loader-host.js";
 export {
+  AlarmIndex,
   D1Transport,
   DoTransport,
   KVNamespace,
@@ -146,6 +147,7 @@ function hostHeaders(request, authority) {
   headers.set("x-open-compute-object-id", authority.objectId);
   headers.set("x-open-compute-object-generation", String(authority.objectGeneration));
   headers.set("x-open-compute-class-name", authority.className);
+  headers.set("x-open-compute-namespace-resource-id", authority.namespaceResourceId);
   return headers;
 }
 
@@ -177,6 +179,7 @@ async function dispatchRpc(request, env, policy) {
   let payload;
   try { payload = JSON.parse(new TextDecoder().decode(bytes)); } catch { return error("DO_RPC_UNSUPPORTED", 400); }
   if (!payload || !PUBLIC_METHOD.test(payload.method) || FORBIDDEN_RPC.has(payload.method)
+      || payload.method.startsWith("__openCompute")
       || !Array.isArray(payload.args)) return error("DO_RPC_UNSUPPORTED", 400);
   const authority = await authorize(request, env);
   const headers = hostHeaders(request, authority);
@@ -215,6 +218,48 @@ async function deleteAuthorized(request, env) {
   return deleteHost(env, authority);
 }
 
+async function alarmAuthority(request, env) {
+  const body = await request.json();
+  if (!body || typeof body.namespaceResourceId !== "string"
+      || typeof body.objectId !== "string" || !/^[0-9a-f]{64}$/.test(body.objectId)
+      || !Number.isSafeInteger(body.objectGeneration) || body.objectGeneration < 1) {
+    throw stableFailure("SCHEDULER_INTERNAL_PROTOCOL_ERROR");
+  }
+  const response = await env.BINDING_BACKEND.fetch(
+    "http://binding-backend/internal/alarms/v1/resolve",
+    {
+      method: "POST",
+      headers: {
+        [TOKEN_HEADER]: env.BINDING_BACKEND_TOKEN,
+        "x-open-compute-startup-generation": currentStartupGeneration(),
+        "x-open-compute-request-id": crypto.randomUUID(),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        namespaceResourceId: body.namespaceResourceId,
+        objectId: body.objectId,
+        objectGeneration: body.objectGeneration,
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw stableFailure(response.headers.get(ERROR_HEADER) || "DO_OBJECT_DELETING");
+  }
+  return { body, authority: await response.json() };
+}
+
+async function dispatchAlarm(request, env, repair) {
+  const { body, authority } = await alarmAuthority(request, env);
+  const headers = hostHeaders(request, authority);
+  headers.set("x-open-compute-do-operation", repair ? "alarm-repair" : "alarm");
+  headers.set("content-type", "application/json");
+  const payload = repair ? {} : { rowToken: body.rowToken, retryCount: body.retryCount };
+  return host(env, authority).fetch(new Request(
+    repair ? "http://do-host/internal/alarm-repair" : "http://do-host/internal/alarm",
+    { method: "POST", headers, body: JSON.stringify(payload) },
+  ));
+}
+
 function deleteHost(env, authority) {
   const headers = new Headers({
     "x-open-compute-object-id": authority.objectId,
@@ -240,6 +285,10 @@ export default {
       }
       if (path === "/internal/do/v1/delete") return deleteObject(request, env);
       if (path === "/internal/do-delete") return deleteAuthorized(request, env);
+      if (path === "/internal/do-alarm") return admitted(env, () => dispatchAlarm(request, env, false));
+      if (path === "/internal/do-alarm-repair") {
+        return admitted(env, () => dispatchAlarm(request, env, true));
+      }
       return error("DO_INTERNAL_PROTOCOL_ERROR", 404);
     } catch (failure) {
       return error(failure && failure.stableCode ? failure.stableCode : "DO_RUNTIME_EXCEPTION");

@@ -3,7 +3,9 @@ import r2FacadeSource from "r2-facade-source";
 import d1FacadeSource from "d1-facade-source";
 import doFacadeSource from "do-facade-source";
 import doIdCodecSource from "do-id-codec-source";
+import doAlarmShimSource from "do-alarm-shim-source";
 import {
+  DO_ALARM_SHIM_MODULE,
   D1_FACADE_MODULE,
   DO_FACADE_MODULE,
   DO_ID_CODEC_MODULE,
@@ -130,7 +132,7 @@ function moduleValue(module) {
   }
 }
 
-export function modulesFor(snapshot, validation, entrypointName) {
+export function modulesFor(snapshot, validation, entrypointName, durableObject = false) {
   const modules = {};
   for (const module of snapshot.modules) modules[module.name] = moduleValue(module);
   const r2Bindings = (snapshot.bindings || [])
@@ -143,7 +145,7 @@ export function modulesFor(snapshot, validation, entrypointName) {
     .filter((binding) => binding.kind === "do_namespace" && binding.capabilityVersion === 1)
     .map((binding) => binding.name);
   let mainModule = snapshot.mainModule;
-  if (r2Bindings.length || d1Bindings.length || doBindings.length) {
+  if (r2Bindings.length || d1Bindings.length || doBindings.length || entrypointName) {
     for (const reserved of LOADED_ISOLATE_RESERVED_MODULES) {
       if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
         throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
@@ -155,6 +157,9 @@ export function modulesFor(snapshot, validation, entrypointName) {
       modules[DO_ID_CODEC_MODULE] = { js: doIdCodecSource };
       modules[DO_FACADE_MODULE] = { js: doFacadeSource };
     }
+    if (entrypointName && durableObject) {
+      modules[DO_ALARM_SHIM_MODULE] = { js: doAlarmShimSource };
+    }
     modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
       js: generateBindingWrapper(
         snapshot.mainModule,
@@ -162,6 +167,7 @@ export function modulesFor(snapshot, validation, entrypointName) {
         d1Bindings,
         doBindings,
         entrypointName,
+        durableObject,
       ),
     };
     mainModule = LOADED_ISOLATE_WRAPPER_MODULE;
@@ -818,6 +824,62 @@ export class DoTransport extends WorkerEntrypoint {
   }
 }
 
+export class AlarmIndex extends WorkerEntrypoint {
+  #props() {
+    const props = this.ctx.props;
+    if (!props || typeof props.namespaceResourceId !== "string"
+        || typeof props.objectId !== "string" || !/^[0-9a-f]{64}$/.test(props.objectId)
+        || !Number.isSafeInteger(props.objectGeneration) || props.objectGeneration < 1) {
+      throw bindingError("SCHEDULER_INTERNAL_PROTOCOL_ERROR");
+    }
+    return props;
+  }
+
+  async #request(operation, mutation = {}) {
+    const props = this.#props();
+    const response = await this.env.BINDING_BACKEND.fetch(
+      `http://binding-backend/internal/alarms/v1/${operation}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
+          "x-open-compute-startup-generation": currentStartupGeneration(),
+          "x-open-compute-request-id": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          namespaceResourceId: props.namespaceResourceId,
+          objectId: props.objectId,
+          objectGeneration: props.objectGeneration,
+          ...mutation,
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw bindingError(response.headers.get("x-open-compute-error-code")
+        || "DO_ALARM_INDEX_UNAVAILABLE");
+    }
+  }
+
+  async upsert(row) {
+    if (!row || !Number.isSafeInteger(row.scheduledTimeMs) || row.scheduledTimeMs <= 0
+        || !Number.isSafeInteger(row.retryCount) || row.retryCount < 0 || row.retryCount > 6
+        || typeof row.rowToken !== "string") {
+      throw bindingError("SCHEDULER_INTERNAL_PROTOCOL_ERROR");
+    }
+    await this.#request("upsert", row);
+  }
+
+  async delete(rowToken) {
+    if (typeof rowToken !== "string") throw bindingError("SCHEDULER_INTERNAL_PROTOCOL_ERROR");
+    await this.#request("delete", { rowToken });
+  }
+
+  async clear() {
+    await this.#request("clear");
+  }
+}
+
 function makeBinding(ctx, descriptor, deploymentId, routeGeneration, accountId, workerId, policy) {
   const capability = `${descriptor.kind}@${descriptor.capabilityVersion}`;
   const props = trustedBindingProps(
@@ -982,7 +1044,7 @@ async function validateDurableObjectClass(request, env) {
   if (!moduleExportsDurableObjectClass(snapshot.modules, className)) {
     return stableError("DO_CLASS_NOT_FOUND", 422, null);
   }
-  const built = modulesFor(snapshot, false, className);
+  const built = modulesFor(snapshot, false, className, true);
   const code = {
     compatibilityDate: snapshot.compatibilityDate,
     compatibilityFlags: snapshot.compatibilityFlags,

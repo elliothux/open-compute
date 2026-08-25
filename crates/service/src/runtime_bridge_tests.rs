@@ -18,6 +18,59 @@ fn tenant_headers_strip_forged_identity_and_hop_by_hop() {
     assert_eq!(clean.get("x-tenant").unwrap(), "kept");
 }
 
+#[test]
+fn private_alarm_result_shapes_are_strict() {
+    let success = AlarmDispatchResult {
+        outcome: AlarmDispatchOutcome::Success,
+        scheduled_time_ms: None,
+        retry_count: None,
+        error_code: None,
+    };
+    assert!(validate_alarm_dispatch_result(success).is_ok());
+    let invalid_success = AlarmDispatchResult {
+        outcome: AlarmDispatchOutcome::Success,
+        scheduled_time_ms: Some(1),
+        retry_count: None,
+        error_code: None,
+    };
+    assert_eq!(
+        validate_alarm_dispatch_result(invalid_success)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SchedulerInternalProtocolError
+    );
+    let retry = AlarmDispatchResult {
+        outcome: AlarmDispatchOutcome::Retry,
+        scheduled_time_ms: Some(2_000),
+        retry_count: Some(6),
+        error_code: Some("DO_RUNTIME_EXCEPTION".to_owned()),
+    };
+    assert!(validate_alarm_dispatch_result(retry).is_ok());
+
+    let present = AlarmRepairResult {
+        exists: true,
+        scheduled_time_ms: Some(10),
+        retry_count: Some(0),
+        row_token: Some("00000000-0000-4000-8000-000000000000".to_owned()),
+    };
+    assert!(validate_alarm_repair_result(present).is_ok());
+    let malformed_absent = AlarmRepairResult {
+        exists: false,
+        scheduled_time_ms: None,
+        retry_count: None,
+        row_token: Some("00000000-0000-4000-8000-000000000000".to_owned()),
+    };
+    assert_eq!(
+        validate_alarm_repair_result(malformed_absent)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SchedulerInternalProtocolError
+    );
+    assert!(
+        serde_json::from_str::<AlarmRepairResult>(r#"{"exists":false,"unexpected":true}"#).is_err()
+    );
+}
+
 #[tokio::test]
 async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     let transport =

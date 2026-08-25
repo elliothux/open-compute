@@ -98,6 +98,7 @@ fn component_labels_and_transition_matrix_are_complete() {
         ComponentName::S3,
         ComponentName::Cache,
         ComponentName::Runtime,
+        ComponentName::Scheduler,
     ];
     for name in names {
         assert_eq!(name.to_string(), name.as_str());

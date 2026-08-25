@@ -2,7 +2,8 @@
 
 use crate::auth::{bearer_matches, resolve_admin_auth};
 use crate::cli::{
-    Cli, Command, ConfigCommand, execute, execute_with_test_binary, load_checked, parse_from,
+    Cli, Command, ConfigCommand, SchedulerCommand, execute, execute_with_test_binary, load_checked,
+    parse_from,
 };
 use crate::config_load::{MAX_CONFIG_BYTES, load_platform_config};
 use crate::doctor::{CheckStatus, DoctorMode, doctor_report};
@@ -10,17 +11,18 @@ use crate::exit::{ExitClass, emit_failure, exit_class_for, exit_code};
 use crate::health::{HealthCoordinator, map_supervisor};
 use crate::http::{self, HttpState, REQUEST_ID_HEADER};
 use crate::metrics::{
-    D1Lifecycle, D1LifecycleGuard, D1Operation, DoFacetReloadReason, DoOperation, DoReconcileState,
-    KvGauge, KvGaugeGuard, KvLifecycle, KvLifecycleGuard, KvMaintenance, KvOperation,
-    KvStagingGauge, MetricsRegistry, R2Operation, R2ProviderError, R2StreamDirection,
-    R2StreamGuard, REQUIRED_SERIES, RestartReason, S3Op, S3Result, SqliteOp, StartResult,
-    StartStage,
+    AlarmMutation, AlarmOutcome, AlarmRepairSource, D1Lifecycle, D1LifecycleGuard, D1Operation,
+    DoFacetReloadReason, DoOperation, DoReconcileState, KvGauge, KvGaugeGuard, KvLifecycle,
+    KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry, R2Operation,
+    R2ProviderError, R2StreamDirection, R2StreamGuard, REQUIRED_SERIES, RestartReason, S3Op,
+    S3Result, SchedulerClaimOutcome, SqliteOp, StartResult, StartStage,
 };
 use crate::run::{
     FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_kv_maintenance,
     run_platform, run_platform_with,
 };
 use crate::runtime_bridge::WorkerdTransport;
+use crate::scheduler::SchedulerService;
 use crate::workers_http::WorkerApiState;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -28,10 +30,11 @@ use clap::CommandFactory;
 use open_compute_core::config::SecretReference;
 use open_compute_core::{
     ComponentName, ComponentState, ErrorCode, MetricsConfig, PlatformStatus, ReadinessReason,
-    SecretString,
+    SchedulerConfig, SecretString, SystemSchedulerClock,
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
+use open_compute_storage::{DataDir, SchedulerStore, SchedulerSummary, inspect_scheduler_db};
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, DeploymentPins, ModuleInput, ModuleType,
 };
@@ -164,7 +167,7 @@ max_artifact_bytes = 65536
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 256
+max_series = 512
 {extra}
 "#,
         data.display(),
@@ -183,6 +186,7 @@ fn package_and_cli_shape() {
     assert!(help.contains("run"));
     assert!(help.contains("config"));
     assert!(help.contains("doctor"));
+    assert!(help.contains("scheduler"));
     let parsed = parse_from(["platformd", "run", "--config", "/tmp/config.toml"]).unwrap();
     assert!(matches!(parsed.command, Command::Run));
     let parsed = parse_from([
@@ -216,6 +220,22 @@ fn package_and_cli_shape() {
             json: true
         }
     ));
+    let parsed = parse_from([
+        "platformd",
+        "scheduler",
+        "recover-corrupt",
+        "--backup-name",
+        "scheduler-corrupt-test",
+        "--config",
+        "/tmp/config.toml",
+    ])
+    .unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Scheduler {
+            command: SchedulerCommand::RecoverCorrupt { .. }
+        }
+    ));
 }
 
 #[tokio::test]
@@ -244,6 +264,46 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         let text = String::from_utf8(stdout).unwrap();
         assert!(text.contains(if json { "config_check" } else { "CONFIG_OK" }));
     }
+
+    let loaded = load_platform_config(&path).unwrap();
+    let data_dir = DataDir::acquire(&loaded.config.storage).unwrap();
+    let scheduler_path = data_dir.ensure_scheduler_db().unwrap();
+    fs::write(&scheduler_path, b"corrupt scheduler").unwrap();
+    drop(data_dir);
+    let recovery = parse_from([
+        "platformd",
+        "--config",
+        path.to_str().unwrap(),
+        "scheduler",
+        "recover-corrupt",
+        "--backup-name",
+        "scheduler-corrupt-cli-test",
+    ])
+    .unwrap();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    assert_eq!(
+        execute(recovery, &mut stdout, &mut stderr).await,
+        std::process::ExitCode::SUCCESS
+    );
+    assert!(stderr.is_empty());
+    assert!(
+        String::from_utf8(stdout)
+            .unwrap()
+            .contains("SCHEDULER_RECOVERED")
+    );
+    assert!(inspect_scheduler_db(&scheduler_path, 100, 10).is_ok());
+    assert_eq!(
+        fs::read(
+            loaded
+                .config
+                .storage
+                .data_dir
+                .join("diagnostics/scheduler-recovery/scheduler-corrupt-cli-test/scheduler.sqlite")
+        )
+        .unwrap(),
+        b"corrupt scheduler"
+    );
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -848,6 +908,7 @@ async fn liveness_ready_status_and_bounds() {
         ComponentName::S3,
         ComponentName::Cache,
         ComponentName::Runtime,
+        ComponentName::Scheduler,
     ] {
         health
             .set_component(name, ComponentState::Healthy, Some(ReadinessReason::Ready))
@@ -1105,6 +1166,109 @@ async fn admin_auth_and_separate_routers() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
+    let (_dir, path, _mock) = initialized_doctor_fixture().await;
+    let loaded = load_platform_config(&path).unwrap();
+    let storage = Arc::new(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &loaded.config.storage,
+            &open_compute_core::SystemClock,
+        )
+        .unwrap(),
+    );
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    let store = Arc::new(SchedulerStore::open(&scheduler_path, 100, 10).unwrap());
+    let transport =
+        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
+    let scheduler = Arc::new(SchedulerService::new(
+        store,
+        storage,
+        transport,
+        SchedulerConfig::default(),
+        Arc::new(SystemSchedulerClock),
+    ));
+    let state = test_state(HealthCoordinator::new(), Some("scheduler-admin"))
+        .with_scheduler(Some(scheduler.clone()));
+    let app = http::admin_router(state);
+
+    let unauthorized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/scheduler")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let request = |method: &str, uri: &str| {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", "Bearer scheduler-admin")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let inspect = app
+        .clone()
+        .oneshot(request("GET", "/v1/scheduler"))
+        .await
+        .unwrap();
+    assert_eq!(inspect.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(inspect.into_body(), 4096)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["paused"], false);
+    assert_eq!(body["summary"]["scheduled"], 0);
+
+    assert_eq!(
+        app.clone()
+            .oneshot(request("POST", "/v1/scheduler/pause"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(scheduler.is_paused());
+    assert_eq!(
+        app.clone()
+            .oneshot(request("POST", "/v1/scheduler/resume"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(!scheduler.is_paused());
+    let repair = app
+        .clone()
+        .oneshot(request("POST", "/v1/scheduler/repair"))
+        .await
+        .unwrap();
+    assert_eq!(repair.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(repair.into_body(), 4096)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["repaired"],
+        0
+    );
+
+    let unavailable = http::admin_router(test_state(HealthCoordinator::new(), None))
+        .oneshot(
+            Request::builder()
+                .uri("/v1/scheduler")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[test]
@@ -1559,6 +1723,22 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     reg.inc_do_reconcile(DoReconcileState::Creating, true);
     reg.inc_do_reconcile(DoReconcileState::Deleting, false);
     reg.set_do_runtime_gauges(2, 4096, usize::MAX);
+    reg.observe_scheduler_summary(
+        SchedulerSummary {
+            scheduled: 3,
+            claimed: 2,
+            discarding: 1,
+            oldest_due_at_ms: Some(1_000),
+            expired_claims: 0,
+        },
+        4_000,
+    );
+    reg.inc_scheduler_claim(SchedulerClaimOutcome::Claimed);
+    reg.inc_scheduler_claim_expired(2);
+    reg.adjust_scheduler_in_flight(true);
+    reg.observe_alarm_delivery(AlarmOutcome::Retry, 2, Duration::from_millis(9));
+    reg.inc_alarm_mutation(AlarmMutation::Set, true);
+    reg.inc_alarm_repair(AlarmRepairSource::Scan, false);
     {
         let _reader = KvGaugeGuard::new(&reg, KvGauge::ReaderConnection);
         let _writer = KvGaugeGuard::new(&reg, KvGauge::WriterConnection);
@@ -1621,6 +1801,18 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     assert!(rendered.contains("oc_do_websocket_active 2"));
     assert!(rendered.contains("oc_do_storage_bytes 4096"));
     assert!(rendered.contains("oc_do_storage_watermark{state=\"stop\"} 1"));
+    assert!(rendered.contains("oc_scheduler_jobs{kind=\"do_alarm\",state=\"scheduled\"} 3"));
+    assert!(rendered.contains("oc_scheduler_claim_total{outcome=\"claimed\"} 1"));
+    assert!(rendered.contains("oc_scheduler_claim_expired_total{kind=\"do_alarm\"} 2"));
+    assert!(rendered.contains("oc_scheduler_in_flight{kind=\"do_alarm\"} 1"));
+    assert!(
+        rendered.contains("oc_do_alarm_mutation_total{operation=\"set\",outcome=\"success\"} 1")
+    );
+    assert!(
+        rendered.contains("oc_do_alarm_delivery_total{outcome=\"retry\",retry_bucket=\"2\"} 1")
+    );
+    assert!(rendered.contains("oc_do_alarm_repair_total{source=\"scan\",outcome=\"failure\"} 1"));
+    assert!(rendered.contains("oc_do_alarm_lag_seconds 3"));
 }
 
 fn content_snapshot(root: &Path) -> Vec<(String, u64, Option<SystemTime>, String)> {

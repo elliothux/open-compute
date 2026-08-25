@@ -15,13 +15,13 @@ use open_compute_runtime::{
 };
 use open_compute_storage::{
     inspect_control_db, inspect_data_root, inspect_durable_object_storage, inspect_master_key,
-    inspect_resources,
+    inspect_resources, inspect_scheduler_db,
 };
 use serde::Serialize;
 use std::io::Write;
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Doctor intensity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -307,6 +307,103 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
             None
         }
     };
+
+    match inspect.as_ref() {
+        Some(root) if root.lock_available => {
+            let path = root.root.join("scheduler.sqlite");
+            match inspect_scheduler_db(
+                &path,
+                loaded.config.storage.sqlite_busy_timeout_ms,
+                unix_ms(),
+            ) {
+                Ok(scheduler) => {
+                    let mode_ok = scheduler.journal_mode.eq_ignore_ascii_case("wal")
+                        && scheduler.synchronous == 2;
+                    checks.push(if mode_ok {
+                        ok(
+                            "scheduler_sqlite",
+                            "scheduler database integrity, WAL, and FULL sync passed",
+                            Some(scheduler.schema_version.to_string()),
+                        )
+                    } else {
+                        failed(
+                            "scheduler_sqlite",
+                            ErrorCode::SchedulerCorrupt,
+                            "scheduler database SQLite mode is invalid",
+                            None,
+                        )
+                    });
+                    checks.push(if scheduler.invalid_rows == 0 {
+                        ok(
+                            "scheduler_invariants",
+                            "scheduler claim and token invariants passed",
+                            Some("0".to_owned()),
+                        )
+                    } else {
+                        failed(
+                            "scheduler_invariants",
+                            ErrorCode::SchedulerCorrupt,
+                            "scheduler claim or token invariant failed",
+                            Some(scheduler.invalid_rows.to_string()),
+                        )
+                    });
+                    let summary = scheduler.summary;
+                    checks.push(ok(
+                        "scheduler_summary",
+                        "scheduler bounded state summary inspected",
+                        Some(format!(
+                            "scheduled={} claimed={} discarding={} expired={}",
+                            summary.scheduled,
+                            summary.claimed,
+                            summary.discarding,
+                            summary.expired_claims
+                        )),
+                    ));
+                }
+                Err(error) => {
+                    checks.push(failed(
+                        "scheduler_sqlite",
+                        error.code(),
+                        error.message(),
+                        None,
+                    ));
+                    checks.push(skipped(
+                        "scheduler_invariants",
+                        "scheduler database is not inspectable",
+                    ));
+                    checks.push(skipped(
+                        "scheduler_summary",
+                        "scheduler database is not inspectable",
+                    ));
+                }
+            }
+        }
+        Some(_) => {
+            checks.push(skipped(
+                "scheduler_sqlite",
+                "data directory exclusive lock is held by another instance",
+            ));
+            checks.push(skipped(
+                "scheduler_invariants",
+                "data directory exclusive lock is held by another instance",
+            ));
+            checks.push(skipped(
+                "scheduler_summary",
+                "data directory exclusive lock is held by another instance",
+            ));
+        }
+        None => {
+            checks.push(skipped("scheduler_sqlite", "data directory is missing"));
+            checks.push(skipped("scheduler_invariants", "data directory is missing"));
+            checks.push(skipped("scheduler_summary", "data directory is missing"));
+        }
+    }
+
+    checks.push(ok(
+        "scheduler_policy",
+        "scheduler lease exceeds dispatch timeout and guard",
+        Some(loaded.config.scheduler.claim_lease_ms.to_string()),
+    ));
 
     match (&inspected_key, &db_ok) {
         (Ok(key), Some(identity)) if key.fingerprint() != identity.master_key_id => {
@@ -743,6 +840,14 @@ fn bound_value(s: &str, max_bytes: usize) -> String {
         out.push(ch);
     }
     out
+}
+
+fn unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@ use crate::run::run_platform;
 use clap::{Parser, Subcommand};
 use open_compute_core::{ErrorCode, PlatformError};
 use open_compute_runtime::{PackageReleaseRequest, load_runtime_lock, package_release_bundle};
+use open_compute_storage::DataDir;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -44,6 +45,12 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Offline scheduler recovery utilities.
+    Scheduler {
+        /// Scheduler subcommand.
+        #[command(subcommand)]
+        command: SchedulerCommand,
+    },
     /// Fetch/verify the official pinned workerd archive and write a release layout.
     PackageRelease {
         /// Absolute destination directory. Must not already exist.
@@ -78,6 +85,17 @@ pub enum ConfigCommand {
         /// Emit versioned JSON.
         #[arg(long)]
         json: bool,
+    },
+}
+
+/// `platformd scheduler` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum SchedulerCommand {
+    /// Quarantine an uninspectable scheduler database and create an empty replacement.
+    RecoverCorrupt {
+        /// Unique directory name created below `data/diagnostics/scheduler-recovery/`.
+        #[arg(long)]
+        backup_name: String,
     },
 }
 
@@ -204,6 +222,25 @@ async fn run(
         Command::Run => {
             let loaded = load_platform_config(config_path)?;
             run_platform(loaded).await?;
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
+        Command::Scheduler {
+            command: SchedulerCommand::RecoverCorrupt { backup_name },
+        } => {
+            let loaded = load_platform_config(config_path)?;
+            MetricsRegistry::validate_limits(&loaded.config.metrics)?;
+            let data_dir = DataDir::acquire(&loaded.config.storage)?;
+            let backup = data_dir.recover_corrupt_scheduler_db(
+                &backup_name,
+                loaded.config.storage.sqlite_busy_timeout_ms,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+                    .unwrap_or(i64::MAX),
+            )?;
+            writeln!(stdout, "SCHEDULER_RECOVERED {}", backup.display())
+                .map_err(|_| io_failed())?;
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
         Command::PackageRelease { .. } => unreachable!("handled before config load"),

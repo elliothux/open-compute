@@ -8,7 +8,9 @@ use crate::http;
 use crate::metrics::MetricsRegistry;
 use open_compute_core::config::MetricsConfig;
 use open_compute_runtime::GenerationAuthRegistry;
-use open_compute_storage::AuthorizedDurableObjectDelete;
+use open_compute_storage::{
+    AlarmProjection, AuthorizedDurableObjectDelete, SchedulerStore, SchedulerSummary,
+};
 use serde_json::{Value, json};
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
@@ -214,7 +216,19 @@ async fn namespace_create_rejects_duplicate_class_and_invalid_boundaries() {
 
 #[tokio::test]
 async fn object_reconcile_get_delete_and_force_namespace_delete_converge() {
-    let fixture = fixture();
+    let mut fixture = fixture();
+    let scheduler_path = fixture.storage.data_dir().ensure_scheduler_db().unwrap();
+    let scheduler = Arc::new(SchedulerStore::open(&scheduler_path, 100, 1).unwrap());
+    fixture.api = fixture.api.clone().with_scheduler(Some(scheduler.clone()));
+    fixture.router = http::admin_router(
+        HttpState::for_test(
+            HealthCoordinator::new(),
+            Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap()),
+            false,
+            None,
+        )
+        .with_do_api(fixture.api.clone()),
+    );
     let namespace = create_namespace_fixture(&fixture, "objects", "Counter").await;
     let item = format!(
         "/v1/accounts/{}/durable-objects/namespaces/{namespace}",
@@ -267,6 +281,21 @@ async fn object_reconcile_get_delete_and_force_namespace_delete_converge() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(fetched["objectId"], object.to_string());
+    scheduler
+        .upsert_alarm(
+            &AlarmProjection {
+                namespace_resource_id: namespace,
+                object_id: object,
+                object_generation: 1,
+                row_token: "delete-fence-token".to_owned(),
+                due_at_ms: 100,
+                target_deployment_id: open_compute_core::DeploymentId::generate(),
+                execution_generation: 1,
+                retry_count: 0,
+            },
+            50,
+        )
+        .unwrap();
     assert_eq!(
         fixture
             .router
@@ -288,6 +317,7 @@ async fn object_reconcile_get_delete_and_force_namespace_delete_converge() {
         StatusCode::NO_CONTENT
     );
     assert_eq!(fixture.deletes.calls.lock().unwrap().len(), 1);
+    assert_eq!(scheduler.summary(50).unwrap(), SchedulerSummary::default());
     assert_eq!(
         fixture
             .router

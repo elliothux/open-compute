@@ -105,6 +105,17 @@ struct DispatchAuthorityRow {
     namespace_storage_key: String,
 }
 
+struct AlarmDispatchAuthorityRow {
+    account_id: String,
+    worker_id: String,
+    deployment_id: String,
+    route_generation: i64,
+    worker_code_sha256: Vec<u8>,
+    class_name: String,
+    namespace_storage_id: String,
+    namespace_storage_key: String,
+}
+
 /// Durable Object repositories over central platform storage and key authority.
 #[derive(Clone, Copy, Debug)]
 pub struct DurableObjectRepository<'a> {
@@ -383,6 +394,101 @@ impl<'a> DurableObjectRepository<'a> {
         })
     }
 
+    /// Reauthorize a scheduler alarm against current namespace, object, and deployment authority.
+    ///
+    /// Unlike a public fetch, this never creates an object and does not depend on a retained
+    /// deployment binding. The caller already holds the private scheduler capability.
+    pub fn authorize_alarm_dispatch(
+        &self,
+        namespace_id: ResourceId,
+        object_id: DurableObjectId,
+        object_generation: u64,
+    ) -> Result<AuthorizedDurableObjectDispatch, PlatformError> {
+        if object_generation == 0 || !object_id.belongs_to(namespace_id) {
+            return Err(PlatformError::new(
+                ErrorCode::DoIdInvalid,
+                "Durable Object alarm identity is invalid",
+            ));
+        }
+        self.storage.db().with_read(|connection| {
+            let row: Option<AlarmDispatchAuthorityRow> = connection
+                .query_row(
+                    "SELECT r.account_id, n.owner_worker_id, w.active_deployment_id,
+                            w.route_generation, d.worker_code_sha256, n.class_name,
+                            n.do_storage_id, n.namespace_storage_key
+                     FROM do_objects o
+                     JOIN do_namespaces n ON n.resource_id = o.namespace_resource_id
+                     JOIN resources r ON r.id = n.resource_id
+                     JOIN workers w ON w.id = n.owner_worker_id
+                     JOIN worker_deployments d ON d.id = w.active_deployment_id
+                     WHERE o.namespace_resource_id = ?1 AND o.object_id = ?2
+                       AND o.generation = ?3 AND o.state IN ('creating', 'ready')
+                       AND r.state = 'ready' AND w.deleted_at_ms IS NULL AND d.state = 'ready'",
+                    params![
+                        namespace_id.to_string(),
+                        object_id.to_string(),
+                        i64::try_from(object_generation).map_err(|_| invariant())?,
+                    ],
+                    |row| {
+                        Ok(AlarmDispatchAuthorityRow {
+                            account_id: row.get(0)?,
+                            worker_id: row.get(1)?,
+                            deployment_id: row.get(2)?,
+                            route_generation: row.get(3)?,
+                            worker_code_sha256: row.get(4)?,
+                            class_name: row.get(5)?,
+                            namespace_storage_id: row.get(6)?,
+                            namespace_storage_key: row.get(7)?,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(|_| db_error())?;
+            let Some(AlarmDispatchAuthorityRow {
+                account_id,
+                worker_id,
+                deployment_id,
+                route_generation,
+                worker_code_sha256,
+                class_name,
+                namespace_storage_id,
+                namespace_storage_key,
+            }) = row
+            else {
+                return Err(PlatformError::new(
+                    ErrorCode::DoObjectDeleting,
+                    "Durable Object alarm generation is no longer live",
+                ));
+            };
+            let worker_storage_id: String = connection
+                .query_row(
+                    "SELECT do_storage_id FROM workers WHERE id = ?1",
+                    [worker_id.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if worker_storage_id != namespace_storage_id {
+                return Err(invariant());
+            }
+            Ok(AuthorizedDurableObjectDispatch {
+                account_id: AccountId::from_str(&account_id).map_err(|_| invariant())?,
+                namespace_resource_id: namespace_id,
+                worker_id: WorkerId::from_str(&worker_id).map_err(|_| invariant())?,
+                deployment_id: DeploymentId::from_str(&deployment_id).map_err(|_| invariant())?,
+                worker_code_sha256: hex::encode(array32(&worker_code_sha256)?),
+                route_generation: u64::try_from(route_generation).map_err(|_| invariant())?,
+                class_name,
+                object_id,
+                object_generation,
+                host_key: self.storage.crypto().durable_object_host_key(
+                    &namespace_storage_key,
+                    &object_id.to_string(),
+                    object_generation,
+                ),
+            })
+        })
+    }
+
     /// Acknowledge that native dispatch reached the registered object generation.
     pub fn finish_object_create(
         &self,
@@ -592,6 +698,54 @@ impl<'a> DurableObjectRepository<'a> {
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map([i64::from(limit)], map_object)
+                .map_err(|_| db_error())?;
+            collect_rows(rows)
+        })
+    }
+
+    /// Scan a stable, bounded page of live object generations for alarm repair.
+    pub fn alarm_repair_candidates(
+        &self,
+        after: Option<(ResourceId, DurableObjectId, u64)>,
+        limit: u32,
+    ) -> Result<Vec<DurableObjectRecord>, PlatformError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let (after_namespace, after_object, after_generation) = after.map_or_else(
+            || (String::new(), String::new(), 0),
+            |(namespace, object, generation)| {
+                (
+                    namespace.to_string(),
+                    object.to_string(),
+                    i64::try_from(generation).unwrap_or(i64::MAX),
+                )
+            },
+        );
+        self.storage.db().with_read(|connection| {
+            let mut statement = connection
+                .prepare(
+                    "SELECT namespace_resource_id, object_id, generation, state,
+                            created_at_ms, updated_at_ms, deleted_at_ms
+                     FROM do_objects
+                     WHERE state IN ('creating', 'ready') AND (
+                       namespace_resource_id > ?1 OR
+                       (namespace_resource_id = ?1 AND object_id > ?2) OR
+                       (namespace_resource_id = ?1 AND object_id = ?2 AND generation > ?3)
+                     )
+                     ORDER BY namespace_resource_id, object_id, generation LIMIT ?4",
+                )
+                .map_err(|_| db_error())?;
+            let rows = statement
+                .query_map(
+                    params![
+                        after_namespace,
+                        after_object,
+                        after_generation,
+                        i64::from(limit)
+                    ],
+                    map_object,
+                )
                 .map_err(|_| db_error())?;
             collect_rows(rows)
         })

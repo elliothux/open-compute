@@ -23,12 +23,15 @@ mod r2_maintenance;
 mod r2_protocol;
 pub mod run;
 pub mod runtime_bridge;
+pub mod scheduler;
+pub mod scheduler_http;
 pub mod workers_http;
 
 pub use binding_backend::{
     KvBindingExecutor, UnavailableKvBindingExecutor, bind_binding_backend, serve_binding_backend,
     serve_binding_backend_with_metrics, serve_binding_backend_with_products,
     serve_binding_backend_with_products_and_do_config, serve_binding_backend_with_r2,
+    serve_binding_backend_with_scheduler,
 };
 pub use cli::{Cli, Command, execute};
 pub use d1_backend::D1BindingService;
@@ -44,6 +47,7 @@ pub use r2_http::R2ApiState;
 pub use run::run_platform;
 #[cfg(any(test, feature = "test-support"))]
 pub use run::{FailAfter, RunOptions, run_platform_with};
+pub use scheduler::SchedulerService;
 
 #[cfg(test)]
 mod tests;

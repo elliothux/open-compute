@@ -1,8 +1,6 @@
 //! Production `run` composition and shutdown.
 
-use crate::binding_backend::{
-    bind_binding_backend, serve_binding_backend_with_products_and_do_config,
-};
+use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_scheduler};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
 use crate::d1_http::D1ApiState;
@@ -18,6 +16,7 @@ use crate::r2_backend::R2BindingService;
 use crate::r2_http::R2ApiState;
 use crate::r2_maintenance::R2Maintenance;
 use crate::runtime_bridge::{WorkerdTransport, bind_runtime_source, serve_runtime_source};
+use crate::scheduler::SchedulerService;
 use crate::workers_http::WorkerApiState;
 use open_compute_artifacts::{
     ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, R2ObjectStore,
@@ -26,14 +25,16 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
     ComponentName, ComponentState, ErrorCode, PlatformError, ReadinessReason, Redactor, RequestId,
-    StartupId,
+    StartupId, SystemSchedulerClock,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
     PlatformReleaseMeta, StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions,
     verify_runtime_binary_with_staging_lease,
 };
-use open_compute_storage::{DurableObjectRepository, PlatformStorage, WorkerRepository};
+use open_compute_storage::{
+    DurableObjectRepository, PlatformStorage, SchedulerStore, WorkerRepository,
+};
 use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins, RuntimeSource};
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -160,6 +161,22 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         }
     };
     let storage = Arc::new(storage);
+    let scheduler_store = match storage.data_dir().ensure_scheduler_db().and_then(|path| {
+        SchedulerStore::open(
+            &path,
+            loaded.config.storage.sqlite_busy_timeout_ms,
+            unix_ms(),
+        )
+    }) {
+        Ok(store) => Some(Arc::new(store)),
+        Err(error) => {
+            tracing::warn!(
+                code = error.code().as_str(),
+                "scheduler unavailable; ordinary Worker and Durable Object traffic remains enabled"
+            );
+            None
+        }
+    };
     metrics.observe_sqlite(SqliteOp::Open, storage_started.elapsed());
     metrics.observe_sqlite(SqliteOp::Migrate, storage_started.elapsed());
     record(&opts, "storage");
@@ -187,6 +204,19 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         ComponentName::MasterKey,
         ComponentState::Healthy,
         Some(ReadinessReason::Ready),
+    )?;
+    health.set_component(
+        ComponentName::Scheduler,
+        if scheduler_store.is_some() {
+            ComponentState::Healthy
+        } else {
+            ComponentState::Degraded
+        },
+        Some(if scheduler_store.is_some() {
+            ReadinessReason::Ready
+        } else {
+            ReadinessReason::SchedulerUnavailable
+        }),
     )?;
 
     let mut redactor = Redactor::new();
@@ -373,6 +403,19 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                 PlatformError::new(ErrorCode::LimitInvalid, "Worker body limit is invalid")
             })?,
         );
+    let scheduler_service = scheduler_store.as_ref().map(|store| {
+        Arc::new(
+            SchedulerService::new(
+                store.clone(),
+                storage.clone(),
+                transport.clone(),
+                loaded.config.scheduler.clone(),
+                Arc::new(SystemSchedulerClock),
+            )
+            .with_metrics(metrics.clone())
+            .with_health(health.clone()),
+        )
+    });
     let bundle_limits = BundleLimits {
         max_artifact_bytes: usize::try_from(loaded.config.workers.max_bundle_bytes).map_err(
             |_| PlatformError::new(ErrorCode::LimitInvalid, "Worker bundle limit is invalid"),
@@ -423,7 +466,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         loaded.config.durable_objects.clone(),
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
-    .with_metrics(metrics.clone());
+    .with_metrics(metrics.clone())
+    .with_scheduler(scheduler_store.clone());
     metrics.set_do_runtime_gauges(0, 0, 0);
     let maintenance_do_api = do_api.clone();
     let supervisor_for_http = supervisor_handle.clone();
@@ -456,7 +500,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     ))
     .with_r2_api(r2_api)
     .with_d1_api(d1_api)
-    .with_do_api(do_api);
+    .with_do_api(do_api)
+    .with_scheduler(scheduler_service.clone());
 
     let public_listener = match http::bind(public_addr).await {
         Ok(l) => l,
@@ -496,6 +541,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     metrics.inc_start(StartResult::Success, StartStage::Listen);
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let (scheduler_shutdown_tx, scheduler_shutdown_rx) = watch::channel(false);
     let mut shutdown_maintenance = shutdown_rx.clone();
     let maintenance_storage = storage.clone();
     let maintenance_store = store.clone();
@@ -577,7 +623,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let binding_metrics = metrics.clone();
     let binding_do_config = loaded.config.durable_objects.clone();
     let binding_backend_task = tokio::spawn(async move {
-        serve_binding_backend_with_products_and_do_config(
+        serve_binding_backend_with_scheduler(
             binding_backend_listener,
             binding_storage,
             binding_auth,
@@ -587,6 +633,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             Some(r2_backend),
             Some(d1_backend),
             binding_do_config,
+            scheduler_store,
             async move {
                 let _ = shutdown_binding.changed().await;
             },
@@ -644,6 +691,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     supervisor.start();
     record(&opts, "supervisor");
     metrics.inc_start(StartResult::Success, StartStage::Supervisor);
+    let scheduler_task = scheduler_service
+        .map(|service| tokio::spawn(async move { service.run(scheduler_shutdown_rx).await }));
 
     let mut watch_rx = supervisor.subscribe();
     let health_watch = health.clone();
@@ -681,11 +730,13 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         &health,
         &supervisor,
         shutdown_tx,
+        scheduler_shutdown_tx,
         public_task,
         admin_task,
         runtime_source_task,
         binding_backend_task,
         maintenance_task,
+        scheduler_task,
     )
     .await;
 
@@ -731,11 +782,13 @@ async fn wait_signals_and_servers(
     health: &HealthCoordinator,
     supervisor: &WorkerdSupervisor,
     shutdown_tx: watch::Sender<bool>,
+    scheduler_shutdown_tx: watch::Sender<bool>,
     public_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     admin_task: Option<tokio::task::JoinHandle<Result<(), PlatformError>>>,
     runtime_source_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     binding_backend_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     maintenance_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
+    scheduler_task: Option<tokio::task::JoinHandle<Result<(), PlatformError>>>,
 ) -> Option<PlatformError> {
     let mut sigterm = signal(SignalKind::terminate()).ok();
     let mut sigint = signal(SignalKind::interrupt()).ok();
@@ -744,46 +797,75 @@ async fn wait_signals_and_servers(
     let mut runtime_source_task = runtime_source_task;
     let mut binding_backend_task = binding_backend_task;
     let mut maintenance_task = maintenance_task;
+    let mut scheduler_task = scheduler_task;
     let mut listener_error = None;
-    tokio::select! {
-        _ = async {
-            match sigterm.as_mut() {
-                Some(s) => {
-                    s.recv().await;
+    'wait: loop {
+        tokio::select! {
+            _ = async {
+                match sigterm.as_mut() {
+                    Some(s) => {
+                        s.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
                 }
-                None => std::future::pending::<()>().await,
-            }
-        } => {}
-        _ = async {
-            match sigint.as_mut() {
-                Some(s) => {
-                    s.recv().await;
+            } => break 'wait,
+            _ = async {
+                match sigint.as_mut() {
+                    Some(s) => {
+                        s.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
                 }
-                None => std::future::pending::<()>().await,
+            } => break 'wait,
+            res = &mut public_task => {
+                listener_error = Some(join_listener(res));
+                break 'wait;
             }
-        } => {}
-        res = &mut public_task => {
-            listener_error = Some(join_listener(res));
-        }
-        res = async {
-            match admin_task.as_mut() {
-                Some(task) => task.await,
-                None => std::future::pending().await,
+            res = async {
+                match admin_task.as_mut() {
+                    Some(task) => task.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                listener_error = Some(join_listener(res));
+                break 'wait;
             }
-        } => {
-            listener_error = Some(join_listener(res));
-        }
-        res = &mut runtime_source_task => {
-            listener_error = Some(join_runtime_source(res));
-        }
-        res = &mut binding_backend_task => {
-            listener_error = Some(join_runtime_source(res));
-        }
-        res = &mut maintenance_task => {
-            listener_error = Some(join_runtime_source(res));
+            res = &mut runtime_source_task => {
+                listener_error = Some(join_runtime_source(res));
+                break 'wait;
+            }
+            res = &mut binding_backend_task => {
+                listener_error = Some(join_runtime_source(res));
+                break 'wait;
+            }
+            res = &mut maintenance_task => {
+                listener_error = Some(join_runtime_source(res));
+                break 'wait;
+            }
+            res = async {
+                match scheduler_task.as_mut() {
+                    Some(task) => task.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                let error = join_scheduler(res);
+                tracing::error!(code = error.code().as_str(), "scheduler task stopped");
+                let _ = health.set_component(
+                    ComponentName::Scheduler,
+                    ComponentState::Failed,
+                    Some(ReadinessReason::SchedulerUnavailable),
+                );
+                scheduler_task = None;
+            }
         }
     }
     let _ = health.begin_drain();
+    let _ = scheduler_shutdown_tx.send(true);
+    if let Some(task) = scheduler_task
+        && !task.is_finished()
+    {
+        let _ = task.await;
+    }
     supervisor.begin_drain();
     let _ = shutdown_tx.send(true);
     supervisor.shutdown().await;
@@ -805,6 +887,17 @@ async fn wait_signals_and_servers(
         let _ = maintenance_task.await;
     }
     listener_error
+}
+
+fn join_scheduler(res: Result<Result<(), PlatformError>, tokio::task::JoinError>) -> PlatformError {
+    match res {
+        Ok(Ok(())) => PlatformError::new(
+            ErrorCode::SchedulerUnavailable,
+            "scheduler task stopped unexpectedly",
+        ),
+        Ok(Err(error)) => error,
+        Err(_) => PlatformError::new(ErrorCode::SchedulerUnavailable, "scheduler task failed"),
+    }
 }
 
 async fn run_worker_maintenance(

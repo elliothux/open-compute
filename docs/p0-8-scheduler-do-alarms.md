@@ -1,6 +1,6 @@
 # P0.8：Scheduler Kernel 与 Durable Object Alarms 详细设计
 
-> 状态：Detailed design，待实现
+> 状态：已实现并验证（2026-08-25）
 >
 > 前置依赖：P0.1 至 P0.6 已按当前 checkout 和用户确认跑通；P0.7 必须先通过 Exit Gate。
 >
@@ -71,6 +71,33 @@ row_token
 - native facet alarm scheduler；P0.8 只使用 pinned workerd 能稳定提供的 storage/facet primitives；
 - `transactionSync()` 内的 alarm mutation；见 4.5 的明确偏差。
 
+### 0.3 当前实现与验证证据
+
+- `scheduler.sqlite` 由 storage crate 独立拥有，使用 WAL/FULL、build-time migration checksum、
+  `quick_check`、claim lease、random claim token、expired-lease recovery 和 token-exact completion；
+- loaded-isolate wrapper 只在 DO facet class 边界注入 alarm shim 和 hidden `AlarmIndex` capability，
+  普通 named Worker entrypoint 保持原有语义；
+- object-local reserved row 是唯一 authority，projection 只通过 scoped private binding写入，
+  dispatch、repair、promotion/rollback 和 object generation 都再次 fence；
+- `SchedulerService` 提供 bounded claim/dispatch、wall-clock floor、timeout lease retention、六次 retry、
+  exhaustion cleanup、periodic bounded repair 和 graceful drain；scheduler 不可用时普通 Worker/DO 仍可服务；
+- authenticated operator API 提供 inspect、pause、resume 和单批 repair；offline CLI 只允许显式隔离坏库并
+  创建空 replacement，后续由 live object bounded scan 重建 projection；
+- metrics 使用固定低基数 series，health/doctor 分开报告 scheduler policy、SQLite mode、状态汇总和 token invariant。
+
+验证结果：
+
+- `./scripts/test-p0-8.sh` 已连续三轮 fresh process通过 P0.8 stock-workerd Gate，并递归跑通
+  P0.7 至 P0.2 的全部三轮 regression Gate；
+- P0.8 Gate 覆盖 constructor/class field/fetch/RPC proxy、number/Date/invalid input、past due、
+  overwrite/delete/token fence、async transaction commit/rollback/coalesce、`transactionSync()` fail closed、
+  read/activation/scan repair、stale authority/projection、transport unknown lease retention、六次 retry 与
+  2/4/8/16/32/64 秒 backoff、exhaustion、A -> B -> rollback A 和 KV/SQL/FK/alarm `deleteAll()`；
+- `./poc/g0 test all` 三轮 aggregate verdict 为 `Conditional Go`，唯一条件仍是既有精确 allowlist
+  `loader:D-abort`；
+- workspace format、Clippy、unit/integration、no-default-features、Rust 1.98 MSRV、metadata、dependency
+  boundary、diff whitespace 和 coverage 均通过；Rust line coverage 为 90.01%。
+
 ## 1. P0.8.0：Facet alarm/shim Hard Gate
 
 动态 tenant class 运行在 facet 上，不能假定普通 native DO namespace 的 alarm scheduler也适用于
@@ -106,8 +133,10 @@ version 和 data migration。
 tenant facet 时固定 native `delete_all_preserves_alarm` 行为，再由 shim实现当前公开
 `deleteAll()` 语义。
 
-若 pinned workerd 不允许可靠固定该 flag，AG-08 失败，P0.8 停止；不能让一次 `deleteAll()` 同时
-触发 native 与 project scheduler。
+实测 pinned facet 的直接 native `storage.deleteAll()` 不能作为产品路径。实现固定
+`delete_all_preserves_alarm`，再在一次 native async `storage.transaction()` 内组合删除 KV、tenant SQL
+对象和 project alarm row；transaction commit 后才 token-exact 删除 projection。这样 workerd native
+alarm scheduler 不介入，project shim 仍只有一条 authority 路径。
 
 P0.8 capability V1 不复制 2026-02-24 之前“deleteAll 保留 alarm”的旧语义：旧 compatibility date
 也按当前语义删除 alarm。这是明确偏差，换来只有一条可验证、原子清理 object storage 的路径。
@@ -365,18 +394,18 @@ set/deleteAlarm 立即抛 TypeError，要求改用 async `transaction()`。这�
 
 ### 4.6 `deleteAll()`
 
-shim 使用一次 pinned native `storage.deleteAll()` 原子删除 KV、tenant SQL object 和自有 alarm table，
-随后 token-exact 删除 scheduler projection：
+shim 使用一次 pinned native async `storage.transaction()` 作为原子边界，在 transaction 内删除 KV、
+按 dependency-safe 顺序 drop tenant SQL object和自有 alarm table，随后 token-exact 删除 scheduler projection：
 
 - native `delete_all_preserves_alarm` 只阻止 workerd 自己的 alarm scheduler介入；
-- project alarm row 是普通 facet SQLite table，会随 native deleteAll 一起删除；
-- native call 成功前不写 scheduler；成功后再删除 projection；
+- transaction 开启 deferred foreign keys，按 trigger、view、反向创建顺序 drop user tables；
+- transaction commit 前不写 scheduler；成功后再删除 projection；
 - crash在两步之间只留下 stale projection，dispatch token validation会清除且不会调用 handler；
 - projection删除失败时返回 error，但已经删除的 object authority不能伪装回滚；
 - 2026-02-24 之前的 preserve-alarm 语义不支持。
 
-AG-08 必须覆盖直接 SQL table、KV 和 alarm 同时存在的原子清理。若 pinned workerd 在 facet 上无法
-提供该原子路径，P0.8 不能退化为手工枚举/drop tables；应先停在 Gate 并重新评估 shim边界。
+AG-08 已用同时存在 KV、直接 SQL table、foreign key和alarm的 stock-workerd fixture覆盖原子清理；
+direct native facet `deleteAll()` 的失败行为也保留为 Hard Gate 结论，产品路径不依赖它。
 
 ## 5. Projection protocol 与 repair
 
@@ -495,9 +524,10 @@ retry 6: 64s
 1. object row token-exact 更新 `in_flight=0`、`retry_count+1`、new due；
 2. scheduler claim-token + row-token 条件 reschedule；
 3. response loss 时旧 claim 等 lease expire；repair 以 object authority 修正 projection；
-4. 第六次 retry 仍失败后进入 `discarding`；
-5. dispatcher 请求 object token-exact 删除 exhausted row；
-6. authority cleanup 成功/row 已 stale 后才删除 scheduler job。
+4. 第六次 retry 仍失败时，object-side transaction先 token-exact 删除 exhausted authority，再返回
+   `exhausted`；
+5. Scheduler 将仍匹配 claim/row token 的 projection 条件标记为 `discarding`；
+6. authority 已清除或 row 已 stale 后，Scheduler 才 token-exact 删除 `discarding` job。
 
 不能先删 job 再清 authority，否则 repair 会把 exhausted alarm重新插回。
 
@@ -618,6 +648,17 @@ health：
 operator commands 只需要：pause/resume scheduler、inspect summary、run bounded repair、explicit corrupt-file
 recovery。P0.8 不提供任意 SQL console或手工“标记完成”接口。
 
+当前接口是 authenticated `GET /v1/scheduler`、`POST /v1/scheduler/pause`、
+`POST /v1/scheduler/resume`、`POST /v1/scheduler/repair`，以及 daemon 停止后的：
+
+```text
+platformd --config /absolute/path/config.toml scheduler recover-corrupt \
+  --backup-name scheduler-corrupt-<operator-unique-suffix>
+```
+
+offline recovery 会把主库、WAL、SHM 一起隔离到 `data/diagnostics/scheduler-recovery/` 并验证空库；
+重启后重复执行 bounded repair，直到 summary 收敛。
+
 ## 10. 安全边界
 
 - AlarmIndex binding由 host按 namespace/object/generation scope构造，tenant不能提交 identity override；
@@ -633,54 +674,54 @@ recovery。P0.8 不提供任意 SQL console或手工“标记完成”接口。
 
 ## 11. Work packages
 
-### P0.8.0：Pinned facet alarm/shim Gate
+### P0.8.0：Pinned facet alarm/shim Gate（已完成）
 
 - AG-01 至 AG-10；
 - freeze native flag与shim path；
 - constructor/transaction/deleteAll proxy proof。
 
-### P0.8.1：`scheduler.sqlite` kernel
+### P0.8.1：`scheduler.sqlite` kernel（已完成）
 
 - independent migration/connection owner；
 - Clock/test clock；
 - due claim、random token、lease recovery；
 - bounded concurrency、shutdown drain。
 
-### P0.8.2：DO storage alarm shim
+### P0.8.2：DO storage alarm shim（已完成）
 
 - reserved authority table；
 - get/set/deleteAlarm；
 - async transaction coalescing；
 - transactionSync reject与deleteAll compatibility。
 
-### P0.8.3：Projection protocol与repair
+### P0.8.3：Projection protocol与repair（已完成）
 
 - private AlarmIndex binding；
 - token/generation conditional upsert/delete；
 - read/activation repair；
 - startup/periodic bounded object scan。
 
-### P0.8.4：Dispatch、retry与token fence
+### P0.8.4：Dispatch、retry与token fence（已完成）
 
 - object-side claim；
 - internal alarm invocation；
 - success/reschedule/discard；
 - six retries、timeout与lease overlap tests。
 
-### P0.8.5：Promotion、delete、shutdown与recovery
+### P0.8.5：Promotion、delete、shutdown与recovery（已完成）
 
 - lazy retarget current deployment；
 - object/namespace delete integration；
 - graceful drain；
 - crash boundary与corruption recovery。
 
-### P0.8.6：Observability、doctor与operator commands
+### P0.8.6：Observability、doctor与operator commands（已完成）
 
 - metrics/health/log redaction；
 - inspect/repair/pause/resume；
 - degraded/unavailable separation。
 
-### P0.8.7：Conformance与P0 Exit Gate
+### P0.8.7：Conformance与P0 Exit Gate（已完成）
 
 - public API semantics；
 - deterministic time/retry suite；

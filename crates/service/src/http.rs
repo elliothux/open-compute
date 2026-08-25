@@ -7,6 +7,8 @@ use crate::health::HealthCoordinator;
 use crate::kv_http::{self, KvApiState};
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
 use crate::r2_http::{self, R2ApiState};
+use crate::scheduler::SchedulerService;
+use crate::scheduler_http;
 use crate::workers_http::{self, WorkerApiState};
 use axum::body::Body;
 use axum::extract::Request;
@@ -44,6 +46,7 @@ pub struct HttpState {
     r2_api: Option<Arc<R2ApiState>>,
     d1_api: Option<Arc<D1ApiState>>,
     do_api: Option<Arc<DoApiState>>,
+    scheduler: Option<Arc<SchedulerService>>,
 }
 
 impl std::fmt::Debug for HttpState {
@@ -56,6 +59,7 @@ impl std::fmt::Debug for HttpState {
             .field("r2_api", &self.r2_api.is_some())
             .field("d1_api", &self.d1_api.is_some())
             .field("do_api", &self.do_api.is_some())
+            .field("scheduler", &self.scheduler.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -105,6 +109,7 @@ impl HttpState {
             r2_api: None,
             d1_api: None,
             do_api: None,
+            scheduler: None,
         })
     }
 
@@ -127,6 +132,7 @@ impl HttpState {
             r2_api: None,
             d1_api: None,
             do_api: None,
+            scheduler: None,
         }
     }
 
@@ -195,6 +201,19 @@ impl HttpState {
         self.do_api.as_ref()
     }
 
+    /// Attach the P0.8 scheduler operator surface.
+    #[must_use]
+    pub fn with_scheduler(mut self, scheduler: Option<Arc<SchedulerService>>) -> Self {
+        self.scheduler = scheduler;
+        self
+    }
+
+    /// Borrow the optional P0.8 scheduler service.
+    #[must_use]
+    pub(crate) fn scheduler(&self) -> Option<&Arc<SchedulerService>> {
+        self.scheduler.as_ref()
+    }
+
     /// Borrow the fixed-series metrics registry from product control handlers.
     #[must_use]
     pub(crate) const fn metrics(&self) -> &Arc<MetricsRegistry> {
@@ -228,6 +247,7 @@ pub fn admin_router(state: HttpState) -> Router {
         .merge(d1_http::control_router());
     router = router.merge(do_http::control_router());
     router = router.merge(r2_http::control_router());
+    router = router.merge(scheduler_http::control_router());
     router
         .fallback(fallback)
         .layer(axum::middleware::from_fn(bounds_middleware))
@@ -250,6 +270,7 @@ pub fn merged_router(state: HttpState) -> Router {
         .merge(r2_http::control_router())
         .merge(d1_http::control_router())
         .merge(do_http::control_router())
+        .merge(scheduler_http::control_router())
         .fallback(workers_http::public_ingress)
         .layer(axum::middleware::from_fn(bounds_middleware))
         .with_state(state)

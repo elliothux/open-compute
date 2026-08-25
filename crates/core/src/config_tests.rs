@@ -419,6 +419,9 @@ fn remaining_authority_and_worker_limit_boundaries_fail_closed() {
         "[workers]\ndeployment_min_retention_ms = 0\n",
         "[workers]\nmax_bundle_bytes = 67108865\n",
         "[workers]\ndelete_recovery_batch = 10001\n",
+        "[scheduler]\npoll_interval_ms = 0\n",
+        "[scheduler]\nclaim_batch = 33\nmax_in_flight = 16\n",
+        "[scheduler]\nclaim_lease_ms = 34999\n",
     ] {
         let code = parse_err(input).code();
         assert!(

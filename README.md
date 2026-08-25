@@ -83,6 +83,7 @@ cargo metadata --no-deps --format-version 1
 ./poc/g0 test bootstrap
 OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-1.sh
 OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-2.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-8.sh
 ```
 
 Rust 覆盖率使用
@@ -90,15 +91,17 @@ Rust 覆盖率使用
 `brew install cargo-llvm-cov`，其他环境可运行
 `cargo install cargo-llvm-cov --locked`。`./scripts/coverage.sh` 使用
 `--all-targets --all-features --test-threads=1` 口径，要求提供与正式 lock 匹配的 pinned
-`workerd`，并执行真实 P0.1/P0.2 Rust Gate 路径。脚本在 `target/llvm-cov/` 生成终端摘要、
+`workerd`，并执行真实 P0.1-P0.8 Rust Gate 路径。脚本在 `target/llvm-cov/` 生成终端摘要、
 HTML、LCOV 和 JSON summary；workspace 生产 Rust 行覆盖率低于 90.00% 时失败。独立的
 `tests/**`、`src/tests.rs`、`src/**/*_tests.rs`、`src/mock_s3.rs` 和测试 supervisor fixture
 不计入分母，生产代码不得放入这些排除路径。覆盖率运行不执行
 `poc/g0` JavaScript 黑盒测试，也不替代下方三个 fresh-process rounds 的 P0 验收。
 
-两个 Gate 在 pinned binary 缺失或 hash 与 lock 不一致时都会直接失败，不会 skip。
+这些 Gate 在 pinned binary 缺失或 hash 与 lock 不一致时都会直接失败，不会 skip。
 `scripts/test-p0-2.sh` 在三个 fresh test process 中运行真实 `workerd`、SQLite 和 SigV4 S3 test
 provider。支持面与明确偏差见 [`docs/p0-2-api-matrix.md`](docs/p0-2-api-matrix.md)。
+`scripts/test-p0-8.sh` 在三个 fresh process 中运行 scheduler/alarm matrix，随后递归执行
+P0.7-P0.2 regression Gate。
 Linux release CI 另以 `scripts/test-p0-2-egress-linux.sh` 创建短期受控 dual-stack 网络夹具，补齐
 public IPv4/IPv6/DNS allow 与 redirect/DNS-to-private deny；该脚本会要求显式 sudo 授权并在退出时
 清理地址和 hosts 项。

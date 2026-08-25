@@ -243,6 +243,16 @@ pub enum ErrorCode {
     DoNamespaceNotEmpty,
     /// The private Durable Object transport protocol was malformed.
     DoInternalProtocolError,
+    /// The independent scheduler database or dispatcher is unavailable.
+    SchedulerUnavailable,
+    /// The independent scheduler database failed integrity validation.
+    SchedulerCorrupt,
+    /// The bounded scheduler writer lane is temporarily busy.
+    SchedulerBusy,
+    /// The private alarm projection or dispatch protocol was malformed.
+    SchedulerInternalProtocolError,
+    /// A Durable Object alarm authority mutation could not update its projection.
+    DoAlarmIndexUnavailable,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -368,6 +378,11 @@ impl ErrorCode {
             Self::DoPlacementOptionUnsupported => "DO_PLACEMENT_OPTION_UNSUPPORTED",
             Self::DoNamespaceNotEmpty => "DO_NAMESPACE_NOT_EMPTY",
             Self::DoInternalProtocolError => "DO_INTERNAL_PROTOCOL_ERROR",
+            Self::SchedulerUnavailable => "SCHEDULER_UNAVAILABLE",
+            Self::SchedulerCorrupt => "SCHEDULER_CORRUPT",
+            Self::SchedulerBusy => "SCHEDULER_BUSY",
+            Self::SchedulerInternalProtocolError => "SCHEDULER_INTERNAL_PROTOCOL_ERROR",
+            Self::DoAlarmIndexUnavailable => "DO_ALARM_INDEX_UNAVAILABLE",
             Self::Internal => "INTERNAL",
         }
     }
@@ -407,6 +422,8 @@ pub enum ReadinessReason {
     DiskHardLimit,
     /// Static configuration is invalid.
     ConfigInvalid,
+    /// Durable Object alarm scheduler is unavailable or degraded.
+    SchedulerUnavailable,
     /// All required components are ready.
     Ready,
 }
@@ -428,6 +445,7 @@ impl ReadinessReason {
             Self::DataDirInUse => "DATA_DIR_IN_USE",
             Self::DiskHardLimit => "DISK_HARD_LIMIT",
             Self::ConfigInvalid => "CONFIG_INVALID",
+            Self::SchedulerUnavailable => "SCHEDULER_UNAVAILABLE",
             Self::Ready => "READY",
         }
     }

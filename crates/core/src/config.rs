@@ -51,6 +51,8 @@ pub struct PlatformConfig {
     pub d1: D1Config,
     /// Durable Object identity, dispatch, RPC, and local-disk policy.
     pub durable_objects: DurableObjectsConfig,
+    /// Durable Object alarm scheduler policy.
+    pub scheduler: SchedulerConfig,
 }
 
 impl PlatformConfig {
@@ -77,6 +79,7 @@ impl PlatformConfig {
         self.r2.validate()?;
         self.d1.validate()?;
         self.durable_objects.validate()?;
+        self.scheduler.validate()?;
         Ok(())
     }
 }
@@ -501,7 +504,7 @@ impl Default for MetricsConfig {
         Self {
             enabled: true,
             max_label_value_bytes: 64,
-            max_series: 256,
+            max_series: 512,
         }
     }
 }
@@ -894,6 +897,81 @@ impl DurableObjectsConfig {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
                 "Durable Object host policy is outside the hard platform bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// P0.8 single-process scheduler and Durable Object alarm policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct SchedulerConfig {
+    /// Delay between due-job polls.
+    pub poll_interval_ms: u64,
+    /// Maximum jobs claimed by one short writer transaction.
+    pub claim_batch: u32,
+    /// Maximum concurrent tenant alarm dispatches.
+    pub max_in_flight: u32,
+    /// Persisted claim lease duration.
+    pub claim_lease_ms: u64,
+    /// Maximum time platformd waits for one workerd alarm dispatch.
+    pub dispatch_timeout_ms: u64,
+    /// Safety interval between dispatch timeout and claim expiry.
+    pub lease_guard_ms: u64,
+    /// Maximum live objects probed by one repair pass.
+    pub repair_batch: u32,
+    /// Delay between bounded repair passes.
+    pub repair_interval_ms: u64,
+    /// Maximum graceful-shutdown wait for in-flight alarm dispatches.
+    pub shutdown_drain_ms: u64,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: 100,
+            claim_batch: 32,
+            max_in_flight: 16,
+            claim_lease_ms: 60_000,
+            dispatch_timeout_ms: 30_000,
+            lease_guard_ms: 5_000,
+            repair_batch: 100,
+            repair_interval_ms: 30_000,
+            shutdown_drain_ms: 10_000,
+        }
+    }
+}
+
+impl SchedulerConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        let guarded_timeout = self
+            .dispatch_timeout_ms
+            .checked_add(self.lease_guard_ms)
+            .ok_or_else(|| {
+                PlatformError::new(ErrorCode::LimitInvalid, "scheduler lease bounds overflow")
+            })?;
+        if self.poll_interval_ms == 0
+            || self.poll_interval_ms > 60_000
+            || self.claim_batch == 0
+            || self.claim_batch > 10_000
+            || self.max_in_flight == 0
+            || self.max_in_flight > 4096
+            || self.claim_batch > self.max_in_flight.saturating_mul(2)
+            || self.dispatch_timeout_ms == 0
+            || self.dispatch_timeout_ms > 5 * 60 * 1000
+            || self.lease_guard_ms == 0
+            || self.claim_lease_ms < guarded_timeout
+            || self.claim_lease_ms > 15 * 60 * 1000
+            || self.repair_batch == 0
+            || self.repair_batch > 10_000
+            || self.repair_interval_ms == 0
+            || self.repair_interval_ms > 24 * 60 * 60 * 1000
+            || self.shutdown_drain_ms > 5 * 60 * 1000
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "scheduler policy is outside the hard platform bounds",
             ));
         }
         Ok(())

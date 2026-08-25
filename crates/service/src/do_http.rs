@@ -15,7 +15,7 @@ use open_compute_core::{
 };
 use open_compute_storage::{
     AuthorizedDurableObjectDelete, DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRecord,
-    DurableObjectRepository, PlatformStorage, ResourceRepository,
+    DurableObjectRepository, PlatformStorage, ResourceRepository, SchedulerStore,
 };
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, DurableObjectResourceDriver, ResourceController,
@@ -56,6 +56,7 @@ pub struct DoApiState {
     config: DurableObjectsConfig,
     delete_drain_timeout: Duration,
     metrics: Option<Arc<MetricsRegistry>>,
+    scheduler: Option<Arc<SchedulerStore>>,
 }
 
 impl std::fmt::Debug for DoApiState {
@@ -83,6 +84,7 @@ impl DoApiState {
             config,
             delete_drain_timeout,
             metrics: None,
+            scheduler: None,
         }
     }
 
@@ -90,6 +92,13 @@ impl DoApiState {
     #[must_use]
     pub fn with_metrics(mut self, metrics: Arc<MetricsRegistry>) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+
+    /// Delete alarm projections inside the object lifecycle fence before native facet removal.
+    #[must_use]
+    pub fn with_scheduler(mut self, scheduler: Option<Arc<SchedulerStore>>) -> Self {
+        self.scheduler = scheduler;
         self
     }
 
@@ -144,6 +153,13 @@ impl DoApiState {
             object.object_id,
             object.generation,
         )?;
+        if let Some(scheduler) = &self.scheduler {
+            scheduler.delete_object(
+                object.namespace_resource_id,
+                object.object_id,
+                object.generation,
+            )?;
+        }
         self.transport.delete(&authority).await?;
         if let Some(metrics) = &self.metrics {
             metrics.inc_do_facet_reload(DoFacetReloadReason::Delete);
