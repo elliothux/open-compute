@@ -727,7 +727,7 @@ fn r2_injection_sources_are_descriptor_bound_and_reserved_modules_fail_closed() 
     assert_eq!(injection.r2_facade_capability_version, Some(1));
     assert_eq!(injection.r2_facade_sha256.as_ref().unwrap().len(), 64);
     assert_eq!(injection.d1_facade_capability_version, None);
-    assert_eq!(injection.r2_wrapper_generator_sha256.len(), 64);
+    assert_eq!(injection.loaded_isolate_wrapper_generator_sha256.len(), 64);
     let digest = descriptor.sha256().unwrap();
     let mut tampered = descriptor.clone();
     tampered

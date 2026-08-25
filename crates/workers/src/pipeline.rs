@@ -4,9 +4,9 @@ use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
 use crate::descriptor::{
-    BindingDescriptorV1, D1_FACADE_MODULE_NAME, R2_FACADE_MODULE_NAME, R2_WRAPPER_MODULE_NAME,
-    SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256,
-    validate_env_name,
+    BindingDescriptorV1, D1_FACADE_MODULE_NAME, DO_FACADE_MODULE_NAME, DO_ID_CODEC_MODULE_NAME,
+    LOADED_ISOLATE_WRAPPER_MODULE_NAME, R2_FACADE_MODULE_NAME, SecretDescriptor,
+    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, validate_env_name,
 };
 use bytes::Bytes;
 use futures::stream;
@@ -17,9 +17,9 @@ use open_compute_core::{
     WorkerId,
 };
 use open_compute_storage::{
-    DeploymentRecord, DeploymentState, IdempotencyReservation, LOADER_SCHEMA_VERSION,
-    NewDeployment, NewDeploymentBinding, PlatformStorage, ResourceRepository,
-    StoredDeploymentSecret, WorkerRepository,
+    DeploymentRecord, DeploymentState, DurableObjectRepository, IdempotencyReservation,
+    LOADER_SCHEMA_VERSION, NewDeployment, NewDeploymentBinding, PlatformStorage,
+    ResourceRepository, StoredDeploymentSecret, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -36,6 +36,12 @@ const MAX_SECRETS: usize = 64;
 const MAX_SECRET_BYTES: usize = 16 * 1024;
 const MAX_SECRET_TOTAL_BYTES: usize = 64 * 1024;
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+
+type PreparedBindings = (
+    Vec<BindingDescriptorV1>,
+    Vec<NewDeploymentBinding>,
+    Vec<String>,
+);
 
 /// Control-plane request for one immutable deployment resource binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -90,6 +96,20 @@ pub trait RuntimeValidator: Send + Sync + 'static {
             Err(PlatformError::new(
                 ErrorCode::EntrypointNotFound,
                 "runtime validator cannot prove the named entrypoint",
+            ))
+        })
+    }
+
+    /// Prove that a candidate exports a constructible Durable Object class.
+    fn validate_durable_object_class(
+        &self,
+        _candidate: ValidationCandidate,
+        _class_name: String,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
+        Box::pin(async {
+            Err(PlatformError::new(
+                ErrorCode::DoClassNotFound,
+                "runtime validator cannot prove the Durable Object class",
             ))
         })
     }
@@ -377,7 +397,8 @@ impl<'a> DeploymentController<'a> {
             deployment_id,
             &request.secrets,
         )?;
-        let (binding_descriptors, stored_bindings) = self.prepare_bindings(request)?;
+        let (binding_descriptors, stored_bindings, durable_object_classes) =
+            self.prepare_bindings(request)?;
         let descriptor = WorkerCodeDescriptorV1::new(
             request.account_id,
             request.worker_id,
@@ -441,6 +462,29 @@ impl<'a> DeploymentController<'a> {
                 code,
                 "real workerd validation rejected the deployment",
             ));
+        }
+        for class_name in durable_object_classes {
+            if let Err(error) = self
+                .validator
+                .validate_durable_object_class(candidate.clone(), class_name)
+                .await
+            {
+                let code = if error.code() == ErrorCode::DoClassNotFound {
+                    ErrorCode::DoClassNotFound
+                } else {
+                    stable_validation_code(&error)
+                };
+                repo.mark_rejected(
+                    deployment_id,
+                    DeploymentState::Validating,
+                    code,
+                    request.now_ms,
+                )?;
+                return Err(PlatformError::new(
+                    code,
+                    "real workerd validation rejected a Durable Object class",
+                ));
+            }
         }
         repo.mark_ready(deployment_id, request.now_ms)?;
         deployment.state = DeploymentState::Ready;
@@ -517,10 +561,11 @@ impl<'a> DeploymentController<'a> {
     fn prepare_bindings(
         &self,
         request: &CreateDeploymentRequest,
-    ) -> Result<(Vec<BindingDescriptorV1>, Vec<NewDeploymentBinding>), PlatformError> {
+    ) -> Result<PreparedBindings, PlatformError> {
         let repository = ResourceRepository::new(self.storage.db());
         let mut descriptors = Vec::with_capacity(request.bindings.len());
         let mut rows = Vec::with_capacity(request.bindings.len());
+        let mut durable_object_classes = Vec::new();
         for (name, input) in &request.bindings {
             let resource = repository.get(request.account_id, input.id)?;
             if resource.state != ResourceState::Ready {
@@ -534,6 +579,17 @@ impl<'a> DeploymentController<'a> {
                     ErrorCode::ResourceNotFound,
                     "resource was not found in the requested scope",
                 ));
+            }
+            if input.kind == BindingKind::DoNamespace {
+                let namespace = DurableObjectRepository::new(self.storage)
+                    .get_namespace(request.account_id, input.id)?;
+                if namespace.owner_worker_id != request.worker_id {
+                    return Err(PlatformError::new(
+                        ErrorCode::DoNamespaceNotFound,
+                        "Durable Object namespace is not owned by this Worker",
+                    ));
+                }
+                durable_object_classes.push(namespace.class_name);
             }
             let descriptor = BindingDescriptorV1::new(
                 BindingId::generate(),
@@ -561,7 +617,9 @@ impl<'a> DeploymentController<'a> {
             });
             descriptors.push(descriptor);
         }
-        Ok((descriptors, rows))
+        durable_object_classes.sort();
+        durable_object_classes.dedup();
+        Ok((descriptors, rows, durable_object_classes))
     }
 }
 
@@ -635,7 +693,7 @@ pub(crate) fn validate_injection_module_collisions(
     if !bindings.values().any(|binding| {
         matches!(
             binding.kind,
-            BindingKind::R2Bucket | BindingKind::D1Database
+            BindingKind::R2Bucket | BindingKind::D1Database | BindingKind::DoNamespace
         )
     }) {
         return Ok(());
@@ -643,7 +701,11 @@ pub(crate) fn validate_injection_module_collisions(
     if manifest.modules.iter().any(|module| {
         matches!(
             module.name.as_str(),
-            R2_FACADE_MODULE_NAME | D1_FACADE_MODULE_NAME | R2_WRAPPER_MODULE_NAME
+            R2_FACADE_MODULE_NAME
+                | D1_FACADE_MODULE_NAME
+                | DO_FACADE_MODULE_NAME
+                | DO_ID_CODEC_MODULE_NAME
+                | LOADED_ISOLATE_WRAPPER_MODULE_NAME
         )
     }) {
         return Err(PlatformError::new(

@@ -15,9 +15,9 @@ use open_compute_core::{
     SecretString, ServerConfig,
 };
 use open_compute_runtime::{
-    ExternalServiceAddress, GenerationAuthRegistry, OsJitter, PlatformReleaseMeta,
-    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
-    verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
+    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
+    WorkerdSupervisorOptions, verify_runtime_binary,
 };
 use open_compute_service::http::{HttpState, merged_router};
 use open_compute_service::runtime_bridge::{
@@ -116,7 +116,14 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     .with_binding_generation_auth(binding_auth.clone());
     let supervisor_slot = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(auth.clone(), supervisor_slot.clone());
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_external_services_and_auth(
+    let do_storage = storage
+        .data_dir()
+        .prepare_durable_object_storage(
+            &storage.identity().platform_id.to_string(),
+            runtime.version_output(),
+        )
+        .unwrap();
+    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -130,6 +137,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
             ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
             ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
         ],
+        vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
         vec![auth.clone(), binding_auth.clone()],
     ));
     *supervisor_slot.lock().unwrap() = Some(supervisor.clone());

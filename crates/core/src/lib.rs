@@ -8,6 +8,7 @@
 
 pub mod clock;
 pub mod config;
+pub mod durable_objects;
 pub mod error;
 pub mod health;
 pub mod ids;
@@ -17,9 +18,13 @@ pub mod secret;
 
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    CacheConfig, D1Config, DiagnosticsConfig, KvConfig, MetricsConfig, PlatformConfig, R2Config,
-    RuntimeConfig, S3Config, SecretReference, ServerConfig, StorageConfig, WorkersConfig,
-    validate_bootstrap_config_path,
+    CacheConfig, D1Config, DiagnosticsConfig, DurableObjectsConfig, KvConfig, MetricsConfig,
+    PlatformConfig, R2Config, RuntimeConfig, S3Config, SecretReference, ServerConfig,
+    StorageConfig, WorkersConfig, validate_bootstrap_config_path,
+};
+pub use durable_objects::{
+    DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAME_MAX_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES,
+    DurableObjectId, DurableObjectState, durable_object_namespace_prefix,
 };
 pub use error::{ErrorCode, PlatformError, ReadinessReason};
 pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus};

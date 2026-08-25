@@ -9,11 +9,13 @@ use open_compute_artifacts::{
 use open_compute_core::ids::{PlatformId, StartupId};
 use open_compute_core::{ErrorCode, PlatformError, Redactor, ResourceAvailability, SystemClock};
 use open_compute_runtime::{
-    ExternalServiceAddress, OsJitter, PlatformReleaseMeta, StaticConfigCompiler, SupervisorState,
-    WorkerdSupervisor, WorkerdSupervisorOptions, verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
+    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
+    verify_runtime_binary,
 };
 use open_compute_storage::{
-    inspect_control_db, inspect_data_root, inspect_master_key, inspect_resources,
+    inspect_control_db, inspect_data_root, inspect_durable_object_storage, inspect_master_key,
+    inspect_resources,
 };
 use serde::Serialize;
 use std::io::Write;
@@ -366,7 +368,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         ));
     }
 
-    match verify_runtime_binary(
+    let verified_runtime = match verify_runtime_binary(
         &loaded.config.runtime.lock_file,
         &loaded.config.runtime.binary,
         Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
@@ -381,8 +383,31 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                 "workerd binary hash and version match the lock",
                 Some(bound_value(&ver, 32)),
             ));
+            Some(rt)
         }
-        Err(err) => checks.push(failed("runtime_binary", err.code(), err.message(), None)),
+        Err(err) => {
+            checks.push(failed("runtime_binary", err.code(), err.message(), None));
+            None
+        }
+    };
+
+    match (inspect.as_ref(), db_ok.as_ref(), verified_runtime.as_ref()) {
+        (Some(root), Some(identity), Some(runtime)) => match inspect_durable_object_storage(
+            &root.root,
+            &identity.platform_id.to_string(),
+            runtime.version_output(),
+        ) {
+            Ok(_) => checks.push(ok(
+                "do_storage",
+                "Durable Object localDisk marker and filesystem passed",
+                Some("format_v1".to_owned()),
+            )),
+            Err(error) => checks.push(failed("do_storage", error.code(), error.message(), None)),
+        },
+        _ => checks.push(skipped(
+            "do_storage",
+            "data identity and verified workerd are prerequisites",
+        )),
     }
 
     let s3_client = match resolve_s3_credentials(&loaded.config.s3) {
@@ -529,7 +554,8 @@ async fn run_full_extras(
         },
         Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
         Redactor::new(),
-    );
+    )
+    .with_durable_objects_config(loaded.config.durable_objects.clone());
     let Ok(runtime_source) = tokio::net::TcpListener::bind("127.0.0.1:0").await else {
         checks.push(failed(
             "runtime_cycle",
@@ -582,7 +608,32 @@ async fn run_full_extras(
                 return;
             }
         };
-    let supervisor = WorkerdSupervisor::new_with_external_services(
+    let Some(platform_id) = platform_id else {
+        checks.push(skipped(
+            "runtime_cycle",
+            "temporary runtime requires stored platform identity",
+        ));
+        return;
+    };
+    let do_storage = match inspect_durable_object_storage(
+        &loaded.config.storage.data_dir,
+        &platform_id.to_string(),
+        runtime.version_output(),
+    ) {
+        Ok(path) => path,
+        Err(error) => {
+            checks.push(failed("runtime_cycle", error.code(), error.message(), None));
+            return;
+        }
+    };
+    let directory = match DirectoryServicePath::local("do-storage", &do_storage) {
+        Ok(directory) => directory,
+        Err(error) => {
+            checks.push(failed("runtime_cycle", error.code(), error.message(), None));
+            return;
+        }
+    };
+    let supervisor = WorkerdSupervisor::new_with_services_and_auth(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -593,7 +644,8 @@ async fn run_full_extras(
             lease_path: None,
         },
         vec![runtime_external, binding_external],
-        None,
+        vec![directory],
+        Vec::new(),
     );
     supervisor.start();
     let deadline = tokio::time::Instant::now()

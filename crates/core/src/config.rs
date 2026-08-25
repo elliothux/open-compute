@@ -49,6 +49,8 @@ pub struct PlatformConfig {
     pub r2: R2Config,
     /// Workers D1 SQLite, result, and concurrency limits.
     pub d1: D1Config,
+    /// Durable Object identity, dispatch, RPC, and local-disk policy.
+    pub durable_objects: DurableObjectsConfig,
 }
 
 impl PlatformConfig {
@@ -74,6 +76,7 @@ impl PlatformConfig {
         self.kv.validate()?;
         self.r2.validate()?;
         self.d1.validate()?;
+        self.durable_objects.validate()?;
         Ok(())
     }
 }
@@ -820,6 +823,80 @@ impl Default for D1Config {
             batch_timeout_ms: 30_000,
             idle_handle_ttl_ms: 60_000,
         }
+    }
+}
+
+/// P0.7 Durable Object identity, transport, and local-disk policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct DurableObjectsConfig {
+    /// Maximum UTF-8 bytes accepted for a namespace display name.
+    pub max_namespace_name_bytes: u32,
+    /// Maximum UTF-8 bytes accepted by `idFromName()`.
+    pub max_object_name_bytes: u32,
+    /// Maximum encoded plain-data RPC request bytes.
+    pub max_rpc_request_bytes: u64,
+    /// Maximum encoded plain-data RPC response bytes.
+    pub max_rpc_response_bytes: u64,
+    /// Maximum forwarded fetch request body bytes.
+    pub max_fetch_body_bytes: u64,
+    /// Foreground dispatch timeout.
+    pub dispatch_timeout_ms: u64,
+    /// Global number of active Durable Object dispatches.
+    pub max_in_flight_dispatches: u32,
+    /// Percentage at which health becomes degraded.
+    pub disk_high_watermark_percent: u8,
+    /// Percentage at which new objects and writes fail closed.
+    pub disk_stop_writes_percent: u8,
+    /// Maximum objects processed in one reconciliation batch.
+    pub reconcile_batch: u32,
+}
+
+impl Default for DurableObjectsConfig {
+    fn default() -> Self {
+        Self {
+            max_namespace_name_bytes: 128,
+            max_object_name_bytes: 1024,
+            max_rpc_request_bytes: 1024 * 1024,
+            max_rpc_response_bytes: 1024 * 1024,
+            max_fetch_body_bytes: 32 * 1024 * 1024,
+            dispatch_timeout_ms: 30_000,
+            max_in_flight_dispatches: 256,
+            disk_high_watermark_percent: 85,
+            disk_stop_writes_percent: 95,
+            reconcile_batch: 64,
+        }
+    }
+}
+
+impl DurableObjectsConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        if self.max_namespace_name_bytes == 0
+            || self.max_namespace_name_bytes > 128
+            || self.max_object_name_bytes == 0
+            || self.max_object_name_bytes > 1024
+            || self.max_rpc_request_bytes == 0
+            || self.max_rpc_request_bytes > 16 * 1024 * 1024
+            || self.max_rpc_response_bytes == 0
+            || self.max_rpc_response_bytes > 16 * 1024 * 1024
+            || self.max_fetch_body_bytes == 0
+            || self.max_fetch_body_bytes > 64 * 1024 * 1024
+            || self.dispatch_timeout_ms == 0
+            || self.dispatch_timeout_ms > 5 * 60 * 1000
+            || self.max_in_flight_dispatches == 0
+            || self.max_in_flight_dispatches > 4096
+            || self.disk_high_watermark_percent == 0
+            || self.disk_high_watermark_percent >= self.disk_stop_writes_percent
+            || self.disk_stop_writes_percent > 99
+            || self.reconcile_batch == 0
+            || self.reconcile_batch > 10_000
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "Durable Object host policy is outside the hard platform bounds",
+            ));
+        }
+        Ok(())
     }
 }
 

@@ -25,11 +25,11 @@ pub use process::BoundedOutput;
 #[cfg(any(test, feature = "test-support"))]
 pub use process::{clear_signal_log, set_reap_probe_fail, take_signal_log};
 pub use supervisor::{
-    ConfigCompiler, ExternalServiceAddress, FnCompiler, GenerationAuthRegistry,
-    GenerationCredential, JitterRng, OsJitter, ProcessDiagnostics, READY_PATH,
-    StaticConfigCompiler, SupervisorSnapshot, SupervisorState, TOKEN_HEADER, WorkerdSupervisor,
-    WorkerdSupervisorOptions, generate_internal_token, probe_ready_with_raw_token, serve_argv,
-    token_fingerprint,
+    ConfigCompiler, DirectoryServicePath, ExternalServiceAddress, FnCompiler,
+    GenerationAuthRegistry, GenerationCredential, JitterRng, OsJitter, ProcessDiagnostics,
+    READY_PATH, StaticConfigCompiler, SupervisorSnapshot, SupervisorState, TOKEN_HEADER,
+    WorkerdSupervisor, WorkerdSupervisorOptions, generate_internal_token,
+    probe_ready_with_raw_token, serve_argv, token_fingerprint,
 };
 pub use verify::{
     VerifiedRuntime, verify_runtime_binary, verify_runtime_binary_with_staging_lease,

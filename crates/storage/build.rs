@@ -14,6 +14,7 @@ fn main() {
         ("004_kv", "MIGRATION_004_SHA256"),
         ("005_r2", "MIGRATION_005_SHA256"),
         ("006_d1", "MIGRATION_006_SHA256"),
+        ("007_durable_objects", "MIGRATION_007_SHA256"),
     ];
     let mut generated = String::new();
     for (file, constant) in migrations {

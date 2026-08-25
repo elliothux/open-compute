@@ -16,13 +16,19 @@ pub const GLOBAL_OUTBOUND_POLICY_VERSION: u32 = 1;
 pub const R2_FACADE_MODULE_NAME: &str = "__open_compute_r2_facade__.js";
 /// Reserved dynamic module containing the tenant-local D1 facade.
 pub const D1_FACADE_MODULE_NAME: &str = "__open_compute_d1_facade__.js";
-/// Reserved deterministic main-module wrapper generated for R2 deployments.
-pub const R2_WRAPPER_MODULE_NAME: &str = "__open_compute_r2_wrapper__.js";
+/// Reserved dynamic module containing the tenant-local Durable Object facade.
+pub const DO_FACADE_MODULE_NAME: &str = "__open_compute_do_facade__.js";
+/// Reserved dynamic module containing the synchronous Durable Object ID codec.
+pub const DO_ID_CODEC_MODULE_NAME: &str = "__open_compute_do_id_codec__.js";
+/// Reserved deterministic main-module wrapper generated for local product facades.
+pub const LOADED_ISOLATE_WRAPPER_MODULE_NAME: &str = "__open_compute_loaded_isolate_wrapper__.js";
 
 const R2_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/r2-facade.js");
 const D1_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/d1-facade.js");
-const R2_WRAPPER_GENERATOR_SOURCE: &[u8] =
-    include_bytes!("../../../runtime/system-workers/r2-wrapper-generator.js");
+const DO_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/do-facade.js");
+const DO_ID_CODEC_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/do-id-codec.js");
+const LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE: &[u8] =
+    include_bytes!("../../../runtime/system-workers/loaded-isolate-wrapper-generator.js");
 
 /// Exact loaded-isolate source identity frozen into a facade deployment descriptor.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -42,8 +48,17 @@ pub struct LoadedIsolateInjectionV1 {
     /// SHA-256 of the exact injected D1 facade source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub d1_facade_sha256: Option<String>,
+    /// Local Durable Object facade capability version when a namespace is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub do_facade_capability_version: Option<u32>,
+    /// SHA-256 of the exact injected Durable Object facade source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub do_facade_sha256: Option<String>,
+    /// SHA-256 of the exact synchronous Durable Object ID codec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub do_id_codec_sha256: Option<String>,
     /// SHA-256 of the exact deterministic wrapper generator source.
-    pub r2_wrapper_generator_sha256: String,
+    pub loaded_isolate_wrapper_generator_sha256: String,
 }
 
 impl LoadedIsolateInjectionV1 {
@@ -54,13 +69,23 @@ impl LoadedIsolateInjectionV1 {
         let d1 = bindings
             .iter()
             .any(|binding| binding.kind == BindingKind::D1Database);
-        (r2 || d1).then(|| Self {
+        let durable_objects = bindings
+            .iter()
+            .any(|binding| binding.kind == BindingKind::DoNamespace);
+        (r2 || d1 || durable_objects).then(|| Self {
             schema_version: 1,
             r2_facade_capability_version: r2.then_some(1),
             r2_facade_sha256: r2.then(|| hex::encode(Sha256::digest(R2_FACADE_SOURCE))),
             d1_facade_capability_version: d1.then_some(1),
             d1_facade_sha256: d1.then(|| hex::encode(Sha256::digest(D1_FACADE_SOURCE))),
-            r2_wrapper_generator_sha256: hex::encode(Sha256::digest(R2_WRAPPER_GENERATOR_SOURCE)),
+            do_facade_capability_version: durable_objects.then_some(1),
+            do_facade_sha256: durable_objects
+                .then(|| hex::encode(Sha256::digest(DO_FACADE_SOURCE))),
+            do_id_codec_sha256: durable_objects
+                .then(|| hex::encode(Sha256::digest(DO_ID_CODEC_SOURCE))),
+            loaded_isolate_wrapper_generator_sha256: hex::encode(Sha256::digest(
+                LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE,
+            )),
         })
     }
 }

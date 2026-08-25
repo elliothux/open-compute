@@ -15,7 +15,7 @@ use crate::process::{assert_reaped, wait_reaped};
 use crate::verify::VerifiedRuntime;
 use backoff::{RestartBudget, backoff_delay};
 use open_compute_core::clock::Clock;
-use open_compute_core::config::RuntimeConfig;
+use open_compute_core::config::{DurableObjectsConfig, RuntimeConfig};
 use open_compute_core::error::ReadinessReason;
 use open_compute_core::ids::StartupId;
 use open_compute_core::{ErrorCode, PlatformError, Redactor, SecretString, SystemClock};
@@ -72,14 +72,47 @@ pub struct ExternalServiceAddress {
     address: SocketAddr,
 }
 
+/// Absolute local directory mapped to one named workerd disk service.
+#[derive(Clone, Eq, PartialEq)]
+pub struct DirectoryServicePath {
+    name: String,
+    path: PathBuf,
+}
+
+impl Debug for DirectoryServicePath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DirectoryServicePath")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DirectoryServicePath {
+    /// Validate an already-created absolute local directory mapping.
+    pub fn local(name: &str, path: &Path) -> Result<Self, PlatformError> {
+        validate_service_name(name)?;
+        if !path.is_absolute() {
+            return Err(directory_invalid());
+        }
+        let metadata = std::fs::symlink_metadata(path).map_err(|_| directory_invalid())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(directory_invalid());
+        }
+        let canonical = std::fs::canonicalize(path).map_err(|_| directory_invalid())?;
+        if canonical.to_str().is_none() {
+            return Err(directory_invalid());
+        }
+        Ok(Self {
+            name: name.to_owned(),
+            path: canonical,
+        })
+    }
+}
+
 impl ExternalServiceAddress {
     /// Validate a service name and a nonzero loopback address.
     pub fn loopback(name: &str, address: SocketAddr) -> Result<Self, PlatformError> {
-        if name.is_empty()
-            || name.len() > 64
-            || name
-                .bytes()
-                .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+        if validate_service_name(name).is_err()
             || !address.ip().is_loopback()
             || address.port() == 0
         {
@@ -93,6 +126,28 @@ impl ExternalServiceAddress {
             address,
         })
     }
+}
+
+fn validate_service_name(name: &str) -> Result<(), PlatformError> {
+    if name.is_empty()
+        || name.len() > 64
+        || name
+            .bytes()
+            .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+    {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "workerd service name is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn directory_invalid() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::DoStorageUnavailable,
+        "workerd Durable Object directory mapping is invalid",
+    )
 }
 
 /// Compiles a generation-scoped binary config from a fresh token.
@@ -117,6 +172,7 @@ pub struct StaticConfigCompiler {
     redactor: Redactor,
     generation_auth: Option<GenerationAuthRegistry>,
     binding_generation_auth: Option<GenerationAuthRegistry>,
+    durable_objects: DurableObjectsConfig,
 }
 
 impl Debug for StaticConfigCompiler {
@@ -150,6 +206,7 @@ impl StaticConfigCompiler {
             redactor,
             generation_auth: None,
             binding_generation_auth: None,
+            durable_objects: DurableObjectsConfig::default(),
         }
     }
 
@@ -164,6 +221,13 @@ impl StaticConfigCompiler {
     #[must_use]
     pub fn with_binding_generation_auth(mut self, auth: GenerationAuthRegistry) -> Self {
         self.binding_generation_auth = Some(auth);
+        self
+    }
+
+    /// Render validated Durable Object limits into private system-Worker bindings.
+    #[must_use]
+    pub fn with_durable_objects_config(mut self, config: DurableObjectsConfig) -> Self {
+        self.durable_objects = config;
         self
     }
 }
@@ -187,6 +251,7 @@ impl ConfigCompiler for StaticConfigCompiler {
                 platform: &self.platform,
                 token: &token,
                 binding_token: &binding_token,
+                durable_objects: self.durable_objects.clone(),
                 deadline: self.deadline,
                 redactor: &redactor,
             })
@@ -342,6 +407,21 @@ impl WorkerdSupervisor {
         K: Clock + 'static,
         J: JitterRng + 'static,
     {
+        Self::new_with_services_and_auth(opts, external_services, Vec::new(), generation_auths)
+    }
+
+    /// Create a supervisor with loopback HTTP and local directory services.
+    pub fn new_with_services_and_auth<C, K, J>(
+        opts: WorkerdSupervisorOptions<C, K, J>,
+        external_services: Vec<ExternalServiceAddress>,
+        directory_services: Vec<DirectoryServicePath>,
+        generation_auths: Vec<GenerationAuthRegistry>,
+    ) -> Self
+    where
+        C: ConfigCompiler,
+        K: Clock + 'static,
+        J: JitterRng + 'static,
+    {
         let now = opts.clock.now();
         let snap = SupervisorSnapshot::initial(now, opts.runtime.binary_sha256().to_owned());
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -373,6 +453,7 @@ impl WorkerdSupervisor {
             lease_active: false,
             recovery_failed: false,
             external_services: Arc::from(external_services),
+            directory_services: Arc::from(directory_services),
             generation_auths: Arc::from(generation_auths),
         };
         let task = tokio::spawn(actor.run());
@@ -481,6 +562,7 @@ struct Actor {
     lease_active: bool,
     recovery_failed: bool,
     external_services: Arc<[ExternalServiceAddress]>,
+    directory_services: Arc<[DirectoryServicePath]>,
     generation_auths: Arc<[GenerationAuthRegistry]>,
 }
 
@@ -678,6 +760,7 @@ impl Actor {
                 startup,
                 owners: self.owners.clone(),
                 external_services: self.external_services.clone(),
+                directory_services: self.directory_services.clone(),
                 lease_path: self.lease_path.clone(),
             },
             cancel_rx,
@@ -1076,6 +1159,7 @@ struct AttemptArgs {
     startup: Duration,
     owners: OwnerRegistry,
     external_services: Arc<[ExternalServiceAddress]>,
+    directory_services: Arc<[DirectoryServicePath]>,
     lease_path: Option<PathBuf>,
 }
 
@@ -1089,6 +1173,7 @@ async fn run_attempt(args: AttemptArgs, mut cancel: oneshot::Receiver<()>) -> At
         startup,
         owners,
         external_services,
+        directory_services,
         lease_path,
     } = args;
     let compiled = tokio::select! {
@@ -1121,6 +1206,7 @@ async fn run_attempt(args: AttemptArgs, mut cancel: oneshot::Receiver<()>) -> At
             redactor: &redactor_spawn,
             owners: &owners_spawn,
             external_services: &external_services,
+            directory_services: &directory_services,
             lease_path: spawn_lease_path.as_deref(),
         })
     });

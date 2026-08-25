@@ -14,6 +14,7 @@ use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, Reque
 use open_compute_runtime::{
     GenerationAuthRegistry, SupervisorState, TOKEN_HEADER, WorkerdSupervisor,
 };
+use open_compute_storage::AuthorizedDurableObjectDelete;
 use open_compute_workers::{
     RuntimeScope, RuntimeSource, RuntimeValidator, ValidationCandidate, loader_key,
 };
@@ -242,7 +243,40 @@ impl WorkerdTransport {
         target: DispatchTarget,
         request: Request,
     ) -> Result<Response, PlatformError> {
-        self.send(target, request, false).await
+        self.send(target, request, false, false).await
+    }
+
+    /// Execute one trusted native facet delete after the control-plane fence commits.
+    pub async fn delete_durable_object(
+        &self,
+        authority: &AuthorizedDurableObjectDelete,
+    ) -> Result<(), PlatformError> {
+        let (port, credential) = self.endpoint()?;
+        let body = serde_json::to_vec(authority).map_err(|_| runtime_unavailable())?;
+        let request = hyper::Request::builder()
+            .method(Method::POST)
+            .uri(format!("http://127.0.0.1:{port}/internal/do-delete"))
+            .header(TOKEN_HEADER, credential.expose())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .map_err(|_| runtime_unavailable())?;
+        let response = tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, self.client.request(request))
+            .await
+            .map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::DoDispatchTimeout,
+                    "Durable Object delete result is unknown",
+                )
+            })?
+            .map_err(|_| runtime_unavailable())?;
+        if response.status() == StatusCode::NO_CONTENT {
+            Ok(())
+        } else {
+            Err(PlatformError::new(
+                ErrorCode::DoStorageUnavailable,
+                "Durable Object native delete did not complete",
+            ))
+        }
     }
 
     /// Prove that a named module export exists without invoking tenant `fetch()`.
@@ -273,7 +307,7 @@ impl WorkerdTransport {
             .uri("/")
             .body(Body::empty())
             .map_err(|_| runtime_unavailable())?;
-        let response = self.send(target, request, true).await?;
+        let response = self.send(target, request, true, false).await?;
         match response.status() {
             StatusCode::NO_CONTENT => Ok(()),
             StatusCode::NOT_FOUND => Err(PlatformError::new(
@@ -293,6 +327,7 @@ impl WorkerdTransport {
         target: DispatchTarget,
         request: Request,
         validation: bool,
+        durable_object_class: bool,
     ) -> Result<Response, PlatformError> {
         let (port, credential) = self.endpoint()?;
         let (parts, body) = request.into_parts();
@@ -350,7 +385,9 @@ impl WorkerdTransport {
         }
         let uri: Uri = format!(
             "http://127.0.0.1:{port}{}",
-            if validation {
+            if durable_object_class {
+                "/internal/validate-do"
+            } else if validation {
                 "/internal/validate"
             } else {
                 "/internal/dispatch"
@@ -420,6 +457,40 @@ impl RuntimeValidator for WorkerdTransport {
         entrypoint: String,
     ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
         Box::pin(async move { self.probe_entrypoint(candidate, entrypoint).await })
+    }
+
+    fn validate_durable_object_class(
+        &self,
+        candidate: ValidationCandidate,
+        class_name: String,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
+        Box::pin(async move {
+            let target = DispatchTarget {
+                account_id: candidate.account_id,
+                worker_id: candidate.worker_id,
+                deployment_id: candidate.deployment_id,
+                worker_code_sha256: hex::encode(candidate.worker_code_sha256),
+                entrypoint: Some(class_name),
+                route_generation: 0,
+                request_id: RequestId::generate(),
+            };
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri("/")
+                .body(Body::empty())
+                .map_err(|_| runtime_unavailable())?;
+            let response = self.send(target, request, true, true).await?;
+            match response.status() {
+                StatusCode::NO_CONTENT => Ok(()),
+                StatusCode::NOT_FOUND | StatusCode::UNPROCESSABLE_ENTITY => {
+                    Err(PlatformError::new(
+                        ErrorCode::DoClassNotFound,
+                        "Durable Object class was not found",
+                    ))
+                }
+                _ => Err(runtime_unavailable()),
+            }
+        })
     }
 }
 

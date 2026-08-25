@@ -12,6 +12,9 @@
 # Repository-local development state.
 /.data/
 
+# Local source checkouts used only as implementation references.
+/references/
+
 # G0 workerd spike: official binary cache and successful-run temp artifacts.
 # Keep source, fixtures, tests, lockfiles, and retained failure evidence.
 /poc/.runtime-cache/

@@ -1,10 +1,10 @@
 //! Spawn a verified workerd (or fixture) with stdin config and control fd 3.
 
-use super::ExternalServiceAddress;
 use super::control::ControlParser;
 use super::logs::LogCollector;
 use super::owner::{ChildHandle, OwnerCompletion};
 use super::probe::probe_ready;
+use super::{DirectoryServicePath, ExternalServiceAddress};
 use crate::compile::CompiledConfig;
 use crate::lease::{capture_lease, clear_lease, write_lease};
 use crate::lock::RuntimeLock;
@@ -34,6 +34,14 @@ pub(crate) fn serve_argv_with_external(
     lock: &RuntimeLock,
     external_services: &[ExternalServiceAddress],
 ) -> Vec<String> {
+    serve_argv_with_services(lock, external_services, &[])
+}
+
+pub(crate) fn serve_argv_with_services(
+    lock: &RuntimeLock,
+    external_services: &[ExternalServiceAddress],
+    directory_services: &[DirectoryServicePath],
+) -> Vec<String> {
     let mut args = vec!["serve".to_owned(), "--binary".to_owned(), "-".to_owned()];
     args.extend(lock.process_flags.iter().cloned());
     args.push("--control-fd=3".to_owned());
@@ -42,6 +50,13 @@ pub(crate) fn serve_argv_with_external(
         args.push(format!(
             "--external-addr={}={}",
             service.name, service.address
+        ));
+    }
+    for service in directory_services {
+        args.push(format!(
+            "--directory-path={}={}",
+            service.name,
+            service.path.display()
         ));
     }
     args
@@ -116,6 +131,7 @@ pub(crate) struct SpawnRequest<'a> {
     pub redactor: &'a Redactor,
     pub owners: &'a super::owner::OwnerRegistry,
     pub external_services: &'a [ExternalServiceAddress],
+    pub directory_services: &'a [DirectoryServicePath],
     pub lease_path: Option<&'a Path>,
 }
 
@@ -140,7 +156,11 @@ impl SpawnFailure {
 
 pub(crate) fn spawn_child(req: &SpawnRequest<'_>) -> Result<LiveRuntime, SpawnFailure> {
     wait_if_spawn_held();
-    let argv = serve_argv_with_external(req.runtime.lock(), req.external_services);
+    let argv = serve_argv_with_services(
+        req.runtime.lock(),
+        req.external_services,
+        req.directory_services,
+    );
     let config = req
         .compiled
         .read_bytes()

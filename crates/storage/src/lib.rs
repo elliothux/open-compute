@@ -7,6 +7,7 @@ pub mod control_db;
 pub mod crypto;
 pub mod d1;
 pub mod data_dir;
+pub mod durable_objects;
 pub mod fs;
 pub mod identity;
 pub mod inspect;
@@ -31,7 +32,14 @@ pub use d1::{
     D1Migration, D1MigrationRecord, D1Paths, D1QueryLimits, D1Statement, D1StatementResult,
     D1Value,
 };
-pub use data_dir::{DataDir, expected_directories, future_resource_paths};
+pub use data_dir::{
+    DURABLE_OBJECT_DATA_FORMAT_VERSION, DURABLE_OBJECT_UNIQUE_KEY, DataDir, expected_directories,
+    future_resource_paths, inspect_durable_object_storage,
+};
+pub use durable_objects::{
+    AuthorizedDurableObjectDelete, AuthorizedDurableObjectDispatch, DO_NAMESPACE_SCHEMA_VERSION,
+    DurableObjectNamespaceRecord, DurableObjectRecord, DurableObjectRepository,
+};
 pub use fs::atomic_write;
 pub use identity::{ARTIFACT_SCHEMA_VERSION, StableIdentity};
 pub use inspect::{
@@ -150,6 +158,30 @@ impl PlatformStorage {
     #[must_use]
     pub const fn free_space_hard_bytes(&self) -> u64 {
         self.free_space_hard_bytes
+    }
+
+    /// Filesystem block utilization containing the owned data directory, rounded down.
+    pub fn filesystem_used_percent(&self) -> Result<u8, PlatformError> {
+        let stat = rustix::fs::statvfs(self.data_dir.root()).map_err(|_| {
+            PlatformError::new(
+                open_compute_core::ErrorCode::DoStorageUnavailable,
+                "Durable Object filesystem capacity is unavailable",
+            )
+        })?;
+        if stat.f_blocks == 0 {
+            return Err(PlatformError::new(
+                open_compute_core::ErrorCode::DoStorageUnavailable,
+                "Durable Object filesystem capacity is unavailable",
+            ));
+        }
+        let used = stat.f_blocks.saturating_sub(stat.f_bfree);
+        let percent = used.saturating_mul(100) / stat.f_blocks;
+        u8::try_from(percent.min(100)).map_err(|_| {
+            PlatformError::new(
+                open_compute_core::ErrorCode::DoStorageUnavailable,
+                "Durable Object filesystem capacity is unavailable",
+            )
+        })
     }
 }
 

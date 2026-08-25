@@ -10,10 +10,11 @@ use crate::exit::{ExitClass, emit_failure, exit_class_for, exit_code};
 use crate::health::{HealthCoordinator, map_supervisor};
 use crate::http::{self, HttpState, REQUEST_ID_HEADER};
 use crate::metrics::{
-    D1Lifecycle, D1LifecycleGuard, D1Operation, KvGauge, KvGaugeGuard, KvLifecycle,
-    KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry, R2Operation,
-    R2ProviderError, R2StreamDirection, R2StreamGuard, REQUIRED_SERIES, RestartReason, S3Op,
-    S3Result, SqliteOp, StartResult, StartStage,
+    D1Lifecycle, D1LifecycleGuard, D1Operation, DoFacetReloadReason, DoOperation, DoReconcileState,
+    KvGauge, KvGaugeGuard, KvLifecycle, KvLifecycleGuard, KvMaintenance, KvOperation,
+    KvStagingGauge, MetricsRegistry, R2Operation, R2ProviderError, R2StreamDirection,
+    R2StreamGuard, REQUIRED_SERIES, RestartReason, S3Op, S3Result, SqliteOp, StartResult,
+    StartStage,
 };
 use crate::run::{
     FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_kv_maintenance,
@@ -367,8 +368,14 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         "loader-host.js",
         "outbound-gateway.js",
         "r2-facade.js",
-        "r2-wrapper-generator.js",
+        "d1-facade.js",
+        "do-facade.js",
+        "do-id-codec.js",
+        "loaded-isolate-wrapper-generator.js",
         "r2-transport.js",
+        "d1-transport.js",
+        "do-router.js",
+        "do-host.js",
     ] {
         fs::copy(
             workspace.join("runtime/system-workers").join(name),
@@ -1539,6 +1546,19 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     let d1_backup = D1LifecycleGuard::new(reg.clone(), D1Lifecycle::Backup);
     d1_backup.success();
     drop(D1LifecycleGuard::new(reg.clone(), D1Lifecycle::Migration));
+    reg.observe_do_dispatch(DoOperation::Fetch, true, Duration::from_millis(7));
+    reg.observe_do_dispatch(DoOperation::Rpc, false, Duration::from_millis(8));
+    reg.set_do_active_hosts(4);
+    for reason in [
+        DoFacetReloadReason::Promotion,
+        DoFacetReloadReason::Restart,
+        DoFacetReloadReason::Delete,
+    ] {
+        reg.inc_do_facet_reload(reason);
+    }
+    reg.inc_do_reconcile(DoReconcileState::Creating, true);
+    reg.inc_do_reconcile(DoReconcileState::Deleting, false);
+    reg.set_do_runtime_gauges(2, 4096, usize::MAX);
     {
         let _reader = KvGaugeGuard::new(&reg, KvGauge::ReaderConnection);
         let _writer = KvGaugeGuard::new(&reg, KvGauge::WriterConnection);
@@ -1591,6 +1611,16 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     assert!(rendered.contains("d1_result_unknown_total{operation=\"exec\"} 1"));
     assert!(rendered.contains("d1_backup_total{outcome=\"success\"} 1"));
     assert!(rendered.contains("d1_migration_total{outcome=\"failure\"} 1"));
+    assert!(rendered.contains("oc_do_dispatch_total{operation=\"fetch\",outcome=\"success\"} 1"));
+    assert!(rendered.contains("oc_do_dispatch_total{operation=\"rpc\",outcome=\"failure\"} 1"));
+    assert!(rendered.contains("oc_do_active_host_actors 4"));
+    assert!(rendered.contains("oc_do_facet_reload_total{reason=\"promotion\"} 1"));
+    assert!(
+        rendered.contains("oc_do_object_reconcile_total{state=\"deleting\",outcome=\"failure\"} 1")
+    );
+    assert!(rendered.contains("oc_do_websocket_active 2"));
+    assert!(rendered.contains("oc_do_storage_bytes 4096"));
+    assert!(rendered.contains("oc_do_storage_watermark{state=\"stop\"} 1"));
 }
 
 fn content_snapshot(root: &Path) -> Vec<(String, u64, Option<SystemTime>, String)> {
@@ -1648,11 +1678,18 @@ request_timeout_ms = 2000
     );
     let path = write_config(dir.path(), &extra);
     let loaded = load_platform_config(&path).unwrap();
-    open_compute_storage::PlatformStorage::bootstrap(
+    let storage = open_compute_storage::PlatformStorage::bootstrap(
         &loaded.config.storage,
         &open_compute_core::SystemClock,
     )
     .unwrap();
+    storage
+        .data_dir()
+        .prepare_durable_object_storage(
+            &storage.identity().platform_id.to_string(),
+            "workerd 2026-08-23",
+        )
+        .unwrap();
     (dir, path, mock)
 }
 

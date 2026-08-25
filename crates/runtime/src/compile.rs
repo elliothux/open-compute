@@ -1,6 +1,6 @@
 //! Static workerd config compiler and on-disk cache.
 
-use crate::digest::digest_for_with_tokens;
+use crate::digest::digest_for_with_tokens_and_policy;
 use crate::fsutil::{
     FILE_MODE, MAX_LOCK_BYTES, WorkDir, chmod, contained_in, create_dir_secure, fsync_dir,
     hex_sha256, open_dir_nofollow, open_nofollow, read_regular_nofollow_bounded,
@@ -8,7 +8,7 @@ use crate::fsutil::{
 };
 use crate::process::assert_reaped;
 use crate::verify::VerifiedRuntime;
-use open_compute_core::{ErrorCode, PlatformError, Redactor, SecretString};
+use open_compute_core::{DurableObjectsConfig, ErrorCode, PlatformError, Redactor, SecretString};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
@@ -39,6 +39,8 @@ pub struct CompileRequest<'a> {
     pub token: &'a SecretString,
     /// Distinct fresh token scoped only to the private binding backend.
     pub binding_token: &'a SecretString,
+    /// Validated Durable Object policy rendered into private system-Worker bindings.
+    pub durable_objects: DurableObjectsConfig,
     /// Compile deadline.
     pub deadline: Duration,
     /// Redactor that already includes the token.
@@ -150,7 +152,7 @@ pub async fn compile_static_config(
             "lock path contents do not match the verified lock identity",
         ));
     }
-    let (digest, rendered, workers) = digest_for_with_tokens(
+    let (digest, rendered, workers) = digest_for_with_tokens_and_policy(
         request.assets_dir,
         request.runtime.lock(),
         &lock_bytes,
@@ -158,6 +160,7 @@ pub async fn compile_static_config(
         request.platform,
         request.token,
         request.binding_token,
+        &request.durable_objects,
     )?;
 
     create_dir_secure(request.runtime_data_dir)?;

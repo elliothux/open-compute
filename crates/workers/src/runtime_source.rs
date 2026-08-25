@@ -7,8 +7,10 @@ use crate::descriptor::{
 };
 use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
-use open_compute_core::{ErrorCode, PlatformError, SecretString};
-use open_compute_storage::{DeploymentState, PlatformStorage, WorkerRepository};
+use open_compute_core::{BindingKind, ErrorCode, PlatformError, SecretString};
+use open_compute_storage::{
+    DeploymentState, DurableObjectRepository, PlatformStorage, WorkerRepository,
+};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -43,6 +45,35 @@ pub struct RuntimeBinding {
     pub descriptor: BindingDescriptorV1,
     /// Lowercase SHA-256 expected by the private backend.
     pub descriptor_sha256: String,
+    /// Namespace-local synchronous ID material, present only for Durable Objects.
+    pub durable_object_identity: Option<DurableObjectFacadeIdentity>,
+}
+
+/// Secret-bearing Durable Object facade material supplied only to the loaded-isolate factory.
+#[derive(Clone)]
+pub struct DurableObjectFacadeIdentity {
+    /// Eight-byte namespace prefix encoded as lowercase hexadecimal.
+    pub namespace_prefix: String,
+    /// Namespace-specific HMAC key encoded as standard base64.
+    pub namespace_name_key: SecretString,
+}
+
+impl PartialEq for DurableObjectFacadeIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        self.namespace_prefix == other.namespace_prefix
+            && self.namespace_name_key.expose() == other.namespace_name_key.expose()
+    }
+}
+
+impl Eq for DurableObjectFacadeIdentity {}
+
+impl std::fmt::Debug for DurableObjectFacadeIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DurableObjectFacadeIdentity")
+            .field("namespace_prefix", &self.namespace_prefix)
+            .field("namespace_name_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl std::fmt::Debug for RuntimeModule {
@@ -62,6 +93,8 @@ pub struct RuntimeSnapshot {
     pub loader_key: String,
     /// Descriptor digest checked before loader get.
     pub worker_code_sha256: String,
+    /// Current Worker route generation used to fence Durable Object dispatch.
+    pub route_generation: u64,
     /// Main module.
     pub main_module: String,
     /// Exact tenant compatibility date.
@@ -263,6 +296,20 @@ impl RuntimeSource {
             runtime_bindings.push(RuntimeBinding {
                 descriptor,
                 descriptor_sha256: hex::encode(digest),
+                durable_object_identity: if binding.kind == BindingKind::DoNamespace
+                    && scope == RuntimeScope::Runtime
+                {
+                    let (prefix, key) = DurableObjectRepository::new(&self.storage)
+                        .facade_identity(binding.resource_id)?;
+                    Some(DurableObjectFacadeIdentity {
+                        namespace_prefix: hex::encode(prefix),
+                        namespace_name_key: SecretString::new(
+                            base64::engine::general_purpose::STANDARD.encode(key),
+                        ),
+                    })
+                } else {
+                    None
+                },
             });
         }
         let descriptor = WorkerCodeDescriptorV1::new(
@@ -314,6 +361,7 @@ impl RuntimeSource {
         Ok(RuntimeSnapshot {
             loader_key: key.to_owned(),
             worker_code_sha256: hex::encode(actual_descriptor),
+            route_generation: snapshot.worker.route_generation,
             main_module: bundle.manifest().main_module.clone(),
             compatibility_date: snapshot.deployment.compatibility_date,
             compatibility_flags: snapshot.deployment.compatibility_flags,
@@ -341,6 +389,7 @@ impl RuntimeSource {
             schema_version: u32,
             loader_key: &'a str,
             worker_code_sha256: &'a str,
+            route_generation: u64,
             main_module: &'a str,
             compatibility_date: &'a str,
             compatibility_flags: &'a [String],
@@ -355,6 +404,10 @@ impl RuntimeSource {
             #[serde(flatten)]
             descriptor: &'a BindingDescriptorV1,
             descriptor_sha256: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            namespace_prefix: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            namespace_name_key: Option<&'a str>,
         }
         let modules = snapshot
             .modules
@@ -382,12 +435,21 @@ impl RuntimeSource {
             .map(|binding| BindingPayload {
                 descriptor: &binding.descriptor,
                 descriptor_sha256: &binding.descriptor_sha256,
+                namespace_prefix: binding
+                    .durable_object_identity
+                    .as_ref()
+                    .map(|identity| identity.namespace_prefix.as_str()),
+                namespace_name_key: binding
+                    .durable_object_identity
+                    .as_ref()
+                    .map(|identity| identity.namespace_name_key.expose()),
             })
             .collect();
         let bytes = serde_json::to_vec(&Payload {
             schema_version: 1,
             loader_key: &snapshot.loader_key,
             worker_code_sha256: &snapshot.worker_code_sha256,
+            route_generation: snapshot.route_generation,
             main_module: &snapshot.main_module,
             compatibility_date: &snapshot.compatibility_date,
             compatibility_flags: &snapshot.compatibility_flags,

@@ -1,14 +1,19 @@
 //! Production `run` composition and shutdown.
 
-use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_products};
+use crate::binding_backend::{
+    bind_binding_backend, serve_binding_backend_with_products_and_do_config,
+};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
 use crate::d1_http::D1ApiState;
+use crate::do_http::DoApiState;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState, SanitizedSupervisor};
 use crate::kv_backend::SqliteKvBindingExecutor;
 use crate::kv_http::KvApiState;
-use crate::metrics::{KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage};
+use crate::metrics::{
+    DoFacetReloadReason, KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage,
+};
 use crate::r2_backend::R2BindingService;
 use crate::r2_http::R2ApiState;
 use crate::r2_maintenance::R2Maintenance;
@@ -24,12 +29,11 @@ use open_compute_core::{
     StartupId,
 };
 use open_compute_runtime::{
-    ExternalServiceAddress, GenerationAuthRegistry, OsJitter, PlatformReleaseMeta,
-    StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions,
+    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
+    PlatformReleaseMeta, StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions,
     verify_runtime_binary_with_staging_lease,
 };
-use open_compute_storage::PlatformStorage;
-use open_compute_storage::WorkerRepository;
+use open_compute_storage::{DurableObjectRepository, PlatformStorage, WorkerRepository};
 use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins, RuntimeSource};
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -204,6 +208,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         }
     };
     metrics.set_workerd_version(runtime.version_output())?;
+    let durable_object_storage = storage.data_dir().prepare_durable_object_storage(
+        &storage.identity().platform_id.to_string(),
+        runtime.version_output(),
+    )?;
+    update_do_storage_health(&storage, &loaded.config.durable_objects, &health, &metrics)?;
     record(&opts, "runtime_verify");
     if let Err(err) = fail_after(
         &opts,
@@ -337,7 +346,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         redactor.clone(),
     )
     .with_generation_auth(generation_auth.clone())
-    .with_binding_generation_auth(binding_generation_auth.clone());
+    .with_binding_generation_auth(binding_generation_auth.clone())
+    .with_durable_objects_config(loaded.config.durable_objects.clone());
     record(&opts, "compile");
     if let Err(err) = fail_after(
         &opts,
@@ -406,6 +416,16 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     );
     d1_api.reconcile_pending().await?;
+    let do_api = DoApiState::new(
+        storage.clone(),
+        resource_pins.clone(),
+        transport.clone(),
+        loaded.config.durable_objects.clone(),
+        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
+    )
+    .with_metrics(metrics.clone());
+    metrics.set_do_runtime_gauges(0, 0, 0);
+    let maintenance_do_api = do_api.clone();
     let supervisor_for_http = supervisor_handle.clone();
     let state = HttpState::new(
         health.clone(),
@@ -435,7 +455,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     ))
     .with_r2_api(r2_api)
-    .with_d1_api(d1_api);
+    .with_d1_api(d1_api)
+    .with_do_api(do_api);
 
     let public_listener = match http::bind(public_addr).await {
         Ok(l) => l,
@@ -482,6 +503,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let maintenance_config = loaded.config.workers.clone();
     let maintenance_kv_config = loaded.config.kv.clone();
     let maintenance_r2_config = loaded.config.r2.clone();
+    let maintenance_do_config = loaded.config.durable_objects.clone();
     let maintenance_r2_objects = r2_objects;
     let maintenance_health = health.clone();
     let maintenance_pins = deployment_pins;
@@ -515,6 +537,13 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                         &maintenance_r2_config,
                         &maintenance_health,
                     ).await;
+                    let _ = update_do_storage_health(
+                        &maintenance_storage,
+                        &maintenance_do_config,
+                        &maintenance_health,
+                        &maintenance_metrics,
+                    );
+                    let _ = maintenance_do_api.reconcile_pending().await;
                 }
             }
         }
@@ -546,8 +575,9 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     );
     let binding_auth = binding_generation_auth.clone();
     let binding_metrics = metrics.clone();
+    let binding_do_config = loaded.config.durable_objects.clone();
     let binding_backend_task = tokio::spawn(async move {
-        serve_binding_backend_with_products(
+        serve_binding_backend_with_products_and_do_config(
             binding_backend_listener,
             binding_storage,
             binding_auth,
@@ -556,6 +586,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             Some(binding_metrics),
             Some(r2_backend),
             Some(d1_backend),
+            binding_do_config,
             async move {
                 let _ = shutdown_binding.changed().await;
             },
@@ -587,7 +618,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         None
     };
 
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_external_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -601,6 +632,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             ExternalServiceAddress::loopback("runtime-source", runtime_source_addr)?,
             ExternalServiceAddress::loopback("binding-backend", binding_backend_addr)?,
         ],
+        vec![DirectoryServicePath::local(
+            "do-storage",
+            &durable_object_storage,
+        )?],
         vec![generation_auth, binding_generation_auth],
     ));
     *supervisor_handle
@@ -613,10 +648,23 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let mut watch_rx = supervisor.subscribe();
     let health_watch = health.clone();
     let metrics_watch = metrics.clone();
+    let storage_watch = storage.clone();
     tokio::spawn(async move {
+        let mut running_pid = None;
         loop {
             let snap = watch_rx.borrow().clone();
             metrics_watch.observe_supervisor(&snap);
+            if snap.state == open_compute_runtime::SupervisorState::Running {
+                if running_pid.is_some()
+                    && running_pid != snap.pid
+                    && DurableObjectRepository::new(&storage_watch)
+                        .count_live_objects()
+                        .is_ok_and(|count| count > 0)
+                {
+                    metrics_watch.inc_do_facet_reload(DoFacetReloadReason::Restart);
+                }
+                running_pid = snap.pid;
+            }
             if let Err(err) = health_watch.apply_supervisor(&snap) {
                 tracing::error!(
                     code = err.code().as_str(),
@@ -648,6 +696,34 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         None => Ok(()),
         Some(err) => Err(err),
     }
+}
+
+fn update_do_storage_health(
+    storage: &PlatformStorage,
+    config: &open_compute_core::DurableObjectsConfig,
+    health: &HealthCoordinator,
+    metrics: &MetricsRegistry,
+) -> Result<(), PlatformError> {
+    let used = storage.filesystem_used_percent()?;
+    let watermark = if used >= config.disk_stop_writes_percent {
+        2
+    } else if used >= config.disk_high_watermark_percent {
+        1
+    } else {
+        0
+    };
+    metrics.set_do_runtime_gauges(0, 0, watermark);
+    let state = if watermark == 0 {
+        ComponentState::Healthy
+    } else {
+        ComponentState::Degraded
+    };
+    let reason = if watermark == 0 {
+        ReadinessReason::Ready
+    } else {
+        ReadinessReason::DiskHardLimit
+    };
+    health.set_component(ComponentName::DataDir, state, Some(reason))
 }
 
 #[allow(clippy::too_many_arguments)]

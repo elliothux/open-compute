@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 
 #[path = "metrics_d1.rs"]
 mod d1;
+#[path = "metrics_do.rs"]
+mod durable_objects;
 #[path = "metrics_kv.rs"]
 mod kv;
 #[path = "metrics_r2.rs"]
@@ -18,6 +20,8 @@ mod r2;
 mod resource;
 use d1::write_d1_metrics;
 pub(crate) use d1::{D1Lifecycle, D1LifecycleGuard, D1Operation};
+use durable_objects::write_do_metrics;
+pub(crate) use durable_objects::{DoFacetReloadReason, DoOperation, DoReconcileState};
 pub(crate) use kv::{
     KvGauge, KvGaugeGuard, KvLifecycle, KvLifecycleGuard, KvMaintenance, KvOperation,
     KvStagingGauge,
@@ -29,7 +33,7 @@ pub use resource::{BindingBackendOperation, ResourceOperation};
 use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
 
 /// Compile-time series required by the platform and P0.3 binding framework.
-pub const REQUIRED_SERIES: u64 = 229;
+pub const REQUIRED_SERIES: u64 = 248;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 32;
 
@@ -239,6 +243,14 @@ struct Inner {
     d1_result_unknown: [u64; 4],
     d1_backup: [u64; 2],
     d1_migration: [u64; 2],
+    do_dispatch: [u64; 4],
+    do_dispatch_duration: [f64; 2],
+    do_active_hosts: u64,
+    do_facet_reload: [u64; 3],
+    do_reconcile: [u64; 4],
+    do_websocket_active: u64,
+    do_storage_bytes: u64,
+    do_storage_watermark: usize,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -327,6 +339,14 @@ impl MetricsRegistry {
                 d1_result_unknown: [0; 4],
                 d1_backup: [0; 2],
                 d1_migration: [0; 2],
+                do_dispatch: [0; 4],
+                do_dispatch_duration: [0.0; 2],
+                do_active_hosts: 0,
+                do_facet_reload: [0; 3],
+                do_reconcile: [0; 4],
+                do_websocket_active: 0,
+                do_storage_bytes: 0,
+                do_storage_watermark: 0,
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -754,6 +774,7 @@ impl MetricsRegistry {
         write_kv_metrics(&mut out, &g);
         write_r2_metrics(&mut out, &g);
         write_d1_metrics(&mut out, &g);
+        write_do_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }

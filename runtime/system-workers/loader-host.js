@@ -1,13 +1,17 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import r2FacadeSource from "r2-facade-source";
 import d1FacadeSource from "d1-facade-source";
+import doFacadeSource from "do-facade-source";
+import doIdCodecSource from "do-id-codec-source";
 import {
   D1_FACADE_MODULE,
+  DO_FACADE_MODULE,
+  DO_ID_CODEC_MODULE,
   LOADED_ISOLATE_RESERVED_MODULES,
+  LOADED_ISOLATE_WRAPPER_MODULE,
   R2_FACADE_MODULE,
-  R2_WRAPPER_MODULE,
   generateBindingWrapper,
-} from "./r2-wrapper-generator.js";
+} from "./loaded-isolate-wrapper-generator.js";
 import { makeR2TransportBase } from "./r2-transport.js";
 import { makeD1TransportBase } from "./d1-transport.js";
 
@@ -34,16 +38,47 @@ const INTERNAL_HEADERS = [
   "x-open-compute-original-url",
   "x-open-compute-route-generation",
   "x-open-compute-request-id",
+  "x-open-compute-binding-id",
+  "x-open-compute-binding-token",
+  "x-open-compute-descriptor-sha256",
+  "x-open-compute-namespace-resource-id",
+  "x-open-compute-object-id",
+  "x-open-compute-object-generation",
+  "x-open-compute-class-name",
+  "x-open-compute-do-method",
+  "x-open-compute-do-url",
+  "x-open-compute-do-operation",
+  "x-open-compute-startup-generation",
   "forwarded",
   "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-proto",
 ];
 
-const PROFILE = Object.freeze({ cpuMs: 50, subRequests: 16 });
+export const PROFILE = Object.freeze({ cpuMs: 50, subRequests: 16 });
 
-function currentStartupGeneration() {
-  if (!startupGeneration) startupGeneration = crypto.randomUUID();
+function policyInteger(env, name, maximum) {
+  const value = Number(env[name]);
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
+  }
+  return value;
+}
+
+export function doPolicy(env) {
+  return Object.freeze({
+    maxObjectNameBytes: policyInteger(env, "DO_MAX_OBJECT_NAME_BYTES", 1024),
+    maxRpcRequestBytes: policyInteger(env, "DO_MAX_RPC_REQUEST_BYTES", 16 * 1024 * 1024),
+    maxRpcResponseBytes: policyInteger(env, "DO_MAX_RPC_RESPONSE_BYTES", 16 * 1024 * 1024),
+    maxFetchBodyBytes: policyInteger(env, "DO_MAX_FETCH_BODY_BYTES", 64 * 1024 * 1024),
+    dispatchTimeoutMs: policyInteger(env, "DO_DISPATCH_TIMEOUT_MS", 5 * 60 * 1000),
+    maxInFlightDispatches: policyInteger(env, "DO_MAX_IN_FLIGHT_DISPATCHES", 4096),
+  });
+}
+
+export function currentStartupGeneration(seed) {
+  if (!startupGeneration) startupGeneration = seed || crypto.randomUUID();
+  if (seed && startupGeneration !== seed) throw bindingError("BINDING_PROTOCOL_ERROR");
   return startupGeneration;
 }
 
@@ -95,7 +130,7 @@ function moduleValue(module) {
   }
 }
 
-function modulesFor(snapshot, validation, entrypointName) {
+export function modulesFor(snapshot, validation, entrypointName) {
   const modules = {};
   for (const module of snapshot.modules) modules[module.name] = moduleValue(module);
   const r2Bindings = (snapshot.bindings || [])
@@ -104,8 +139,11 @@ function modulesFor(snapshot, validation, entrypointName) {
   const d1Bindings = (snapshot.bindings || [])
     .filter((binding) => binding.kind === "d1_database" && binding.capabilityVersion === 1)
     .map((binding) => binding.name);
+  const doBindings = (snapshot.bindings || [])
+    .filter((binding) => binding.kind === "do_namespace" && binding.capabilityVersion === 1)
+    .map((binding) => binding.name);
   let mainModule = snapshot.mainModule;
-  if (r2Bindings.length || d1Bindings.length) {
+  if (r2Bindings.length || d1Bindings.length || doBindings.length) {
     for (const reserved of LOADED_ISOLATE_RESERVED_MODULES) {
       if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
         throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
@@ -113,10 +151,20 @@ function modulesFor(snapshot, validation, entrypointName) {
     }
     if (r2Bindings.length) modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
     if (d1Bindings.length) modules[D1_FACADE_MODULE] = { js: d1FacadeSource };
-    modules[R2_WRAPPER_MODULE] = {
-      js: generateBindingWrapper(snapshot.mainModule, r2Bindings, d1Bindings, entrypointName),
+    if (doBindings.length) {
+      modules[DO_ID_CODEC_MODULE] = { js: doIdCodecSource };
+      modules[DO_FACADE_MODULE] = { js: doFacadeSource };
+    }
+    modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
+      js: generateBindingWrapper(
+        snapshot.mainModule,
+        r2Bindings,
+        d1Bindings,
+        doBindings,
+        entrypointName,
+      ),
     };
-    mainModule = R2_WRAPPER_MODULE;
+    mainModule = LOADED_ISOLATE_WRAPPER_MODULE;
   }
   if (validation) {
     const wrapper = "__open_compute_validation__.js";
@@ -138,14 +186,20 @@ function assertEnvelope(request, validation, entrypointName) {
   if (entrypointName && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypointName)) {
     throw new Error("invalid entrypoint");
   }
+  const routeGeneration = Number(request.headers.get("x-open-compute-route-generation"));
+  if (!Number.isSafeInteger(routeGeneration)
+      || (validation ? routeGeneration < 0 : routeGeneration < 1)) {
+    throw new Error("invalid route generation");
+  }
   return {
     loaderKey,
     expected,
-    runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}/${expected}/${entrypointName || "default"}`,
+    routeGeneration,
+    runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}/${expected}/g/${routeGeneration}/${entrypointName || "default"}`,
   };
 }
 
-async function resolveSnapshot(env, envelope, validation, probe, internalToken) {
+export async function resolveSnapshot(env, envelope, validation, probe, internalToken) {
   const response = await env.RUNTIME_SOURCE.fetch(`http://runtime-source${SOURCE_PATH}`, {
     method: "POST",
     headers: {
@@ -153,7 +207,7 @@ async function resolveSnapshot(env, envelope, validation, probe, internalToken) 
       [TOKEN_HEADER]: internalToken,
     },
     body: JSON.stringify({
-      startupGeneration: currentStartupGeneration(),
+      startupGeneration: currentStartupGeneration(internalToken),
       key: envelope.loaderKey,
       expectedWorkerCodeSha256: envelope.expected,
       scope: validation ? (probe ? "probe" : "validation") : "runtime",
@@ -184,7 +238,7 @@ function assembleOnce(key, build) {
   return pending;
 }
 
-function bindingError(code) {
+export function bindingError(code) {
   const error = new Error(code);
   error.name = "Error";
   error.stableCode = code;
@@ -484,11 +538,15 @@ async function decodeSingleEntry(response) {
   return { value, metadata, expiration: expiration < 0n ? null : Number(expiration) };
 }
 
-function trustedBindingProps(descriptor, deploymentId) {
+function trustedBindingProps(descriptor, deploymentId, routeGeneration, accountId, workerId) {
   return Object.freeze({
+    accountId,
+    workerId,
     bindingId: descriptor.bindingId,
     deploymentId,
     descriptorSha256: descriptor.descriptorSha256,
+    routeGeneration,
+    namespaceResourceId: descriptor.resourceId,
     resourceSpecGeneration: descriptor.resourceSpecGeneration,
     permissions: Object.freeze({
       read: descriptor.permissions.read === true,
@@ -689,33 +747,133 @@ const D1TransportBase = makeD1TransportBase(
 
 export class D1Transport extends D1TransportBase {}
 
-function makeBinding(ctx, descriptor, deploymentId) {
+export class DoTransport extends WorkerEntrypoint {
+  #props() {
+    const props = this.ctx.props;
+    if (!props || typeof props.accountId !== "string" || typeof props.workerId !== "string"
+        || typeof props.bindingId !== "string" || typeof props.deploymentId !== "string"
+        || typeof props.namespaceResourceId !== "string"
+        || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
+        || !Number.isSafeInteger(props.routeGeneration) || props.routeGeneration < 1) {
+      throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
+    }
+    return props;
+  }
+
+  #headers(objectId) {
+    const props = this.#props();
+    if (typeof objectId !== "string" || !/^[0-9a-f]{64}$/.test(objectId)) {
+      throw bindingError("DO_ID_INVALID");
+    }
+    return {
+      "x-open-compute-startup-generation": currentStartupGeneration(),
+      "x-open-compute-account-id": props.accountId,
+      "x-open-compute-worker-id": props.workerId,
+      "x-open-compute-binding-id": props.bindingId,
+      "x-open-compute-deployment-id": props.deploymentId,
+      "x-open-compute-descriptor-sha256": props.descriptorSha256,
+      "x-open-compute-route-generation": String(props.routeGeneration),
+      "x-open-compute-namespace-resource-id": props.namespaceResourceId,
+      "x-open-compute-object-id": objectId,
+      "x-open-compute-request-id": crypto.randomUUID(),
+    };
+  }
+
+  async fetch(request) {
+    const objectId = new URL(request.url).pathname.slice(1);
+    const headers = new Headers(request.headers);
+    const tenantMethod = headers.get("x-open-compute-do-method") || request.method;
+    const tenantUrl = headers.get("x-open-compute-do-url") || "https://do.invalid/";
+    for (const name of INTERNAL_HEADERS) headers.delete(name);
+    for (const [name, value] of Object.entries(this.#headers(objectId))) headers.set(name, value);
+    headers.set("x-open-compute-do-method", tenantMethod);
+    headers.set("x-open-compute-do-url", tenantUrl);
+    headers.set("x-open-compute-do-operation", "fetch");
+    const init = { method: request.method, headers, body: request.body, redirect: "manual" };
+    if (request.method === "GET" || request.method === "HEAD") delete init.body;
+    return this.env.DO_ROUTER.fetch(new Request(
+      "http://do-router/internal/do/v1/fetch",
+      init,
+    ));
+  }
+
+  async dispatchRpc(objectId, method, args) {
+    const response = await this.env.DO_ROUTER.fetch(
+      "http://do-router/internal/do/v1/rpc",
+      {
+        method: "POST",
+        headers: {
+          ...this.#headers(objectId),
+          "content-type": "application/json",
+          "x-open-compute-do-operation": "rpc",
+        },
+        body: JSON.stringify({ method, args }),
+      },
+    );
+    if (!response.ok) {
+      throw bindingError(response.headers.get("x-open-compute-error-code") || "DO_RUNTIME_EXCEPTION");
+    }
+    const payload = await response.json();
+    return payload.value;
+  }
+}
+
+function makeBinding(ctx, descriptor, deploymentId, routeGeneration, accountId, workerId, policy) {
   const capability = `${descriptor.kind}@${descriptor.capabilityVersion}`;
+  const props = trustedBindingProps(
+    descriptor,
+    deploymentId,
+    routeGeneration,
+    accountId,
+    workerId,
+  );
   switch (capability) {
     case "kv_namespace@1":
       return ctx.exports.KVNamespace({
-        props: trustedBindingProps(descriptor, deploymentId),
+        props,
       });
     case "r2_bucket@1":
       return ctx.exports.R2Transport({
-        props: trustedBindingProps(descriptor, deploymentId),
+        props,
       });
     case "d1_database@1":
       return ctx.exports.D1Transport({
-        props: trustedBindingProps(descriptor, deploymentId),
+        props,
       });
+    case "do_namespace@1": {
+      if (!/^[0-9a-f]{16}$/.test(descriptor.namespacePrefix)
+          || typeof descriptor.namespaceNameKey !== "string") {
+        throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+      }
+      return Object.freeze({
+        schemaVersion: 1,
+        namespacePrefix: descriptor.namespacePrefix,
+        namespaceNameKey: descriptor.namespaceNameKey,
+        maxObjectNameBytes: policy.maxObjectNameBytes,
+        transport: ctx.exports.DoTransport({ props }),
+      });
+    }
     default:
       throw bindingError("BINDING_CAPABILITY_UNSUPPORTED");
   }
 }
 
-function tenantEnv(snapshot, ctx, deploymentId) {
+export function tenantEnv(snapshot, ctx, deploymentId, policy) {
   const env = { ...snapshot.env };
+  const [accountId, workerId] = snapshot.loaderKey.split("/");
   for (const descriptor of snapshot.bindings || []) {
     if (Object.prototype.hasOwnProperty.call(env, descriptor.name)) {
       throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
     }
-    env[descriptor.name] = makeBinding(ctx, descriptor, deploymentId);
+    env[descriptor.name] = makeBinding(
+      ctx,
+      descriptor,
+      deploymentId,
+      snapshot.routeGeneration,
+      accountId,
+      workerId,
+      policy,
+    );
   }
   return env;
 }
@@ -763,7 +921,7 @@ async function handle(request, env, ctx, validation) {
         compatibilityFlags: snapshot.compatibilityFlags,
         mainModule: built.mainModule,
         modules: built.modules,
-        env: validation ? {} : tenantEnv(snapshot, ctx, deploymentId),
+        env: validation ? {} : tenantEnv(snapshot, ctx, deploymentId, doPolicy(env)),
         globalOutbound: validation ? null : ctx.exports.OutboundGateway({
           props: { deploymentId, policyVersion: 1 },
         }),
@@ -803,11 +961,54 @@ async function handle(request, env, ctx, validation) {
   }
 }
 
+function moduleExportsDurableObjectClass(modules, className) {
+  const patterns = [
+    new RegExp(`export\\s+class\\s+${className}\\b`),
+    new RegExp(`export\\s+(?:const|let|var)\\s+${className}\\s*=\\s*class\\b`),
+    new RegExp(`export\\s*\\{[^}]*\\b${className}\\b[^}]*\\}`),
+  ];
+  return modules.some((module) => {
+    if (module.type !== "esModule") return false;
+    const source = new TextDecoder().decode(bytes(module.bytesBase64));
+    return patterns.some((pattern) => pattern.test(source));
+  });
+}
+
+async function validateDurableObjectClass(request, env) {
+  const className = request.headers.get("x-open-compute-entrypoint") || "";
+  const envelope = assertEnvelope(request, true, className);
+  const internalToken = request.headers.get(TOKEN_HEADER) || "";
+  const snapshot = await resolveSnapshot(env, envelope, true, false, internalToken);
+  if (!moduleExportsDurableObjectClass(snapshot.modules, className)) {
+    return stableError("DO_CLASS_NOT_FOUND", 422, null);
+  }
+  const built = modulesFor(snapshot, false, className);
+  const code = {
+    compatibilityDate: snapshot.compatibilityDate,
+    compatibilityFlags: snapshot.compatibilityFlags,
+    mainModule: built.mainModule,
+    modules: built.modules,
+    env: {},
+    globalOutbound: null,
+    limits: PROFILE,
+  };
+  try {
+    const loaded = env.LOADER.get(`validate-do/${envelope.runtimeKey}`, () => code);
+    loaded.getDurableObjectClass(className);
+    return new Response(null, { status: 204 });
+  } catch {
+    return stableError("DO_CLASS_NOT_FOUND", 422, null);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const path = new URL(request.url).pathname;
     if (request.method === "POST" && path === "/internal/dispatch") return handle(request, env, ctx, false);
     if (request.method === "POST" && path === "/internal/validate") return handle(request, env, ctx, true);
+    if (request.method === "POST" && path === "/internal/validate-do") {
+      return validateDurableObjectClass(request, env);
+    }
     return new Response(null, { status: 404 });
   },
 };

@@ -217,6 +217,32 @@ pub enum ErrorCode {
     D1IdentityMismatch,
     /// The private D1 facade/transport/backend protocol was malformed.
     D1InternalProtocolError,
+    /// Durable Object namespace or binding authority does not exist.
+    DoNamespaceNotFound,
+    /// Public Durable Object identity is malformed or belongs to another namespace.
+    DoIdInvalid,
+    /// Durable Object deletion has fenced new dispatches.
+    DoObjectDeleting,
+    /// A late call carries an execution generation older than the host actor has observed.
+    DoDeploymentStale,
+    /// The active deployment no longer exports the namespace class.
+    DoClassNotFound,
+    /// Native Durable Object storage or its local disk is unavailable.
+    DoStorageUnavailable,
+    /// Durable Object local-disk capacity policy rejected a write or new identity.
+    DoStorageLimit,
+    /// Durable Object dispatch exceeded its bounded foreground deadline.
+    DoDispatchTimeout,
+    /// The requested plain-data RPC method or value is outside the P0.7 surface.
+    DoRpcUnsupported,
+    /// Tenant Durable Object code raised an opaque runtime exception.
+    DoRuntimeException,
+    /// Single-node P0.7 does not implement placement hints.
+    DoPlacementOptionUnsupported,
+    /// A namespace still owns live objects and force deletion was not requested.
+    DoNamespaceNotEmpty,
+    /// The private Durable Object transport protocol was malformed.
+    DoInternalProtocolError,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -329,6 +355,19 @@ impl ErrorCode {
             Self::D1DatabaseCorrupt => "D1_DATABASE_CORRUPT",
             Self::D1IdentityMismatch => "D1_IDENTITY_MISMATCH",
             Self::D1InternalProtocolError => "D1_INTERNAL_PROTOCOL_ERROR",
+            Self::DoNamespaceNotFound => "DO_NAMESPACE_NOT_FOUND",
+            Self::DoIdInvalid => "DO_ID_INVALID",
+            Self::DoObjectDeleting => "DO_OBJECT_DELETING",
+            Self::DoDeploymentStale => "DO_DEPLOYMENT_STALE",
+            Self::DoClassNotFound => "DO_CLASS_NOT_FOUND",
+            Self::DoStorageUnavailable => "DO_STORAGE_UNAVAILABLE",
+            Self::DoStorageLimit => "DO_STORAGE_LIMIT",
+            Self::DoDispatchTimeout => "DO_DISPATCH_TIMEOUT",
+            Self::DoRpcUnsupported => "DO_RPC_UNSUPPORTED",
+            Self::DoRuntimeException => "DO_RUNTIME_EXCEPTION",
+            Self::DoPlacementOptionUnsupported => "DO_PLACEMENT_OPTION_UNSUPPORTED",
+            Self::DoNamespaceNotEmpty => "DO_NAMESPACE_NOT_EMPTY",
+            Self::DoInternalProtocolError => "DO_INTERNAL_PROTOCOL_ERROR",
             Self::Internal => "INTERNAL",
         }
     }

@@ -6,7 +6,7 @@ use crate::fsutil::{
 };
 use crate::lock::RuntimeLock;
 use crate::verify::VerifiedRuntime;
-use open_compute_core::{ErrorCode, PlatformError, SecretString};
+use open_compute_core::{DurableObjectsConfig, ErrorCode, PlatformError, SecretString};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -14,6 +14,30 @@ const DIGEST_TAG: &[u8] = b"open-compute-static-config-v1\0";
 pub(crate) const TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_INTERNAL_TOKEN__";
 pub(crate) const BINDING_TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_BINDING_TOKEN__";
 pub(crate) const TOKEN_HEX_LEN: usize = 64;
+type DurableObjectPolicyPlaceholder = (&'static str, fn(&DurableObjectsConfig) -> String);
+const DO_POLICY_PLACEHOLDERS: [DurableObjectPolicyPlaceholder; 7] = [
+    ("__OPEN_COMPUTE_DO_MAX_OBJECT_NAME_BYTES__", |v| {
+        v.max_object_name_bytes.to_string()
+    }),
+    ("__OPEN_COMPUTE_DO_MAX_RPC_REQUEST_BYTES__", |v| {
+        v.max_rpc_request_bytes.to_string()
+    }),
+    ("__OPEN_COMPUTE_DO_MAX_RPC_RESPONSE_BYTES__", |v| {
+        v.max_rpc_response_bytes.to_string()
+    }),
+    ("__OPEN_COMPUTE_DO_MAX_FETCH_BODY_BYTES__", |v| {
+        v.max_fetch_body_bytes.to_string()
+    }),
+    ("__OPEN_COMPUTE_DO_DISPATCH_TIMEOUT_MS__", |v| {
+        v.dispatch_timeout_ms.to_string()
+    }),
+    ("__OPEN_COMPUTE_DO_MAX_IN_FLIGHT_DISPATCHES__", |v| {
+        v.max_in_flight_dispatches.to_string()
+    }),
+    ("__OPEN_COMPUTE_DO_DISK_STOP_WRITES_PERCENT__", |v| {
+        v.disk_stop_writes_percent.to_string()
+    }),
+];
 
 /// Platform release identity mixed into the config digest.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -184,6 +208,7 @@ pub(crate) fn digest_for(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn digest_for_with_tokens(
     assets_dir: &Path,
     lock: &RuntimeLock,
@@ -192,6 +217,29 @@ pub(crate) fn digest_for_with_tokens(
     platform: &PlatformReleaseMeta,
     token: &SecretString,
     binding_token: &SecretString,
+) -> Result<(String, String, WorkerFiles), PlatformError> {
+    digest_for_with_tokens_and_policy(
+        assets_dir,
+        lock,
+        lock_bytes,
+        runtime,
+        platform,
+        token,
+        binding_token,
+        &DurableObjectsConfig::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn digest_for_with_tokens_and_policy(
+    assets_dir: &Path,
+    lock: &RuntimeLock,
+    lock_bytes: &[u8],
+    runtime: &VerifiedRuntime,
+    platform: &PlatformReleaseMeta,
+    token: &SecretString,
+    binding_token: &SecretString,
+    durable_objects: &DurableObjectsConfig,
 ) -> Result<(String, String, WorkerFiles), PlatformError> {
     let _ = lock;
     let (template, workers, _) = load_assets(assets_dir)?;
@@ -213,6 +261,7 @@ pub(crate) fn digest_for_with_tokens(
     } else {
         render_config_with_tokens(template_str, token, binding_token)?
     };
+    let rendered = render_do_policy(rendered, durable_objects)?;
     let digest = config_input_digest(&DigestInputs {
         config_template: &template,
         workers: &workers,
@@ -222,4 +271,20 @@ pub(crate) fn digest_for_with_tokens(
         rendered: rendered.as_bytes(),
     });
     Ok((digest, rendered, workers))
+}
+
+fn render_do_policy(
+    mut rendered: String,
+    durable_objects: &DurableObjectsConfig,
+) -> Result<String, PlatformError> {
+    for (placeholder, value) in DO_POLICY_PLACEHOLDERS {
+        if rendered.matches(placeholder).count() != 1 {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigCompileFailed,
+                "config template must contain each Durable Object policy placeholder exactly once",
+            ));
+        }
+        rendered = rendered.replace(placeholder, &value(durable_objects));
+    }
+    Ok(rendered)
 }

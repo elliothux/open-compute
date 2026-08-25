@@ -9,11 +9,11 @@ use open_compute_runtime::process::{
     assert_reaped, clear_signal_log, take_signal_log, wait_reaped,
 };
 use open_compute_runtime::supervisor::{
-    ExternalServiceAddress, FnCompiler, SequenceJitter, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, blocking_spawn_is_waiting, clear_blocking_spawn_hold,
-    hold_blocking_spawn, last_spawned_pid, probe_ready_with_raw_token, release_blocking_spawn,
-    serve_argv, set_reader_fail_point, set_spawn_fail_point, take_owner_wait_count,
-    token_fingerprint,
+    DirectoryServicePath, ExternalServiceAddress, FnCompiler, SequenceJitter, SupervisorState,
+    WorkerdSupervisor, WorkerdSupervisorOptions, blocking_spawn_is_waiting,
+    clear_blocking_spawn_hold, hold_blocking_spawn, last_spawned_pid, probe_ready_with_raw_token,
+    release_blocking_spawn, serve_argv, set_reader_fail_point, set_spawn_fail_point,
+    take_owner_wait_count, token_fingerprint,
 };
 use open_compute_runtime::verify::verify_runtime_binary;
 use rustix::process::{Pid, test_kill_process};
@@ -619,7 +619,9 @@ async fn real_workerd_control_probe_term_kill() {
             .expect("real workerd must verify");
     let dir = TempDir::new().unwrap();
     let data = dir.path().join("runtime");
+    let do_storage = dir.path().join("do-storage");
     fs::create_dir(&data).unwrap();
+    fs::create_dir(&do_storage).unwrap();
     let compiler = open_compute_runtime::StaticConfigCompiler::new(
         runtime.clone(),
         lock_path,
@@ -640,7 +642,7 @@ async fn real_workerd_control_probe_term_kill() {
     let runtime_source_addr = runtime_source.local_addr().unwrap();
     let binding_backend = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let binding_backend_addr = binding_backend.local_addr().unwrap();
-    let sup = WorkerdSupervisor::new_with_external_services(
+    let sup = WorkerdSupervisor::new_with_services_and_auth(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -654,7 +656,8 @@ async fn real_workerd_control_probe_term_kill() {
             ExternalServiceAddress::loopback("runtime-source", runtime_source_addr).unwrap(),
             ExternalServiceAddress::loopback("binding-backend", binding_backend_addr).unwrap(),
         ],
-        None,
+        vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
+        Vec::new(),
     );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;

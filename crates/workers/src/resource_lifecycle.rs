@@ -55,6 +55,10 @@ impl ResourceHealth {
 pub trait ResourceDriver: Send + Sync {
     /// Product kind implemented by this driver.
     fn kind(&self) -> BindingKind;
+    /// Product identity mixed into create idempotency without exposing secret material.
+    fn create_fingerprint_material(&self) -> Vec<u8> {
+        Vec::new()
+    }
     /// Create or publish the physical identity idempotently.
     fn create(&self, resource: &ResourceRecord) -> Result<(), PlatformError>;
     /// Probe durable state after startup or a lost response.
@@ -135,7 +139,8 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
                 "resource driver does not implement the requested kind",
             ));
         }
-        let fingerprint_input = create_fingerprint(request)?;
+        let fingerprint_input =
+            create_fingerprint(request, &self.driver.create_fingerprint_material())?;
         let fingerprint = self
             .storage
             .crypto()
@@ -158,16 +163,32 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
             ResourceCreateReservation::Complete(response) => {
                 return Ok(CreateResourceOutcome::Replay(response));
             }
-            ResourceCreateReservation::Failed(_) => {
-                return Err(PlatformError::new(
-                    ErrorCode::ResourceInvariantViolation,
-                    "resource create previously failed",
-                ));
+            ResourceCreateReservation::Failed(response) => {
+                return Err(replayed_create_failure(&response));
             }
             ResourceCreateReservation::Reserved(resource)
             | ResourceCreateReservation::Continue(resource) => resource,
         };
-        let resource = self.reconcile_create(resource, request.now_ms)?;
+        let resource = match self.reconcile_create(resource.clone(), request.now_ms) {
+            Ok(resource) => resource,
+            Err(error) => {
+                if matches!(
+                    self.driver.reconcile(&resource),
+                    Ok(ReconcileOutcome::Absent)
+                ) {
+                    repository.fail_create(
+                        request.account_id,
+                        &request.idempotency_key,
+                        &fingerprint,
+                        resource.id,
+                        error.code(),
+                        request.request_id,
+                        request.now_ms,
+                    )?;
+                }
+                return Err(error);
+            }
+        };
         let result = CreateResourceResult {
             resource_id: resource.id,
             state: resource.state,
@@ -358,14 +379,37 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
     }
 }
 
-fn create_fingerprint(request: &CreateResourceRequest) -> Result<[u8; 32], PlatformError> {
+fn create_fingerprint(
+    request: &CreateResourceRequest,
+    product_material: &[u8],
+) -> Result<[u8; 32], PlatformError> {
     let mut digest = Sha256::new();
     digest.update(b"open-compute/resource-create/v1\0");
     digest.update(request.account_id.as_uuid().as_bytes());
     frame(&mut digest, request.kind.as_str().as_bytes())?;
     frame(&mut digest, request.name.as_bytes())?;
     digest.update(request.driver_schema_version.to_be_bytes());
+    if !product_material.is_empty() {
+        frame(&mut digest, product_material)?;
+    }
     Ok(digest.finalize().into())
+}
+
+fn replayed_create_failure(bytes: &[u8]) -> PlatformError {
+    let code = serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|value| value.get("code")?.as_str().map(str::to_owned));
+    match code.as_deref() {
+        Some("RESOURCE_NAME_CONFLICT") => PlatformError::new(
+            ErrorCode::ResourceNameConflict,
+            "resource create previously failed with a name conflict",
+        ),
+        Some("DO_CLASS_NOT_FOUND") => PlatformError::new(
+            ErrorCode::DoClassNotFound,
+            "resource create previously failed class validation",
+        ),
+        _ => invariant(),
+    }
 }
 
 fn frame(digest: &mut Sha256, value: &[u8]) -> Result<(), PlatformError> {

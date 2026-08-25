@@ -1,6 +1,7 @@
 //! P0.2 Worker control API and public route ingress.
 
 use crate::http::{HttpState, authorize};
+use crate::metrics::DoFacetReloadReason;
 use crate::runtime_bridge::{DispatchTarget, WorkerdTransport};
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -13,9 +14,12 @@ use http_body_util::BodyExt as _;
 use hyper::body::{Body as HttpBody, Frame, SizeHint};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, SecretString, WorkerId,
+    AccountId, BindingKind, DeploymentId, ErrorCode, PlatformError, RequestId, SecretString,
+    WorkerId,
 };
-use open_compute_storage::{DeploymentRecord, PlatformStorage, WorkerRepository};
+use open_compute_storage::{
+    BindingRepository, DeploymentRecord, PlatformStorage, WorkerRepository,
+};
 use open_compute_workers::{
     BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBindingInput,
     DeploymentBundle, DeploymentController, DeploymentPin, DeploymentPins, RuntimeValidator,
@@ -489,6 +493,7 @@ async fn promotion_impl(
         if rollback { "rollback" } else { "promote" },
         worker_id
     );
+    let metrics = state.metrics().clone();
     let response = run_idempotent_async(
         api,
         account_id,
@@ -502,6 +507,10 @@ async fn promotion_impl(
             let worker_before = repo.get_worker(account_id, worker_id)?;
             let deployment =
                 repo.get_deployment(account_id, worker_id, body.target_deployment_id)?;
+            let reloads_durable_objects = BindingRepository::new(api.storage.db())
+                .deployment_bindings(deployment.id)?
+                .iter()
+                .any(|binding| binding.kind == BindingKind::DoNamespace);
             for route in repo.list_routes(account_id, worker_id)? {
                 if let Some(entrypoint) = route.entrypoint {
                     api.transport
@@ -526,6 +535,9 @@ async fn promotion_impl(
                 request_id,
                 now_ms(),
             )?;
+            if reloads_durable_objects {
+                metrics.inc_do_facet_reload(DoFacetReloadReason::Promotion);
+            }
             Ok(serde_json::json!({ "worker": worker }))
         },
     )

@@ -1,6 +1,11 @@
 const READY_PATH = "/internal/ready";
 const TOKEN_HEADER = "x-open-compute-internal-token";
-const INTERNAL_PATHS = new Set(["/internal/dispatch", "/internal/validate"]);
+const INTERNAL_PATHS = new Set([
+  "/internal/dispatch",
+  "/internal/validate",
+  "/internal/validate-do",
+]);
+const DO_ADMIN_PATH = "/internal/do-delete";
 
 function tokenEquals(left, right) {
   const encoder = new TextEncoder();
@@ -35,6 +40,13 @@ export default {
       return body.byteLength === 0 ? new Response(null, { status: 204 }) : deny();
     }
     if (request.method !== "POST" || !INTERNAL_PATHS.has(url.pathname) || url.search !== "") {
+      if (request.method === "POST" && url.pathname === DO_ADMIN_PATH && url.search === "") {
+        return env.DO_ROUTER.fetch(new Request("http://do-router/internal/do-delete", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: request.body,
+        }));
+      }
       return deny();
     }
     const headers = new Headers(request.headers);

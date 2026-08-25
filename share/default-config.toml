@@ -63,3 +63,15 @@ max_vm_steps = 10000000
 query_timeout_ms = 30000
 batch_timeout_ms = 30000
 idle_handle_ttl_ms = 60000
+
+[durable_objects]
+max_namespace_name_bytes = 128
+max_object_name_bytes = 1024
+max_rpc_request_bytes = 1048576
+max_rpc_response_bytes = 1048576
+max_fetch_body_bytes = 33554432
+dispatch_timeout_ms = 30000
+max_in_flight_dispatches = 256
+disk_high_watermark_percent = 85
+disk_stop_writes_percent = 95
+reconcile_batch = 64

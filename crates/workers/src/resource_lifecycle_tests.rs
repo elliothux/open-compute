@@ -125,6 +125,38 @@ impl ResourceDriver for StuckDriver {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct RejectedCreateDriver;
+
+impl ResourceDriver for RejectedCreateDriver {
+    fn kind(&self) -> BindingKind {
+        BindingKind::KvNamespace
+    }
+
+    fn create(&self, _resource: &ResourceRecord) -> Result<(), PlatformError> {
+        Err(PlatformError::new(
+            ErrorCode::ResourceNameConflict,
+            "fake product identity conflict",
+        ))
+    }
+
+    fn reconcile(&self, _resource: &ResourceRecord) -> Result<ReconcileOutcome, PlatformError> {
+        Ok(ReconcileOutcome::Absent)
+    }
+
+    fn begin_delete(&self, _resource: &ResourceRecord) -> Result<(), PlatformError> {
+        Ok(())
+    }
+
+    fn finalize_delete(&self, _resource: &ResourceRecord) -> Result<(), PlatformError> {
+        Ok(())
+    }
+
+    fn health(&self, _resource: &ResourceRecord) -> Result<ResourceHealth, PlatformError> {
+        Ok(ResourceHealth::healthy())
+    }
+}
+
 fn storage() -> (tempfile::TempDir, PlatformStorage) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
@@ -367,6 +399,25 @@ fn create_reconciliation_fails_closed_on_impossible_driver_outcomes() {
             ErrorCode::ResourceInvariantViolation
         );
     }
+}
+
+#[test]
+fn rejected_create_tombstones_reservation_and_replays_stable_failure() {
+    let (_temp, storage) = storage();
+    let account = storage.identity().default_account_id;
+    let controller = ResourceController::new(&storage, ResourcePins::new(), RejectedCreateDriver);
+    let create = request(account, "rejected", 10);
+    assert_eq!(
+        controller.create(&create).unwrap_err().code(),
+        ErrorCode::ResourceNameConflict
+    );
+    assert_eq!(
+        controller.create(&create).unwrap_err().code(),
+        ErrorCode::ResourceNameConflict
+    );
+    let resources = controller.list(account).unwrap();
+    assert_eq!(resources.len(), 1);
+    assert_eq!(resources[0].state, ResourceState::Tombstoned);
 }
 
 #[test]

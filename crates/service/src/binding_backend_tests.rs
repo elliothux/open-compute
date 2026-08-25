@@ -1,7 +1,7 @@
 use super::*;
 use crate::metrics::MetricsRegistry;
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::{MetricsConfig, StorageConfig};
+use open_compute_core::config::{DurableObjectsConfig, MetricsConfig, StorageConfig};
 use open_compute_core::{
     AccountId, CanonicalBindingConfig, CanonicalPermissions, RequestId, ResourceAvailability,
     ResourceId, ResourceState, SecretString,
@@ -444,6 +444,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
         stream_budget: StreamBudget::new(2, 1),
         r2: None,
         d1: None,
+        do_config: DurableObjectsConfig::default(),
     };
     let binding_id = BindingId::generate();
     let path = format!("/internal/bindings/v1/kv/{binding_id}/get");
@@ -1344,6 +1345,7 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
             stream_budget: StreamBudget::new(2, 1),
             r2: None,
             d1: None,
+            do_config: DurableObjectsConfig::default(),
         };
         dispatch_frame(
             state,

@@ -3,6 +3,7 @@
 use crate::fs;
 use crate::lock::{DataDirLock, FilesystemDurability};
 use open_compute_core::{PlatformError, StartupId, config::StorageConfig};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const KEYS: &str = "keys";
@@ -17,6 +18,62 @@ const DIAGNOSTICS: &str = "diagnostics";
 const FAILED_STARTS: &str = "failed-starts";
 const LOCK_NAME: &str = "platform.lock";
 const CONTROL_DB_NAME: &str = "control.sqlite";
+const DURABLE_OBJECTS: &str = "do";
+const DURABLE_OBJECT_WORKERD: &str = "workerd";
+const DURABLE_OBJECT_MARKER: &str = "format.json";
+/// Stable native Durable Object namespace identity compiled into workerd.
+pub const DURABLE_OBJECT_UNIQUE_KEY: &str = "open-compute-do-host-v1";
+/// Platform-owned Durable Object local-disk format version.
+pub const DURABLE_OBJECT_DATA_FORMAT_VERSION: u32 = 1;
+
+#[derive(Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DurableObjectFormatMarker {
+    schema_version: u32,
+    platform_id: String,
+    unique_key: String,
+    workerd_version: String,
+}
+
+/// Inspect an existing native Durable Object storage boundary without creating or mutating it.
+pub fn inspect_durable_object_storage(
+    data_root: &Path,
+    platform_id: &str,
+    workerd_version: &str,
+) -> Result<PathBuf, PlatformError> {
+    if !data_root.is_absolute() || platform_id.is_empty() || workerd_version.is_empty() {
+        return Err(do_storage_unavailable());
+    }
+    let parent = data_root.join(DURABLE_OBJECTS);
+    let workerd = parent.join(DURABLE_OBJECT_WORKERD);
+    let marker = parent.join(DURABLE_OBJECT_MARKER);
+    fs::validate_contained(data_root, &parent)?;
+    fs::validate_contained(data_root, &workerd)?;
+    fs::validate_contained(data_root, &marker)?;
+    fs::validate_owned_dir(&parent)?;
+    fs::validate_owned_dir(&workerd)?;
+    fs::validate_owned_file(&marker, true)?;
+    if DataDirLock::classify_path(&workerd) != FilesystemDurability::ApparentlyLocal {
+        return Err(do_storage_unavailable());
+    }
+    let metadata = std::fs::metadata(&marker).map_err(|_| do_storage_unavailable())?;
+    if metadata.len() > 4096 {
+        return Err(do_storage_unavailable());
+    }
+    let bytes = std::fs::read(&marker).map_err(|_| do_storage_unavailable())?;
+    let actual: DurableObjectFormatMarker =
+        serde_json::from_slice(&bytes).map_err(|_| do_storage_unavailable())?;
+    let expected = DurableObjectFormatMarker {
+        schema_version: DURABLE_OBJECT_DATA_FORMAT_VERSION,
+        platform_id: platform_id.to_owned(),
+        unique_key: DURABLE_OBJECT_UNIQUE_KEY.to_owned(),
+        workerd_version: workerd_version.to_owned(),
+    };
+    if actual != expected {
+        return Err(do_storage_unavailable());
+    }
+    Ok(workerd)
+}
 
 /// P0.1 layout names that must not be pre-created as tenant resource files.
 pub const FORBIDDEN_PRECREATE: &[&str] = &["do", "kv", "d1", "scheduler.sqlite"];
@@ -91,6 +148,64 @@ impl DataDir {
     #[must_use]
     pub fn backup_staging_dir(&self) -> PathBuf {
         self.root.join(BACKUP_STAGING)
+    }
+
+    /// Platform-owned parent for native Durable Object storage and its marker.
+    #[must_use]
+    pub fn durable_objects_dir(&self) -> PathBuf {
+        self.root.join(DURABLE_OBJECTS)
+    }
+
+    /// Writable directory mapped exclusively to workerd's native DO disk service.
+    #[must_use]
+    pub fn durable_object_workerd_dir(&self) -> PathBuf {
+        self.durable_objects_dir().join(DURABLE_OBJECT_WORKERD)
+    }
+
+    /// Create and verify the local-only native Durable Object storage boundary.
+    pub fn prepare_durable_object_storage(
+        &self,
+        platform_id: &str,
+        workerd_version: &str,
+    ) -> Result<PathBuf, PlatformError> {
+        if platform_id.is_empty() || workerd_version.is_empty() {
+            return Err(do_storage_unavailable());
+        }
+        let parent = self.durable_objects_dir();
+        let workerd = self.durable_object_workerd_dir();
+        fs::validate_contained(&self.root, &parent)?;
+        fs::create_dir_secure(&parent)?;
+        fs::validate_contained(&self.root, &workerd)?;
+        fs::create_dir_secure(&workerd)?;
+        if DataDirLock::classify_path(&workerd) != FilesystemDurability::ApparentlyLocal {
+            return Err(do_storage_unavailable());
+        }
+        let marker = parent.join(DURABLE_OBJECT_MARKER);
+        fs::validate_contained(&self.root, &marker)?;
+        let expected = DurableObjectFormatMarker {
+            schema_version: DURABLE_OBJECT_DATA_FORMAT_VERSION,
+            platform_id: platform_id.to_owned(),
+            unique_key: DURABLE_OBJECT_UNIQUE_KEY.to_owned(),
+            workerd_version: workerd_version.to_owned(),
+        };
+        if marker.exists() || std::fs::symlink_metadata(&marker).is_ok() {
+            fs::validate_owned_file(&marker, true)?;
+            let metadata = std::fs::metadata(&marker).map_err(|_| do_storage_unavailable())?;
+            if metadata.len() > 4096 {
+                return Err(do_storage_unavailable());
+            }
+            let bytes = std::fs::read(&marker).map_err(|_| do_storage_unavailable())?;
+            let actual: DurableObjectFormatMarker =
+                serde_json::from_slice(&bytes).map_err(|_| do_storage_unavailable())?;
+            if actual != expected {
+                return Err(do_storage_unavailable());
+            }
+        } else {
+            let bytes = serde_json::to_vec(&expected).map_err(|_| do_storage_unavailable())?;
+            fs::atomic_write(&marker, &bytes)?;
+        }
+        fs::validate_owned_dir(&workerd)?;
+        Ok(workerd)
     }
 
     /// Held lock.
@@ -190,6 +305,13 @@ impl DataDir {
         }
         Ok(())
     }
+}
+
+fn do_storage_unavailable() -> PlatformError {
+    PlatformError::new(
+        open_compute_core::ErrorCode::DoStorageUnavailable,
+        "Durable Object local storage is unavailable or incompatible",
+    )
 }
 
 fn create_layout(root: &Path) -> Result<(), PlatformError> {

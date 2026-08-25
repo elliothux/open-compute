@@ -1,5 +1,6 @@
 //! Stable AEAD for secrets.
 
+use base64::Engine as _;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hmac::{Hmac, Mac};
@@ -41,6 +42,8 @@ pub struct SecretCrypto {
     fingerprint_key_id: String,
     kv_cursor_key: [u8; 32],
     r2_cursor_key: [u8; 32],
+    do_name_root_key: [u8; 32],
+    do_host_root_key: [u8; 32],
 }
 
 impl std::fmt::Debug for SecretCrypto {
@@ -94,6 +97,8 @@ impl SecretCrypto {
             })?;
         r2_cursor_derivation.update(b"open-compute/r2-list-cursor/v1");
         let r2_cursor_key: [u8; 32] = r2_cursor_derivation.finalize().into_bytes().into();
+        let do_name_root_key = derive_key(bytes, b"open-compute/do-name-root/v1")?;
+        let do_host_root_key = derive_key(bytes, b"open-compute/do-host-root/v1")?;
         Ok(Self {
             cipher,
             key_id: key_id.to_string(),
@@ -101,6 +106,8 @@ impl SecretCrypto {
             fingerprint_key_id,
             kv_cursor_key,
             r2_cursor_key,
+            do_name_root_key,
+            do_host_root_key,
         })
     }
 
@@ -162,6 +169,34 @@ impl SecretCrypto {
         };
         mac.update(payload);
         mac.verify_slice(signature).is_ok()
+    }
+
+    /// Derive the namespace-local HMAC key injected only into the tenant facade closure.
+    #[must_use]
+    pub fn durable_object_name_key(&self, namespace_storage_key: &str) -> [u8; 32] {
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.do_name_root_key)
+            .expect("SHA-256 HMAC accepts a 32-byte key");
+        mac.update(b"open-compute/do-namespace-name/v1\0");
+        mac.update(namespace_storage_key.as_bytes());
+        mac.finalize().into_bytes().into()
+    }
+
+    /// Derive the opaque native host-actor name for one object generation.
+    #[must_use]
+    pub fn durable_object_host_key(
+        &self,
+        namespace_storage_key: &str,
+        object_id: &str,
+        object_generation: u64,
+    ) -> String {
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.do_host_root_key)
+            .expect("SHA-256 HMAC accepts a 32-byte key");
+        mac.update(b"oc-do-host-v1\0");
+        mac.update(namespace_storage_key.as_bytes());
+        mac.update(b"\0");
+        mac.update(object_id.as_bytes());
+        mac.update(&object_generation.to_be_bytes());
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
     }
 
     /// Encrypt `plaintext` bound to the canonical associated-data context.
@@ -379,6 +414,17 @@ impl SecretCrypto {
             })?;
         Ok(SecretBytes::new(plaintext))
     }
+}
+
+fn derive_key(master: &[u8], domain: &[u8]) -> Result<[u8; 32], PlatformError> {
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(master).map_err(|_| {
+        PlatformError::new(
+            ErrorCode::MasterKeyMismatch,
+            "failed to derive Durable Object HMAC key",
+        )
+    })?;
+    mac.update(domain);
+    Ok(mac.finalize().into_bytes().into())
 }
 
 fn associated_data(

@@ -1705,9 +1705,11 @@ dependencies = [
 name = "open-compute-core"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "ipnet",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "toml",
  "url",
@@ -1747,6 +1749,7 @@ dependencies = [
  "clap",
  "futures",
  "hex",
+ "hmac",
  "http-body-util",
  "hyper 1.11.0",
  "hyper-util",

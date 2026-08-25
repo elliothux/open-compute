@@ -5,7 +5,9 @@ use crate::kv_backend::{
     KvCommand, KvCommandResult, KvStagedValue, KvStagingLease, KvStreamPart,
     ensure_storage_headroom,
 };
-use crate::metrics::{BindingBackendOperation, KvOperation, KvStagingGauge, MetricsRegistry};
+use crate::metrics::{
+    BindingBackendOperation, DoOperation, KvOperation, KvStagingGauge, MetricsRegistry,
+};
 use crate::r2_backend::R2BindingService;
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -15,10 +17,13 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures::{Stream, StreamExt as _, TryStreamExt};
 use open_compute_core::{
-    BindingId, BindingKind, DeploymentId, ErrorCode, PlatformError, ResourceId,
+    BindingId, BindingKind, DeploymentId, DurableObjectId, DurableObjectsConfig, ErrorCode,
+    PlatformError, ResourceId,
 };
 use open_compute_runtime::GenerationAuthRegistry;
-use open_compute_storage::{AuthorizedBinding, BindingRepository, PlatformStorage};
+use open_compute_storage::{
+    AuthorizedBinding, BindingRepository, DurableObjectRepository, PlatformStorage,
+};
 use open_compute_workers::{ResourcePin, ResourcePins};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -37,6 +42,7 @@ const GENERATION_HEADER: &str = "x-open-compute-startup-generation";
 const DEPLOYMENT_HEADER: &str = "x-open-compute-deployment-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const REQUEST_HEADER: &str = "x-open-compute-request-id";
+const ROUTE_GENERATION_HEADER: &str = "x-open-compute-route-generation";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 const JSON_CONTENT_TYPE: &str = "application/vnd.open-compute.kv.v1+json";
 const STREAM_CONTENT_TYPE: &str = "application/vnd.open-compute.kv.v1+octet-stream";
@@ -203,6 +209,7 @@ struct BackendState {
     stream_budget: StreamBudget,
     r2: Option<Arc<R2BindingService>>,
     d1: Option<Arc<D1BindingService>>,
+    do_config: DurableObjectsConfig,
 }
 
 #[derive(Clone)]
@@ -324,6 +331,35 @@ pub async fn serve_binding_backend_with_products(
     d1: Option<Arc<D1BindingService>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
+    serve_binding_backend_with_products_and_do_config(
+        listener,
+        storage,
+        auth,
+        pins,
+        executor,
+        metrics,
+        r2,
+        d1,
+        DurableObjectsConfig::default(),
+        shutdown,
+    )
+    .await
+}
+
+/// Serve every product plane with validated Durable Object capacity policy.
+#[allow(clippy::too_many_arguments)]
+pub async fn serve_binding_backend_with_products_and_do_config(
+    listener: TcpListener,
+    storage: Arc<PlatformStorage>,
+    auth: GenerationAuthRegistry,
+    pins: ResourcePins,
+    executor: Arc<dyn KvBindingExecutor>,
+    metrics: Option<Arc<MetricsRegistry>>,
+    r2: Option<Arc<R2BindingService>>,
+    d1: Option<Arc<D1BindingService>>,
+    do_config: DurableObjectsConfig,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), PlatformError> {
     let (global_streams, resource_streams) = executor.stream_limits();
     let state = BackendState {
         storage,
@@ -334,6 +370,7 @@ pub async fn serve_binding_backend_with_products(
         stream_budget: StreamBudget::new(global_streams, resource_streams),
         r2,
         d1,
+        do_config,
     };
     let router = Router::new().fallback(handle).with_state(state);
     axum::serve(listener, router.into_make_service())
@@ -434,6 +471,20 @@ struct GetResponse {
     value: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DoResolveRequest {
+    object_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DoReadyRequest {
+    namespace_resource_id: ResourceId,
+    object_id: DurableObjectId,
+    object_generation: u64,
+}
+
 async fn handle(State(state): State<BackendState>, request: Request) -> Response {
     let headers = request.headers();
     let token = header_text(headers, TOKEN_HEADER).unwrap_or("");
@@ -446,6 +497,17 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
             ErrorCode::BindingProtocolError,
             StatusCode::METHOD_NOT_ALLOWED,
         );
+    }
+    if request
+        .uri()
+        .path()
+        .starts_with("/internal/bindings/v1/do/")
+    {
+        return if request.uri().path().ends_with("/ready") {
+            acknowledge_durable_object(state, request).await
+        } else {
+            resolve_durable_object(state, request).await
+        };
     }
     if request
         .uri()
@@ -597,6 +659,164 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
         observe(dispatch_frame(state.clone(), binding, operation, request_id, request, pin).await)
     } else {
         observe(dispatch(state.executor, binding, operation, request, pin).await)
+    }
+}
+
+async fn acknowledge_durable_object(state: BackendState, request: Request) -> Response {
+    let Some(binding_id) = parse_do_path(request.uri().path(), "ready") else {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::NOT_FOUND);
+    };
+    if !content_type_is(request.headers(), "application/json")
+        || !valid_request_id(request.headers())
+    {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+    }
+    let Ok(deployment_id) = parse_header::<DeploymentId>(request.headers(), DEPLOYMENT_HEADER)
+    else {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+    };
+    let Ok(descriptor) = parse_digest(request.headers()) else {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+    };
+    let Ok(bytes) = to_bytes(request.into_body(), 4096).await else {
+        return backend_error(ErrorCode::DoRpcUnsupported, StatusCode::PAYLOAD_TOO_LARGE);
+    };
+    let body = match parse_json::<DoReadyRequest>(&bytes) {
+        Ok(value) if value.object_generation > 0 => value,
+        _ => {
+            return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+        }
+    };
+    let storage = state.storage.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let binding = BindingRepository::new(storage.db()).authorize(
+            binding_id,
+            deployment_id,
+            &descriptor,
+        )?;
+        if binding.binding.kind != BindingKind::DoNamespace
+            || binding.resource.id != body.namespace_resource_id
+        {
+            return Err(PlatformError::new(
+                ErrorCode::DoInternalProtocolError,
+                "Durable Object ready acknowledgement is outside binding authority",
+            ));
+        }
+        DurableObjectRepository::new(&storage).finish_object_create(
+            body.namespace_resource_id,
+            body.object_id,
+            body.object_generation,
+            unix_ms(),
+        )?;
+        Ok(())
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(error)) => platform_error(&error),
+        Err(_) => backend_error(
+            ErrorCode::DoStorageUnavailable,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+    }
+}
+
+async fn resolve_durable_object(state: BackendState, request: Request) -> Response {
+    let started = Instant::now();
+    let operation = match header_text(request.headers(), "x-open-compute-do-operation") {
+        Some("fetch") => DoOperation::Fetch,
+        Some("rpc") => DoOperation::Rpc,
+        _ => {
+            return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+        }
+    };
+    let Some(binding_id) = parse_do_resolve_path(request.uri().path()) else {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::NOT_FOUND);
+    };
+    if !content_type_is(request.headers(), "application/json")
+        || !valid_request_id(request.headers())
+    {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+    }
+    let Ok(deployment_id) = parse_header::<DeploymentId>(request.headers(), DEPLOYMENT_HEADER)
+    else {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+    };
+    let Ok(descriptor) = parse_digest(request.headers()) else {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+    };
+    let route_generation = match parse_header::<u64>(request.headers(), ROUTE_GENERATION_HEADER) {
+        Ok(value) if value > 0 => value,
+        _ => {
+            return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+        }
+    };
+    let Ok(bytes) = to_bytes(request.into_body(), 4096).await else {
+        return backend_error(ErrorCode::DoRpcUnsupported, StatusCode::PAYLOAD_TOO_LARGE);
+    };
+    let Ok(body) = parse_json::<DoResolveRequest>(&bytes) else {
+        return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
+    };
+    let Ok(object_id) = DurableObjectId::from_str(&body.object_id) else {
+        return backend_error(ErrorCode::DoIdInvalid, StatusCode::BAD_REQUEST);
+    };
+    let used_percent = match state.storage.filesystem_used_percent() {
+        Ok(value) => value,
+        Err(error) => return platform_error(&error),
+    };
+    if let Some(metrics) = &state.metrics {
+        let watermark = if used_percent >= state.do_config.disk_stop_writes_percent {
+            2
+        } else if used_percent >= state.do_config.disk_high_watermark_percent {
+            1
+        } else {
+            0
+        };
+        metrics.set_do_runtime_gauges(0, 0, watermark);
+    }
+    let allow_create = used_percent < state.do_config.disk_stop_writes_percent;
+    let storage = state.storage.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        DurableObjectRepository::new(&storage).authorize_dispatch(
+            binding_id,
+            deployment_id,
+            &descriptor,
+            route_generation,
+            object_id,
+            unix_ms(),
+            allow_create,
+        )
+    })
+    .await;
+    let success = matches!(&result, Ok(Ok(_)));
+    if let Some(metrics) = &state.metrics {
+        metrics.observe_do_dispatch(operation, success, started.elapsed());
+        if success
+            && let Ok(hosts) = DurableObjectRepository::new(&state.storage).count_live_objects()
+        {
+            metrics.set_do_active_hosts(hosts);
+        }
+    }
+    match result {
+        Ok(Ok(authority)) => match serde_json::to_vec(&authority) {
+            Ok(bytes) => {
+                let mut response = Response::new(Body::from(bytes));
+                response.headers_mut().insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                );
+                response
+            }
+            Err(_) => backend_error(
+                ErrorCode::DoInternalProtocolError,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        },
+        Ok(Err(error)) => platform_error(&error),
+        Err(_) => backend_error(
+            ErrorCode::DoStorageUnavailable,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
     }
 }
 
@@ -1249,6 +1469,18 @@ fn parse_path(path: &str) -> Option<(BindingId, Operation)> {
     Some((BindingId::from_str(id).ok()?, operation))
 }
 
+fn parse_do_resolve_path(path: &str) -> Option<BindingId> {
+    parse_do_path(path, "resolve")
+}
+
+fn parse_do_path(path: &str, operation: &str) -> Option<BindingId> {
+    let rest = path.strip_prefix("/internal/bindings/v1/do/")?;
+    let id = rest.strip_suffix(&format!("/{operation}"))?;
+    (!id.contains('/'))
+        .then(|| BindingId::from_str(id).ok())
+        .flatten()
+}
+
 fn declared_too_large(headers: &HeaderMap) -> bool {
     let limit = if content_type_is(headers, FRAME_CONTENT_TYPE) {
         MAX_FRAME_BODY_BYTES
@@ -1347,6 +1579,7 @@ fn serialize_get_response(value: Option<String>) -> Result<Vec<u8>, PlatformErro
 fn platform_error(error: &PlatformError) -> Response {
     let status = match error.code() {
         ErrorCode::BindingNotFound | ErrorCode::ResourceNotFound => StatusCode::NOT_FOUND,
+        ErrorCode::DoNamespaceNotFound => StatusCode::NOT_FOUND,
         ErrorCode::BindingPermissionDenied => StatusCode::FORBIDDEN,
         ErrorCode::BindingLimitExceeded
         | ErrorCode::KvKeyTooLarge
@@ -1354,13 +1587,20 @@ fn platform_error(error: &PlatformError) -> Response {
         | ErrorCode::KvMetadataTooLarge
         | ErrorCode::KvResponseTooLarge
         | ErrorCode::KvTooManyKeys => StatusCode::PAYLOAD_TOO_LARGE,
-        ErrorCode::ResourceNotReady | ErrorCode::ResourceReferenced => StatusCode::CONFLICT,
+        ErrorCode::ResourceNotReady
+        | ErrorCode::ResourceReferenced
+        | ErrorCode::DoObjectDeleting
+        | ErrorCode::DoDeploymentStale
+        | ErrorCode::DoNamespaceNotEmpty => StatusCode::CONFLICT,
         ErrorCode::ResourceUnavailable
         | ErrorCode::BindingResultUnknown
         | ErrorCode::KvBusy
         | ErrorCode::KvStorageFull
         | ErrorCode::KvUnavailable
         | ErrorCode::KvResultUnknown => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::DoStorageUnavailable
+        | ErrorCode::DoStorageLimit
+        | ErrorCode::DoDispatchTimeout => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::BindingTypeMismatch
         | ErrorCode::BindingCapabilityUnsupported
         | ErrorCode::ResourceInvariantViolation => StatusCode::UNPROCESSABLE_ENTITY,
@@ -1370,10 +1610,27 @@ fn platform_error(error: &PlatformError) -> Response {
         | ErrorCode::KvInvalidOptions
         | ErrorCode::KvCursorInvalid
         | ErrorCode::KvInternalProtocolError => StatusCode::BAD_REQUEST,
+        ErrorCode::DoIdInvalid
+        | ErrorCode::DoRpcUnsupported
+        | ErrorCode::DoPlacementOptionUnsupported
+        | ErrorCode::DoInternalProtocolError => StatusCode::BAD_REQUEST,
+        ErrorCode::DoClassNotFound | ErrorCode::DoRuntimeException => {
+            StatusCode::UNPROCESSABLE_ENTITY
+        }
         ErrorCode::KvCorrupt => StatusCode::UNPROCESSABLE_ENTITY,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     backend_error(error.code(), status)
+}
+
+fn unix_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(i64::MAX)
 }
 
 fn kv_protocol_error() -> PlatformError {

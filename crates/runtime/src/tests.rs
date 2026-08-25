@@ -146,8 +146,14 @@ fn copy_formal_assets(dest: &Path) {
         "loader-host.js",
         "outbound-gateway.js",
         "r2-facade.js",
-        "r2-wrapper-generator.js",
+        "d1-facade.js",
+        "do-facade.js",
+        "do-id-codec.js",
+        "loaded-isolate-wrapper-generator.js",
         "r2-transport.js",
+        "d1-transport.js",
+        "do-router.js",
+        "do-host.js",
     ] {
         fs::copy(
             src.join("system-workers").join(name),
@@ -195,6 +201,7 @@ fn compile_req<'a>(
         platform,
         token,
         binding_token: token,
+        durable_objects: open_compute_core::DurableObjectsConfig::default(),
         deadline,
         redactor,
     }

@@ -294,6 +294,71 @@ impl<'a> ResourceRepository<'a> {
         })
     }
 
+    /// Tombstone a create with no physical effect and persist its stable failure for replay.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fail_create(
+        self,
+        account_id: AccountId,
+        key: &str,
+        fingerprint: &[u8; 32],
+        resource_id: ResourceId,
+        code: ErrorCode,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        let response = serde_json::to_vec(&serde_json::json!({ "code": code.as_str() }))
+            .map_err(|_| resource_invariant())?;
+        self.db.with_immediate(|tx| {
+            let resource = read_resource_tx(tx, account_id, resource_id)?;
+            if resource.state != ResourceState::Creating || has_referrers(tx, resource_id)? {
+                return Err(resource_invariant());
+            }
+            let deleting_changed = tx
+                .execute(
+                    "UPDATE resources SET state = 'deleting', updated_at_ms = ?1
+                     WHERE id = ?2 AND account_id = ?3 AND state = 'creating'",
+                    params![now_ms, resource_id.to_string(), account_id.to_string(),],
+                )
+                .map_err(|_| db_error())?;
+            let resource_changed = tx
+                .execute(
+                    "UPDATE resources SET state = 'tombstoned', updated_at_ms = ?1,
+                            deleted_at_ms = ?1
+                     WHERE id = ?2 AND account_id = ?3 AND state = 'deleting'",
+                    params![now_ms, resource_id.to_string(), account_id.to_string(),],
+                )
+                .map_err(|_| db_error())?;
+            let operation_changed = tx
+                .execute(
+                    "UPDATE control_idempotency SET state = 'failed', response_json = ?1
+                     WHERE account_id = ?2 AND scope = 'resource.create'
+                       AND idempotency_key = ?3 AND request_fingerprint = ?4
+                       AND resource_id = ?5 AND state = 'running'",
+                    params![
+                        response,
+                        account_id.to_string(),
+                        key,
+                        fingerprint.as_slice(),
+                        resource_id.to_string(),
+                    ],
+                )
+                .map_err(|_| db_error())?;
+            if deleting_changed != 1 || resource_changed != 1 || operation_changed != 1 {
+                return Err(resource_invariant());
+            }
+            audit(
+                tx,
+                account_id,
+                "resource.create_failed",
+                "resource",
+                &resource_id.to_string(),
+                request_id,
+                &response,
+                now_ms,
+            )
+        })
+    }
+
     /// Reserve or replay one account-scoped resource deletion.
     pub fn reserve_delete(
         &self,
