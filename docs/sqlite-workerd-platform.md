@@ -246,7 +246,7 @@ data/
 ├── kv/
 │   └── <account-id>/<namespace-id>/data.sqlite
 ├── d1/
-│   └── <account-id>/<database-id>.sqlite
+│   └── <account-id>/<database-id>/data.sqlite
 ├── do/
 │   └── workerd localDisk managed files
 ├── cache/
@@ -351,7 +351,7 @@ WHERE state != 'tombstoned';
 
 ```text
 kv_namespaces(resource_id, storage_key, schema_version, quota_bytes)
-d1_databases(resource_id, file_key, schema_version)
+d1_databases(resource_id, storage_key, schema_version, quota_bytes)
 r2_buckets(resource_id, physical_prefix)
 queues(resource_id, retention, dlq_resource_id)
 queue_consumers(queue_id, worker_id, batch_config, generation)
@@ -497,11 +497,11 @@ API 兼容面、25 MiB stream、TTL/list cursor、connection manager、backup/re
 
 ### 9.1 一数据库一文件
 
-D1 允许用户创建任意 table、index 和 transaction，因此一个 D1 database 必须对应独立
-SQLite 文件：
+D1 允许用户创建自己的 table、index、view、trigger 和数据，因此一个 D1 database 必须对应独立
+SQLite 文件；原子多 statement 使用 `batch()`，不允许 transaction 跨 binding call：
 
 ```text
-d1/<account-id>/<database-id>.sqlite
+d1/<account-id>/<database-id>/data.sqlite
 ```
 
 `control.sqlite` 只保存 resource metadata、file key、binding referrer 和 lifecycle。
@@ -517,9 +517,15 @@ batch
 exec
 ```
 
-binding 通过 JSRPC 回到 runtime host adapter，再调用 `platformd` 的 scoped D1 endpoint。
-endpoint 的 immutable props 固定 account、database ID 和 permission，tenant code 不能选择
-其他文件。
+`prepare()` 和 `bind()` 必须同步返回可复用的本地 statement object，因此不能把整个 D1 facade
+直接做成远端 JSRPC object。P0.5.0 先建立 loaded-isolate facade framework：WorkerLoader 注入项目
+自有 D1 client module 和 deterministic main wrapper，在 tenant isolate 内构造 `D1Database`/
+`D1PreparedStatement`；只有 `run/all/first/raw/batch/exec` 这类 terminal operation 通过
+binding-scoped JSRPC transport 回到 `platformd`。transport 的 immutable props 固定 binding、
+deployment、database generation 和 permission，tenant code 不能选择其他文件。
+
+完整 facade Gate、SQLite authorizer/limits、batch/exec/migration、backup/restore、工作包和测试矩阵见
+[P0.6：D1 详细设计](./p0-6-d1.md)。
 
 ### 9.3 SQL 安全边界
 
@@ -597,7 +603,7 @@ Alarm delivery 是 at-least-once，handler 必须支持幂等。
 外部只要求一个 S3-compatible provider。平台用不透明 prefix 实现多个逻辑 R2 bucket：
 
 ```text
-r2/<account-id>/<bucket-id>/<user-object-key>
+tenant/r2/v1/<resource-id>/objects/<user-object-key>
 ```
 
 `control.sqlite` 保存：
@@ -621,7 +627,8 @@ S3 object key 是平面字符串，不对 user object key 做 filesystem path no
 ```text
 system/bundles/<sha256>
 system/assets/<deployment-id>/<path>
-r2/<account-id>/<bucket-id>/<key>
+system/backups/<product>/...
+tenant/r2/v1/<resource-id>/objects/<key>
 ```
 
 Worker bundle 是 immutable content-addressed object。`control.sqlite` 保存 hash 和 ref，
@@ -629,6 +636,11 @@ Worker bundle 是 immutable content-addressed object。`control.sqlite` 保存 h
 
 S3 credential 只存在于 `platformd`。tenant Worker 获得的是 binding-scoped adapter，不能
 读取物理 bucket、credential 或 `system/` prefix。
+
+R2 返回对象带同步 `writeHttpMetadata()` 和本地 body helper，因此与 D1 一样使用 P0.5.0 的
+loaded-isolate facade；raw transport 只传 metadata DTO 和 byte stream。完整 key budget、metadata
+codec、conditional/range/list、provider preflight、bucket lifecycle、工作包和测试矩阵见
+[P0.5：R2 详细设计](./p0-5-r2.md)。
 
 ## 12. Queues
 
@@ -1135,8 +1147,10 @@ LRU/WAL、backup/restore、工作包与测试 Gate 见 [P0.4：KV 详细设计](
 
 ### P0.5：R2
 
-R2 复用 foundation 中已经验证过的 S3 client，再增加 tenant-facing virtual bucket：
+R2 先补一层 R2/D1 共用的 loaded-isolate facade framework，再复用 foundation 中已经验证过的
+S3 client 增加 tenant-facing virtual bucket：
 
+- injected local facade + deterministic main wrapper Gate；
 - logical bucket lifecycle；
 - physical prefix isolation；
 - `head/get/put/delete/list`；
@@ -1146,12 +1160,15 @@ R2 复用 foundation 中已经验证过的 S3 client，再增加 tenant-facing v
 完成门槛包括 logical bucket 隔离、`system/` prefix 不可达、stream cancel 和 S3 timeout/
 5xx。Multipart 不阻塞 P0。
 
+详细的 loaded-isolate facade、S3 typed store、provider capability preflight、control schema、object
+metadata/key budget、读写路径、工作包和测试 Gate 见 [P0.5：R2 详细设计](./p0-5-r2.md)。
+
 ### P0.6：D1
 
 D1 复用 resource lifecycle、SQLite manager 和 binding framework：
 
 - 一 database 一 SQLite；
-- D1 facade；
+- loaded-isolate D1 facade + flat scoped transport；
 - `prepare/bind/run/first/all/raw`、`batch` 和 `exec`；
 - migrations；
 - SQLite authorizer；
@@ -1160,6 +1177,9 @@ D1 复用 resource lifecycle、SQLite manager 和 binding framework：
 
 完成门槛包括跨 database 隔离、`ATTACH`/extension/filesystem pragma 拒绝、transaction
 rollback、WAL recovery 和 commit 后 response 丢失的 `result-unknown` 行为。
+
+详细的 facade architecture decision、SQLite schema/authorizer/limits、statement/batch/exec、migration、
+backup/restore、工作包和测试 Gate 见 [P0.6：D1 详细设计](./p0-6-d1.md)。
 
 ### P0.7：Durable Object core
 
@@ -1359,6 +1379,9 @@ lease expiry 和 version retention 都需要独立状态机与大量 crash-point
 - [Miniflare workerd runtime supervisor](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/runtime/index.ts)
 - [Miniflare worker-loader plugin](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/plugins/worker-loader/index.ts)
 - [Miniflare D1 plugin](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/plugins/d1/index.ts)
+- [WDL loaded-isolate R2 facade](https://github.com/wdl-dev/wdl/blob/main/runtime/r2-client.js)
+- [WDL loaded-isolate D1 facade](https://github.com/wdl-dev/wdl/blob/main/runtime/d1-client.js)
+- [WDL host-binding wrapper generator](https://github.com/wdl-dev/wdl/blob/main/runtime/load/wrapper-generate.js)
 - [Miniflare Durable Objects plugin](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/plugins/do/index.ts)
 - [workerd WorkerLoader](https://github.com/cloudflare/workerd/blob/main/src/workerd/api/worker-loader.h)
 - [Cloudflare KV namespaces](https://developers.cloudflare.com/kv/concepts/kv-namespaces/)
