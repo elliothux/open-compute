@@ -1,0 +1,767 @@
+//! Real pinned-workerd P0 aggregate Exit Gate.
+//!
+//! One Worker deployment owns every P0 product binding so cross-product composition, resource
+//! isolation, backup/rebind, deployment fencing, process recovery, and failure isolation are
+//! proven together rather than inferred from independent product Gates.
+
+#![cfg(feature = "test-support")]
+
+#[path = "p0_exit_support/mod.rs"]
+mod support;
+
+use axum::http::StatusCode;
+use open_compute_artifacts::{Fault, MockS3};
+use open_compute_core::clock::SystemClock;
+use open_compute_core::{RequestId, ResourceAvailability, ResourceId};
+use open_compute_storage::{PlatformStorage, ResourceRepository, WorkerRepository};
+use open_compute_workers::{BundleLimits, DeploymentController, ResourcePins, RuntimeValidator};
+use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use support::{
+    GateStack, ProductBindings, admin_json, admin_router, corrupt_d1, deploy, deployment_request,
+    dispatch, kill_workerd, now_ms, open_scheduler, repo_root, storage_config, stores,
+    wait_pid_change,
+};
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p0_real_combined_exit_matrix() {
+    let Some(workerd) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map(PathBuf::from) else {
+        return;
+    };
+    let root = repo_root();
+    let lock = root.join("runtime/workerd.lock.json");
+    let assets = root.join("runtime");
+    let temp = tempfile::tempdir().unwrap();
+    let data_root = temp.path().join("data");
+    let config = storage_config(&data_root);
+    let storage = Arc::new(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
+    let scheduler_store = open_scheduler(&storage);
+    let mock = MockS3::spawn("open-compute").await;
+    let (artifacts, objects) = stores(&mock);
+    let pins = ResourcePins::new();
+    let stack = GateStack::start(
+        storage.clone(),
+        scheduler_store.clone(),
+        artifacts.clone(),
+        objects.clone(),
+        pins.clone(),
+        workerd.clone(),
+        lock.clone(),
+        assets.clone(),
+        "p0-exit-owner",
+    )
+    .await;
+
+    let account = storage.identity().default_account_id;
+    let workers = WorkerRepository::new(storage.db());
+    let (worker, _) = workers
+        .create_worker(account, "p0-combined", RequestId::generate(), 10)
+        .unwrap();
+    let router = admin_router(
+        storage.clone(),
+        artifacts.clone(),
+        objects.clone(),
+        pins.clone(),
+        &stack,
+        scheduler_store.clone(),
+    );
+    let bindings = create_product_set(&router, account, worker.id).await;
+    assert_control_catalogs(&router, account).await;
+    apply_primary_d1_migration(&router, account, bindings.d1).await;
+
+    let deployment_a = {
+        let validator: Arc<dyn RuntimeValidator> = Arc::new(stack.transport.clone());
+        let controller = DeploymentController::new(
+            &storage,
+            artifacts.clone(),
+            validator,
+            BundleLimits::default(),
+        );
+        deploy(
+            &controller,
+            deployment_request(
+                account,
+                worker.id,
+                bindings,
+                "p0-exit-deploy-a",
+                "A",
+                true,
+                20,
+            ),
+            &stack.supervisor,
+        )
+        .await
+    };
+    let generation_a = workers
+        .get_worker(account, worker.id)
+        .unwrap()
+        .route_generation;
+
+    let seeded = dispatch(
+        &stack.transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/seed",
+    )
+    .await;
+    let seed = response_json(&seeded);
+    assert_snapshot(&seed, "A", "seed-kv", "seed-d1");
+    assert_eq!(seed["durableObject"]["rpc"]["count"], 1);
+    assert_eq!(seed["durableObject"]["isolated"]["count"], 1);
+
+    let websocket = response_json(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_a,
+            "/websocket",
+        )
+        .await,
+    );
+    assert_eq!(websocket, json!({"text": true, "binary": true}));
+
+    let kv_backup = create_backup(
+        &router,
+        &format!(
+            "/v1/accounts/{account}/kv/namespaces/{}/backups",
+            bindings.kv
+        ),
+        "p0-exit-kv-backup",
+    )
+    .await;
+    let d1_backup = create_backup(
+        &router,
+        &format!(
+            "/v1/accounts/{account}/d1/databases/{}/backups",
+            bindings.d1
+        ),
+        "p0-exit-d1-backup",
+    )
+    .await;
+    assert!(
+        mock.keys()
+            .iter()
+            .any(|key| key.contains("system/backups/kv/"))
+    );
+    assert!(
+        mock.keys()
+            .iter()
+            .any(|key| key.contains("system/backups/d1/"))
+    );
+
+    assert_ok(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_a,
+            "/mutate",
+        )
+        .await,
+    );
+    let restored_kv = restore_resource(
+        &router,
+        &format!("/v1/accounts/{account}/kv/namespaces:restore"),
+        &kv_backup,
+        "restored-kv",
+        "p0-exit-kv-restore",
+    )
+    .await;
+    let restored_d1 = restore_resource(
+        &router,
+        &format!("/v1/accounts/{account}/d1/databases:restore"),
+        &d1_backup,
+        "restored-d1",
+        "p0-exit-d1-restore",
+    )
+    .await;
+    assert_ne!(restored_kv, bindings.kv);
+    assert_ne!(restored_d1, bindings.d1);
+
+    let due = now_ms().saturating_sub(1).max(1);
+    assert_ok(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_a,
+            &format!("/set-alarm?time={due}"),
+        )
+        .await,
+    );
+    let bindings_b = ProductBindings {
+        kv: restored_kv,
+        d1: restored_d1,
+        ..bindings
+    };
+    let deployment_b = {
+        let validator: Arc<dyn RuntimeValidator> = Arc::new(stack.transport.clone());
+        let controller = DeploymentController::new(
+            &storage,
+            artifacts.clone(),
+            validator,
+            BundleLimits::default(),
+        );
+        deploy(
+            &controller,
+            deployment_request(
+                account,
+                worker.id,
+                bindings_b,
+                "p0-exit-deploy-b",
+                "B",
+                true,
+                30,
+            ),
+            &stack.supervisor,
+        )
+        .await
+    };
+    let generation_b = workers
+        .get_worker(account, worker.id)
+        .unwrap()
+        .route_generation;
+    assert!(generation_b > generation_a);
+    assert_eq!(stack.scheduler.poll_once().await.unwrap(), 1);
+    let alarm_b = alarm_status(&stack, account, worker.id, &deployment_b, generation_b).await;
+    assert_eq!(alarm_b["alarmDeliveries"], 1);
+    assert_eq!(alarm_b["alarmRelease"], "B");
+    assert_eq!(alarm_b["alarmRetryCount"], 0);
+    assert_eq!(alarm_b["alarm"], Value::Null);
+
+    let restored = response_json(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_b,
+            generation_b,
+            "/snapshot",
+        )
+        .await,
+    );
+    assert_snapshot(&restored, "B", "seed-kv", "seed-d1");
+
+    assert_ok(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_b,
+            generation_b,
+            &format!("/set-alarm?time={due}"),
+        )
+        .await,
+    );
+    workers
+        .promote_checked(
+            account,
+            worker.id,
+            deployment_a.id,
+            Some(deployment_b.id),
+            Some(generation_b),
+            RequestId::generate(),
+            40,
+        )
+        .unwrap();
+    let generation_rollback = workers
+        .get_worker(account, worker.id)
+        .unwrap()
+        .route_generation;
+    assert_eq!(stack.scheduler.poll_once().await.unwrap(), 1);
+    let alarm_a = alarm_status(
+        &stack,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_rollback,
+    )
+    .await;
+    assert_eq!(alarm_a["alarmDeliveries"], 2);
+    assert_eq!(alarm_a["alarmRelease"], "A");
+    let rolled_back = response_json(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_rollback,
+            "/snapshot",
+        )
+        .await,
+    );
+    assert_snapshot(&rolled_back, "A", "mutated-kv", "mutated-d1");
+
+    let killed_pid = stack.supervisor.snapshot().pid.unwrap();
+    kill_workerd(killed_pid);
+    wait_pid_change(&stack.supervisor, killed_pid, Duration::from_secs(30)).await;
+    let after_workerd_crash = response_json(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_rollback,
+            "/snapshot",
+        )
+        .await,
+    );
+    assert_snapshot(&after_workerd_crash, "A", "mutated-kv", "mutated-d1");
+
+    assert_ok(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_rollback,
+            &format!("/set-alarm?time={due}"),
+        )
+        .await,
+    );
+    for id in all_resources(bindings_b) {
+        assert_eq!(pins.count(id), 0);
+    }
+    drop(router);
+    stack.stop().await;
+    drop(scheduler_store);
+    drop(storage);
+
+    let storage = Arc::new(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
+    let scheduler_store = open_scheduler(&storage);
+    let pins = ResourcePins::new();
+    let stack = GateStack::start(
+        storage.clone(),
+        scheduler_store.clone(),
+        artifacts.clone(),
+        objects.clone(),
+        pins.clone(),
+        workerd,
+        lock,
+        assets,
+        "p0-exit-owner",
+    )
+    .await;
+    let router = admin_router(
+        storage.clone(),
+        artifacts,
+        objects,
+        pins.clone(),
+        &stack,
+        scheduler_store,
+    );
+    let persisted_worker = WorkerRepository::new(storage.db())
+        .get_worker(account, worker.id)
+        .unwrap();
+    assert_eq!(persisted_worker.active_deployment_id, Some(deployment_a.id));
+    assert_eq!(persisted_worker.route_generation, generation_rollback);
+    assert_eq!(stack.scheduler.poll_once().await.unwrap(), 1);
+    let after_platform_restart = alarm_status(
+        &stack,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_rollback,
+    )
+    .await;
+    assert_eq!(after_platform_restart["alarmDeliveries"], 3);
+    assert_eq!(after_platform_restart["alarmRelease"], "A");
+    let persisted = response_json(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_rollback,
+            "/snapshot",
+        )
+        .await,
+    );
+    assert_snapshot(&persisted, "A", "mutated-kv", "mutated-d1");
+
+    let s3_request = tokio::spawn({
+        let transport = stack.transport.clone();
+        let deployment = deployment_a.clone();
+        async move {
+            dispatch(
+                &transport,
+                account,
+                worker.id,
+                &deployment,
+                generation_rollback,
+                "/s3-fault?delay=250",
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    mock.set_fault(Fault::ServerError);
+    let s3_failure = response_json(&s3_request.await.unwrap());
+    assert!(
+        s3_failure["r2Error"]
+            .as_str()
+            .unwrap()
+            .contains("R2_PROVIDER_UNAVAILABLE")
+    );
+    assert_eq!(s3_failure["kv"], "mutated-kv");
+    assert_eq!(s3_failure["d1"], "mutated-d1");
+    let (failed_backup_status, failed_backup) = admin_json(
+        &router,
+        "POST",
+        &format!(
+            "/v1/accounts/{account}/kv/namespaces/{}/backups",
+            bindings.kv_other
+        ),
+        Value::Null,
+        Some("p0-exit-s3-failed-backup"),
+    )
+    .await;
+    assert_eq!(failed_backup_status, StatusCode::SERVICE_UNAVAILABLE);
+    let failure_text = failed_backup.to_string();
+    assert!(!failure_text.contains(&mock.endpoint));
+    assert!(!failure_text.contains("sqlite"));
+    mock.set_fault(Fault::None);
+    let after_s3_recovery = response_json(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_rollback,
+            "/snapshot",
+        )
+        .await,
+    );
+    assert_snapshot(&after_s3_recovery, "A", "mutated-kv", "mutated-d1");
+
+    corrupt_d1(&storage, account, bindings.d1_corrupt);
+    let isolated_corruption = response_json(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_rollback,
+            "/corruption",
+        )
+        .await,
+    );
+    assert_eq!(isolated_corruption["primary"], "mutated-d1");
+    assert_eq!(isolated_corruption["kv"], "mutated-kv");
+    assert!(
+        isolated_corruption["corruptError"]
+            .as_str()
+            .unwrap()
+            .contains("D1_DATABASE_CORRUPT")
+    );
+    assert_eq!(
+        ResourceRepository::new(storage.db())
+            .get(account, bindings.d1_corrupt)
+            .unwrap()
+            .availability,
+        ResourceAvailability::Unavailable
+    );
+
+    let deleted = dispatch(
+        &stack.transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_rollback,
+        "/delete-r2",
+    )
+    .await;
+    assert_eq!((deleted.status, deleted.body.as_str()), (200, "null"));
+    for id in all_resources(bindings_b) {
+        assert_eq!(pins.count(id), 0);
+    }
+    drop(router);
+    stack.stop().await;
+    println!("P0 combined Worker/KV/R2/D1/DO/alarm/WebSocket/backup/restart/failure matrix PASS");
+}
+
+async fn create_product_set(
+    router: &axum::Router,
+    account: open_compute_core::AccountId,
+    worker: open_compute_core::WorkerId,
+) -> ProductBindings {
+    let kv = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/kv/namespaces"),
+        json!({"name": "combined-kv"}),
+        "p0-exit-create-kv",
+        &["resourceId"],
+    )
+    .await;
+    let replay = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/kv/namespaces"),
+        json!({"name": "combined-kv"}),
+        "p0-exit-create-kv",
+        &["resourceId"],
+    )
+    .await;
+    assert_eq!(replay, kv);
+    let kv_other = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/kv/namespaces"),
+        json!({"name": "combined-kv-other"}),
+        "p0-exit-create-kv-other",
+        &["resourceId"],
+    )
+    .await;
+    let r2 = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/r2/buckets"),
+        json!({"name": "combined-r2"}),
+        "p0-exit-create-r2",
+        &["bucket", "resourceId"],
+    )
+    .await;
+    let r2_other = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/r2/buckets"),
+        json!({"name": "combined-r2-other"}),
+        "p0-exit-create-r2-other",
+        &["bucket", "resourceId"],
+    )
+    .await;
+    let d1 = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/d1/databases"),
+        json!({"name": "combined-d1"}),
+        "p0-exit-create-d1",
+        &["resourceId"],
+    )
+    .await;
+    let d1_other = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/d1/databases"),
+        json!({"name": "combined-d1-other"}),
+        "p0-exit-create-d1-other",
+        &["resourceId"],
+    )
+    .await;
+    let d1_corrupt = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/d1/databases"),
+        json!({"name": "combined-d1-corrupt"}),
+        "p0-exit-create-d1-corrupt",
+        &["resourceId"],
+    )
+    .await;
+    let objects = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/durable-objects/namespaces"),
+        json!({"name": "combined-do", "workerId": worker, "className": "AppObject"}),
+        "p0-exit-create-do",
+        &["resourceId"],
+    )
+    .await;
+    let objects_other = create_resource(
+        router,
+        &format!("/v1/accounts/{account}/durable-objects/namespaces"),
+        json!({"name": "combined-do-other", "workerId": worker, "className": "OtherObject"}),
+        "p0-exit-create-do-other",
+        &["resourceId"],
+    )
+    .await;
+    ProductBindings {
+        kv,
+        kv_other,
+        r2,
+        r2_other,
+        d1,
+        d1_other,
+        d1_corrupt,
+        objects,
+        objects_other,
+    }
+}
+
+async fn create_resource(
+    router: &axum::Router,
+    uri: &str,
+    body: Value,
+    key: &str,
+    path: &[&str],
+) -> ResourceId {
+    let (status, response) = admin_json(router, "POST", uri, body, Some(key)).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "{status}: {response}"
+    );
+    let mut value = &response;
+    for segment in path {
+        value = &value[*segment];
+    }
+    value.as_str().unwrap().parse().unwrap()
+}
+
+async fn assert_control_catalogs(router: &axum::Router, account: open_compute_core::AccountId) {
+    for (uri, key, minimum) in [
+        (
+            format!("/v1/accounts/{account}/kv/namespaces"),
+            "namespaces",
+            2,
+        ),
+        (format!("/v1/accounts/{account}/r2/buckets"), "buckets", 2),
+        (
+            format!("/v1/accounts/{account}/d1/databases"),
+            "databases",
+            3,
+        ),
+        (
+            format!("/v1/accounts/{account}/durable-objects/namespaces"),
+            "namespaces",
+            2,
+        ),
+    ] {
+        let (status, value) = admin_json(router, "GET", &uri, Value::Null, None).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(value[key].as_array().unwrap().len() >= minimum);
+    }
+}
+
+async fn apply_primary_d1_migration(
+    router: &axum::Router,
+    account: open_compute_core::AccountId,
+    database: ResourceId,
+) {
+    let sql = "CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL)";
+    let digest = hex::encode(Sha256::digest(sql.as_bytes()));
+    let uri = format!("/v1/accounts/{account}/d1/databases/{database}/migrations/apply");
+    let body = json!({"migrations": [{
+        "id": 1,
+        "name": "0001_notes.sql",
+        "sha256": digest,
+        "sql": sql
+    }]});
+    let (status, applied) = admin_json(
+        router,
+        "POST",
+        &uri,
+        body.clone(),
+        Some("p0-exit-d1-migration"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+    assert_eq!(applied["migrations"].as_array().unwrap().len(), 1);
+    let (replay_status, _) =
+        admin_json(router, "POST", &uri, body, Some("p0-exit-d1-migration")).await;
+    assert_eq!(replay_status, StatusCode::OK);
+}
+
+async fn create_backup(router: &axum::Router, uri: &str, key: &str) -> String {
+    let (status, body) = admin_json(router, "POST", uri, Value::Null, Some(key)).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let id = body["backup"]["id"].as_str().unwrap().to_owned();
+    let (replay_status, replay) = admin_json(router, "POST", uri, Value::Null, Some(key)).await;
+    assert_eq!(replay_status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["backup"]["id"], id);
+    id
+}
+
+async fn restore_resource(
+    router: &axum::Router,
+    uri: &str,
+    backup_id: &str,
+    name: &str,
+    key: &str,
+) -> ResourceId {
+    let body = json!({"backupId": backup_id, "newName": name});
+    let (status, restored) = admin_json(router, "POST", uri, body.clone(), Some(key)).await;
+    assert_eq!(status, StatusCode::CREATED, "{restored}");
+    let resource: ResourceId = restored["resourceId"].as_str().unwrap().parse().unwrap();
+    let (replay_status, replay) = admin_json(router, "POST", uri, body, Some(key)).await;
+    assert_eq!(replay_status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["resourceId"], resource.to_string());
+    resource
+}
+
+async fn alarm_status(
+    stack: &GateStack,
+    account: open_compute_core::AccountId,
+    worker: open_compute_core::WorkerId,
+    deployment: &open_compute_storage::DeploymentRecord,
+    generation: u64,
+) -> Value {
+    let response = dispatch(
+        &stack.transport,
+        account,
+        worker,
+        deployment,
+        generation,
+        "/alarm-status",
+    )
+    .await;
+    assert_eq!(
+        response.status,
+        200,
+        "{}; runtime={:?}; diagnostics={:?}",
+        response.body,
+        stack.supervisor.snapshot(),
+        stack.supervisor.last_diagnostics()
+    );
+    serde_json::from_str(&response.body).unwrap()
+}
+
+#[track_caller]
+fn response_json(response: &support::DispatchResponse) -> Value {
+    assert_ok(response);
+    serde_json::from_str(&response.body).unwrap()
+}
+
+#[track_caller]
+fn assert_ok(response: &support::DispatchResponse) {
+    assert_eq!(response.status, 200, "{}", response.body);
+}
+
+#[track_caller]
+fn assert_snapshot(value: &Value, release: &str, kv: &str, d1: &str) {
+    assert_eq!(value["release"], release);
+    for key in ["kv", "r2", "d1", "durableObject"] {
+        assert_eq!(value["facade"][key], true, "{key}: {value}");
+    }
+    assert_eq!(value["kv"]["text"], kv);
+    assert_eq!(value["kv"]["json"], json!({"ok": true, "product": "kv"}));
+    assert_eq!(value["kv"]["binary"], json!([1, 2]));
+    assert_eq!(value["kv"]["stream"], "stream-value");
+    assert_eq!(value["kv"]["isolated"], "isolated-kv");
+    assert_eq!(value["r2"]["body"], "hello-r2");
+    assert_eq!(value["r2"]["range"], "ell");
+    assert_eq!(value["r2"]["size"], 8);
+    assert_eq!(value["r2"]["custom"], "seed");
+    assert_eq!(value["r2"]["contentType"], "text/plain");
+    assert_eq!(value["r2"]["metadataReturnUndefined"], true);
+    assert_eq!(value["r2"]["isolated"], "isolated-r2");
+    assert_eq!(value["d1"]["first"], d1);
+    assert_eq!(value["d1"]["sessionCount"], 3);
+    assert_eq!(value["d1"]["isolated"], "isolated-d1");
+    assert_eq!(value["durableObject"]["rpc"]["count"], 1);
+    assert_eq!(value["durableObject"]["fetch"]["count"], 1);
+    assert_eq!(value["durableObject"]["isolated"]["count"], 1);
+}
+
+fn all_resources(bindings: ProductBindings) -> [ResourceId; 9] {
+    [
+        bindings.kv,
+        bindings.kv_other,
+        bindings.r2,
+        bindings.r2_other,
+        bindings.d1,
+        bindings.d1_other,
+        bindings.d1_corrupt,
+        bindings.objects,
+        bindings.objects_other,
+    ]
+}

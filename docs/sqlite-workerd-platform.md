@@ -1237,6 +1237,10 @@ lease、row/claim token、repair、at-least-once delivery、六次 retry 和 fai
 
 ### P0 Exit Gate
 
+> 验证状态（2026-08-26）：已由 `crates/service/tests/p0_exit_gate.rs` 的单一真实
+> pinned-workerd fixture 覆盖，并通过 `scripts/test-p0-exit.sh` 三轮 fresh-process 综合矩阵；
+> 该入口随后递归执行 P0.8-P0.2 与 P0.1 全部 regression Gate。
+
 一个 fixture Worker 必须能同时使用：
 
 ```text
@@ -1254,20 +1258,34 @@ HTTP Worker
 整套测试覆盖 deploy A -> B -> rollback A、platform/workerd restart、资源隔离、单资源
 损坏、S3 故障以及 P0 resource backup/restore。
 
+综合 fixture 通过 control API 创建两组隔离 KV/R2/DO、三组 D1，使用同一 immutable deployment
+同时执行 KV typed get/put/list/metadata/stream、R2 put/head/get/range/list/metadata/delete、D1
+prepare/bind/run/all/first/raw/batch/session/migration、DO fetch/RPC/sync+async storage/transaction/alarm/
+WebSocket。KV 与 D1 online backup restore-as-new 后由 deployment B 显式重绑，rollback A 再验证原
+resource 未被原地覆盖；测试还直接 SIGKILL workerd、重启完整 platform owner composition，并保证
+重启后的第一个 tenant event 可以是 cold DO alarm，而不依赖普通 fetch 预热。
+
 ### P1：P0 加固
 
-P1 不增加新的 Cloudflare 产品能力，集中完成：
+P1 不增加新的 Cloudflare 产品能力。它把已通过 aggregate Gate 的 P0 收敛成可安全升级、灾备和长期
+运行的单机发行版，按依赖顺序完成：
 
-- P0 API conformance suite；
-- full snapshot/restore；
-- forward-only schema upgrade；
-- resource quota 和磁盘保护；
-- security fuzzing 和恶意 Worker fixtures；
-- soak、load 和 crash-point matrix；
-- production health、metrics、doctor 和 runbook；
-- advanced WebSocket hibernation 等不阻塞 P0 的兼容增强。
+1. capability/format freeze 与 P0 API conformance；
+2. resource quota、统一磁盘 admission 和 offline data-dir ownership；
+3. 短维护窗口下的 platform snapshot 与 fresh-host restore；
+4. 以已验证 snapshot 为 rollback anchor 的 forward-only schema/workerd upgrade；
+5. security fuzzing、恶意 Worker 和跨 account/resource isolation；
+6. soak、load、crash-point/fault matrix 和 capacity envelope；
+7. production health、metrics、doctor、support bundle 和 runbook；
+8. advanced WebSocket hibernation 的 pinned stock-workerd 条件性 Gate。
 
-只有 P1 达到稳定门槛，才让高频 scheduler workload 进入同一个单机服务。
+P1.0 至 P1.7 是进入 P2 的必过 Gate；P1.8 hibernation 可以是 Go、Conditional Go 或 No-Go，不能
+阻塞核心稳定性发布。整机 snapshot 不重复复制 R2/bundle 所在的外部 S3，不包含 master key，恢复要求
+同一 S3 authority、同一外部 master key 和 source-compatible release；它恢复本地 authority，但不是
+R2 point-in-time backup，R2 使用 restore 时外部 provider 中的当前状态。
+
+详细的离线 snapshot/restore format、升级/回滚协议、磁盘 admission、安全与长稳矩阵、运维合同、
+工作包和 Exit Gate 见 [P1：P0 平台加固详细设计](./p1-platform-hardening.md)。
 
 ### P2.1：Scheduler hardening
 

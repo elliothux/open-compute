@@ -84,6 +84,7 @@ cargo metadata --no-deps --format-version 1
 OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-1.sh
 OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-2.sh
 OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-8.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-exit.sh
 ```
 
 Rust 覆盖率使用
@@ -102,6 +103,9 @@ HTML、LCOV 和 JSON summary；workspace 生产 Rust 行覆盖率低于 90.00% �
 provider。支持面与明确偏差见 [`docs/p0-2-api-matrix.md`](docs/p0-2-api-matrix.md)。
 `scripts/test-p0-8.sh` 在三个 fresh process 中运行 scheduler/alarm matrix，随后递归执行
 P0.7-P0.2 regression Gate。
+`scripts/test-p0-exit.sh` 在三个 fresh process 中运行单一 Worker 的 KV、R2、D1、DO、alarm、
+WebSocket、backup/restore、promotion/rollback、restart、corruption 与 S3 fault 综合矩阵，随后执行
+P0.8-P0.2 和 P0.1 的全部 regression Gate。
 Linux release CI 另以 `scripts/test-p0-2-egress-linux.sh` 创建短期受控 dual-stack 网络夹具，补齐
 public IPv4/IPv6/DNS allow 与 redirect/DNS-to-private deny；该脚本会要求显式 sudo 授权并在退出时
 清理地址和 hosts 项。

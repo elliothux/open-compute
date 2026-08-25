@@ -728,6 +728,10 @@ offline recovery 会把主库、WAL、SHM 一起隔离到 `data/diagnostics/sche
 - stock workerd三轮；
 - P0.2-P0.7 regression；
 - combined Worker/DO/alarm fixture。
+- `scripts/test-p0-exit.sh` 进一步以单一 deployment 同时绑定 KV、R2、D1 和两个 DO namespace，
+  覆盖 backup/restore 重绑、basic WebSocket、workerd SIGKILL、platform owner restart、S3 fault 与
+  单 D1 corruption isolation；platform restart 后 pending alarm 是第一个 tenant event，禁止依赖普通
+  fetch 预热 loader/binding generation。
 
 依赖顺序固定为 `0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7`。P0.8.1 不得为了未来 Queue/Workflow
 增加没有 alarm测试消费者的 abstraction；如果一段代码只被未来产品“可能需要”，先不实现。

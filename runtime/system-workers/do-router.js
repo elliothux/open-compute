@@ -231,7 +231,7 @@ async function alarmAuthority(request, env) {
       method: "POST",
       headers: {
         [TOKEN_HEADER]: env.BINDING_BACKEND_TOKEN,
-        "x-open-compute-startup-generation": currentStartupGeneration(),
+        "x-open-compute-startup-generation": currentStartupGeneration(env.INTERNAL_TOKEN),
         "x-open-compute-request-id": crypto.randomUUID(),
         "content-type": "application/json",
       },
