@@ -10,10 +10,10 @@ use crate::exit::{ExitClass, emit_failure, exit_class_for, exit_code};
 use crate::health::{HealthCoordinator, map_supervisor};
 use crate::http::{self, HttpState, REQUEST_ID_HEADER};
 use crate::metrics::{
-    KvGauge, KvGaugeGuard, KvLifecycle, KvLifecycleGuard, KvMaintenance, KvOperation,
-    KvStagingGauge, MetricsRegistry, R2Operation, R2ProviderError, R2StreamDirection,
-    R2StreamGuard, REQUIRED_SERIES, RestartReason, S3Op, S3Result, SqliteOp, StartResult,
-    StartStage,
+    D1Lifecycle, D1LifecycleGuard, D1Operation, KvGauge, KvGaugeGuard, KvLifecycle,
+    KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry, R2Operation,
+    R2ProviderError, R2StreamDirection, R2StreamGuard, REQUIRED_SERIES, RestartReason, S3Op,
+    S3Result, SqliteOp, StartResult, StartStage,
 };
 use crate::run::{
     FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_kv_maintenance,
@@ -1523,6 +1523,22 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     reg.add_r2_list_head_fanout(3);
     reg.add_r2_bytes(R2StreamDirection::Upload, 7);
     reg.add_r2_bytes(R2StreamDirection::Download, 5);
+    reg.observe_d1_operation(
+        D1Operation::Query,
+        true,
+        true,
+        Duration::from_millis(3),
+        2,
+        0,
+        17,
+    );
+    reg.observe_d1_queue_depth(2);
+    reg.set_d1_open_databases(3);
+    reg.observe_d1_wal_bytes(2 * 1024 * 1024);
+    reg.inc_d1_error(D1Operation::Exec, ErrorCode::D1ResultUnknown);
+    let d1_backup = D1LifecycleGuard::new(reg.clone(), D1Lifecycle::Backup);
+    d1_backup.success();
+    drop(D1LifecycleGuard::new(reg.clone(), D1Lifecycle::Migration));
     {
         let _reader = KvGaugeGuard::new(&reg, KvGauge::ReaderConnection);
         let _writer = KvGaugeGuard::new(&reg, KvGauge::WriterConnection);
@@ -1566,6 +1582,15 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     assert!(rendered.contains("r2_bytes_total{direction=\"egress\"} 5"));
     assert!(rendered.contains("r2_active_streams{direction=\"upload\"} 0"));
     assert!(rendered.contains("r2_staging_bytes 0"));
+    assert!(rendered.contains(
+        "d1_operations_total{operation=\"query\",outcome=\"success\",readonly=\"true\"} 1"
+    ));
+    assert!(rendered.contains("d1_operation_queue_depth_bucket{le=\"4\"} 1"));
+    assert!(rendered.contains("d1_open_databases 3"));
+    assert!(rendered.contains("d1_wal_bytes_bucket{le=\"4194304\"} 1"));
+    assert!(rendered.contains("d1_result_unknown_total{operation=\"exec\"} 1"));
+    assert!(rendered.contains("d1_backup_total{outcome=\"success\"} 1"));
+    assert!(rendered.contains("d1_migration_total{outcome=\"failure\"} 1"));
 }
 
 fn content_snapshot(root: &Path) -> Vec<(String, u64, Option<SystemTime>, String)> {

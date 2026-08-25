@@ -161,6 +161,16 @@ async fn wire_validation_and_error_mapping_cover_every_bounded_shape() {
         .code(),
         ErrorCode::R2ProviderUnavailable
     );
+    assert_eq!(
+        mutation_timeout_result(Duration::from_millis(1), async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            Ok::<_, PlatformError>(())
+        })
+        .await
+        .unwrap_err()
+        .code(),
+        ErrorCode::R2ResultUnknown
+    );
     assert_eq!(digest_text("x").len(), 64);
     assert!(unix_ms().unwrap() > 0);
 

@@ -4,8 +4,9 @@ use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
 use crate::descriptor::{
-    BindingDescriptorV1, R2_FACADE_MODULE_NAME, R2_WRAPPER_MODULE_NAME, SecretDescriptor,
-    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, validate_env_name,
+    BindingDescriptorV1, D1_FACADE_MODULE_NAME, R2_FACADE_MODULE_NAME, R2_WRAPPER_MODULE_NAME,
+    SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256,
+    validate_env_name,
 };
 use bytes::Bytes;
 use futures::stream;
@@ -631,16 +632,18 @@ pub(crate) fn validate_injection_module_collisions(
     manifest: &WorkerBundleManifest,
     bindings: &BTreeMap<String, DeploymentBindingInput>,
 ) -> Result<(), PlatformError> {
-    if !bindings
-        .values()
-        .any(|binding| binding.kind == BindingKind::R2Bucket)
-    {
+    if !bindings.values().any(|binding| {
+        matches!(
+            binding.kind,
+            BindingKind::R2Bucket | BindingKind::D1Database
+        )
+    }) {
         return Ok(());
     }
     if manifest.modules.iter().any(|module| {
         matches!(
             module.name.as_str(),
-            R2_FACADE_MODULE_NAME | R2_WRAPPER_MODULE_NAME
+            R2_FACADE_MODULE_NAME | D1_FACADE_MODULE_NAME | R2_WRAPPER_MODULE_NAME
         )
     }) {
         return Err(PlatformError::new(

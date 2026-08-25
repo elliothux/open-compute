@@ -47,7 +47,7 @@ jobs:
       - name: metadata
         run: cargo metadata --no-deps --format-version 1
       - name: dependency boundaries
-        run: chmod +x scripts/check-boundaries && ./scripts/check-boundaries
+        run: chmod +x scripts/check-boundaries.sh && ./scripts/check-boundaries.sh
 
   coverage:
     runs-on: macos-14
@@ -64,12 +64,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Prepare formally pinned workerd
         run: |
-          chmod +x scripts/package-release scripts/coverage
+          chmod +x scripts/package-release.sh scripts/coverage.sh
           dest="$RUNNER_TEMP/open-compute-coverage-release"
-          ./scripts/package-release --dest "$dest" --download
+          ./scripts/package-release.sh --dest "$dest" --download
           echo "OPEN_COMPUTE_TEST_WORKERD=$dest/bin/workerd" >> "$GITHUB_ENV"
       - name: Enforce 90 percent Rust line coverage
-        run: ./scripts/coverage
+        run: ./scripts/coverage.sh
 
   integration:
     strategy:
@@ -85,26 +85,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Package pinned offline release
         run: |
-          chmod +x scripts/package-release scripts/test-p0-1 scripts/test-p0-2 scripts/test-p0-2-egress-linux
+          chmod +x scripts/package-release.sh scripts/test-p0-1.sh scripts/test-p0-2.sh scripts/test-p0-2-egress-linux.sh
           cargo build -p open-compute-service --bin platformd
           dest="$RUNNER_TEMP/open-compute-release"
-          ./scripts/package-release --dest "$dest" --download
+          ./scripts/package-release.sh --dest "$dest" --download
           test -x "$dest/bin/workerd"
           test -x "$dest/bin/platformd"
           test -f "$dest/runtime/workerd.lock.json"
       - name: P0.1 three-round process Gate
         run: |
           dest="$RUNNER_TEMP/open-compute-release"
-          OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" ./scripts/test-p0-1
+          OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" ./scripts/test-p0-1.sh
       - name: P0.2 three-round Worker Gate (macOS)
         if: runner.os == 'macOS'
         run: |
           dest="$RUNNER_TEMP/open-compute-release"
-          OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" ./scripts/test-p0-2
+          OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" ./scripts/test-p0-2.sh
       - name: P0.2 three-round Worker and controlled egress Gate (Linux)
         if: runner.os == 'Linux'
         run: |
           dest="$RUNNER_TEMP/open-compute-release"
           OPEN_COMPUTE_TEST_WORKERD="$dest/bin/workerd" \
           OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
-            ./scripts/test-p0-2-egress-linux
+            ./scripts/test-p0-2-egress-linux.sh

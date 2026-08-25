@@ -303,6 +303,25 @@ fn runtime_and_storage_timeout_bounds() {
 }
 
 #[test]
+fn d1_policy_defaults_and_hard_bounds_are_validated() {
+    let config = parse_ok("");
+    assert_eq!(config.d1, D1Config::default());
+    for input in [
+        "[d1]\ndatabase_quota_bytes = 1\n",
+        "[d1]\nmax_open_databases = 0\n",
+        "[d1]\nmax_queued_operations_per_database = 0\n",
+        "[d1]\nmax_result_rows = 0\n",
+        "[d1]\nmax_result_bytes = 0\n",
+        "[d1]\nmax_vm_steps = 1000000001\n",
+        "[d1]\nquery_timeout_ms = 300001\n",
+        "[d1]\nbatch_timeout_ms = 300001\n",
+        "[d1]\nidle_handle_ttl_ms = 86400001\n",
+    ] {
+        assert_eq!(parse_err(input).code(), ErrorCode::LimitInvalid, "{input}");
+    }
+}
+
+#[test]
 fn parse_does_not_resolve_secrets_or_search_home() {
     let config = parse_ok(
         r#"

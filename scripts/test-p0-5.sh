@@ -26,4 +26,4 @@ while [ "$round" -le 3 ]; do
   round=$((round + 1))
 done
 
-./scripts/test-p0-4
+./scripts/test-p0-4.sh

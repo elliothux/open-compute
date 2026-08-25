@@ -89,7 +89,7 @@ async fn p0_1_process_gate_three_rounds() {
         .filter(|s| !s.is_empty())
         .is_none()
     {
-        // Ordinary workspace tests do not fetch workerd. `scripts/test-p0-1` requires it.
+        // Ordinary workspace tests do not fetch workerd. `scripts/test-p0-1.sh` requires it.
         return;
     }
     let workerd = required_workerd();

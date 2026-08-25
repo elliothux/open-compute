@@ -38,8 +38,10 @@ const loaderHostWorker :Workerd.Worker = (
   modules = [
     (name = "loader-host.js", esModule = embed "system-workers/loader-host.js"),
     (name = "r2-facade-source", text = embed "system-workers/r2-facade.js"),
+    (name = "d1-facade-source", text = embed "system-workers/d1-facade.js"),
     (name = "r2-wrapper-generator.js", esModule = embed "system-workers/r2-wrapper-generator.js"),
     (name = "r2-transport.js", esModule = embed "system-workers/r2-transport.js"),
+    (name = "d1-transport.js", esModule = embed "system-workers/d1-transport.js"),
   ],
   bindings = [
     (name = "LOADER", workerLoader = (id = "open-compute")),

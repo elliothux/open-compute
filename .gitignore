@@ -19,5 +19,3 @@
 
 # Successful P0.1 run artifacts. Retain failure evidence under failed/.
 /.p0-1-run/*
-!/.p0-1-run/failed/
-!/.p0-1-run/failed/**

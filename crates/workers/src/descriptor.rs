@@ -14,40 +14,54 @@ use std::str::FromStr;
 pub const GLOBAL_OUTBOUND_POLICY_VERSION: u32 = 1;
 /// Reserved dynamic module containing the tenant-local R2 facade.
 pub const R2_FACADE_MODULE_NAME: &str = "__open_compute_r2_facade__.js";
+/// Reserved dynamic module containing the tenant-local D1 facade.
+pub const D1_FACADE_MODULE_NAME: &str = "__open_compute_d1_facade__.js";
 /// Reserved deterministic main-module wrapper generated for R2 deployments.
 pub const R2_WRAPPER_MODULE_NAME: &str = "__open_compute_r2_wrapper__.js";
 
 const R2_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/r2-facade.js");
+const D1_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/d1-facade.js");
 const R2_WRAPPER_GENERATOR_SOURCE: &[u8] =
     include_bytes!("../../../runtime/system-workers/r2-wrapper-generator.js");
 
-/// Exact loaded-isolate source identity frozen into an R2 deployment descriptor.
+/// Exact loaded-isolate source identity frozen into a facade deployment descriptor.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LoadedIsolateInjectionV1 {
     /// Injection plan schema.
     pub schema_version: u32,
     /// Local R2 facade capability version.
-    pub r2_facade_capability_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r2_facade_capability_version: Option<u32>,
     /// SHA-256 of the exact injected facade module source.
-    pub r2_facade_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r2_facade_sha256: Option<String>,
+    /// Local D1 facade capability version when D1 is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub d1_facade_capability_version: Option<u32>,
+    /// SHA-256 of the exact injected D1 facade source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub d1_facade_sha256: Option<String>,
     /// SHA-256 of the exact deterministic wrapper generator source.
     pub r2_wrapper_generator_sha256: String,
 }
 
 impl LoadedIsolateInjectionV1 {
     fn for_bindings(bindings: &[BindingDescriptorV1]) -> Option<Self> {
-        bindings
+        let r2 = bindings
             .iter()
-            .any(|binding| binding.kind == BindingKind::R2Bucket)
-            .then(|| Self {
-                schema_version: 1,
-                r2_facade_capability_version: 1,
-                r2_facade_sha256: hex::encode(Sha256::digest(R2_FACADE_SOURCE)),
-                r2_wrapper_generator_sha256: hex::encode(Sha256::digest(
-                    R2_WRAPPER_GENERATOR_SOURCE,
-                )),
-            })
+            .any(|binding| binding.kind == BindingKind::R2Bucket);
+        let d1 = bindings
+            .iter()
+            .any(|binding| binding.kind == BindingKind::D1Database);
+        (r2 || d1).then(|| Self {
+            schema_version: 1,
+            r2_facade_capability_version: r2.then_some(1),
+            r2_facade_sha256: r2.then(|| hex::encode(Sha256::digest(R2_FACADE_SOURCE))),
+            d1_facade_capability_version: d1.then_some(1),
+            d1_facade_sha256: d1.then(|| hex::encode(Sha256::digest(D1_FACADE_SOURCE))),
+            r2_wrapper_generator_sha256: hex::encode(Sha256::digest(R2_WRAPPER_GENERATOR_SOURCE)),
+        })
     }
 }
 

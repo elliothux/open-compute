@@ -1,7 +1,9 @@
 //! Production `run` composition and shutdown.
 
-use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_r2};
+use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_products};
 use crate::config_load::LoadedConfig;
+use crate::d1_backend::D1BindingService;
+use crate::d1_http::D1ApiState;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState, SanitizedSupervisor};
 use crate::kv_backend::SqliteKvBindingExecutor;
@@ -387,6 +389,23 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         )?
         .with_metrics(metrics.clone()),
     );
+    let d1_backend = Arc::new(
+        D1BindingService::new(
+            storage.clone(),
+            resource_pins.clone(),
+            loaded.config.d1.clone(),
+        )
+        .with_metrics(metrics.clone()),
+    );
+    let d1_api = D1ApiState::new(
+        storage.clone(),
+        store.clone(),
+        resource_pins.clone(),
+        d1_backend.clone(),
+        loaded.config.d1.clone(),
+        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
+    );
+    d1_api.reconcile_pending().await?;
     let supervisor_for_http = supervisor_handle.clone();
     let state = HttpState::new(
         health.clone(),
@@ -415,7 +434,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         loaded.config.kv.clone(),
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     ))
-    .with_r2_api(r2_api);
+    .with_r2_api(r2_api)
+    .with_d1_api(d1_api);
 
     let public_listener = match http::bind(public_addr).await {
         Ok(l) => l,
@@ -527,7 +547,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let binding_auth = binding_generation_auth.clone();
     let binding_metrics = metrics.clone();
     let binding_backend_task = tokio::spawn(async move {
-        serve_binding_backend_with_r2(
+        serve_binding_backend_with_products(
             binding_backend_listener,
             binding_storage,
             binding_auth,
@@ -535,6 +555,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             binding_executor,
             Some(binding_metrics),
             Some(r2_backend),
+            Some(d1_backend),
             async move {
                 let _ = shutdown_binding.changed().await;
             },

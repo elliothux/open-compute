@@ -28,13 +28,14 @@ webpki-root-certs = "1.0.4"
 bytes = "1.10.1"
 chacha20poly1305 = "0.10.1"
 flate2 = "1.1.2"
+fallible-iterator = "0.3.0"
 futures = "0.3.31"
 hex = "0.4.3"
 hmac = "0.12.1"
 md-5 = "0.10.6"
 ipnet = "2.11.0"
 rand = "0.9.2"
-rusqlite = { version = "0.37.0", features = ["backup", "blob", "bundled"] }
+rusqlite = { version = "0.37.0", features = ["backup", "blob", "bundled", "hooks", "limits"] }
 rustix = { version = "1.1.2", features = ["alloc", "fs"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"

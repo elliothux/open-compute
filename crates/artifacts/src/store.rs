@@ -19,6 +19,57 @@ use std::time::{Duration, SystemTime};
 
 const META_SHA256: &str = "sha256";
 const KV_BACKUP_PREFIX: &str = "backups/kv/";
+const D1_BACKUP_PREFIX: &str = "backups/d1/";
+
+#[derive(Clone, Copy)]
+enum BackupKind {
+    Kv,
+    D1,
+}
+
+impl BackupKind {
+    const fn prefix(self) -> &'static str {
+        match self {
+            Self::Kv => KV_BACKUP_PREFIX,
+            Self::D1 => D1_BACKUP_PREFIX,
+        }
+    }
+
+    const fn key_error(self) -> &'static str {
+        match self {
+            Self::Kv => "KV backup object key is outside the system prefix",
+            Self::D1 => "D1 backup object key is outside the system prefix",
+        }
+    }
+
+    const fn size_error(self) -> &'static str {
+        match self {
+            Self::Kv => "KV backup exceeds the configured object limit",
+            Self::D1 => "D1 backup exceeds the configured object limit",
+        }
+    }
+
+    const fn staging_error(self) -> &'static str {
+        match self {
+            Self::Kv => "KV backup staging file is unavailable",
+            Self::D1 => "D1 backup staging file is unavailable",
+        }
+    }
+
+    const fn manifest_size_error(self) -> &'static str {
+        match self {
+            Self::Kv => "KV backup manifest is outside the fixed size limit",
+            Self::D1 => "D1 backup manifest is outside the fixed size limit",
+        }
+    }
+
+    const fn canonical_error(self) -> &'static str {
+        match self {
+            Self::Kv => "KV backup data object key is not canonical",
+            Self::D1 => "D1 backup data object key is not canonical",
+        }
+    }
+}
 
 /// Remote object listed under the internal artifact prefix.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -44,17 +95,12 @@ impl ArtifactStore {
 
     /// Construct a host-owned KV backup key below the configured system prefix.
     pub fn kv_backup_key(&self, relative: &str) -> Result<String, PlatformError> {
-        if relative.is_empty()
-            || relative.contains("..")
-            || relative.starts_with('/')
-            || !relative.starts_with(KV_BACKUP_PREFIX)
-        {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "KV backup object key is outside the system prefix",
-            ));
-        }
-        Ok(format!("{}{relative}", self.client.prefix()))
+        self.backup_key(BackupKind::Kv, relative)
+    }
+
+    /// Construct a host-owned D1 backup key below the configured system prefix.
+    pub fn d1_backup_key(&self, relative: &str) -> Result<String, PlatformError> {
+        self.backup_key(BackupKind::D1, relative)
     }
 
     /// Upload one verified KV backup file to its immutable host-generated key.
@@ -65,20 +111,52 @@ impl ArtifactStore {
         expected_sha256: &str,
         expected_size: u64,
     ) -> Result<String, PlatformError> {
+        self.put_backup_file(
+            BackupKind::Kv,
+            relative,
+            path,
+            expected_sha256,
+            expected_size,
+        )
+        .await
+    }
+
+    /// Upload one verified D1 backup file to its immutable host-generated key.
+    pub async fn put_d1_backup_file(
+        &self,
+        relative: &str,
+        path: &Path,
+        expected_sha256: &str,
+        expected_size: u64,
+    ) -> Result<String, PlatformError> {
+        self.put_backup_file(
+            BackupKind::D1,
+            relative,
+            path,
+            expected_sha256,
+            expected_size,
+        )
+        .await
+    }
+
+    async fn put_backup_file(
+        &self,
+        kind: BackupKind,
+        relative: &str,
+        path: &Path,
+        expected_sha256: &str,
+        expected_size: u64,
+    ) -> Result<String, PlatformError> {
         let expected = parse_sha256(expected_sha256)?;
         if expected_size > self.client.max_artifact_bytes() {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
-                "KV backup exceeds the configured object limit",
+                kind.size_error(),
             ));
         }
-        let key = self.kv_backup_key(relative)?;
-        let mut file = std::fs::File::open(path).map_err(|_| {
-            PlatformError::new(
-                ErrorCode::DiskHardLimit,
-                "KV backup staging file is unavailable",
-            )
-        })?;
+        let key = self.backup_key(kind, relative)?;
+        let mut file = std::fs::File::open(path)
+            .map_err(|_| PlatformError::new(ErrorCode::DiskHardLimit, kind.staging_error()))?;
         let metadata = file.metadata().map_err(|_| error::integrity_error())?;
         if !metadata.file_type().is_file() || metadata.len() != expected_size {
             return Err(error::integrity_error());
@@ -126,15 +204,27 @@ impl ArtifactStore {
             if let SdkError::ServiceError(service) = &err
                 && matches!(service.raw().status().as_u16(), 409 | 412)
             {
-                self.verify_kv_backup_head(&key, expected_sha256, expected_size)
+                self.verify_backup_head(&key, expected_sha256, expected_size)
                     .await?;
-                self.download_kv_backup(&key, expected_sha256, expected_size, &mut std::io::sink())
+                self.download_backup(&key, expected_sha256, expected_size, &mut std::io::sink())
                     .await?;
                 return Ok(key);
             }
-            return Err(error::from_put(&err));
+            let original = error::from_put(&err);
+            if self
+                .verify_backup_head(&key, expected_sha256, expected_size)
+                .await
+                .is_ok()
+                && self
+                    .download_backup(&key, expected_sha256, expected_size, &mut std::io::sink())
+                    .await
+                    .is_ok()
+            {
+                return Ok(key);
+            }
+            return Err(original);
         }
-        self.verify_kv_backup_head(&key, expected_sha256, expected_size)
+        self.verify_backup_head(&key, expected_sha256, expected_size)
             .await?;
         Ok(key)
     }
@@ -145,13 +235,33 @@ impl ArtifactStore {
         relative: &str,
         bytes: Bytes,
     ) -> Result<String, PlatformError> {
+        self.put_backup_manifest(BackupKind::Kv, relative, bytes)
+            .await
+    }
+
+    /// Upload one small immutable JSON manifest below the D1 backup prefix.
+    pub async fn put_d1_backup_manifest(
+        &self,
+        relative: &str,
+        bytes: Bytes,
+    ) -> Result<String, PlatformError> {
+        self.put_backup_manifest(BackupKind::D1, relative, bytes)
+            .await
+    }
+
+    async fn put_backup_manifest(
+        &self,
+        kind: BackupKind,
+        relative: &str,
+        bytes: Bytes,
+    ) -> Result<String, PlatformError> {
         if bytes.is_empty() || bytes.len() > 64 * 1024 {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
-                "KV backup manifest is outside the fixed size limit",
+                kind.manifest_size_error(),
             ));
         }
-        let key = self.kv_backup_key(relative)?;
+        let key = self.backup_key(kind, relative)?;
         let digest = hex::encode(Sha256::digest(&bytes));
         let size = bytes.len() as u64;
         let put = self
@@ -167,17 +277,26 @@ impl ArtifactStore {
             .if_none_match("*")
             .send()
             .await;
-        if let Err(err) = put
-            && !matches!(
+        if let Err(err) = put {
+            let conflict = matches!(
                 &err,
                 SdkError::ServiceError(service)
                     if matches!(service.raw().status().as_u16(), 409 | 412)
-            )
-        {
-            return Err(error::from_put(&err));
+            );
+            if !conflict {
+                let original = error::from_put(&err);
+                let reconciled = self.verify_backup_head(&key, &digest, size).await.is_ok()
+                    && self
+                        .get_backup_manifest(&key)
+                        .await
+                        .is_ok_and(|stored| stored == bytes);
+                if !reconciled {
+                    return Err(original);
+                }
+            }
         }
-        self.verify_kv_backup_head(&key, &digest, size).await?;
-        let stored = self.get_kv_backup_manifest(&key).await?;
+        self.verify_backup_head(&key, &digest, size).await?;
+        let stored = self.get_backup_manifest(&key).await?;
         if stored != bytes {
             return Err(error::integrity_error());
         }
@@ -186,7 +305,17 @@ impl ArtifactStore {
 
     /// Download a small manifest while verifying its declared digest and size.
     pub async fn get_kv_backup_manifest(&self, key: &str) -> Result<Bytes, PlatformError> {
-        self.validate_kv_backup_key(key)?;
+        self.validate_backup_key(BackupKind::Kv, key)?;
+        self.get_backup_manifest(key).await
+    }
+
+    /// Download a small D1 manifest while verifying its declared digest and size.
+    pub async fn get_d1_backup_manifest(&self, key: &str) -> Result<Bytes, PlatformError> {
+        self.validate_backup_key(BackupKind::D1, key)?;
+        self.get_backup_manifest(key).await
+    }
+
+    async fn get_backup_manifest(&self, key: &str) -> Result<Bytes, PlatformError> {
         let head = self
             .client
             .inner()
@@ -233,16 +362,12 @@ impl ArtifactStore {
 
     /// Derive the sibling manifest object from a persisted data object key.
     pub fn kv_backup_manifest_key(&self, data_key: &str) -> Result<String, PlatformError> {
-        self.validate_kv_backup_key(data_key)?;
-        data_key
-            .strip_suffix("/data.sqlite")
-            .map(|prefix| format!("{prefix}/manifest.json"))
-            .ok_or_else(|| {
-                PlatformError::new(
-                    ErrorCode::ConfigInvalid,
-                    "KV backup data object key is not canonical",
-                )
-            })
+        self.backup_manifest_key(BackupKind::Kv, data_key)
+    }
+
+    /// Derive the sibling manifest object from a persisted D1 data object key.
+    pub fn d1_backup_manifest_key(&self, data_key: &str) -> Result<String, PlatformError> {
+        self.backup_manifest_key(BackupKind::D1, data_key)
     }
 
     /// Download and verify one persisted host-owned KV backup object.
@@ -253,9 +378,33 @@ impl ArtifactStore {
         expected_size: u64,
         writer: &mut W,
     ) -> Result<(), PlatformError> {
+        self.validate_backup_key(BackupKind::Kv, key)?;
+        self.download_backup(key, expected_sha256, expected_size, writer)
+            .await
+    }
+
+    /// Download and verify one persisted host-owned D1 backup object.
+    pub async fn download_d1_backup<W: std::io::Write>(
+        &self,
+        key: &str,
+        expected_sha256: &str,
+        expected_size: u64,
+        writer: &mut W,
+    ) -> Result<(), PlatformError> {
+        self.validate_backup_key(BackupKind::D1, key)?;
+        self.download_backup(key, expected_sha256, expected_size, writer)
+            .await
+    }
+
+    async fn download_backup<W: std::io::Write>(
+        &self,
+        key: &str,
+        expected_sha256: &str,
+        expected_size: u64,
+        writer: &mut W,
+    ) -> Result<(), PlatformError> {
         let expected = parse_sha256(expected_sha256)?;
-        self.validate_kv_backup_key(key)?;
-        self.verify_kv_backup_head(key, expected_sha256, expected_size)
+        self.verify_backup_head(key, expected_sha256, expected_size)
             .await?;
         let got = self
             .client
@@ -277,7 +426,7 @@ impl ArtifactStore {
             }
             hasher.update(&chunk);
             writer.write_all(&chunk).map_err(|_| {
-                PlatformError::new(ErrorCode::DiskHardLimit, "failed to stage KV backup")
+                PlatformError::new(ErrorCode::DiskHardLimit, "failed to stage backup")
             })?;
         }
         if total != expected_size || hasher.finalize().as_slice() != expected {
@@ -288,7 +437,17 @@ impl ArtifactStore {
 
     /// Delete one exact host-owned KV backup object.
     pub async fn delete_kv_backup(&self, key: &str) -> Result<(), PlatformError> {
-        self.validate_kv_backup_key(key)?;
+        self.validate_backup_key(BackupKind::Kv, key)?;
+        self.delete_backup(key).await
+    }
+
+    /// Delete one exact host-owned D1 backup object.
+    pub async fn delete_d1_backup(&self, key: &str) -> Result<(), PlatformError> {
+        self.validate_backup_key(BackupKind::D1, key)?;
+        self.delete_backup(key).await
+    }
+
+    async fn delete_backup(&self, key: &str) -> Result<(), PlatformError> {
         self.client
             .inner()
             .delete_object()
@@ -300,7 +459,7 @@ impl ArtifactStore {
         Ok(())
     }
 
-    async fn verify_kv_backup_head(
+    async fn verify_backup_head(
         &self,
         key: &str,
         expected_sha256: &str,
@@ -325,15 +484,41 @@ impl ArtifactStore {
         Ok(())
     }
 
-    fn validate_kv_backup_key(&self, key: &str) -> Result<(), PlatformError> {
-        let prefix = format!("{}{}", self.client.prefix(), KV_BACKUP_PREFIX);
+    fn backup_key(&self, kind: BackupKind, relative: &str) -> Result<String, PlatformError> {
+        if relative.is_empty()
+            || relative.contains("..")
+            || relative.starts_with('/')
+            || !relative.starts_with(kind.prefix())
+        {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                kind.key_error(),
+            ));
+        }
+        Ok(format!("{}{relative}", self.client.prefix()))
+    }
+
+    fn validate_backup_key(&self, kind: BackupKind, key: &str) -> Result<(), PlatformError> {
+        let prefix = format!("{}{}", self.client.prefix(), kind.prefix());
         if !key.starts_with(&prefix) || key.contains("..") {
             return Err(PlatformError::new(
                 ErrorCode::ConfigInvalid,
-                "KV backup object key is outside the system prefix",
+                kind.key_error(),
             ));
         }
         Ok(())
+    }
+
+    fn backup_manifest_key(
+        &self,
+        kind: BackupKind,
+        data_key: &str,
+    ) -> Result<String, PlatformError> {
+        self.validate_backup_key(kind, data_key)?;
+        data_key
+            .strip_suffix("/data.sqlite")
+            .map(|prefix| format!("{prefix}/manifest.json"))
+            .ok_or_else(|| PlatformError::new(ErrorCode::ConfigInvalid, kind.canonical_error()))
     }
 
     /// Stream bytes to S3, verifying digest and size before success.

@@ -47,6 +47,8 @@ pub struct PlatformConfig {
     pub kv: KvConfig,
     /// Workers R2 object, staging, and concurrency limits.
     pub r2: R2Config,
+    /// Workers D1 SQLite, result, and concurrency limits.
+    pub d1: D1Config,
 }
 
 impl PlatformConfig {
@@ -71,6 +73,7 @@ impl PlatformConfig {
         self.workers.validate()?;
         self.kv.validate()?;
         self.r2.validate()?;
+        self.d1.validate()?;
         Ok(())
     }
 }
@@ -741,6 +744,82 @@ impl R2Config {
             ));
         }
         Ok(())
+    }
+}
+
+/// P0.6 Workers D1 SQLite, result, and concurrency policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct D1Config {
+    /// Frozen per-database quota for newly created databases.
+    pub database_quota_bytes: u64,
+    /// Global maximum open tenant database handles.
+    pub max_open_databases: u32,
+    /// Maximum queued operations admitted for one database.
+    pub max_queued_operations_per_database: u32,
+    /// Maximum materialized rows in one terminal operation.
+    pub max_result_rows: u32,
+    /// Maximum encoded result bytes in one terminal operation.
+    pub max_result_bytes: u64,
+    /// Maximum SQLite VM progress steps in one operation.
+    pub max_vm_steps: u64,
+    /// Single-query wall deadline.
+    pub query_timeout_ms: u64,
+    /// Whole-batch wall deadline.
+    pub batch_timeout_ms: u64,
+    /// Idle handle lifetime before LRU eviction eligibility.
+    pub idle_handle_ttl_ms: u64,
+}
+
+impl D1Config {
+    /// Hard product quota ceiling accepted by the local P0.6 implementation.
+    pub const DATABASE_QUOTA_BYTES_HARD: u64 = 10 * 1024 * 1024 * 1024;
+    /// Maximum result bytes accepted by configuration.
+    pub const MAX_RESULT_BYTES_HARD: u64 = 64 * 1024 * 1024;
+
+    fn validate(&self) -> Result<(), PlatformError> {
+        const MIN_QUOTA: u64 = 64 * 1024 * 1024;
+        if self.database_quota_bytes < MIN_QUOTA
+            || self.database_quota_bytes > Self::DATABASE_QUOTA_BYTES_HARD
+            || self.max_open_databases == 0
+            || self.max_open_databases > 1024
+            || self.max_queued_operations_per_database == 0
+            || self.max_queued_operations_per_database > 4096
+            || self.max_result_rows == 0
+            || self.max_result_rows > 1_000_000
+            || self.max_result_bytes == 0
+            || self.max_result_bytes > Self::MAX_RESULT_BYTES_HARD
+            || self.max_vm_steps == 0
+            || self.max_vm_steps > 1_000_000_000
+            || self.query_timeout_ms == 0
+            || self.query_timeout_ms > 5 * 60 * 1000
+            || self.batch_timeout_ms == 0
+            || self.batch_timeout_ms > 5 * 60 * 1000
+            || self.idle_handle_ttl_ms == 0
+            || self.idle_handle_ttl_ms > 24 * 60 * 60 * 1000
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "D1 host policy is outside the hard platform bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for D1Config {
+    fn default() -> Self {
+        Self {
+            database_quota_bytes: 1024 * 1024 * 1024,
+            max_open_databases: 32,
+            max_queued_operations_per_database: 64,
+            max_result_rows: 10_000,
+            max_result_bytes: 8 * 1024 * 1024,
+            max_vm_steps: 10_000_000,
+            query_timeout_ms: 30_000,
+            batch_timeout_ms: 30_000,
+            idle_handle_ttl_ms: 60_000,
+        }
     }
 }
 

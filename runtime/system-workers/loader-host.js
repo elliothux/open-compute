@@ -1,12 +1,15 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import r2FacadeSource from "r2-facade-source";
+import d1FacadeSource from "d1-facade-source";
 import {
+  D1_FACADE_MODULE,
+  LOADED_ISOLATE_RESERVED_MODULES,
   R2_FACADE_MODULE,
-  R2_RESERVED_MODULES,
   R2_WRAPPER_MODULE,
-  generateR2Wrapper,
+  generateBindingWrapper,
 } from "./r2-wrapper-generator.js";
 import { makeR2TransportBase } from "./r2-transport.js";
+import { makeD1TransportBase } from "./d1-transport.js";
 
 const SOURCE_PATH = "/internal/runtime/v1/deployments/resolve";
 const TOKEN_HEADER = "x-open-compute-internal-token";
@@ -98,16 +101,20 @@ function modulesFor(snapshot, validation, entrypointName) {
   const r2Bindings = (snapshot.bindings || [])
     .filter((binding) => binding.kind === "r2_bucket" && binding.capabilityVersion === 1)
     .map((binding) => binding.name);
+  const d1Bindings = (snapshot.bindings || [])
+    .filter((binding) => binding.kind === "d1_database" && binding.capabilityVersion === 1)
+    .map((binding) => binding.name);
   let mainModule = snapshot.mainModule;
-  if (r2Bindings.length) {
-    for (const reserved of R2_RESERVED_MODULES) {
+  if (r2Bindings.length || d1Bindings.length) {
+    for (const reserved of LOADED_ISOLATE_RESERVED_MODULES) {
       if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
         throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
       }
     }
-    modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
+    if (r2Bindings.length) modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
+    if (d1Bindings.length) modules[D1_FACADE_MODULE] = { js: d1FacadeSource };
     modules[R2_WRAPPER_MODULE] = {
-      js: generateR2Wrapper(snapshot.mainModule, r2Bindings, entrypointName),
+      js: generateBindingWrapper(snapshot.mainModule, r2Bindings, d1Bindings, entrypointName),
     };
     mainModule = R2_WRAPPER_MODULE;
   }
@@ -674,6 +681,14 @@ const R2TransportBase = makeR2TransportBase(
 
 export class R2Transport extends R2TransportBase {}
 
+const D1TransportBase = makeD1TransportBase(
+  bindingError,
+  currentStartupGeneration,
+  BINDING_TOKEN_HEADER,
+);
+
+export class D1Transport extends D1TransportBase {}
+
 function makeBinding(ctx, descriptor, deploymentId) {
   const capability = `${descriptor.kind}@${descriptor.capabilityVersion}`;
   switch (capability) {
@@ -683,6 +698,10 @@ function makeBinding(ctx, descriptor, deploymentId) {
       });
     case "r2_bucket@1":
       return ctx.exports.R2Transport({
+        props: trustedBindingProps(descriptor, deploymentId),
+      });
+    case "d1_database@1":
+      return ctx.exports.D1Transport({
         props: trustedBindingProps(descriptor, deploymentId),
       });
     default:

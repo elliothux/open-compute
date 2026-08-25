@@ -185,6 +185,38 @@ pub enum ErrorCode {
     R2ObjectMetadataInvalid,
     /// A logical bucket physical identity marker belongs to another authority.
     R2PrefixCollision,
+    /// A JavaScript value cannot be represented by the D1 binding protocol.
+    D1TypeError,
+    /// SQL is empty, malformed, or contains an unexpected second statement.
+    D1SqlInvalid,
+    /// Bound values do not match the prepared statement parameter slots.
+    D1ParameterMismatch,
+    /// SQLite authorizer rejected tenant SQL.
+    D1AuthorizerDenied,
+    /// A D1 SQL, value, row, result, or VM bound was exceeded.
+    D1LimitError,
+    /// A D1 query or batch exceeded its wall deadline.
+    D1Timeout,
+    /// `first(column)` named a column absent from the result.
+    D1ColumnNotFound,
+    /// A D1 batch is empty, oversized, forged, or crosses owner scope.
+    D1InvalidBatch,
+    /// A requested D1 replica or bookmark session is not implemented locally.
+    D1SessionUnsupported,
+    /// An applied D1 migration identity conflicts with different SQL.
+    D1MigrationDrift,
+    /// A D1 database quota or disk safety bound was reached.
+    D1DatabaseFull,
+    /// A D1 operation queue or blocking executor is saturated.
+    D1Overloaded,
+    /// A D1 mutation may have committed before its response was observed.
+    D1ResultUnknown,
+    /// A tenant D1 SQLite file failed integrity validation.
+    D1DatabaseCorrupt,
+    /// A tenant D1 file belongs to a different account or resource.
+    D1IdentityMismatch,
+    /// The private D1 facade/transport/backend protocol was malformed.
+    D1InternalProtocolError,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -281,6 +313,22 @@ impl ErrorCode {
             Self::R2ResultUnknown => "R2_RESULT_UNKNOWN",
             Self::R2ObjectMetadataInvalid => "R2_OBJECT_METADATA_INVALID",
             Self::R2PrefixCollision => "R2_PREFIX_COLLISION",
+            Self::D1TypeError => "D1_TYPE_ERROR",
+            Self::D1SqlInvalid => "D1_SQL_INVALID",
+            Self::D1ParameterMismatch => "D1_PARAMETER_MISMATCH",
+            Self::D1AuthorizerDenied => "D1_AUTHORIZER_DENIED",
+            Self::D1LimitError => "D1_LIMIT_ERROR",
+            Self::D1Timeout => "D1_TIMEOUT",
+            Self::D1ColumnNotFound => "D1_COLUMN_NOTFOUND",
+            Self::D1InvalidBatch => "D1_INVALID_BATCH",
+            Self::D1SessionUnsupported => "D1_SESSION_UNSUPPORTED",
+            Self::D1MigrationDrift => "D1_MIGRATION_DRIFT",
+            Self::D1DatabaseFull => "D1_DATABASE_FULL",
+            Self::D1Overloaded => "D1_OVERLOADED",
+            Self::D1ResultUnknown => "D1_RESULT_UNKNOWN",
+            Self::D1DatabaseCorrupt => "D1_DATABASE_CORRUPT",
+            Self::D1IdentityMismatch => "D1_IDENTITY_MISMATCH",
+            Self::D1InternalProtocolError => "D1_INTERNAL_PROTOCOL_ERROR",
             Self::Internal => "INTERNAL",
         }
     }

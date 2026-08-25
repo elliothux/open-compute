@@ -1,5 +1,6 @@
 //! Generation-authenticated private backend for typed resource-binding adapters.
 
+use crate::d1_backend::D1BindingService;
 use crate::kv_backend::{
     KvCommand, KvCommandResult, KvStagedValue, KvStagingLease, KvStreamPart,
     ensure_storage_headroom,
@@ -201,6 +202,7 @@ struct BackendState {
     metrics: Option<Arc<MetricsRegistry>>,
     stream_budget: StreamBudget,
     r2: Option<Arc<R2BindingService>>,
+    d1: Option<Arc<D1BindingService>>,
 }
 
 #[derive(Clone)]
@@ -303,6 +305,25 @@ pub async fn serve_binding_backend_with_r2(
     r2: Option<Arc<R2BindingService>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
+    serve_binding_backend_with_products(
+        listener, storage, auth, pins, executor, metrics, r2, None, shutdown,
+    )
+    .await
+}
+
+/// Serve the private binding backend with all composed product data planes.
+#[allow(clippy::too_many_arguments)]
+pub async fn serve_binding_backend_with_products(
+    listener: TcpListener,
+    storage: Arc<PlatformStorage>,
+    auth: GenerationAuthRegistry,
+    pins: ResourcePins,
+    executor: Arc<dyn KvBindingExecutor>,
+    metrics: Option<Arc<MetricsRegistry>>,
+    r2: Option<Arc<R2BindingService>>,
+    d1: Option<Arc<D1BindingService>>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), PlatformError> {
     let (global_streams, resource_streams) = executor.stream_limits();
     let state = BackendState {
         storage,
@@ -312,6 +333,7 @@ pub async fn serve_binding_backend_with_r2(
         metrics,
         stream_budget: StreamBudget::new(global_streams, resource_streams),
         r2,
+        d1,
     };
     let router = Router::new().fallback(handle).with_state(state);
     axum::serve(listener, router.into_make_service())
@@ -432,6 +454,16 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
     {
         return match &state.r2 {
             Some(r2) => r2.handle(request).await,
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+    if request
+        .uri()
+        .path()
+        .starts_with("/internal/bindings/v1/d1/")
+    {
+        return match &state.d1 {
+            Some(d1) => d1.handle(request).await,
             None => StatusCode::NOT_FOUND.into_response(),
         };
     }

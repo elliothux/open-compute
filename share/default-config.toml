@@ -52,3 +52,14 @@ max_staging_bytes = 2147483648
 max_metadata_head_concurrency = 8
 operation_timeout_ms = 30000
 cursor_ttl_ms = 900000
+
+[d1]
+database_quota_bytes = 1073741824
+max_open_databases = 32
+max_queued_operations_per_database = 64
+max_result_rows = 10000
+max_result_bytes = 8388608
+max_vm_steps = 10000000
+query_timeout_ms = 30000
+batch_timeout_ms = 30000
+idle_handle_ttl_ms = 60000

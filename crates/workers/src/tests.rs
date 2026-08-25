@@ -724,8 +724,9 @@ fn r2_injection_sources_are_descriptor_bound_and_reserved_modules_fail_closed() 
     .unwrap();
     let injection = descriptor.loaded_isolate_injection.as_ref().unwrap();
     assert_eq!(injection.schema_version, 1);
-    assert_eq!(injection.r2_facade_capability_version, 1);
-    assert_eq!(injection.r2_facade_sha256.len(), 64);
+    assert_eq!(injection.r2_facade_capability_version, Some(1));
+    assert_eq!(injection.r2_facade_sha256.as_ref().unwrap().len(), 64);
+    assert_eq!(injection.d1_facade_capability_version, None);
     assert_eq!(injection.r2_wrapper_generator_sha256.len(), 64);
     let digest = descriptor.sha256().unwrap();
     let mut tampered = descriptor.clone();
@@ -733,7 +734,7 @@ fn r2_injection_sources_are_descriptor_bound_and_reserved_modules_fail_closed() 
         .loaded_isolate_injection
         .as_mut()
         .unwrap()
-        .r2_facade_sha256 = "00".repeat(32);
+        .r2_facade_sha256 = Some("00".repeat(32));
     assert_ne!(digest, tampered.sha256().unwrap());
 
     let collision = CanonicalBundle::build(

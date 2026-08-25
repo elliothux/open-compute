@@ -326,6 +326,18 @@ pub(crate) async fn timeout_result<T>(
     })?
 }
 
+pub(crate) async fn mutation_timeout_result<T>(
+    duration: Duration,
+    future: impl Future<Output = Result<T, PlatformError>>,
+) -> Result<T, PlatformError> {
+    tokio::time::timeout(duration, future).await.map_err(|_| {
+        PlatformError::new(
+            ErrorCode::R2ResultUnknown,
+            "R2 mutation result is unknown after timeout",
+        )
+    })?
+}
+
 pub(crate) fn json_response(value: impl Serialize) -> Response {
     (
         [(

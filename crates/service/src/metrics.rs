@@ -8,12 +8,16 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[path = "metrics_d1.rs"]
+mod d1;
 #[path = "metrics_kv.rs"]
 mod kv;
 #[path = "metrics_r2.rs"]
 mod r2;
 #[path = "metrics_resource.rs"]
 mod resource;
+use d1::write_d1_metrics;
+pub(crate) use d1::{D1Lifecycle, D1LifecycleGuard, D1Operation};
 pub(crate) use kv::{
     KvGauge, KvGaugeGuard, KvLifecycle, KvLifecycleGuard, KvMaintenance, KvOperation,
     KvStagingGauge,
@@ -25,7 +29,7 @@ pub use resource::{BindingBackendOperation, ResourceOperation};
 use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
 
 /// Compile-time series required by the platform and P0.3 binding framework.
-pub const REQUIRED_SERIES: u64 = 176;
+pub const REQUIRED_SERIES: u64 = 229;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 32;
 
@@ -221,6 +225,20 @@ struct Inner {
     r2_list_head_fanout: u64,
     r2_result_unknown: [u64; 2],
     r2_force_delete_remaining_batches: u64,
+    d1_operations: [u64; 12],
+    d1_operation_duration: [f64; 3],
+    d1_statement_duration: [f64; 3],
+    d1_rows_output: [u64; 3],
+    d1_rows_written: [u64; 3],
+    d1_result_bytes: [u64; 3],
+    d1_queue_depth: [u64; 5],
+    d1_open_databases: u64,
+    d1_wal_bytes: [u64; 5],
+    d1_interrupts: [u64; 3],
+    d1_authorizer_denials: [u64; 4],
+    d1_result_unknown: [u64; 4],
+    d1_backup: [u64; 2],
+    d1_migration: [u64; 2],
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -295,6 +313,20 @@ impl MetricsRegistry {
                 r2_list_head_fanout: 0,
                 r2_result_unknown: [0; 2],
                 r2_force_delete_remaining_batches: 0,
+                d1_operations: [0; 12],
+                d1_operation_duration: [0.0; 3],
+                d1_statement_duration: [0.0; 3],
+                d1_rows_output: [0; 3],
+                d1_rows_written: [0; 3],
+                d1_result_bytes: [0; 3],
+                d1_queue_depth: [0; 5],
+                d1_open_databases: 0,
+                d1_wal_bytes: [0; 5],
+                d1_interrupts: [0; 3],
+                d1_authorizer_denials: [0; 4],
+                d1_result_unknown: [0; 4],
+                d1_backup: [0; 2],
+                d1_migration: [0; 2],
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -721,6 +753,7 @@ impl MetricsRegistry {
         write_resource_metrics(&mut out, &g);
         write_kv_metrics(&mut out, &g);
         write_r2_metrics(&mut out, &g);
+        write_d1_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }

@@ -5,6 +5,7 @@
 pub mod bindings;
 pub mod control_db;
 pub mod crypto;
+pub mod d1;
 pub mod data_dir;
 pub mod fs;
 pub mod identity;
@@ -23,6 +24,13 @@ pub use bindings::{
 };
 pub use control_db::ControlDb;
 pub use crypto::{SecretCrypto, SecretEnvelope};
+pub use d1::{
+    D1_DATABASE_SCHEMA_VERSION, D1_MAX_BATCH_STATEMENTS, D1_MAX_BOUND_PARAMS, D1_MAX_COLUMNS,
+    D1_MAX_EXEC_STATEMENTS, D1_MAX_SQL_BYTES, D1_MAX_VALUE_OR_ROW_BYTES, D1BackupRecord,
+    D1BackupState, D1DatabaseRecord, D1DatabaseRepository, D1Engine, D1ExecResult, D1Meta,
+    D1Migration, D1MigrationRecord, D1Paths, D1QueryLimits, D1Statement, D1StatementResult,
+    D1Value,
+};
 pub use data_dir::{DataDir, expected_directories, future_resource_paths};
 pub use fs::atomic_write;
 pub use identity::{ARTIFACT_SCHEMA_VERSION, StableIdentity};

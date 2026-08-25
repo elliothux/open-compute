@@ -443,6 +443,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
         )),
         stream_budget: StreamBudget::new(2, 1),
         r2: None,
+        d1: None,
     };
     let binding_id = BindingId::generate();
     let path = format!("/internal/bindings/v1/kv/{binding_id}/get");
@@ -1342,6 +1343,7 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
             metrics: None,
             stream_budget: StreamBudget::new(2, 1),
             r2: None,
+            d1: None,
         };
         dispatch_frame(
             state,

@@ -6,6 +6,9 @@ pub mod auth;
 pub mod binding_backend;
 pub mod cli;
 pub mod config_load;
+pub mod d1_backend;
+pub mod d1_http;
+mod d1_protocol;
 pub mod doctor;
 pub mod exit;
 pub mod health;
@@ -23,9 +26,12 @@ pub mod workers_http;
 
 pub use binding_backend::{
     KvBindingExecutor, UnavailableKvBindingExecutor, bind_binding_backend, serve_binding_backend,
-    serve_binding_backend_with_metrics, serve_binding_backend_with_r2,
+    serve_binding_backend_with_metrics, serve_binding_backend_with_products,
+    serve_binding_backend_with_r2,
 };
 pub use cli::{Cli, Command, execute};
+pub use d1_backend::D1BindingService;
+pub use d1_http::D1ApiState;
 pub use exit::{ExitClass, emit_failure, exit_code};
 pub use health::{HealthCoordinator, map_supervisor};
 pub use kv_backend::{KvCommand, KvCommandResult, KvStreamPart, SqliteKvBindingExecutor};

@@ -24,14 +24,14 @@
 - No-default-features check: `RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features`
 - MSRV check: `cargo +1.98.0 check --workspace --all-targets`
 - Metadata: `cargo metadata --no-deps --format-version 1`
-- Dependency boundaries: `./scripts/check-boundaries`
+- Dependency boundaries: `./scripts/check-boundaries.sh`
 - Coverage setup (macOS): `brew install cargo-llvm-cov`
 - Coverage setup (portable): `cargo install cargo-llvm-cov --locked`
-- Coverage run (from the repository root): `./scripts/coverage`
+- Coverage run (from the repository root): `./scripts/coverage.sh`
 - Coverage reports: `target/llvm-cov/html/index.html`, `target/llvm-cov/lcov.info`, and `target/llvm-cov/summary.json`
 - G0 stock-workerd regression: `./poc/g0 test all`
-- P0.1 process Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-1`
-- P0.2 Worker Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-2`
+- P0.1 process Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-1.sh`
+- P0.2 Worker Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-2.sh`
 
 ## Architecture and Ownership
 
@@ -43,7 +43,7 @@
   - `runtime`: workerd pinning, verification, config compilation, process ownership, and supervision;
   - `workers`: immutable bundles/deployments, routing pins, and runtime-source snapshots;
   - `service`: CLI and composition of the production control/data planes.
-- Enforce the dependency direction checked by `scripts/check-boundaries`: `core`, `storage`, `artifacts`, and `runtime` remain lower-level siblings; `workers` may build on `core`, `storage`, and `artifacts` but not `runtime`; `service` is the composition root.
+- Enforce the dependency direction checked by `scripts/check-boundaries.sh`: `core`, `storage`, `artifacts`, and `runtime` remain lower-level siblings; `workers` may build on `core`, `storage`, and `artifacts` but not `runtime`; `service` is the composition root.
 - Default to the direct architecture this repository should have now. Preserve compatibility or legacy paths only when required by an API/protocol contract, persisted data, the current workerd pin, or a release boundary.
 - Keep transport handlers thin. Validate and route at HTTP/CLI boundaries; put storage, deployment, artifact, and supervisor workflows in their owning crates.
 - Normalize and validate data once at the authority boundary, then pass structured values forward. Do not repair persisted or untrusted values during reads or presentation.
@@ -109,18 +109,18 @@
 - A missing or checksum-mismatched workerd binary is a test failure, not a reason to skip. Use `OPEN_COMPUTE_TEST_WORKERD` to select an already available verified binary.
 - `./poc/g0 test all` runs three fresh-process rounds and regenerates `docs/g0-results.md`. Standalone loader currently exits nonzero for the documented `D-abort`; aggregate acceptance must remain fail-closed and match the exact allowlisted observation.
 - Preserve failure diagnostics under the ignored run directories' `failed/` subtrees, sanitize generated reports, and check that tests leave no workerd process, listener, temp file, or secret behind.
-- `scripts/test-p0-2-egress-linux` is Linux-only and mutates loopback addresses plus `/etc/hosts` through `sudo`; run it only with explicit user authorization and `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`.
+- `scripts/test-p0-2-egress-linux.sh` is Linux-only and mutates loopback addresses plus `/etc/hosts` through `sudo`; run it only with explicit user authorization and `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`.
 
 ## Release and Operations
 
-- `scripts/package-release` may download only the formally pinned upstream archive during packaging. It requires an explicit absolute destination, refuses checksum/version mismatch and overwrite, and must never be treated as a normal local validation command.
+- `scripts/package-release.sh` may download only the formally pinned upstream archive during packaging. It requires an explicit absolute destination, refuses checksum/version mismatch and overwrite, and must never be treated as a normal local validation command.
 - When requesting the Operating Contract's confirmation for packaging, publishing, or deployment, state the source revision, target platform, exact workerd pin, destination, network/privilege effects, and excluded unrelated changes.
 - Release layouts contain the freshly built `platformd`, verified `workerd`, matching runtime lock/config/system workers, license, and default config. Verify version, size, SHA-256, and offline startup from the packaged layout.
 - Keep container, systemd, and launchd examples on the same binary/config/data-dir contract. Never embed credentials in images, service units, examples, or release archives.
 
 ## Verification and Git
 
-- Before finishing code changes, remove dead code and run format, clippy, the workspace test suite, no-default-features check, metadata, dependency-boundary check, and `./scripts/coverage`. Workspace Rust line coverage must remain at or above 90.00%; never lower the threshold. Coverage includes real-runtime P0 tests but does not replace the relevant three-round P0/G0 Gate for runtime, process, persistence, Worker, routing, egress, packaging, or security changes.
+- Before finishing code changes, remove dead code and run format, clippy, the workspace test suite, no-default-features check, metadata, dependency-boundary check, and `./scripts/coverage.sh`. Workspace Rust line coverage must remain at or above 90.00%; never lower the threshold. Coverage includes real-runtime P0 tests but does not replace the relevant three-round P0/G0 Gate for runtime, process, persistence, Worker, routing, egress, packaging, or security changes.
 - Documentation-only and policy-only edits do not require Rust checks; run `git diff --check` and verify commands, paths, and generated-file claims against the repository.
 - If a required check cannot run, report the exact reason and the next best evidence. Never report a command as passing before it exits successfully.
 - Keep diffs focused and preserve unrelated user changes. Do not rewrite Git history, delete retained failure evidence, or clean the workspace unless explicitly requested.

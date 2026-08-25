@@ -13,12 +13,14 @@ const MIGRATION_002_SQL: &str = include_str!("../migrations/002_workers_runtime.
 const MIGRATION_003_SQL: &str = include_str!("../migrations/003_resource_bindings.sql");
 const MIGRATION_004_SQL: &str = include_str!("../migrations/004_kv.sql");
 const MIGRATION_005_SQL: &str = include_str!("../migrations/005_r2.sql");
-const CURRENT_VERSION: i64 = 5;
+const MIGRATION_006_SQL: &str = include_str!("../migrations/006_d1.sql");
+const CURRENT_VERSION: i64 = 6;
 const MIGRATION_001_NAME: &str = "001_init";
 const MIGRATION_002_NAME: &str = "002_workers_runtime";
 const MIGRATION_003_NAME: &str = "003_resource_bindings";
 const MIGRATION_004_NAME: &str = "004_kv";
 const MIGRATION_005_NAME: &str = "005_r2";
+const MIGRATION_006_NAME: &str = "006_d1";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Test-only deterministic fault injection points.
@@ -114,6 +116,18 @@ fn apply_inner(
             MIGRATION_005_NAME,
             MIGRATION_005_SQL,
             &MIGRATION_005_SHA256,
+            #[cfg(any(test, feature = "test-support"))]
+            fault,
+        )?;
+    }
+    if db.user_version()? < 6 {
+        apply_one(
+            db,
+            clock,
+            6,
+            MIGRATION_006_NAME,
+            MIGRATION_006_SQL,
+            &MIGRATION_006_SHA256,
             #[cfg(any(test, feature = "test-support"))]
             fault,
         )?;
@@ -241,6 +255,7 @@ pub(crate) fn expected_checksum(version: i64) -> Result<&'static [u8], PlatformE
         3 => Ok(&MIGRATION_003_SHA256),
         4 => Ok(&MIGRATION_004_SHA256),
         5 => Ok(&MIGRATION_005_SHA256),
+        6 => Ok(&MIGRATION_006_SHA256),
         v if v > CURRENT_VERSION => Err(PlatformError::new(
             ErrorCode::SchemaTooNew,
             "on-disk schema is newer than this binary",
@@ -339,6 +354,9 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
     }
     if version >= 5 {
         tables.push("r2_buckets");
+    }
+    if version >= 6 {
+        tables.extend(["d1_databases", "d1_backups"]);
     }
     for table in tables {
         let sql: String = tx
@@ -472,6 +490,13 @@ pub fn migration_004_checksum() -> &'static [u8; 32] {
 #[must_use]
 pub fn migration_005_checksum() -> &'static [u8; 32] {
     &MIGRATION_005_SHA256
+}
+
+/// Compiled SHA-256 for migration 006.
+#[cfg(any(test, feature = "test-support"))]
+#[must_use]
+pub fn migration_006_checksum() -> &'static [u8; 32] {
+    &MIGRATION_006_SHA256
 }
 
 /// Read-only schema inspection used by doctor.

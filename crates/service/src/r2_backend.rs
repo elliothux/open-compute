@@ -210,7 +210,7 @@ impl R2BindingService {
                     version: uuid::Uuid::now_v7().hyphenated().to_string(),
                 };
                 let options = staged.header.options.try_into()?;
-                let response = timeout_result(
+                let response = mutation_timeout_result(
                     timeout,
                     self.objects.put_file(&locator, &key, &source, &options),
                 )
@@ -231,7 +231,7 @@ impl R2BindingService {
                     .iter()
                     .map(|key| UserObjectKey::parse(key, &locator))
                     .collect::<Result<Vec<_>, _>>()?;
-                timeout_result(timeout, self.objects.delete(&locator, &keys)).await?;
+                mutation_timeout_result(timeout, self.objects.delete(&locator, &keys)).await?;
                 no_content()
             }
             Operation::List => {
