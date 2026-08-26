@@ -1,6 +1,6 @@
 # G0 results
 
-- Generated: 2026-08-26T12:47:27.028Z
+- Generated: 2026-08-26T14:53:09.075Z
 - Hostname: Elliots-MacBook-Pro.local
 - OS: darwin 25.6.0 arm64
 - Node: v24.10.0
@@ -9,16 +9,16 @@
 
 ## Pinned workerd
 
-- Release: `v1.20260823.1`
-- Version: `1.20260823.1`
-- Version output: `workerd 2026-08-23`
-- Artifact URL: https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-darwin-arm64.gz
-- Archive SHA256: `4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb`
-- Binary SHA256: `8c6562229cc652bcb8d926f5cd3a80e4947d723567588635fbaaebca9fdd7577`
+- Release: `v1.20260826.1`
+- Version: `1.20260826.1`
+- Version output: `workerd 2026-08-26`
+- Artifact URL: https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/workerd-darwin-arm64.gz
+- Archive SHA256: `22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba`
+- Binary SHA256: `2d17da54d2671d6e9e7c776d56b934f60be8c140b9bac35ddf22f60d6cff9403`
 - Compatibility date: `2026-08-22`
 - Process flags: `--experimental`
 - Compatibility flags: `nodejs_compat`, `rpc`, `enable_ctx_exports`, `experimental`
-- Release URL: https://github.com/cloudflare/workerd/releases/tag/v1.20260823.1
+- Release URL: https://github.com/cloudflare/workerd/releases/tag/v1.20260826.1
 
 ## Rounds
 

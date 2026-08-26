@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "release": "v1.20260823.1",
-  "expectedVersionOutput": "workerd 2026-08-23",
+  "release": "v1.20260826.1",
+  "expectedVersionOutput": "workerd 2026-08-26",
   "hostCompatibilityDate": "2026-08-22",
   "processFlags": ["--experimental"],
   "hostCompatibilityFlags": [
@@ -13,27 +13,27 @@
   "targets": {
     "darwin-arm64": {
       "archiveName": "workerd-darwin-arm64.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-darwin-arm64.gz",
-      "archiveSha256": "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
-      "binarySha256": "8c6562229cc652bcb8d926f5cd3a80e4947d723567588635fbaaebca9fdd7577"
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/workerd-darwin-arm64.gz",
+      "archiveSha256": "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
+      "binarySha256": "2d17da54d2671d6e9e7c776d56b934f60be8c140b9bac35ddf22f60d6cff9403"
     },
     "darwin-x64": {
       "archiveName": "workerd-darwin-64.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-darwin-64.gz",
-      "archiveSha256": "fff5ae0188fc72a8bbc9a8314eaf367c45d81bf01d8aca7f803660ed42533476",
-      "binarySha256": "9bfd82a7504a341e5e39f1bd4cb6cf8bb71c37c84281f11c271ac482e9d80c97"
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/workerd-darwin-64.gz",
+      "archiveSha256": "61b644abde08329d3057634e591bd72a9cd5adc3424edd66509b138648289e37",
+      "binarySha256": "b1046219d7b5b5e86047f44cb3372b803741a772db632a54ba987ee0f16dcd58"
     },
     "linux-x64": {
       "archiveName": "workerd-linux-64.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-linux-64.gz",
-      "archiveSha256": "dcbfc4b9cbd9afa752e264e47704e114082f09db94bd212d59ad223eada7b6cc",
-      "binarySha256": "9b3b65714f673616465f61d3d48315e5f4ac48c0c3eb51500117ea530c8cb662"
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/workerd-linux-64.gz",
+      "archiveSha256": "b832c71df79585b7eb361205f531aeebd6b4f15a0934ecdbfdf01d32c025ed63",
+      "binarySha256": "32976646cded43835d624c138d10121f63a692e47df0438390ab11a072345880"
     },
     "linux-arm64": {
       "archiveName": "workerd-linux-arm64.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/workerd-linux-arm64.gz",
-      "archiveSha256": "c6b0415179546e39fc3729e7b06dd25aa66a2a9aedd9a49df086a1f32b8945ea",
-      "binarySha256": "b00ccbed52a5203c38948d5110cbe8d7c6444c3e94a11cd91d882deac2696fc5"
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/workerd-linux-arm64.gz",
+      "archiveSha256": "66237c656a3dd770db05cfd33c07c3710cbc74a3e00953105667fdeb91f36d8e",
+      "binarySha256": "44ad4e92dd4260a6f9689cf4d4839c4bc3e58adb11e6faeacb68c5740acee1a9"
     }
   }
 }

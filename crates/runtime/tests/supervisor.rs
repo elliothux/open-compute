@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use tempfile::TempDir;
 
-const VERSION: &str = "workerd 2026-08-23";
+const VERSION: &str = "workerd 2026-08-26";
 
 fn host_target() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
@@ -66,7 +66,7 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
     let lock = format!(
         r#"{{
   "schemaVersion": 1,
-  "release": "v1.20260823.1",
+  "release": "v1.20260826.1",
   "expectedVersionOutput": "{VERSION}",
   "hostCompatibilityDate": "2026-08-22",
   "processFlags": ["--experimental"],
@@ -74,8 +74,8 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
   "targets": {{
     "{target}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}",
-      "archiveSha256": "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}",
+      "archiveSha256": "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
       "binarySha256": "{binary_sha}"
     }}
   }}

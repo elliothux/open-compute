@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
-const VERSION: &str = "workerd 2026-08-23";
+const VERSION: &str = "workerd 2026-08-26";
 const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TOKEN_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
@@ -84,7 +84,7 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
     format!(
         r#"{{
   "schemaVersion": 1,
-  "release": "v1.20260823.1",
+  "release": "v1.20260826.1",
   "expectedVersionOutput": "{VERSION}",
   "hostCompatibilityDate": "2026-08-22",
   "processFlags": ["--experimental"],
@@ -92,8 +92,8 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
   "targets": {{
     "{target}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}",
-      "archiveSha256": "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}",
+      "archiveSha256": "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
       "binarySha256": "{binary_sha}"
     }}{extra_target}
   }}
@@ -257,7 +257,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         r#",
     "solaris-sparc": {
       "archiveName": "x.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/x.gz",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/x.gz",
       "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }"#,
@@ -301,10 +301,10 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         )
         .replace(
             &format!(
-                "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}"
+                "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}"
             ),
             &format!(
-                "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{foreign_archive}"
+                "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{foreign_archive}"
             ),
         );
     assert!(
@@ -316,7 +316,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         r#",
     "{foreign}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}",
       "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }}"#
@@ -351,18 +351,18 @@ fn load_lock_rejects_symlink_and_missing() {
 fn lock_validation_rejects_every_malformed_authority_field() {
     let good = lock_json(&"ab".repeat(32), "");
     let replacements = [
-        ("\"release\": \"v1.20260823.1\"", "\"release\": \"\""),
+        ("\"release\": \"v1.20260826.1\"", "\"release\": \"\""),
         (
-            "\"release\": \"v1.20260823.1\"",
-            "\"release\": \" v1.20260823.1\"",
+            "\"release\": \"v1.20260826.1\"",
+            "\"release\": \" v1.20260826.1\"",
         ),
         (
-            "\"expectedVersionOutput\": \"workerd 2026-08-23\"",
+            "\"expectedVersionOutput\": \"workerd 2026-08-26\"",
             "\"expectedVersionOutput\": \"\"",
         ),
         (
-            "\"expectedVersionOutput\": \"workerd 2026-08-23\"",
-            "\"expectedVersionOutput\": \"workerd 2026-08-23 \"",
+            "\"expectedVersionOutput\": \"workerd 2026-08-26\"",
+            "\"expectedVersionOutput\": \"workerd 2026-08-26 \"",
         ),
         (
             "\"hostCompatibilityDate\": \"2026-08-22\"",
@@ -450,7 +450,7 @@ fn lock_target_url_identity_and_accessors_are_strict() {
     let good = lock_json(&"ab".repeat(32), "");
     let archive = host_archive();
     let url =
-        format!("https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}");
+        format!("https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}");
     let bad_urls = [
         "not a url".to_owned(),
         url.replacen("https://", "http://", 1),
@@ -458,7 +458,7 @@ fn lock_target_url_identity_and_accessors_are_strict() {
         url.replace("github.com", "example.com"),
         format!("{url}?download=1"),
         format!("{url}#fragment"),
-        url.replace("v1.20260823.1", "v1.other"),
+        url.replace("v1.20260826.1", "v1.other"),
     ];
     for bad_url in bad_urls {
         let bad = good.replacen(&url, &bad_url, 1);
@@ -476,7 +476,7 @@ fn lock_target_url_identity_and_accessors_are_strict() {
         assert!(RuntimeLock::parse(bad.as_bytes()).is_err());
     }
     let bad_archive_hash = good.replacen(
-        "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
         "zz",
         1,
     );
@@ -718,7 +718,7 @@ async fn missing_symlink_directory_non_executable_tampered_rejected_before_versi
     let tampered = dir.path().join("workerd-bad");
     write_exec(
         &tampered,
-        "#!/bin/sh\nprintf x >> /dev/null\necho 'workerd 2026-08-23'\n# tampered\n",
+        "#!/bin/sh\nprintf x >> /dev/null\necho 'workerd 2026-08-26'\n# tampered\n",
     );
     assert_eq!(
         verify_runtime_binary(
@@ -762,7 +762,7 @@ async fn version_success_mismatch_nonzero_timeout_oversized_non_utf8() {
     );
 
     let nonzero = dir.path().join("nonzero");
-    write_exec(&nonzero, "#!/bin/sh\necho 'workerd 2026-08-23'\nexit 3\n");
+    write_exec(&nonzero, "#!/bin/sh\necho 'workerd 2026-08-26'\nexit 3\n");
     let nlock = dir.path().join("n.lock.json");
     fs::write(&nlock, lock_json(&sha256_file(&nonzero), "")).unwrap();
     assert!(
@@ -921,7 +921,7 @@ async fn real_pinned_binary_accepted_when_env_set() {
     .await
     .expect("real workerd must verify");
     assert_eq!(verified.version_output(), VERSION);
-    assert_eq!(verified.release(), "v1.20260823.1");
+    assert_eq!(verified.release(), "v1.20260826.1");
 }
 
 #[tokio::test]
@@ -1307,7 +1307,7 @@ async fn compile_failures_clean_partials() {
     let sleepy = dir.path().join("sleepy");
     write_exec(
         &sleepy,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-23'; exit 0; fi\nsleep 30\n",
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-26'; exit 0; fi\nsleep 30\n",
     );
     let slock_path = dir.path().join("sleepy.lock.json");
     fs::write(&slock_path, lock_json(&sha256_file(&sleepy), "")).unwrap();
@@ -1329,7 +1329,7 @@ async fn compile_failures_clean_partials() {
     let big = dir.path().join("bigc");
     write_exec(
         &big,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-23'; exit 0; fi\ndd if=/dev/zero bs=1048576 count=18 2>/dev/null\n",
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-26'; exit 0; fi\ndd if=/dev/zero bs=1048576 count=18 2>/dev/null\n",
     );
     let block = dir.path().join("big.lock.json");
     fs::write(&block, lock_json(&sha256_file(&big), "")).unwrap();
@@ -1616,7 +1616,7 @@ fn install_rejects_hash_mismatch_and_existing_dest() {
     let lock = RuntimeLock::parse(
         lock_json(&sha256_bytes(payload), "")
             .replace(
-                "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+                "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
                 &sha256_bytes(&gz),
             )
             .as_bytes(),
@@ -1634,7 +1634,7 @@ fn install_rejects_hash_mismatch_and_existing_dest() {
 fn install_and_package_reject_failure_matrix_without_downloading() {
     fn release_lock(binary: &[u8], archive: &[u8]) -> RuntimeLock {
         let json = lock_json(&sha256_bytes(binary), "").replace(
-            "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+            "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
             &sha256_bytes(archive),
         );
         RuntimeLock::parse(json.as_bytes()).unwrap()
@@ -1780,34 +1780,34 @@ fn compiled_config_accessors_and_corruption_matrix() {
 fn packaged_lock_matches_g0_pin() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/workerd.lock.json");
     let (lock, _) = load_runtime_lock(&path.canonicalize().unwrap()).unwrap();
-    assert_eq!(lock.release, "v1.20260823.1");
+    assert_eq!(lock.release, "v1.20260826.1");
     assert_eq!(lock.expected_version_output, VERSION);
     assert_eq!(lock.host_compatibility_date, "2026-08-22");
     assert_eq!(lock.process_flags, vec!["--experimental".to_string()]);
     let darwin = lock.targets.get("darwin-arm64").unwrap();
     assert_eq!(
         darwin.archive_sha256,
-        "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb"
+        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba"
     );
     assert_eq!(
         darwin.binary_sha256,
-        "8c6562229cc652bcb8d926f5cd3a80e4947d723567588635fbaaebca9fdd7577"
+        "2d17da54d2671d6e9e7c776d56b934f60be8c140b9bac35ddf22f60d6cff9403"
     );
     let expected = [
         (
             "darwin-x64",
-            "fff5ae0188fc72a8bbc9a8314eaf367c45d81bf01d8aca7f803660ed42533476",
-            "9bfd82a7504a341e5e39f1bd4cb6cf8bb71c37c84281f11c271ac482e9d80c97",
+            "61b644abde08329d3057634e591bd72a9cd5adc3424edd66509b138648289e37",
+            "b1046219d7b5b5e86047f44cb3372b803741a772db632a54ba987ee0f16dcd58",
         ),
         (
             "linux-x64",
-            "dcbfc4b9cbd9afa752e264e47704e114082f09db94bd212d59ad223eada7b6cc",
-            "9b3b65714f673616465f61d3d48315e5f4ac48c0c3eb51500117ea530c8cb662",
+            "b832c71df79585b7eb361205f531aeebd6b4f15a0934ecdbfdf01d32c025ed63",
+            "32976646cded43835d624c138d10121f63a692e47df0438390ab11a072345880",
         ),
         (
             "linux-arm64",
-            "c6b0415179546e39fc3729e7b06dd25aa66a2a9aedd9a49df086a1f32b8945ea",
-            "b00ccbed52a5203c38948d5110cbe8d7c6444c3e94a11cd91d882deac2696fc5",
+            "66237c656a3dd770db05cfd33c07c3710cbc74a3e00953105667fdeb91f36d8e",
+            "44ad4e92dd4260a6f9689cf4d4839c4bc3e58adb11e6faeacb68c5740acee1a9",
         ),
     ];
     for (name, archive, binary) in expected {
@@ -1865,7 +1865,7 @@ fn package_release_is_atomic_and_rejects_bad_inputs() {
     let gz = gzip_bytes(payload.as_bytes());
     let mut lock_txt = lock_json(&sha256_bytes(payload.as_bytes()), "");
     lock_txt = lock_txt.replace(
-        "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
         &sha256_bytes(&gz),
     );
     let lock = RuntimeLock::parse(lock_txt.as_bytes()).unwrap();
@@ -2084,7 +2084,7 @@ fn install_release_destination_appears_race_preserves_bytes() {
     encoder.write_all(payload.as_bytes()).unwrap();
     let gz = encoder.finish().unwrap();
     let json = lock_json(&sha256_bytes(payload.as_bytes()), "").replace(
-        "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
         &sha256_bytes(&gz),
     );
     let lock = RuntimeLock::parse(json.as_bytes()).unwrap();
@@ -2658,7 +2658,7 @@ async fn symlink_ancestor_rejected_for_all_external_paths() {
         encoder.write_all(payload.as_bytes()).unwrap();
         let gz = encoder.finish().unwrap();
         let json = lock_json(&sha256_bytes(payload.as_bytes()), "").replace(
-            "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+            "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
             &sha256_bytes(&gz),
         );
         let lock = RuntimeLock::parse(json.as_bytes()).unwrap();

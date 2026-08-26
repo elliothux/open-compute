@@ -18,7 +18,7 @@ use std::time::Duration;
 
 const READY_PATH: &str = "/internal/ready";
 const TOKEN_HEADER: &str = "x-open-compute-internal-token";
-const VERSION: &str = "workerd 2026-08-23";
+const VERSION: &str = "workerd 2026-08-26";
 
 #[derive(Debug, Deserialize, Default)]
 struct FixtureConfig {

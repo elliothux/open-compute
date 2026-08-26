@@ -1021,7 +1021,7 @@ fn loader_key_and_compatibility_are_strict() {
     assert!(parse_loader_key(&format!("{key}/extra")).is_err());
     assert!(parse_loader_key(&key.replace('-', "%2d")).is_err());
     assert!(validate_compatibility("2026-02-29", Vec::new()).is_err());
-    assert!(validate_compatibility("2026-08-24", Vec::new()).is_err());
+    assert!(validate_compatibility("2026-08-27", Vec::new()).is_err());
     assert!(validate_compatibility("2026-08-22", vec!["experimental".to_owned()]).is_err());
     for invalid in ["", "a/b", "a/b/c", "a/b/c/d"] {
         assert_eq!(

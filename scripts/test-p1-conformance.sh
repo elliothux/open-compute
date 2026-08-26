@@ -2,7 +2,7 @@
 # Run the deterministic P1.0 capability/deviation contract in fresh platformd processes.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/poc/.runtime-cache/v1.20260823.1/workerd"}
+workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/poc/.runtime-cache/v1.20260826.1/workerd"}
 if [ ! -f "$workerd" ]; then
   echo "OPEN_COMPUTE_TEST_WORKERD is missing; the P1 conformance Gate refuses to skip" >&2
   exit 1

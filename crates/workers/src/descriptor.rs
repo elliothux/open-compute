@@ -29,7 +29,7 @@ pub const LOADED_ISOLATE_WRAPPER_MODULE_NAME: &str = "__open_compute_loaded_isol
 /// Earliest compatibility date accepted by the pinned P1 policy.
 pub const COMPATIBILITY_DATE_MIN: &str = "2022-01-01";
 /// Latest compatibility date accepted by the pinned P1 policy.
-pub const COMPATIBILITY_DATE_MAX: &str = "2026-08-23";
+pub const COMPATIBILITY_DATE_MAX: &str = "2026-08-26";
 /// Compatibility flags accepted by the production descriptor validator.
 pub const COMPATIBILITY_FLAGS_ALLOWED: &[&str] = &["nodejs_compat", "rpc"];
 

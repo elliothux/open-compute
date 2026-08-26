@@ -26,7 +26,7 @@ control/data plane 和 pinned upstream `workerd` child；启动过程永不下�
 
 - Rust 1.98.0 (workspace toolchain and MSRV)
 - macOS or Linux
-- Official pinned `workerd` matching `runtime/workerd.lock.json` (G0 pin `v1.20260823.1`)
+- Official pinned `workerd` matching `runtime/workerd.lock.json` (G0 pin `v1.20260826.1`)
 - `rclone` with `serve s3` support for local development
 - Local S3-compatible endpoint for real runs (the Gate hosts its own fake S3; protocol is still AWS SDK SigV4)
 
@@ -61,7 +61,7 @@ platformd --config /abs/config.toml run
 ```
 
 停止 `platformd` 时脚本同时停止 rclone，但保留上述数据供下次启动复用。默认使用正式 lock
-匹配的 `poc/.runtime-cache/v1.20260823.1/workerd`；也可通过绝对路径
+匹配的 `poc/.runtime-cache/v1.20260826.1/workerd`；也可通过绝对路径
 `OPEN_COMPUTE_DEV_WORKERD` 指定已有的 verified binary。首次 `./scripts/dev.sh` 完成数据目录初始化后，
 开发环境检查可运行：
 
@@ -81,10 +81,10 @@ RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
 cargo metadata --no-deps --format-version 1
 ./scripts/check-boundaries.sh
 ./poc/g0 test bootstrap
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-1.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-2.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-8.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260823.1/workerd" ./scripts/test-p0-exit.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./scripts/test-p0-1.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./scripts/test-p0-2.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./scripts/test-p0-8.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./scripts/test-p0-exit.sh
 ```
 
 Rust 覆盖率使用

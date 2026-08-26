@@ -528,7 +528,7 @@ async fn upgrade_gate() {
         0o600,
     );
     let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map_or_else(
-        || workspace().join("poc/.runtime-cache/v1.20260823.1/workerd"),
+        || workspace().join("poc/.runtime-cache/v1.20260826.1/workerd"),
         PathBuf::from,
     );
     assert!(workerd.is_file(), "stock workerd is required");
@@ -555,7 +555,7 @@ async fn upgrade_gate() {
     let platform_id = storage.identity().platform_id;
     let do_root = storage
         .data_dir()
-        .prepare_durable_object_storage(&platform_id.to_string(), "workerd 2026-08-23")
+        .prepare_durable_object_storage(&platform_id.to_string(), "workerd 2026-08-26")
         .expect("DO storage");
     write_mode(
         &do_root.join("upgrade-sentinel.bin"),

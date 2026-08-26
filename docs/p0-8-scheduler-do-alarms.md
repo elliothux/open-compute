@@ -102,7 +102,7 @@ row_token
 
 动态 tenant class 运行在 facet 上，不能假定普通 native DO namespace 的 alarm scheduler也适用于
 facet。WDL 的当前实现采用 injected alarm shim 和独立 index；P0.8 必须先在 pinned stock workerd
-`v1.20260823.1` 上确认确切行为，再实现 Rust scheduler。
+`v1.20260826.1` 上确认确切行为，再实现 Rust scheduler。
 
 [G0 结果](./g0-results.md)明确没有覆盖 DO alarms、WebSocket hibernation 和 DO migrations，因此
 P0.7 storage/facet 通过不能替代本 Hard Gate。
@@ -830,5 +830,5 @@ ownership 原则：
 - [Cloudflare Durable Object lifecycle](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/)
 - [WDL alarm shim](https://github.com/wdl-dev/wdl/blob/main/do-runtime/alarm-shim-source.js)
 - [WDL DO runtime actor](https://github.com/wdl-dev/wdl/blob/main/do-runtime/actor.js)
-- [workerd config schema](https://github.com/cloudflare/workerd/blob/v1.20260823.1/src/workerd/server/workerd.capnp)
+- [workerd config schema](https://github.com/cloudflare/workerd/blob/v1.20260826.1/src/workerd/server/workerd.capnp)
 - [Miniflare Durable Objects plugin](https://github.com/cloudflare/workers-sdk/tree/main/packages/miniflare/src/plugins/do)

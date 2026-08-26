@@ -2,7 +2,7 @@
 
 - Verdict: **No-Go**
 - Release under test: `platformd 0.1.0`, checkout baseline `19dd7227fed39a1c3871f7498977bf4416849844`
-- Stock workerd pin: `v1.20260823.1`, expected output `workerd 2026-08-23`
+- Stock workerd pin: `v1.20260826.1`, expected output `workerd 2026-08-26`
 - Production path: checked-in `runtime/config.capnp`, `do-facade.js`, `do-host.js` and the public platformd WebSocket bridge
 - Fixture: `p0_7_durable_objects_gate` basic WebSocket restart/close matrix plus `p1_conformance` capability shape
 

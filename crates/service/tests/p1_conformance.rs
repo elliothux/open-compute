@@ -193,7 +193,7 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
         );
     }
     assert!(validate_compatibility("2021-12-31", Vec::new()).is_err());
-    assert!(validate_compatibility("2026-08-24", Vec::new()).is_err());
+    assert!(validate_compatibility("2026-08-27", Vec::new()).is_err());
     assert!(validate_compatibility(COMPATIBILITY_DATE_MIN, vec!["unknown".to_owned()]).is_err());
     assert_eq!(
         validate_compatibility(

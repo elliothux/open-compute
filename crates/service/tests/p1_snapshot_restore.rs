@@ -32,7 +32,7 @@ fn write_runtime(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let binary = root.join("workerd");
     write_mode(
         &binary,
-        b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-23'; exit 0; fi\nexit 1\n",
+        b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-26'; exit 0; fi\nexit 1\n",
         0o755,
     );
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -248,7 +248,7 @@ async fn snapshot_restore_gate() {
         .data_dir()
         .prepare_durable_object_storage(
             &storage.identity().platform_id.to_string(),
-            "workerd 2026-08-23",
+            "workerd 2026-08-26",
         )
         .expect("DO root");
     write_mode(

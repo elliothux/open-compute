@@ -2,7 +2,7 @@
 # Record the conditional P1.8 No-Go while preserving the stock-workerd basic WebSocket Gate.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/poc/.runtime-cache/v1.20260823.1/workerd"}
+workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/poc/.runtime-cache/v1.20260826.1/workerd"}
 if [ ! -f "$workerd" ]; then
   echo "OPEN_COMPUTE_TEST_WORKERD is missing; the P1.8 Gate refuses to skip" >&2
   exit 1
@@ -18,4 +18,4 @@ cargo test -p open-compute-service --features test-support \
   --test p0_7_durable_objects_gate -- --test-threads=1 --nocapture
 cargo test -p open-compute-service --features test-support \
   --test p1_conformance -- --test-threads=1
-printf 'P1.8 NO_GO workerd=v1.20260823.1 reason=WH-01-facade-absent basic-websocket=passed\n'
+printf 'P1.8 NO_GO workerd=v1.20260826.1 reason=WH-01-facade-absent basic-websocket=passed\n'

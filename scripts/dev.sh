@@ -31,7 +31,7 @@ command -v cargo >/dev/null 2>&1 || fail "cargo is required"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required"
 command -v rclone >/dev/null 2>&1 || fail "rclone with 'serve s3' support is required"
 
-workerd=${OPEN_COMPUTE_DEV_WORKERD:-"$root/poc/.runtime-cache/v1.20260823.1/workerd"}
+workerd=${OPEN_COMPUTE_DEV_WORKERD:-"$root/poc/.runtime-cache/v1.20260826.1/workerd"}
 case "$workerd" in
   /*) ;;
   *) fail "OPEN_COMPUTE_DEV_WORKERD must be an absolute path" ;;

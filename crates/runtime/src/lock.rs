@@ -22,7 +22,7 @@ pub struct RuntimeLock {
     /// Schema version. Must be 1.
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
-    /// Release tag, for example `v1.20260823.1`.
+    /// Release tag, for example `v1.20260826.1`.
     pub release: String,
     /// Exact `workerd --version` stdout, trimmed.
     #[serde(rename = "expectedVersionOutput")]

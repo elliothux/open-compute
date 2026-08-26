@@ -201,7 +201,7 @@ async function run() {
     assert.equal(verified.sha256, lock.binary.sha256, "binary sha256");
     assert.equal(verified.sha256, lock.sha256, "lock sha256");
     assert.equal(verified.versionOutput, lock.versionOutput, "workerd --version");
-    assert.equal(lock.versionOutput, "workerd 2026-08-23", "pinned version output");
+    assert.equal(lock.versionOutput, "workerd 2026-08-26", "pinned version output");
     assert.isTrue(Array.isArray(lock.requiredProcessFlags), "required process flags present");
     assert.includes(lock.requiredProcessFlags.join(" "), "--experimental", "experimental flag pinned");
   });

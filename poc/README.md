@@ -14,7 +14,7 @@ Darwin arm64. The harness is Node.js standard library. The official Cloudflare
 `workerd` Darwin arm64 artifact is downloaded into `poc/.runtime-cache/` and
 SHA-256 verified before every start.
 
-Pinned release: `v1.20260823.1` (`workerd 2026-08-23`).
+Pinned release: `v1.20260826.1` (`workerd 2026-08-26`).
 
 ## Bootstrap
 

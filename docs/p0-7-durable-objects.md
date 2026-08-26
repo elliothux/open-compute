@@ -22,7 +22,7 @@ restart policy。
 
 ## 0. 已验证基线与本阶段决策
 
-[G0 结果](./g0-results.md)在 pinned stock workerd `v1.20260823.1` 上已经验证：
+[G0 结果](./g0-results.md)在 pinned stock workerd `v1.20260826.1` 上已经验证：
 
 - `WorkerLoader.getDurableObjectClass(className)` 可以取得动态 class；
 - dynamic class 可以挂到 native facet，并执行 fetch 与 RPC；
@@ -847,8 +847,8 @@ scripts/test-p0-7.sh
 - [Cloudflare SQLite-backed storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
 - [Cloudflare Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/)
 - [Cloudflare Dynamic Worker facets](https://developers.cloudflare.com/dynamic-workers/usage/durable-object-facets/)
-- [workerd WorkerLoader](https://github.com/cloudflare/workerd/blob/v1.20260823.1/src/workerd/api/worker-loader.h)
-- [workerd config schema](https://github.com/cloudflare/workerd/blob/v1.20260823.1/src/workerd/server/workerd.capnp)
+- [workerd WorkerLoader](https://github.com/cloudflare/workerd/blob/v1.20260826.1/src/workerd/api/worker-loader.h)
+- [workerd config schema](https://github.com/cloudflare/workerd/blob/v1.20260826.1/src/workerd/server/workerd.capnp)
 - [WDL Durable Objects](https://github.com/wdl-dev/wdl/blob/main/docs/modules/durable-objects.zh.md)
 - [WDL DO runtime actor](https://github.com/wdl-dev/wdl/blob/main/do-runtime/actor.js)
 - [Miniflare Durable Objects plugin](https://github.com/cloudflare/workers-sdk/tree/main/packages/miniflare/src/plugins/do)

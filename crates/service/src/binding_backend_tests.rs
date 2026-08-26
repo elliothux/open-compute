@@ -1303,7 +1303,10 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
     struct ControlledExecutor(Behavior);
     impl KvBindingExecutor for ControlledExecutor {
         fn operation_timeout(&self) -> Duration {
-            Duration::from_millis(1)
+            match self.0 {
+                Behavior::Slow => Duration::from_millis(1),
+                Behavior::Panic | Behavior::WrongShape => Duration::from_millis(100),
+            }
         }
         fn get(&self, _: &AuthorizedBinding, _: &str) -> Result<Option<String>, PlatformError> {
             unreachable!()

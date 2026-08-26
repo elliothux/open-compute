@@ -2,7 +2,7 @@
 
 ## 结论
 
-- P1.0 至 P1.7 的实现以及 functional/process/security aggregate 脚本通过。
+- P1.0 至 P1.7 的实现以及当前 pin 下的 workspace、process 和 security 回归通过。
 - P1.8 verdict 为 **No-Go**：当前 pinned stock workerd 的 production DO facade 不提供
   `ctx.acceptWebSocket()`；basic WebSocket 仍由 P0.7 Gate 覆盖并通过。该条件性结论不阻塞 P2。
 - 本结果是本地实现与回归证据，不是 release candidate 资格声明。1 小时 developer soak、24 小时
@@ -10,14 +10,14 @@
 
 ## Release identity
 
-- Checkout baseline：`19dd7227fed39a1c3871f7498977bf4416849844`
-- Working tree：包含本次尚未提交的 P1 实现；没有 commit、push、package 或 deploy
+- Checkout baseline：`15877c31f6480b51e0eb93687a55690364c2ceb6`
+- Working tree：包含本次尚未提交的 workerd pin 升级；没有 commit、push、package 或 deploy
 - Host：`Darwin 25.6.0 arm64`
-- Stock workerd pin：`v1.20260823.1`，expected output `workerd 2026-08-23`
+- Stock workerd pin：`v1.20260826.1`，expected output `workerd 2026-08-26`
 - `runtime/workerd.lock.json` SHA-256：
-  `dc57a2451d60692e9c4808c02687c4e98e5b5e83cf268e90ab64be364833c047`
+  `d3614a6394cf85e24704954d9e7a9585fb38a2107e8eb73a02519e39add14d2e`
 - `share/default-config.toml` SHA-256：
-  `caf4a3ede246662d51dcc2cda7a71d66ea62a4292ad211eae3f88012f187397c`
+  `c8250dca6be0bbb872e5357a05a3b553089aaa7ca72533980f19164301782834`
 
 ## 验证矩阵
 
@@ -32,24 +32,25 @@
 | Dependency boundaries | `./scripts/check-boundaries.sh` | PASS |
 | Shell syntax | `sh -n scripts/*.sh` | PASS |
 | Diff whitespace | `git diff --check` | PASS |
-| Coverage and real-runtime Gates | `./scripts/coverage.sh` with `OPEN_COMPUTE_TEST_WORKERD` | PASS; 38,464 / 42,726 lines, 90.024809% |
-| P1 aggregate | `./scripts/test-p1.sh` with `OPEN_COMPUTE_TEST_WORKERD` | PASS |
+| Coverage and real-runtime Gates | `./scripts/coverage.sh` with `OPEN_COMPUTE_TEST_WORKERD` | PASS; 43,685 / 48,521 lines, 90.033182% |
+| Pin-upgrade regression | `cargo test --workspace --all-targets --all-features -- --test-threads=1` | PASS；P0.1-P0.8、P0 aggregate、P1、P2.1、P2.2 均使用真实 pinned workerd |
+| P1.8 conditional Gate | `./scripts/test-p1-8.sh` with `OPEN_COMPUTE_TEST_WORKERD` | PASS；verdict 仍为 No-Go |
 | Stock-workerd G0 | `./poc/g0 test all` | Conditional Go; only exact `loader:D-abort` limitation |
-| Mixed load | `./scripts/load-p1.sh --profile mixed --seed 1701` | PASS |
-| Local smoke soak | `./scripts/soak-p1.sh --duration 10m --seed 1701` | PASS |
+| Mixed load | `./scripts/load-p1.sh --profile mixed --seed 1701` | 原 P1 实现验证 PASS；pin 升级未重跑 |
+| Local smoke soak | `./scripts/soak-p1.sh --duration 10m --seed 1701` | 原 P1 实现验证 PASS；pin 升级未重跑 |
 
-`./scripts/test-p1.sh` completed P1 conformance, security/fuzz, crash/recovery, upgrade/rollback,
-P1.8 conditional Gate, reliability, load and P0 aggregate regressions. The security/release fuzz runner
-executed 9,739,783 cases in 10 seconds. P0 and P1 process Gates used the verified stock workerd rather than
-a mock runtime.
+本次 pin 升级按用户要求以一轮 Gate 为准；workspace 与 coverage 各执行一次完整 real-runtime
+矩阵，另执行 P1.8 conditional Gate。P0 和 P1 process Gates 使用经过校验的 stock workerd，而非
+mock runtime。原 P1 security/release fuzz、mixed load 与 10 分钟 soak 证据保留，但未作为本次 pin
+升级的新运行结果。
 
-## Capacity 与 soak 证据
+## 原 P1 实现的 Capacity 与 soak 证据
 
 Mixed load ran 3 iterations in 331 seconds with 183 request samples. The worst iteration measured p50
 25.066 ms, p95 295.527 ms, p99 302.082 ms, maximum runner RSS 117,669,888 bytes and process-recovery Gate
 51 seconds. Machine-readable evidence is under `target/p1-results/load/`.
 
-The 10-minute mixed soak ran 3 iterations for 600 seconds with the fault schedule
+以下容量与 soak 数据来自 pin 升级前的 P1 实现验证。The 10-minute mixed soak ran 3 iterations for 600 seconds with the fault schedule
 `p0_combined_then_upgrade_then_platformd_sigkill`; verdict was `pass` and the event log remained bounded to
 400 lines. Machine-readable evidence is under `target/p1-results/soak-10m/`.
 

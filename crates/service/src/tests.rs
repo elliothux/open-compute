@@ -74,7 +74,7 @@ fn host_archive() -> &'static str {
 fn write_stub_workerd(bin: &Path, lock: &Path) {
     fs::write(
         bin,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-23'; exit 0; fi\nexit 1\n",
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-26'; exit 0; fi\nexit 1\n",
     )
     .unwrap();
     let mut perms = fs::metadata(bin).unwrap().permissions();
@@ -88,16 +88,16 @@ fn write_stub_workerd(bin: &Path, lock: &Path) {
         format!(
             r#"{{
   "schemaVersion": 1,
-  "release": "v1.20260823.1",
-  "expectedVersionOutput": "workerd 2026-08-23",
+  "release": "v1.20260826.1",
+  "expectedVersionOutput": "workerd 2026-08-26",
   "hostCompatibilityDate": "2026-08-22",
   "processFlags": ["--experimental"],
   "hostCompatibilityFlags": ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
   "targets": {{
     "{target}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260823.1/{archive}",
-      "archiveSha256": "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}",
+      "archiveSha256": "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
       "binarySha256": "{sha}"
     }}
   }}
@@ -486,7 +486,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
     fs::write(&archive_path, &archive.stdout).unwrap();
     let archive_hash = hex::encode(sha2::Sha256::digest(&archive.stdout));
     let lock_text = fs::read_to_string(&package_lock).unwrap().replace(
-        "4386bf8bd6f94eed6704a7b6cdd5301daef8ada25c60f7b82e7e74d155d3beeb",
+        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
         &archive_hash,
     );
     fs::write(&package_lock, &lock_text).unwrap();
@@ -960,7 +960,7 @@ impl SnapInit for SupervisorSnapshot {
 
 fn test_state(health: HealthCoordinator, secret: Option<&str>) -> HttpState {
     let metrics = Arc::new(
-        MetricsRegistry::new(&MetricsConfig::default(), "0.1.0", "workerd 2026-08-23").unwrap(),
+        MetricsRegistry::new(&MetricsConfig::default(), "0.1.0", "workerd 2026-08-26").unwrap(),
     );
     HttpState::for_test(health, metrics, true, secret.map(SecretString::new))
 }
@@ -1479,7 +1479,7 @@ fn metrics_fixed_and_limits() {
         ErrorCode::LimitInvalid
     );
     let reg =
-        MetricsRegistry::new(&MetricsConfig::default(), "0.1.0", "workerd 2026-08-23").unwrap();
+        MetricsRegistry::new(&MetricsConfig::default(), "0.1.0", "workerd 2026-08-26").unwrap();
     reg.inc_start(StartResult::Success, StartStage::Config);
     let text = reg.render(&PlatformStatus::starting());
     assert!(text.contains("platform_info"));
@@ -1647,9 +1647,9 @@ fn observe_supervisor_counts_one_logical_restart() {
 #[test]
 fn metrics_workerd_version_and_preflight_counters() {
     let reg = MetricsRegistry::new(&MetricsConfig::default(), "0.1.0", "unknown").unwrap();
-    reg.set_workerd_version("workerd 2026-08-23").unwrap();
+    reg.set_workerd_version("workerd 2026-08-26").unwrap();
     let text = reg.render(&PlatformStatus::starting());
-    assert!(text.contains("workerd_version=\"workerd 2026-08-23\""));
+    assert!(text.contains("workerd_version=\"workerd 2026-08-26\""));
     assert!(!text.contains("workerd_version=\"unknown\""));
 
     let outcome = open_compute_artifacts::PreflightOutcome::successful_canary();
@@ -2138,7 +2138,7 @@ request_timeout_ms = 2000
         .data_dir()
         .prepare_durable_object_storage(
             &storage.identity().platform_id.to_string(),
-            "workerd 2026-08-23",
+            "workerd 2026-08-26",
         )
         .unwrap();
     (dir, path, mock)

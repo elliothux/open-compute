@@ -65,7 +65,7 @@ P0.1 不实现：
 
 ## 2. G0 证据与 P0.1 决策
 
-G0 使用真实的 `workerd v1.20260823.1`，连续三轮新进程运行 hard matrix。Bootstrap、binding、
+G0 使用真实的 `workerd v1.20260826.1`，连续三轮新进程运行 hard matrix。Bootstrap、binding、
 Durable Object 和 recovery gate 全部通过；Loader 只有已接受的 `D-abort` 限制。P0.1 必须继承
 已经验证的路径，不把测试 fixture 当成生产实现。
 
@@ -83,9 +83,9 @@ Durable Object 和 recovery gate 全部通过；Loader 只有已接受的 `D-abo
 当前 G0 pin 是：
 
 ```text
-release              v1.20260823.1
-workerd version      1.20260823.1
-runtime date         2026-08-23
+release              v1.20260826.1
+workerd version      1.20260826.1
+runtime date         2026-08-26
 compatibility date   2026-08-22
 process flags        --experimental
 compatibility flags  nodejs_compat, rpc, enable_ctx_exports, experimental
@@ -183,8 +183,8 @@ lock 文件是 release artifact 的一部分，至少包含：
 ```json
 {
   "schemaVersion": 1,
-  "release": "v1.20260823.1",
-  "expectedVersionOutput": "workerd 2026-08-23",
+  "release": "v1.20260826.1",
+  "expectedVersionOutput": "workerd 2026-08-26",
   "hostCompatibilityDate": "2026-08-22",
   "processFlags": ["--experimental"],
   "hostCompatibilityFlags": [

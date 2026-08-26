@@ -1,6 +1,6 @@
 # P0.2 Worker API compatibility matrix
 
-This matrix is scoped to the pinned `workerd v1.20260823.1` release and the
+This matrix is scoped to the pinned `workerd v1.20260826.1` release and the
 platform policy in `runtime/config.capnp`. It is not a claim of full Cloudflare
 Workers compatibility. `scripts/test-p0-2.sh` executes the cited real-workerd
 conformance gate in three fresh test processes.
