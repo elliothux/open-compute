@@ -4,6 +4,7 @@ import d1FacadeSource from "d1-facade-source";
 import doFacadeSource from "do-facade-source";
 import doIdCodecSource from "do-id-codec-source";
 import doAlarmShimSource from "do-alarm-shim-source";
+import queueFacadeSource from "queue-facade-source";
 import {
   DO_ALARM_SHIM_MODULE,
   D1_FACADE_MODULE,
@@ -11,6 +12,7 @@ import {
   DO_ID_CODEC_MODULE,
   LOADED_ISOLATE_RESERVED_MODULES,
   LOADED_ISOLATE_WRAPPER_MODULE,
+  QUEUE_FACADE_MODULE,
   R2_FACADE_MODULE,
   generateBindingWrapper,
 } from "./loaded-isolate-wrapper-generator.js";
@@ -144,8 +146,12 @@ export function modulesFor(snapshot, validation, entrypointName, durableObject =
   const doBindings = (snapshot.bindings || [])
     .filter((binding) => binding.kind === "do_namespace" && binding.capabilityVersion === 1)
     .map((binding) => binding.name);
+  const queueBindings = (snapshot.bindings || [])
+    .filter((binding) => binding.kind === "queue_producer" && binding.capabilityVersion === 1)
+    .map((binding) => binding.name);
   let mainModule = snapshot.mainModule;
-  if (r2Bindings.length || d1Bindings.length || doBindings.length || entrypointName) {
+  if (r2Bindings.length || d1Bindings.length || doBindings.length
+      || queueBindings.length || entrypointName) {
     for (const reserved of LOADED_ISOLATE_RESERVED_MODULES) {
       if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
         throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
@@ -157,6 +163,7 @@ export function modulesFor(snapshot, validation, entrypointName, durableObject =
       modules[DO_ID_CODEC_MODULE] = { js: doIdCodecSource };
       modules[DO_FACADE_MODULE] = { js: doFacadeSource };
     }
+    if (queueBindings.length) modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
     if (entrypointName && durableObject) {
       modules[DO_ALARM_SHIM_MODULE] = { js: doAlarmShimSource };
     }
@@ -168,6 +175,7 @@ export function modulesFor(snapshot, validation, entrypointName, durableObject =
         doBindings,
         entrypointName,
         durableObject,
+        queueBindings,
       ),
     };
     mainModule = LOADED_ISOLATE_WRAPPER_MODULE;
@@ -545,6 +553,17 @@ async function decodeSingleEntry(response) {
 }
 
 function trustedBindingProps(descriptor, deploymentId, routeGeneration, accountId, workerId) {
+  if (descriptor.kind === "queue_producer") {
+    return Object.freeze({
+      accountId,
+      workerId,
+      bindingId: descriptor.bindingId,
+      deploymentId,
+      descriptorSha256: descriptor.descriptorSha256,
+      queueId: descriptor.queueId,
+      queueLifecycleGeneration: descriptor.queueLifecycleGeneration,
+    });
+  }
   return Object.freeze({
     accountId,
     workerId,
@@ -753,6 +772,62 @@ const D1TransportBase = makeD1TransportBase(
 
 export class D1Transport extends D1TransportBase {}
 
+export class QueueTransport extends WorkerEntrypoint {
+  #props() {
+    const props = this.ctx.props;
+    if (!props || typeof props.bindingId !== "string"
+        || typeof props.deploymentId !== "string" || typeof props.queueId !== "string"
+        || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
+        || !Number.isSafeInteger(props.queueLifecycleGeneration)
+        || props.queueLifecycleGeneration < 1) {
+      throw bindingError("QUEUE_INVARIANT_VIOLATION");
+    }
+    return props;
+  }
+
+  async #request(operation, body) {
+    const props = this.#props();
+    const response = await this.env.BINDING_BACKEND.fetch(
+      `http://binding-backend/internal/bindings/v1/queue/${props.bindingId}/${operation}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": body === undefined
+            ? "application/json"
+            : "application/vnd.open-compute.queue.v1+frame",
+          [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
+          "x-open-compute-startup-generation": currentStartupGeneration(),
+          "x-open-compute-deployment-id": props.deploymentId,
+          "x-open-compute-descriptor-sha256": props.descriptorSha256,
+          "x-open-compute-request-id": crypto.randomUUID(),
+        },
+        body,
+      },
+    );
+    if (!response.ok) {
+      const code = response.headers.get("x-open-compute-error-code")
+        || "QUEUE_STORAGE_UNAVAILABLE";
+      try { await response.body?.cancel(); } catch { /* best effort */ }
+      throw bindingError(code);
+    }
+    const result = await response.json();
+    if (!result || typeof result !== "object") throw bindingError("QUEUE_INVARIANT_VIOLATION");
+    return result;
+  }
+
+  send(frame) {
+    return this.#request("send", frame);
+  }
+
+  sendBatch(frame) {
+    return this.#request("batch", frame);
+  }
+
+  metrics() {
+    return this.#request("metrics");
+  }
+}
+
 export class DoTransport extends WorkerEntrypoint {
   #props() {
     const props = this.ctx.props;
@@ -902,6 +977,8 @@ function makeBinding(ctx, descriptor, deploymentId, routeGeneration, accountId, 
       return ctx.exports.D1Transport({
         props,
       });
+    case "queue_producer@1":
+      return ctx.exports.QueueTransport({ props });
     case "do_namespace@1": {
       if (!/^[0-9a-f]{16}$/.test(descriptor.namespacePrefix)
           || typeof descriptor.namespaceNameKey !== "string") {

@@ -113,7 +113,7 @@ fn p1_owned_schema_inspection_sees_uncheckpointed_bootstrap_wal() {
     drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
 
     let state = crate::inspect_owned_schema(storage.data_dir(), storage.db(), 5_000, 1).unwrap();
-    assert_eq!(state.control, 8);
+    assert_eq!(state.control, 9);
     assert_eq!(
         state.scheduler,
         u32::try_from(crate::current_scheduler_schema_version()).unwrap()
@@ -240,7 +240,7 @@ fn p1_schema_inspection_checks_live_kv_and_d1_files_and_apply_is_idempotent() {
         snapshot_id: &snapshot_id,
         label: "resource-schema-snapshot",
         created_at_ms: 2,
-        release: p1_release_identity(8),
+        release: p1_release_identity(9),
         master_key_fingerprint: key.fingerprint(),
         s3_authority_fingerprint: &"d".repeat(64),
         r2_prefix_fingerprint: &"e".repeat(64),
@@ -2163,7 +2163,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 8);
+    assert_eq!(crate::migrations::current_schema_version(), 9);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2172,6 +2172,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert_eq!(crate::migrations::migration_006_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_007_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_008_checksum().len(), 32);
+    assert_eq!(crate::migrations::migration_009_checksum().len(), 32);
     assert!(crate::migrations::expected_checksum(1).is_ok());
     assert!(crate::migrations::expected_checksum(2).is_ok());
     assert!(crate::migrations::expected_checksum(3).is_ok());
@@ -2181,7 +2182,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert!(crate::migrations::expected_checksum(7).is_ok());
     assert!(crate::migrations::expected_checksum(8).is_ok());
     assert_eq!(
-        crate::migrations::expected_checksum(9).unwrap_err().code(),
+        crate::migrations::expected_checksum(10).unwrap_err().code(),
         ErrorCode::SchemaTooNew
     );
     assert_eq!(
@@ -2855,7 +2856,7 @@ fn p1_release_identity(control_schema_version: u32) -> PlatformReleaseIdentityV1
         runtime_assets_sha256: "b".repeat(64),
         facade_capability_version: 1,
         control_schema_version,
-        scheduler_schema_version: 1,
+        scheduler_schema_version: 2,
         kv_schema_version_min: crate::KV_SCHEMA_VERSION,
         kv_schema_version_max: crate::KV_SCHEMA_VERSION,
         d1_schema_version_min: crate::D1_DATABASE_SCHEMA_VERSION,
@@ -2863,6 +2864,38 @@ fn p1_release_identity(control_schema_version: u32) -> PlatformReleaseIdentityV1
         snapshot_format_version: 1,
         compatibility_policy_sha256: "c".repeat(64),
     }
+}
+
+fn downgrade_control_to_v8(path: &Path) {
+    let control = Connection::open(path).unwrap();
+    control.pragma_update(None, "foreign_keys", "OFF").unwrap();
+    let triggers = {
+        let mut statement = control
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '%queue%'",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    for trigger in triggers {
+        control
+            .execute_batch(&format!("DROP TRIGGER \"{trigger}\";"))
+            .unwrap();
+    }
+    control
+        .execute_batch(
+            "DROP TABLE queue_referrers;
+             DROP TABLE queue_producer_bindings;
+             ALTER TABLE control_idempotency DROP COLUMN queue_id;
+             DROP TABLE queues;
+             DELETE FROM schema_migrations WHERE version = 9;
+             PRAGMA user_version = 8;",
+        )
+        .unwrap();
 }
 
 #[test]
@@ -2892,7 +2925,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         snapshot_id: &snapshot_id,
         label: "p1-test",
         created_at_ms: 1,
-        release: p1_release_identity(8),
+        release: p1_release_identity(9),
         master_key_fingerprint: key.fingerprint(),
         s3_authority_fingerprint: &"d".repeat(64),
         r2_prefix_fingerprint: &"e".repeat(64),
@@ -2917,12 +2950,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         ErrorCode::MasterKeyMismatch
     );
 
-    let control = Connection::open(data_dir.control_db_path()).unwrap();
-    control
-        .execute("DELETE FROM schema_migrations WHERE version = 8", [])
-        .unwrap();
-    control.pragma_update(None, "user_version", 7).unwrap();
-    drop(control);
+    downgrade_control_to_v8(&data_dir.control_db_path());
     assert_eq!(
         crate::prepare_platform_snapshot(&data_dir, &request)
             .unwrap_err()
@@ -2933,7 +2961,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         crate::apply_offline_upgrade(&data_dir, 5_000, 1)
             .unwrap()
             .control,
-        8
+        9
     );
 
     assert_eq!(
@@ -2955,14 +2983,14 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
             .ok()
     );
     fs::remove_file(do_root.join("forbidden-link")).unwrap();
-    request.release.control_schema_version = 7;
+    request.release.control_schema_version = 8;
     assert_eq!(
         crate::prepare_platform_snapshot(&data_dir, &request)
             .unwrap_err()
             .code(),
         ErrorCode::SnapshotInvalid
     );
-    request.release.control_schema_version = 8;
+    request.release.control_schema_version = 9;
     let mut prepared = crate::prepare_platform_snapshot(&data_dir, &request).unwrap();
     assert!(prepared.manifest.files.iter().any(|file| {
         file.role == open_compute_core::SnapshotFileRole::DurableObjectFile
@@ -3054,17 +3082,12 @@ fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
     drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
     drop(storage);
 
-    let control = Connection::open(root.join("control.sqlite")).unwrap();
-    control
-        .execute("DELETE FROM schema_migrations WHERE version = 8", [])
-        .unwrap();
-    control.pragma_update(None, "user_version", 7).unwrap();
-    drop(control);
+    downgrade_control_to_v8(&root.join("control.sqlite"));
     let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
     let before = crate::inspect_offline_schema(&data_dir, 5_000, 1).unwrap();
-    assert_eq!(before.control, 7);
+    assert_eq!(before.control, 8);
     let after = crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap();
-    assert_eq!(after.control, 8);
+    assert_eq!(after.control, 9);
     assert_eq!(
         crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap(),
         after
@@ -3115,6 +3138,783 @@ fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
             .unwrap_err()
             .code(),
         ErrorCode::RestoreInvalid
+    );
+}
+
+#[test]
+fn p2_2_queue_catalog_projection_and_config_fences_are_exact() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    let scheduler = crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap();
+    let account_id = storage.identity().default_account_id;
+    let queue_id = open_compute_core::QueueId::generate();
+    let repository = crate::QueueRepository::new(storage.db());
+    let queue = repository
+        .insert_creating(
+            account_id,
+            queue_id,
+            "events",
+            crate::QueueConfig::default(),
+            10,
+        )
+        .unwrap();
+    assert_eq!(queue.state, crate::QueueState::Creating);
+    assert_eq!(queue.availability, crate::QueueAvailability::Degraded);
+    let projection = crate::QueueProjection {
+        queue_id,
+        account_id,
+        lifecycle_generation: queue.lifecycle_generation,
+        config_generation: queue.config_generation,
+        config: queue.config,
+        created_at_ms: queue.created_at_ms,
+        updated_at_ms: queue.updated_at_ms,
+    };
+    scheduler.create_queue_projection(&projection).unwrap();
+    scheduler.verify_queue_projection(&projection).unwrap();
+    let ready = repository.mark_ready(account_id, queue_id, 11).unwrap();
+    assert_eq!(ready.state, crate::QueueState::Ready);
+    assert_eq!(ready.availability, crate::QueueAvailability::Healthy);
+    assert_eq!(
+        repository
+            .insert_creating(
+                account_id,
+                open_compute_core::QueueId::generate(),
+                "events",
+                crate::QueueConfig::default(),
+                12,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueNameConflict
+    );
+    let raw = Connection::open(storage.data_dir().control_db_path()).unwrap();
+    assert!(
+        raw.execute(
+            "UPDATE queues SET delivery_delay_seconds = 4 WHERE id = ?1",
+            [queue_id.to_string()],
+        )
+        .is_err()
+    );
+    assert!(
+        raw.execute(
+            "UPDATE queues SET config_generation = config_generation + 1 WHERE id = ?1",
+            [queue_id.to_string()],
+        )
+        .is_err()
+    );
+    assert!(
+        raw.execute(
+            "UPDATE queues SET name = 'combined', delivery_delay_seconds = 4,
+                    config_generation = config_generation + 1,
+                    availability = 'degraded', availability_code = 'QUEUE_CONFIG_PENDING'
+             WHERE id = ?1",
+            [queue_id.to_string()],
+        )
+        .is_err()
+    );
+    drop(raw);
+
+    scheduler.begin_queue_config(queue_id, 1, 1, 20).unwrap();
+    assert_eq!(
+        scheduler
+            .enqueue_queue(
+                &crate::QueueEnqueueRequest {
+                    queue_id,
+                    lifecycle_generation: 1,
+                    config_generation: 1,
+                    batch_delay_seconds: None,
+                    messages: vec![crate::QueueMessageInput {
+                        content_type: crate::QueueContentType::Text,
+                        body: b"blocked".to_vec(),
+                        delay_seconds: None,
+                    }],
+                },
+                20,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueConfigPending
+    );
+    let mut next_config = ready.config;
+    next_config.delivery_delay_seconds = 9;
+    next_config.max_backlog_bytes = 4096;
+    let pending = repository
+        .write_config_pending(account_id, queue_id, 1, next_config, 21)
+        .unwrap();
+    let next_projection = crate::QueueProjection {
+        queue_id,
+        account_id,
+        lifecycle_generation: 1,
+        config_generation: 2,
+        config: next_config,
+        created_at_ms: pending.created_at_ms,
+        updated_at_ms: pending.updated_at_ms,
+    };
+    scheduler.project_queue_config(&next_projection).unwrap();
+    let healthy = repository
+        .mark_config_healthy(
+            account_id,
+            queue_id,
+            2,
+            open_compute_core::RequestId::generate(),
+            22,
+        )
+        .unwrap();
+    scheduler.finish_queue_config(queue_id, 1, 2, 23).unwrap();
+    scheduler.verify_queue_projection(&next_projection).unwrap();
+    assert_eq!(healthy.config_generation, 2);
+    assert_eq!(healthy.config.delivery_delay_seconds, 9);
+}
+
+#[test]
+fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    let scheduler = crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap();
+    let queue_id = open_compute_core::QueueId::generate();
+    let queue_config = crate::QueueConfig {
+        delivery_delay_seconds: 7,
+        retention_seconds: 60,
+        max_backlog_bytes: 8,
+        ..crate::QueueConfig::default()
+    };
+    scheduler
+        .create_queue_projection(&crate::QueueProjection {
+            queue_id,
+            account_id: storage.identity().default_account_id,
+            lifecycle_generation: 1,
+            config_generation: 1,
+            config: queue_config,
+            created_at_ms: 1_000,
+            updated_at_ms: 1_000,
+        })
+        .unwrap();
+    let result = scheduler
+        .enqueue_queue(
+            &crate::QueueEnqueueRequest {
+                queue_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: Some(3),
+                messages: vec![
+                    crate::QueueMessageInput {
+                        content_type: crate::QueueContentType::Json,
+                        body: b"{}".to_vec(),
+                        delay_seconds: None,
+                    },
+                    crate::QueueMessageInput {
+                        content_type: crate::QueueContentType::Bytes,
+                        body: vec![1, 2, 3],
+                        delay_seconds: Some(0),
+                    },
+                ],
+            },
+            1_000,
+        )
+        .unwrap();
+    assert_eq!(result.message_ids.len(), 2);
+    assert_eq!(result.metrics.backlog_count, 2);
+    assert_eq!(result.metrics.backlog_bytes, 5);
+    let reader = Connection::open(&scheduler_path).unwrap();
+    let rows = reader
+        .prepare(
+            "SELECT available_at_ms, expires_at_ms, content_type, body
+             FROM queue_messages WHERE queue_id = ?1 ORDER BY seq",
+        )
+        .unwrap()
+        .query_map([queue_id.to_string()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(rows[0], (4_000, 61_000, "json".to_owned(), b"{}".to_vec()));
+    assert_eq!(rows[1], (1_000, 61_000, "bytes".to_owned(), vec![1, 2, 3]));
+    assert_eq!(
+        scheduler
+            .enqueue_queue(
+                &crate::QueueEnqueueRequest {
+                    queue_id,
+                    lifecycle_generation: 1,
+                    config_generation: 1,
+                    batch_delay_seconds: None,
+                    messages: vec![crate::QueueMessageInput {
+                        content_type: crate::QueueContentType::Text,
+                        body: b"more".to_vec(),
+                        delay_seconds: None,
+                    }],
+                },
+                2_000,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueBacklogLimitExceeded
+    );
+    assert_eq!(
+        scheduler
+            .queue_metrics(queue_id, 1, 1)
+            .unwrap()
+            .backlog_count,
+        2
+    );
+    let swept = scheduler.sweep_queue_retention(61_000, 100, 1024).unwrap();
+    assert_eq!(swept.messages, 2);
+    assert_eq!(swept.bytes, 5);
+    assert_eq!(
+        scheduler
+            .queue_metrics(queue_id, 1, 1)
+            .unwrap()
+            .backlog_count,
+        0
+    );
+    assert!(scheduler.queue_counter_mismatches().unwrap().is_empty());
+    drop(reader);
+    drop(scheduler);
+    let inspection = crate::inspect_scheduler_db(&scheduler_path, 5_000, 61_000).unwrap();
+    assert_eq!(inspection.schema_version, 2);
+    assert_eq!(inspection.queue.queues, 1);
+    assert_eq!(inspection.queue.backlog_messages, 0);
+    assert_eq!(inspection.queue.counter_mismatches, 0);
+}
+
+#[test]
+fn p2_2_concurrent_queue_enqueues_never_exceed_backlog_quota() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    let scheduler = Arc::new(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    let queue_id = open_compute_core::QueueId::generate();
+    scheduler
+        .create_queue_projection(&crate::QueueProjection {
+            queue_id,
+            account_id: storage.identity().default_account_id,
+            lifecycle_generation: 1,
+            config_generation: 1,
+            config: crate::QueueConfig {
+                max_backlog_bytes: 10,
+                ..crate::QueueConfig::default()
+            },
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        })
+        .unwrap();
+    let barrier = Arc::new(Barrier::new(9));
+    let mut threads = Vec::new();
+    for _ in 0..8 {
+        let scheduler = scheduler.clone();
+        let barrier = barrier.clone();
+        threads.push(thread::spawn(move || {
+            barrier.wait();
+            scheduler.enqueue_queue(
+                &crate::QueueEnqueueRequest {
+                    queue_id,
+                    lifecycle_generation: 1,
+                    config_generation: 1,
+                    batch_delay_seconds: None,
+                    messages: vec![crate::QueueMessageInput {
+                        content_type: crate::QueueContentType::Bytes,
+                        body: vec![1, 2, 3],
+                        delay_seconds: Some(0),
+                    }],
+                },
+                2,
+            )
+        }));
+    }
+    barrier.wait();
+    let mut accepted = 0_u64;
+    for thread in threads {
+        match thread.join().unwrap() {
+            Ok(_) => accepted += 1,
+            Err(error) => assert_eq!(error.code(), ErrorCode::QueueBacklogLimitExceeded),
+        }
+    }
+    assert_eq!(accepted, 3);
+    let metrics = scheduler.queue_metrics(queue_id, 1, 1).unwrap();
+    assert_eq!(metrics.backlog_count, 3);
+    assert_eq!(metrics.backlog_bytes, 9);
+    assert!(scheduler.queue_counter_mismatches().unwrap().is_empty());
+}
+
+#[test]
+fn p2_2_queue_catalog_idempotency_and_failure_boundaries_are_complete() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let repository = crate::QueueRepository::new(storage.db());
+    let workers = WorkerRepository::new(storage.db());
+    let fingerprint = [7_u8; 32];
+    let other_fingerprint = [8_u8; 32];
+
+    assert_eq!(crate::QueueState::Creating.as_str(), "creating");
+    assert_eq!(crate::QueueState::Ready.as_str(), "ready");
+    assert_eq!(crate::QueueState::Deleting.as_str(), "deleting");
+    assert_eq!(crate::QueueState::Tombstoned.as_str(), "tombstoned");
+    assert_eq!(
+        "creating".parse::<crate::QueueState>().unwrap(),
+        crate::QueueState::Creating
+    );
+    assert_eq!(
+        "tombstoned".parse::<crate::QueueState>().unwrap(),
+        crate::QueueState::Tombstoned
+    );
+    assert_eq!(
+        "invalid".parse::<crate::QueueState>().unwrap_err().code(),
+        ErrorCode::QueueInvariantViolation
+    );
+    assert_eq!(crate::QueueAvailability::Healthy.as_str(), "healthy");
+    assert_eq!(crate::QueueAvailability::Degraded.as_str(), "degraded");
+    assert_eq!(
+        crate::QueueAvailability::Unavailable.as_str(),
+        "unavailable"
+    );
+    assert_eq!(
+        "degraded".parse::<crate::QueueAvailability>().unwrap(),
+        crate::QueueAvailability::Degraded
+    );
+    assert_eq!(
+        "invalid"
+            .parse::<crate::QueueAvailability>()
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueInvariantViolation
+    );
+
+    for invalid in [
+        crate::QueueConfig {
+            delivery_delay_seconds: crate::QUEUE_MAX_DELAY_SECONDS + 1,
+            ..crate::QueueConfig::default()
+        },
+        crate::QueueConfig {
+            retention_seconds: crate::QUEUE_MIN_RETENTION_SECONDS - 1,
+            ..crate::QueueConfig::default()
+        },
+        crate::QueueConfig {
+            max_message_bytes: 0,
+            ..crate::QueueConfig::default()
+        },
+        crate::QueueConfig {
+            max_batch_messages: 0,
+            ..crate::QueueConfig::default()
+        },
+        crate::QueueConfig {
+            max_batch_bytes: 0,
+            ..crate::QueueConfig::default()
+        },
+        crate::QueueConfig {
+            max_backlog_bytes: 0,
+            ..crate::QueueConfig::default()
+        },
+    ] {
+        assert_eq!(
+            invalid.validate().unwrap_err().code(),
+            ErrorCode::LimitInvalid
+        );
+    }
+    for name in ["", "bad\nname"] {
+        assert_eq!(
+            repository
+                .insert_creating(
+                    account,
+                    open_compute_core::QueueId::generate(),
+                    name,
+                    crate::QueueConfig::default(),
+                    1,
+                )
+                .unwrap_err()
+                .code(),
+            ErrorCode::ConfigInvalid
+        );
+    }
+    assert_eq!(
+        repository.list(account, None, 0).unwrap_err().code(),
+        ErrorCode::LimitInvalid
+    );
+    assert_eq!(
+        repository.list_reconcile(1001).unwrap_err().code(),
+        ErrorCode::LimitInvalid
+    );
+    assert_eq!(
+        repository.list_running_mutations(0).unwrap_err().code(),
+        ErrorCode::LimitInvalid
+    );
+    assert_eq!(
+        repository
+            .insert_creating(
+                AccountId::generate(),
+                open_compute_core::QueueId::generate(),
+                "orphan",
+                crate::QueueConfig::default(),
+                1,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::AccountNotFound
+    );
+
+    let running_id = open_compute_core::QueueId::generate();
+    let running = repository
+        .reserve_create(
+            account,
+            running_id,
+            "running",
+            crate::QueueConfig::default(),
+            "create-running",
+            "key",
+            &fingerprint,
+            10,
+            100,
+            10,
+        )
+        .unwrap();
+    assert!(matches!(
+        running,
+        crate::QueueCreateReservation::Reserved(_)
+    ));
+    assert_eq!(
+        repository
+            .reserve_create(
+                account,
+                running_id,
+                "running",
+                crate::QueueConfig::default(),
+                "create-running",
+                "key",
+                &fingerprint,
+                10,
+                100,
+                10,
+            )
+            .unwrap(),
+        crate::QueueCreateReservation::Running
+    );
+    assert_eq!(
+        repository
+            .reserve_create(
+                account,
+                running_id,
+                "running",
+                crate::QueueConfig::default(),
+                "create-running",
+                "key",
+                &other_fingerprint,
+                10,
+                100,
+                10,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+
+    let complete_id = open_compute_core::QueueId::generate();
+    let complete = match repository
+        .reserve_create(
+            account,
+            complete_id,
+            "complete",
+            crate::QueueConfig::default(),
+            "create-complete",
+            "key",
+            &fingerprint,
+            11,
+            100,
+            10,
+        )
+        .unwrap()
+    {
+        crate::QueueCreateReservation::Reserved(queue) => queue,
+        other => panic!("unexpected reservation: {other:?}"),
+    };
+    repository
+        .complete_reconciled_create(&complete, b"{\"complete\":true}")
+        .unwrap();
+    assert_eq!(
+        repository
+            .reserve_create(
+                account,
+                complete_id,
+                "complete",
+                crate::QueueConfig::default(),
+                "create-complete",
+                "key",
+                &fingerprint,
+                11,
+                100,
+                10,
+            )
+            .unwrap(),
+        crate::QueueCreateReservation::Complete(b"{\"complete\":true}".to_vec())
+    );
+
+    let failed_id = open_compute_core::QueueId::generate();
+    assert!(matches!(
+        repository
+            .reserve_create(
+                account,
+                failed_id,
+                "failed",
+                crate::QueueConfig::default(),
+                "create-failed",
+                "key",
+                &fingerprint,
+                12,
+                100,
+                10,
+            )
+            .unwrap(),
+        crate::QueueCreateReservation::Reserved(_)
+    ));
+    workers
+        .fail_idempotency(
+            account,
+            "queue.create",
+            "create-failed",
+            &fingerprint,
+            b"{\"failed\":true}",
+        )
+        .unwrap();
+    assert_eq!(
+        repository
+            .reserve_create(
+                account,
+                failed_id,
+                "failed",
+                crate::QueueConfig::default(),
+                "create-failed",
+                "key",
+                &fingerprint,
+                12,
+                100,
+                10,
+            )
+            .unwrap(),
+        crate::QueueCreateReservation::Failed(b"{\"failed\":true}".to_vec())
+    );
+    assert_eq!(
+        repository
+            .reserve_create(
+                account,
+                open_compute_core::QueueId::generate(),
+                "quota",
+                crate::QueueConfig::default(),
+                "create-quota",
+                "key",
+                &fingerprint,
+                13,
+                100,
+                0,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::QuotaExceeded
+    );
+
+    let lifecycle_id = open_compute_core::QueueId::generate();
+    let lifecycle = repository
+        .insert_creating(
+            account,
+            lifecycle_id,
+            "lifecycle",
+            crate::QueueConfig::default(),
+            20,
+        )
+        .unwrap();
+    assert_eq!(
+        repository
+            .get(AccountId::generate(), lifecycle_id)
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueNotFound
+    );
+    assert_eq!(
+        repository
+            .rename(
+                account,
+                lifecycle_id,
+                "too-early",
+                open_compute_core::RequestId::generate(),
+                21
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueNotReady
+    );
+    let ready = repository.mark_ready(account, lifecycle_id, 22).unwrap();
+    assert_eq!(ready.state, crate::QueueState::Ready);
+    assert_eq!(
+        repository
+            .mark_ready(account, lifecycle_id, 23)
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueNotReady
+    );
+    assert_eq!(
+        repository
+            .write_config_pending(account, lifecycle_id, 9, ready.config, 24)
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueConfigPending
+    );
+    assert_eq!(
+        repository
+            .mark_config_healthy(
+                account,
+                lifecycle_id,
+                1,
+                open_compute_core::RequestId::generate(),
+                25,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueConfigPending
+    );
+    assert_eq!(
+        repository
+            .begin_delete(account, lifecycle_id, 9, 26)
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueNotReady
+    );
+    repository
+        .begin_delete(account, lifecycle_id, 1, 27)
+        .unwrap();
+    assert_eq!(
+        repository
+            .begin_delete(account, lifecycle_id, 1, 28)
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueNotReady
+    );
+    repository
+        .mark_tombstoned(
+            account,
+            lifecycle_id,
+            open_compute_core::RequestId::generate(),
+            29,
+        )
+        .unwrap();
+    assert_eq!(
+        repository
+            .mark_tombstoned(
+                account,
+                lifecycle_id,
+                open_compute_core::RequestId::generate(),
+                30,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueNotReady
+    );
+
+    let mutation_id = lifecycle.id;
+    let mutation = crate::RunningQueueMutation {
+        account_id: account,
+        scope: format!("queue.patch:{mutation_id}"),
+        idempotency_key: "mutation".to_owned(),
+        request_fingerprint: fingerprint,
+        queue_id: mutation_id,
+        intent_json: b"{\"version\":1}".to_vec(),
+    };
+    assert_eq!(
+        repository
+            .reserve_mutation(
+                account,
+                &mutation.scope,
+                &mutation.idempotency_key,
+                "key",
+                &fingerprint,
+                mutation_id,
+                &mutation.intent_json,
+                40,
+                100,
+            )
+            .unwrap(),
+        IdempotencyReservation::Reserved
+    );
+    assert_eq!(
+        repository
+            .reserve_mutation(
+                account,
+                &mutation.scope,
+                &mutation.idempotency_key,
+                "key",
+                &fingerprint,
+                mutation_id,
+                &mutation.intent_json,
+                40,
+                100,
+            )
+            .unwrap(),
+        IdempotencyReservation::Running
+    );
+    assert_eq!(
+        repository.list_running_mutations(10).unwrap(),
+        vec![mutation.clone()]
+    );
+    repository
+        .replace_mutation_intent(&mutation, b"{\"version\":1,\"changed\":true}")
+        .unwrap();
+    let mut wrong = mutation.clone();
+    wrong.request_fingerprint = other_fingerprint;
+    assert_eq!(
+        repository
+            .replace_mutation_intent(&wrong, b"{}")
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    assert_eq!(
+        repository
+            .reserve_mutation(
+                account,
+                &mutation.scope,
+                &mutation.idempotency_key,
+                "key",
+                &other_fingerprint,
+                mutation_id,
+                &mutation.intent_json,
+                40,
+                100,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    workers
+        .complete_idempotency_with_queue_ref(
+            account,
+            &mutation.scope,
+            &mutation.idempotency_key,
+            &fingerprint,
+            b"{\"done\":true}",
+            mutation_id,
+        )
+        .unwrap();
+    assert_eq!(
+        repository
+            .reserve_mutation(
+                account,
+                &mutation.scope,
+                &mutation.idempotency_key,
+                "key",
+                &fingerprint,
+                mutation_id,
+                &mutation.intent_json,
+                40,
+                100,
+            )
+            .unwrap(),
+        IdempotencyReservation::Complete(b"{\"done\":true}".to_vec())
     );
 }
 

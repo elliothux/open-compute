@@ -9,6 +9,7 @@ pub mod durable_objects;
 pub mod kv;
 pub mod pins;
 pub mod pipeline;
+pub mod queue_lifecycle;
 pub mod r2;
 pub mod resource_lifecycle;
 pub mod resource_pins;
@@ -23,9 +24,10 @@ pub use descriptor::{
     BindingDescriptorV1, COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN,
     COMPATIBILITY_FLAGS_ALLOWED, D1_FACADE_MODULE_NAME, DO_ALARM_SHIM_MODULE_NAME,
     DO_FACADE_MODULE_NAME, DO_ID_CODEC_MODULE_NAME, GLOBAL_OUTBOUND_POLICY_VERSION,
-    LOADED_ISOLATE_WRAPPER_MODULE_NAME, LoadedIsolateInjectionV1, R2_FACADE_MODULE_NAME,
-    SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, loader_key,
-    parse_loader_key, validate_compatibility, validate_env_name,
+    LOADED_ISOLATE_WRAPPER_MODULE_NAME, LoadedIsolateInjectionV1, QUEUE_FACADE_MODULE_NAME,
+    QueueProducerBindingDescriptorV1, R2_FACADE_MODULE_NAME, SecretDescriptor,
+    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, loader_key, parse_loader_key,
+    validate_compatibility, validate_env_name,
 };
 pub use durable_objects::DurableObjectResourceDriver;
 pub use kv::KvResourceDriver;
@@ -35,6 +37,9 @@ pub use pipeline::{
     DeploymentBindingInput, DeploymentBundle, DeploymentController, RuntimeValidator,
     ValidationCandidate,
 };
+pub use queue_lifecycle::{
+    CreateQueueOutcome, CreateQueueRequest, CreateQueueResult, DeleteQueueResult, QueueController,
+};
 pub use r2::R2ResourceDriver;
 pub use resource_lifecycle::{
     CreateResourceOutcome, CreateResourceRequest, CreateResourceResult, ReconcileOutcome,
@@ -42,8 +47,8 @@ pub use resource_lifecycle::{
 };
 pub use resource_pins::{ResourcePin, ResourcePins};
 pub use runtime_source::{
-    DurableObjectFacadeIdentity, RuntimeBinding, RuntimeModule, RuntimePayload, RuntimeScope,
-    RuntimeSnapshot, RuntimeSource,
+    DurableObjectFacadeIdentity, RuntimeBinding, RuntimeModule, RuntimePayload,
+    RuntimeQueueBinding, RuntimeScope, RuntimeSnapshot, RuntimeSource,
 };
 
 #[cfg(test)]

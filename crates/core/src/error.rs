@@ -273,6 +273,38 @@ pub enum ErrorCode {
     SchedulerKindNotEnabled,
     /// A Durable Object alarm authority mutation could not update its projection.
     DoAlarmIndexUnavailable,
+    /// Requested Queue does not exist in the authorized account.
+    QueueNotFound,
+    /// A live Queue already owns the requested display name.
+    QueueNameConflict,
+    /// Queue lifecycle does not currently admit the requested operation.
+    QueueNotReady,
+    /// Queue configuration is fenced while scheduler projection converges.
+    QueueConfigPending,
+    /// Queue still has a producer, consumer, or dead-letter referrer.
+    QueueReferenced,
+    /// A non-force delete was requested for a Queue with retained messages.
+    QueueNotEmpty,
+    /// Queue content type is unknown or deliberately unsupported.
+    QueueContentTypeUnsupported,
+    /// Queue message, body type, JSON value, or iterable is invalid.
+    QueueInvalidMessage,
+    /// One serialized Queue message exceeds the capability limit.
+    QueueMessageTooLarge,
+    /// Queue batch count or serialized body total exceeds its capability limit.
+    QueueBatchLimitExceeded,
+    /// Queue delivery delay is not an integer in the supported range.
+    QueueDelayInvalid,
+    /// Queue-local durable backlog capacity would be exceeded.
+    QueueBacklogLimitExceeded,
+    /// Queue scheduler storage is temporarily unavailable.
+    QueueStorageUnavailable,
+    /// Queue mutation may have committed before its response was observed.
+    QueueSendResultUnknown,
+    /// Durable Object Queue producer is disabled until output-gate equivalence is proven.
+    QueueDoOutputGateUnsupported,
+    /// Queue catalog, binding, projection, or counter authority is inconsistent.
+    QueueInvariantViolation,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -413,6 +445,22 @@ impl ErrorCode {
             Self::SchedulerInternalProtocolError => "SCHEDULER_INTERNAL_PROTOCOL_ERROR",
             Self::SchedulerKindNotEnabled => "SCHEDULER_KIND_NOT_ENABLED",
             Self::DoAlarmIndexUnavailable => "DO_ALARM_INDEX_UNAVAILABLE",
+            Self::QueueNotFound => "QUEUE_NOT_FOUND",
+            Self::QueueNameConflict => "QUEUE_NAME_CONFLICT",
+            Self::QueueNotReady => "QUEUE_NOT_READY",
+            Self::QueueConfigPending => "QUEUE_CONFIG_PENDING",
+            Self::QueueReferenced => "QUEUE_REFERENCED",
+            Self::QueueNotEmpty => "QUEUE_NOT_EMPTY",
+            Self::QueueContentTypeUnsupported => "QUEUE_CONTENT_TYPE_UNSUPPORTED",
+            Self::QueueInvalidMessage => "QUEUE_INVALID_MESSAGE",
+            Self::QueueMessageTooLarge => "QUEUE_MESSAGE_TOO_LARGE",
+            Self::QueueBatchLimitExceeded => "QUEUE_BATCH_LIMIT_EXCEEDED",
+            Self::QueueDelayInvalid => "QUEUE_DELAY_INVALID",
+            Self::QueueBacklogLimitExceeded => "QUEUE_BACKLOG_LIMIT_EXCEEDED",
+            Self::QueueStorageUnavailable => "QUEUE_STORAGE_UNAVAILABLE",
+            Self::QueueSendResultUnknown => "QUEUE_SEND_RESULT_UNKNOWN",
+            Self::QueueDoOutputGateUnsupported => "QUEUE_DO_OUTPUT_GATE_UNSUPPORTED",
+            Self::QueueInvariantViolation => "QUEUE_INVARIANT_VIOLATION",
             Self::Internal => "INTERNAL",
         }
     }

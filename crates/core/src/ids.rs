@@ -83,6 +83,8 @@ typed_id!(WorkerId, "worker");
 typed_id!(DeploymentId, "deployment");
 typed_id!(ResourceId, "resource");
 typed_id!(BindingId, "deployment binding");
+typed_id!(QueueId, "Queue resource");
+typed_id!(QueueMessageId, "Queue message");
 
 fn canonical(uuid: Uuid) -> String {
     uuid.as_hyphenated()

@@ -2,8 +2,8 @@
 
 use crate::bundle::{BundleLimits, CanonicalBundle, ModuleType};
 use crate::descriptor::{
-    BindingDescriptorV1, SecretDescriptor, WorkerCodeDescriptorV1, ciphertext_sha256,
-    parse_loader_key,
+    BindingDescriptorV1, QueueProducerBindingDescriptorV1, SecretDescriptor,
+    WorkerCodeDescriptorV1, ciphertext_sha256, parse_loader_key,
 };
 use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
@@ -47,6 +47,15 @@ pub struct RuntimeBinding {
     pub descriptor_sha256: String,
     /// Namespace-local synchronous ID material, present only for Durable Objects.
     pub durable_object_identity: Option<DurableObjectFacadeIdentity>,
+}
+
+/// One verified immutable Queue producer binding.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuntimeQueueBinding {
+    /// Canonical Queue producer descriptor supplied only to the loader binding factory.
+    pub descriptor: QueueProducerBindingDescriptorV1,
+    /// Lowercase canonical descriptor SHA-256.
+    pub descriptor_sha256: String,
 }
 
 /// Secret-bearing Durable Object facade material supplied only to the loaded-isolate factory.
@@ -109,6 +118,8 @@ pub struct RuntimeSnapshot {
     pub secrets: BTreeMap<String, SecretString>,
     /// Verified runtime bindings. Empty in validation and probe scopes.
     pub bindings: Vec<RuntimeBinding>,
+    /// Verified Queue producer bindings. Empty in validation and probe scopes.
+    pub queue_bindings: Vec<RuntimeQueueBinding>,
     /// Immutable resource limits.
     pub limits: serde_json::Value,
 }
@@ -123,6 +134,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("var_count", &self.vars.len())
             .field("secret_count", &self.secrets.len())
             .field("binding_count", &self.bindings.len())
+            .field("queue_binding_count", &self.queue_bindings.len())
             .finish_non_exhaustive()
     }
 }
@@ -312,7 +324,27 @@ impl RuntimeSource {
                 },
             });
         }
-        let descriptor = WorkerCodeDescriptorV1::new(
+        let mut queue_binding_descriptors = Vec::with_capacity(snapshot.queue_bindings.len());
+        let mut runtime_queue_bindings = Vec::with_capacity(snapshot.queue_bindings.len());
+        for binding in &snapshot.queue_bindings {
+            let descriptor = QueueProducerBindingDescriptorV1::new(
+                binding.id,
+                binding.name.clone(),
+                binding.queue_id,
+                binding.queue_lifecycle_generation,
+                binding.capability_version,
+            )?;
+            let digest = descriptor.sha256()?;
+            if digest != binding.descriptor_sha256 {
+                return Err(invariant());
+            }
+            queue_binding_descriptors.push(descriptor.clone());
+            runtime_queue_bindings.push(RuntimeQueueBinding {
+                descriptor,
+                descriptor_sha256: hex::encode(digest),
+            });
+        }
+        let descriptor = WorkerCodeDescriptorV1::new_with_queue_bindings(
             account_id,
             worker_id,
             deployment_id,
@@ -323,6 +355,7 @@ impl RuntimeSource {
             vars.clone(),
             secret_descriptors,
             binding_descriptors,
+            queue_binding_descriptors,
             snapshot.deployment.limits.clone(),
             snapshot.deployment.loader_schema_version,
         )?;
@@ -369,6 +402,7 @@ impl RuntimeSource {
             vars,
             secrets,
             bindings: runtime_bindings,
+            queue_bindings: runtime_queue_bindings,
             limits: snapshot.deployment.limits,
         })
     }
@@ -400,7 +434,7 @@ impl RuntimeSource {
         }
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
-        struct BindingPayload<'a> {
+        struct ResourceBindingPayload<'a> {
             #[serde(flatten)]
             descriptor: &'a BindingDescriptorV1,
             descriptor_sha256: &'a str,
@@ -408,6 +442,19 @@ impl RuntimeSource {
             namespace_prefix: Option<&'a str>,
             #[serde(skip_serializing_if = "Option::is_none")]
             namespace_name_key: Option<&'a str>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct QueueBindingPayload<'a> {
+            #[serde(flatten)]
+            descriptor: &'a QueueProducerBindingDescriptorV1,
+            descriptor_sha256: &'a str,
+        }
+        #[derive(Serialize)]
+        #[serde(untagged)]
+        enum BindingPayload<'a> {
+            Resource(ResourceBindingPayload<'a>),
+            Queue(QueueBindingPayload<'a>),
         }
         let modules = snapshot
             .modules
@@ -432,18 +479,26 @@ impl RuntimeSource {
         let bindings = snapshot
             .bindings
             .iter()
-            .map(|binding| BindingPayload {
-                descriptor: &binding.descriptor,
-                descriptor_sha256: &binding.descriptor_sha256,
-                namespace_prefix: binding
-                    .durable_object_identity
-                    .as_ref()
-                    .map(|identity| identity.namespace_prefix.as_str()),
-                namespace_name_key: binding
-                    .durable_object_identity
-                    .as_ref()
-                    .map(|identity| identity.namespace_name_key.expose()),
+            .map(|binding| {
+                BindingPayload::Resource(ResourceBindingPayload {
+                    descriptor: &binding.descriptor,
+                    descriptor_sha256: &binding.descriptor_sha256,
+                    namespace_prefix: binding
+                        .durable_object_identity
+                        .as_ref()
+                        .map(|identity| identity.namespace_prefix.as_str()),
+                    namespace_name_key: binding
+                        .durable_object_identity
+                        .as_ref()
+                        .map(|identity| identity.namespace_name_key.expose()),
+                })
             })
+            .chain(snapshot.queue_bindings.iter().map(|binding| {
+                BindingPayload::Queue(QueueBindingPayload {
+                    descriptor: &binding.descriptor,
+                    descriptor_sha256: &binding.descriptor_sha256,
+                })
+            }))
             .collect();
         let bytes = serde_json::to_vec(&Payload {
             schema_version: 1,

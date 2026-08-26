@@ -1,8 +1,9 @@
 //! Offline, forward-only P1 schema inspection and upgrade application.
 
+use crate::scheduler::inspect_scheduler_schema_version;
 use crate::{
     ControlDb, D1_DATABASE_SCHEMA_VERSION, DataDir, KV_SCHEMA_VERSION, SchedulerStore,
-    current_scheduler_schema_version, inspect_control_db, inspect_scheduler_db, migrations,
+    current_scheduler_schema_version, inspect_control_db, migrations,
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{ErrorCode, PlatformError};
@@ -74,9 +75,10 @@ fn inspect_schema_with_control(
     control_db: &ControlDb,
     control: u32,
     busy_timeout_ms: u64,
-    now_ms: i64,
+    _now_ms: i64,
 ) -> Result<OfflineSchemaState, PlatformError> {
-    let scheduler = inspect_scheduler_db(&data_dir.scheduler_db_path(), busy_timeout_ms, now_ms)?;
+    let scheduler =
+        inspect_scheduler_schema_version(&data_dir.scheduler_db_path(), busy_timeout_ms)?;
     let resources = control_db.with_read(|connection| {
         let mut statement = connection
             .prepare(
@@ -133,7 +135,7 @@ fn inspect_schema_with_control(
     }
     Ok(OfflineSchemaState {
         control,
-        scheduler: u32::try_from(scheduler.schema_version).map_err(|_| upgrade_invalid())?,
+        scheduler: u32::try_from(scheduler).map_err(|_| upgrade_invalid())?,
         kv_min: kv_versions
             .iter()
             .copied()

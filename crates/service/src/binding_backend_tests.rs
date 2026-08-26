@@ -446,6 +446,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
         d1: None,
         do_config: DurableObjectsConfig::default(),
         scheduler: None,
+        queue: None,
     };
     let binding_id = BindingId::generate();
     let path = format!("/internal/bindings/v1/kv/{binding_id}/get");
@@ -1348,6 +1349,7 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
             d1: None,
             do_config: DurableObjectsConfig::default(),
             scheduler: None,
+            queue: None,
         };
         dispatch_frame(
             state,

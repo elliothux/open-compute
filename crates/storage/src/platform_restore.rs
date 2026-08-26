@@ -220,15 +220,12 @@ fn validate_staging(
             "restore control identity does not match the authenticated manifest",
         ));
     }
-    let scheduler = inspect_scheduler_db(
+    let scheduler = crate::scheduler::inspect_scheduler_schema_version(
         &root.join("scheduler.sqlite"),
         busy_timeout_ms,
-        manifest.created_at_ms,
     )
     .map_err(|error| restore_stage(&error, "restore scheduler authority is invalid"))?;
-    if u32::try_from(scheduler.schema_version).ok()
-        != manifest.source_schemas.get("scheduler").copied()
-    {
+    if u32::try_from(scheduler).ok() != manifest.source_schemas.get("scheduler").copied() {
         return Err(PlatformError::new(
             ErrorCode::RestoreInvalid,
             "restore scheduler schema does not match the authenticated manifest",

@@ -13,6 +13,7 @@ use crate::kv_http::KvApiState;
 use crate::metrics::{
     DoFacetReloadReason, KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage,
 };
+use crate::queue_http::QueueApiState;
 use crate::r2_backend::R2BindingService;
 use crate::r2_http::R2ApiState;
 use crate::r2_maintenance::R2Maintenance;
@@ -545,6 +546,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     )
     .with_metrics(metrics.clone())
     .with_scheduler(scheduler_store.clone());
+    let queue_api = scheduler_store.as_ref().map(|scheduler| {
+        QueueApiState::new(storage.clone(), scheduler.clone())
+            .with_metrics(metrics.clone())
+            .with_default_max_backlog_bytes(loaded.config.queues.default_max_backlog_bytes)
+    });
+    if let Some(api) = &queue_api {
+        api.reconcile_pending().await?;
+    }
     metrics.set_do_runtime_gauges(0, 0, 0);
     let maintenance_do_api = do_api.clone();
     let supervisor_for_http = supervisor_handle.clone();
@@ -581,6 +590,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     .with_r2_api(r2_api)
     .with_d1_api(d1_api)
     .with_do_api(do_api)
+    .with_queue_api(queue_api)
     .with_scheduler(scheduler_service.clone());
 
     let public_listener = match http::bind(public_addr).await {
@@ -721,6 +731,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let binding_auth = binding_generation_auth.clone();
     let binding_metrics = metrics.clone();
     let binding_do_config = loaded.config.durable_objects.clone();
+    let binding_queue_config = loaded.config.queues.clone();
     let binding_backend_task = tokio::spawn(async move {
         serve_binding_backend_with_scheduler(
             binding_backend_listener,
@@ -732,6 +743,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             Some(r2_backend),
             Some(d1_backend),
             binding_do_config,
+            binding_queue_config,
             scheduler_store,
             async move {
                 let _ = shutdown_binding.changed().await;

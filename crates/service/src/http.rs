@@ -6,6 +6,7 @@ use crate::do_http::{self, DoApiState};
 use crate::health::HealthCoordinator;
 use crate::kv_http::{self, KvApiState};
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
+use crate::queue_http::{self, QueueApiState};
 use crate::r2_http::{self, R2ApiState};
 use crate::scheduler::SchedulerService;
 use crate::scheduler_http;
@@ -50,6 +51,7 @@ pub struct HttpState {
     r2_api: Option<Arc<R2ApiState>>,
     d1_api: Option<Arc<D1ApiState>>,
     do_api: Option<Arc<DoApiState>>,
+    queue_api: Option<Arc<QueueApiState>>,
     scheduler: Option<Arc<SchedulerService>>,
 }
 
@@ -63,6 +65,7 @@ impl std::fmt::Debug for HttpState {
             .field("r2_api", &self.r2_api.is_some())
             .field("d1_api", &self.d1_api.is_some())
             .field("do_api", &self.do_api.is_some())
+            .field("queue_api", &self.queue_api.is_some())
             .field("scheduler", &self.scheduler.is_some())
             .finish_non_exhaustive()
     }
@@ -113,6 +116,7 @@ impl HttpState {
             r2_api: None,
             d1_api: None,
             do_api: None,
+            queue_api: None,
             scheduler: None,
         })
     }
@@ -136,6 +140,7 @@ impl HttpState {
             r2_api: None,
             d1_api: None,
             do_api: None,
+            queue_api: None,
             scheduler: None,
         }
     }
@@ -205,6 +210,19 @@ impl HttpState {
         self.do_api.as_ref()
     }
 
+    /// Attach the P2.2 Queue catalog control plane.
+    #[must_use]
+    pub fn with_queue_api(mut self, queue_api: Option<QueueApiState>) -> Self {
+        self.queue_api = queue_api.map(Arc::new);
+        self
+    }
+
+    /// Borrow the optional P2.2 Queue control-plane state.
+    #[must_use]
+    pub(crate) fn queue_api(&self) -> Option<&Arc<QueueApiState>> {
+        self.queue_api.as_ref()
+    }
+
     /// Attach the P0.8 scheduler operator surface.
     #[must_use]
     pub fn with_scheduler(mut self, scheduler: Option<Arc<SchedulerService>>) -> Self {
@@ -257,6 +275,7 @@ pub fn admin_router(state: HttpState) -> Router {
     router = router.merge(do_http::control_router());
     router = router.merge(r2_http::control_router());
     router = router.merge(scheduler_http::control_router());
+    router = router.merge(queue_http::control_router());
     router
         .fallback(fallback)
         .layer(axum::middleware::from_fn_with_state(
@@ -284,6 +303,7 @@ pub fn merged_router(state: HttpState) -> Router {
         .merge(d1_http::control_router())
         .merge(do_http::control_router())
         .merge(scheduler_http::control_router())
+        .merge(queue_http::control_router())
         .fallback(workers_http::public_ingress)
         .layer(axum::middleware::from_fn_with_state(
             middleware_state,
@@ -464,6 +484,8 @@ fn product_operation(path: &str) -> Option<OperationClass> {
         Some(OperationClass::D1)
     } else if path.contains("/durable-objects/") {
         Some(OperationClass::DurableObjects)
+    } else if path.contains("/queues") {
+        Some(OperationClass::Scheduler)
     } else {
         None
     }

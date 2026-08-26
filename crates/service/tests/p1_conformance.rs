@@ -95,11 +95,19 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
         first["release"]["workerd_lock_sha256"]
     );
     let products = first["products"].as_object().expect("products");
-    for name in ["workers", "kv", "r2", "d1", "durable_objects", "alarms"] {
+    for name in [
+        "workers",
+        "kv",
+        "r2",
+        "d1",
+        "durable_objects",
+        "alarms",
+        "queues",
+    ] {
         assert_eq!(products[name]["status"], "supported", "{name}");
         assert!(products[name]["capability_version"].is_number(), "{name}");
     }
-    for name in ["queues", "cron", "workflows", "websocket_hibernation"] {
+    for name in ["cron", "workflows", "websocket_hibernation"] {
         assert_eq!(products[name]["status"], "unsupported", "{name}");
         assert!(products[name].get("capability_version").is_none(), "{name}");
     }
@@ -145,6 +153,7 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
             "alarms",
             vec!["getAlarm", "setAlarm", "deleteAlarm", "alarm"],
         ),
+        ("queues", vec!["send", "sendBatch", "metrics"]),
     ]);
     for (product, methods) in expected_methods {
         assert_eq!(

@@ -13,13 +13,22 @@ pub(super) struct SchedulerMigration {
 }
 
 const MIGRATION_001_SQL: &str = include_str!("../../scheduler-migrations/001_scheduler.sql");
+const MIGRATION_002_SQL: &str = include_str!("../../scheduler-migrations/002_queue_producer.sql");
 
-pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[SchedulerMigration {
-    version: 1,
-    name: "001_scheduler",
-    sql: MIGRATION_001_SQL,
-    checksum: &crate::migrations::SCHEDULER_MIGRATION_001_SHA256,
-}];
+pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[
+    SchedulerMigration {
+        version: 1,
+        name: "001_scheduler",
+        sql: MIGRATION_001_SQL,
+        checksum: &crate::migrations::SCHEDULER_MIGRATION_001_SHA256,
+    },
+    SchedulerMigration {
+        version: 2,
+        name: "002_queue_producer",
+        sql: MIGRATION_002_SQL,
+        checksum: &crate::migrations::SCHEDULER_MIGRATION_002_SHA256,
+    },
+];
 
 pub(super) fn validate_registry(migrations: &[SchedulerMigration]) -> Result<(), PlatformError> {
     if migrations.is_empty()
@@ -42,7 +51,10 @@ pub(super) fn verify_applied(
     schema_version: i64,
 ) -> Result<(), PlatformError> {
     validate_registry(SCHEDULER_MIGRATIONS)?;
-    if usize::try_from(schema_version).ok() != Some(SCHEDULER_MIGRATIONS.len()) {
+    let Some(applied_count) = usize::try_from(schema_version).ok() else {
+        return Err(super::corrupt());
+    };
+    if applied_count == 0 || applied_count > SCHEDULER_MIGRATIONS.len() {
         return Err(super::corrupt());
     }
     let count: i64 = connection
@@ -50,10 +62,10 @@ pub(super) fn verify_applied(
             row.get(0)
         })
         .map_err(|_| super::corrupt())?;
-    if usize::try_from(count).ok() != Some(SCHEDULER_MIGRATIONS.len()) {
+    if usize::try_from(count).ok() != Some(applied_count) {
         return Err(super::corrupt());
     }
-    for migration in SCHEDULER_MIGRATIONS {
+    for migration in SCHEDULER_MIGRATIONS.iter().take(applied_count) {
         let applied: Option<(String, Vec<u8>)> = connection
             .query_row(
                 "SELECT name, checksum_sha256

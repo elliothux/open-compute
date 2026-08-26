@@ -30,9 +30,9 @@ pub use capability::{
 pub use clock::{Clock, SystemClock};
 pub use config::{
     CacheConfig, D1Config, DiagnosticsConfig, DurableObjectsConfig, HardeningConfig, KvConfig,
-    MetricsConfig, PlatformConfig, R2Config, RuntimeConfig, S3Config, SchedulerConfig,
-    SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig, StorageConfig,
-    WorkersConfig, validate_bootstrap_config_path,
+    MetricsConfig, PlatformConfig, QueuesConfig, R2Config, RuntimeConfig, S3Config,
+    SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig,
+    StorageConfig, WorkersConfig, validate_bootstrap_config_path,
 };
 pub use durable_objects::{
     DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAME_MAX_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES,
@@ -41,7 +41,8 @@ pub use durable_objects::{
 pub use error::{ErrorCode, PlatformError, ReadinessReason};
 pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus};
 pub use ids::{
-    AccountId, BindingId, DeploymentId, PlatformId, RequestId, ResourceId, StartupId, WorkerId,
+    AccountId, BindingId, DeploymentId, PlatformId, QueueId, QueueMessageId, RequestId, ResourceId,
+    StartupId, WorkerId,
 };
 pub use redact::Redactor;
 pub use release_identity::{

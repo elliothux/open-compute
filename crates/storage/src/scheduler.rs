@@ -13,12 +13,18 @@ use uuid::Uuid;
 
 #[path = "scheduler/migrations.rs"]
 mod migration_registry;
+#[path = "scheduler/queue.rs"]
+mod queue;
 #[path = "scheduler/summary.rs"]
 mod summary;
 #[path = "scheduler/wake.rs"]
 mod wake;
 
 use migration_registry::{SCHEDULER_MIGRATIONS, validate_registry, verify_applied};
+pub use queue::{
+    QueueContentType, QueueCounterMismatch, QueueDeleteBatch, QueueEnqueueRequest,
+    QueueEnqueueResult, QueueMessageInput, QueueMetrics, QueueProjection,
+};
 use summary::{summary_connection, workload_summary_connection};
 pub use wake::{SchedulerWakeFuture, SchedulerWakeSignal};
 
@@ -127,6 +133,26 @@ pub struct SchedulerSummary {
     pub expired_claims: u64,
 }
 
+/// Secret-free aggregate Queue authority facts for doctor and support bundles.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueInspectionSummary {
+    /// Scheduler Queue projection count.
+    pub queues: u64,
+    /// Total retained messages.
+    pub backlog_messages: u64,
+    /// Total retained serialized body bytes.
+    pub backlog_bytes: u64,
+    /// Oldest retained enqueue timestamp.
+    pub oldest_enqueued_at_ms: Option<i64>,
+    /// Earliest retained expiry timestamp.
+    pub oldest_expires_at_ms: Option<i64>,
+    /// Already-expired messages awaiting bounded retention.
+    pub ready_maintenance: u64,
+    /// Counter rows that disagree with the message authority.
+    pub counter_mismatches: u64,
+}
+
 /// Read-only scheduler database facts used by `platformd doctor`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +167,8 @@ pub struct SchedulerInspection {
     pub synchronous: i64,
     /// Bounded state summary.
     pub summary: SchedulerSummary,
+    /// Queue producer/retention authority summary; excludes bodies and tenant identities.
+    pub queue: QueueInspectionSummary,
     /// Invalid claim/token invariant rows found by a bounded aggregate query.
     pub invalid_rows: u64,
 }
@@ -184,6 +212,34 @@ pub fn inspect_scheduler_db(
         .pragma_query_value(None, "synchronous", |row| row.get(0))
         .map_err(map_sql_error)?;
     let summary = summary_connection(&connection, now_ms)?;
+    let queue_workload = queue::helpers::queue_workload_summary_connection(&connection, now_ms)?;
+    let (queue_count, backlog_messages, backlog_bytes, oldest_enqueued_at_ms, oldest_expires_at_ms): (
+        i64,
+        i64,
+        i64,
+        Option<i64>,
+        Option<i64>,
+    ) = connection
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM queue_state),
+                    COALESCE((SELECT SUM(message_count) FROM queue_state), 0),
+                    COALESCE((SELECT SUM(message_bytes) FROM queue_state), 0),
+                    (SELECT MIN(enqueued_at_ms) FROM queue_messages),
+                    (SELECT MIN(expires_at_ms) FROM queue_messages)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        )
+        .map_err(map_sql_error)?;
+    let counter_mismatches = queue::helpers::counter_mismatches_connection(&connection)?.len();
+    let queue = QueueInspectionSummary {
+        queues: u64::try_from(queue_count).map_err(|_| corrupt())?,
+        backlog_messages: u64::try_from(backlog_messages).map_err(|_| corrupt())?,
+        backlog_bytes: u64::try_from(backlog_bytes).map_err(|_| corrupt())?,
+        oldest_enqueued_at_ms,
+        oldest_expires_at_ms,
+        ready_maintenance: queue_workload.ready,
+        counter_mismatches: u64::try_from(counter_mismatches).map_err(|_| corrupt())?,
+    };
     let invalid_rows: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM scheduled_jobs WHERE
@@ -201,8 +257,49 @@ pub fn inspect_scheduler_db(
         journal_mode,
         synchronous,
         summary,
+        queue,
         invalid_rows: u64::try_from(invalid_rows).map_err(|_| corrupt())?,
     })
+}
+
+pub(crate) fn inspect_scheduler_schema_version(
+    path: &std::path::Path,
+    busy_timeout_ms: u64,
+) -> Result<i64, PlatformError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let open_path = crate::control_db::leaf_nofollow_path(path)?;
+    let connection = Connection::open_with_flags(open_path, flags).map_err(map_open_error)?;
+    connection
+        .busy_timeout(Duration::from_millis(busy_timeout_ms))
+        .map_err(map_sql_error)?;
+    let quick: String = connection
+        .pragma_query_value(None, "quick_check", |row| row.get(0))
+        .map_err(map_sql_error)?;
+    if quick != "ok" {
+        return Err(corrupt());
+    }
+    let schema_version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(map_sql_error)?;
+    if schema_version > SCHEMA_VERSION {
+        return Err(PlatformError::new(
+            ErrorCode::SchemaTooNew,
+            "scheduler database schema is newer than this binary",
+        ));
+    }
+    let marker: (i64, String) = connection
+        .query_row(
+            "SELECT schema_version, data_format
+             FROM scheduler_meta WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(map_sql_error)?;
+    if marker != (schema_version, DATA_FORMAT.to_owned()) {
+        return Err(corrupt());
+    }
+    verify_applied(&connection, schema_version)?;
+    Ok(schema_version)
 }
 
 /// Single-process owner of `scheduler.sqlite` and its bounded writer lane.

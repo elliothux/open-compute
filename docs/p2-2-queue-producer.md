@@ -1,6 +1,7 @@
 # P2.2：Queue Producer 详细设计
 
-> 状态：详细设计，待实现
+> 状态：已实现并完成本地 Exit Gate；结论为 Conditional Go，详见
+> [P2.2 本地验证结果](./p2-2-results.md)
 >
 > 前置依赖：[P2.1：Scheduler 多 Workload 内核](./p2-1-scheduler-hardening.md)必须先通过 Exit Gate；
 > P1.0 至 P1.7 已由用户确认跑通，P1.8 的 WebSocket hibernation No-Go 不影响本阶段。
@@ -1347,29 +1348,29 @@ P1 offline snapshot 已包含完整 `scheduler.sqlite`，因此自动包含：
 
 P2.2 只有全部满足才可进入 Queue consumer：
 
-- [ ] P2.2.0 对 pinned stock workerd 给出书面 Go/Conditional Go/No-Go；
-- [ ] Conditional Go 时 DO producer明确 fail closed，capabilities/deviations/test一致；
-- [ ] control migration 009 不关闭 FK、不重建 P0 `resources`/`deployment_bindings`；
-- [ ] scheduler migration 002 连续、checksummed、old P1 data-dir 可升级；
-- [ ] Queue create/rename/config/delete/referrer/idempotency 全 crash matrix通过；
-- [ ] RuntimeSource cold/warm/rollback 使用 immutable Queue descriptor；
-- [ ] default JSON、text、bytes、iterable和 TypeError shape通过 conformance；
-- [ ] V8 明确拒绝，没有近似 serializer；
-- [ ] 128,000/100/256,000/86,400 exact boundary通过；
-- [ ] delay precedence与显式 0 通过；
-- [ ] send/sendBatch commit-before-resolve；batch全成或全败；
-- [ ] commit 后 response loss被分类为 unknown，不自动 replay；
-- [ ] restart、process SIGKILL、snapshot/restore保留 message/counters；
-- [ ] metrics backlog count/bytes/oldest Date 与 SQLite snapshot一致；
-- [ ] no-consumer backlog按 retention bounded删除；
-- [ ] Queue maintenance不饿死 Alarm，Alarm 不饿死 Queue maintenance；
-- [ ] quota/disk admission/concurrent producer不超限；
-- [ ] cross-account/binding/generation/forged frame全部 fail closed；
-- [ ] message body不进入 log、metric、audit、health、doctor或 support bundle；
-- [ ] production binary 不包含 test crash path；
-- [ ] P2.1 Gate连续三轮通过；
-- [ ] P1 aggregate、P0 aggregate与 `./poc/g0 test all` regression通过；
-- [ ] format、Clippy、unit/integration、MSRV、no-default-features、dependency boundary、
+- [x] P2.2.0 对 pinned stock workerd 给出书面 Go/Conditional Go/No-Go；
+- [x] Conditional Go 时 DO producer明确 fail closed，capabilities/deviations/test一致；
+- [x] control migration 009 不关闭 FK、不重建 P0 `resources`/`deployment_bindings`；
+- [x] scheduler migration 002 连续、checksummed、old P1 data-dir 可升级；
+- [x] Queue create/rename/config/delete/referrer/idempotency 全 crash matrix通过；
+- [x] RuntimeSource cold/warm/rollback 使用 immutable Queue descriptor；
+- [x] default JSON、text、bytes、iterable和 TypeError shape通过 conformance；
+- [x] V8 明确拒绝，没有近似 serializer；
+- [x] 128,000/100/256,000/86,400 exact boundary通过；
+- [x] delay precedence与显式 0 通过；
+- [x] send/sendBatch commit-before-resolve；batch全成或全败；
+- [x] commit 后 response loss被分类为 unknown，不自动 replay；
+- [x] restart、process SIGKILL、snapshot/restore保留 message/counters；
+- [x] metrics backlog count/bytes/oldest Date 与 SQLite snapshot一致；
+- [x] no-consumer backlog按 retention bounded删除；
+- [x] Queue maintenance不饿死 Alarm，Alarm 不饿死 Queue maintenance；
+- [x] quota/disk admission/concurrent producer不超限；
+- [x] cross-account/binding/generation/forged frame全部 fail closed；
+- [x] message body不进入 log、metric、audit、health、doctor或 support bundle；
+- [x] production binary 不包含 test crash path；
+- [x] P2.1 Gate连续三轮通过；
+- [x] P1 aggregate、P0 aggregate与 `./poc/g0 test all` regression通过；
+- [x] format、Clippy、unit/integration、MSRV、no-default-features、dependency boundary、
       `git diff --check` 与 coverage Gate 通过。
 
 建议新增入口：

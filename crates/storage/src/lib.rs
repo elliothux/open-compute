@@ -18,6 +18,7 @@ pub mod master_key;
 pub mod migrations;
 pub mod platform_restore;
 pub mod platform_snapshot;
+pub mod queues;
 pub mod r2;
 pub mod r2_staging;
 pub mod resources;
@@ -75,6 +76,14 @@ pub use platform_snapshot::{
     estimate_platform_snapshot_bytes, prepare_platform_snapshot, sign_snapshot_manifest,
     verify_snapshot_manifest_mac,
 };
+pub use queues::{
+    AuthorizedQueueBinding, NewQueueProducerBinding, QUEUE_DEFAULT_MAX_BACKLOG_BYTES,
+    QUEUE_DEFAULT_RETENTION_SECONDS, QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES,
+    QUEUE_MAX_DELAY_SECONDS, QUEUE_MAX_MESSAGE_BYTES, QUEUE_MAX_RETENTION_SECONDS,
+    QUEUE_MIN_RETENTION_SECONDS, QUEUE_PRODUCER_CAPABILITY_VERSION, QueueAvailability, QueueConfig,
+    QueueCreateReservation, QueueProducerBindingRecord, QueueRecord, QueueRepository, QueueState,
+    RunningQueueMutation,
+};
 pub use r2::{R2_SCHEMA_VERSION, R2BucketRecord, R2BucketRepository};
 pub use r2_staging::R2Staging;
 pub use resources::{
@@ -83,7 +92,9 @@ pub use resources::{
 };
 pub use restore_cleanup::{RestoreStagingCleanup, cleanup_restore_staging};
 pub use scheduler::{
-    AlarmProjection, ClaimResult, ClaimedJob, SchedulerInspection, SchedulerStore,
+    AlarmProjection, ClaimResult, ClaimedJob, QueueContentType, QueueCounterMismatch,
+    QueueDeleteBatch, QueueEnqueueRequest, QueueEnqueueResult, QueueInspectionSummary,
+    QueueMessageInput, QueueMetrics, QueueProjection, SchedulerInspection, SchedulerStore,
     SchedulerSummary, SchedulerWakeFuture, SchedulerWakeSignal, current_scheduler_schema_version,
     inspect_scheduler_db, scheduler_migration_registry,
 };

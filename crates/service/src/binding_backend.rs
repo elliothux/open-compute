@@ -9,6 +9,7 @@ use crate::metrics::{
     AlarmMutation, BindingBackendOperation, DoOperation, KvOperation, KvStagingGauge,
     MetricsRegistry,
 };
+use crate::queue_backend::QueueBindingService;
 use crate::r2_backend::R2BindingService;
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -19,7 +20,7 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt as _, TryStreamExt};
 use open_compute_core::{
     BindingId, BindingKind, DeploymentId, DurableObjectId, DurableObjectsConfig, ErrorCode,
-    OperationClass, PlatformError, ResourceId,
+    OperationClass, PlatformError, QueuesConfig, ResourceId,
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
@@ -213,6 +214,7 @@ struct BackendState {
     d1: Option<Arc<D1BindingService>>,
     do_config: DurableObjectsConfig,
     scheduler: Option<Arc<SchedulerStore>>,
+    queue: Option<Arc<QueueBindingService>>,
 }
 
 #[derive(Clone)]
@@ -364,7 +366,18 @@ pub async fn serve_binding_backend_with_products_and_do_config(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     serve_binding_backend_with_scheduler(
-        listener, storage, auth, pins, executor, metrics, r2, d1, do_config, None, shutdown,
+        listener,
+        storage,
+        auth,
+        pins,
+        executor,
+        metrics,
+        r2,
+        d1,
+        do_config,
+        QueuesConfig::default(),
+        None,
+        shutdown,
     )
     .await
 }
@@ -381,10 +394,22 @@ pub async fn serve_binding_backend_with_scheduler(
     r2: Option<Arc<R2BindingService>>,
     d1: Option<Arc<D1BindingService>>,
     do_config: DurableObjectsConfig,
+    queue_config: QueuesConfig,
     scheduler: Option<Arc<SchedulerStore>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     let (global_streams, resource_streams) = executor.stream_limits();
+    let queue = scheduler.as_ref().map(|scheduler| {
+        let service = QueueBindingService::new(storage.clone(), scheduler.clone())
+            .with_concurrency_limits(
+                queue_config.max_in_flight_requests,
+                queue_config.max_in_flight_requests_per_binding,
+            );
+        Arc::new(match &metrics {
+            Some(metrics) => service.with_metrics(metrics.clone()),
+            None => service,
+        })
+    });
     let state = BackendState {
         storage,
         auth,
@@ -396,6 +421,7 @@ pub async fn serve_binding_backend_with_scheduler(
         d1,
         do_config,
         scheduler,
+        queue,
     };
     let router = Router::new().fallback(handle).with_state(state);
     axum::serve(listener, router.into_make_service())
@@ -539,6 +565,16 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
     }
     if request.uri().path().starts_with("/internal/alarms/v1/") {
         return handle_alarm_index(state, request).await;
+    }
+    if request
+        .uri()
+        .path()
+        .starts_with("/internal/bindings/v1/queue/")
+    {
+        return match &state.queue {
+            Some(queue) => queue.handle(request).await,
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
     }
     if request
         .uri()

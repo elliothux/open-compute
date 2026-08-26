@@ -51,6 +51,8 @@ pub struct PlatformConfig {
     pub r2: R2Config,
     /// Workers D1 SQLite, result, and concurrency limits.
     pub d1: D1Config,
+    /// Queue producer backlog and request-admission limits.
+    pub queues: QueuesConfig,
     /// Durable Object identity, dispatch, RPC, and local-disk policy.
     pub durable_objects: DurableObjectsConfig,
     /// Durable Object alarm scheduler policy.
@@ -87,6 +89,7 @@ impl PlatformConfig {
         self.kv.validate()?;
         self.r2.validate()?;
         self.d1.validate()?;
+        self.queues.validate()?;
         self.durable_objects.validate()?;
         self.scheduler.validate()?;
         Ok(())
@@ -921,6 +924,46 @@ impl Default for D1Config {
     }
 }
 
+/// P2.2 Queue producer local backlog and concurrency policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct QueuesConfig {
+    /// Default durable serialized-body quota assigned to newly created Queues.
+    pub default_max_backlog_bytes: u64,
+    /// Global private Queue producer requests admitted concurrently.
+    pub max_in_flight_requests: u32,
+    /// Private producer requests admitted concurrently for one immutable binding.
+    pub max_in_flight_requests_per_binding: u32,
+}
+
+impl QueuesConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        if self.default_max_backlog_bytes == 0
+            || self.default_max_backlog_bytes > 1024 * 1024 * 1024 * 1024
+            || self.max_in_flight_requests == 0
+            || self.max_in_flight_requests > 4096
+            || self.max_in_flight_requests_per_binding == 0
+            || self.max_in_flight_requests_per_binding > self.max_in_flight_requests
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "Queue host policy is outside the hard platform bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for QueuesConfig {
+    fn default() -> Self {
+        Self {
+            default_max_backlog_bytes: 1024 * 1024 * 1024,
+            max_in_flight_requests: 64,
+            max_in_flight_requests_per_binding: 8,
+        }
+    }
+}
+
 /// P0.7 Durable Object identity, transport, and local-disk policy.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
@@ -1044,13 +1087,13 @@ impl Default for SchedulerPoolConfig {
     }
 }
 
-/// Fixed scheduler pool registry; future products remain disabled in P2.1.
+/// Fixed scheduler pool registry; Alarm and Queue are enabled while later products stay disabled.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct SchedulerPoolsConfig {
     /// Durable Object alarm pool.
     pub alarm: SchedulerPoolConfig,
-    /// Queue pool reserved until P2.3.
+    /// Queue producer retention-maintenance pool.
     pub queue: SchedulerPoolConfig,
     /// Cron pool reserved until P2.3.
     pub cron: SchedulerPoolConfig,
@@ -1062,7 +1105,12 @@ impl Default for SchedulerPoolsConfig {
     fn default() -> Self {
         Self {
             alarm: SchedulerPoolConfig::alarm_default(),
-            queue: SchedulerPoolConfig::future_default(32, 16),
+            queue: SchedulerPoolConfig {
+                enabled: true,
+                max_in_flight: 1,
+                claim_batch: 256,
+                weight: 1,
+            },
             cron: SchedulerPoolConfig::future_default(8, 8),
             workflow: SchedulerPoolConfig::future_default(16, 16),
         }
@@ -1177,7 +1225,7 @@ impl SchedulerConfig {
                     "scheduler pool policy is outside the hard platform bounds",
                 ));
             }
-            if pools.queue.enabled || pools.cron.enabled || pools.workflow.enabled {
+            if pools.cron.enabled || pools.workflow.enabled {
                 return Err(PlatformError::new(
                     ErrorCode::SchedulerKindNotEnabled,
                     "scheduler workload kind is not enabled in this release",

@@ -98,6 +98,11 @@ query_timeout_ms = 30000
 batch_timeout_ms = 30000
 idle_handle_ttl_ms = 60000
 
+[queues]
+default_max_backlog_bytes = 1073741824
+max_in_flight_requests = 64
+max_in_flight_requests_per_binding = 8
+
 [durable_objects]
 max_namespace_name_bytes = 128
 max_object_name_bytes = 1024
@@ -128,9 +133,9 @@ claim_batch = 32
 weight = 1
 
 [scheduler.pools.queue]
-enabled = false
-max_in_flight = 32
-claim_batch = 16
+enabled = true
+max_in_flight = 1
+claim_batch = 256
 weight = 1
 
 [scheduler.pools.cron]

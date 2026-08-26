@@ -232,6 +232,7 @@ impl GateStack {
                     Some(r2),
                     Some(d1),
                     DurableObjectsConfig::default(),
+                    open_compute_core::QueuesConfig::default(),
                     Some(scheduler_store),
                     async move {
                         let _ = binding_shutdown.changed().await;

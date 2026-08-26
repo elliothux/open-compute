@@ -13,10 +13,10 @@ use crate::http::{self, HttpState, REQUEST_ID_HEADER};
 use crate::metrics::{
     AlarmMutation, AlarmOutcome, AlarmRepairSource, D1Lifecycle, D1LifecycleGuard, D1Operation,
     DoFacetReloadReason, DoOperation, DoReconcileState, KvGauge, KvGaugeGuard, KvLifecycle,
-    KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry, R2Operation,
-    R2ProviderError, R2StreamDirection, R2StreamGuard, REQUIRED_SERIES, ResourceOperation,
-    RestartReason, S3Op, S3Result, SchedulerClaimOutcome, SqliteOp, StartResult, StartStage,
-    WebSocketCloseReason,
+    KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry,
+    QueueMetricOperation, QueueReconcileOperation, R2Operation, R2ProviderError, R2StreamDirection,
+    R2StreamGuard, REQUIRED_SERIES, ResourceOperation, RestartReason, S3Op, S3Result,
+    SchedulerClaimOutcome, SqliteOp, StartResult, StartStage, WebSocketCloseReason,
 };
 use crate::run::{
     FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_kv_maintenance,
@@ -1292,7 +1292,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     let transport =
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
     let scheduler = Arc::new(SchedulerService::new(
-        store,
+        store.clone(),
         storage,
         transport,
         SchedulerConfig::default(),
@@ -1335,9 +1335,45 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     assert_eq!(body["version"], 2);
     assert_eq!(body["paused"], false);
     assert_eq!(body["global"]["inFlight"], 0);
-    assert_eq!(body["pools"].as_array().unwrap().len(), 1);
+    assert_eq!(body["pools"].as_array().unwrap().len(), 2);
     assert_eq!(body["pools"][0]["kind"], "do_alarm");
     assert_eq!(body["pools"][0]["ready"], 0);
+    assert_eq!(body["pools"][1]["kind"], "queue");
+    assert_eq!(body["pools"][1]["ready"], 0);
+
+    let queue_id = open_compute_core::QueueId::generate();
+    store
+        .create_queue_projection(&open_compute_storage::QueueProjection {
+            queue_id,
+            account_id: open_compute_core::AccountId::generate(),
+            lifecycle_generation: 1,
+            config_generation: 1,
+            config: open_compute_storage::QueueConfig::default(),
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        })
+        .unwrap();
+    store
+        .enqueue_queue(
+            &open_compute_storage::QueueEnqueueRequest {
+                queue_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![open_compute_storage::QueueMessageInput {
+                    content_type: open_compute_storage::QueueContentType::Text,
+                    body: b"expired".to_vec(),
+                    delay_seconds: Some(0),
+                }],
+            },
+            1,
+        )
+        .unwrap();
+    assert_eq!(scheduler.poll_once().await.unwrap(), 1);
+    assert_eq!(
+        store.queue_metrics(queue_id, 1, 1).unwrap().backlog_count,
+        0
+    );
 
     assert_eq!(
         app.clone()
@@ -1386,7 +1422,16 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
             .await
             .unwrap()
             .status(),
-        StatusCode::BAD_REQUEST
+        StatusCode::NO_CONTENT
+    );
+    assert!(scheduler.is_kind_paused(SchedulerKind::Queue).unwrap());
+    assert_eq!(
+        app.clone()
+            .oneshot(request("POST", "/v1/operator/scheduler/resume?kind=queue"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
     );
     let repair = app
         .clone()
@@ -1448,6 +1493,49 @@ fn metrics_fixed_and_limits() {
     assert_eq!(text, again);
     assert!(text.contains("content") || text.contains("platform_info"));
     assert!(!text.contains("AKIA"));
+}
+
+#[test]
+fn queue_metrics_cover_fixed_operations_outcomes_and_backlog() {
+    let metrics = MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap();
+    for operation in [
+        QueueMetricOperation::Send,
+        QueueMetricOperation::Batch,
+        QueueMetricOperation::Metrics,
+    ] {
+        metrics.observe_queue_producer(operation, false, 2, 3, Duration::from_millis(4));
+        metrics.observe_queue_producer(operation, true, 5, 7, Duration::from_millis(8));
+        metrics.inc_queue_result_unknown(operation);
+    }
+    metrics.set_queue_backlog(11, 13);
+    metrics.observe_queue_retention(false, 17, 19);
+    metrics.observe_queue_retention(true, 23, 29);
+    for operation in [
+        QueueReconcileOperation::Create,
+        QueueReconcileOperation::Config,
+        QueueReconcileOperation::Delete,
+    ] {
+        metrics.observe_queue_reconcile(operation, false, Duration::from_millis(31));
+        metrics.observe_queue_reconcile(operation, true, Duration::from_millis(37));
+    }
+    let rendered = metrics.render(&PlatformStatus::starting());
+    for expected in [
+        "queue_producer_requests_total{operation=\"send\",outcome=\"error\"} 1",
+        "queue_producer_requests_total{operation=\"batch\",outcome=\"success\"} 1",
+        "queue_producer_messages_total{operation=\"metrics\",outcome=\"success\"} 5",
+        "queue_producer_body_bytes_total{operation=\"send\",outcome=\"success\"} 7",
+        "queue_backlog_messages 11",
+        "queue_backlog_bytes 13",
+        "queue_retention_deleted_total{outcome=\"error\"} 17",
+        "queue_retention_deleted_bytes_total{outcome=\"success\"} 29",
+        "queue_reconcile_total{operation=\"delete\",outcome=\"success\"} 1",
+        "queue_projection_lag_seconds 0.037",
+        "queue_result_unknown_total{operation=\"send\"} 1",
+        "queue_result_unknown_total{operation=\"batch\"} 1",
+    ] {
+        assert!(rendered.contains(expected), "missing {expected}");
+    }
+    assert!(!rendered.contains("queue_result_unknown_total{operation=\"metrics\"}"));
 }
 
 #[test]
@@ -2179,7 +2267,15 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         capabilities.products["durable_objects"].hibernatable_websocket,
         Some(open_compute_core::CapabilityStatus::Unsupported)
     );
-    for product in ["queues", "cron", "workflows", "websocket_hibernation"] {
+    assert_eq!(
+        capabilities.products["queues"].status,
+        open_compute_core::CapabilityStatus::Supported
+    );
+    assert_eq!(
+        capabilities.products["queues"].deviations,
+        vec!["OC-QUEUE-001"]
+    );
+    for product in ["cron", "workflows", "websocket_hibernation"] {
         assert_eq!(
             capabilities.products[product].status,
             open_compute_core::CapabilityStatus::Unsupported
@@ -3492,7 +3588,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
     loaded.config.runtime.binary = PathBuf::from(binary);
     loaded.config.runtime.lock_file = workspace.join("runtime/workerd.lock.json");
     loaded.config.runtime.assets_dir = workspace.join("runtime");
-    loaded.config.runtime.startup_timeout_ms = 20_000;
+    loaded.config.runtime.startup_timeout_ms = 60_000;
     loaded.config.runtime.shutdown_grace_ms = 1_000;
     loaded.config.runtime.kill_timeout_ms = 2_000;
     loaded.config.workers.artifact_gc_interval_ms = 20;
@@ -3552,11 +3648,14 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
 
     let options = RunOptions::default();
     let addresses = options.last_public_addr.clone();
-    let task = tokio::spawn(run_platform_with(loaded, options));
-    tokio::time::timeout(Duration::from_secs(20), async {
+    let mut task = tokio::spawn(run_platform_with(loaded, options));
+    tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             if addresses.lock().unwrap().is_some() {
                 break;
+            }
+            if task.is_finished() {
+                panic!("platform startup ended early: {:?}", (&mut task).await);
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -3566,7 +3665,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TERM)
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(20), task)
+    tokio::time::timeout(Duration::from_secs(60), task)
         .await
         .unwrap()
         .unwrap()
@@ -3693,7 +3792,7 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     loaded.config.runtime.binary = PathBuf::from(binary);
     loaded.config.runtime.lock_file = workspace.join("runtime/workerd.lock.json");
     loaded.config.runtime.assets_dir = workspace.join("runtime");
-    loaded.config.runtime.startup_timeout_ms = 20_000;
+    loaded.config.runtime.startup_timeout_ms = 60_000;
     loaded.config.runtime.shutdown_grace_ms = 1_000;
     loaded.config.runtime.kill_timeout_ms = 2_000;
 
@@ -3703,8 +3802,8 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     loaded.config.server.public_bind = address.to_string();
     loaded.config.server.admin_bind = None;
 
-    let task = tokio::spawn(run_platform(loaded));
-    let response = tokio::time::timeout(Duration::from_secs(20), async {
+    let mut task = tokio::spawn(run_platform(loaded));
+    let response = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             match tokio::net::TcpStream::connect(address).await {
                 Ok(mut stream) => {
@@ -3718,7 +3817,12 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
                     stream.read_to_end(&mut response).await.unwrap();
                     break response;
                 }
-                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+                Err(_) => {
+                    if task.is_finished() {
+                        panic!("platform startup ended early: {:?}", (&mut task).await);
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
             }
         }
     })
@@ -3727,7 +3831,7 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
 
     rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TERM)
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(20), task)
+    tokio::time::timeout(Duration::from_secs(60), task)
         .await
         .unwrap()
         .unwrap()

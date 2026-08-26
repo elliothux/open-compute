@@ -141,7 +141,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
         }
         let _admission = self
             .storage
-            .reserve_mutation(resource_operation_class(request.kind), 64 * 1024)?;
+            .reserve_mutation(resource_operation_class(request.kind)?, 64 * 1024)?;
         let fingerprint_input =
             create_fingerprint(request, &self.driver.create_fingerprint_material())?;
         let fingerprint = self
@@ -385,13 +385,19 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
     }
 }
 
-fn resource_operation_class(kind: BindingKind) -> OperationClass {
-    match kind {
+fn resource_operation_class(kind: BindingKind) -> Result<OperationClass, PlatformError> {
+    Ok(match kind {
         BindingKind::KvNamespace => OperationClass::Kv,
         BindingKind::R2Bucket => OperationClass::R2,
         BindingKind::D1Database => OperationClass::D1,
         BindingKind::DoNamespace => OperationClass::DurableObjects,
-    }
+        BindingKind::QueueProducer => {
+            return Err(PlatformError::new(
+                ErrorCode::BindingTypeMismatch,
+                "Queue producer is not a generic resource driver kind",
+            ));
+        }
+    })
 }
 
 fn create_fingerprint(

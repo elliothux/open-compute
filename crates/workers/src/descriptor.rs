@@ -22,6 +22,8 @@ pub const DO_FACADE_MODULE_NAME: &str = "__open_compute_do_facade__.js";
 pub const DO_ID_CODEC_MODULE_NAME: &str = "__open_compute_do_id_codec__.js";
 /// Reserved dynamic module containing the object-local Durable Object alarm shim.
 pub const DO_ALARM_SHIM_MODULE_NAME: &str = "__open_compute_do_alarm_shim__.js";
+/// Reserved dynamic module containing the tenant-local Queue producer facade.
+pub const QUEUE_FACADE_MODULE_NAME: &str = "__open_compute_queue_facade__.js";
 /// Reserved deterministic main-module wrapper generated for local product facades.
 pub const LOADED_ISOLATE_WRAPPER_MODULE_NAME: &str = "__open_compute_loaded_isolate_wrapper__.js";
 /// Earliest compatibility date accepted by the pinned P1 policy.
@@ -37,6 +39,8 @@ const DO_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/
 const DO_ID_CODEC_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/do-id-codec.js");
 const DO_ALARM_SHIM_SOURCE: &[u8] =
     include_bytes!("../../../runtime/system-workers/do-alarm-shim.js");
+const QUEUE_FACADE_SOURCE: &[u8] =
+    include_bytes!("../../../runtime/system-workers/queue-facade.js");
 const LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE: &[u8] =
     include_bytes!("../../../runtime/system-workers/loaded-isolate-wrapper-generator.js");
 
@@ -70,12 +74,21 @@ pub struct LoadedIsolateInjectionV1 {
     /// SHA-256 of the exact object-local alarm shim source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub do_alarm_shim_sha256: Option<String>,
+    /// Local Queue producer facade capability version when a Queue binding is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_facade_capability_version: Option<u32>,
+    /// SHA-256 of the exact injected Queue producer facade source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_facade_sha256: Option<String>,
     /// SHA-256 of the exact deterministic wrapper generator source.
     pub loaded_isolate_wrapper_generator_sha256: String,
 }
 
 impl LoadedIsolateInjectionV1 {
-    fn for_bindings(bindings: &[BindingDescriptorV1]) -> Option<Self> {
+    fn for_bindings(
+        bindings: &[BindingDescriptorV1],
+        queue_bindings: &[QueueProducerBindingDescriptorV1],
+    ) -> Option<Self> {
         let r2 = bindings
             .iter()
             .any(|binding| binding.kind == BindingKind::R2Bucket);
@@ -85,7 +98,8 @@ impl LoadedIsolateInjectionV1 {
         let durable_objects = bindings
             .iter()
             .any(|binding| binding.kind == BindingKind::DoNamespace);
-        (r2 || d1 || durable_objects).then(|| Self {
+        let queue = !queue_bindings.is_empty();
+        (r2 || d1 || durable_objects || queue).then(|| Self {
             schema_version: 1,
             r2_facade_capability_version: r2.then_some(1),
             r2_facade_sha256: r2.then(|| hex::encode(Sha256::digest(R2_FACADE_SOURCE))),
@@ -98,6 +112,8 @@ impl LoadedIsolateInjectionV1 {
                 .then(|| hex::encode(Sha256::digest(DO_ID_CODEC_SOURCE))),
             do_alarm_shim_sha256: durable_objects
                 .then(|| hex::encode(Sha256::digest(DO_ALARM_SHIM_SOURCE))),
+            queue_facade_capability_version: queue.then_some(1),
+            queue_facade_sha256: queue.then(|| hex::encode(Sha256::digest(QUEUE_FACADE_SOURCE))),
             loaded_isolate_wrapper_generator_sha256: hex::encode(Sha256::digest(
                 LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE,
             )),
@@ -155,7 +171,7 @@ impl BindingDescriptorV1 {
         config: CanonicalBindingConfig,
     ) -> Result<Self, PlatformError> {
         validate_env_name(&name)?;
-        if name.len() > 64 || resource_spec_generation == 0 {
+        if name.len() > 64 || resource_spec_generation == 0 || kind == BindingKind::QueueProducer {
             return Err(binding_invariant());
         }
         if capability_version != 1 {
@@ -180,6 +196,74 @@ impl BindingDescriptorV1 {
     /// Canonical typed JSON bytes persisted and hashed at staging.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, PlatformError> {
         if self.schema_version != 1 || self.capability_version != 1 {
+            return Err(binding_invariant());
+        }
+        serde_json::to_vec(self).map_err(|_| binding_invariant())
+    }
+
+    /// SHA-256 of canonical descriptor bytes.
+    pub fn sha256(&self) -> Result<[u8; 32], PlatformError> {
+        Ok(Sha256::digest(self.canonical_bytes()?).into())
+    }
+}
+
+/// Canonical immutable descriptor for one Queue producer binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueueProducerBindingDescriptorV1 {
+    /// Descriptor schema version.
+    pub schema_version: u32,
+    /// Immutable binding identity.
+    pub binding_id: BindingId,
+    /// Tenant environment name.
+    pub name: String,
+    /// Fixed runtime binding kind.
+    pub kind: BindingKind,
+    /// Frozen Queue identity.
+    pub queue_id: open_compute_core::QueueId,
+    /// Frozen Queue lifecycle generation.
+    pub queue_lifecycle_generation: u64,
+    /// Static producer capability version.
+    pub capability_version: u32,
+}
+
+impl QueueProducerBindingDescriptorV1 {
+    /// Validate and build the P2.2 Queue producer descriptor.
+    pub fn new(
+        binding_id: BindingId,
+        name: String,
+        queue_id: open_compute_core::QueueId,
+        queue_lifecycle_generation: u64,
+        capability_version: u32,
+    ) -> Result<Self, PlatformError> {
+        validate_env_name(&name)?;
+        if name.len() > 64 || queue_lifecycle_generation == 0 {
+            return Err(binding_invariant());
+        }
+        if capability_version != 1 {
+            return Err(PlatformError::new(
+                ErrorCode::BindingCapabilityUnsupported,
+                "Queue binding capability version is not supported",
+            ));
+        }
+        Ok(Self {
+            schema_version: 1,
+            binding_id,
+            name,
+            kind: BindingKind::QueueProducer,
+            queue_id,
+            queue_lifecycle_generation,
+            capability_version,
+        })
+    }
+
+    /// Canonical typed JSON bytes persisted and hashed at staging.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, PlatformError> {
+        if self.schema_version != 1
+            || self.kind != BindingKind::QueueProducer
+            || self.capability_version != 1
+            || self.queue_lifecycle_generation == 0
+        {
             return Err(binding_invariant());
         }
         serde_json::to_vec(self).map_err(|_| binding_invariant())
@@ -217,6 +301,9 @@ pub struct WorkerCodeDescriptorV1 {
     pub secret_revisions: Vec<SecretDescriptor>,
     /// Canonically sorted immutable resource binding descriptors.
     pub binding_descriptors: Vec<BindingDescriptorV1>,
+    /// Canonically sorted immutable Queue producer binding descriptors.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
     /// Exact loaded-isolate facade sources required by product bindings.
     pub loaded_isolate_injection: Option<LoadedIsolateInjectionV1>,
     /// Immutable limits profile document.
@@ -239,8 +326,42 @@ impl WorkerCodeDescriptorV1 {
         compatibility_date: String,
         compatibility_flags: Vec<String>,
         canonical_vars: BTreeMap<String, serde_json::Value>,
+        secret_revisions: Vec<SecretDescriptor>,
+        binding_descriptors: Vec<BindingDescriptorV1>,
+        limits: serde_json::Value,
+        loader_schema_version: u32,
+    ) -> Result<Self, PlatformError> {
+        Self::new_with_queue_bindings(
+            account_id,
+            worker_id,
+            deployment_id,
+            artifact_sha256,
+            manifest,
+            compatibility_date,
+            compatibility_flags,
+            canonical_vars,
+            secret_revisions,
+            binding_descriptors,
+            Vec::new(),
+            limits,
+            loader_schema_version,
+        )
+    }
+
+    /// Build and validate the canonical descriptor with independent Queue bindings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_queue_bindings(
+        account_id: AccountId,
+        worker_id: WorkerId,
+        deployment_id: DeploymentId,
+        artifact_sha256: [u8; 32],
+        manifest: &WorkerBundleManifest,
+        compatibility_date: String,
+        compatibility_flags: Vec<String>,
+        canonical_vars: BTreeMap<String, serde_json::Value>,
         mut secret_revisions: Vec<SecretDescriptor>,
         mut binding_descriptors: Vec<BindingDescriptorV1>,
+        mut queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
         limits: serde_json::Value,
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
@@ -293,7 +414,27 @@ impl WorkerCodeDescriptorV1 {
                 ));
             }
         }
-        let loaded_isolate_injection = LoadedIsolateInjectionV1::for_bindings(&binding_descriptors);
+        queue_binding_descriptors.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+        for binding in &queue_binding_descriptors {
+            if binding.schema_version != 1
+                || binding.kind != BindingKind::QueueProducer
+                || binding.capability_version != 1
+                || binding.queue_lifecycle_generation == 0
+            {
+                return Err(binding_invariant());
+            }
+            validate_env_name(&binding.name)?;
+            if binding.name.len() > 64 || !env_names.insert(&binding.name) {
+                return Err(PlatformError::new(
+                    ErrorCode::BindingTypeMismatch,
+                    "Queue binding names are duplicate or conflict with env",
+                ));
+            }
+        }
+        let loaded_isolate_injection = LoadedIsolateInjectionV1::for_bindings(
+            &binding_descriptors,
+            &queue_binding_descriptors,
+        );
         validate_limits(&limits)?;
         Ok(Self {
             schema_version: 1,
@@ -307,6 +448,7 @@ impl WorkerCodeDescriptorV1 {
             canonical_vars,
             secret_revisions,
             binding_descriptors,
+            queue_binding_descriptors,
             loaded_isolate_injection,
             limits,
             global_outbound_policy_version: GLOBAL_OUTBOUND_POLICY_VERSION,

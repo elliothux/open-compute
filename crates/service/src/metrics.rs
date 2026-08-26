@@ -16,6 +16,8 @@ mod durable_objects;
 mod kv;
 #[path = "metrics_p1.rs"]
 mod p1;
+#[path = "metrics_queue.rs"]
+mod queue;
 #[path = "metrics_r2.rs"]
 mod r2;
 #[path = "metrics_resource.rs"]
@@ -33,6 +35,8 @@ pub(crate) use kv::{
 use kv::{lifecycle_index, maintenance_index, operation_index, write_kv_metrics};
 pub use p1::WebSocketCloseReason;
 use p1::{P1Metrics, write_p1_metrics};
+use queue::write_queue_metrics;
+pub(crate) use queue::{QueueMetricOperation, QueueReconcileOperation};
 use r2::write_r2_metrics;
 pub(crate) use r2::{R2Operation, R2ProviderError, R2StreamDirection, R2StreamGuard};
 pub use resource::{BindingBackendOperation, ResourceOperation};
@@ -41,7 +45,7 @@ use scheduler::write_scheduler_metrics;
 pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 427;
+pub const REQUIRED_SERIES: u64 = 463;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -274,6 +278,7 @@ struct Inner {
     alarm_delivery: [u64; 42],
     alarm_repair: [u64; 6],
     alarm_lag_seconds: f64,
+    queue: queue::QueueMetrics,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -386,6 +391,7 @@ impl MetricsRegistry {
                 alarm_delivery: [0; 42],
                 alarm_repair: [0; 6],
                 alarm_lag_seconds: 0.0,
+                queue: queue::QueueMetrics::default(),
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -817,6 +823,7 @@ impl MetricsRegistry {
         write_d1_metrics(&mut out, &g);
         write_do_metrics(&mut out, &g);
         write_scheduler_metrics(&mut out, &g);
+        write_queue_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }

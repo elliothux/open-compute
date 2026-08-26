@@ -6,6 +6,8 @@ mod alarm;
 mod fairness;
 #[path = "scheduler/kernel.rs"]
 mod kernel;
+#[path = "scheduler/queue.rs"]
+mod queue;
 #[path = "scheduler/wake.rs"]
 mod wake;
 
@@ -45,9 +47,12 @@ pub struct SchedulerService {
     observed_wall_floor_ms: AtomicI64,
     paused: AtomicBool,
     alarm_paused: AtomicBool,
+    queue_paused: AtomicBool,
     alarm_pool_state: AtomicU8,
+    queue_pool_state: AtomicU8,
     global_in_flight: AtomicUsize,
     alarm_in_flight: AtomicUsize,
+    queue_in_flight: AtomicUsize,
     next_wake_at_ms: AtomicI64,
     wake: WakeCoordinator,
     repair_cursor: Mutex<Option<RepairCursor>>,
@@ -135,6 +140,7 @@ impl SchedulerService {
             Duration::from_millis(config.poll_interval_ms),
         );
         let alarm_enabled = config.pool(SchedulerKind::Alarm).enabled;
+        let queue_enabled = config.pool(SchedulerKind::Queue).enabled;
         Self {
             store,
             storage,
@@ -144,13 +150,20 @@ impl SchedulerService {
             observed_wall_floor_ms: AtomicI64::new(wall),
             paused: AtomicBool::new(false),
             alarm_paused: AtomicBool::new(false),
+            queue_paused: AtomicBool::new(false),
             alarm_pool_state: AtomicU8::new(encode_pool_state(if alarm_enabled {
+                SchedulerPoolState::Ready
+            } else {
+                SchedulerPoolState::Disabled
+            })),
+            queue_pool_state: AtomicU8::new(encode_pool_state(if queue_enabled {
                 SchedulerPoolState::Ready
             } else {
                 SchedulerPoolState::Disabled
             })),
             global_in_flight: AtomicUsize::new(0),
             alarm_in_flight: AtomicUsize::new(0),
+            queue_in_flight: AtomicUsize::new(0),
             next_wake_at_ms: AtomicI64::new(-1),
             wake,
             repair_cursor: Mutex::new(None),
@@ -213,8 +226,17 @@ impl SchedulerService {
     /// Pause one registered fixed workload without affecting other pools.
     pub fn pause_kind(&self, kind: SchedulerKind) -> Result<(), PlatformError> {
         self.ensure_kind_enabled(kind)?;
-        self.alarm_paused.store(true, Ordering::Release);
-        self.set_alarm_pool_state(SchedulerPoolState::Paused);
+        match kind {
+            SchedulerKind::Alarm => {
+                self.alarm_paused.store(true, Ordering::Release);
+                self.set_alarm_pool_state(SchedulerPoolState::Paused);
+            }
+            SchedulerKind::Queue => {
+                self.queue_paused.store(true, Ordering::Release);
+                self.set_queue_pool_state(SchedulerPoolState::Paused);
+            }
+            SchedulerKind::Cron | SchedulerKind::Workflow => unreachable!(),
+        }
         self.wake.notify();
         Ok(())
     }
@@ -222,8 +244,17 @@ impl SchedulerService {
     /// Resume one registered fixed workload.
     pub fn resume_kind(&self, kind: SchedulerKind) -> Result<(), PlatformError> {
         self.ensure_kind_enabled(kind)?;
-        self.alarm_paused.store(false, Ordering::Release);
-        self.set_alarm_pool_state(SchedulerPoolState::Ready);
+        match kind {
+            SchedulerKind::Alarm => {
+                self.alarm_paused.store(false, Ordering::Release);
+                self.set_alarm_pool_state(SchedulerPoolState::Ready);
+            }
+            SchedulerKind::Queue => {
+                self.queue_paused.store(false, Ordering::Release);
+                self.set_queue_pool_state(SchedulerPoolState::Ready);
+            }
+            SchedulerKind::Cron | SchedulerKind::Workflow => unreachable!(),
+        }
         self.wake.notify();
         Ok(())
     }
@@ -231,7 +262,11 @@ impl SchedulerService {
     /// Whether a fixed workload is process-locally paused.
     pub fn is_kind_paused(&self, kind: SchedulerKind) -> Result<bool, PlatformError> {
         self.ensure_kind_enabled(kind)?;
-        Ok(self.alarm_paused.load(Ordering::Acquire))
+        Ok(match kind {
+            SchedulerKind::Alarm => self.alarm_paused.load(Ordering::Acquire),
+            SchedulerKind::Queue => self.queue_paused.load(Ordering::Acquire),
+            SchedulerKind::Cron | SchedulerKind::Workflow => unreachable!(),
+        })
     }
 
     /// Low-cardinality state summary for health and operator inspection.
@@ -244,6 +279,7 @@ impl SchedulerService {
         let now_ms = self.observed_wall_time_ms();
         let summary = self.store.workload_summary(now_ms)?;
         let alarm = self.config.pool(SchedulerKind::Alarm);
+        let queue = self.config.pool(SchedulerKind::Queue);
         let state = if !alarm.enabled {
             SchedulerPoolState::Disabled
         } else if self.is_paused() || self.alarm_paused.load(Ordering::Acquire) {
@@ -259,18 +295,38 @@ impl SchedulerService {
                 max_in_flight: self.config.max_in_flight,
                 next_wake_at: atomic_option_i64(&self.next_wake_at_ms),
             },
-            pools: vec![SchedulerPoolInspect {
-                kind: SchedulerKind::Alarm,
-                enabled: alarm.enabled,
-                state,
-                ready: summary.ready,
-                claimed: summary.claimed,
-                expired: summary.expired,
-                oldest_due_at: summary.oldest_due_at_ms,
-                next_due_at: summary.next_due_at_ms,
-                in_flight: self.alarm_in_flight.load(Ordering::Acquire),
-                max_in_flight: alarm.max_in_flight,
-            }],
+            pools: vec![
+                SchedulerPoolInspect {
+                    kind: SchedulerKind::Alarm,
+                    enabled: alarm.enabled,
+                    state,
+                    ready: summary.ready,
+                    claimed: summary.claimed,
+                    expired: summary.expired,
+                    oldest_due_at: summary.oldest_due_at_ms,
+                    next_due_at: summary.next_due_at_ms,
+                    in_flight: self.alarm_in_flight.load(Ordering::Acquire),
+                    max_in_flight: alarm.max_in_flight,
+                },
+                SchedulerPoolInspect {
+                    kind: SchedulerKind::Queue,
+                    enabled: queue.enabled,
+                    state: if !queue.enabled {
+                        SchedulerPoolState::Disabled
+                    } else if self.is_paused() || self.queue_paused.load(Ordering::Acquire) {
+                        SchedulerPoolState::Paused
+                    } else {
+                        self.queue_pool_state()
+                    },
+                    ready: self.store.queue_workload_summary(now_ms)?.ready,
+                    claimed: 0,
+                    expired: 0,
+                    oldest_due_at: self.store.queue_workload_summary(now_ms)?.oldest_due_at_ms,
+                    next_due_at: self.store.queue_workload_summary(now_ms)?.next_due_at_ms,
+                    in_flight: self.queue_in_flight.load(Ordering::Acquire),
+                    max_in_flight: queue.max_in_flight,
+                },
+            ],
         })
     }
 
@@ -280,6 +336,7 @@ impl SchedulerService {
         mut shutdown: watch::Receiver<bool>,
     ) -> Result<(), PlatformError> {
         let alarm = self.config.pool(SchedulerKind::Alarm);
+        let queue = self.config.pool(SchedulerKind::Queue);
         let pool_caps = SchedulerKind::ALL.map(|kind| {
             usize::try_from(self.config.pool(kind).max_in_flight).unwrap_or(usize::MAX)
         });
@@ -339,9 +396,27 @@ impl SchedulerService {
 
             let now_ms = self.observed_wall_time_ms();
             let summary = self.pool_summary(now_ms).await?;
-            set_atomic_option_i64(&self.next_wake_at_ms, summary.next_due_at_ms);
+            let queue_summary = self.store.queue_workload_summary(now_ms)?;
+            set_atomic_option_i64(
+                &self.next_wake_at_ms,
+                match (summary.next_due_at_ms, queue_summary.next_due_at_ms) {
+                    (Some(left), Some(right)) => Some(left.min(right)),
+                    (left, right) => left.or(right),
+                },
+            );
             if let Some(metrics) = &self.metrics {
                 metrics.observe_scheduler_workload(SchedulerKind::Alarm, summary, now_ms);
+                metrics.observe_scheduler_workload(SchedulerKind::Queue, queue_summary, now_ms);
+                if let Ok((messages, bytes)) = self.store.queue_backlog_totals() {
+                    metrics.set_queue_backlog(messages, bytes);
+                }
+            }
+            let queue_runnable = queue.enabled
+                && !self.is_paused()
+                && !self.queue_paused.load(Ordering::Acquire)
+                && self.queue_pool_state() != SchedulerPoolState::CircuitOpen;
+            if queue_runnable && queue_summary.ready > 0 {
+                self.run_queue_maintenance(now_ms, queue.claim_batch).await;
             }
             let pool_runnable = alarm.enabled
                 && !self.is_paused()
@@ -423,6 +498,12 @@ impl SchedulerService {
                     reason: WakeReason::Due,
                 });
             }
+            if queue_runnable && let Some(next_due_at_ms) = queue_summary.next_due_at_ms {
+                deadlines.push(WakeDeadline {
+                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
+                    reason: WakeReason::Due,
+                });
+            }
             if let Some(retry_at) = pool.retry_at() {
                 deadlines.push(WakeDeadline {
                     at: retry_at,
@@ -469,8 +550,9 @@ impl SchedulerService {
     /// Claim and deliver one deterministic due batch without real scheduler sleeps.
     pub async fn poll_once(self: &Arc<Self>) -> Result<usize, PlatformError> {
         let alarm = self.config.pool(SchedulerKind::Alarm);
+        let completed = self.poll_queue_once()?;
         if !alarm.enabled || self.is_paused() || self.alarm_paused.load(Ordering::Acquire) {
-            return Ok(0);
+            return Ok(completed);
         }
         let batch = alarm
             .claim_batch
@@ -484,11 +566,13 @@ impl SchedulerService {
                 async move { service.dispatch_one(job).await }
             })
             .await;
-        Ok(count)
+        Ok(completed.saturating_add(count))
     }
 
     fn ensure_kind_enabled(&self, kind: SchedulerKind) -> Result<(), PlatformError> {
-        if kind == SchedulerKind::Alarm && self.config.pool(kind).enabled {
+        if matches!(kind, SchedulerKind::Alarm | SchedulerKind::Queue)
+            && self.config.pool(kind).enabled
+        {
             return Ok(());
         }
         Err(PlatformError::new(

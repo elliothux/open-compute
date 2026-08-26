@@ -105,6 +105,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
                 None,
                 None,
                 PlatformConfig::default().durable_objects,
+                open_compute_core::QueuesConfig::default(),
                 Some(scheduler),
                 async move {
                     let _ = binding_shutdown.changed().await;

@@ -3,6 +3,7 @@ export const D1_FACADE_MODULE = "__open_compute_d1_facade__.js";
 export const DO_FACADE_MODULE = "__open_compute_do_facade__.js";
 export const DO_ID_CODEC_MODULE = "__open_compute_do_id_codec__.js";
 export const DO_ALARM_SHIM_MODULE = "__open_compute_do_alarm_shim__.js";
+export const QUEUE_FACADE_MODULE = "__open_compute_queue_facade__.js";
 export const LOADED_ISOLATE_WRAPPER_MODULE = "__open_compute_loaded_isolate_wrapper__.js";
 export const LOADED_ISOLATE_RESERVED_MODULES = Object.freeze([
   R2_FACADE_MODULE,
@@ -10,6 +11,7 @@ export const LOADED_ISOLATE_RESERVED_MODULES = Object.freeze([
   DO_FACADE_MODULE,
   DO_ID_CODEC_MODULE,
   DO_ALARM_SHIM_MODULE,
+  QUEUE_FACADE_MODULE,
   LOADED_ISOLATE_WRAPPER_MODULE,
 ]);
 
@@ -20,20 +22,26 @@ export function generateBindingWrapper(
   doBindingNames,
   entrypointName,
   durableObject,
+  queueBindingNames = [],
 ) {
   const main = JSON.stringify(`./${mainModule}`);
   const r2Bindings = JSON.stringify(r2BindingNames);
   const d1Bindings = JSON.stringify(d1BindingNames);
   const doBindings = JSON.stringify(doBindingNames);
+  const queueBindings = JSON.stringify(queueBindingNames);
   const imports = [
     r2BindingNames.length ? `import { R2Bucket } from "./${R2_FACADE_MODULE}";` : "",
     d1BindingNames.length ? `import { D1Database } from "./${D1_FACADE_MODULE}";` : "",
     doBindingNames.length ? `import { DurableObjectNamespace } from "./${DO_FACADE_MODULE}";` : "",
+    queueBindingNames.length ? `import { QueueProducer } from "./${QUEUE_FACADE_MODULE}";` : "",
   ].join("\n");
   const wraps = [
     r2BindingNames.length ? "for (const name of R2_BINDINGS) out[name] = new R2Bucket(out[name]);" : "",
     d1BindingNames.length ? "for (const name of D1_BINDINGS) out[name] = new D1Database(out[name]);" : "",
     doBindingNames.length ? "for (const name of DO_BINDINGS) out[name] = new DurableObjectNamespace(out[name]);" : "",
+    queueBindingNames.length
+      ? `for (const name of QUEUE_BINDINGS) out[name] = new QueueProducer(out[name], ${durableObject === true});`
+      : "",
   ].join("\n");
   const doContext = entrypointName && durableObject ? `
 import {
@@ -93,6 +101,7 @@ ${doContext}
 const R2_BINDINGS = ${r2Bindings};
 const D1_BINDINGS = ${d1Bindings};
 const DO_BINDINGS = ${doBindings};
+const QUEUE_BINDINGS = ${queueBindings};
 const wrappedMarker = Symbol("open-compute.loaded-isolate-wrapped-env");
 function wrapEnv(env) {
   if (!env || env[wrappedMarker]) return env;

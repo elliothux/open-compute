@@ -485,8 +485,9 @@ fn scheduler_pool_defaults_preserve_p0_8_config_and_reject_unreleased_products()
             weight: 2,
         }
     );
+    let queue = parse_ok("[scheduler.pools.queue]\nenabled = true\n");
+    assert!(queue.scheduler.pool(SchedulerKind::Queue).enabled);
     for kind in [
-        ("queue", SchedulerKind::Queue),
         ("cron", SchedulerKind::Cron),
         ("workflow", SchedulerKind::Workflow),
     ] {
@@ -532,6 +533,9 @@ fn p1_hardening_and_remaining_static_error_paths_are_validated() {
         "[hardening]\nmax_support_bundle_bytes = 0\n",
         "[hardening]\nemergency_reserve_bytes = 268435456\n",
         "[kv]\nnamespace_quota_bytes = 1\n",
+        "[queues]\ndefault_max_backlog_bytes = 0\n",
+        "[queues]\nmax_in_flight_requests = 0\n",
+        "[queues]\nmax_in_flight_requests = 2\nmax_in_flight_requests_per_binding = 3\n",
         "[server]\npublic_bind = \"not-an-address\"\n",
         "[server]\nadmin_bind = \"not-an-address\"\n",
         "[server]\nadmin_bind = \"0.0.0.0:8788\"\nadmin_auth = { env = \"bad-name\" }\n",

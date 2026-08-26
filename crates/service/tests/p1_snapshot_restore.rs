@@ -4,7 +4,7 @@ use base64::Engine as _;
 use open_compute_artifacts::{
     MockS3, S3ArtifactClient, SnapshotObjectStore, resolve_s3_credentials,
 };
-use open_compute_core::{ErrorCode, PlatformSnapshotManifestV1, SystemClock};
+use open_compute_core::{ErrorCode, PlatformSnapshotManifestV1, RequestId, SystemClock};
 use open_compute_service::backup_cli::{
     backup_attest_restore_smoke, backup_create, backup_delete, backup_inspect, backup_list,
     backup_restore, backup_retention_plan,
@@ -12,12 +12,15 @@ use open_compute_service::backup_cli::{
 use open_compute_service::cli::{execute, parse_from};
 use open_compute_service::config_load::load_platform_config;
 use open_compute_storage::{
-    PlatformStorage, RestoreTarget, SchedulerStore, inspect_control_db, inspect_master_key,
+    PlatformStorage, QueueConfig, QueueContentType, QueueEnqueueRequest, QueueMessageInput,
+    QueueRepository, RestoreTarget, SchedulerStore, inspect_control_db, inspect_master_key,
     inspect_scheduler_db, sign_snapshot_manifest,
 };
+use open_compute_workers::{CreateQueueOutcome, CreateQueueRequest, QueueController};
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
@@ -209,7 +212,38 @@ async fn snapshot_restore_gate() {
         .data_dir()
         .ensure_scheduler_db()
         .expect("scheduler path");
-    drop(SchedulerStore::open(&scheduler_path, 5_000, 1).expect("scheduler"));
+    let scheduler = Arc::new(SchedulerStore::open(&scheduler_path, 5_000, 1).expect("scheduler"));
+    let account_id = storage.identity().default_account_id;
+    let snapshot_queue = match QueueController::new(&storage, scheduler.clone())
+        .create(&CreateQueueRequest {
+            account_id,
+            name: "snapshot-queue".to_owned(),
+            config: QueueConfig::default(),
+            idempotency_key: "snapshot-queue-create".to_owned(),
+            request_id: RequestId::generate(),
+            now_ms: 1_000,
+        })
+        .expect("create snapshot Queue")
+    {
+        CreateQueueOutcome::Applied(result) => result.queue.id,
+        CreateQueueOutcome::Replay(_) => panic!("unexpected Queue create replay"),
+    };
+    scheduler
+        .enqueue_queue(
+            &QueueEnqueueRequest {
+                queue_id: snapshot_queue,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![QueueMessageInput {
+                    content_type: QueueContentType::Text,
+                    body: b"snapshot-queue-body".to_vec(),
+                    delay_seconds: Some(0),
+                }],
+            },
+            1_001,
+        )
+        .expect("enqueue snapshot Queue message");
     let do_root = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -223,6 +257,7 @@ async fn snapshot_restore_gate() {
         0o600,
     );
     let platform_id = storage.identity().platform_id;
+    drop(scheduler);
     drop(storage);
 
     for invalid_label in ["", "line\nbreak"] {
@@ -570,6 +605,27 @@ async fn snapshot_restore_gate() {
         .expect("restored scheduler");
     assert!(restored_scheduler.journal_mode.eq_ignore_ascii_case("wal"));
     assert_eq!(restored_scheduler.synchronous, 2);
+    {
+        let restored_storage =
+            PlatformStorage::bootstrap(&restore_loaded.config.storage, &SystemClock)
+                .expect("bootstrap restored Queue authority");
+        let restored_queue = QueueRepository::new(restored_storage.db())
+            .get(account_id, snapshot_queue)
+            .expect("restored Queue catalog");
+        let restored_scheduler =
+            SchedulerStore::open(&restored_storage.data_dir().scheduler_db_path(), 5_000, 1)
+                .expect("open restored Queue scheduler");
+        let metrics = restored_scheduler
+            .queue_metrics(
+                snapshot_queue,
+                restored_queue.lifecycle_generation,
+                restored_queue.config_generation,
+            )
+            .expect("restored Queue metrics");
+        assert_eq!(metrics.backlog_count, 1);
+        assert_eq!(metrics.backlog_bytes, 19);
+        assert_eq!(metrics.oldest_message_timestamp_ms, Some(1_001));
+    }
     assert!(
         backup_attest_restore_smoke(&restore_loaded, &first.snapshot_id, false)
             .await

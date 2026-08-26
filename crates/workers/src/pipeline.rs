@@ -5,22 +5,23 @@ use crate::bundle::{
 };
 use crate::descriptor::{
     BindingDescriptorV1, D1_FACADE_MODULE_NAME, DO_ALARM_SHIM_MODULE_NAME, DO_FACADE_MODULE_NAME,
-    DO_ID_CODEC_MODULE_NAME, LOADED_ISOLATE_WRAPPER_MODULE_NAME, R2_FACADE_MODULE_NAME,
-    SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256,
-    validate_env_name,
+    DO_ID_CODEC_MODULE_NAME, LOADED_ISOLATE_WRAPPER_MODULE_NAME, QUEUE_FACADE_MODULE_NAME,
+    QueueProducerBindingDescriptorV1, R2_FACADE_MODULE_NAME, SecretDescriptor,
+    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, validate_env_name,
 };
 use bytes::Bytes;
 use futures::stream;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
     AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
-    ErrorCode, OperationClass, PlatformError, RequestId, ResourceId, ResourceState, SecretBytes,
-    SecretString, WorkerId,
+    ErrorCode, OperationClass, PlatformError, QueueId, RequestId, ResourceId, ResourceState,
+    SecretBytes, SecretString, WorkerId,
 };
 use open_compute_storage::{
     DeploymentRecord, DeploymentState, DurableObjectRepository, IdempotencyReservation,
-    LOADER_SCHEMA_VERSION, NewDeployment, NewDeploymentBinding, PlatformStorage,
-    ResourceRepository, StoredDeploymentSecret, WorkerRepository,
+    LOADER_SCHEMA_VERSION, NewDeployment, NewDeploymentBinding, NewQueueProducerBinding,
+    PlatformStorage, QueueAvailability, QueueRepository, QueueState, ResourceRepository,
+    StoredDeploymentSecret, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -41,6 +42,8 @@ const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 type PreparedBindings = (
     Vec<BindingDescriptorV1>,
     Vec<NewDeploymentBinding>,
+    Vec<QueueProducerBindingDescriptorV1>,
+    Vec<NewQueueProducerBinding>,
     Vec<String>,
 );
 
@@ -408,9 +411,14 @@ impl<'a> DeploymentController<'a> {
             deployment_id,
             &request.secrets,
         )?;
-        let (binding_descriptors, stored_bindings, durable_object_classes) =
-            self.prepare_bindings(request)?;
-        let descriptor = WorkerCodeDescriptorV1::new(
+        let (
+            binding_descriptors,
+            stored_bindings,
+            queue_binding_descriptors,
+            stored_queue_bindings,
+            durable_object_classes,
+        ) = self.prepare_bindings(request)?;
+        let descriptor = WorkerCodeDescriptorV1::new_with_queue_bindings(
             request.account_id,
             request.worker_id,
             deployment_id,
@@ -421,6 +429,7 @@ impl<'a> DeploymentController<'a> {
             canonical_vars,
             secret_descriptors,
             binding_descriptors,
+            queue_binding_descriptors,
             request.limits.clone(),
             u32::try_from(LOADER_SCHEMA_VERSION).map_err(|_| invariant())?,
         )?;
@@ -433,7 +442,7 @@ impl<'a> DeploymentController<'a> {
                 "ArtifactStore returned a different immutable artifact",
             ));
         }
-        let mut deployment = repo.insert_staging_deployment_with_bindings_and_limit(
+        let mut deployment = repo.insert_staging_deployment_with_all_bindings_and_limit(
             &NewDeployment {
                 id: deployment_id,
                 account_id: request.account_id,
@@ -452,6 +461,7 @@ impl<'a> DeploymentController<'a> {
                 now_ms: request.now_ms,
             },
             &stored_bindings,
+            &stored_queue_bindings,
             self.storage.hardening().max_deployments_per_worker,
         )?;
         repo.begin_validation(deployment_id)?;
@@ -575,10 +585,50 @@ impl<'a> DeploymentController<'a> {
         request: &CreateDeploymentRequest,
     ) -> Result<PreparedBindings, PlatformError> {
         let repository = ResourceRepository::new(self.storage.db());
+        let queues = QueueRepository::new(self.storage.db());
         let mut descriptors = Vec::with_capacity(request.bindings.len());
         let mut rows = Vec::with_capacity(request.bindings.len());
+        let mut queue_descriptors = Vec::new();
+        let mut queue_rows = Vec::new();
         let mut durable_object_classes = Vec::new();
         for (name, input) in &request.bindings {
+            if input.kind == BindingKind::QueueProducer {
+                if input.permissions != CanonicalPermissions::default()
+                    || input.config != CanonicalBindingConfig::default()
+                {
+                    return Err(PlatformError::new(
+                        ErrorCode::BindingTypeMismatch,
+                        "Queue producer binding does not accept resource permissions or config",
+                    ));
+                }
+                let queue_id = QueueId::from_uuid(input.id.as_uuid()).map_err(|_| invariant())?;
+                let queue = queues.get(request.account_id, queue_id)?;
+                if queue.state != QueueState::Ready
+                    || queue.availability != QueueAvailability::Healthy
+                {
+                    return Err(PlatformError::new(
+                        ErrorCode::QueueNotReady,
+                        "deployment Queue binding is not ready",
+                    ));
+                }
+                let descriptor = QueueProducerBindingDescriptorV1::new(
+                    BindingId::generate(),
+                    name.clone(),
+                    queue.id,
+                    queue.lifecycle_generation,
+                    1,
+                )?;
+                queue_rows.push(NewQueueProducerBinding {
+                    id: descriptor.binding_id,
+                    name: descriptor.name.clone(),
+                    queue_id: descriptor.queue_id,
+                    queue_lifecycle_generation: descriptor.queue_lifecycle_generation,
+                    capability_version: descriptor.capability_version,
+                    descriptor_sha256: descriptor.sha256()?,
+                });
+                queue_descriptors.push(descriptor);
+                continue;
+            }
             let resource = repository.get(request.account_id, input.id)?;
             if resource.state != ResourceState::Ready {
                 return Err(PlatformError::new(
@@ -631,7 +681,13 @@ impl<'a> DeploymentController<'a> {
         }
         durable_object_classes.sort();
         durable_object_classes.dedup();
-        Ok((descriptors, rows, durable_object_classes))
+        Ok((
+            descriptors,
+            rows,
+            queue_descriptors,
+            queue_rows,
+            durable_object_classes,
+        ))
     }
 }
 
@@ -705,7 +761,10 @@ pub(crate) fn validate_injection_module_collisions(
     if !bindings.values().any(|binding| {
         matches!(
             binding.kind,
-            BindingKind::R2Bucket | BindingKind::D1Database | BindingKind::DoNamespace
+            BindingKind::R2Bucket
+                | BindingKind::D1Database
+                | BindingKind::DoNamespace
+                | BindingKind::QueueProducer
         )
     }) {
         return Ok(());
@@ -718,6 +777,7 @@ pub(crate) fn validate_injection_module_collisions(
                 | DO_FACADE_MODULE_NAME
                 | DO_ID_CODEC_MODULE_NAME
                 | DO_ALARM_SHIM_MODULE_NAME
+                | QUEUE_FACADE_MODULE_NAME
                 | LOADED_ISOLATE_WRAPPER_MODULE_NAME
         )
     }) {
@@ -832,6 +892,10 @@ pub(crate) fn parse_failure_code(code: &str) -> ErrorCode {
         "BINDING_PROTOCOL_ERROR" => ErrorCode::BindingProtocolError,
         "BINDING_LIMIT_EXCEEDED" => ErrorCode::BindingLimitExceeded,
         "BINDING_RESULT_UNKNOWN" => ErrorCode::BindingResultUnknown,
+        "QUEUE_NOT_FOUND" => ErrorCode::QueueNotFound,
+        "QUEUE_NOT_READY" => ErrorCode::QueueNotReady,
+        "QUEUE_CONFIG_PENDING" => ErrorCode::QueueConfigPending,
+        "QUEUE_INVARIANT_VIOLATION" => ErrorCode::QueueInvariantViolation,
         "RUNTIME_UNAVAILABLE" => ErrorCode::RuntimeUnavailable,
         "RUNTIME_RESULT_UNKNOWN" => ErrorCode::RuntimeResultUnknown,
         _ => ErrorCode::Internal,

@@ -150,14 +150,74 @@ async fn run_cli_json(config: &Path, args: &[&str]) -> serde_json::Value {
 fn downgrade_control_to_seven(path: &Path) {
     let connection = Connection::open(path).expect("open control");
     connection
-        .execute("DELETE FROM schema_migrations WHERE version = 8", [])
-        .expect("remove P1 migration");
+        .pragma_update(None, "foreign_keys", "OFF")
+        .expect("disable fixture foreign keys");
+    let queue_triggers = {
+        let mut statement = connection
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'trigger' AND name LIKE '%queue%'",
+            )
+            .expect("list Queue triggers");
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("read Queue triggers")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect Queue triggers")
+    };
+    for trigger in queue_triggers {
+        connection
+            .execute_batch(&format!("DROP TRIGGER \"{trigger}\";"))
+            .expect("drop Queue trigger");
+    }
     connection
-        .pragma_update(None, "user_version", 7)
-        .expect("schema seven");
+        .execute_batch(
+            "DROP TABLE queue_referrers;
+             DROP TABLE queue_producer_bindings;
+             ALTER TABLE control_idempotency DROP COLUMN queue_id;
+             DROP TABLE queues;
+             DELETE FROM schema_migrations WHERE version >= 8;
+             PRAGMA user_version = 7;",
+        )
+        .expect("restore schema-seven control fixture");
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
         .expect("checkpoint");
+}
+
+fn downgrade_scheduler_to_one(path: &Path) {
+    let connection = Connection::open(path).expect("open scheduler");
+    connection
+        .pragma_update(None, "foreign_keys", "OFF")
+        .expect("disable fixture foreign keys");
+    let queue_triggers = {
+        let mut statement = connection
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'trigger' AND name LIKE '%queue%'",
+            )
+            .expect("list scheduler Queue triggers");
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("read scheduler Queue triggers")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect scheduler Queue triggers")
+    };
+    for trigger in queue_triggers {
+        connection
+            .execute_batch(&format!("DROP TRIGGER \"{trigger}\";"))
+            .expect("drop scheduler Queue trigger");
+    }
+    connection
+        .execute_batch(
+            "DROP TABLE queue_messages;
+             DROP TABLE queue_state;
+             DELETE FROM scheduler_migrations WHERE version = 2;
+             UPDATE scheduler_meta SET schema_version = 1;
+             PRAGMA user_version = 1;
+             PRAGMA wal_checkpoint(TRUNCATE);",
+        )
+        .expect("restore schema-one scheduler fixture");
 }
 
 fn sqlite_backup(source: &Path, destination: &Path) {
@@ -504,6 +564,7 @@ async fn upgrade_gate() {
     );
     drop(storage);
     downgrade_control_to_seven(&source_data.join("control.sqlite"));
+    downgrade_scheduler_to_one(&source_data.join("scheduler.sqlite"));
     assert!(old_fixture_accepts_schema_seven(
         &source_data.join("control.sqlite")
     ));
@@ -513,6 +574,7 @@ async fn upgrade_gate() {
         .expect("capabilities")
         .release;
     source_release.control_schema_version = 7;
+    source_release.scheduler_schema_version = 1;
     let snapshot_id = Uuid::now_v7().hyphenated().to_string();
     let manifest = create_schema_seven_snapshot(
         &loaded,
@@ -558,7 +620,7 @@ async fn upgrade_gate() {
             check["before"]["control"].as_u64(),
             check["target"]["control"].as_u64()
         ),
-        (Some(7), Some(8))
+        (Some(7), Some(9))
     );
 
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).expect("offline");
@@ -598,7 +660,7 @@ async fn upgrade_gate() {
             applied["before"]["control"].as_u64(),
             applied["target"]["control"].as_u64()
         ),
-        (Some(8), Some(8))
+        (Some(8), Some(9))
     );
 
     let doctor = doctor_report(&loaded, DoctorMode::Full).await;

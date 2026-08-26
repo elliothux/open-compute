@@ -157,7 +157,6 @@ fn validate_upgrade_source(
         || source.workerd_lock_sha256 != metadata.release.workerd_lock_sha256
         || source.runtime_assets_sha256 != metadata.release.runtime_assets_sha256
         || source.facade_capability_version != metadata.release.facade_capability_version
-        || source.scheduler_schema_version != metadata.release.scheduler_schema_version
         || source.kv_schema_version_min != metadata.release.kv_schema_version_min
         || source.kv_schema_version_max != metadata.release.kv_schema_version_max
         || source.d1_schema_version_min != metadata.release.d1_schema_version_min

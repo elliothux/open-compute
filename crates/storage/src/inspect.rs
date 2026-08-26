@@ -59,6 +59,14 @@ pub struct ControlInventory {
     pub d1_databases: u64,
     /// Non-tombstoned Durable Object namespaces.
     pub do_namespaces: u64,
+    /// Non-tombstoned Queues.
+    pub queues: u64,
+    /// Queues still creating their scheduler projection.
+    pub queues_creating: u64,
+    /// Queues converging deletion.
+    pub queues_deleting: u64,
+    /// Retired Queue tombstones.
+    pub queues_tombstoned: u64,
 }
 
 impl DataRootInspect {
@@ -207,6 +215,22 @@ pub fn inspect_control_inventory(db: &ControlDb) -> Result<ControlInventory, Pla
             r2_buckets: query_resource_count(connection, "r2_bucket")?,
             d1_databases: query_resource_count(connection, "d1_database")?,
             do_namespaces: query_resource_count(connection, "do_namespace")?,
+            queues: query_count(
+                connection,
+                "SELECT COUNT(*) FROM queues WHERE state != 'tombstoned'",
+            )?,
+            queues_creating: query_count(
+                connection,
+                "SELECT COUNT(*) FROM queues WHERE state = 'creating'",
+            )?,
+            queues_deleting: query_count(
+                connection,
+                "SELECT COUNT(*) FROM queues WHERE state = 'deleting'",
+            )?,
+            queues_tombstoned: query_count(
+                connection,
+                "SELECT COUNT(*) FROM queues WHERE state = 'tombstoned'",
+            )?,
         })
     })
 }

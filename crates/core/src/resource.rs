@@ -17,6 +17,8 @@ pub enum BindingKind {
     D1Database,
     /// Durable Object namespace.
     DoNamespace,
+    /// Queue producer runtime binding; never a generic P0 resource driver.
+    QueueProducer,
 }
 
 impl BindingKind {
@@ -28,6 +30,7 @@ impl BindingKind {
             Self::R2Bucket => "r2_bucket",
             Self::D1Database => "d1_database",
             Self::DoNamespace => "do_namespace",
+            Self::QueueProducer => "queue_producer",
         }
     }
 }
@@ -47,6 +50,7 @@ impl FromStr for BindingKind {
             "r2_bucket" => Ok(Self::R2Bucket),
             "d1_database" => Ok(Self::D1Database),
             "do_namespace" => Ok(Self::DoNamespace),
+            "queue_producer" => Ok(Self::QueueProducer),
             _ => Err(resource_type_error()),
         }
     }

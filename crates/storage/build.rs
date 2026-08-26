@@ -16,6 +16,7 @@ fn main() {
         ("006_d1", "MIGRATION_006_SHA256"),
         ("007_durable_objects", "MIGRATION_007_SHA256"),
         ("008_p1_format_freeze", "MIGRATION_008_SHA256"),
+        ("009_queues", "MIGRATION_009_SHA256"),
     ];
     let mut generated = String::new();
     for (file, constant) in migrations {
@@ -35,22 +36,26 @@ fn main() {
             "/// SHA-256 of `{file}.sql` captured at build time.\npub const {constant}: [u8; 32] = {literal};\n"
         ));
     }
-    let scheduler_file = "001_scheduler";
-    let scheduler_path = manifest_dir
-        .join("scheduler-migrations")
-        .join(format!("{scheduler_file}.sql"));
-    println!("cargo:rerun-if-changed={}", scheduler_path.display());
-    let scheduler_sql = fs::read(&scheduler_path).expect("read scheduler migration");
-    let digest = Sha256::digest(&scheduler_sql);
-    let literal = digest
-        .iter()
-        .map(|byte| format!("0x{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    generated.push_str(&format!(
-        "/// SHA-256 of `{scheduler_file}.sql` captured at build time.\n\
-         pub const SCHEDULER_MIGRATION_001_SHA256: [u8; 32] = [{literal}];\n"
-    ));
+    for (scheduler_file, constant) in [
+        ("001_scheduler", "SCHEDULER_MIGRATION_001_SHA256"),
+        ("002_queue_producer", "SCHEDULER_MIGRATION_002_SHA256"),
+    ] {
+        let scheduler_path = manifest_dir
+            .join("scheduler-migrations")
+            .join(format!("{scheduler_file}.sql"));
+        println!("cargo:rerun-if-changed={}", scheduler_path.display());
+        let scheduler_sql = fs::read(&scheduler_path).expect("read scheduler migration");
+        let digest = Sha256::digest(&scheduler_sql);
+        let literal = digest
+            .iter()
+            .map(|byte| format!("0x{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        generated.push_str(&format!(
+            "/// SHA-256 of `{scheduler_file}.sql` captured at build time.\n\
+             pub const {constant}: [u8; 32] = [{literal}];\n"
+        ));
+    }
 
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("migration_hashes.rs");
     fs::write(out, generated).expect("write migration hashes");

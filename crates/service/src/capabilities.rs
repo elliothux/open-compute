@@ -9,7 +9,8 @@ use open_compute_core::{
 };
 use open_compute_runtime::{load_runtime_lock, runtime_assets_sha256};
 use open_compute_storage::{
-    D1_DATABASE_SCHEMA_VERSION, KV_SCHEMA_VERSION, current_scheduler_schema_version, migrations,
+    D1_DATABASE_SCHEMA_VERSION, KV_SCHEMA_VERSION, QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES,
+    QUEUE_MAX_DELAY_SECONDS, QUEUE_MAX_MESSAGE_BYTES, current_scheduler_schema_version, migrations,
 };
 use open_compute_workers::{
     COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN, COMPATIBILITY_FLAGS_ALLOWED,
@@ -140,7 +141,7 @@ pub fn platform_release_metadata(
             ("snapshots".to_owned(), vec![1]),
         ]),
         workerd_local_disk_gate_result: "p0.7-stock-workerd".to_owned(),
-        conformance_result: "p2.1-scheduler-kernel-v2".to_owned(),
+        conformance_result: "conditional-go-p2.2-queue-producer-v1".to_owned(),
         websocket_hibernation_result: "no-go:p1.8-unsupported".to_owned(),
     };
     if !metadata.validate() {
@@ -256,7 +257,11 @@ fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
         "alarms".to_owned(),
         supported(&["getAlarm", "setAlarm", "deleteAlarm", "alarm"], &[]),
     );
-    for name in ["queues", "cron", "workflows", "websocket_hibernation"] {
+    products.insert(
+        "queues".to_owned(),
+        supported(&["send", "sendBatch", "metrics"], &["OC-QUEUE-001"]),
+    );
+    for name in ["cron", "workflows", "websocket_hibernation"] {
         products.insert(name.to_owned(), unsupported());
     }
     products
@@ -289,6 +294,9 @@ fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
     let alarm = config
         .scheduler
         .pool(open_compute_core::SchedulerKind::Alarm);
+    let queue = config
+        .scheduler
+        .pool(open_compute_core::SchedulerKind::Queue);
     BTreeMap::from([
         (
             "workers.max_bundle_bytes".to_owned(),
@@ -326,6 +334,43 @@ fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
         (
             "scheduler.pools.alarm.weight".to_owned(),
             u64::from(alarm.weight),
+        ),
+        (
+            "scheduler.pools.queue.max_in_flight".to_owned(),
+            u64::from(queue.max_in_flight),
+        ),
+        (
+            "scheduler.pools.queue.claim_batch".to_owned(),
+            u64::from(queue.claim_batch),
+        ),
+        (
+            "scheduler.pools.queue.weight".to_owned(),
+            u64::from(queue.weight),
+        ),
+        (
+            "queues.max_message_bytes".to_owned(),
+            QUEUE_MAX_MESSAGE_BYTES,
+        ),
+        (
+            "queues.max_batch_messages".to_owned(),
+            u64::from(QUEUE_MAX_BATCH_MESSAGES),
+        ),
+        ("queues.max_batch_bytes".to_owned(), QUEUE_MAX_BATCH_BYTES),
+        (
+            "queues.max_delay_seconds".to_owned(),
+            u64::from(QUEUE_MAX_DELAY_SECONDS),
+        ),
+        (
+            "queues.default_max_backlog_bytes".to_owned(),
+            config.queues.default_max_backlog_bytes,
+        ),
+        (
+            "queues.max_in_flight_requests".to_owned(),
+            u64::from(config.queues.max_in_flight_requests),
+        ),
+        (
+            "queues.max_in_flight_requests_per_binding".to_owned(),
+            u64::from(config.queues.max_in_flight_requests_per_binding),
         ),
         (
             "hardening.max_workers_per_account".to_owned(),

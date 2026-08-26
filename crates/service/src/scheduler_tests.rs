@@ -1,13 +1,17 @@
 use super::*;
+use crate::metrics::MetricsRegistry;
 use crate::runtime_bridge::WorkerdTransport;
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::StorageConfig;
+use open_compute_core::config::{MetricsConfig, StorageConfig};
 use open_compute_core::{
     DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES, DeploymentId,
     DeterministicSchedulerClock, durable_object_namespace_prefix,
 };
 use open_compute_runtime::GenerationAuthRegistry;
-use open_compute_storage::AlarmProjection;
+use open_compute_storage::{
+    AlarmProjection, QueueConfig, QueueContentType, QueueEnqueueRequest, QueueMessageInput,
+    QueueProjection,
+};
 use std::path::Path;
 
 #[test]
@@ -153,6 +157,112 @@ async fn scheduler_helpers_cover_all_fixed_states_and_completion_results() {
     let failed = tokio::spawn(async { panic!("expected test task failure") }).await;
     release_completed(&failed, &mut admission, &global, &alarm);
     assert_eq!(alarm.load(Ordering::Acquire), 0);
+}
+
+#[tokio::test]
+async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage =
+        Arc::new(PlatformStorage::bootstrap(&storage_config(temp.path()), &SystemClock).unwrap());
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    let store = Arc::new(SchedulerStore::open(&scheduler_path, 100, 1).unwrap());
+    let queue_id = open_compute_core::QueueId::generate();
+    let account_id = storage.identity().default_account_id;
+    let config = QueueConfig {
+        retention_seconds: 60,
+        max_backlog_bytes: 1024,
+        ..QueueConfig::default()
+    };
+    store
+        .create_queue_projection(&QueueProjection {
+            queue_id,
+            account_id,
+            lifecycle_generation: 1,
+            config_generation: 1,
+            config,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        })
+        .unwrap();
+    store
+        .enqueue_queue(
+            &QueueEnqueueRequest {
+                queue_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![QueueMessageInput {
+                    content_type: QueueContentType::Text,
+                    body: b"expired".to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            1,
+        )
+        .unwrap();
+
+    let clock = Arc::new(DeterministicSchedulerClock::new(60_001));
+    let metrics =
+        Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
+    let transport =
+        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
+    let scheduler = SchedulerService::new(
+        store.clone(),
+        storage,
+        transport,
+        SchedulerConfig::default(),
+        clock,
+    )
+    .with_metrics(metrics);
+
+    scheduler.pause();
+    assert_eq!(scheduler.poll_queue_once().unwrap(), 0);
+    scheduler.resume();
+    scheduler.pause_kind(SchedulerKind::Queue).unwrap();
+    assert_eq!(scheduler.queue_pool_state(), SchedulerPoolState::Paused);
+    assert_eq!(scheduler.poll_queue_once().unwrap(), 0);
+    scheduler.resume_kind(SchedulerKind::Queue).unwrap();
+    assert_eq!(scheduler.poll_queue_once().unwrap(), 1);
+    assert_eq!(store.queue_backlog_totals().unwrap(), (0, 0));
+
+    scheduler.set_queue_pool_state(SchedulerPoolState::Backoff);
+    assert_eq!(scheduler.queue_pool_state(), SchedulerPoolState::Backoff);
+    scheduler.run_queue_maintenance(60_001, 0).await;
+    assert_eq!(scheduler.queue_pool_state(), SchedulerPoolState::Backoff);
+    scheduler.run_queue_maintenance(60_001, 1).await;
+    assert_eq!(scheduler.queue_in_flight.load(Ordering::Acquire), 0);
+    assert_eq!(scheduler.queue_pool_state(), SchedulerPoolState::Ready);
+
+    store
+        .enqueue_queue(
+            &QueueEnqueueRequest {
+                queue_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![QueueMessageInput {
+                    content_type: QueueContentType::Bytes,
+                    body: b"corrupt".to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            1,
+        )
+        .unwrap();
+    let connection = rusqlite::Connection::open(&scheduler_path).unwrap();
+    connection
+        .execute_batch(
+            "DROP TRIGGER queue_messages_update_guard;
+             PRAGMA ignore_check_constraints = ON;
+             UPDATE queue_messages SET body_bytes = -1;",
+        )
+        .unwrap();
+    drop(connection);
+    scheduler.run_queue_maintenance(60_001, 1).await;
+    assert_eq!(
+        scheduler.queue_pool_state(),
+        SchedulerPoolState::CircuitOpen
+    );
 }
 
 fn storage_config(root: &Path) -> StorageConfig {

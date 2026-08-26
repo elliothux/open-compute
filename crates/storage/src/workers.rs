@@ -149,6 +149,8 @@ pub struct DeploymentSnapshot {
     pub secrets: BTreeMap<String, StoredDeploymentSecret>,
     /// Immutable typed resource bindings ordered by env name.
     pub bindings: Vec<crate::DeploymentBindingRecord>,
+    /// Immutable Queue producer bindings ordered by env name.
+    pub queue_bindings: Vec<crate::QueueProducerBindingRecord>,
 }
 
 /// Route kind supported by P0.2.
@@ -470,6 +472,22 @@ impl<'a> WorkerRepository<'a> {
         bindings: &[crate::NewDeploymentBinding],
         max_retained: u32,
     ) -> Result<DeploymentRecord, PlatformError> {
+        self.insert_staging_deployment_with_all_bindings_and_limit(
+            input,
+            bindings,
+            &[],
+            max_retained,
+        )
+    }
+
+    /// Insert deployment metadata and both frozen resource and Queue bindings atomically.
+    pub fn insert_staging_deployment_with_all_bindings_and_limit(
+        &self,
+        input: &NewDeployment,
+        bindings: &[crate::NewDeploymentBinding],
+        queue_bindings: &[crate::NewQueueProducerBinding],
+        max_retained: u32,
+    ) -> Result<DeploymentRecord, PlatformError> {
         if max_retained == 0 {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
@@ -557,6 +575,7 @@ impl<'a> WorkerRepository<'a> {
                 .map_err(|_| db_error())?;
             }
             crate::bindings::insert_staging_bindings(tx, input.id, bindings, input.now_ms)?;
+            crate::queues::insert_staging_bindings(tx, input.id, queue_bindings, input.now_ms)?;
             audit(
                 tx,
                 input.account_id,
@@ -824,6 +843,7 @@ impl<'a> WorkerRepository<'a> {
             let vars = read_vars(conn, deployment_id)?;
             let secrets = read_secrets(conn, deployment_id)?;
             let bindings = crate::bindings::read_deployment_bindings_conn(conn, deployment_id)?;
+            let queue_bindings = crate::queues::read_deployment_bindings_conn(conn, deployment_id)?;
             Ok(DeploymentSnapshot {
                 account_id,
                 worker,
@@ -831,6 +851,7 @@ impl<'a> WorkerRepository<'a> {
                 vars,
                 secrets,
                 bindings,
+                queue_bindings,
             })
         })
     }
@@ -1311,6 +1332,44 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
+    /// Complete an idempotent Queue mutation and retain its exact Queue identity.
+    pub fn complete_idempotency_with_queue_ref(
+        &self,
+        account_id: AccountId,
+        scope: &str,
+        key: &str,
+        fingerprint: &[u8; 32],
+        response: &[u8],
+        queue_id: open_compute_core::QueueId,
+    ) -> Result<(), PlatformError> {
+        self.db.with_immediate(|tx| {
+            let changed = tx
+                .execute(
+                    "UPDATE control_idempotency SET state = 'complete', response_json = ?1,
+                            queue_id = ?6
+                     WHERE account_id = ?2 AND scope = ?3 AND idempotency_key = ?4
+                       AND state = 'running' AND request_fingerprint = ?5
+                       AND (queue_id IS NULL OR queue_id = ?6)",
+                    params![
+                        response,
+                        account_id.to_string(),
+                        scope,
+                        key,
+                        fingerprint.as_slice(),
+                        queue_id.to_string(),
+                    ],
+                )
+                .map_err(|_| db_error())?;
+            if changed != 1 {
+                return Err(PlatformError::new(
+                    ErrorCode::IdempotencyConflict,
+                    "Queue idempotency reservation is no longer owned",
+                ));
+            }
+            Ok(())
+        })
+    }
+
     /// Complete an idempotent response and register its deployment readback ref atomically.
     #[allow(clippy::too_many_arguments)]
     pub fn complete_idempotency_with_deployment_ref(
@@ -1556,6 +1615,11 @@ impl<'a> WorkerRepository<'a> {
                 ));
             }
             tx.execute(
+                "DELETE FROM queue_producer_bindings WHERE deployment_id = ?1",
+                [deployment_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
                 "DELETE FROM deployment_bindings WHERE deployment_id = ?1",
                 [deployment_id.to_string()],
             )
@@ -1666,6 +1730,11 @@ impl<'a> WorkerRepository<'a> {
             };
             let mut recovered = 0_u32;
             for (deployment, _worker, account) in candidates {
+                tx.execute(
+                    "DELETE FROM queue_producer_bindings WHERE deployment_id = ?1",
+                    [&deployment],
+                )
+                .map_err(|_| db_error())?;
                 tx.execute(
                     "DELETE FROM deployment_bindings WHERE deployment_id = ?1",
                     [&deployment],

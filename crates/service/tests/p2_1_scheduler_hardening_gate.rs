@@ -3,7 +3,7 @@
 #![cfg(feature = "test-support")]
 
 use open_compute_core::{
-    DeploymentId, DurableObjectId, ErrorCode, ResourceId, SchedulerFaultPoint, SchedulerKind,
+    DeploymentId, DurableObjectId, ResourceId, SchedulerFaultPoint, SchedulerKind,
 };
 use open_compute_storage::{
     AlarmProjection, ClaimResult, ClaimedJob, SchedulerStore, scheduler_migration_registry,
@@ -205,8 +205,9 @@ fn p2_1_five_fresh_process_crash_boundaries_recover_exactly() {
 
 #[test]
 fn p2_1_schema_and_product_scope_remain_frozen() {
-    assert_eq!(scheduler_migration_registry().len(), 1);
+    assert_eq!(scheduler_migration_registry().len(), 2);
     assert_eq!(scheduler_migration_registry()[0].0, 1);
+    assert_eq!(scheduler_migration_registry()[1].0, 2);
     assert_eq!(
         SchedulerKind::ALL.map(SchedulerKind::as_str),
         ["do_alarm", "queue", "cron", "workflow"]
@@ -233,12 +234,9 @@ fn p2_1_schema_and_product_scope_remain_frozen() {
         [],
     );
     assert!(result.is_err(), "future workload row bypassed schema fence");
-    assert_eq!(
-        open_compute_core::PlatformConfig::from_toml_str(
-            "[scheduler.pools.queue]\nenabled = true\n"
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::SchedulerKindNotEnabled
-    );
+    let config = open_compute_core::PlatformConfig::from_toml_str(
+        "[scheduler.pools.queue]\nenabled = true\nmax_in_flight = 1\nclaim_batch = 256\n",
+    )
+    .unwrap();
+    assert!(config.scheduler.pool(SchedulerKind::Queue).enabled);
 }
