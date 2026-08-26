@@ -1289,22 +1289,32 @@ R2 point-in-time backup，R2 使用 restore 时外部 provider 中的当前状�
 
 ### P2.1：Scheduler hardening
 
-先扩展 P0 alarm 已验证的 scheduler kernel：
+先把 P0.8 已由 alarm 验证的单 workload loop 收敛成多 workload 内核，但 production 仍只注册
+Alarm。内核使用 global budget + Alarm/Queue/Cron/Workflow 独立 pool、work-conserving weighted
+fairness、pool-local batch claim、generation/token/lease fence、event wake + earliest deadline、完整 virtual
+clock、基础设施 backoff/jitter 和只存在于 test-support binary 的 crash point。业务 authority 仍归每个
+产品，禁止建立一张 nullable-column 的通用 jobs 表；P2.1 也不创建 Queue/Cron/Workflow 业务 row。
 
-- Queue、Cron、Workflow 和 Alarm 独立 admission pool；
-- ready/due fairness；
-- batch claim；
-- backoff/jitter；
-- scheduler projection generation；
-- virtual-clock test harness；
-- test-only crash injection point。
+详细的 workload contract、fairness、wake/lost-wake 协议、migration registry、故障隔离、工作包、
+测试矩阵与 Exit Gate 见
+[P2.1：Scheduler 多 Workload 内核详细设计](./p2-1-scheduler-hardening.md)。
 
 ### P2.2：Queue producer
 
-- Queue lifecycle；
-- `send`、`sendBatch` 和 delay；
-- message ID、payload limits 和 producer transaction；
-- restart persistence 和 Queue 隔离。
+实现 Queue lifecycle 与 immutable producer binding，向普通 Worker 暴露 `send`、`sendBatch` 和
+`metrics`。Queue catalog/producer binding 使用 control migration 009 的独立表，不关闭 FK 重建 P0 已
+冻结的 `resources` 引用图；durable message authority 使用 scheduler migration 002 的
+`queue_state/queue_messages`。一个 batch 在一笔 SQLite transaction 中全成或全败，支持 JSON/text/bytes、
+Queue/batch/message delay、128,000-byte 单消息、100 条/256,000-byte batch、restart/snapshot persistence、
+retention、quota 与跨 account isolation；V8 明确不支持。
+
+实现前必须在 pinned stock workerd 上验证动态 facade 是否继承 Durable Object output gate。若普通
+Worker 可用但 DO output gate 不成立，则以 Conditional Go 发布：普通 Worker producer 开放，DO 内
+Queue producer 稳定 fail closed，不能静默提早 enqueue。
+
+详细的 control/scheduler schema、跨库 lifecycle、facade/transport、serialization、durability、
+output-gate Hard Gate、工作包、测试矩阵与 Exit Gate 见
+[P2.2：Queue Producer 详细设计](./p2-2-queue-producer.md)。
 
 ### P2.3：Queue consumer 与 Cron
 
