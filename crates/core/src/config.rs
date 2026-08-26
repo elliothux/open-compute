@@ -995,15 +995,89 @@ impl DurableObjectsConfig {
     }
 }
 
-/// P0.8 single-process scheduler and Durable Object alarm policy.
+/// One fixed scheduler workload-pool policy.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct SchedulerPoolConfig {
+    /// Whether production composition enables this pool.
+    pub enabled: bool,
+    /// Maximum claims from this pool concurrently dispatched.
+    pub max_in_flight: u32,
+    /// Maximum claims selected in one short transaction.
+    pub claim_batch: u32,
+    /// Weighted deficit round-robin quantum.
+    pub weight: u32,
+}
+
+impl SchedulerPoolConfig {
+    fn alarm_default() -> Self {
+        Self {
+            enabled: true,
+            max_in_flight: 16,
+            claim_batch: 32,
+            weight: 1,
+        }
+    }
+
+    fn future_default(max_in_flight: u32, claim_batch: u32) -> Self {
+        Self {
+            enabled: false,
+            max_in_flight,
+            claim_batch,
+            weight: 1,
+        }
+    }
+
+    fn validate(self) -> bool {
+        self.max_in_flight > 0
+            && self.max_in_flight <= 4096
+            && self.claim_batch > 0
+            && self.claim_batch <= 10_000
+            && self.weight > 0
+            && self.weight <= 1024
+    }
+}
+
+impl Default for SchedulerPoolConfig {
+    fn default() -> Self {
+        Self::alarm_default()
+    }
+}
+
+/// Fixed scheduler pool registry; future products remain disabled in P2.1.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct SchedulerPoolsConfig {
+    /// Durable Object alarm pool.
+    pub alarm: SchedulerPoolConfig,
+    /// Queue pool reserved until P2.3.
+    pub queue: SchedulerPoolConfig,
+    /// Cron pool reserved until P2.3.
+    pub cron: SchedulerPoolConfig,
+    /// Workflow pool reserved until P2.4.
+    pub workflow: SchedulerPoolConfig,
+}
+
+impl Default for SchedulerPoolsConfig {
+    fn default() -> Self {
+        Self {
+            alarm: SchedulerPoolConfig::alarm_default(),
+            queue: SchedulerPoolConfig::future_default(32, 16),
+            cron: SchedulerPoolConfig::future_default(8, 8),
+            workflow: SchedulerPoolConfig::future_default(16, 16),
+        }
+    }
+}
+
+/// P2.1 single-process multi-workload scheduler policy.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct SchedulerConfig {
-    /// Delay between due-job polls.
+    /// Bounded safety-reconcile interval used when no earlier wake is known.
     pub poll_interval_ms: u64,
-    /// Maximum jobs claimed by one short writer transaction.
+    /// Legacy Alarm claim batch used by configurations without a pools table.
     pub claim_batch: u32,
-    /// Maximum concurrent tenant alarm dispatches.
+    /// Global maximum concurrent scheduler dispatches.
     pub max_in_flight: u32,
     /// Persisted claim lease duration.
     pub claim_lease_ms: u64,
@@ -1017,6 +1091,8 @@ pub struct SchedulerConfig {
     pub repair_interval_ms: u64,
     /// Maximum graceful-shutdown wait for in-flight alarm dispatches.
     pub shutdown_drain_ms: u64,
+    /// Optional per-pool policy; absence preserves the P0.8 Alarm settings.
+    pub pools: Option<SchedulerPoolsConfig>,
 }
 
 impl Default for SchedulerConfig {
@@ -1031,11 +1107,36 @@ impl Default for SchedulerConfig {
             repair_batch: 100,
             repair_interval_ms: 30_000,
             shutdown_drain_ms: 10_000,
+            pools: None,
         }
     }
 }
 
 impl SchedulerConfig {
+    /// Effective policy for one fixed workload kind.
+    #[must_use]
+    pub fn pool(&self, kind: crate::SchedulerKind) -> SchedulerPoolConfig {
+        let Some(pools) = &self.pools else {
+            return match kind {
+                crate::SchedulerKind::Alarm => SchedulerPoolConfig {
+                    enabled: true,
+                    max_in_flight: self.max_in_flight,
+                    claim_batch: self.claim_batch,
+                    weight: 1,
+                },
+                crate::SchedulerKind::Queue => SchedulerPoolsConfig::default().queue,
+                crate::SchedulerKind::Cron => SchedulerPoolsConfig::default().cron,
+                crate::SchedulerKind::Workflow => SchedulerPoolsConfig::default().workflow,
+            };
+        };
+        match kind {
+            crate::SchedulerKind::Alarm => pools.alarm,
+            crate::SchedulerKind::Queue => pools.queue,
+            crate::SchedulerKind::Cron => pools.cron,
+            crate::SchedulerKind::Workflow => pools.workflow,
+        }
+    }
+
     fn validate(&self) -> Result<(), PlatformError> {
         let guarded_timeout = self
             .dispatch_timeout_ms
@@ -1065,6 +1166,23 @@ impl SchedulerConfig {
                 ErrorCode::LimitInvalid,
                 "scheduler policy is outside the hard platform bounds",
             ));
+        }
+        if let Some(pools) = &self.pools {
+            if ![pools.alarm, pools.queue, pools.cron, pools.workflow]
+                .into_iter()
+                .all(SchedulerPoolConfig::validate)
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::LimitInvalid,
+                    "scheduler pool policy is outside the hard platform bounds",
+                ));
+            }
+            if pools.queue.enabled || pools.cron.enabled || pools.workflow.enabled {
+                return Err(PlatformError::new(
+                    ErrorCode::SchedulerKindNotEnabled,
+                    "scheduler workload kind is not enabled in this release",
+                ));
+            }
         }
         Ok(())
     }

@@ -366,6 +366,26 @@ impl WorkerdTransport {
         validate_alarm_dispatch_result(result)
     }
 
+    /// Deliver one scheduler claim while the scheduler clock owns the timeout.
+    pub(crate) async fn dispatch_alarm_unbounded(
+        &self,
+        job: &ClaimedJob,
+    ) -> Result<AlarmDispatchResult, PlatformError> {
+        let result = self
+            .alarm_request_unbounded(
+                "/internal/do-alarm",
+                &AlarmObjectRequest {
+                    namespace_resource_id: job.namespace_resource_id,
+                    object_id: job.object_id,
+                    object_generation: job.object_generation,
+                    row_token: Some(&job.row_token),
+                    retry_count: Some(job.retry_count),
+                },
+            )
+            .await?;
+        validate_alarm_dispatch_result(result)
+    }
+
     /// Probe one live object for bounded projection repair without exposing arbitrary SQL.
     pub async fn repair_alarm(
         &self,
@@ -390,11 +410,48 @@ impl WorkerdTransport {
         validate_alarm_repair_result(result)
     }
 
+    /// Probe an Alarm projection while the scheduler clock owns the timeout.
+    pub(crate) async fn repair_alarm_unbounded(
+        &self,
+        namespace_resource_id: open_compute_core::ResourceId,
+        object_id: open_compute_core::DurableObjectId,
+        object_generation: u64,
+    ) -> Result<AlarmRepairResult, PlatformError> {
+        let result = self
+            .alarm_request_unbounded(
+                "/internal/do-alarm-repair",
+                &AlarmObjectRequest {
+                    namespace_resource_id,
+                    object_id,
+                    object_generation,
+                    row_token: None,
+                    retry_count: None,
+                },
+            )
+            .await?;
+        validate_alarm_repair_result(result)
+    }
+
     async fn alarm_request<T: for<'de> Deserialize<'de>>(
         &self,
         path: &str,
         body: &AlarmObjectRequest<'_>,
         timeout: Duration,
+    ) -> Result<T, PlatformError> {
+        tokio::time::timeout(timeout, self.alarm_request_unbounded(path, body))
+            .await
+            .map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::DoDispatchTimeout,
+                    "Durable Object alarm dispatch result is unknown",
+                )
+            })?
+    }
+
+    async fn alarm_request_unbounded<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: &AlarmObjectRequest<'_>,
     ) -> Result<T, PlatformError> {
         let (port, credential) = self.endpoint()?;
         let bytes = serde_json::to_vec(body).map_err(|_| alarm_protocol_error())?;
@@ -405,14 +462,10 @@ impl WorkerdTransport {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(bytes))
             .map_err(|_| alarm_protocol_error())?;
-        let response = tokio::time::timeout(timeout, self.client.request(request))
+        let response = self
+            .client
+            .request(request)
             .await
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::DoDispatchTimeout,
-                    "Durable Object alarm dispatch result is unknown",
-                )
-            })?
             .map_err(|_| runtime_unavailable())?;
         if !response.status().is_success() {
             return Err(PlatformError::new(

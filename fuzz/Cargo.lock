@@ -1444,12 +1444,14 @@ dependencies = [
 name = "open-compute-core"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "hex",
  "ipnet",
  "serde",
  "serde_json",
  "sha2",
  "thiserror",
+ "tokio",
  "toml",
  "url",
  "uuid",

@@ -84,7 +84,8 @@ pub use resources::{
 pub use restore_cleanup::{RestoreStagingCleanup, cleanup_restore_staging};
 pub use scheduler::{
     AlarmProjection, ClaimResult, ClaimedJob, SchedulerInspection, SchedulerStore,
-    SchedulerSummary, current_scheduler_schema_version, inspect_scheduler_db,
+    SchedulerSummary, SchedulerWakeFuture, SchedulerWakeSignal, current_scheduler_schema_version,
+    inspect_scheduler_db, scheduler_migration_registry,
 };
 pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
 pub use upgrade::{

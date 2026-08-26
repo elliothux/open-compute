@@ -31,7 +31,7 @@ use clap::CommandFactory;
 use open_compute_core::config::SecretReference;
 use open_compute_core::{
     ComponentName, ComponentState, ErrorCode, MetricsConfig, PlatformStatus, ReadinessReason,
-    SchedulerConfig, SecretString, SystemSchedulerClock,
+    SchedulerConfig, SchedulerKind, SchedulerPoolState, SecretString, SystemSchedulerClock,
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
@@ -1332,8 +1332,12 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         .await
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["version"], 2);
     assert_eq!(body["paused"], false);
-    assert_eq!(body["summary"]["scheduled"], 0);
+    assert_eq!(body["global"]["inFlight"], 0);
+    assert_eq!(body["pools"].as_array().unwrap().len(), 1);
+    assert_eq!(body["pools"][0]["kind"], "do_alarm");
+    assert_eq!(body["pools"][0]["ready"], 0);
 
     assert_eq!(
         app.clone()
@@ -1353,6 +1357,37 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         StatusCode::NO_CONTENT
     );
     assert!(!scheduler.is_paused());
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "POST",
+                "/v1/operator/scheduler/pause?kind=do_alarm"
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(scheduler.is_kind_paused(SchedulerKind::Alarm).unwrap());
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "POST",
+                "/v1/operator/scheduler/resume?kind=do_alarm"
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request("POST", "/v1/operator/scheduler/pause?kind=queue"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
     let repair = app
         .clone()
         .oneshot(request("POST", "/v1/scheduler/repair"))
@@ -1844,6 +1879,21 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     reg.inc_scheduler_claim(SchedulerClaimOutcome::Claimed);
     reg.inc_scheduler_claim_expired(2);
     reg.adjust_scheduler_in_flight(true);
+    reg.observe_scheduler_workload(
+        SchedulerKind::Alarm,
+        open_compute_core::WorkloadSummary {
+            ready: 3,
+            claimed: 2,
+            expired: 0,
+            oldest_due_at_ms: Some(1_000),
+            next_due_at_ms: Some(1_000),
+        },
+        4_000,
+    );
+    reg.observe_scheduler_claim_duration(Duration::from_millis(4));
+    reg.inc_scheduler_stale_completion(SchedulerKind::Alarm);
+    reg.set_scheduler_pool_state(SchedulerKind::Alarm, SchedulerPoolState::Ready);
+    reg.inc_scheduler_wake("notification");
     reg.observe_alarm_delivery(AlarmOutcome::Retry, 2, Duration::from_millis(9));
     reg.inc_alarm_mutation(AlarmMutation::Set, true);
     reg.inc_alarm_repair(AlarmRepairSource::Scan, false);
@@ -1913,6 +1963,19 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     assert!(rendered.contains("oc_scheduler_claim_total{outcome=\"claimed\"} 1"));
     assert!(rendered.contains("oc_scheduler_claim_expired_total{kind=\"do_alarm\"} 2"));
     assert!(rendered.contains("oc_scheduler_in_flight{kind=\"do_alarm\"} 1"));
+    assert!(rendered.contains("open_compute_scheduler_ready{kind=\"do_alarm\"} 3"));
+    assert!(
+        rendered.contains(
+            "open_compute_scheduler_claim_total{kind=\"do_alarm\",outcome=\"claimed\"} 1"
+        )
+    );
+    assert!(
+        rendered.contains("open_compute_scheduler_stale_completion_total{kind=\"do_alarm\"} 1")
+    );
+    assert!(
+        rendered.contains("open_compute_scheduler_pool_state{kind=\"do_alarm\",state=\"ready\"} 1")
+    );
+    assert!(rendered.contains("open_compute_scheduler_wake_total{reason=\"notification\"} 1"));
     assert!(
         rendered.contains("oc_do_alarm_mutation_total{operation=\"set\",outcome=\"success\"} 1")
     );

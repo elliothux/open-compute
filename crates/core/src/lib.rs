@@ -31,7 +31,8 @@ pub use clock::{Clock, SystemClock};
 pub use config::{
     CacheConfig, D1Config, DiagnosticsConfig, DurableObjectsConfig, HardeningConfig, KvConfig,
     MetricsConfig, PlatformConfig, R2Config, RuntimeConfig, S3Config, SchedulerConfig,
-    SecretReference, ServerConfig, StorageConfig, WorkersConfig, validate_bootstrap_config_path,
+    SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig, StorageConfig,
+    WorkersConfig, validate_bootstrap_config_path,
 };
 pub use durable_objects::{
     DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAME_MAX_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES,
@@ -50,8 +51,11 @@ pub use resource::{
     BindingKind, CanonicalBindingConfig, CanonicalPermissions, ResourceAvailability, ResourceState,
 };
 #[cfg(any(test, feature = "test-support"))]
-pub use scheduler::DeterministicSchedulerClock;
-pub use scheduler::{SchedulerClock, SystemSchedulerClock};
+pub use scheduler::{DeterministicSchedulerClock, SchedulerFaultPoint};
+pub use scheduler::{
+    DispatchOutcome, SchedulerClock, SchedulerFenceV1, SchedulerKind, SchedulerPoolState,
+    SchedulerSleep, SystemSchedulerClock, WorkloadSummary,
+};
 pub use secret::{SecretBytes, SecretString};
 pub use snapshot_manifest::{
     PlatformSnapshotManifestV1, SnapshotFileRole, SnapshotFileV1, SnapshotImmutableReferenceV1,

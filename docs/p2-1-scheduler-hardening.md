@@ -1,9 +1,13 @@
 # P2.1：Scheduler 多 Workload 内核详细设计
 
-> 状态：详细设计，待实现
+> 状态：已实现并验证（2026-08-26）
 >
 > 前置基线：P1.0 至 P1.7 已由用户确认在当前 checkout 全部跑通；P1.8 维持既有
 > WebSocket hibernation No-Go 结论，不阻塞 P2。
+>
+> 验证证据：`./scripts/test-p2-1.sh` 聚合 Gate 通过；`./scripts/coverage.sh` 通过，
+> workspace Rust line coverage 为 90.07%。G0 维持既有精确 `D-abort` allowlist 下的
+> Conditional Go，未扩大接受范围。
 >
 > 直接依赖：[P0.8：Scheduler Kernel 与 Durable Object Alarms](./p0-8-scheduler-do-alarms.md)、
 > [P1：P0 平台加固](./p1-platform-hardening.md)
@@ -808,23 +812,23 @@ P2.1 先用 Alarm 覆盖所有边界；P2.2/P2.3 再复用相同 fault enum 扩 
 
 P2.1 只有满足以下条件才可进入 P2.2：
 
-- [ ] production composition 只注册 Alarm；没有 Queue/Cron/Workflow row、API或 binding；
-- [ ] `scheduler.sqlite` schema version 仍为 1，旧 checksum 和 alarm rows保持；
-- [ ] migration registry 连续、checksum-exact，可接受后续真实 migration 002；
-- [ ] global + pool caps 在 property/synthetic test 中从未超限；
-- [ ] 四 workload synthetic backlog 下不存在 starvation；
-- [ ] 空闲 pool 不浪费 global capacity；
-- [ ] 所有 scheduler timers 可由 virtual clock 推进，无真实 sleep 型长测试；
-- [ ] lost-wake、wall 前跳/后跳和 restart 首轮 recovery 通过；
-- [ ] unknown dispatch 保留 lease，stale completion token-exact no-op；
-- [ ] Alarm handler retry 仍精确为既有六次 schedule；
-- [ ] test-only fault path 不存在于 production binary；
-- [ ] 五个 crash boundary fresh-process recovery 通过；
-- [ ] pause/resume/drain/hung dispatch/circuit isolation 通过；
-- [ ] metrics label 固定低基数，inspect/health/capabilities versioned；
-- [ ] P0.8 scheduler/Alarm Gate 连续三轮通过；
-- [ ] P0 aggregate、P1 aggregate 与 `./poc/g0 test all` regression 通过；
-- [ ] format、Clippy、unit/integration、MSRV、no-default-features、dependency boundary、
+- [x] production composition 只注册 Alarm；没有 Queue/Cron/Workflow row、API或 binding；
+- [x] `scheduler.sqlite` schema version 仍为 1，旧 checksum 和 alarm rows保持；
+- [x] migration registry 连续、checksum-exact，可接受后续真实 migration 002；
+- [x] global + pool caps 在 property/synthetic test 中从未超限；
+- [x] 四 workload synthetic backlog 下不存在 starvation；
+- [x] 空闲 pool 不浪费 global capacity；
+- [x] 所有 scheduler timers 可由 virtual clock 推进，无真实 sleep 型长测试；
+- [x] lost-wake、wall 前跳/后跳和 restart 首轮 recovery 通过；
+- [x] unknown dispatch 保留 lease，stale completion token-exact no-op；
+- [x] Alarm handler retry 仍精确为既有六次 schedule；
+- [x] test-only fault path 不存在于 production binary；
+- [x] 五个 crash boundary fresh-process recovery 通过；
+- [x] pause/resume/drain/hung dispatch/circuit isolation 通过；
+- [x] metrics label 固定低基数，inspect/health/capabilities versioned；
+- [x] P0.8 scheduler/Alarm Gate 连续三轮通过；
+- [x] P0 aggregate、P1 aggregate 与 `./poc/g0 test all` regression 通过；
+- [x] format、Clippy、unit/integration、MSRV、no-default-features、dependency boundary、
       `git diff --check` 与 coverage Gate 通过。
 
 建议新增入口：

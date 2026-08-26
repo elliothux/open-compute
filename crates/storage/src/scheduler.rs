@@ -1,15 +1,28 @@
 //! Independent SQLite authority for the bounded P0.8 scheduler projection.
 
-use open_compute_core::{DeploymentId, DurableObjectId, ErrorCode, PlatformError, ResourceId};
+use open_compute_core::{
+    DeploymentId, DurableObjectId, ErrorCode, PlatformError, ResourceId, WorkloadSummary,
+};
 use rand::TryRngCore as _;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 1;
+#[path = "scheduler/migrations.rs"]
+mod migration_registry;
+#[path = "scheduler/summary.rs"]
+mod summary;
+#[path = "scheduler/wake.rs"]
+mod wake;
+
+use migration_registry::{SCHEDULER_MIGRATIONS, validate_registry, verify_applied};
+use summary::{summary_connection, workload_summary_connection};
+pub use wake::{SchedulerWakeFuture, SchedulerWakeSignal};
+
+const SCHEMA_VERSION: i64 = SCHEDULER_MIGRATIONS.len() as i64;
 const DATA_FORMAT: &str = "open-compute-scheduler-v1";
 
 /// Current scheduler database schema implemented by this binary.
@@ -17,8 +30,15 @@ const DATA_FORMAT: &str = "open-compute-scheduler-v1";
 pub const fn current_scheduler_schema_version() -> i64 {
     SCHEMA_VERSION
 }
-const MIGRATION: &str = include_str!("../scheduler-migrations/001_scheduler.sql");
-const MIGRATION_NAME: &str = "001_scheduler";
+
+/// Ordered scheduler migration identities shipped by this binary.
+#[must_use]
+pub fn scheduler_migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
+    SCHEDULER_MIGRATIONS
+        .iter()
+        .map(|migration| (migration.version, migration.name, *migration.checksum))
+        .collect()
+}
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// One authoritative alarm projection submitted by the object-local shim.
@@ -156,21 +176,7 @@ pub fn inspect_scheduler_db(
     if schema_version != SCHEMA_VERSION || data_format != DATA_FORMAT {
         return Err(corrupt());
     }
-    let migration: (String, Vec<u8>) = connection
-        .query_row(
-            "SELECT name, checksum_sha256 FROM scheduler_migrations WHERE version = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|_| corrupt())?;
-    if migration
-        != (
-            MIGRATION_NAME.to_owned(),
-            crate::migrations::SCHEDULER_MIGRATION_001_SHA256.to_vec(),
-        )
-    {
-        return Err(corrupt());
-    }
+    verify_applied(&connection, schema_version)?;
     let journal_mode: String = connection
         .pragma_query_value(None, "journal_mode", |row| row.get(0))
         .map_err(map_sql_error)?;
@@ -203,6 +209,7 @@ pub fn inspect_scheduler_db(
 #[derive(Debug)]
 pub struct SchedulerStore {
     connection: Mutex<Connection>,
+    wake: Arc<SchedulerWakeSignal>,
 }
 
 impl SchedulerStore {
@@ -234,15 +241,18 @@ impl SchedulerStore {
             .map_err(map_sql_error)?;
         let store = Self {
             connection: Mutex::new(connection),
+            wake: Arc::new(SchedulerWakeSignal::default()),
         };
         store.migrate(now_ms)?;
         store.quick_check()?;
+        store.recover_expired(now_ms, 10_000)?;
         Ok(store)
     }
 
     fn migrate(&self, now_ms: i64) -> Result<(), PlatformError> {
+        validate_registry(SCHEDULER_MIGRATIONS)?;
         let mut connection = self.lock()?;
-        let version: i64 = connection
+        let mut version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(map_sql_error)?;
         if version > SCHEMA_VERSION {
@@ -251,34 +261,48 @@ impl SchedulerStore {
                 "scheduler database schema is newer than this binary",
             ));
         }
-        if version == 0 {
+        for migration in SCHEDULER_MIGRATIONS {
+            if migration.version <= version {
+                continue;
+            }
             let tx = connection
                 .transaction_with_behavior(TransactionBehavior::Exclusive)
                 .map_err(map_sql_error)?;
-            tx.execute_batch(MIGRATION).map_err(map_sql_error)?;
-            tx.execute(
-                "INSERT INTO scheduler_meta
-                 (singleton, schema_version, data_format, created_at_ms, updated_at_ms)
-                 VALUES (1, ?1, ?2, ?3, ?3)",
-                params![SCHEMA_VERSION, DATA_FORMAT, now_ms],
-            )
-            .map_err(map_sql_error)?;
+            tx.execute_batch(migration.sql).map_err(map_sql_error)?;
+            if migration.version == 1 {
+                tx.execute(
+                    "INSERT INTO scheduler_meta
+                     (singleton, schema_version, data_format, created_at_ms, updated_at_ms)
+                     VALUES (1, ?1, ?2, ?3, ?3)",
+                    params![migration.version, DATA_FORMAT, now_ms],
+                )
+                .map_err(map_sql_error)?;
+            } else {
+                tx.execute(
+                    "UPDATE scheduler_meta
+                     SET schema_version = ?1, updated_at_ms = ?2
+                     WHERE singleton = 1 AND schema_version = ?3",
+                    params![migration.version, now_ms, migration.version - 1],
+                )
+                .map_err(map_sql_error)?;
+            }
             tx.execute(
                 "INSERT INTO scheduler_migrations
                  (version, name, checksum_sha256, applied_at_ms, app_version)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
-                    SCHEMA_VERSION,
-                    MIGRATION_NAME,
-                    crate::migrations::SCHEDULER_MIGRATION_001_SHA256.as_slice(),
+                    migration.version,
+                    migration.name,
+                    migration.checksum.as_slice(),
                     now_ms,
                     APP_VERSION,
                 ],
             )
             .map_err(map_sql_error)?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION)
+            tx.pragma_update(None, "user_version", migration.version)
                 .map_err(map_sql_error)?;
             tx.commit().map_err(map_sql_error)?;
+            version = migration.version;
         }
         let marker: Option<(i64, String)> = connection
             .query_row(
@@ -291,23 +315,14 @@ impl SchedulerStore {
         if marker != Some((SCHEMA_VERSION, DATA_FORMAT.to_owned())) {
             return Err(corrupt());
         }
-        let migration: Option<(String, Vec<u8>)> = connection
-            .query_row(
-                "SELECT name, checksum_sha256 FROM scheduler_migrations WHERE version = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(|_| corrupt())?;
-        if migration
-            != Some((
-                MIGRATION_NAME.to_owned(),
-                crate::migrations::SCHEDULER_MIGRATION_001_SHA256.to_vec(),
-            ))
-        {
-            return Err(corrupt());
-        }
+        verify_applied(&connection, version)?;
         Ok(())
+    }
+
+    /// Process-local committed-mutation notification used by the wake coordinator.
+    #[must_use]
+    pub fn wake_signal(&self) -> Arc<SchedulerWakeSignal> {
+        self.wake.clone()
     }
 
     /// Run a bounded SQLite integrity check without rebuilding on failure.
@@ -360,6 +375,8 @@ impl SchedulerStore {
                 ],
             )
             .map_err(map_sql_error)?;
+        drop(connection);
+        self.wake.notify();
         Ok(())
     }
 
@@ -386,6 +403,10 @@ impl SchedulerStore {
                 ],
             )
             .map_err(map_sql_error)?;
+        drop(connection);
+        if affected > 0 {
+            self.wake.notify();
+        }
         Ok(affected == 1)
     }
 
@@ -408,6 +429,10 @@ impl SchedulerStore {
                 ],
             )
             .map_err(map_sql_error)?;
+        drop(connection);
+        if affected > 0 {
+            self.wake.notify();
+        }
         u64::try_from(affected).map_err(|_| invalid())
     }
 
@@ -442,10 +467,14 @@ impl SchedulerStore {
         let recovered = tx
             .execute(
                 "UPDATE scheduled_jobs
-             SET state = 'scheduled', claim_token = NULL, claim_until_ms = NULL,
-                 updated_at_ms = ?1
-             WHERE state = 'claimed' AND claim_until_ms <= ?1",
-                [now_ms],
+                 SET state = 'scheduled', claim_token = NULL, claim_until_ms = NULL,
+                     updated_at_ms = ?1
+                 WHERE id IN (
+                   SELECT id FROM scheduled_jobs
+                   WHERE state = 'claimed' AND claim_until_ms <= ?1
+                   ORDER BY claim_until_ms, id LIMIT ?2
+                 )",
+                params![now_ms, i64::from(batch)],
             )
             .map_err(map_sql_error)?;
         let candidates = {
@@ -485,6 +514,32 @@ impl SchedulerStore {
         }
         tx.commit().map_err(map_sql_error)?;
         Ok((claimed, u64::try_from(recovered).map_err(|_| corrupt())?))
+    }
+
+    /// Recover a bounded number of expired claims without claiming new work.
+    pub fn recover_expired(&self, now_ms: i64, limit: u32) -> Result<u64, PlatformError> {
+        if limit == 0 {
+            return Err(invalid());
+        }
+        let connection = self.lock()?;
+        let recovered = connection
+            .execute(
+                "UPDATE scheduled_jobs
+                 SET state = 'scheduled', claim_token = NULL, claim_until_ms = NULL,
+                     updated_at_ms = ?1
+                 WHERE id IN (
+                   SELECT id FROM scheduled_jobs
+                   WHERE state = 'claimed' AND claim_until_ms <= ?1
+                   ORDER BY claim_until_ms, id LIMIT ?2
+                 )",
+                params![now_ms, i64::from(limit)],
+            )
+            .map_err(map_sql_error)?;
+        drop(connection);
+        if recovered > 0 {
+            self.wake.notify();
+        }
+        u64::try_from(recovered).map_err(|_| corrupt())
     }
 
     /// Apply one result only while both the lease token and object row token still match.
@@ -539,6 +594,10 @@ impl SchedulerStore {
             ),
         }
         .map_err(map_sql_error)?;
+        drop(connection);
+        if affected > 0 {
+            self.wake.notify();
+        }
         Ok(affected == 1)
     }
 
@@ -566,6 +625,10 @@ impl SchedulerStore {
                 ],
             )
             .map_err(map_sql_error)?;
+        drop(connection);
+        if affected > 0 {
+            self.wake.notify();
+        }
         Ok(affected == 1)
     }
 
@@ -579,6 +642,10 @@ impl SchedulerStore {
                 params![job.id, job.row_token],
             )
             .map_err(map_sql_error)?;
+        drop(connection);
+        if affected > 0 {
+            self.wake.notify();
+        }
         Ok(affected == 1)
     }
 
@@ -588,51 +655,15 @@ impl SchedulerStore {
         summary_connection(&connection, now_ms)
     }
 
+    /// Typed Alarm pool summary for scheduler wake and operator inspection.
+    pub fn workload_summary(&self, now_ms: i64) -> Result<WorkloadSummary, PlatformError> {
+        let connection = self.lock()?;
+        workload_summary_connection(&connection, now_ms)
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, PlatformError> {
         self.connection.lock().map_err(|_| unavailable())
     }
-}
-
-fn summary_connection(
-    connection: &Connection,
-    now_ms: i64,
-) -> Result<SchedulerSummary, PlatformError> {
-    let mut summary = SchedulerSummary::default();
-    let mut statement = connection
-        .prepare("SELECT state, COUNT(*) FROM scheduled_jobs GROUP BY state")
-        .map_err(map_sql_error)?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })
-        .map_err(map_sql_error)?;
-    for row in rows {
-        let (state, count) = row.map_err(map_sql_error)?;
-        let count = u64::try_from(count).map_err(|_| corrupt())?;
-        match state.as_str() {
-            "scheduled" => summary.scheduled = count,
-            "claimed" => summary.claimed = count,
-            "discarding" => summary.discarding = count,
-            _ => return Err(corrupt()),
-        }
-    }
-    summary.oldest_due_at_ms = connection
-        .query_row(
-            "SELECT MIN(due_at_ms) FROM scheduled_jobs WHERE state = 'scheduled'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(map_sql_error)?;
-    let expired: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM scheduled_jobs
-                 WHERE state = 'claimed' AND claim_until_ms <= ?1",
-            [now_ms],
-            |row| row.get(0),
-        )
-        .map_err(map_sql_error)?;
-    summary.expired_claims = u64::try_from(expired).map_err(|_| corrupt())?;
-    Ok(summary)
 }
 
 fn read_claimed(connection: &Connection, id: &str) -> Result<ClaimedJob, PlatformError> {

@@ -41,7 +41,7 @@ use scheduler::write_scheduler_metrics;
 pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 401;
+pub const REQUIRED_SERIES: u64 = 427;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -262,6 +262,12 @@ struct Inner {
     scheduler_jobs: [u64; 3],
     scheduler_claim: [u64; 3],
     scheduler_dispatch_duration: [f64; 6],
+    scheduler_claim_duration: f64,
+    scheduler_dispatch_last: f64,
+    scheduler_ready: [u64; 4],
+    scheduler_stale_completion: [u64; 4],
+    scheduler_pool_state: [u8; 4],
+    scheduler_wake: [u64; 5],
     scheduler_claim_expired: u64,
     scheduler_in_flight: u64,
     alarm_mutation: [u64; 6],
@@ -368,6 +374,12 @@ impl MetricsRegistry {
                 scheduler_jobs: [0; 3],
                 scheduler_claim: [0; 3],
                 scheduler_dispatch_duration: [0.0; 6],
+                scheduler_claim_duration: 0.0,
+                scheduler_dispatch_last: 0.0,
+                scheduler_ready: [0; 4],
+                scheduler_stale_completion: [0; 4],
+                scheduler_pool_state: [0; 4],
+                scheduler_wake: [0; 5],
                 scheduler_claim_expired: 0,
                 scheduler_in_flight: 0,
                 alarm_mutation: [0; 6],

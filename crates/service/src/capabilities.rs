@@ -140,7 +140,7 @@ pub fn platform_release_metadata(
             ("snapshots".to_owned(), vec![1]),
         ]),
         workerd_local_disk_gate_result: "p0.7-stock-workerd".to_owned(),
-        conformance_result: "p1.0-capabilities-v1".to_owned(),
+        conformance_result: "p2.1-scheduler-kernel-v2".to_owned(),
         websocket_hibernation_result: "no-go:p1.8-unsupported".to_owned(),
     };
     if !metadata.validate() {
@@ -286,6 +286,9 @@ fn unsupported() -> ProductCapabilityV1 {
 
 fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
     let config = &loaded.config;
+    let alarm = config
+        .scheduler
+        .pool(open_compute_core::SchedulerKind::Alarm);
     BTreeMap::from([
         (
             "workers.max_bundle_bytes".to_owned(),
@@ -307,6 +310,22 @@ fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
         (
             "durable_objects.max_in_flight_dispatches".to_owned(),
             u64::from(config.durable_objects.max_in_flight_dispatches),
+        ),
+        (
+            "scheduler.max_in_flight".to_owned(),
+            u64::from(config.scheduler.max_in_flight),
+        ),
+        (
+            "scheduler.pools.alarm.max_in_flight".to_owned(),
+            u64::from(alarm.max_in_flight),
+        ),
+        (
+            "scheduler.pools.alarm.claim_batch".to_owned(),
+            u64::from(alarm.claim_batch),
+        ),
+        (
+            "scheduler.pools.alarm.weight".to_owned(),
+            u64::from(alarm.weight),
         ),
         (
             "hardening.max_workers_per_account".to_owned(),

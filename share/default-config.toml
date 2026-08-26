@@ -120,3 +120,27 @@ lease_guard_ms = 5000
 repair_batch = 100
 repair_interval_ms = 30000
 shutdown_drain_ms = 10000
+
+[scheduler.pools.alarm]
+enabled = true
+max_in_flight = 16
+claim_batch = 32
+weight = 1
+
+[scheduler.pools.queue]
+enabled = false
+max_in_flight = 32
+claim_batch = 16
+weight = 1
+
+[scheduler.pools.cron]
+enabled = false
+max_in_flight = 8
+claim_batch = 8
+weight = 1
+
+[scheduler.pools.workflow]
+enabled = false
+max_in_flight = 16
+claim_batch = 16
+weight = 1

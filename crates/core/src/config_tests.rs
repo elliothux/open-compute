@@ -1,4 +1,5 @@
 use super::*;
+use crate::SchedulerKind;
 use crate::redact::Redactor;
 use crate::secret::SecretString;
 
@@ -455,6 +456,62 @@ fn private_config_helpers_cover_single_source_boundaries() {
         validate_secret_pair(Some("TEST_SECRET"), Some(Path::new("/tmp/secret")), "test").is_ok()
     );
     assert!(is_loopback("::1".parse().unwrap()));
+}
+
+#[test]
+fn scheduler_pool_defaults_preserve_p0_8_config_and_reject_unreleased_products() {
+    let legacy =
+        parse_ok("[scheduler]\nmax_in_flight = 7\nclaim_batch = 12\nclaim_lease_ms = 60000\n");
+    assert!(legacy.scheduler.pools.is_none());
+    assert_eq!(
+        legacy.scheduler.pool(SchedulerKind::Alarm),
+        SchedulerPoolConfig {
+            enabled: true,
+            max_in_flight: 7,
+            claim_batch: 12,
+            weight: 1,
+        }
+    );
+
+    let configured = parse_ok(
+        "[scheduler.pools.alarm]\nenabled = true\nmax_in_flight = 5\nclaim_batch = 9\nweight = 2\n",
+    );
+    assert_eq!(
+        configured.scheduler.pool(SchedulerKind::Alarm),
+        SchedulerPoolConfig {
+            enabled: true,
+            max_in_flight: 5,
+            claim_batch: 9,
+            weight: 2,
+        }
+    );
+    for kind in [
+        ("queue", SchedulerKind::Queue),
+        ("cron", SchedulerKind::Cron),
+        ("workflow", SchedulerKind::Workflow),
+    ] {
+        let input = format!("[scheduler.pools.{}]\nenabled = true\n", kind.0);
+        assert_eq!(
+            parse_err(&input).code(),
+            ErrorCode::SchedulerKindNotEnabled,
+            "{} unexpectedly enabled",
+            kind.1.as_str()
+        );
+    }
+}
+
+#[test]
+fn scheduler_pool_hard_bounds_fail_closed() {
+    for input in [
+        "[scheduler.pools.alarm]\nmax_in_flight = 0\n",
+        "[scheduler.pools.alarm]\nclaim_batch = 0\n",
+        "[scheduler.pools.alarm]\nweight = 0\n",
+        "[scheduler.pools.alarm]\nmax_in_flight = 4097\n",
+        "[scheduler.pools.alarm]\nclaim_batch = 10001\n",
+        "[scheduler.pools.alarm]\nweight = 1025\n",
+    ] {
+        assert_eq!(parse_err(input).code(), ErrorCode::LimitInvalid);
+    }
 }
 
 #[test]

@@ -187,6 +187,7 @@ fn every_error_and_readiness_token_formats_stably() {
         ErrorCode::SchedulerCorrupt,
         ErrorCode::SchedulerBusy,
         ErrorCode::SchedulerInternalProtocolError,
+        ErrorCode::SchedulerKindNotEnabled,
         ErrorCode::DoAlarmIndexUnavailable,
         ErrorCode::Internal,
     ];

@@ -68,6 +68,107 @@ fn migrates_and_reopens_the_independent_database() {
 }
 
 #[test]
+fn scheduler_registry_is_contiguous_and_future_schema_fails_closed() {
+    let registry = scheduler_migration_registry();
+    assert_eq!(registry.len(), 1);
+    assert_eq!(registry[0].0, 1);
+    assert_eq!(registry[0].1, "001_scheduler");
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("scheduler.sqlite");
+    let store = open_store(&temp, 10);
+    drop(store);
+    let connection = Connection::open(&path).unwrap();
+    connection.pragma_update(None, "user_version", 2).unwrap();
+    drop(connection);
+    assert_eq!(
+        SchedulerStore::open(&path, 100, 20).unwrap_err().code(),
+        ErrorCode::SchemaTooNew
+    );
+}
+
+#[test]
+fn reopening_v1_preserves_schema_sql_migration_identity_and_alarm_rows() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("scheduler.sqlite");
+    let store = open_store(&temp, 10);
+    let namespace = ResourceId::generate();
+    let alarm = projection(namespace, object(namespace, 9), "preserve-token-01", 50);
+    store.upsert_alarm(&alarm, 10).unwrap();
+    drop(store);
+    let before = Connection::open(&path).unwrap();
+    let schema_before: Vec<(String, String)> = {
+        let mut statement = before
+            .prepare(
+                "SELECT name, sql FROM sqlite_master
+                 WHERE type IN ('table', 'index') AND sql IS NOT NULL ORDER BY name",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    let row_before: (String, i64, String) = before
+        .query_row(
+            "SELECT kind, due_at_ms, row_token FROM scheduled_jobs",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    let migration_before: (String, Vec<u8>) = before
+        .query_row(
+            "SELECT name, checksum_sha256 FROM scheduler_migrations WHERE version = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    drop(before);
+
+    drop(SchedulerStore::open(&path, 100, 20).unwrap());
+    let after = Connection::open(&path).unwrap();
+    let schema_after: Vec<(String, String)> = {
+        let mut statement = after
+            .prepare(
+                "SELECT name, sql FROM sqlite_master
+                 WHERE type IN ('table', 'index') AND sql IS NOT NULL ORDER BY name",
+            )
+            .unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(schema_after, schema_before);
+    assert_eq!(
+        after
+            .query_row(
+                "SELECT kind, due_at_ms, row_token FROM scheduled_jobs",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?
+                )),
+            )
+            .unwrap(),
+        row_before
+    );
+    assert_eq!(
+        after
+            .query_row(
+                "SELECT name, checksum_sha256 FROM scheduler_migrations WHERE version = 1",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+            )
+            .unwrap(),
+        migration_before
+    );
+}
+
+#[test]
 fn overwrite_claim_and_conditional_completion_are_token_fenced() {
     let temp = tempfile::tempdir().unwrap();
     let store = open_store(&temp, 10);
@@ -140,6 +241,87 @@ fn expired_lease_recovers_with_a_new_random_claim_token() {
             .finish_claim(&second, ClaimResult::Delete, 61)
             .unwrap()
     );
+}
+
+#[test]
+fn recovery_is_bounded_and_workload_summary_includes_lease_deadline() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = open_store(&temp, 1);
+    let namespace = ResourceId::generate();
+    for byte in 1..=3 {
+        store
+            .upsert_alarm(
+                &projection(
+                    namespace,
+                    object(namespace, byte),
+                    &format!("recover-{byte:016}"),
+                    10,
+                ),
+                1,
+            )
+            .unwrap();
+    }
+    assert_eq!(store.claim_due(10, 50, 3).unwrap().len(), 3);
+    let before = store.workload_summary(20).unwrap();
+    assert_eq!(before.claimed, 3);
+    assert_eq!(before.next_due_at_ms, Some(60));
+    assert_eq!(store.recover_expired(60, 2).unwrap(), 2);
+    let after = store.workload_summary(60).unwrap();
+    assert_eq!(after.ready, 2);
+    assert_eq!(after.claimed, 1);
+    assert_eq!(after.expired, 1);
+}
+
+#[test]
+fn concurrent_claim_transactions_never_duplicate_an_alarm() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Arc::new(open_store(&temp, 1));
+    let namespace = ResourceId::generate();
+    for byte in 1..=8 {
+        store
+            .upsert_alarm(
+                &projection(
+                    namespace,
+                    object(namespace, byte),
+                    &format!("concurrent-{byte:016}"),
+                    10,
+                ),
+                1,
+            )
+            .unwrap();
+    }
+    let threads = (0..2)
+        .map(|_| {
+            let store = store.clone();
+            std::thread::spawn(move || store.claim_due(10, 100, 8).unwrap())
+        })
+        .collect::<Vec<_>>();
+    let claimed = threads
+        .into_iter()
+        .flat_map(|thread| thread.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(claimed.len(), 8);
+    let ids = claimed
+        .iter()
+        .map(|claim| claim.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(ids.len(), 8);
+}
+
+#[tokio::test]
+async fn committed_projection_mutations_wake_generation_waiters() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = open_store(&temp, 1);
+    let wake = store.wake_signal();
+    let observed = wake.generation();
+    let namespace = ResourceId::generate();
+    store
+        .upsert_alarm(
+            &projection(namespace, object(namespace, 1), "wake-token-00001", 10),
+            1,
+        )
+        .unwrap();
+    assert_eq!(wake.notified_since(observed).await, observed + 1);
 }
 
 #[test]

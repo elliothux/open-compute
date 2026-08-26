@@ -269,6 +269,8 @@ pub enum ErrorCode {
     SchedulerBusy,
     /// The private alarm projection or dispatch protocol was malformed.
     SchedulerInternalProtocolError,
+    /// The requested fixed scheduler workload is not enabled in this release.
+    SchedulerKindNotEnabled,
     /// A Durable Object alarm authority mutation could not update its projection.
     DoAlarmIndexUnavailable,
     /// A secret-safe internal P0.2 failure.
@@ -409,6 +411,7 @@ impl ErrorCode {
             Self::SchedulerCorrupt => "SCHEDULER_CORRUPT",
             Self::SchedulerBusy => "SCHEDULER_BUSY",
             Self::SchedulerInternalProtocolError => "SCHEDULER_INTERNAL_PROTOCOL_ERROR",
+            Self::SchedulerKindNotEnabled => "SCHEDULER_KIND_NOT_ENABLED",
             Self::DoAlarmIndexUnavailable => "DO_ALARM_INDEX_UNAVAILABLE",
             Self::Internal => "INTERNAL",
         }
