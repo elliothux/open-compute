@@ -14,8 +14,8 @@ use futures::stream;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
     AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
-    ErrorCode, PlatformError, RequestId, ResourceId, ResourceState, SecretBytes, SecretString,
-    WorkerId,
+    ErrorCode, OperationClass, PlatformError, RequestId, ResourceId, ResourceState, SecretBytes,
+    SecretString, WorkerId,
 };
 use open_compute_storage::{
     DeploymentRecord, DeploymentState, DurableObjectRepository, IdempotencyReservation,
@@ -188,6 +188,13 @@ impl PreparedBundle {
                 CanonicalBundle::parse(bytes.clone(), limits).map(Self::Memory)
             }
             DeploymentBundle::Staged(bundle) => Ok(Self::Staged(bundle.clone())),
+        }
+    }
+
+    fn admission_bytes(&self) -> Result<u64, PlatformError> {
+        match self {
+            Self::Memory(_) => self.size()?.checked_add(64 * 1024).ok_or_else(invariant),
+            Self::Staged(_) => Ok(64 * 1024),
         }
     }
 
@@ -391,6 +398,9 @@ impl<'a> DeploymentController<'a> {
         stored_vars: BTreeMap<String, Vec<u8>>,
     ) -> Result<CreateDeploymentResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
+        let _admission = self
+            .storage
+            .reserve_mutation(OperationClass::Workers, bundle.admission_bytes()?)?;
         let deployment_id = DeploymentId::generate();
         let (stored_secrets, secret_descriptors) = self.encrypt_secrets(
             request.account_id,
@@ -423,7 +433,7 @@ impl<'a> DeploymentController<'a> {
                 "ArtifactStore returned a different immutable artifact",
             ));
         }
-        let mut deployment = repo.insert_staging_deployment_with_bindings(
+        let mut deployment = repo.insert_staging_deployment_with_bindings_and_limit(
             &NewDeployment {
                 id: deployment_id,
                 account_id: request.account_id,
@@ -442,6 +452,7 @@ impl<'a> DeploymentController<'a> {
                 now_ms: request.now_ms,
             },
             &stored_bindings,
+            self.storage.hardening().max_deployments_per_worker,
         )?;
         repo.begin_validation(deployment_id)?;
         let candidate = ValidationCandidate {

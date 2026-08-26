@@ -206,6 +206,10 @@ pub struct PackageReleaseRequest<'a> {
     pub license_file: &'a Path,
     /// Absolute default config file.
     pub default_config: &'a Path,
+    /// Absolute directory containing the complete P1 operator runbook set.
+    pub runbooks_dir: &'a Path,
+    /// Canonical machine-readable P1 release compatibility metadata.
+    pub release_json: &'a [u8],
     /// When true, fetch the official archive over HTTPS.
     pub download: bool,
     /// Optional already-read official archive (still hash-verified).
@@ -221,10 +225,21 @@ pub fn package_release_bundle(req: &PackageReleaseRequest<'_>) -> Result<(), Pla
     require_absolute(req.assets_dir)?;
     require_absolute(req.license_file)?;
     require_absolute(req.default_config)?;
+    require_absolute(req.runbooks_dir)?;
     if req.dest_dir.exists() {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
             "release destination already exists",
+        ));
+    }
+    if req.release_json.is_empty()
+        || req.release_json.len() > 1024 * 1024
+        || !serde_json::from_slice::<serde_json::Value>(req.release_json)
+            .is_ok_and(|value| value.is_object())
+    {
+        return Err(PlatformError::new(
+            ErrorCode::ReleaseUnsupported,
+            "release metadata is invalid",
         ));
     }
     let _ = req.lock.current_target()?;
@@ -269,6 +284,25 @@ pub fn package_release_bundle(req: &PackageReleaseRequest<'_>) -> Result<(), Pla
         &share.join("default-config.toml"),
         0o644,
     )?;
+    write_atomic_new(&share.join("release.json"), req.release_json, 0o644)?;
+    let runbooks = staging.path().join("docs").join("runbooks");
+    create_dir_secure(&staging.path().join("docs"))?;
+    create_dir_secure(&runbooks)?;
+    for name in [
+        "install-and-first-start.md",
+        "backup-and-retention.md",
+        "fresh-host-restore.md",
+        "upgrade-and-rollback.md",
+        "disk-pressure.md",
+        "sqlite-corruption.md",
+        "s3-outage.md",
+        "workerd-crash-loop.md",
+        "master-key-loss-and-recovery.md",
+        "scheduler-recovery.md",
+        "collect-support-bundle.md",
+    ] {
+        copy_regular(&req.runbooks_dir.join(name), &runbooks.join(name), 0o644)?;
+    }
     fsync_dir(staging.path())?;
     rename_noreplace(staging.path(), req.dest_dir)?;
     staging.persist();

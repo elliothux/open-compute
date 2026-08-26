@@ -9,8 +9,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, D1Config, DeploymentId, ErrorCode, PlatformError,
-    ResourceAvailability, ResourceId,
+    AccountId, BindingId, BindingKind, D1Config, DeploymentId, ErrorCode, OperationClass,
+    PlatformError, ResourceAvailability, ResourceId,
 };
 use open_compute_storage::{
     BindingRepository, D1DatabaseRepository, D1Engine, D1Migration, D1MigrationRecord, D1Paths,
@@ -106,6 +106,9 @@ impl D1BindingService {
                 executed.response
             }
             Err(error) => {
+                if let Some(metrics) = &self.metrics {
+                    metrics.observe_product_error(OperationClass::D1, error.code());
+                }
                 if let (Some(metrics), Some(operation)) = (&self.metrics, operation) {
                     metrics.observe_d1_operation(
                         operation,
@@ -207,6 +210,21 @@ impl D1BindingService {
                 let path =
                     paths.resolve_storage_key(&catalog.storage_key, account_id, resource_id)?;
                 let engine = D1Engine::from_record(path, &catalog)?;
+                let _admission = if mutation {
+                    let result = storage.reserve_mutation(
+                        OperationClass::D1,
+                        config.max_result_bytes.saturating_add(64 * 1024),
+                    );
+                    if let Some(metrics) = &metrics {
+                        metrics.observe_admission(
+                            OperationClass::D1,
+                            result.as_ref().err().map(PlatformError::code),
+                        );
+                    }
+                    Some(result?)
+                } else {
+                    None
+                };
                 if mutation {
                     ensure_d1_storage_headroom(&storage)?;
                 }
@@ -321,6 +339,23 @@ impl D1BindingService {
                         {
                             return Err(permission_denied());
                         }
+                        let _admission = if readonly {
+                            None
+                        } else {
+                            let result = storage.reserve_mutation(
+                                OperationClass::D1,
+                                config
+                                    .max_result_bytes
+                                    .saturating_add(D1_MAX_FRAME_BYTES as u64),
+                            );
+                            if let Some(metrics) = &metrics {
+                                metrics.observe_admission(
+                                    OperationClass::D1,
+                                    result.as_ref().err().map(PlatformError::code),
+                                );
+                            }
+                            Some(result?)
+                        };
                         if !readonly {
                             ensure_d1_storage_headroom(&storage)?;
                         }
@@ -359,6 +394,17 @@ impl D1BindingService {
                         })
                     }
                     Command::Exec(sql) => {
+                        let result = storage.reserve_mutation(
+                            OperationClass::D1,
+                            config.max_result_bytes.saturating_add(sql.len() as u64),
+                        );
+                        if let Some(metrics) = &metrics {
+                            metrics.observe_admission(
+                                OperationClass::D1,
+                                result.as_ref().err().map(PlatformError::code),
+                            );
+                        }
+                        let _admission = result?;
                         ensure_d1_storage_headroom(&storage)?;
                         mutation_for_task.store(true, Ordering::Release);
                         let result = engine.exec(&sql, D1QueryLimits::query(&config)?)?;

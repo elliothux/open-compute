@@ -1,7 +1,7 @@
 //! P0.6 D1 database control API.
 
 use crate::d1_backend::D1BindingService;
-use crate::http::{HttpState, authorize};
+use crate::http::{HttpState, ProductErrorCode, authorize};
 use crate::metrics::{D1Lifecycle, D1LifecycleGuard};
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -11,8 +11,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, BindingKind, D1Config, ErrorCode, PlatformError, RequestId, ResourceId,
-    ResourceState,
+    AccountId, BindingKind, D1Config, ErrorCode, OperationClass, PlatformError, RequestId,
+    ResourceId, ResourceState,
 };
 use open_compute_storage::{
     D1_DATABASE_SCHEMA_VERSION, D1BackupState, D1DatabaseRepository, D1Engine, D1Migration,
@@ -251,10 +251,15 @@ async fn rename_database(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
+    let admission = match api.storage.reserve_mutation(OperationClass::D1, 64 * 1024) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
     let storage = api.storage.clone();
     let pins = api.pins.clone();
     let quota = api.config.database_quota_bytes;
     match tokio::task::spawn_blocking(move || {
+        let _admission = admission;
         let driver = D1ResourceDriver::new(&storage, quota);
         ResourceController::new(&storage, pins, driver).rename(
             account_id,
@@ -635,15 +640,20 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         ErrorCode::D1DatabaseCorrupt
         | ErrorCode::D1IdentityMismatch
         | ErrorCode::ArtifactIntegrityError => StatusCode::UNPROCESSABLE_ENTITY,
-        ErrorCode::D1Overloaded => StatusCode::TOO_MANY_REQUESTS,
+        ErrorCode::D1Overloaded | ErrorCode::QuotaExceeded | ErrorCode::AdmissionBusy => {
+            StatusCode::TOO_MANY_REQUESTS
+        }
+        ErrorCode::StoragePressure | ErrorCode::DiskHardLimit | ErrorCode::D1DatabaseFull => {
+            StatusCode::INSUFFICIENT_STORAGE
+        }
+        ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::D1Timeout
         | ErrorCode::D1ResultUnknown
-        | ErrorCode::D1DatabaseFull
         | ErrorCode::S3Unavailable
         | ErrorCode::ArtifactUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    (
+    let mut response = (
         status,
         axum::Json(serde_json::json!({
             "ok": false,
@@ -654,7 +664,9 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
             }
         })),
     )
-        .into_response()
+        .into_response();
+    response.extensions_mut().insert(ProductErrorCode(code));
+    response
 }
 
 async fn fail_idempotency(

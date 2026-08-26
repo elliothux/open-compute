@@ -41,6 +41,8 @@ pub struct PlatformConfig {
     pub metrics: MetricsConfig,
     /// Bounded diagnostic retention.
     pub diagnostics: DiagnosticsConfig,
+    /// P1 platform-wide admission, resource-count, snapshot, and recovery limits.
+    pub hardening: HardeningConfig,
     /// Worker ingress, deletion, and artifact retention policy.
     pub workers: WorkersConfig,
     /// Workers KV local database, connection, and stream limits.
@@ -74,12 +76,102 @@ impl PlatformConfig {
         self.cache.validate()?;
         self.metrics.validate()?;
         self.diagnostics.validate()?;
+        self.hardening.validate()?;
+        if self.hardening.emergency_reserve_bytes >= self.storage.free_space_hard_bytes {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "hardening.emergency_reserve_bytes must be below the storage hard reserve",
+            ));
+        }
         self.workers.validate()?;
         self.kv.validate()?;
         self.r2.validate()?;
         self.d1.validate()?;
         self.durable_objects.validate()?;
         self.scheduler.validate()?;
+        Ok(())
+    }
+}
+
+/// P1 platform-wide limits that protect a single-node host.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct HardeningConfig {
+    /// Maximum live Workers owned by one account.
+    pub max_workers_per_account: u32,
+    /// Maximum live routes owned by one account.
+    pub max_routes_per_account: u32,
+    /// Maximum retained deployments owned by one Worker.
+    pub max_deployments_per_worker: u32,
+    /// Maximum live resources of one product kind owned by one account.
+    pub max_resources_per_kind_per_account: u32,
+    /// Bytes retained exclusively for delete, cleanup, and bounded diagnostics.
+    pub emergency_reserve_bytes: u64,
+    /// Maximum files accepted in one platform snapshot.
+    pub max_snapshot_files: u32,
+    /// Maximum bytes accepted for one snapshot file.
+    pub max_snapshot_file_bytes: u64,
+    /// Maximum aggregate bytes accepted in one snapshot.
+    pub max_snapshot_total_bytes: u64,
+    /// Maximum canonical manifest bytes accepted from object storage.
+    pub max_snapshot_manifest_bytes: u64,
+    /// Additional local headroom required while staging a snapshot or restore.
+    pub snapshot_staging_margin_bytes: u64,
+    /// Age before an owned incomplete snapshot prefix may be reclaimed.
+    pub incomplete_snapshot_grace_ms: u64,
+    /// Age after which the most recent committed snapshot degrades operator health.
+    pub snapshot_stale_after_ms: u64,
+    /// Maximum bytes written to one local support bundle.
+    pub max_support_bundle_bytes: u64,
+}
+
+impl Default for HardeningConfig {
+    fn default() -> Self {
+        Self {
+            max_workers_per_account: 1_000,
+            max_routes_per_account: 10_000,
+            max_deployments_per_worker: 1_000,
+            max_resources_per_kind_per_account: 1_000,
+            emergency_reserve_bytes: 64 * 1024 * 1024,
+            max_snapshot_files: 1_000_000,
+            max_snapshot_file_bytes: 64 * 1024 * 1024 * 1024,
+            max_snapshot_total_bytes: 1024 * 1024 * 1024 * 1024,
+            max_snapshot_manifest_bytes: 8 * 1024 * 1024,
+            snapshot_staging_margin_bytes: 64 * 1024 * 1024,
+            incomplete_snapshot_grace_ms: 24 * 60 * 60 * 1_000,
+            snapshot_stale_after_ms: 7 * 24 * 60 * 60 * 1_000,
+            max_support_bundle_bytes: 32 * 1024 * 1024,
+        }
+    }
+}
+
+impl HardeningConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        if self.max_workers_per_account == 0
+            || self.max_workers_per_account > 1_000_000
+            || self.max_routes_per_account == 0
+            || self.max_routes_per_account > 10_000_000
+            || self.max_deployments_per_worker == 0
+            || self.max_deployments_per_worker > 1_000_000
+            || self.max_resources_per_kind_per_account == 0
+            || self.max_resources_per_kind_per_account > 1_000_000
+            || self.emergency_reserve_bytes == 0
+            || self.max_snapshot_files == 0
+            || self.max_snapshot_files > 10_000_000
+            || self.max_snapshot_file_bytes == 0
+            || self.max_snapshot_total_bytes < self.max_snapshot_file_bytes
+            || self.max_snapshot_manifest_bytes == 0
+            || self.max_snapshot_manifest_bytes > 64 * 1024 * 1024
+            || self.snapshot_staging_margin_bytes == 0
+            || self.incomplete_snapshot_grace_ms == 0
+            || self.snapshot_stale_after_ms == 0
+            || self.max_support_bundle_bytes == 0
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "P1 hardening policy is outside the platform bounds",
+            ));
+        }
         Ok(())
     }
 }

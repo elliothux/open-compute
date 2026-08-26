@@ -456,3 +456,54 @@ fn private_config_helpers_cover_single_source_boundaries() {
     );
     assert!(is_loopback("::1".parse().unwrap()));
 }
+
+#[test]
+fn p1_hardening_and_remaining_static_error_paths_are_validated() {
+    for input in [
+        "[hardening]\nmax_workers_per_account = 0\n",
+        "[hardening]\nmax_routes_per_account = 10000001\n",
+        "[hardening]\nmax_deployments_per_worker = 0\n",
+        "[hardening]\nmax_resources_per_kind_per_account = 0\n",
+        "[hardening]\nemergency_reserve_bytes = 0\n",
+        "[hardening]\nmax_snapshot_files = 0\n",
+        "[hardening]\nmax_snapshot_file_bytes = 0\n",
+        "[hardening]\nmax_snapshot_file_bytes = 2\nmax_snapshot_total_bytes = 1\n",
+        "[hardening]\nmax_snapshot_manifest_bytes = 67108865\n",
+        "[hardening]\nsnapshot_staging_margin_bytes = 0\n",
+        "[hardening]\nincomplete_snapshot_grace_ms = 0\n",
+        "[hardening]\nsnapshot_stale_after_ms = 0\n",
+        "[hardening]\nmax_support_bundle_bytes = 0\n",
+        "[hardening]\nemergency_reserve_bytes = 268435456\n",
+        "[kv]\nnamespace_quota_bytes = 1\n",
+        "[server]\npublic_bind = \"not-an-address\"\n",
+        "[server]\nadmin_bind = \"not-an-address\"\n",
+        "[server]\nadmin_bind = \"0.0.0.0:8788\"\nadmin_auth = { env = \"bad-name\" }\n",
+        "[storage]\nfree_space_soft_bytes = 0\n",
+        "[storage]\nfree_space_hard_bytes = 0\n",
+        "[s3]\nsecret_access_key_env = \"bad-name\"\n",
+        "[s3]\nretry_backoff_ms = 0\n",
+        "[s3]\nconnect_timeout_ms = 0\n",
+        "[s3]\nrequest_timeout_ms = 0\n",
+        "[runtime]\nshutdown_grace_ms = 0\n",
+        "[runtime]\ndrain_timeout_ms = 0\n",
+        "[runtime]\nkill_timeout_ms = 0\n",
+        "[runtime]\nrestart_budget = 0\n",
+        "[runtime]\nrestart_window_ms = 0\n",
+        "[cache]\nmax_artifact_bytes = 0\n",
+        "[metrics]\nmax_label_value_bytes = 0\n",
+        "[diagnostics]\nmax_bytes = 0\n",
+        "[scheduler]\ndispatch_timeout_ms = 18446744073709551615\nlease_guard_ms = 1\n",
+        "[s3]\nendpoint = \"https:///\"\n",
+    ] {
+        assert!(PlatformConfig::from_toml_str(input).is_err(), "{input}");
+    }
+
+    let config = ServerConfig {
+        admin_bind: Some("not-an-address".to_owned()),
+        ..ServerConfig::default()
+    };
+    assert!(config.admin_addr().is_err());
+    assert!(
+        validate_secret_pair(Some("bad-name"), Some(Path::new("/tmp/secret")), "test").is_err()
+    );
+}

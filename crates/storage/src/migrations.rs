@@ -15,7 +15,8 @@ const MIGRATION_004_SQL: &str = include_str!("../migrations/004_kv.sql");
 const MIGRATION_005_SQL: &str = include_str!("../migrations/005_r2.sql");
 const MIGRATION_006_SQL: &str = include_str!("../migrations/006_d1.sql");
 const MIGRATION_007_SQL: &str = include_str!("../migrations/007_durable_objects.sql");
-const CURRENT_VERSION: i64 = 7;
+const MIGRATION_008_SQL: &str = include_str!("../migrations/008_p1_format_freeze.sql");
+const CURRENT_VERSION: i64 = 8;
 const MIGRATION_001_NAME: &str = "001_init";
 const MIGRATION_002_NAME: &str = "002_workers_runtime";
 const MIGRATION_003_NAME: &str = "003_resource_bindings";
@@ -23,6 +24,7 @@ const MIGRATION_004_NAME: &str = "004_kv";
 const MIGRATION_005_NAME: &str = "005_r2";
 const MIGRATION_006_NAME: &str = "006_d1";
 const MIGRATION_007_NAME: &str = "007_durable_objects";
+const MIGRATION_008_NAME: &str = "008_p1_format_freeze";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Test-only deterministic fault injection points.
@@ -142,6 +144,18 @@ fn apply_inner(
             MIGRATION_007_NAME,
             MIGRATION_007_SQL,
             &MIGRATION_007_SHA256,
+            #[cfg(any(test, feature = "test-support"))]
+            fault,
+        )?;
+    }
+    if db.user_version()? < 8 {
+        apply_one(
+            db,
+            clock,
+            8,
+            MIGRATION_008_NAME,
+            MIGRATION_008_SQL,
+            &MIGRATION_008_SHA256,
             #[cfg(any(test, feature = "test-support"))]
             fault,
         )?;
@@ -271,6 +285,7 @@ pub(crate) fn expected_checksum(version: i64) -> Result<&'static [u8], PlatformE
         5 => Ok(&MIGRATION_005_SHA256),
         6 => Ok(&MIGRATION_006_SHA256),
         7 => Ok(&MIGRATION_007_SHA256),
+        8 => Ok(&MIGRATION_008_SHA256),
         v if v > CURRENT_VERSION => Err(PlatformError::new(
             ErrorCode::SchemaTooNew,
             "on-disk schema is newer than this binary",
@@ -522,6 +537,27 @@ pub fn migration_006_checksum() -> &'static [u8; 32] {
 #[must_use]
 pub fn migration_007_checksum() -> &'static [u8; 32] {
     &MIGRATION_007_SHA256
+}
+
+/// Compiled SHA-256 for the P1 offline-upgrade format fence.
+#[must_use]
+pub fn migration_008_checksum() -> &'static [u8; 32] {
+    &MIGRATION_008_SHA256
+}
+
+/// Ordered production migration identities and checksums.
+#[must_use]
+pub fn migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
+    vec![
+        (1, MIGRATION_001_NAME, MIGRATION_001_SHA256),
+        (2, MIGRATION_002_NAME, MIGRATION_002_SHA256),
+        (3, MIGRATION_003_NAME, MIGRATION_003_SHA256),
+        (4, MIGRATION_004_NAME, MIGRATION_004_SHA256),
+        (5, MIGRATION_005_NAME, MIGRATION_005_SHA256),
+        (6, MIGRATION_006_NAME, MIGRATION_006_SHA256),
+        (7, MIGRATION_007_NAME, MIGRATION_007_SHA256),
+        (8, MIGRATION_008_NAME, MIGRATION_008_SHA256),
+    ]
 }
 
 /// Read-only schema inspection used by doctor.

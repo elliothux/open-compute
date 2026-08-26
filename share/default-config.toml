@@ -6,6 +6,24 @@ public_bind = "127.0.0.1:8787"
 [storage]
 data_dir = "/var/lib/open-compute"
 master_key_file = "/var/lib/open-compute/keys/master.key"
+sqlite_busy_timeout_ms = 5000
+free_space_soft_bytes = 1073741824
+free_space_hard_bytes = 268435456
+
+[hardening]
+max_workers_per_account = 1000
+max_routes_per_account = 10000
+max_deployments_per_worker = 1000
+max_resources_per_kind_per_account = 1000
+emergency_reserve_bytes = 67108864
+max_snapshot_files = 1000000
+max_snapshot_file_bytes = 68719476736
+max_snapshot_total_bytes = 1099511627776
+max_snapshot_manifest_bytes = 8388608
+snapshot_staging_margin_bytes = 67108864
+incomplete_snapshot_grace_ms = 86400000
+snapshot_stale_after_ms = 604800000
+max_support_bundle_bytes = 33554432
 
 [s3]
 endpoint = "https://s3.example.com"
@@ -23,6 +41,22 @@ lock_file = "/opt/open-compute/runtime/workerd.lock.json"
 assets_dir = "/opt/open-compute/runtime"
 startup_timeout_ms = 20000
 shutdown_grace_ms = 10000
+
+[cache]
+max_bytes = 10737418240
+high_watermark_ratio = 0.9
+low_watermark_ratio = 0.8
+partial_grace_ms = 3600000
+max_artifact_bytes = 536870912
+
+[metrics]
+enabled = true
+max_label_value_bytes = 64
+max_series = 512
+
+[diagnostics]
+max_failed_starts = 32
+max_bytes = 16777216
 
 [workers]
 max_bundle_bytes = 17825792

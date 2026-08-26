@@ -14,6 +14,8 @@ mod d1;
 mod durable_objects;
 #[path = "metrics_kv.rs"]
 mod kv;
+#[path = "metrics_p1.rs"]
+mod p1;
 #[path = "metrics_r2.rs"]
 mod r2;
 #[path = "metrics_resource.rs"]
@@ -29,6 +31,8 @@ pub(crate) use kv::{
     KvStagingGauge,
 };
 use kv::{lifecycle_index, maintenance_index, operation_index, write_kv_metrics};
+pub use p1::WebSocketCloseReason;
+use p1::{P1Metrics, write_p1_metrics};
 use r2::write_r2_metrics;
 pub(crate) use r2::{R2Operation, R2ProviderError, R2StreamDirection, R2StreamGuard};
 pub use resource::{BindingBackendOperation, ResourceOperation};
@@ -36,10 +40,10 @@ use resource::{binding_operation_index, resource_operation_index, write_resource
 use scheduler::write_scheduler_metrics;
 pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
 
-/// Compile-time series required by the platform and P0.3 binding framework.
-pub const REQUIRED_SERIES: u64 = 318;
+/// Compile-time series required by the platform, product bindings, and P1 hardening surface.
+pub const REQUIRED_SERIES: u64 = 401;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
-pub const MIN_LABEL_VALUE_BYTES: u64 = 32;
+pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
 /// Start outcome label.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -267,6 +271,7 @@ struct Inner {
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
+    p1: P1Metrics,
 }
 
 /// Fixed-series metrics registry.
@@ -372,6 +377,7 @@ impl MetricsRegistry {
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
+                p1: P1Metrics::default(),
             }),
         })
     }
@@ -716,6 +722,7 @@ impl MetricsRegistry {
             g.start_duration
         )
         .ok();
+        write_p1_metrics(&mut out, &g.p1);
         write_help(
             &mut out,
             "sqlite_operation_duration_seconds",
@@ -821,12 +828,13 @@ fn escape(value: &str) -> String {
         .replace('"', "\\\"")
 }
 
-fn component_order() -> [ComponentName; 8] {
+fn component_order() -> [ComponentName; 9] {
     [
         ComponentName::Cache,
         ComponentName::ControlDb,
         ComponentName::DataDir,
         ComponentName::MasterKey,
+        ComponentName::Operations,
         ComponentName::Process,
         ComponentName::Runtime,
         ComponentName::S3,

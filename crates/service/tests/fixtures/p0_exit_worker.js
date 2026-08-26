@@ -2,6 +2,15 @@ import { DurableObject } from "cloudflare:workers";
 import { D1Database } from "./__open_compute_d1_facade__.js";
 import { DurableObjectNamespace } from "./__open_compute_do_facade__.js";
 import { R2Bucket } from "./__open_compute_r2_facade__.js";
+import { checkWorkersSurface } from "./p1-conformance/workers.mjs";
+import { checkKvSurface } from "./p1-conformance/kv.mjs";
+import { checkR2Surface } from "./p1-conformance/r2.mjs";
+import { checkD1Surface } from "./p1-conformance/d1.mjs";
+import { checkDurableObjectSurface } from "./p1-conformance/durable-objects.mjs";
+import { checkAlarmSurface } from "./p1-conformance/alarms.mjs";
+import { checkWebSocketSurface } from "./p1-conformance/websocket.mjs";
+import { checkAdversarialValues } from "./p1-conformance/adversarial-values.mjs";
+import { checkMaliciousWorkerSurface } from "./p1-conformance/malicious-worker.mjs";
 
 function errorCode(error) {
   return String(error && error.message ? error.message : error);
@@ -52,6 +61,7 @@ export class AppObject extends DurableObject {
       alarmDeliveries: Number(row.alarm_deliveries),
       alarmRelease: row.alarm_release,
       alarmRetryCount: row.alarm_retry_count === null ? null : Number(row.alarm_retry_count),
+      alarmConformance: checkAlarmSurface(this.ctx.storage),
     };
   }
 
@@ -123,6 +133,16 @@ async function snapshot(env) {
   const fetched = await stub.fetch(new Request("https://object.invalid/fetch"));
   return {
     release: env.RELEASE,
+    conformance: {
+      workers: checkWorkersSurface(),
+      kv: checkKvSurface(env.CACHE),
+      r2: checkR2Surface(env.BUCKET),
+      d1: checkD1Surface(env.DB),
+      durableObjects: checkDurableObjectSurface(env.OBJECTS),
+      websocket: checkWebSocketSurface(),
+      adversarialValues: checkAdversarialValues(),
+      maliciousWorker: await checkMaliciousWorkerSurface(env),
+    },
     facade: {
       kv: typeof env.CACHE.get === "function"
         && typeof env.CACHE.put === "function"

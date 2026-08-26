@@ -139,6 +139,20 @@ pub(crate) fn load_assets(
     Ok((template, workers, config_path))
 }
 
+/// Compute a deterministic SHA-256 over the packaged runtime template and system Workers.
+pub fn runtime_assets_sha256(assets_dir: &Path) -> Result<String, PlatformError> {
+    let (template, workers, _) = load_assets(assets_dir)?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"open-compute/runtime-assets/v1\0");
+    put_bytes(&mut hasher, &template);
+    put_u64(&mut hasher, workers.len() as u64);
+    for (name, bytes) in workers {
+        put_bytes(&mut hasher, name.as_bytes());
+        put_bytes(&mut hasher, &bytes);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
 pub(crate) fn render_config(template: &str, token: &SecretString) -> Result<String, PlatformError> {
     validate_token(token)?;
     let count = template.matches(TOKEN_PLACEHOLDER).count();

@@ -13,24 +13,124 @@ use axum::http::StatusCode;
 use open_compute_artifacts::{Fault, MockS3};
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{RequestId, ResourceAvailability, ResourceId};
+use open_compute_service::backup_cli::{
+    backup_attest_restore_smoke, backup_create, backup_inspect, backup_restore,
+};
+use open_compute_service::config_load::load_platform_config;
+use open_compute_service::doctor::{DoctorMode, doctor_report};
 use open_compute_storage::{PlatformStorage, ResourceRepository, WorkerRepository};
 use open_compute_workers::{BundleLimits, DeploymentController, ResourcePins, RuntimeValidator};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
+use std::fs;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use support::{
-    GateStack, ProductBindings, admin_json, admin_router, corrupt_d1, deploy, deployment_request,
-    dispatch, kill_workerd, now_ms, open_scheduler, repo_root, storage_config, stores,
-    wait_pid_change,
+    GateStack, ProductBindings, admin_json, admin_router, capacity_summary, corrupt_d1, deploy,
+    deployment_request, dispatch, kill_workerd, now_ms, open_scheduler, repo_root,
+    reset_capacity_samples, storage_config, stores, wait_pid_change,
 };
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p0_real_combined_exit_matrix() {
+struct PlatformConfigInput<'a> {
+    temp: &'a tempfile::TempDir,
+    name: &'a str,
+    data_dir: &'a std::path::Path,
+    master_key: &'a std::path::Path,
+    mock: &'a MockS3,
+    workerd: &'a std::path::Path,
+    lock: &'a std::path::Path,
+    assets: &'a std::path::Path,
+}
+
+fn write_platform_config(input: &PlatformConfigInput<'_>) -> PathBuf {
+    let access_key = input.temp.path().join("p1-s3-access-key");
+    let secret_key = input.temp.path().join("p1-s3-secret-key");
+    fs::write(&access_key, b"AKIAEXAMPLEKEYID01").unwrap();
+    fs::write(&secret_key, b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY").unwrap();
+    fs::set_permissions(&access_key, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&secret_key, fs::Permissions::from_mode(0o600)).unwrap();
+    let path = input.temp.path().join(format!("{}.toml", input.name));
+    fs::write(
+        &path,
+        format!(
+            r#"
+[server]
+public_bind = "127.0.0.1:0"
+admin_bind = "127.0.0.1:0"
+
+[storage]
+data_dir = "{data_dir}"
+master_key_file = "{master_key}"
+
+[s3]
+endpoint = "{endpoint}"
+region = "us-east-1"
+bucket = "open-compute"
+force_path_style = true
+access_key_id_file = "{access_key}"
+secret_access_key_file = "{secret_key}"
+prefix = "system/"
+r2_prefix = "tenant/r2/"
+max_retries = 1
+retry_backoff_ms = 10
+connect_timeout_ms = 500
+request_timeout_ms = 5000
+
+[runtime]
+binary = "{workerd}"
+lock_file = "{lock}"
+assets_dir = "{assets}"
+
+[cache]
+max_bytes = 67108864
+high_watermark_ratio = 0.9
+low_watermark_ratio = 0.8
+max_artifact_bytes = 67108864
+
+[metrics]
+enabled = true
+max_label_value_bytes = 64
+max_series = 512
+"#,
+            data_dir = input.data_dir.display(),
+            master_key = input.master_key.display(),
+            endpoint = input.mock.endpoint,
+            access_key = access_key.display(),
+            secret_key = secret_key.display(),
+            workerd = input.workerd.display(),
+            lock = input.lock.display(),
+            assets = input.assets.display(),
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn p0_real_combined_exit_matrix() {
+    std::thread::Builder::new()
+        .name("p0-combined-exit".to_owned())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(4)
+                .enable_all()
+                .build()
+                .expect("P0 runtime")
+                .block_on(p0_real_combined_exit_matrix_inner());
+        })
+        .expect("P0 Gate thread")
+        .join()
+        .expect("P0 Gate thread result");
+}
+
+async fn p0_real_combined_exit_matrix_inner() {
     let Some(workerd) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map(PathBuf::from) else {
         return;
     };
+    reset_capacity_samples();
     let root = repo_root();
     let lock = root.join("runtime/workerd.lock.json");
     let assets = root.join("runtime");
@@ -126,6 +226,21 @@ async fn p0_real_combined_exit_matrix() {
         .await,
     );
     assert_eq!(websocket, json!({"text": true, "binary": true}));
+
+    let saturation = futures::future::join_all((0..16).map(|_| {
+        dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_a,
+            "/snapshot",
+        )
+    }))
+    .await;
+    for response in saturation {
+        assert_snapshot(&response_json(&response), "A", "seed-kv", "seed-d1");
+    }
 
     let kv_backup = create_backup(
         &router,
@@ -345,16 +460,16 @@ async fn p0_real_combined_exit_matrix() {
         artifacts.clone(),
         objects.clone(),
         pins.clone(),
-        workerd,
-        lock,
-        assets,
+        workerd.clone(),
+        lock.clone(),
+        assets.clone(),
         "p0-exit-owner",
     )
     .await;
     let router = admin_router(
         storage.clone(),
-        artifacts,
-        objects,
+        artifacts.clone(),
+        objects.clone(),
         pins.clone(),
         &stack,
         scheduler_store,
@@ -387,6 +502,100 @@ async fn p0_real_combined_exit_matrix() {
         .await,
     );
     assert_snapshot(&persisted, "A", "mutated-kv", "mutated-d1");
+
+    drop(router);
+    stack.stop().await;
+    drop(storage);
+    let recovery_key = temp.path().join("p1-recovery-master.key");
+    fs::copy(data_root.join("keys/master.key"), &recovery_key).unwrap();
+    fs::set_permissions(&recovery_key, fs::Permissions::from_mode(0o600)).unwrap();
+    let source_platform_config = write_platform_config(&PlatformConfigInput {
+        temp: &temp,
+        name: "p1-source",
+        data_dir: &data_root,
+        master_key: &recovery_key,
+        mock: &mock,
+        workerd: &workerd,
+        lock: &lock,
+        assets: &assets,
+    });
+    let source_loaded = load_platform_config(&source_platform_config).unwrap();
+    let full_snapshot = backup_create(&source_loaded, "p0-combined-fixture")
+        .await
+        .unwrap();
+    assert!(
+        backup_inspect(&source_loaded, &full_snapshot.snapshot_id, true)
+            .await
+            .unwrap()
+            .verified
+    );
+    let retired_source = temp.path().join("p1-source-unavailable");
+    fs::rename(&data_root, &retired_source).unwrap();
+
+    let restored_root = fs::canonicalize(temp.path())
+        .unwrap()
+        .join("p1-restored-data");
+    let restore_platform_config = write_platform_config(&PlatformConfigInput {
+        temp: &temp,
+        name: "p1-restore",
+        data_dir: &restored_root,
+        master_key: &recovery_key,
+        mock: &mock,
+        workerd: &workerd,
+        lock: &lock,
+        assets: &assets,
+    });
+    let restored_loaded = load_platform_config(&restore_platform_config).unwrap();
+    let restored = backup_restore(&restored_loaded, &full_snapshot.snapshot_id)
+        .await
+        .unwrap();
+    assert_eq!(restored.platform_id, full_snapshot.platform_id);
+    let doctor = doctor_report(&restored_loaded, DoctorMode::Full).await;
+    assert!(!doctor.failed(), "restored doctor: {doctor:?}");
+
+    let storage = Arc::new(
+        PlatformStorage::bootstrap(&restored_loaded.config.storage, &SystemClock).unwrap(),
+    );
+    let scheduler_store = open_scheduler(&storage);
+    let (artifacts, objects) = stores(&mock);
+    let pins = ResourcePins::new();
+    let stack = GateStack::start(
+        storage.clone(),
+        scheduler_store.clone(),
+        artifacts.clone(),
+        objects.clone(),
+        pins.clone(),
+        workerd,
+        lock,
+        assets,
+        "p0-exit-owner",
+    )
+    .await;
+    let router = admin_router(
+        storage.clone(),
+        artifacts,
+        objects,
+        pins.clone(),
+        &stack,
+        scheduler_store,
+    );
+    let restored_worker = WorkerRepository::new(storage.db())
+        .get_worker(account, worker.id)
+        .unwrap();
+    assert_eq!(restored_worker.active_deployment_id, Some(deployment_a.id));
+    assert_eq!(restored_worker.route_generation, generation_rollback);
+    let restored_snapshot = response_json(
+        &dispatch(
+            &stack.transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_rollback,
+            "/snapshot",
+        )
+        .await,
+    );
+    assert_snapshot(&restored_snapshot, "A", "mutated-kv", "mutated-d1");
 
     let s3_request = tokio::spawn({
         let transport = stack.transport.clone();
@@ -486,6 +695,13 @@ async fn p0_real_combined_exit_matrix() {
     }
     drop(router);
     stack.stop().await;
+    drop(storage);
+    let attestation =
+        backup_attest_restore_smoke(&restored_loaded, &full_snapshot.snapshot_id, true)
+            .await
+            .unwrap();
+    assert!(attestation.smoke_verified);
+    println!("P1_CAPACITY {}", capacity_summary());
     println!("P0 combined Worker/KV/R2/D1/DO/alarm/WebSocket/backup/restart/failure matrix PASS");
 }
 
@@ -732,6 +948,18 @@ fn assert_snapshot(value: &Value, release: &str, kv: &str, d1: &str) {
     for key in ["kv", "r2", "d1", "durableObject"] {
         assert_eq!(value["facade"][key], true, "{key}: {value}");
     }
+    for key in [
+        "workers",
+        "kv",
+        "r2",
+        "d1",
+        "durableObjects",
+        "websocket",
+        "adversarialValues",
+        "maliciousWorker",
+    ] {
+        assert_eq!(value["conformance"][key], true, "{key}: {value}");
+    }
     assert_eq!(value["kv"]["text"], kv);
     assert_eq!(value["kv"]["json"], json!({"ok": true, "product": "kv"}));
     assert_eq!(value["kv"]["binary"], json!([1, 2]));
@@ -750,6 +978,7 @@ fn assert_snapshot(value: &Value, release: &str, kv: &str, d1: &str) {
     assert_eq!(value["durableObject"]["rpc"]["count"], 1);
     assert_eq!(value["durableObject"]["fetch"]["count"], 1);
     assert_eq!(value["durableObject"]["isolated"]["count"], 1);
+    assert_eq!(value["durableObject"]["rpc"]["alarmConformance"], true);
 }
 
 fn all_resources(bindings: ProductBindings) -> [ResourceId; 9] {

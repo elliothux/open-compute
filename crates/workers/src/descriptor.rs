@@ -24,6 +24,12 @@ pub const DO_ID_CODEC_MODULE_NAME: &str = "__open_compute_do_id_codec__.js";
 pub const DO_ALARM_SHIM_MODULE_NAME: &str = "__open_compute_do_alarm_shim__.js";
 /// Reserved deterministic main-module wrapper generated for local product facades.
 pub const LOADED_ISOLATE_WRAPPER_MODULE_NAME: &str = "__open_compute_loaded_isolate_wrapper__.js";
+/// Earliest compatibility date accepted by the pinned P1 policy.
+pub const COMPATIBILITY_DATE_MIN: &str = "2022-01-01";
+/// Latest compatibility date accepted by the pinned P1 policy.
+pub const COMPATIBILITY_DATE_MAX: &str = "2026-08-23";
+/// Compatibility flags accepted by the production descriptor validator.
+pub const COMPATIBILITY_FLAGS_ALLOWED: &[&str] = &["nodejs_compat", "rpc"];
 
 const R2_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/r2-facade.js");
 const D1_FACADE_SOURCE: &[u8] = include_bytes!("../../../runtime/system-workers/d1-facade.js");
@@ -396,16 +402,15 @@ pub fn validate_compatibility(
     date: &str,
     flags: Vec<String>,
 ) -> Result<Vec<String>, PlatformError> {
-    if !valid_date(date) || !("2022-01-01"..="2026-08-23").contains(&date) {
+    if !valid_date(date) || !(COMPATIBILITY_DATE_MIN..=COMPATIBILITY_DATE_MAX).contains(&date) {
         return Err(PlatformError::new(
             ErrorCode::CompatibilityUnsupported,
             "compatibility date is outside the pinned runtime policy",
         ));
     }
-    let allowed = ["nodejs_compat", "rpc"];
     let mut unique = BTreeSet::new();
     for flag in flags {
-        if !allowed.contains(&flag.as_str()) {
+        if !COMPATIBILITY_FLAGS_ALLOWED.contains(&flag.as_str()) {
             return Err(PlatformError::new(
                 ErrorCode::CompatibilityUnsupported,
                 "compatibility flag is not allowed by P0.2 policy",

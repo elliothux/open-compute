@@ -1,7 +1,8 @@
 //! P0.4 KV namespace control API.
 
-use crate::http::{HttpState, authorize};
+use crate::http::{HttpState, ProductErrorCode, authorize};
 use crate::metrics::{KvLifecycle, KvLifecycleGuard};
+use crate::snapshot_pins::SnapshotPins;
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::extract::{Path, Request, State};
@@ -10,8 +11,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, KvConfig, PlatformError, RequestId, ResourceId,
-    ResourceState,
+    AccountId, BindingKind, ErrorCode, KvConfig, OperationClass, PlatformError, RequestId,
+    ResourceId, ResourceState,
 };
 use open_compute_storage::{
     KvBackupState, KvEngine, KvNamespaceRepository, KvPaths, PlatformStorage,
@@ -53,6 +54,7 @@ pub struct KvApiState {
     pins: ResourcePins,
     config: KvConfig,
     delete_drain_timeout: Duration,
+    snapshot_pins: Arc<SnapshotPins>,
 }
 
 impl std::fmt::Debug for KvApiState {
@@ -81,7 +83,15 @@ impl KvApiState {
             pins,
             config,
             delete_drain_timeout,
+            snapshot_pins: Arc::new(SnapshotPins::empty()),
         }
+    }
+
+    /// Use the authenticated immutable-object pins frozen at daemon startup.
+    #[must_use]
+    pub(crate) fn with_snapshot_pins(mut self, pins: Arc<SnapshotPins>) -> Self {
+        self.snapshot_pins = pins;
+        self
     }
 }
 
@@ -243,10 +253,15 @@ async fn rename_namespace(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
+    let admission = match api.storage.reserve_mutation(OperationClass::Kv, 64 * 1024) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
     let storage = api.storage.clone();
     let pins = api.pins.clone();
     let quota = api.config.namespace_quota_bytes;
     match tokio::task::spawn_blocking(move || {
+        let _admission = admission;
         let driver = KvResourceDriver::new(&storage, quota);
         ResourceController::new(&storage, pins, driver).rename(
             account_id,
@@ -329,6 +344,13 @@ async fn create_backup(
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
     let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let _admission = match api
+        .storage
+        .reserve_mutation(OperationClass::Kv, api.config.namespace_quota_bytes)
+    {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
@@ -567,6 +589,13 @@ async fn restore_namespace(
         (backup.object_key.clone(), backup.sha256, backup.size_bytes)
     else {
         return error_response(internal(), request_id);
+    };
+    let _admission = match api
+        .storage
+        .reserve_mutation(OperationClass::Kv, size.saturating_mul(2).max(1))
+    {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
     };
     let manifest_key = match api.artifacts.kv_backup_manifest_key(&object_key) {
         Ok(value) => value,
@@ -871,10 +900,16 @@ async fn delete_backup(
     if backup.state == KvBackupState::Ready
         && let Some(key) = backup.object_key.as_deref()
     {
+        if let Err(error) = api.snapshot_pins.ensure_unpinned(key) {
+            return error_response(error, request_id);
+        }
         let manifest = match api.artifacts.kv_backup_manifest_key(key) {
             Ok(value) => value,
             Err(error) => return error_response(error, request_id),
         };
+        if let Err(error) = api.snapshot_pins.ensure_unpinned(&manifest) {
+            return error_response(error, request_id);
+        }
         if let Err(error) = api.artifacts.delete_kv_backup(&manifest).await {
             return error_response(error, request_id);
         }
@@ -1011,13 +1046,17 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         ErrorCode::ResourceReferenced | ErrorCode::ResourceNotReady => StatusCode::CONFLICT,
         ErrorCode::AdminAuthRequired => StatusCode::UNAUTHORIZED,
         ErrorCode::ConfigInvalid | ErrorCode::LimitInvalid => StatusCode::BAD_REQUEST,
-        ErrorCode::KvStorageFull
-        | ErrorCode::KvUnavailable
-        | ErrorCode::KvBusy
-        | ErrorCode::S3Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::QuotaExceeded | ErrorCode::AdmissionBusy => StatusCode::TOO_MANY_REQUESTS,
+        ErrorCode::StoragePressure | ErrorCode::DiskHardLimit | ErrorCode::KvStorageFull => {
+            StatusCode::INSUFFICIENT_STORAGE
+        }
+        ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::KvUnavailable | ErrorCode::KvBusy | ErrorCode::S3Unavailable => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    (
+    let mut response = (
         status,
         axum::Json(serde_json::json!({
             "ok": false,
@@ -1028,7 +1067,9 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
             }
         })),
     )
-        .into_response()
+        .into_response();
+    response.extensions_mut().insert(ProductErrorCode(code));
+    response
 }
 
 fn internal() -> PlatformError {

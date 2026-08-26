@@ -1,6 +1,7 @@
 //! Production `run` composition and shutdown.
 
 use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_scheduler};
+use crate::capabilities::{platform_capabilities, platform_release_metadata};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
 use crate::d1_http::D1ApiState;
@@ -17,7 +18,10 @@ use crate::r2_http::R2ApiState;
 use crate::r2_maintenance::R2Maintenance;
 use crate::runtime_bridge::{WorkerdTransport, bind_runtime_source, serve_runtime_source};
 use crate::scheduler::SchedulerService;
+use crate::snapshot_pins::{SnapshotPins, load_snapshot_pins};
 use crate::workers_http::WorkerApiState;
+#[path = "run_p1.rs"]
+pub(super) mod p1;
 use open_compute_artifacts::{
     ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, R2ObjectStore,
     S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
@@ -36,6 +40,10 @@ use open_compute_storage::{
     DurableObjectRepository, PlatformStorage, SchedulerStore, WorkerRepository,
 };
 use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins, RuntimeSource};
+use p1::{
+    load_offline_metrics_receipts, refresh_metrics as refresh_p1_metrics,
+    require_current_serving_schema, update_operations_health,
+};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -116,6 +124,17 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     record(&opts, "config");
     fail_after(&opts, FailAfterDummy::Config, &metrics, StartStage::Config)?;
     metrics.inc_start(StartResult::Success, StartStage::Config);
+    if let (Ok(capabilities), Ok(release_metadata)) = (
+        platform_capabilities(&loaded),
+        platform_release_metadata(&loaded),
+    ) {
+        metrics.set_release_identity(
+            &capabilities.release.workerd_lock_sha256,
+            &release_metadata.conformance_result,
+        )?;
+    }
+
+    require_current_serving_schema(&loaded)?;
 
     let health = HealthCoordinator::new();
     health.set_component(
@@ -128,9 +147,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let storage_started = Instant::now();
     let storage = match tokio::task::spawn_blocking({
         let cfg = loaded.config.storage.clone();
+        let hardening = loaded.config.hardening.clone();
         let recovery_batch = loaded.config.workers.delete_recovery_batch;
         move || {
-            let storage = PlatformStorage::bootstrap(&cfg, &clock)?;
+            let storage = PlatformStorage::bootstrap_with_hardening(&cfg, &hardening, &clock)?;
             open_compute_storage::KvPaths::open(storage.data_dir().root())?
                 .cleanup_write_staging()?;
             open_compute_storage::R2Staging::open(storage.data_dir().root())?.cleanup()?;
@@ -142,6 +162,34 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                 maintenance_now,
                 recovery_batch,
             )?;
+            let scheduler_path = storage.data_dir().ensure_scheduler_db()?;
+            drop(SchedulerStore::open(
+                &scheduler_path,
+                cfg.sqlite_busy_timeout_ms,
+                maintenance_now,
+            )?);
+            let schemas = open_compute_storage::inspect_owned_schema(
+                storage.data_dir(),
+                storage.db(),
+                cfg.sqlite_busy_timeout_ms,
+                maintenance_now,
+            )?;
+            if schemas.control
+                != u32::try_from(open_compute_storage::migrations::current_schema_version())
+                    .unwrap_or(u32::MAX)
+                || schemas.scheduler
+                    != u32::try_from(open_compute_storage::current_scheduler_schema_version())
+                        .unwrap_or(u32::MAX)
+                || schemas.kv_min != open_compute_storage::KV_SCHEMA_VERSION
+                || schemas.kv_max != open_compute_storage::KV_SCHEMA_VERSION
+                || schemas.d1_min != open_compute_storage::D1_DATABASE_SCHEMA_VERSION
+                || schemas.d1_max != open_compute_storage::D1_DATABASE_SCHEMA_VERSION
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::UpgradeRequired,
+                    "platformd run refuses a mixed project-owned schema tuple",
+                ));
+            }
             Ok::<_, PlatformError>(storage)
         }
     })
@@ -161,6 +209,21 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         }
     };
     let storage = Arc::new(storage);
+    refresh_p1_metrics(
+        &storage,
+        &metrics,
+        loaded.config.hardening.emergency_reserve_bytes,
+    )?;
+    metrics.set_schema_state(
+        u64::try_from(open_compute_storage::migrations::current_schema_version()).unwrap_or(0),
+        u64::try_from(open_compute_storage::migrations::current_schema_version()).unwrap_or(0),
+    );
+    load_offline_metrics_receipts(storage.data_dir(), &metrics);
+    update_operations_health(
+        storage.data_dir(),
+        loaded.config.hardening.snapshot_stale_after_ms,
+        &health,
+    )?;
     let scheduler_store = match storage.data_dir().ensure_scheduler_db().and_then(|path| {
         SchedulerStore::open(
             &path,
@@ -317,6 +380,20 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         ComponentState::Healthy,
         Some(ReadinessReason::Ready),
     )?;
+
+    let snapshot_pins = Arc::new(
+        match load_snapshot_pins(&loaded, storage.identity().platform_id, client.clone()).await {
+            Ok(pins) => pins,
+            Err(error) => {
+                metrics.inc_snapshot_inspect_failure();
+                tracing::warn!(
+                    code = error.code().as_str(),
+                    "Snapshot pin inventory is unavailable; immutable object GC is disabled"
+                );
+                SnapshotPins::Unavailable
+            }
+        },
+    );
 
     let r2_objects = R2ObjectStore::new(client.clone());
     let store = ArtifactStore::new(client);
@@ -491,13 +568,16 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         bundle_limits,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     ))
-    .with_kv_api(KvApiState::new(
-        storage.clone(),
-        store.clone(),
-        resource_pins.clone(),
-        loaded.config.kv.clone(),
-        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-    ))
+    .with_kv_api(
+        KvApiState::new(
+            storage.clone(),
+            store.clone(),
+            resource_pins.clone(),
+            loaded.config.kv.clone(),
+            Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
+        )
+        .with_snapshot_pins(snapshot_pins.clone()),
+    )
     .with_r2_api(r2_api)
     .with_d1_api(d1_api)
     .with_do_api(do_api)
@@ -550,11 +630,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let maintenance_kv_config = loaded.config.kv.clone();
     let maintenance_r2_config = loaded.config.r2.clone();
     let maintenance_do_config = loaded.config.durable_objects.clone();
+    let maintenance_snapshot_stale_after_ms = loaded.config.hardening.snapshot_stale_after_ms;
+    let maintenance_emergency_reserve_bytes = loaded.config.hardening.emergency_reserve_bytes;
     let maintenance_r2_objects = r2_objects;
     let maintenance_health = health.clone();
     let maintenance_pins = deployment_pins;
     let maintenance_resource_pins = resource_pins.clone();
     let maintenance_metrics = metrics.clone();
+    let maintenance_snapshot_pins = snapshot_pins;
     let maintenance_task = tokio::spawn(async move {
         let mut r2_maintenance = R2Maintenance::default();
         let mut interval = tokio::time::interval(Duration::from_millis(
@@ -570,6 +653,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                         &maintenance_cache,
                         &maintenance_pins,
                         &maintenance_config,
+                        &maintenance_snapshot_pins,
                     ).await;
                     run_kv_maintenance(
                         &maintenance_storage,
@@ -589,6 +673,21 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                         &maintenance_health,
                         &maintenance_metrics,
                     );
+                    let _ = update_operations_health(
+                        maintenance_storage.data_dir(),
+                        maintenance_snapshot_stale_after_ms,
+                        &maintenance_health,
+                    );
+                    if let Err(error) = refresh_p1_metrics(
+                        &maintenance_storage,
+                        &maintenance_metrics,
+                        maintenance_emergency_reserve_bytes,
+                    ) {
+                        tracing::warn!(
+                            code = error.code().as_str(),
+                            "P1 disk and resource metrics refresh failed"
+                        );
+                    }
                     let _ = maintenance_do_api.reconcile_pending().await;
                 }
             }
@@ -769,10 +868,10 @@ fn update_do_storage_health(
     } else {
         ComponentState::Degraded
     };
-    let reason = if watermark == 0 {
-        ReadinessReason::Ready
-    } else {
-        ReadinessReason::DiskHardLimit
+    let reason = match watermark {
+        0 => ReadinessReason::Ready,
+        1 => ReadinessReason::DiskSoftLimit,
+        _ => ReadinessReason::DiskHardLimit,
     };
     health.set_component(ComponentName::DataDir, state, Some(reason))
 }
@@ -906,6 +1005,7 @@ async fn run_worker_maintenance(
     cache: &Arc<ArtifactCache>,
     pins: &DeploymentPins,
     config: &open_compute_core::WorkersConfig,
+    snapshot_pins: &SnapshotPins,
 ) {
     let now = unix_ms();
     let storage_for_db = storage.clone();
@@ -997,14 +1097,22 @@ async fn run_worker_maintenance(
             retained.insert(reference);
         }
     }
-    let grace = SystemTime::now()
-        .checked_sub(Duration::from_millis(config.artifact_gc_grace_ms))
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-    if let Err(error) = store.gc_unreferenced(&retained, grace).await {
-        tracing::warn!(
+    match snapshot_pins.extend_artifacts(&mut retained) {
+        Ok(()) => {
+            let grace = SystemTime::now()
+                .checked_sub(Duration::from_millis(config.artifact_gc_grace_ms))
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            if let Err(error) = store.gc_unreferenced(&retained, grace).await {
+                tracing::warn!(
+                    code = error.code().as_str(),
+                    "Worker artifact GC pass failed"
+                );
+            }
+        }
+        Err(error) => tracing::warn!(
             code = error.code().as_str(),
-            "Worker artifact GC pass failed"
-        );
+            "Worker artifact GC skipped because snapshot pins are unavailable"
+        ),
     }
     if let Err(error) = cache.evict_if_needed().await {
         tracing::warn!(
@@ -1073,6 +1181,7 @@ pub(crate) async fn run_kv_maintenance(
                         let _ = catalog.record_quick_check(record.resource.id, now);
                     }
                     Err(error) => {
+                        metrics.inc_sqlite_check_failure();
                         metrics.inc_kv_corruption(2);
                         let code = if error.code() == ErrorCode::KvCorrupt {
                             "KV_CORRUPT"

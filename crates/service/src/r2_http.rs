@@ -1,6 +1,6 @@
 //! P0.5 logical R2 bucket control API and lifecycle recovery.
 
-use crate::http::{HttpState, authorize};
+use crate::http::{HttpState, ProductErrorCode, authorize};
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::extract::{Path, Request, State};
@@ -9,8 +9,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use open_compute_artifacts::R2ObjectStore;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, R2Config, RequestId, ResourceId,
-    ResourceState,
+    AccountId, BindingKind, ErrorCode, OperationClass, PlatformError, R2Config, RequestId,
+    ResourceId, ResourceState,
 };
 use open_compute_storage::{
     PlatformStorage, R2_SCHEMA_VERSION, R2BucketRecord, R2BucketRepository, ReserveResourceCreate,
@@ -204,6 +204,9 @@ async fn create(
     key: String,
     request_id: RequestId,
 ) -> Result<CreateOutcome, PlatformError> {
+    let _admission = api
+        .storage
+        .reserve_mutation(OperationClass::R2, 64 * 1024)?;
     let fingerprint_input = serde_json::to_vec(&serde_json::json!({
         "v": 1,
         "accountId": account_id,
@@ -214,8 +217,8 @@ async fn create(
     .map_err(|_| internal())?;
     let fingerprint = api.storage.crypto().fingerprint_request(&fingerprint_input);
     let now = now_ms();
-    let reservation =
-        ResourceRepository::new(api.storage.db()).reserve_create(&ReserveResourceCreate {
+    let reservation = ResourceRepository::new(api.storage.db()).reserve_create_with_limit(
+        &ReserveResourceCreate {
             account_id,
             kind: BindingKind::R2Bucket,
             name: &name,
@@ -227,7 +230,9 @@ async fn create(
             request_id,
             now_ms: now,
             expires_at_ms: now.saturating_add(IDEMPOTENCY_TTL_MS),
-        })?;
+        },
+        api.storage.hardening().max_resources_per_kind_per_account,
+    )?;
     let resource = match reservation {
         ResourceCreateReservation::Complete(bytes) => return Ok(CreateOutcome::Replay(bytes)),
         ResourceCreateReservation::Failed(_) => {
@@ -324,6 +329,10 @@ async fn rename_bucket(
         Err(error) => return error_response(error, request_id),
     };
     let body = match read_json::<RenameBucketBody>(request).await {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let _admission = match api.storage.reserve_mutation(OperationClass::R2, 64 * 1024) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
@@ -622,6 +631,9 @@ fn error_response(
         | ErrorCode::R2BucketNotEmpty => StatusCode::CONFLICT,
         ErrorCode::AdminAuthRequired => StatusCode::UNAUTHORIZED,
         ErrorCode::ConfigInvalid | ErrorCode::LimitInvalid => StatusCode::BAD_REQUEST,
+        ErrorCode::QuotaExceeded | ErrorCode::AdmissionBusy => StatusCode::TOO_MANY_REQUESTS,
+        ErrorCode::StoragePressure | ErrorCode::DiskHardLimit => StatusCode::INSUFFICIENT_STORAGE,
+        ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::R2ProviderUnavailable | ErrorCode::R2Overloaded | ErrorCode::R2ResultUnknown => {
             StatusCode::SERVICE_UNAVAILABLE
         }
@@ -630,7 +642,9 @@ fn error_response(
         }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    (status, axum::Json(serde_json::json!({"ok": false, "error": {"code": code.as_str(), "message": "control request failed", "requestId": request_id}}))).into_response()
+    let mut response = (status, axum::Json(serde_json::json!({"ok": false, "error": {"code": code.as_str(), "message": "control request failed", "requestId": request_id}}))).into_response();
+    response.extensions_mut().insert(ProductErrorCode(code));
+    response
 }
 
 fn not_found() -> PlatformError {

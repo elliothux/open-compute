@@ -1697,6 +1697,7 @@ fn install_and_package_reject_failure_matrix_without_downloading() {
     let assets = dir.path().join("assets");
     let license = dir.path().join("LICENSE");
     let default_config = dir.path().join("default.toml");
+    let runbooks = dir.path().join("runbooks");
     let destination = dir.path().join("bundle");
     let mut request = PackageReleaseRequest {
         lock: &valid_lock,
@@ -1705,6 +1706,8 @@ fn install_and_package_reject_failure_matrix_without_downloading() {
         assets_dir: &assets,
         license_file: &license,
         default_config: &default_config,
+        runbooks_dir: &runbooks,
+        release_json: b"{}",
         download: false,
         archive_bytes: Some(&valid_gz),
     };
@@ -1722,6 +1725,9 @@ fn install_and_package_reject_failure_matrix_without_downloading() {
     assert!(package_release_bundle(&request).is_err());
     request.license_file = &license;
     request.default_config = Path::new("relative");
+    assert!(package_release_bundle(&request).is_err());
+    request.default_config = &default_config;
+    request.runbooks_dir = Path::new("relative");
     assert!(package_release_bundle(&request).is_err());
 }
 
@@ -1824,6 +1830,25 @@ fn write_package_assets(dir: &Path, lock_json: &str) {
     fs::write(dir.join("system-workers/host.js"), b"export default {};\n").unwrap();
 }
 
+fn write_package_runbooks(dir: &Path) {
+    fs::create_dir(dir).unwrap();
+    for name in [
+        "install-and-first-start.md",
+        "backup-and-retention.md",
+        "fresh-host-restore.md",
+        "upgrade-and-rollback.md",
+        "disk-pressure.md",
+        "sqlite-corruption.md",
+        "s3-outage.md",
+        "workerd-crash-loop.md",
+        "master-key-loss-and-recovery.md",
+        "scheduler-recovery.md",
+        "collect-support-bundle.md",
+    ] {
+        fs::write(dir.join(name), format!("# {name}\n")).unwrap();
+    }
+}
+
 fn no_partial_bundles(parent: &Path) {
     let leftovers: Vec<_> = fs::read_dir(parent)
         .unwrap()
@@ -1857,6 +1882,8 @@ fn package_release_is_atomic_and_rejects_bad_inputs() {
         b"[server]\npublic_bind = \"127.0.0.1:1\"\n",
     )
     .unwrap();
+    let runbooks = dir.path().join("runbooks");
+    write_package_runbooks(&runbooks);
 
     let dest = dir.path().join("rel dest");
     package_release_bundle(&PackageReleaseRequest {
@@ -1866,6 +1893,8 @@ fn package_release_is_atomic_and_rejects_bad_inputs() {
         assets_dir: &assets,
         license_file: &license,
         default_config: &default_config,
+        runbooks_dir: &runbooks,
+        release_json: b"{}",
         download: false,
         archive_bytes: Some(&gz),
     })
@@ -1880,8 +1909,10 @@ fn package_release_is_atomic_and_rejects_bad_inputs() {
     top_level.sort();
     assert_eq!(
         top_level,
-        ["bin", "licenses", "runtime", "share"].map(std::ffi::OsString::from)
+        ["bin", "docs", "licenses", "runtime", "share"].map(std::ffi::OsString::from)
     );
+    assert!(dest.join("share/release.json").is_file());
+    assert!(dest.join("docs/runbooks/fresh-host-restore.md").is_file());
     assert!(!dest.join(".workerd-inst").exists());
     no_partial_bundles(dir.path());
 
@@ -1895,6 +1926,8 @@ fn package_release_is_atomic_and_rejects_bad_inputs() {
         assets_dir: &assets,
         license_file: &license,
         default_config: &default_config,
+        runbooks_dir: &runbooks,
+        release_json: b"{}",
         download: false,
         archive_bytes: Some(&gz),
     })
@@ -1909,6 +1942,8 @@ fn package_release_is_atomic_and_rejects_bad_inputs() {
         assets_dir: &assets,
         license_file: &license,
         default_config: &default_config,
+        runbooks_dir: &runbooks,
+        release_json: b"{}",
         download: false,
         archive_bytes: Some(b"not-the-archive"),
     });
@@ -1926,6 +1961,8 @@ fn package_release_is_atomic_and_rejects_bad_inputs() {
         assets_dir: &missing_capnp,
         license_file: &license,
         default_config: &default_config,
+        runbooks_dir: &runbooks,
+        release_json: b"{}",
         download: false,
         archive_bytes: Some(&gz),
     });
@@ -1942,6 +1979,8 @@ fn package_release_is_atomic_and_rejects_bad_inputs() {
         assets_dir: &assets,
         license_file: &license,
         default_config: &default_config,
+        runbooks_dir: &runbooks,
+        release_json: b"{}",
         download: false,
         archive_bytes: Some(&gz),
     });

@@ -83,6 +83,7 @@ impl HealthCoordinator {
             ComponentName::Cache,
             ComponentName::Runtime,
             ComponentName::Scheduler,
+            ComponentName::Operations,
         ];
         let mut status = self.lock();
         for name in names {

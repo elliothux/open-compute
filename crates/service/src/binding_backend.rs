@@ -19,7 +19,7 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt as _, TryStreamExt};
 use open_compute_core::{
     BindingId, BindingKind, DeploymentId, DurableObjectId, DurableObjectsConfig, ErrorCode,
-    PlatformError, ResourceId,
+    OperationClass, PlatformError, ResourceId,
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
@@ -752,7 +752,25 @@ async fn handle_alarm_index(state: BackendState, request: Request) -> Response {
         "clear" => Some(AlarmMutation::Clear),
         _ => None,
     };
+    let admission = if operation == "upsert" {
+        let result = state
+            .storage
+            .reserve_mutation(OperationClass::Scheduler, 64 * 1024);
+        if let Some(metrics) = &state.metrics {
+            metrics.observe_admission(
+                OperationClass::Scheduler,
+                result.as_ref().err().map(PlatformError::code),
+            );
+        }
+        match result {
+            Ok(reservation) => Some(reservation),
+            Err(error) => return platform_error(&error),
+        }
+    } else {
+        None
+    };
     let result = tokio::task::spawn_blocking(move || {
+        let _admission = admission;
         let authority = DurableObjectRepository::new(&storage).authorize_alarm_dispatch(
             body.namespace_resource_id,
             body.object_id,
@@ -961,6 +979,19 @@ async fn resolve_durable_object(state: BackendState, request: Request) -> Respon
         metrics.set_do_runtime_gauges(0, 0, watermark);
     }
     let allow_create = used_percent < state.do_config.disk_stop_writes_percent;
+    let admission = state
+        .storage
+        .reserve_mutation(OperationClass::DurableObjects, 64 * 1024);
+    if let Some(metrics) = &state.metrics {
+        metrics.observe_admission(
+            OperationClass::DurableObjects,
+            admission.as_ref().err().map(PlatformError::code),
+        );
+    }
+    let _admission = match admission {
+        Ok(value) => value,
+        Err(error) => return platform_error(&error),
+    };
     let storage = state.storage.clone();
     let result = tokio::task::spawn_blocking(move || {
         DurableObjectRepository::new(&storage).authorize_dispatch(

@@ -44,6 +44,12 @@ impl R2BucketLocator {
         self.resource_id
     }
 
+    /// Canonical immutable identity-marker key for this validated locator.
+    #[must_use]
+    pub fn identity_marker_key(&self) -> String {
+        format!("{}meta/identity.json", self.physical_prefix)
+    }
+
     /// Maximum user-key bytes after accounting for the frozen physical prefix.
     #[must_use]
     pub fn max_user_key_bytes(&self) -> usize {

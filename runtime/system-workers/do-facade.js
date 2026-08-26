@@ -121,9 +121,15 @@ function makeId(value, name) {
   return new DurableObjectId(idState, value, name);
 }
 
+function enqueueStubOperation(state, operation) {
+  const result = state.queue.tail.then(operation);
+  state.queue.tail = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 function stubProxy(id, raw) {
   const target = Object.create(DurableObjectStub.prototype);
-  const state = Object.freeze({ id, raw });
+  const state = Object.freeze({ id, raw, queue: { tail: Promise.resolve() } });
   stubState.set(target, state);
   const proxy = new Proxy(target, {
     get(owner, property, receiver) {
@@ -136,7 +142,10 @@ function stubProxy(id, raw) {
       return async (...args) => {
         assertPlain(args);
         try {
-          return decodeWire(await raw.dispatchRpc(id.toString(), property, encodeWire(args)));
+          return decodeWire(await enqueueStubOperation(
+            state,
+            () => raw.dispatchRpc(id.toString(), property, encodeWire(args)),
+          ));
         } catch (error) {
           const code = /\b(DO_[A-Z_]+)\b/.exec(String(error && error.message || error));
           throw failure(code ? code[1] : "DO_RUNTIME_EXCEPTION");
@@ -171,10 +180,11 @@ export class DurableObjectStub {
         redirect: "manual",
       };
       if (request.method === "GET" || request.method === "HEAD") delete transport.body;
-      return await state.raw.fetch(new Request(
+      const outbound = new Request(
         `https://do-transport.invalid/${state.id.toString()}`,
         transport,
-      ));
+      );
+      return await enqueueStubOperation(state, () => state.raw.fetch(outbound));
     } catch (error) {
       const code = /\b(DO_[A-Z_]+)\b/.exec(String(error && error.message || error));
       throw failure(code ? code[1] : "DO_RUNTIME_EXCEPTION");

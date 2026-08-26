@@ -2,8 +2,8 @@
 
 use crate::auth::{bearer_matches, resolve_admin_auth};
 use crate::cli::{
-    Cli, Command, ConfigCommand, SchedulerCommand, execute, execute_with_test_binary, load_checked,
-    parse_from,
+    BackupCommand, Cli, Command, ConfigCommand, SchedulerCommand, UpgradeCommand, execute,
+    execute_with_test_binary, load_checked, parse_from,
 };
 use crate::config_load::{MAX_CONFIG_BYTES, load_platform_config};
 use crate::doctor::{CheckStatus, DoctorMode, doctor_report};
@@ -14,8 +14,9 @@ use crate::metrics::{
     AlarmMutation, AlarmOutcome, AlarmRepairSource, D1Lifecycle, D1LifecycleGuard, D1Operation,
     DoFacetReloadReason, DoOperation, DoReconcileState, KvGauge, KvGaugeGuard, KvLifecycle,
     KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry, R2Operation,
-    R2ProviderError, R2StreamDirection, R2StreamGuard, REQUIRED_SERIES, RestartReason, S3Op,
-    S3Result, SchedulerClaimOutcome, SqliteOp, StartResult, StartStage,
+    R2ProviderError, R2StreamDirection, R2StreamGuard, REQUIRED_SERIES, ResourceOperation,
+    RestartReason, S3Op, S3Result, SchedulerClaimOutcome, SqliteOp, StartResult, StartStage,
+    WebSocketCloseReason,
 };
 use crate::run::{
     FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_kv_maintenance,
@@ -187,6 +188,10 @@ fn package_and_cli_shape() {
     assert!(help.contains("config"));
     assert!(help.contains("doctor"));
     assert!(help.contains("scheduler"));
+    assert!(help.contains("capabilities"));
+    assert!(help.contains("backup"));
+    assert!(help.contains("upgrade"));
+    assert!(help.contains("support-bundle"));
     let parsed = parse_from(["platformd", "run", "--config", "/tmp/config.toml"]).unwrap();
     assert!(matches!(parsed.command, Command::Run));
     let parsed = parse_from([
@@ -202,6 +207,78 @@ fn package_and_cli_shape() {
         parsed.command,
         Command::Config {
             command: ConfigCommand::Check { json: true }
+        }
+    ));
+    let parsed = parse_from([
+        "platformd",
+        "backup",
+        "create",
+        "--name",
+        "before-upgrade",
+        "--config",
+        "/tmp/config.toml",
+        "--json",
+    ])
+    .unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Backup {
+            command: BackupCommand::Create { json: true, .. }
+        }
+    ));
+    let parsed = parse_from([
+        "platformd",
+        "backup",
+        "cleanup-restore",
+        "--staging",
+        "01900000-0000-7000-8000-000000000000",
+        "--config",
+        "/tmp/config.toml",
+        "--json",
+    ])
+    .unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Backup {
+            command: BackupCommand::CleanupRestore { json: true, .. }
+        }
+    ));
+    let parsed = parse_from([
+        "platformd",
+        "backup",
+        "attest-restore-smoke",
+        "--snapshot",
+        "01900000-0000-7000-8000-000000000000",
+        "--passed",
+        "--config",
+        "/tmp/config.toml",
+        "--json",
+    ])
+    .unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Backup {
+            command: BackupCommand::AttestRestoreSmoke {
+                passed: true,
+                json: true,
+                ..
+            }
+        }
+    ));
+    let parsed = parse_from([
+        "platformd",
+        "upgrade",
+        "check",
+        "--from-snapshot",
+        "01900000-0000-7000-8000-000000000000",
+        "--config",
+        "/tmp/config.toml",
+    ])
+    .unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Upgrade {
+            command: UpgradeCommand::Check { .. }
         }
     ));
     let parsed = parse_from([
@@ -329,6 +406,8 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         "/tmp/license",
         "--default-config",
         "/tmp/config",
+        "--runbooks",
+        "/tmp/runbooks",
     ])
     .unwrap();
     let mut stdout = Vec::new();
@@ -379,6 +458,8 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         dir.path().join("missing-license").to_str().unwrap(),
         "--default-config",
         path.to_str().unwrap(),
+        "--runbooks",
+        dir.path().to_str().unwrap(),
         "--archive",
         dir.path().join("missing-archive.gz").to_str().unwrap(),
     ])
@@ -445,9 +526,27 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
     }
     let license = package_root.join("LICENSE");
     fs::write(&license, b"test license").unwrap();
+    let package_config = package_root.join("package-config.toml");
+    let package_config_text = fs::read_to_string(&path)
+        .unwrap()
+        .replace(
+            loaded.config.runtime.binary.to_str().unwrap(),
+            package_binary.to_str().unwrap(),
+        )
+        .replace(
+            loaded.config.runtime.lock_file.to_str().unwrap(),
+            package_lock.to_str().unwrap(),
+        )
+        .replace(
+            loaded.config.runtime.assets_dir.to_str().unwrap(),
+            assets.to_str().unwrap(),
+        );
+    fs::write(&package_config, package_config_text).unwrap();
     let destination = dir.path().join("release-bundle");
     let package = parse_from([
         "platformd",
+        "--config",
+        package_config.to_str().unwrap(),
         "package-release",
         "--dest",
         destination.to_str().unwrap(),
@@ -459,6 +558,8 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         license.to_str().unwrap(),
         "--default-config",
         path.to_str().unwrap(),
+        "--runbooks",
+        workspace.join("docs/runbooks").to_str().unwrap(),
         "--archive",
         archive_path.to_str().unwrap(),
     ])
@@ -475,6 +576,12 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
     assert!(stderr.is_empty());
     assert!(String::from_utf8(stdout).unwrap().contains("RELEASE_OK"));
     assert!(destination.join("bin/workerd").is_file());
+    assert!(destination.join("share/release.json").is_file());
+    assert!(
+        destination
+            .join("docs/runbooks/install-and-first-start.md")
+            .is_file()
+    );
 
     struct RejectWrites;
     impl Write for RejectWrites {
@@ -909,6 +1016,7 @@ async fn liveness_ready_status_and_bounds() {
         ComponentName::Cache,
         ComponentName::Runtime,
         ComponentName::Scheduler,
+        ComponentName::Operations,
     ] {
         health
             .set_component(name, ComponentState::Healthy, Some(ReadinessReason::Ready))
@@ -1640,18 +1748,18 @@ fn admin_auth_environment_modes_are_covered_in_isolated_processes() {
 #[test]
 fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     let cfg = MetricsConfig {
-        max_label_value_bytes: 32,
+        max_label_value_bytes: 64,
         ..MetricsConfig::default()
     };
     assert_eq!(
-        MetricsRegistry::new(&cfg, &"v".repeat(33), "workerd")
+        MetricsRegistry::new(&cfg, &"v".repeat(65), "workerd")
             .unwrap_err()
             .code(),
         ErrorCode::LimitInvalid
     );
     let reg = Arc::new(MetricsRegistry::new(&cfg, "v1", "workerd").unwrap());
     assert_eq!(
-        reg.set_workerd_version(&"w".repeat(33)).unwrap_err().code(),
+        reg.set_workerd_version(&"w".repeat(65)).unwrap_err().code(),
         ErrorCode::LimitInvalid
     );
     reg.set_process_up(true);
@@ -1883,6 +1991,382 @@ request_timeout_ms = 2000
         )
         .unwrap();
     (dir, path, mock)
+}
+
+#[tokio::test]
+async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority() {
+    let (dir, path, _mock) = initialized_doctor_fixture().await;
+    let loaded = load_platform_config(&path).unwrap();
+    let fresh_root = dir.path().join("fresh-schema-root");
+    fs::create_dir(&fresh_root).unwrap();
+    let mut fresh = loaded.clone();
+    fresh.config.storage.data_dir = fresh_root.clone();
+    assert!(crate::run::p1::require_current_serving_schema(&fresh).is_ok());
+    fs::write(fresh_root.join("control.sqlite"), b"").unwrap();
+    assert!(crate::run::p1::require_current_serving_schema(&fresh).is_ok());
+    assert!(crate::run::p1::require_current_serving_schema(&loaded).is_ok());
+
+    let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).unwrap();
+    let now_ms = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    data_dir
+        .write_operation_receipt(
+            "last-snapshot.json",
+            serde_json::to_vec(&serde_json::json!({
+                "bytes": 321,
+                "created_at_ms": now_ms,
+                "duration_ms": 12,
+                "verified": true
+            }))
+            .unwrap()
+            .as_slice(),
+        )
+        .unwrap();
+    data_dir
+        .write_operation_receipt(
+            "last-restore.json",
+            serde_json::to_vec(&serde_json::json!({
+                "restored_at_ms": now_ms,
+                "duration_ms": 34,
+                "smoke_verified": true
+            }))
+            .unwrap()
+            .as_slice(),
+        )
+        .unwrap();
+
+    let metrics = MetricsRegistry::new(&loaded.config.metrics, "test", "workerd").unwrap();
+    crate::run::p1::load_offline_metrics_receipts(&data_dir, &metrics);
+    let health = HealthCoordinator::new();
+    crate::run::p1::update_operations_health(&data_dir, 60_000, &health).unwrap();
+    let operations = health
+        .snapshot()
+        .components
+        .into_iter()
+        .find(|component| component.name == ComponentName::Operations)
+        .unwrap();
+    assert_eq!(operations.state, ComponentState::Healthy);
+
+    let storage = open_compute_storage::PlatformStorage::bootstrap(
+        &loaded.config.storage,
+        &open_compute_core::SystemClock,
+    );
+    assert_eq!(storage.unwrap_err().code(), ErrorCode::DataDirInUse);
+    drop(data_dir);
+    let storage = open_compute_storage::PlatformStorage::bootstrap(
+        &loaded.config.storage,
+        &open_compute_core::SystemClock,
+    )
+    .unwrap();
+    crate::run::p1::refresh_metrics(
+        &storage,
+        &metrics,
+        loaded.config.hardening.emergency_reserve_bytes,
+    )
+    .unwrap();
+    let rendered = metrics.render(&health.snapshot());
+    assert!(rendered.contains("platform_snapshot_last_bytes 321"));
+    assert!(rendered.contains("platform_restore_last_smoke_verified 1"));
+    assert!(rendered.contains("platform_resource_count{resource=\"accounts\"} 1"));
+    drop(storage);
+
+    let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).unwrap();
+    data_dir
+        .write_operation_receipt("last-snapshot.json", br#"{"verified":false}"#)
+        .unwrap();
+    crate::run::p1::load_offline_metrics_receipts(&data_dir, &metrics);
+    crate::run::p1::update_operations_health(&data_dir, 0, &health).unwrap();
+    let operations = health
+        .snapshot()
+        .components
+        .into_iter()
+        .find(|component| component.name == ComponentName::Operations)
+        .unwrap();
+    assert_eq!(operations.state, ComponentState::Degraded);
+    assert_eq!(operations.reason, Some(ReadinessReason::SnapshotStale));
+}
+
+#[tokio::test]
+async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() {
+    assert_eq!(
+        crate::snapshot_pins::SnapshotPins::Unavailable
+            .ensure_unpinned("system/artifacts/v1/sha256/untrusted")
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceReferenced
+    );
+    let (dir, path, _mock) = initialized_doctor_fixture().await;
+    let mut loaded = load_platform_config(&path).unwrap();
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .unwrap()
+        .to_path_buf();
+    loaded.config.runtime.lock_file = workspace.join("runtime/workerd.lock.json");
+    loaded.config.runtime.assets_dir = workspace.join("runtime");
+    let capabilities = crate::capabilities::platform_capabilities(&loaded).unwrap();
+    assert!(capabilities.validate());
+    assert_eq!(
+        capabilities.products["durable_objects"].basic_websocket,
+        Some(open_compute_core::CapabilityStatus::Supported)
+    );
+    assert_eq!(
+        capabilities.products["durable_objects"].hibernatable_websocket,
+        Some(open_compute_core::CapabilityStatus::Unsupported)
+    );
+    for product in ["queues", "cron", "workflows", "websocket_hibernation"] {
+        assert_eq!(
+            capabilities.products[product].status,
+            open_compute_core::CapabilityStatus::Unsupported
+        );
+    }
+    let metadata = crate::capabilities::platform_release_metadata(&loaded).unwrap();
+    assert!(metadata.validate());
+    assert_eq!(metadata.release, capabilities.release);
+    assert_eq!(
+        metadata.migrations.last().unwrap().version,
+        metadata.release.control_schema_version
+    );
+    let policy = crate::capabilities::platform_config_policy_sha256(&loaded).unwrap();
+    let original_data_dir = loaded.config.storage.data_dir.clone();
+    let original_master_key_file = loaded.config.storage.master_key_file.clone();
+    let original_public_bind = loaded.config.server.public_bind;
+    let original_admin_bind = loaded.config.server.admin_bind;
+    loaded.config.storage.data_dir = dir.path().join("relocated-data");
+    loaded.config.storage.master_key_file = dir.path().join("relocated-recovery-key");
+    loaded.config.server.public_bind = "127.0.0.1:65001".parse().unwrap();
+    loaded.config.server.admin_bind = Some("127.0.0.1:65002".to_owned());
+    assert_eq!(
+        crate::capabilities::platform_config_policy_sha256(&loaded).unwrap(),
+        policy,
+        "host paths and listener ports are intentionally outside restore policy"
+    );
+    loaded.config.kv.namespace_quota_bytes += 4096;
+    assert_ne!(
+        crate::capabilities::platform_config_policy_sha256(&loaded).unwrap(),
+        policy,
+        "product semantics must change the authenticated restore policy"
+    );
+    loaded.config.kv.namespace_quota_bytes -= 4096;
+    loaded.config.storage.data_dir = original_data_dir;
+    loaded.config.storage.master_key_file = original_master_key_file;
+    loaded.config.server.public_bind = original_public_bind;
+    loaded.config.server.admin_bind = original_admin_bind;
+
+    let operations = loaded.config.storage.data_dir.join("operations");
+    fs::create_dir(&operations).unwrap();
+    fs::set_permissions(&operations, fs::Permissions::from_mode(0o700)).unwrap();
+    let snapshot_receipt = operations.join("last-snapshot.json");
+    write_mode(
+        &snapshot_receipt,
+        r#"{"schema_version":1,"created_at_ms":1,"verified":true}"#,
+        0o600,
+    );
+    let outside_receipt = dir.path().join("outside-receipt.json");
+    write_mode(&outside_receipt, r#"{"secret":"outside"}"#, 0o600);
+    std::os::unix::fs::symlink(&outside_receipt, operations.join("last-restore.json")).unwrap();
+
+    let output = fs::canonicalize(dir.path())
+        .unwrap()
+        .join("open-compute-support.tar");
+    let result = crate::support_bundle::create_support_bundle(&loaded, &output)
+        .await
+        .unwrap();
+    assert_eq!(result.entries, 8);
+    assert_eq!(
+        fs::metadata(&output).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let archive = fs::read(output).unwrap();
+    assert!(!archive.windows(4).any(|window| window == b"AKIA"));
+    assert!(
+        !archive
+            .windows(b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".len())
+            .any(|window| window == b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+    );
+    for name in [
+        b"config-policy.json".as_slice(),
+        b"doctor.json".as_slice(),
+        b"metrics.prom".as_slice(),
+        b"receipts/last-snapshot.json".as_slice(),
+        b"release.json".as_slice(),
+    ] {
+        assert!(archive.windows(name.len()).any(|window| window == name));
+    }
+    assert_eq!(
+        crate::support_bundle::create_support_bundle(&loaded, Path::new("relative.tar"))
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::SupportBundleInvalid
+    );
+    let existing = fs::canonicalize(dir.path())
+        .unwrap()
+        .join("existing-support.tar");
+    fs::write(&existing, b"existing").unwrap();
+    assert_eq!(
+        crate::support_bundle::create_support_bundle(&loaded, &existing)
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::SupportBundleInvalid
+    );
+    loaded.config.hardening.max_support_bundle_bytes = 1;
+    assert_eq!(
+        crate::support_bundle::create_support_bundle(
+            &loaded,
+            &fs::canonicalize(dir.path())
+                .unwrap()
+                .join("bounded-support.tar"),
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        ErrorCode::SupportBundleInvalid
+    );
+    loaded.config.hardening.max_support_bundle_bytes = 32 * 1024 * 1024;
+
+    fs::remove_file(operations.join("last-restore.json")).unwrap();
+    write_mode(&operations.join("last-upgrade.json"), "not-json", 0o600);
+    assert_eq!(
+        crate::support_bundle::create_support_bundle(
+            &loaded,
+            &fs::canonicalize(dir.path())
+                .unwrap()
+                .join("invalid-receipt-support.tar"),
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        ErrorCode::SupportBundleInvalid
+    );
+    fs::remove_file(operations.join("last-upgrade.json")).unwrap();
+
+    let admin_secret = dir.path().join("admin-auth-secret");
+    write_mode(&admin_secret, "p1-support-admin-secret", 0o600);
+    loaded.config.server.admin_auth = Some(SecretReference {
+        env: None,
+        file: Some(admin_secret),
+    });
+    let admin_output = fs::canonicalize(dir.path())
+        .unwrap()
+        .join("admin-support.tar");
+    crate::support_bundle::create_support_bundle(&loaded, &admin_output)
+        .await
+        .unwrap();
+    assert!(
+        !fs::read(admin_output)
+            .unwrap()
+            .windows(b"p1-support-admin-secret".len())
+            .any(|window| window == b"p1-support-admin-secret")
+    );
+
+    let metrics = MetricsRegistry::new(&loaded.config.metrics, "test", "workerd").unwrap();
+    metrics.observe_admission(open_compute_core::OperationClass::Kv, None);
+    metrics.observe_admission(
+        open_compute_core::OperationClass::Workers,
+        Some(ErrorCode::QuotaExceeded),
+    );
+    metrics.observe_admission(
+        open_compute_core::OperationClass::D1,
+        Some(ErrorCode::AdmissionBusy),
+    );
+    metrics.observe_admission(
+        open_compute_core::OperationClass::Restore,
+        Some(ErrorCode::StoragePressure),
+    );
+    metrics.observe_admission(
+        open_compute_core::OperationClass::Upgrade,
+        Some(ErrorCode::PlatformUnavailable),
+    );
+    metrics.set_disk_admission(
+        &open_compute_core::AdmissionSnapshotV1 {
+            schema_version: 1,
+            filesystem_free_bytes: 100,
+            soft_reserve_bytes: 80,
+            hard_reserve_bytes: 60,
+            emergency_reserve_bytes: 10,
+            reserved_bytes: 7,
+            owned_staging_bytes: 3,
+            mode: open_compute_core::PlatformMode::Serving,
+        },
+        10,
+    );
+    metrics.set_schema_state(7, 8);
+    metrics.set_schema_failed_resources(2);
+    metrics.set_resource_counts([1, 2, 3, 4, 5, 6, 7, 8]);
+    metrics.observe_product_error(
+        open_compute_core::OperationClass::DurableObjects,
+        ErrorCode::QuotaExceeded,
+    );
+    metrics.inc_sqlite_busy();
+    metrics.inc_sqlite_check_failure();
+    metrics.inc_websocket_close(WebSocketCloseReason::DeploymentRestart);
+    for reason in [
+        WebSocketCloseReason::Normal,
+        WebSocketCloseReason::Shutdown,
+        WebSocketCloseReason::Error,
+        WebSocketCloseReason::Disconnected,
+    ] {
+        metrics.inc_websocket_close(reason);
+    }
+    metrics.record_snapshot_receipt(122, Duration::from_millis(11));
+    metrics.record_snapshot_receipt_at(123, Duration::from_millis(12), 1);
+    metrics.record_restore_receipt(1, Duration::from_millis(34), true);
+    metrics
+        .set_release_identity(&"a".repeat(64), "p1.0-capabilities-v1")
+        .unwrap();
+    assert!(metrics.set_release_identity("BAD", "p1").is_err());
+    metrics.inc_quota_reject("unsupported-product");
+    metrics.observe_product_error(
+        open_compute_core::OperationClass::Scheduler,
+        ErrorCode::QuotaExceeded,
+    );
+    metrics.observe_product_error(open_compute_core::OperationClass::Kv, ErrorCode::KvBusy);
+    metrics.observe_product_error(
+        open_compute_core::OperationClass::D1,
+        ErrorCode::D1Overloaded,
+    );
+    let mut staging_gauge = KvStagingGauge::new(None);
+    staging_gauge.add(5);
+    assert!(format!("{staging_gauge:?}").contains("bytes: 5"));
+    for operation in [
+        ResourceOperation::Create,
+        ResourceOperation::Get,
+        ResourceOperation::List,
+        ResourceOperation::Rename,
+        ResourceOperation::Delete,
+    ] {
+        metrics.observe_resource_operation(operation, false, Duration::from_millis(1));
+        metrics.observe_resource_operation(operation, true, Duration::from_millis(2));
+    }
+    metrics.set_resource_open_handles(7);
+    metrics.observe_resource_pin_wait(Duration::from_millis(3));
+    for deleting in [false, true] {
+        for success in [false, true] {
+            metrics.inc_resource_reconcile(deleting, success);
+        }
+    }
+    let rendered = metrics.render(&PlatformStatus::starting());
+    assert!(rendered.contains("platform_admission_total{operation=\"kv\",outcome=\"accepted\"} 1"));
+    assert!(rendered.contains(
+        "platform_admission_total{operation=\"restore\",outcome=\"storage_pressure\"} 1"
+    ));
+    assert!(rendered.contains("platform_schema_migration_required 1"));
+    assert!(rendered.contains("platform_schema_failed_resources 2"));
+    assert!(rendered.contains("platform_resource_count{resource=\"d1_databases\"} 7"));
+    assert!(rendered.contains("platform_quota_reject_total{product=\"durable_objects\"} 1"));
+    assert!(rendered.contains("sqlite_busy_total 3"));
+    assert!(rendered.contains("sqlite_check_failure_total 1"));
+    assert!(rendered.contains("oc_do_websocket_close_total{reason=\"deployment_restart\"} 1"));
+    assert!(rendered.contains("platform_restore_last_smoke_verified 1"));
+    assert!(rendered.contains("conformance_result=\"p1.0-capabilities-v1\""));
+    assert!(rendered.contains(
+        "resource_operations_total{kind=\"kv_namespace\",operation=\"create\",outcome=\"success\"} 1"
+    ));
+    assert!(rendered.contains("resource_open_handles{kind=\"kv_namespace\"} 7"));
 }
 
 async fn initialized_worker_http_fixture() -> (

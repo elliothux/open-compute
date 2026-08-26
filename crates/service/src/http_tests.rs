@@ -43,6 +43,11 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
     ] {
         assert_eq!(bound_route(path), expected);
     }
+    assert_eq!(
+        product_operation("/v1/accounts/a/kv/namespaces"),
+        Some(OperationClass::Kv)
+    );
+    assert_eq!(product_operation("/__workers/a/w"), None);
 
     let health = HealthCoordinator::new();
     let open_state = HttpState::for_test(health.clone(), metrics(), true, None);
@@ -83,6 +88,43 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn product_error_extension_updates_admission_metrics_without_tenant_labels() {
+    let registry = metrics();
+    let state = HttpState::for_test(HealthCoordinator::new(), registry.clone(), true, None);
+    let middleware_state = state.clone();
+    let router = Router::new()
+        .route(
+            "/v1/accounts/a/kv/namespaces",
+            axum::routing::post(|| async {
+                let mut response = StatusCode::TOO_MANY_REQUESTS.into_response();
+                response
+                    .extensions_mut()
+                    .insert(ProductErrorCode(ErrorCode::QuotaExceeded));
+                response
+            }),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            middleware_state,
+            bounds_middleware,
+        ))
+        .with_state(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/v1/accounts/a/kv/namespaces")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let rendered = registry.render(&HealthCoordinator::new().snapshot());
+    assert!(rendered.contains("platform_admission_total{operation=\"kv\",outcome=\"quota\"} 1"));
+    assert!(rendered.contains("platform_quota_reject_total{product=\"kv\"} 1"));
 }
 
 #[test]

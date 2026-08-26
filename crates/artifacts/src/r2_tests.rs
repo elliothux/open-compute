@@ -14,6 +14,7 @@ fn locator() -> R2BucketLocator {
 #[test]
 fn user_keys_are_not_normalized_and_respect_dynamic_budget() {
     let locator = locator();
+    assert_eq!(locator.resource_id(), locator.resource_id);
     for key in ["", "/", "a//b", "%2F", "中文", "+", " a "] {
         assert_eq!(UserObjectKey::parse(key, &locator).unwrap().as_str(), key);
     }
@@ -44,6 +45,26 @@ fn range_condition_etag_and_metadata_are_strict() {
         .header()
         .unwrap(),
         "bytes=3-6"
+    );
+    assert_eq!(
+        R2Range {
+            offset: Some(3),
+            length: None,
+            suffix: None,
+        }
+        .header()
+        .unwrap(),
+        "bytes=3-"
+    );
+    assert_eq!(
+        R2Range {
+            offset: None,
+            length: Some(4),
+            suffix: None,
+        }
+        .header()
+        .unwrap(),
+        "bytes=0-3"
     );
     assert_eq!(
         R2Range {

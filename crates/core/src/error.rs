@@ -39,6 +39,24 @@ pub enum ErrorCode {
     ProcessKilled,
     /// Data directory free space reached the hard limit.
     DiskHardLimit,
+    /// A platform-wide resource count or immutable product quota was exceeded.
+    QuotaExceeded,
+    /// A bounded admission queue or reservation counter is saturated.
+    AdmissionBusy,
+    /// The host hard reserve would be violated by a local-state mutation.
+    StoragePressure,
+    /// The process is draining or an offline operation owns the data directory.
+    PlatformUnavailable,
+    /// A platform snapshot manifest, object, or local tree failed validation.
+    SnapshotInvalid,
+    /// A fresh-host restore target or restored authority failed validation.
+    RestoreInvalid,
+    /// The data directory requires an explicit offline forward upgrade.
+    UpgradeRequired,
+    /// A release identity is not supported for restore or upgrade.
+    ReleaseUnsupported,
+    /// A support-bundle output path or allowlisted input failed validation.
+    SupportBundleInvalid,
     /// Data directory exclusive lock is held by another instance.
     DataDirInUse,
     /// Admin bind is non-loopback and no admin auth secret is configured.
@@ -276,6 +294,15 @@ impl ErrorCode {
             Self::RuntimeExitedInFlight => "RUNTIME_EXITED_IN_FLIGHT",
             Self::ProcessKilled => "PROCESS_KILLED",
             Self::DiskHardLimit => "DISK_HARD_LIMIT",
+            Self::QuotaExceeded => "QUOTA_EXCEEDED",
+            Self::AdmissionBusy => "ADMISSION_BUSY",
+            Self::StoragePressure => "STORAGE_PRESSURE",
+            Self::PlatformUnavailable => "PLATFORM_UNAVAILABLE",
+            Self::SnapshotInvalid => "SNAPSHOT_INVALID",
+            Self::RestoreInvalid => "RESTORE_INVALID",
+            Self::UpgradeRequired => "UPGRADE_REQUIRED",
+            Self::ReleaseUnsupported => "RELEASE_UNSUPPORTED",
+            Self::SupportBundleInvalid => "SUPPORT_BUNDLE_INVALID",
             Self::DataDirInUse => "DATA_DIR_IN_USE",
             Self::AdminAuthRequired => "ADMIN_AUTH_REQUIRED",
             Self::SecretRefInvalid => "SECRET_REF_INVALID",
@@ -424,6 +451,14 @@ pub enum ReadinessReason {
     ConfigInvalid,
     /// Durable Object alarm scheduler is unavailable or degraded.
     SchedulerUnavailable,
+    /// Scheduler remains serviceable but backlog or repair work is elevated.
+    SchedulerBacklog,
+    /// Required S3 remains available while an optional product surface is degraded.
+    S3Degraded,
+    /// Host disk crossed the soft pressure threshold while bounded service continues.
+    DiskSoftLimit,
+    /// The latest committed full-platform snapshot is missing or too old.
+    SnapshotStale,
     /// All required components are ready.
     Ready,
 }
@@ -446,6 +481,10 @@ impl ReadinessReason {
             Self::DiskHardLimit => "DISK_HARD_LIMIT",
             Self::ConfigInvalid => "CONFIG_INVALID",
             Self::SchedulerUnavailable => "SCHEDULER_UNAVAILABLE",
+            Self::SchedulerBacklog => "SCHEDULER_BACKLOG",
+            Self::S3Degraded => "S3_DEGRADED",
+            Self::DiskSoftLimit => "DISK_SOFT_LIMIT",
+            Self::SnapshotStale => "SNAPSHOT_STALE",
             Self::Ready => "READY",
         }
     }
@@ -453,7 +492,16 @@ impl ReadinessReason {
     /// Whether this reason reports the platform as ready to take traffic.
     #[must_use]
     pub const fn is_ready(self) -> bool {
-        matches!(self, Self::Ready)
+        matches!(
+            self,
+            Self::Ready
+                | Self::SchedulerUnavailable
+                | Self::SchedulerBacklog
+                | Self::S3Degraded
+                | Self::DiskSoftLimit
+                | Self::DiskHardLimit
+                | Self::SnapshotStale
+        )
     }
 }
 

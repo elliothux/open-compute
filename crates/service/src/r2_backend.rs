@@ -14,7 +14,9 @@ use md5::{Digest as _, Md5};
 use open_compute_artifacts::{
     R2GetResult, R2ObjectMetadata, R2ObjectStore, R2UploadSource, UserObjectKey,
 };
-use open_compute_core::{DeploymentId, ErrorCode, PlatformError, R2Config, ResourceId};
+use open_compute_core::{
+    DeploymentId, ErrorCode, OperationClass, PlatformError, R2Config, ResourceId,
+};
 use open_compute_storage::{
     AuthorizedBinding, BindingRepository, PlatformStorage, R2BucketRepository, R2Staging,
 };
@@ -84,6 +86,7 @@ impl R2BindingService {
         if let (Some(metrics), Some(operation)) = (&self.metrics, operation) {
             metrics.observe_r2_operation(operation, result.is_ok(), started.elapsed());
             if let Err(error) = &result {
+                metrics.observe_product_error(OperationClass::R2, error.code());
                 match error.code() {
                     ErrorCode::R2ProviderUnavailable => {
                         metrics.inc_r2_provider_error(operation, R2ProviderError::Availability);
@@ -187,6 +190,17 @@ impl R2BindingService {
                 }
             }
             Operation::Put => {
+                let admission = self.storage.reserve_mutation(
+                    OperationClass::R2,
+                    bucket.max_object_bytes.saturating_add(64 * 1024),
+                );
+                if let Some(metrics) = &self.metrics {
+                    metrics.observe_admission(
+                        OperationClass::R2,
+                        admission.as_ref().err().map(PlatformError::code),
+                    );
+                }
+                let _admission = admission?;
                 let _stream = self
                     .metrics
                     .as_ref()

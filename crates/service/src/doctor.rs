@@ -1,5 +1,6 @@
 //! Doctor: default is strictly read-only; `--full` authorizes canary and a temporary runtime.
 
+use crate::capabilities::platform_release_metadata;
 use crate::config_load::LoadedConfig;
 use crate::metrics::MetricsRegistry;
 use open_compute_artifacts::{
@@ -15,7 +16,7 @@ use open_compute_runtime::{
 };
 use open_compute_storage::{
     inspect_control_db, inspect_data_root, inspect_durable_object_storage, inspect_master_key,
-    inspect_resources, inspect_scheduler_db,
+    inspect_resources, inspect_scheduler_db, read_operation_receipt,
 };
 use serde::Serialize;
 use std::io::Write;
@@ -125,6 +126,19 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         "static configuration parsed",
         Some("ok".into()),
     ));
+    match platform_release_metadata(loaded) {
+        Ok(metadata) => checks.push(ok(
+            "release_identity",
+            "release identity and migration registry are internally consistent",
+            Some(metadata.release.platform_version),
+        )),
+        Err(error) => checks.push(failed(
+            "release_identity",
+            error.code(),
+            error.message(),
+            None,
+        )),
+    }
     if MetricsRegistry::validate_limits(&loaded.config.metrics).is_err() {
         checks[0] = failed(
             "config",
@@ -234,6 +248,15 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                         "applied migration checksums match this binary",
                         Some(version.to_string()),
                     ));
+                    if version != open_compute_storage::migrations::current_schema_version() {
+                        let index = checks.len() - 1;
+                        checks[index] = failed(
+                            "schema",
+                            ErrorCode::UpgradeRequired,
+                            "control schema requires an offline upgrade before serving",
+                            Some(version.to_string()),
+                        );
+                    }
                     let id = identity.platform_id.to_string();
                     let bounded = bound_value(&id, 36);
                     checks.push(ok(
@@ -422,6 +445,14 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         (Err(err), _) => checks.push(failed("master_key", err.code(), err.message(), None)),
     }
 
+    for receipt in [
+        "last-snapshot.json",
+        "last-restore.json",
+        "last-upgrade.json",
+    ] {
+        checks.push(operation_receipt_check(loaded, receipt));
+    }
+
     let hold_local = inspect.as_ref().is_some_and(|root| root.lock_available);
     let cache_dir = loaded
         .config
@@ -579,6 +610,45 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         command: "doctor",
         result,
         checks,
+    }
+}
+
+fn operation_receipt_check(loaded: &LoadedConfig, name: &'static str) -> DoctorCheck {
+    let path = loaded.config.storage.data_dir.join("operations").join(name);
+    let check_name = match name {
+        "last-snapshot.json" => "last_snapshot_receipt",
+        "last-restore.json" => "last_restore_receipt",
+        "last-upgrade.json" => "last_upgrade_receipt",
+        _ => "operation_receipt",
+    };
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return warning(check_name, "operation receipt has not been recorded", None);
+        }
+        Err(_) => return warning(check_name, "operation receipt cannot be inspected", None),
+    };
+    if metadata.file_type().is_symlink()
+        || !metadata.file_type().is_file()
+        || metadata.len() > 64 * 1024
+    {
+        return warning(check_name, "operation receipt is invalid", None);
+    }
+    match read_operation_receipt(&loaded.config.storage.data_dir, name, 64 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+    {
+        Some(value) => ok(
+            check_name,
+            "operation receipt is valid JSON",
+            value
+                .get("completed_at_ms")
+                .or_else(|| value.get("restored_at_ms"))
+                .or_else(|| value.get("created_at_ms"))
+                .and_then(serde_json::Value::as_i64)
+                .map(|value| value.to_string()),
+        ),
+        None => warning(check_name, "operation receipt is invalid", None),
     }
 }
 

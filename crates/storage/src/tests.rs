@@ -5,12 +5,16 @@ use crate::fs as sfs;
 use crate::master_key;
 use crate::migrations::MigrationFault;
 use crate::{
-    DataDir, DeploymentState, IdempotencyReservation, NewDeployment, PlatformStorage, SecretCrypto,
+    DataDir, DeploymentState, IdempotencyReservation, NewDeployment, PlatformStorage,
+    ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, SecretCrypto,
     StoredDeploymentSecret, WorkerRepository, atomic_write, inspect_durable_object_storage,
 };
 use open_compute_core::clock::{DeterministicClock, SystemClock};
 use open_compute_core::config::StorageConfig;
-use open_compute_core::{AccountId, DeploymentId, ErrorCode, SecretBytes, WorkerId};
+use open_compute_core::{
+    AccountId, BindingKind, DeploymentId, ErrorCode, HardeningConfig, OperationClass,
+    PlatformReleaseIdentityV1, ResourceId, SecretBytes, WorkerId,
+};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -18,6 +22,7 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 use tempfile::TempDir;
@@ -71,6 +76,256 @@ fn clean_and_repeat_bootstrap_preserves_identity() {
             .unwrap()
             .as_deref(),
         Some(env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn p1_control_inventory_returns_only_fixed_aggregate_counts() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let empty = crate::inspect_control_inventory(storage.db()).unwrap();
+    assert_eq!(empty.accounts, 1);
+    assert_eq!(empty.workers, 0);
+    assert_eq!(empty.deployments, 0);
+    assert_eq!(empty.routes, 0);
+    assert_eq!(empty.kv_namespaces, 0);
+
+    WorkerRepository::new(storage.db())
+        .create_worker(
+            storage.identity().default_account_id,
+            "inventory-worker",
+            open_compute_core::RequestId::generate(),
+            1,
+        )
+        .unwrap();
+    let populated = crate::inspect_control_inventory(storage.db()).unwrap();
+    assert_eq!(populated.accounts, 1);
+    assert_eq!(populated.workers, 1);
+    assert_eq!(populated.routes, 1);
+}
+
+#[test]
+fn p1_owned_schema_inspection_sees_uncheckpointed_bootstrap_wal() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+
+    let state = crate::inspect_owned_schema(storage.data_dir(), storage.db(), 5_000, 1).unwrap();
+    assert_eq!(state.control, 8);
+    assert_eq!(
+        state.scheduler,
+        u32::try_from(crate::current_scheduler_schema_version()).unwrap()
+    );
+    assert_eq!(state.kv_files, 0);
+    assert_eq!(state.d1_files, 0);
+}
+
+#[test]
+fn p1_readonly_schema_fence_sees_uncheckpointed_bootstrap_wal() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+
+    let readonly =
+        crate::ControlDb::open_readonly_wal_aware(&root.join("control.sqlite"), 5_000).unwrap();
+    assert_eq!(
+        crate::migrations::inspect_schema(&readonly).unwrap(),
+        crate::migrations::current_schema_version()
+    );
+    drop(storage);
+}
+
+#[test]
+fn p1_schema_inspection_checks_live_kv_and_d1_files_and_apply_is_idempotent() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    let account = storage.identity().default_account_id;
+
+    let reserve = |kind, name: &str, key: &str| {
+        let fingerprint = storage.crypto().fingerprint_request(key.as_bytes());
+        let reserved = ResourceRepository::new(storage.db())
+            .reserve_create(&ReserveResourceCreate {
+                account_id: account,
+                kind,
+                name,
+                idempotency_key: key,
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: ResourceId::generate(),
+                driver_schema_version: 1,
+                request_id: open_compute_core::RequestId::generate(),
+                now_ms: 1,
+                expires_at_ms: 10,
+            })
+            .unwrap();
+        let ResourceCreateReservation::Reserved(resource) = reserved else {
+            panic!("resource must be newly reserved");
+        };
+        resource
+    };
+
+    let kv = reserve(BindingKind::KvNamespace, "schema-kv", "schema-kv");
+    let kv_paths = crate::KvPaths::open(&root).unwrap();
+    let kv_key = crate::KvPaths::storage_key(account, kv.id);
+    crate::KvNamespaceRepository::new(storage.db())
+        .ensure_namespace(&kv, &kv_key, crate::KV_SCHEMA_VERSION, 256 * 1024 * 1024)
+        .unwrap();
+    let kv_staging = kv_paths.create_namespace_staging(kv.id).unwrap();
+    drop(
+        crate::KvEngine::create(
+            &kv_staging.join("data.sqlite"),
+            account,
+            kv.id,
+            1,
+            256 * 1024 * 1024,
+        )
+        .unwrap(),
+    );
+    kv_paths
+        .publish_staging(&kv_staging, account, kv.id)
+        .unwrap();
+
+    let d1 = reserve(BindingKind::D1Database, "schema-d1", "schema-d1");
+    let d1_paths = crate::D1Paths::open(&root).unwrap();
+    let d1_key = crate::D1Paths::storage_key(account, d1.id);
+    crate::D1DatabaseRepository::new(storage.db())
+        .ensure_database(
+            &d1,
+            &d1_key,
+            crate::D1_DATABASE_SCHEMA_VERSION,
+            64 * 1024 * 1024,
+        )
+        .unwrap();
+    let d1_staging = d1_paths.create_database_staging(d1.id).unwrap();
+    drop(
+        crate::D1Engine::create(
+            &d1_staging.join("data.sqlite"),
+            account,
+            d1.id,
+            1,
+            64 * 1024 * 1024,
+        )
+        .unwrap(),
+    );
+    d1_paths
+        .publish_staging(&d1_staging, account, d1.id)
+        .unwrap();
+
+    let owned = crate::inspect_owned_schema(storage.data_dir(), storage.db(), 5_000, 1).unwrap();
+    assert_eq!(owned.kv_files, 1);
+    assert_eq!(owned.d1_files, 1);
+    assert_eq!(owned.kv_min, crate::KV_SCHEMA_VERSION);
+    assert_eq!(owned.d1_max, crate::D1_DATABASE_SCHEMA_VERSION);
+    drop(storage);
+
+    let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
+    let offline = crate::inspect_offline_schema(&data_dir, 5_000, 1).unwrap();
+    assert_eq!(offline, owned);
+    let key = crate::inspect_master_key(&config).unwrap();
+    let snapshot_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let authority = crate::inspect_control_db(&data_dir.control_db_path(), 5_000)
+        .unwrap()
+        .1;
+    let object_prefix = format!(
+        "system/snapshots/v1/{}/{snapshot_id}/objects/",
+        authority.platform_id
+    );
+    let hardening = HardeningConfig::default();
+    let request = crate::PreparePlatformSnapshotRequest {
+        snapshot_id: &snapshot_id,
+        label: "resource-schema-snapshot",
+        created_at_ms: 2,
+        release: p1_release_identity(8),
+        master_key_fingerprint: key.fingerprint(),
+        s3_authority_fingerprint: &"d".repeat(64),
+        r2_prefix_fingerprint: &"e".repeat(64),
+        config_policy_sha256: &"f".repeat(64),
+        object_prefix: &object_prefix,
+        hardening: &hardening,
+        sqlite_busy_timeout_ms: 5_000,
+    };
+    assert!(
+        crate::estimate_platform_snapshot_bytes(
+            &data_dir,
+            &request,
+            &authority.platform_id.to_string()
+        )
+        .unwrap()
+            > 0
+    );
+    let prepared = crate::prepare_platform_snapshot(&data_dir, &request).unwrap();
+    assert!(
+        prepared
+            .manifest
+            .files
+            .iter()
+            .any(|file| file.role == open_compute_core::SnapshotFileRole::KvSqlite)
+    );
+    assert!(
+        prepared
+            .manifest
+            .files
+            .iter()
+            .any(|file| file.role == open_compute_core::SnapshotFileRole::D1Sqlite)
+    );
+    let applied = crate::apply_offline_upgrade(&data_dir, 5_000, 2).unwrap();
+    assert_eq!(applied, owned);
+}
+
+#[test]
+fn p1_disk_admission_modes_and_staging_tree_validation_are_explicit() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let hardening = HardeningConfig::default();
+    let admission = crate::DiskAdmission::new(&config, &hardening);
+    assert_eq!(
+        admission.snapshot(storage.data_dir()).unwrap().mode,
+        open_compute_core::PlatformMode::Serving
+    );
+    assert_eq!(
+        admission
+            .reserve(storage.data_dir(), OperationClass::Kv, 0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::LimitInvalid
+    );
+    drop(
+        admission
+            .reserve(storage.data_dir(), OperationClass::Kv, 4096)
+            .unwrap(),
+    );
+    admission.begin_draining();
+    assert_eq!(
+        admission.snapshot(storage.data_dir()).unwrap().mode,
+        open_compute_core::PlatformMode::Draining
+    );
+    let offline = crate::DiskAdmission::offline(&config, &hardening);
+    assert_eq!(
+        offline.snapshot(storage.data_dir()).unwrap().mode,
+        open_compute_core::PlatformMode::Offline
+    );
+
+    let nested = storage.data_dir().backup_staging_dir().join("nested");
+    fs::create_dir(&nested).unwrap();
+    fs::write(nested.join("payload"), b"12345").unwrap();
+    assert!(
+        admission
+            .snapshot(storage.data_dir())
+            .unwrap()
+            .owned_staging_bytes
+            >= 5
+    );
+    let link = nested.join("escape");
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    assert_eq!(
+        admission.snapshot(storage.data_dir()).unwrap_err().code(),
+        ErrorCode::StoragePressure
     );
 }
 
@@ -1013,6 +1268,56 @@ fn inspect_lock_holds_and_releases_flock() {
 }
 
 #[test]
+fn operation_receipt_reads_are_bounded_and_never_follow_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let (tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    storage
+        .data_dir()
+        .write_operation_receipt("last-restore.json", b"bounded")
+        .unwrap();
+    assert_eq!(
+        storage
+            .data_dir()
+            .read_operation_receipt("last-restore.json", 7)
+            .unwrap(),
+        b"bounded"
+    );
+    assert_eq!(
+        storage
+            .data_dir()
+            .read_operation_receipt("../control.sqlite", 64)
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+
+    let receipt = root.join("operations/last-restore.json");
+    fs::write(&receipt, vec![0_u8; 65]).unwrap();
+    assert_eq!(
+        storage
+            .data_dir()
+            .read_operation_receipt("last-restore.json", 64)
+            .unwrap_err()
+            .code(),
+        ErrorCode::LimitInvalid
+    );
+
+    fs::remove_file(&receipt).unwrap();
+    let outside = tmp.path().join("outside-receipt");
+    fs::write(&outside, b"outside").unwrap();
+    symlink(&outside, &receipt).unwrap();
+    assert!(
+        storage
+            .data_dir()
+            .read_operation_receipt("last-restore.json", 64)
+            .is_err()
+    );
+}
+
+#[test]
 fn inspect_control_db_accepts_uri_special_path_chars() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("data?x#y%z");
@@ -1024,6 +1329,50 @@ fn inspect_control_db_accepts_uri_special_path_chars() {
         crate::inspect_control_db(&inspect.root.join("control.sqlite"), 5_000).unwrap();
     assert_eq!(version, crate::migrations::current_schema_version());
     assert!(!identity.master_key_id.is_empty());
+}
+
+#[test]
+fn snapshot_worker_bundle_inventory_uses_the_canonical_sharded_key() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let repo = WorkerRepository::new(storage.db());
+    let request = open_compute_core::RequestId::generate();
+    let (worker, _) = repo
+        .create_worker(account, "snapshot-key", request, 1)
+        .unwrap();
+    repo.insert_staging_deployment(&NewDeployment {
+        id: DeploymentId::generate(),
+        account_id: account,
+        worker_id: worker.id,
+        artifact_sha256: [1; 32],
+        artifact_size: 123,
+        artifact_schema_version: 1,
+        main_module: "index.js".to_owned(),
+        compatibility_date: "2026-08-22".to_owned(),
+        compatibility_flags: Vec::new(),
+        limits: serde_json::json!({}),
+        worker_code_sha256: [2; 32],
+        vars: BTreeMap::new(),
+        secrets: BTreeMap::new(),
+        request_id: request,
+        now_ms: 2,
+    })
+    .unwrap();
+    drop(storage);
+
+    let references = crate::inspect_snapshot_immutable_references(
+        &root.join("control.sqlite"),
+        5_000,
+        "system/",
+    )
+    .unwrap();
+    assert_eq!(references.len(), 1);
+    assert_eq!(
+        references[0].object_key,
+        format!("system/artifacts/v1/sha256/01/{}", "01".repeat(31))
+    );
 }
 
 #[test]
@@ -1814,7 +2163,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 7);
+    assert_eq!(crate::migrations::current_schema_version(), 8);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -1822,6 +2171,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert_eq!(crate::migrations::migration_005_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_006_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_007_checksum().len(), 32);
+    assert_eq!(crate::migrations::migration_008_checksum().len(), 32);
     assert!(crate::migrations::expected_checksum(1).is_ok());
     assert!(crate::migrations::expected_checksum(2).is_ok());
     assert!(crate::migrations::expected_checksum(3).is_ok());
@@ -1829,8 +2179,9 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert!(crate::migrations::expected_checksum(5).is_ok());
     assert!(crate::migrations::expected_checksum(6).is_ok());
     assert!(crate::migrations::expected_checksum(7).is_ok());
+    assert!(crate::migrations::expected_checksum(8).is_ok());
     assert_eq!(
-        crate::migrations::expected_checksum(8).unwrap_err().code(),
+        crate::migrations::expected_checksum(9).unwrap_err().code(),
         ErrorCode::SchemaTooNew
     );
     assert_eq!(
@@ -2056,6 +2407,58 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             .unwrap_err()
             .code(),
         ErrorCode::DeploymentNotReady
+    );
+    let foreign_account = AccountId::generate();
+    storage
+        .db()
+        .with_immediate(|transaction| {
+            transaction
+                .execute(
+                    "INSERT INTO accounts (id, name, created_at_ms, deleted_at_ms)
+                     VALUES (?1, ?2, 1, NULL)",
+                    rusqlite::params![
+                        foreign_account.to_string(),
+                        format!("foreign-{foreign_account}")
+                    ],
+                )
+                .map_err(|_| {
+                    open_compute_core::PlatformError::new(
+                        ErrorCode::Internal,
+                        "test account insert",
+                    )
+                })?;
+            Ok(())
+        })
+        .unwrap();
+    let (foreign_worker, _) = repo
+        .create_worker(foreign_account, "foreign", request, 16)
+        .unwrap();
+    let foreign_ready = insert_ready(
+        &repo,
+        foreign_account,
+        foreign_worker.id,
+        [5; 32],
+        request,
+        17,
+    );
+    assert_eq!(
+        repo.promote(account, worker.id, foreign_ready, None, request, 19)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotFound
+    );
+    assert_eq!(
+        repo.promote(
+            AccountId::generate(),
+            worker.id,
+            foreign_ready,
+            None,
+            request,
+            19,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::WorkerNotFound
     );
     assert_eq!(
         repo.add_deployment_referrer(staging, "control_idempotency", "ref", 16)
@@ -2438,5 +2841,414 @@ fn control_db_operations_fail_closed_when_foreign_keys_are_disabled() {
             .unwrap_err()
             .code(),
         ErrorCode::MigrationFailed
+    );
+}
+
+fn p1_release_identity(control_schema_version: u32) -> PlatformReleaseIdentityV1 {
+    PlatformReleaseIdentityV1 {
+        schema_version: 1,
+        platform_version: env!("CARGO_PKG_VERSION").to_owned(),
+        git_revision: "test".to_owned(),
+        rust_msrv: "1.98.0".to_owned(),
+        workerd_version: "workerd test".to_owned(),
+        workerd_lock_sha256: "a".repeat(64),
+        runtime_assets_sha256: "b".repeat(64),
+        facade_capability_version: 1,
+        control_schema_version,
+        scheduler_schema_version: 1,
+        kv_schema_version_min: crate::KV_SCHEMA_VERSION,
+        kv_schema_version_max: crate::KV_SCHEMA_VERSION,
+        d1_schema_version_min: crate::D1_DATABASE_SCHEMA_VERSION,
+        d1_schema_version_max: crate::D1_DATABASE_SCHEMA_VERSION,
+        snapshot_format_version: 1,
+        compatibility_policy_sha256: "c".repeat(64),
+    }
+}
+
+#[test]
+fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
+    let (tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    let do_root = storage
+        .data_dir()
+        .prepare_durable_object_storage(&storage.identity().platform_id.to_string(), "workerd test")
+        .unwrap();
+    let do_file = do_root.join("state.bin");
+    fs::write(&do_file, b"opaque-do-state").unwrap();
+    fs::set_permissions(&do_file, fs::Permissions::from_mode(0o600)).unwrap();
+    let outside = tmp.path().join("outside");
+    fs::write(&outside, b"outside").unwrap();
+    std::os::unix::fs::symlink(&outside, do_root.join("forbidden-link")).unwrap();
+    drop(storage);
+
+    let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
+    let key = crate::inspect_master_key(&config).unwrap();
+    let snapshot_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let hardening = HardeningConfig::default();
+    let mut request = crate::PreparePlatformSnapshotRequest {
+        snapshot_id: &snapshot_id,
+        label: "p1-test",
+        created_at_ms: 1,
+        release: p1_release_identity(8),
+        master_key_fingerprint: key.fingerprint(),
+        s3_authority_fingerprint: &"d".repeat(64),
+        r2_prefix_fingerprint: &"e".repeat(64),
+        config_policy_sha256: &"f".repeat(64),
+        object_prefix: &format!(
+            "system/snapshots/v1/{}/{snapshot_id}/objects/",
+            crate::inspect_control_db(&data_dir.control_db_path(), 5_000)
+                .unwrap()
+                .1
+                .platform_id
+        ),
+        hardening: &hardening,
+        sqlite_busy_timeout_ms: 5_000,
+    };
+    let wrong_fingerprint = "0".repeat(64);
+    let mut wrong_key_request = request.clone();
+    wrong_key_request.master_key_fingerprint = &wrong_fingerprint;
+    assert_eq!(
+        crate::prepare_platform_snapshot(&data_dir, &wrong_key_request)
+            .unwrap_err()
+            .code(),
+        ErrorCode::MasterKeyMismatch
+    );
+
+    let control = Connection::open(data_dir.control_db_path()).unwrap();
+    control
+        .execute("DELETE FROM schema_migrations WHERE version = 8", [])
+        .unwrap();
+    control.pragma_update(None, "user_version", 7).unwrap();
+    drop(control);
+    assert_eq!(
+        crate::prepare_platform_snapshot(&data_dir, &request)
+            .unwrap_err()
+            .code(),
+        ErrorCode::UpgradeRequired
+    );
+    assert_eq!(
+        crate::apply_offline_upgrade(&data_dir, 5_000, 1)
+            .unwrap()
+            .control,
+        8
+    );
+
+    assert_eq!(
+        crate::prepare_platform_snapshot(&data_dir, &request)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SnapshotInvalid
+    );
+    let staging = data_dir
+        .backup_staging_dir()
+        .join(format!("platform-{snapshot_id}"));
+    assert!(
+        !staging.exists(),
+        "staging entries: {:?}",
+        fs::read_dir(&staging)
+            .map(|entries| entries
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>())
+            .ok()
+    );
+    fs::remove_file(do_root.join("forbidden-link")).unwrap();
+    request.release.control_schema_version = 7;
+    assert_eq!(
+        crate::prepare_platform_snapshot(&data_dir, &request)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SnapshotInvalid
+    );
+    request.release.control_schema_version = 8;
+    let mut prepared = crate::prepare_platform_snapshot(&data_dir, &request).unwrap();
+    assert!(prepared.manifest.files.iter().any(|file| {
+        file.role == open_compute_core::SnapshotFileRole::DurableObjectFile
+            && file.restore_path.ends_with("state.bin")
+    }));
+    crate::sign_snapshot_manifest(&mut prepared.manifest, &key).unwrap();
+    crate::verify_snapshot_manifest_mac(&prepared.manifest, &key).unwrap();
+    prepared.manifest.label.push('x');
+    assert_eq!(
+        crate::verify_snapshot_manifest_mac(&prepared.manifest, &key)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SnapshotInvalid
+    );
+    let largest_file = prepared
+        .manifest
+        .files
+        .iter()
+        .map(|file| file.size)
+        .max()
+        .unwrap();
+    let total_bytes = prepared.manifest.totals.bytes;
+    drop(prepared);
+
+    let file_limited = HardeningConfig {
+        max_snapshot_file_bytes: largest_file - 1,
+        max_snapshot_total_bytes: total_bytes,
+        ..HardeningConfig::default()
+    };
+    request.hardening = &file_limited;
+    assert_eq!(
+        crate::prepare_platform_snapshot(&data_dir, &request)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SnapshotInvalid
+    );
+    let staging = data_dir
+        .backup_staging_dir()
+        .join(format!("platform-{snapshot_id}"));
+    assert!(
+        !staging.exists(),
+        "staging entries: {:?}",
+        fs::read_dir(&staging)
+            .map(|entries| entries
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>())
+            .ok()
+    );
+
+    let total_limited = HardeningConfig {
+        max_snapshot_file_bytes: largest_file,
+        max_snapshot_total_bytes: total_bytes - 1,
+        ..HardeningConfig::default()
+    };
+    request.hardening = &total_limited;
+    assert_eq!(
+        crate::prepare_platform_snapshot(&data_dir, &request)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SnapshotInvalid
+    );
+}
+
+#[test]
+fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
+    let (tmp, root) = unique_root();
+    let mut config = storage_config(&root);
+    config.free_space_hard_bytes = u64::MAX - 1;
+    let hardening = HardeningConfig {
+        emergency_reserve_bytes: 1,
+        ..HardeningConfig::default()
+    };
+    let storage =
+        PlatformStorage::bootstrap_with_hardening(&config, &hardening, &SystemClock).unwrap();
+    assert_eq!(
+        storage
+            .reserve_mutation(OperationClass::Kv, 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::StoragePressure
+    );
+    assert_eq!(
+        DataDir::acquire_existing_offline(&config)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DataDirInUse
+    );
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
+    drop(storage);
+
+    let control = Connection::open(root.join("control.sqlite")).unwrap();
+    control
+        .execute("DELETE FROM schema_migrations WHERE version = 8", [])
+        .unwrap();
+    control.pragma_update(None, "user_version", 7).unwrap();
+    drop(control);
+    let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
+    let before = crate::inspect_offline_schema(&data_dir, 5_000, 1).unwrap();
+    assert_eq!(before.control, 7);
+    let after = crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap();
+    assert_eq!(after.control, 8);
+    assert_eq!(
+        crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap(),
+        after
+    );
+    drop(data_dir);
+
+    let target = fs::canonicalize(tmp.path()).unwrap().join("restored");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("occupied"), b"x").unwrap();
+    assert_eq!(
+        crate::RestoreTarget::acquire(&target).unwrap_err().code(),
+        ErrorCode::RestoreInvalid
+    );
+    fs::remove_file(target.join("occupied")).unwrap();
+    let restore = crate::RestoreTarget::acquire(&target).unwrap();
+    assert!(restore.staging_root().starts_with(target.parent().unwrap()));
+    assert!(restore.destination_for("../escape").is_err());
+    assert_eq!(
+        crate::RestoreTarget::acquire(&target).unwrap_err().code(),
+        ErrorCode::DataDirInUse
+    );
+    let nested = restore.destination_for("do/workerd/failure.bin").unwrap();
+    fs::write(&nested, b"retained restore bytes").unwrap();
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(restore.destination_for("do/workerd/failure.bin").is_err());
+    let staging_name = restore
+        .staging_root()
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let staging_id = staging_name.rsplit_once(".restore-").unwrap().1.to_owned();
+    drop(restore);
+    let cleaned =
+        crate::cleanup_restore_staging(&target, &staging_id, 10, 1024, 10 * 1024).unwrap();
+    assert_eq!(cleaned.files, 1);
+    assert!(!target.parent().unwrap().join(staging_name).exists());
+
+    let real_parent = fs::canonicalize(tmp.path()).unwrap().join("restore-parent");
+    fs::create_dir(&real_parent).unwrap();
+    let alias_parent = fs::canonicalize(tmp.path())
+        .unwrap()
+        .join("restore-parent-alias");
+    std::os::unix::fs::symlink(&real_parent, &alias_parent).unwrap();
+    assert_eq!(
+        crate::RestoreTarget::acquire(&alias_parent.join("target"))
+            .unwrap_err()
+            .code(),
+        ErrorCode::RestoreInvalid
+    );
+}
+
+#[test]
+fn p1_restore_cleanup_rejects_ambiguous_bounds_links_receipts_and_lock_owners() {
+    let (tmp, _) = unique_root();
+    let parent = fs::canonicalize(tmp.path()).unwrap();
+    let target = parent.join("cleanup-target");
+    let make_staging = |id: &str| {
+        let staging = parent.join(format!(".cleanup-target.restore-{id}"));
+        fs::create_dir(&staging).unwrap();
+        fs::set_permissions(&staging, fs::Permissions::from_mode(0o700)).unwrap();
+        staging
+    };
+
+    let valid_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    for result in [
+        crate::cleanup_restore_staging(&target, "not-a-uuid", 1, 1, 1),
+        crate::cleanup_restore_staging(&target, &valid_id, 0, 1, 1),
+        crate::cleanup_restore_staging(&target, &valid_id, 1, 0, 1),
+        crate::cleanup_restore_staging(&target, &valid_id, 1, 2, 1),
+        crate::cleanup_restore_staging(Path::new("relative"), &valid_id, 1, 1, 1),
+    ] {
+        assert!(result.is_err());
+    }
+
+    let empty_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    make_staging(&empty_id);
+    let empty = crate::cleanup_restore_staging(&target, &empty_id, 1, 1, 1).unwrap();
+    assert_eq!(empty.files, 0);
+    assert_eq!(empty.bytes, 0);
+
+    let size_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let size_staging = make_staging(&size_id);
+    fs::write(size_staging.join("control.sqlite"), b"large").unwrap();
+    fs::set_permissions(
+        size_staging.join("control.sqlite"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    assert!(crate::cleanup_restore_staging(&target, &size_id, 1, 4, 4).is_err());
+
+    let count_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let count_staging = make_staging(&count_id);
+    for name in ["control.sqlite", "scheduler.sqlite"] {
+        fs::write(count_staging.join(name), b"x").unwrap();
+        fs::set_permissions(count_staging.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(crate::cleanup_restore_staging(&target, &count_id, 1, 1, 2).is_err());
+
+    let total_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let total_staging = make_staging(&total_id);
+    for name in ["control.sqlite", "scheduler.sqlite"] {
+        fs::write(total_staging.join(name), b"abc").unwrap();
+        fs::set_permissions(total_staging.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(crate::cleanup_restore_staging(&target, &total_id, 2, 4, 5).is_err());
+
+    let hardlink_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let hardlink_staging = make_staging(&hardlink_id);
+    let first = hardlink_staging.join("control.sqlite");
+    fs::write(&first, b"x").unwrap();
+    fs::set_permissions(&first, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::hard_link(&first, hardlink_staging.join("scheduler.sqlite")).unwrap();
+    assert!(crate::cleanup_restore_staging(&target, &hardlink_id, 2, 1, 2).is_err());
+
+    let receipt_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    make_staging(&receipt_id);
+    fs::create_dir(parent.join(format!(".cleanup-target.restore-failure-{receipt_id}.json")))
+        .unwrap();
+    assert!(crate::cleanup_restore_staging(&target, &receipt_id, 1, 1, 1).is_err());
+
+    let held = crate::RestoreTarget::acquire(&target).unwrap();
+    let held_name = held.staging_root().file_name().unwrap().to_str().unwrap();
+    let held_id = held_name.rsplit_once(".restore-").unwrap().1;
+    assert_eq!(
+        crate::cleanup_restore_staging(&target, held_id, 1, 1, 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DataDirInUse
+    );
+}
+
+#[test]
+fn p1_concurrent_resource_creates_never_exceed_the_account_kind_limit() {
+    let (_tmp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = Arc::new(PlatformStorage::bootstrap(&config, &SystemClock).unwrap());
+    let account = storage.identity().default_account_id;
+    let barrier = Arc::new(Barrier::new(9));
+    let mut threads = Vec::new();
+    for index in 0..8 {
+        let storage = storage.clone();
+        let barrier = barrier.clone();
+        threads.push(thread::spawn(move || {
+            let name = format!("p1-concurrent-{index}");
+            let idempotency_key = format!("p1-concurrent-key-{index}");
+            let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
+            barrier.wait();
+            ResourceRepository::new(storage.db()).reserve_create_with_limit(
+                &ReserveResourceCreate {
+                    account_id: account,
+                    kind: BindingKind::KvNamespace,
+                    name: &name,
+                    idempotency_key: &idempotency_key,
+                    fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                    request_fingerprint: &fingerprint,
+                    resource_id: ResourceId::generate(),
+                    driver_schema_version: 1,
+                    request_id: open_compute_core::RequestId::generate(),
+                    now_ms: 1,
+                    expires_at_ms: 1_001,
+                },
+                3,
+            )
+        }));
+    }
+    barrier.wait();
+    let mut accepted = 0;
+    let mut rejected = 0;
+    for thread in threads {
+        match thread.join().unwrap() {
+            Ok(ResourceCreateReservation::Reserved(_)) => accepted += 1,
+            Err(error) if error.code() == ErrorCode::QuotaExceeded => rejected += 1,
+            other => panic!("unexpected concurrent resource result: {other:?}"),
+        }
+    }
+    assert_eq!(accepted, 3);
+    assert_eq!(rejected, 5);
+    assert_eq!(
+        ResourceRepository::new(storage.db())
+            .list(account, Some(BindingKind::KvNamespace))
+            .unwrap()
+            .len(),
+        3
     );
 }

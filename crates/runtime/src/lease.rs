@@ -172,6 +172,41 @@ pub(crate) fn recover_orphans(
     }
 }
 
+/// Fail closed when an offline operation observes a live or unverifiable runtime child.
+///
+/// This check never signals a process or removes lease/staging evidence. A dead lease is safe for
+/// an offline reader and will be reclaimed by the next supervised daemon start.
+pub fn assert_no_live_orphan(path: &Path, expected_digest: &str) -> Result<(), PlatformError> {
+    require_absolute(path)?;
+    let Some(lease) = load_lease(path)? else {
+        if std::fs::symlink_metadata(crate::process::staging_journal_path(path)).is_ok() {
+            return Err(recovery_refused(
+                "unleased runtime staging evidence requires supervised recovery",
+            ));
+        }
+        return Ok(());
+    };
+    let Some(pid) = Pid::from_raw(lease.pid) else {
+        return Ok(());
+    };
+    match test_kill_process(pid) {
+        Err(error) if error == rustix::io::Errno::SRCH => Ok(()),
+        Err(_) => Err(recovery_refused(
+            "child lease PID could not be verified; offline operation refused",
+        )),
+        Ok(()) => match live_match(&lease, expected_digest) {
+            LiveMatch::Gone => Ok(()),
+            LiveMatch::Verified(_) => Err(PlatformError::new(
+                ErrorCode::PlatformUnavailable,
+                "verified workerd child is still live; offline operation refused",
+            )),
+            LiveMatch::Mismatch | LiveMatch::IdentityUnavailable => Err(recovery_refused(
+                "live child does not match verifiable lease identity; offline operation refused",
+            )),
+        },
+    }
+}
+
 /// Recover a formally identified orphan from a process-level integration test.
 #[cfg(any(test, feature = "test-support"))]
 pub fn recover_orphan_for_test(

@@ -475,10 +475,7 @@ impl SchedulerService {
                 > i64::try_from(self.config.repair_interval_ms).unwrap_or(i64::MAX)
         });
         let (state, reason) = if lagged || summary.expired_claims > 0 {
-            (
-                ComponentState::Degraded,
-                ReadinessReason::SchedulerUnavailable,
-            )
+            (ComponentState::Degraded, ReadinessReason::SchedulerBacklog)
         } else {
             (ComponentState::Healthy, ReadinessReason::Ready)
         };

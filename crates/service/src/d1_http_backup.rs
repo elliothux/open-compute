@@ -33,6 +33,13 @@ pub(super) async fn create_backup(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
+    let _admission = match api
+        .storage
+        .reserve_mutation(OperationClass::D1, api.config.database_quota_bytes)
+    {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
     let key = match idempotency_key(&request) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
@@ -279,6 +286,13 @@ pub(super) async fn restore_database(
         (backup.object_key.clone(), backup.sha256, backup.size_bytes)
     else {
         return error_response(internal(), request_id);
+    };
+    let _admission = match api
+        .storage
+        .reserve_mutation(OperationClass::D1, size.saturating_mul(2).max(1))
+    {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
     };
     let manifest_key = match api.artifacts.d1_backup_manifest_key(&object_key) {
         Ok(value) => value,

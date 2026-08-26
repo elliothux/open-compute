@@ -18,15 +18,22 @@ if [ -z "$dest" ]; then
   exit 2
 fi
 bin="$root/target/release/platformd"
+revision=$(git -C "$root" rev-parse --verify HEAD)
+if [ -n "$(git -C "$root" status --porcelain --untracked-files=all)" ]; then
+  echo "release packaging requires a clean checkout so release.json names exact source" >&2
+  exit 1
+fi
 # Always ask Cargo to validate freshness. Incremental no-op builds are cheap,
 # while reusing an arbitrary executable left in target/ can package stale code.
-cargo build -q --release -p open-compute-service --bin platformd
+OPEN_COMPUTE_GIT_REVISION="$revision" \
+  cargo build -q --release -p open-compute-service --bin platformd
 set -- package-release \
   --dest "$dest" \
   --lock "$root/runtime/workerd.lock.json" \
   --assets "$root/runtime" \
   --license "$root/LICENSE" \
-  --default-config "$root/share/default-config.toml"
+  --default-config "$root/share/default-config.toml" \
+  --runbooks "$root/docs/runbooks"
 if [ "$download" -eq 1 ]; then
   set -- "$@" --download
 fi

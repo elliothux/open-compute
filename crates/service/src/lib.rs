@@ -3,7 +3,11 @@
 #![deny(missing_docs)]
 
 pub mod auth;
+mod backup_attestation;
+pub mod backup_cli;
+mod backup_retention;
 pub mod binding_backend;
+pub mod capabilities;
 pub mod cli;
 pub mod config_load;
 pub mod d1_backend;
@@ -25,6 +29,9 @@ pub mod run;
 pub mod runtime_bridge;
 pub mod scheduler;
 pub mod scheduler_http;
+mod snapshot_pins;
+pub mod support_bundle;
+pub mod upgrade_cli;
 pub mod workers_http;
 
 pub use binding_backend::{

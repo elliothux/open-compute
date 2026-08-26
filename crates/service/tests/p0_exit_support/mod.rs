@@ -39,12 +39,21 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
 use tower::ServiceExt as _;
 
 const WORKER_SOURCE: &str = include_str!("../fixtures/p0_exit_worker.js");
+const P1_WORKERS: &str = include_str!("../fixtures/p1-conformance/workers.mjs");
+const P1_KV: &str = include_str!("../fixtures/p1-conformance/kv.mjs");
+const P1_R2: &str = include_str!("../fixtures/p1-conformance/r2.mjs");
+const P1_D1: &str = include_str!("../fixtures/p1-conformance/d1.mjs");
+const P1_DO: &str = include_str!("../fixtures/p1-conformance/durable-objects.mjs");
+const P1_ALARMS: &str = include_str!("../fixtures/p1-conformance/alarms.mjs");
+const P1_WEBSOCKET: &str = include_str!("../fixtures/p1-conformance/websocket.mjs");
+const P1_ADVERSARIAL: &str = include_str!("../fixtures/p1-conformance/adversarial-values.mjs");
+const P1_MALICIOUS: &str = include_str!("../fixtures/p1-conformance/malicious-worker.mjs");
 
 #[derive(Clone, Copy)]
 pub(super) struct ProductBindings {
@@ -62,6 +71,91 @@ pub(super) struct ProductBindings {
 pub(super) struct DispatchResponse {
     pub(super) status: u16,
     pub(super) body: String,
+}
+
+#[derive(Debug)]
+struct CapacitySample {
+    operation: &'static str,
+    elapsed_micros: u64,
+}
+
+static CAPACITY_SAMPLES: OnceLock<Mutex<Vec<CapacitySample>>> = OnceLock::new();
+
+pub(super) fn reset_capacity_samples() {
+    capacity_samples().lock().unwrap().clear();
+}
+
+pub(super) fn capacity_summary() -> Value {
+    let samples = capacity_samples().lock().unwrap();
+    let mut micros = samples
+        .iter()
+        .map(|sample| sample.elapsed_micros)
+        .collect::<Vec<_>>();
+    micros.sort_unstable();
+    let mut operations = BTreeMap::<&str, u64>::new();
+    for sample in samples.iter() {
+        *operations.entry(sample.operation).or_default() += 1;
+    }
+    serde_json::json!({
+        "schema_version": 1,
+        "samples": micros.len(),
+        "p50_ms": percentile_millis(&micros, 50),
+        "p95_ms": percentile_millis(&micros, 95),
+        "p99_ms": percentile_millis(&micros, 99),
+        "operations": operations,
+    })
+}
+
+fn capacity_samples() -> &'static Mutex<Vec<CapacitySample>> {
+    CAPACITY_SAMPLES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn record_capacity(operation: &'static str, started: Instant) {
+    capacity_samples().lock().unwrap().push(CapacitySample {
+        operation,
+        elapsed_micros: u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
+    });
+}
+
+fn percentile_millis(sorted_micros: &[u64], percentile: usize) -> f64 {
+    if sorted_micros.is_empty() {
+        return 0.0;
+    }
+    let rank = sorted_micros
+        .len()
+        .saturating_mul(percentile)
+        .div_ceil(100)
+        .saturating_sub(1)
+        .min(sorted_micros.len() - 1);
+    sorted_micros[rank] as f64 / 1_000.0
+}
+
+fn admin_operation(uri: &str) -> &'static str {
+    if uri.contains("/kv/") {
+        "control_kv"
+    } else if uri.contains("/r2/") {
+        "control_r2"
+    } else if uri.contains("/d1/") {
+        "control_d1"
+    } else if uri.contains("/durable-objects/") {
+        "control_do"
+    } else if uri.contains("/scheduler/") {
+        "control_scheduler"
+    } else {
+        "control_workers"
+    }
+}
+
+fn dispatch_operation(path: &str) -> &'static str {
+    if path.starts_with("/snapshot") {
+        "product_read_mixed"
+    } else if path.starts_with("/websocket") {
+        "do_websocket"
+    } else if path.starts_with("/set-alarm") || path.starts_with("/alarm-status") {
+        "scheduler_alarm"
+    } else {
+        "product_write_mixed"
+    }
 }
 
 pub(super) struct GateStack {
@@ -276,6 +370,8 @@ pub(super) async fn admin_json(
     body: Value,
     idempotency_key: Option<&str>,
 ) -> (StatusCode, Value) {
+    let started = Instant::now();
+    let operation = admin_operation(uri);
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -299,6 +395,7 @@ pub(super) async fn admin_json(
     let value = serde_json::from_slice(&bytes).unwrap_or_else(
         |_| serde_json::json!({ "raw": String::from_utf8_lossy(&bytes).into_owned() }),
     );
+    record_capacity(operation, started);
     (status, value)
 }
 
@@ -307,7 +404,8 @@ pub(super) async fn deploy(
     request: CreateDeploymentRequest,
     supervisor: &WorkerdSupervisor,
 ) -> DeploymentRecord {
-    match controller
+    let started = Instant::now();
+    let result = match controller
         .create_deployment(request)
         .await
         .unwrap_or_else(|error| {
@@ -319,7 +417,9 @@ pub(super) async fn deploy(
         }) {
         CreateDeploymentOutcome::Applied(result) => result.deployment,
         CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
-    }
+    };
+    record_capacity("deployment", started);
+    result
 }
 
 pub(super) fn deployment_request(
@@ -333,11 +433,24 @@ pub(super) fn deployment_request(
 ) -> CreateDeploymentRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
-        vec![ModuleInput {
-            name: "index.js".to_owned(),
-            module_type: ModuleType::EsModule,
-            bytes: WORKER_SOURCE.as_bytes().to_vec(),
-        }],
+        std::iter::once(("index.js", WORKER_SOURCE))
+            .chain([
+                ("p1-conformance/workers.mjs", P1_WORKERS),
+                ("p1-conformance/kv.mjs", P1_KV),
+                ("p1-conformance/r2.mjs", P1_R2),
+                ("p1-conformance/d1.mjs", P1_D1),
+                ("p1-conformance/durable-objects.mjs", P1_DO),
+                ("p1-conformance/alarms.mjs", P1_ALARMS),
+                ("p1-conformance/websocket.mjs", P1_WEBSOCKET),
+                ("p1-conformance/adversarial-values.mjs", P1_ADVERSARIAL),
+                ("p1-conformance/malicious-worker.mjs", P1_MALICIOUS),
+            ])
+            .map(|(name, source)| ModuleInput {
+                name: name.to_owned(),
+                module_type: ModuleType::EsModule,
+                bytes: source.as_bytes().to_vec(),
+            })
+            .collect(),
         BundleLimits::default(),
     )
     .unwrap();
@@ -392,6 +505,8 @@ pub(super) async fn dispatch(
     route_generation: u64,
     path: &str,
 ) -> DispatchResponse {
+    let started = Instant::now();
+    let operation = dispatch_operation(path);
     let response = transport
         .dispatch(
             DispatchTarget {
@@ -416,10 +531,12 @@ pub(super) async fn dispatch(
     let bytes = to_bytes(response.into_body(), 16 * 1024 * 1024)
         .await
         .unwrap();
-    DispatchResponse {
+    let response = DispatchResponse {
         status,
         body: String::from_utf8(bytes.to_vec()).unwrap(),
-    }
+    };
+    record_capacity(operation, started);
+    response
 }
 
 pub(super) async fn wait_pid_change(

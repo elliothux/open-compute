@@ -4,6 +4,7 @@ use crate::fs;
 use crate::lock::{DataDirLock, FilesystemDurability};
 use open_compute_core::{PlatformError, StartupId, config::StorageConfig};
 use serde::{Deserialize, Serialize};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 const KEYS: &str = "keys";
@@ -15,6 +16,7 @@ const SHA256: &str = "sha256";
 const DEPLOYMENT_STAGING: &str = "deployment-staging";
 const BACKUP_STAGING: &str = "backup-staging";
 const DIAGNOSTICS: &str = "diagnostics";
+const OPERATIONS: &str = "operations";
 const FAILED_STARTS: &str = "failed-starts";
 const SCHEDULER_RECOVERY: &str = "scheduler-recovery";
 const LOCK_NAME: &str = "platform.lock";
@@ -58,11 +60,7 @@ pub fn inspect_durable_object_storage(
     if DataDirLock::classify_path(&workerd) != FilesystemDurability::ApparentlyLocal {
         return Err(do_storage_unavailable());
     }
-    let metadata = std::fs::metadata(&marker).map_err(|_| do_storage_unavailable())?;
-    if metadata.len() > 4096 {
-        return Err(do_storage_unavailable());
-    }
-    let bytes = std::fs::read(&marker).map_err(|_| do_storage_unavailable())?;
+    let bytes = read_durable_object_marker(&marker)?;
     let actual: DurableObjectFormatMarker =
         serde_json::from_slice(&bytes).map_err(|_| do_storage_unavailable())?;
     let expected = DurableObjectFormatMarker {
@@ -107,6 +105,25 @@ impl DataDir {
         };
         data_dir.validate_children()?;
         data_dir.clear_deployment_staging()?;
+        Ok(data_dir)
+    }
+
+    /// Acquire an already initialized data directory for an offline command.
+    ///
+    /// This path never creates layout, generates a key, opens a database, or runs a migration.
+    pub fn acquire_existing_offline(config: &StorageConfig) -> Result<Self, PlatformError> {
+        let root = &config.data_dir;
+        fs::require_absolute(root)?;
+        fs::validate_root(root)?;
+        let lock_path = config.data_lock_path();
+        fs::validate_contained(root, &lock_path)?;
+        fs::validate_owned_file(&lock_path, true)?;
+        let lock = DataDirLock::acquire(&lock_path, StartupId::generate())?;
+        let data_dir = Self {
+            root: root.clone(),
+            lock,
+        };
+        data_dir.validate_children()?;
         Ok(data_dir)
     }
 
@@ -158,6 +175,35 @@ impl DataDir {
         self.root.join(BACKUP_STAGING)
     }
 
+    /// Atomically write one non-authoritative operator receipt below `operations/`.
+    pub fn write_operation_receipt(
+        &self,
+        name: &str,
+        contents: &[u8],
+    ) -> Result<(), PlatformError> {
+        if !valid_operation_receipt_name(name) {
+            return Err(PlatformError::new(
+                open_compute_core::ErrorCode::PathInvalid,
+                "operation receipt name is invalid",
+            ));
+        }
+        let operations = self.root.join(OPERATIONS);
+        fs::validate_contained(&self.root, &operations)?;
+        fs::create_dir_secure(&operations)?;
+        let path = operations.join(name);
+        fs::validate_contained(&self.root, &path)?;
+        fs::atomic_write(&path, contents)
+    }
+
+    /// Read one bounded, regular, mode-0600 operator receipt without following symlinks.
+    pub fn read_operation_receipt(
+        &self,
+        name: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, PlatformError> {
+        read_operation_receipt(&self.root, name, max_bytes)
+    }
+
     /// Platform-owned parent for native Durable Object storage and its marker.
     #[must_use]
     pub fn durable_objects_dir(&self) -> PathBuf {
@@ -198,11 +244,7 @@ impl DataDir {
         };
         if marker.exists() || std::fs::symlink_metadata(&marker).is_ok() {
             fs::validate_owned_file(&marker, true)?;
-            let metadata = std::fs::metadata(&marker).map_err(|_| do_storage_unavailable())?;
-            if metadata.len() > 4096 {
-                return Err(do_storage_unavailable());
-            }
-            let bytes = std::fs::read(&marker).map_err(|_| do_storage_unavailable())?;
+            let bytes = read_durable_object_marker(&marker)?;
             let actual: DurableObjectFormatMarker =
                 serde_json::from_slice(&bytes).map_err(|_| do_storage_unavailable())?;
             if actual != expected {
@@ -431,6 +473,66 @@ impl DataDir {
     }
 }
 
+/// Read one bounded operator receipt from an existing data root without following symlinks.
+pub fn read_operation_receipt(
+    data_root: &Path,
+    name: &str,
+    max_bytes: u64,
+) -> Result<Vec<u8>, PlatformError> {
+    if !valid_operation_receipt_name(name) || max_bytes == 0 || max_bytes > 1_048_576 {
+        return Err(PlatformError::new(
+            open_compute_core::ErrorCode::PathInvalid,
+            "operation receipt read limit is invalid",
+        ));
+    }
+    let operations = data_root.join(OPERATIONS);
+    fs::validate_contained(data_root, &operations)?;
+    fs::validate_owned_dir(&operations)?;
+    let path = operations.join(name);
+    fs::validate_contained(data_root, &path)?;
+    let mut file = fs::open_nofollow(&path, false, false)?;
+    fs::validate_authority_fd(&file)?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| {
+            PlatformError::new(
+                open_compute_core::ErrorCode::PathInvalid,
+                "operation receipt could not be read",
+            )
+        })?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(PlatformError::new(
+            open_compute_core::ErrorCode::LimitInvalid,
+            "operation receipt exceeds its read limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn valid_operation_receipt_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !matches!(name, "." | "..")
+}
+
+fn read_durable_object_marker(path: &Path) -> Result<Vec<u8>, PlatformError> {
+    let mut file = fs::open_nofollow(path, false, false).map_err(|_| do_storage_unavailable())?;
+    fs::validate_authority_fd(&file).map_err(|_| do_storage_unavailable())?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(4097)
+        .read_to_end(&mut bytes)
+        .map_err(|_| do_storage_unavailable())?;
+    if bytes.len() > 4096 {
+        return Err(do_storage_unavailable());
+    }
+    Ok(bytes)
+}
+
 fn valid_scheduler_backup_name(name: &str) -> bool {
     (1..=80).contains(&name.len())
         && name.starts_with("scheduler-corrupt-")
@@ -471,6 +573,13 @@ fn create_layout(root: &Path) -> Result<(), PlatformError> {
     fs::create_dir_secure(&root.join(DIAGNOSTICS))?;
     fs::create_dir_secure(&root.join(DIAGNOSTICS).join(FAILED_STARTS))?;
     Ok(())
+}
+
+/// Recreate excluded runtime/cache/lock layout inside a validated restore staging root.
+pub(crate) fn initialize_restored_layout(root: &Path) -> Result<(), PlatformError> {
+    fs::validate_root(root)?;
+    create_layout(root)?;
+    fs::ensure_file_secure(&root.join(LOCK_NAME))
 }
 
 /// Paths that must not exist after a clean P0.1 bootstrap.

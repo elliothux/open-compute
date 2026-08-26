@@ -148,7 +148,7 @@ fn update_provider_health(health: &HealthCoordinator, failed: bool) {
         ComponentState::Healthy
     };
     let reason = if failed {
-        ReadinessReason::S3Unavailable
+        ReadinessReason::S3Degraded
     } else {
         ReadinessReason::Ready
     };

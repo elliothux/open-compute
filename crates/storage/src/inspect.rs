@@ -6,6 +6,7 @@ use crate::identity::{self, StableIdentity};
 use crate::lock::{DataDirLock, FilesystemDurability, InspectLock};
 use crate::master_key::{self, MasterKey};
 use crate::migrations;
+use open_compute_core::SnapshotImmutableReferenceV1;
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{BindingKind, ErrorCode, PlatformError, ResourceAvailability, ResourceId};
 use std::path::{Path, PathBuf};
@@ -37,6 +38,27 @@ pub struct ResourceInspect {
     pub availability: ResourceAvailability,
     /// Stable resource-local health code.
     pub availability_code: Option<String>,
+}
+
+/// Fixed low-cardinality inventory used by platform metrics and diagnostics.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ControlInventory {
+    /// Live accounts.
+    pub accounts: u64,
+    /// Live Workers.
+    pub workers: u64,
+    /// Non-tombstoned deployments.
+    pub deployments: u64,
+    /// Active routes.
+    pub routes: u64,
+    /// Non-tombstoned KV namespaces.
+    pub kv_namespaces: u64,
+    /// Non-tombstoned R2 buckets.
+    pub r2_buckets: u64,
+    /// Non-tombstoned D1 databases.
+    pub d1_databases: u64,
+    /// Non-tombstoned Durable Object namespaces.
+    pub do_namespaces: u64,
 }
 
 impl DataRootInspect {
@@ -143,6 +165,159 @@ pub fn inspect_resources(
         }
         Ok(resources)
     })
+}
+
+/// Return only the aggregate count of bounded control audit events.
+pub fn inspect_operator_event_count(
+    path: &Path,
+    busy_timeout_ms: u64,
+) -> Result<u64, PlatformError> {
+    let db = ControlDb::open_readonly(path, busy_timeout_ms)?;
+    db.with_read(|connection| {
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM control_audit_events", [], |row| {
+                row.get(0)
+            })
+            .map_err(|_| inspect_error())?;
+        u64::try_from(count).map_err(|_| inspect_error())
+    })
+}
+
+/// Read aggregate live-object counts without returning tenant identifiers.
+pub fn inspect_control_inventory(db: &ControlDb) -> Result<ControlInventory, PlatformError> {
+    db.with_read(|connection| {
+        Ok(ControlInventory {
+            accounts: query_count(
+                connection,
+                "SELECT COUNT(*) FROM accounts WHERE deleted_at_ms IS NULL",
+            )?,
+            workers: query_count(
+                connection,
+                "SELECT COUNT(*) FROM workers WHERE deleted_at_ms IS NULL",
+            )?,
+            deployments: query_count(
+                connection,
+                "SELECT COUNT(*) FROM worker_deployments WHERE state != 'tombstoned'",
+            )?,
+            routes: query_count(
+                connection,
+                "SELECT COUNT(*) FROM worker_routes WHERE state = 'active'",
+            )?,
+            kv_namespaces: query_resource_count(connection, "kv_namespace")?,
+            r2_buckets: query_resource_count(connection, "r2_bucket")?,
+            d1_databases: query_resource_count(connection, "d1_database")?,
+            do_namespaces: query_resource_count(connection, "do_namespace")?,
+        })
+    })
+}
+
+fn query_count(connection: &rusqlite::Connection, sql: &str) -> Result<u64, PlatformError> {
+    let count: i64 = connection
+        .query_row(sql, [], |row| row.get(0))
+        .map_err(|_| inspect_error())?;
+    u64::try_from(count).map_err(|_| inspect_error())
+}
+
+fn query_resource_count(
+    connection: &rusqlite::Connection,
+    kind: &str,
+) -> Result<u64, PlatformError> {
+    let count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM resources WHERE kind = ?1 AND state != 'tombstoned'",
+            [kind],
+            |row| row.get(0),
+        )
+        .map_err(|_| inspect_error())?;
+    u64::try_from(count).map_err(|_| inspect_error())
+}
+
+/// Enumerate immutable system objects referenced by live control authority.
+pub fn inspect_snapshot_immutable_references(
+    path: &Path,
+    busy_timeout_ms: u64,
+    system_prefix: &str,
+) -> Result<Vec<SnapshotImmutableReferenceV1>, PlatformError> {
+    if !system_prefix.ends_with('/') || system_prefix.contains("..") {
+        return Err(inspect_error());
+    }
+    let db = ControlDb::open_readonly(path, busy_timeout_ms)?;
+    db.with_read(|connection| {
+        let mut references = Vec::new();
+        let mut deployments = connection
+            .prepare(
+                "SELECT artifact_sha256, artifact_size FROM worker_deployments
+                 WHERE deleted_at_ms IS NULL
+                 ORDER BY artifact_sha256",
+            )
+            .map_err(|_| inspect_error())?;
+        let rows = deployments
+            .query_map([], |row| {
+                Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|_| inspect_error())?;
+        for row in rows {
+            let (digest, size) = row.map_err(|_| inspect_error())?;
+            let sha256 = valid_digest(&digest)?;
+            references.push(SnapshotImmutableReferenceV1 {
+                role: "worker_bundle".to_owned(),
+                object_key: format!(
+                    "{system_prefix}artifacts/v1/sha256/{}/{rest}",
+                    &sha256[..2],
+                    rest = &sha256[2..]
+                ),
+                sha256,
+                size: u64::try_from(size).map_err(|_| inspect_error())?,
+            });
+        }
+        for (table, role, prefix) in [
+            ("kv_backups", "kv_backup", "backups/kv/"),
+            ("d1_backups", "d1_backup", "backups/d1/"),
+        ] {
+            let sql = format!(
+                "SELECT object_key, sha256, size_bytes FROM {table}
+                 WHERE state = 'ready' ORDER BY object_key"
+            );
+            let mut statement = connection.prepare(&sql).map_err(|_| inspect_error())?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(|_| inspect_error())?;
+            for row in rows {
+                let (object_key, digest, size) = row.map_err(|_| inspect_error())?;
+                if !object_key.starts_with(&format!("{system_prefix}{prefix}"))
+                    || object_key.contains("..")
+                {
+                    return Err(inspect_error());
+                }
+                references.push(SnapshotImmutableReferenceV1 {
+                    role: role.to_owned(),
+                    object_key,
+                    sha256: valid_digest(&digest)?,
+                    size: u64::try_from(size).map_err(|_| inspect_error())?,
+                });
+            }
+        }
+        references.sort_by(|left, right| {
+            left.object_key
+                .cmp(&right.object_key)
+                .then(left.role.cmp(&right.role))
+        });
+        references.dedup();
+        Ok(references)
+    })
+}
+
+fn valid_digest(bytes: &[u8]) -> Result<String, PlatformError> {
+    if bytes.len() != 32 {
+        return Err(inspect_error());
+    }
+    Ok(hex::encode(bytes))
 }
 
 fn inspect_error() -> PlatformError {

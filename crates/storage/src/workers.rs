@@ -298,13 +298,45 @@ impl<'a> WorkerRepository<'a> {
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(WorkerRecord, RouteRecord), PlatformError> {
+        self.create_worker_with_limit(account_id, name, request_id, now_ms, u32::MAX)
+    }
+
+    /// Create a Worker while atomically enforcing the account live-Worker limit.
+    pub fn create_worker_with_limit(
+        &self,
+        account_id: AccountId,
+        name: &str,
+        request_id: RequestId,
+        now_ms: i64,
+        max_live: u32,
+    ) -> Result<(WorkerRecord, RouteRecord), PlatformError> {
         validate_worker_name(name)?;
+        if max_live == 0 {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "Worker count limit must be greater than zero",
+            ));
+        }
         let worker_id = WorkerId::generate();
         let do_storage_id = Uuid::now_v7().to_string();
         let route_id = Uuid::now_v7().to_string();
         let prefix = format!("/__workers/{account_id}/{name}/");
         self.db.with_immediate(|tx| {
             require_account(tx, account_id)?;
+            let live_count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM workers
+                     WHERE account_id = ?1 AND deleted_at_ms IS NULL",
+                    [account_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if live_count >= i64::from(max_live) {
+                return Err(PlatformError::new(
+                    ErrorCode::QuotaExceeded,
+                    "account Worker count quota was exceeded",
+                ));
+            }
             let inserted = tx
                 .execute(
                     "INSERT OR IGNORE INTO workers
@@ -428,10 +460,40 @@ impl<'a> WorkerRepository<'a> {
         input: &NewDeployment,
         bindings: &[crate::NewDeploymentBinding],
     ) -> Result<DeploymentRecord, PlatformError> {
+        self.insert_staging_deployment_with_bindings_and_limit(input, bindings, u32::MAX)
+    }
+
+    /// Insert deployment metadata while atomically enforcing the Worker retention ceiling.
+    pub fn insert_staging_deployment_with_bindings_and_limit(
+        &self,
+        input: &NewDeployment,
+        bindings: &[crate::NewDeploymentBinding],
+        max_retained: u32,
+    ) -> Result<DeploymentRecord, PlatformError> {
+        if max_retained == 0 {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "deployment count limit must be greater than zero",
+            ));
+        }
         let flags_json = serde_json::to_vec(&input.compatibility_flags).map_err(|_| invariant())?;
         let limits_json = serde_json::to_vec(&input.limits).map_err(|_| invariant())?;
         self.db.with_immediate(|tx| {
             require_live_worker(tx, input.account_id, input.worker_id)?;
+            let retained_count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM worker_deployments
+                     WHERE worker_id = ?1 AND deleted_at_ms IS NULL",
+                    [input.worker_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if retained_count >= i64::from(max_retained) {
+                return Err(PlatformError::new(
+                    ErrorCode::QuotaExceeded,
+                    "Worker deployment count quota was exceeded",
+                ));
+            }
             let version: i64 = tx
                 .query_row(
                     "SELECT COALESCE(MAX(version_number), 0) + 1
@@ -648,24 +710,24 @@ impl<'a> WorkerRepository<'a> {
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
         self.db.with_immediate(|tx| {
-            let state: Option<(String, String)> = tx
+            let current = require_live_worker(tx, account_id, worker_id)?;
+            let state: Option<String> = tx
                 .query_row(
-                    "SELECT state, worker_id FROM worker_deployments WHERE id = ?1",
-                    [target.to_string()],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    "SELECT state FROM worker_deployments WHERE id = ?1 AND worker_id = ?2",
+                    params![target.to_string(), worker_id.to_string()],
+                    |row| row.get(0),
                 )
                 .optional()
                 .map_err(|_| db_error())?;
-            let Some((state, owner)) = state else {
+            let Some(state) = state else {
                 return Err(deployment_not_found());
             };
-            if state != "ready" || owner != worker_id.to_string() {
+            if state != "ready" {
                 return Err(PlatformError::new(
                     ErrorCode::DeploymentNotReady,
                     "promotion target is not a ready deployment of this Worker",
                 ));
             }
-            let current = require_live_worker(tx, account_id, worker_id)?;
             if expected_active
                 .is_some_and(|expected| current.active_deployment_id != Some(expected))
                 || expected_route_generation
@@ -898,10 +960,57 @@ impl<'a> WorkerRepository<'a> {
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<RouteRecord, PlatformError> {
+        self.create_exact_route_with_limit(
+            account_id,
+            worker_id,
+            hostname_ascii,
+            path_prefix,
+            entrypoint,
+            expected_active,
+            request_id,
+            now_ms,
+            u32::MAX,
+        )
+    }
+
+    /// Add an exact-host route while atomically enforcing the account route limit.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_exact_route_with_limit(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        hostname_ascii: &str,
+        path_prefix: &str,
+        entrypoint: Option<&str>,
+        expected_active: Option<DeploymentId>,
+        request_id: RequestId,
+        now_ms: i64,
+        max_live: u32,
+    ) -> Result<RouteRecord, PlatformError> {
         validate_exact_route(hostname_ascii, path_prefix, entrypoint)?;
+        if max_live == 0 {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "route count limit must be greater than zero",
+            ));
+        }
         let route_id = Uuid::now_v7().to_string();
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
+            let live_count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM worker_routes
+                     WHERE account_id = ?1 AND state = 'active' AND deleted_at_ms IS NULL",
+                    [account_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if live_count >= i64::from(max_live) {
+                return Err(PlatformError::new(
+                    ErrorCode::QuotaExceeded,
+                    "account route count quota was exceeded",
+                ));
+            }
             if expected_active.is_some_and(|expected| worker.active_deployment_id != Some(expected))
             {
                 return Err(PlatformError::new(

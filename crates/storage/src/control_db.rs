@@ -66,11 +66,31 @@ impl ControlDb {
     ///
     /// Does not create files, enable WAL, migrate, or checkpoint.
     pub fn open_readonly(path: &Path, busy_timeout_ms: u64) -> Result<Self, PlatformError> {
+        Self::open_readonly_uri(path, busy_timeout_ms, sqlite_readonly_uri)
+    }
+
+    /// Open an existing control database read-only while observing committed WAL frames.
+    ///
+    /// This is reserved for stopped-platform startup and upgrade fences. SQLite may create
+    /// or update WAL coordination sidecars, so zero-side-effect diagnostics must use
+    /// [`Self::open_readonly`] instead.
+    pub fn open_readonly_wal_aware(
+        path: &Path,
+        busy_timeout_ms: u64,
+    ) -> Result<Self, PlatformError> {
+        Self::open_readonly_uri(path, busy_timeout_ms, sqlite_wal_readonly_uri)
+    }
+
+    fn open_readonly_uri(
+        path: &Path,
+        busy_timeout_ms: u64,
+        make_uri: fn(&Path) -> String,
+    ) -> Result<Self, PlatformError> {
         let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
             | OpenFlags::SQLITE_OPEN_NOFOLLOW
             | OpenFlags::SQLITE_OPEN_URI;
         let open_path = leaf_nofollow_path(path)?;
-        let uri = sqlite_readonly_uri(&open_path);
+        let uri = make_uri(&open_path);
         let conn = Connection::open_with_flags(&uri, flags).map_err(|_| {
             PlatformError::new(
                 ErrorCode::MigrationFailed,
@@ -366,6 +386,14 @@ pub(crate) fn leaf_nofollow_path(path: &Path) -> Result<std::path::PathBuf, Plat
 }
 
 pub(crate) fn sqlite_readonly_uri(path: &Path) -> String {
+    sqlite_uri(path, true)
+}
+
+fn sqlite_wal_readonly_uri(path: &Path) -> String {
+    sqlite_uri(path, false)
+}
+
+fn sqlite_uri(path: &Path, immutable: bool) -> String {
     let raw = path.to_string_lossy();
     let mut encoded = String::from("file:");
     for byte in raw.as_bytes() {
@@ -378,7 +406,11 @@ pub(crate) fn sqlite_readonly_uri(path: &Path) -> String {
             }
         }
     }
-    encoded.push_str("?mode=ro&immutable=1");
+    encoded.push_str(if immutable {
+        "?mode=ro&immutable=1"
+    } else {
+        "?mode=ro"
+    });
     encoded
 }
 

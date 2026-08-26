@@ -2,8 +2,8 @@
 
 use crate::ResourcePins;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, PlatformError, RequestId, ResourceAvailability, ResourceId,
-    ResourceState,
+    AccountId, BindingKind, ErrorCode, OperationClass, PlatformError, RequestId,
+    ResourceAvailability, ResourceId, ResourceState,
 };
 use open_compute_storage::{
     PlatformStorage, ReserveResourceCreate, ResourceCreateReservation, ResourceRecord,
@@ -139,6 +139,9 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
                 "resource driver does not implement the requested kind",
             ));
         }
+        let _admission = self
+            .storage
+            .reserve_mutation(resource_operation_class(request.kind), 64 * 1024)?;
         let fingerprint_input =
             create_fingerprint(request, &self.driver.create_fingerprint_material())?;
         let fingerprint = self
@@ -146,19 +149,22 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
             .crypto()
             .fingerprint_request(&fingerprint_input);
         let repository = ResourceRepository::new(self.storage.db());
-        let reservation = repository.reserve_create(&ReserveResourceCreate {
-            account_id: request.account_id,
-            kind: request.kind,
-            name: &request.name,
-            idempotency_key: &request.idempotency_key,
-            fingerprint_key_id: self.storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id: ResourceId::generate(),
-            driver_schema_version: request.driver_schema_version,
-            request_id: request.request_id,
-            now_ms: request.now_ms,
-            expires_at_ms: request.now_ms.saturating_add(IDEMPOTENCY_TTL_MS),
-        })?;
+        let reservation = repository.reserve_create_with_limit(
+            &ReserveResourceCreate {
+                account_id: request.account_id,
+                kind: request.kind,
+                name: &request.name,
+                idempotency_key: &request.idempotency_key,
+                fingerprint_key_id: self.storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: ResourceId::generate(),
+                driver_schema_version: request.driver_schema_version,
+                request_id: request.request_id,
+                now_ms: request.now_ms,
+                expires_at_ms: request.now_ms.saturating_add(IDEMPOTENCY_TTL_MS),
+            },
+            self.storage.hardening().max_resources_per_kind_per_account,
+        )?;
         let resource = match reservation {
             ResourceCreateReservation::Complete(response) => {
                 return Ok(CreateResourceOutcome::Replay(response));
@@ -376,6 +382,15 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
         }
         repository.mark_ready(resource.id, now_ms)?;
         repository.get(resource.account_id, resource.id)
+    }
+}
+
+fn resource_operation_class(kind: BindingKind) -> OperationClass {
+    match kind {
+        BindingKind::KvNamespace => OperationClass::Kv,
+        BindingKind::R2Bucket => OperationClass::R2,
+        BindingKind::D1Database => OperationClass::D1,
+        BindingKind::DoNamespace => OperationClass::DurableObjects,
     }
 }
 

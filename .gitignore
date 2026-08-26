@@ -1,6 +1,7 @@
 # Rust and Cargo output.
 /debug/
 /target/
+/fuzz/target/
 /.cargo-home/
 **/*.rs.bk
 *.pdb

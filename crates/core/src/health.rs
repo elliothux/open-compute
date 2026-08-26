@@ -24,6 +24,8 @@ pub enum ComponentName {
     Runtime,
     /// Independent Durable Object alarm scheduler.
     Scheduler,
+    /// Snapshot, restore, and upgrade operator receipts.
+    Operations,
 }
 
 impl ComponentName {
@@ -39,6 +41,7 @@ impl ComponentName {
             Self::Cache => "cache",
             Self::Runtime => "runtime",
             Self::Scheduler => "scheduler",
+            Self::Operations => "operations",
         }
     }
 }
@@ -166,6 +169,7 @@ impl PlatformStatus {
                 ComponentHealth::starting(ComponentName::Cache),
                 ComponentHealth::starting(ComponentName::Runtime),
                 ComponentHealth::starting(ComponentName::Scheduler),
+                ComponentHealth::starting(ComponentName::Operations),
             ],
         }
     }

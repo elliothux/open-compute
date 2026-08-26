@@ -145,9 +145,19 @@ impl<'a> ResourceRepository<'a> {
         &self,
         input: &ReserveResourceCreate<'_>,
     ) -> Result<ResourceCreateReservation, PlatformError> {
+        self.reserve_create_with_limit(input, u32::MAX)
+    }
+
+    /// Atomically enforce the account/product live-resource limit and reserve create.
+    pub fn reserve_create_with_limit(
+        &self,
+        input: &ReserveResourceCreate<'_>,
+        max_live: u32,
+    ) -> Result<ResourceCreateReservation, PlatformError> {
         validate_name(input.name)?;
         validate_idempotency_key(input.idempotency_key)?;
-        if input.driver_schema_version == 0 || input.expires_at_ms <= input.now_ms {
+        if max_live == 0 || input.driver_schema_version == 0 || input.expires_at_ms <= input.now_ms
+        {
             return Err(resource_invariant());
         }
         self.db.with_immediate(|tx| {
@@ -187,6 +197,21 @@ impl<'a> ResourceRepository<'a> {
                     }
                     _ => Err(resource_invariant()),
                 };
+            }
+
+            let live_count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM resources
+                     WHERE account_id = ?1 AND kind = ?2 AND state != 'tombstoned'",
+                    params![input.account_id.to_string(), input.kind.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if live_count >= i64::from(max_live) {
+                return Err(PlatformError::new(
+                    ErrorCode::QuotaExceeded,
+                    "account resource count quota was exceeded",
+                ));
             }
 
             let name_conflict: bool = tx

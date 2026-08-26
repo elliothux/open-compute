@@ -17,7 +17,9 @@ mod digest;
 mod fsutil;
 
 pub use compile::{CompileRequest, CompiledConfig, PlatformReleaseMeta, compile_static_config};
+pub use digest::runtime_assets_sha256;
 pub use fetch::{PackageReleaseRequest, install_official_release, package_release_bundle};
+pub use lease::assert_no_live_orphan;
 #[cfg(any(test, feature = "test-support"))]
 pub use lease::{recover_orphan_for_test, set_lease_write_fail, set_start_key_hook};
 pub use lock::{RuntimeLock, RuntimeTarget, load_runtime_lock};

@@ -1,6 +1,6 @@
 //! P0.2 Worker control API and public route ingress.
 
-use crate::http::{HttpState, authorize};
+use crate::http::{HttpState, ProductErrorCode, authorize};
 use crate::metrics::DoFacetReloadReason;
 use crate::runtime_bridge::{DispatchTarget, WorkerdTransport};
 use axum::Router;
@@ -14,8 +14,8 @@ use http_body_util::BodyExt as _;
 use hyper::body::{Body as HttpBody, Frame, SizeHint};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, BindingKind, DeploymentId, ErrorCode, PlatformError, RequestId, SecretString,
-    WorkerId,
+    AccountId, BindingKind, DeploymentId, ErrorCode, OperationClass, PlatformError, RequestId,
+    SecretString, WorkerId,
 };
 use open_compute_storage::{
     BindingRepository, DeploymentRecord, PlatformStorage, WorkerRepository,
@@ -171,12 +171,17 @@ async fn create_worker(
         request_id,
         None,
         || {
-            let (worker, route) = WorkerRepository::new(api.storage.db()).create_worker(
-                account_id,
-                &body.name,
-                request_id,
-                now_ms(),
-            )?;
+            let _admission = api
+                .storage
+                .reserve_mutation(OperationClass::Workers, 64 * 1024)?;
+            let (worker, route) = WorkerRepository::new(api.storage.db())
+                .create_worker_with_limit(
+                    account_id,
+                    &body.name,
+                    request_id,
+                    now_ms(),
+                    api.storage.hardening().max_workers_per_account,
+                )?;
             Ok(serde_json::json!({ "worker": worker, "defaultRoute": route }))
         },
     );
@@ -313,6 +318,13 @@ async fn create_deployment(
             request_id,
         );
     }
+    let staging_admission = match api.storage.reserve_mutation(
+        OperationClass::Workers,
+        u64::try_from(body_limit).unwrap_or(u64::MAX),
+    ) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
     let staged = match stage_bundle(
         request.into_body(),
         api.storage.data_dir().deployment_staging_dir(),
@@ -324,6 +336,7 @@ async fn create_deployment(
         Ok(staged) => staged,
         Err(error) => return error_response(error, request_id),
     };
+    drop(staging_admission);
     if staged.bundle.manifest().main_module != metadata.main_module {
         return error_response(
             PlatformError::new(
@@ -503,6 +516,9 @@ async fn promotion_impl(
         request_id,
         Some(body.target_deployment_id),
         || async {
+            let _admission = api
+                .storage
+                .reserve_mutation(OperationClass::Workers, 64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
             let worker_before = repo.get_worker(account_id, worker_id)?;
             let deployment =
@@ -598,6 +614,9 @@ async fn create_route(
         request_id,
         None,
         || async {
+            let _admission = api
+                .storage
+                .reserve_mutation(OperationClass::Workers, 64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
             let expected_active = if let Some(entrypoint) = body.entrypoint.as_ref() {
                 let worker = repo.get_worker(account_id, worker_id)?;
@@ -623,7 +642,7 @@ async fn create_route(
             } else {
                 None
             };
-            let route = repo.create_exact_route(
+            let route = repo.create_exact_route_with_limit(
                 account_id,
                 worker_id,
                 &hostname,
@@ -632,6 +651,7 @@ async fn create_route(
                 expected_active,
                 request_id,
                 now_ms(),
+                api.storage.hardening().max_routes_per_account,
             )?;
             Ok(serde_json::json!({ "route": route }))
         },
@@ -1347,14 +1367,18 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         ErrorCode::RuntimeUnavailable | ErrorCode::ArtifactUnavailable => {
             StatusCode::SERVICE_UNAVAILABLE
         }
-        ErrorCode::ResourceLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
+        ErrorCode::ResourceLimitExceeded | ErrorCode::QuotaExceeded | ErrorCode::AdmissionBusy => {
+            StatusCode::TOO_MANY_REQUESTS
+        }
+        ErrorCode::StoragePressure | ErrorCode::DiskHardLimit => StatusCode::INSUFFICIENT_STORAGE,
+        ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::Internal
         | ErrorCode::RuntimeResultUnknown
         | ErrorCode::DeploymentInvariantViolation
         | ErrorCode::ArtifactIntegrityError => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::BAD_REQUEST,
     };
-    (
+    let mut response = (
         status,
         axum::Json(serde_json::json!({
             "ok": false,
@@ -1365,7 +1389,11 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
             }
         })),
     )
-        .into_response()
+        .into_response();
+    response
+        .extensions_mut()
+        .insert(ProductErrorCode(error.code()));
+    response
 }
 
 fn error_code(value: &str) -> ErrorCode {

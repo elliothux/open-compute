@@ -6,7 +6,7 @@ use crate::error::{
 use crate::mock_s3::{Fault, MockS3};
 use crate::{
     ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, S3ArtifactClient,
-    S3Failure, S3Stage, StaticEnv, preflight_s3, resolve_s3_credentials,
+    S3Failure, S3Stage, SnapshotObjectStore, StaticEnv, preflight_s3, resolve_s3_credentials,
     resolve_s3_credentials_with,
 };
 use aws_smithy_runtime_api::client::result::ConnectorError;
@@ -66,6 +66,286 @@ async fn client_for(mock: &MockS3) -> S3ArtifactClient {
     let config = s3_config(&mock.endpoint);
     let creds = resolve_s3_credentials_with(&config, &env()).expect("creds");
     S3ArtifactClient::connect(&config, &creds, 64 * 1024).expect("client")
+}
+
+#[tokio::test]
+async fn p1_snapshot_layout_commits_manifest_last_and_verifies_exact_bytes() {
+    let mock = MockS3::spawn("open-compute").await;
+    let client = client_for(&mock).await;
+    let platform = PlatformId::generate();
+    let store = SnapshotObjectStore::new(client.clone(), platform);
+    let snapshot_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let prefix = store.object_prefix(&snapshot_id).unwrap();
+    let key = format!("{prefix}000000.bin");
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("source.bin");
+    write_mode(&source, "snapshot-bytes", 0o600);
+    let payload = fs::read(&source).unwrap();
+    let digest = hex::encode(Sha256::digest(&payload));
+    store
+        .put_file(&key, &source, &digest, payload.len() as u64)
+        .await
+        .unwrap();
+    assert!(store.list_committed().await.unwrap().is_empty());
+    store
+        .verify_file(&key, &digest, payload.len() as u64)
+        .await
+        .unwrap();
+    let restored = temp.path().join("restored.bin");
+    store
+        .download_file(&key, &restored, &digest, payload.len() as u64)
+        .await
+        .unwrap();
+    assert_eq!(fs::read(restored).unwrap(), payload);
+
+    let manifest = br#"{"schema_version":1}"#;
+    let manifest_key = store
+        .put_manifest(&snapshot_id, manifest, 1024)
+        .await
+        .unwrap();
+    assert_eq!(manifest_key, store.manifest_key(&snapshot_id).unwrap());
+    assert_eq!(
+        store.get_manifest(&snapshot_id, 1024).await.unwrap(),
+        manifest
+    );
+    assert_eq!(store.list_committed().await.unwrap().len(), 1);
+    let discovered = SnapshotObjectStore::discover(client, &snapshot_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        discovered.get_manifest(&snapshot_id, 1024).await.unwrap(),
+        manifest
+    );
+    assert!(
+        store
+            .put_manifest(&snapshot_id, b"different", 1024)
+            .await
+            .is_err()
+    );
+    let incomplete_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let incomplete_key = format!("{}000000.bin", store.object_prefix(&incomplete_id).unwrap());
+    store
+        .put_file(&incomplete_key, &source, &digest, payload.len() as u64)
+        .await
+        .unwrap();
+    let cleanup = store
+        .cleanup_incomplete(SystemTime::now() + Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(cleanup.prefixes, 1);
+    assert_eq!(cleanup.objects, 1);
+    assert_eq!(cleanup.bytes, payload.len() as u64);
+    assert!(
+        store
+            .verify_file(&incomplete_key, &digest, payload.len() as u64)
+            .await
+            .is_err()
+    );
+    assert_eq!(store.list_committed().await.unwrap().len(), 1);
+    mock.set_fault(Fault::CorruptBody);
+    assert!(
+        store
+            .verify_file(&key, &digest, payload.len() as u64)
+            .await
+            .is_err()
+    );
+}
+
+#[test]
+fn p1_snapshot_layout_rejects_malformed_bounds_and_remote_corruption() {
+    std::thread::Builder::new()
+        .name("p1-snapshot-invalid".to_owned())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(p1_snapshot_layout_invalid_gate());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+async fn p1_snapshot_layout_invalid_gate() {
+    let mock = MockS3::spawn("open-compute").await;
+    let client = client_for(&mock).await;
+    let platform = PlatformId::generate();
+    let store = SnapshotObjectStore::new(client.clone(), platform);
+    let snapshot_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let key = format!("{}000000.bin", store.object_prefix(&snapshot_id).unwrap());
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("source.bin");
+    write_mode(&source, "snapshot-bytes", 0o600);
+    let payload = fs::read(&source).unwrap();
+    let digest = hex::encode(Sha256::digest(&payload));
+
+    for invalid_id in [
+        "not-a-uuid".to_owned(),
+        uuid::Uuid::nil().hyphenated().to_string(),
+        snapshot_id.to_ascii_uppercase(),
+    ] {
+        assert!(store.object_prefix(&invalid_id).is_err());
+        assert!(store.manifest_key(&invalid_id).is_err());
+        assert!(
+            SnapshotObjectStore::discover(client.clone(), &invalid_id)
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        SnapshotObjectStore::discover(client.clone(), &snapshot_id)
+            .await
+            .is_err(),
+        "an uncommitted snapshot must not be discoverable"
+    );
+
+    assert!(
+        store
+            .put_file("system/outside.bin", &source, &digest, payload.len() as u64)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .put_file(
+                &key,
+                &source,
+                &digest.to_ascii_uppercase(),
+                payload.len() as u64
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .put_file(&key, &source, &digest, 64 * 1024 + 1)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .put_file(&key, &source, &digest, payload.len() as u64 + 1)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .put_file(&key, &source, &"0".repeat(64), payload.len() as u64)
+            .await
+            .is_err()
+    );
+    mock.set_fault(Fault::ServerError);
+    assert!(
+        store
+            .put_file(&key, &source, &digest, payload.len() as u64)
+            .await
+            .is_err()
+    );
+    mock.set_fault(Fault::None);
+    store
+        .put_file(&key, &source, &digest, payload.len() as u64)
+        .await
+        .unwrap();
+
+    assert!(store.put_manifest(&snapshot_id, b"", 1024).await.is_err());
+    assert!(
+        store
+            .put_manifest(&snapshot_id, b"too-large", 1)
+            .await
+            .is_err()
+    );
+    let empty_manifest_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    mock.put_raw(&store.manifest_key(&empty_manifest_id).unwrap(), Vec::new());
+    assert!(store.get_manifest(&empty_manifest_id, 1024).await.is_err());
+
+    assert!(
+        store
+            .download_file(
+                &key,
+                &temp.path().join("too-large.bin"),
+                &digest,
+                64 * 1024 + 1,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .download_file(
+                &key,
+                &temp.path().join("wrong-metadata.bin"),
+                &"0".repeat(64),
+                payload.len() as u64,
+            )
+            .await
+            .is_err()
+    );
+    let occupied = temp.path().join("occupied.bin");
+    write_mode(&occupied, "occupied", 0o600);
+    assert!(
+        store
+            .download_file(&key, &occupied, &digest, payload.len() as u64)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .verify_file(&key, &digest, payload.len() as u64 + 1)
+            .await
+            .is_err()
+    );
+
+    let external_key = "system/external/reference.bin";
+    mock.put_raw(external_key, payload.clone());
+    assert!(
+        store
+            .verify_external_reference("outside/reference.bin", &digest, payload.len() as u64)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .verify_external_reference(external_key, "BAD", payload.len() as u64)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .verify_external_reference(external_key, &digest, payload.len() as u64 + 1)
+            .await
+            .is_err()
+    );
+    mock.corrupt_body(external_key);
+    assert!(
+        store
+            .verify_external_reference(external_key, &digest, payload.len() as u64)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .delete_exact("system/not-snapshot-owned")
+            .await
+            .is_err()
+    );
+
+    let incomplete_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let base = format!("system/snapshots/v1/{platform}/{incomplete_id}");
+    mock.put_raw(&format!("{base}/unexpected"), b"retained".to_vec());
+    mock.put_raw(
+        &format!("system/snapshots/v1/{platform}/not-a-uuid/object"),
+        b"retained".to_vec(),
+    );
+    let cleanup = store
+        .cleanup_incomplete(SystemTime::now() + Duration::from_secs(60))
+        .await
+        .unwrap();
+    assert_eq!(cleanup.prefixes, 1);
+    assert_eq!(cleanup.objects, 1);
+    assert_eq!(cleanup.bytes, payload.len() as u64);
+    assert!(mock.keys().contains(&format!("{base}/unexpected")));
 }
 
 fn write_mode(path: &Path, contents: &str, mode: u32) {

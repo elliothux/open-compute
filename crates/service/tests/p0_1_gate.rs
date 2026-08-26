@@ -1312,4 +1312,46 @@ fn retain_failure(round: &Round) {
         );
         let _ = fs::write(dest.join("stderr.log"), redacted);
     }
+    let control = round.data.join("control.sqlite");
+    let diagnostic_control = control
+        .parent()
+        .and_then(|parent| fs::canonicalize(parent).ok())
+        .and_then(|parent| control.file_name().map(|name| parent.join(name)))
+        .unwrap_or_else(|| control.clone());
+    let opened = rusqlite::Connection::open_with_flags(
+        &diagnostic_control,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    );
+    let mut diagnostic = format!(
+        "path_metadata={:?}\n",
+        fs::symlink_metadata(&control)
+            .map(|metadata| (metadata.len(), metadata.file_type().is_file()))
+    );
+    if let Ok(connection) = &opened {
+        let version =
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0));
+        diagnostic.push_str(&format!("user_version={version:?}\n"));
+        match connection
+            .prepare("SELECT key, typeof(value), length(value) FROM platform_meta ORDER BY key")
+        {
+            Ok(mut statement) => match statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            }) {
+                Ok(rows) => {
+                    for row in rows {
+                        diagnostic.push_str(&format!("meta={row:?}\n"));
+                    }
+                }
+                Err(error) => diagnostic.push_str(&format!("meta_query={error:?}\n")),
+            },
+            Err(error) => diagnostic.push_str(&format!("meta_prepare={error:?}\n")),
+        }
+    } else {
+        diagnostic.push_str(&format!("open={opened:?}\n"));
+    }
+    let _ = fs::write(dest.join("database-diagnostic.log"), diagnostic);
 }

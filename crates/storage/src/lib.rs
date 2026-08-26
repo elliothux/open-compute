@@ -7,6 +7,7 @@ pub mod control_db;
 pub mod crypto;
 pub mod d1;
 pub mod data_dir;
+pub mod disk_admission;
 pub mod durable_objects;
 pub mod fs;
 pub mod identity;
@@ -15,10 +16,15 @@ pub mod kv;
 pub mod lock;
 pub mod master_key;
 pub mod migrations;
+pub mod platform_restore;
+pub mod platform_snapshot;
 pub mod r2;
 pub mod r2_staging;
 pub mod resources;
+mod restore_cleanup;
 pub mod scheduler;
+mod snapshot_staging;
+pub mod upgrade;
 pub mod workers;
 
 pub use bindings::{
@@ -35,8 +41,9 @@ pub use d1::{
 };
 pub use data_dir::{
     DURABLE_OBJECT_DATA_FORMAT_VERSION, DURABLE_OBJECT_UNIQUE_KEY, DataDir, expected_directories,
-    future_resource_paths, inspect_durable_object_storage,
+    future_resource_paths, inspect_durable_object_storage, read_operation_receipt,
 };
+pub use disk_admission::DiskAdmission;
 pub use durable_objects::{
     AuthorizedDurableObjectDelete, AuthorizedDurableObjectDispatch, DO_NAMESPACE_SCHEMA_VERSION,
     DurableObjectNamespaceRecord, DurableObjectRecord, DurableObjectRepository,
@@ -44,8 +51,9 @@ pub use durable_objects::{
 pub use fs::atomic_write;
 pub use identity::{ARTIFACT_SCHEMA_VERSION, StableIdentity};
 pub use inspect::{
-    DataRootInspect, ResourceInspect, inspect_control_db, inspect_data_root, inspect_master_key,
-    inspect_resources,
+    ControlInventory, DataRootInspect, ResourceInspect, inspect_control_db,
+    inspect_control_inventory, inspect_data_root, inspect_master_key, inspect_operator_event_count,
+    inspect_resources, inspect_snapshot_immutable_references,
 };
 pub use kv::{
     KV_CAPABILITY_VERSION, KV_DEFAULT_LIST_LIMIT, KV_MAX_KEY_BYTES, KV_MAX_LIST_LIMIT,
@@ -61,15 +69,26 @@ pub use master_key::MasterKey;
 pub use master_key::{clear_test_env, set_test_env};
 #[cfg(any(test, feature = "test-support"))]
 pub use migrations::MigrationFault;
+pub use platform_restore::RestoreTarget;
+pub use platform_snapshot::{
+    PreparePlatformSnapshotRequest, PreparedPlatformSnapshot, PreparedSnapshotFile,
+    estimate_platform_snapshot_bytes, prepare_platform_snapshot, sign_snapshot_manifest,
+    verify_snapshot_manifest_mac,
+};
 pub use r2::{R2_SCHEMA_VERSION, R2BucketRecord, R2BucketRepository};
 pub use r2_staging::R2Staging;
 pub use resources::{
     ReserveResourceCreate, ReserveResourceDelete, ResourceCreateReservation,
     ResourceDeleteReservation, ResourceRecord, ResourceReferrer, ResourceRepository,
 };
+pub use restore_cleanup::{RestoreStagingCleanup, cleanup_restore_staging};
 pub use scheduler::{
     AlarmProjection, ClaimResult, ClaimedJob, SchedulerInspection, SchedulerStore,
-    SchedulerSummary, inspect_scheduler_db,
+    SchedulerSummary, current_scheduler_schema_version, inspect_scheduler_db,
+};
+pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
+pub use upgrade::{
+    OfflineSchemaState, apply_offline_upgrade, inspect_offline_schema, inspect_owned_schema,
 };
 pub use workers::{
     DeploymentRecord, DeploymentReferrer, DeploymentSnapshot, DeploymentState,
@@ -77,9 +96,11 @@ pub use workers::{
     RouteRecord, RouteSnapshot, StoredDeploymentSecret, WorkerRecord, WorkerRepository,
 };
 
-use open_compute_core::PlatformError;
 use open_compute_core::clock::Clock;
 use open_compute_core::config::StorageConfig;
+use open_compute_core::{
+    AdmissionReservation, AdmissionSnapshotV1, HardeningConfig, OperationClass, PlatformError,
+};
 
 /// Fully bootstrapped P0.1 storage owner.
 #[derive(Debug)]
@@ -89,11 +110,26 @@ pub struct PlatformStorage {
     crypto: SecretCrypto,
     identity: StableIdentity,
     free_space_hard_bytes: u64,
+    hardening: HardeningConfig,
+    admission: DiskAdmission,
 }
 
 impl PlatformStorage {
     /// Acquire the data-dir lock, resolve the master key, then open/migrate the DB and identity.
     pub fn bootstrap(config: &StorageConfig, clock: &dyn Clock) -> Result<Self, PlatformError> {
+        let mut hardening = HardeningConfig::default();
+        hardening.emergency_reserve_bytes = hardening
+            .emergency_reserve_bytes
+            .min(config.free_space_hard_bytes.saturating_sub(1));
+        Self::bootstrap_with_hardening(config, &hardening, clock)
+    }
+
+    /// Bootstrap with the P1 platform-wide hardening policy.
+    pub fn bootstrap_with_hardening(
+        config: &StorageConfig,
+        hardening: &HardeningConfig,
+        clock: &dyn Clock,
+    ) -> Result<Self, PlatformError> {
         let data_dir = DataDir::acquire(config)?;
         let key = master_key::resolve(config)?;
         let db_path = data_dir.ensure_control_db()?;
@@ -108,6 +144,8 @@ impl PlatformStorage {
             crypto,
             identity,
             free_space_hard_bytes: config.free_space_hard_bytes,
+            hardening: hardening.clone(),
+            admission: DiskAdmission::new(config, hardening),
         })
     }
 
@@ -126,12 +164,18 @@ impl PlatformStorage {
         let identity = identity::bootstrap(&db, clock, key.fingerprint())?;
         data_dir.record_platform_id(&identity.platform_id.to_string())?;
         let crypto = SecretCrypto::new(key.bytes(), key.fingerprint())?;
+        let mut hardening = HardeningConfig::default();
+        hardening.emergency_reserve_bytes = hardening
+            .emergency_reserve_bytes
+            .min(config.free_space_hard_bytes.saturating_sub(1));
         Ok(Self {
             data_dir,
             db,
             crypto,
             identity,
             free_space_hard_bytes: config.free_space_hard_bytes,
+            hardening: hardening.clone(),
+            admission: DiskAdmission::new(config, &hardening),
         })
     }
 
@@ -163,6 +207,31 @@ impl PlatformStorage {
     #[must_use]
     pub const fn free_space_hard_bytes(&self) -> u64 {
         self.free_space_hard_bytes
+    }
+
+    /// P1 resource-count, snapshot, and emergency-reserve policy.
+    #[must_use]
+    pub const fn hardening(&self) -> &HardeningConfig {
+        &self.hardening
+    }
+
+    /// Capture the current immutable admission decision input.
+    pub fn admission_snapshot(&self) -> Result<AdmissionSnapshotV1, PlatformError> {
+        self.admission.snapshot(&self.data_dir)
+    }
+
+    /// Reserve conservative local bytes for one storage-growing operation.
+    pub fn reserve_mutation(
+        &self,
+        class: OperationClass,
+        bytes: u64,
+    ) -> Result<AdmissionReservation, PlatformError> {
+        self.admission.reserve(&self.data_dir, class, bytes)
+    }
+
+    /// Enter terminal draining mode and reject new storage-growing work.
+    pub fn begin_draining(&self) {
+        self.admission.begin_draining();
     }
 
     /// Filesystem block utilization containing the owned data directory, rounded down.

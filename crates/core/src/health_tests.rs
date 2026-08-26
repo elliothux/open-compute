@@ -26,7 +26,7 @@ fn health_transitions_and_recompute() {
 }
 
 #[test]
-fn degraded_s3_or_cache_is_never_ready() {
+fn degraded_required_s3_is_unready_but_bounded_disk_pressure_is_serviceable() {
     let mut status = PlatformStatus::starting();
     for component in &mut status.components {
         component
@@ -73,7 +73,7 @@ fn degraded_s3_or_cache_is_never_ready() {
         .expect("healthy->degraded");
     status.recompute();
     assert_eq!(status.readiness, ReadinessReason::DiskHardLimit);
-    assert!(!status.readiness.is_ready());
+    assert!(status.readiness.is_ready());
 }
 
 #[test]
@@ -99,6 +99,7 @@ fn component_labels_and_transition_matrix_are_complete() {
         ComponentName::Cache,
         ComponentName::Runtime,
         ComponentName::Scheduler,
+        ComponentName::Operations,
     ];
     for name in names {
         assert_eq!(name.to_string(), name.as_str());

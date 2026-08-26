@@ -1,14 +1,23 @@
 //! Clap derive CLI for `platformd`.
 
+use crate::backup_cli::{
+    backup_attest_restore_smoke, backup_cleanup_incomplete, backup_cleanup_restore, backup_create,
+    backup_delete, backup_inspect, backup_list, backup_restore, backup_retention_plan,
+    write_result,
+};
+use crate::capabilities::{platform_capabilities, platform_release_metadata, write_capabilities};
 use crate::config_load::{LoadedConfig, load_platform_config};
 use crate::doctor::{DoctorMode, doctor_report};
 use crate::exit::{ExitClass, emit_failure, exit_class_for};
 use crate::metrics::MetricsRegistry;
 use crate::run::run_platform;
+use crate::support_bundle::create_support_bundle;
+use crate::upgrade_cli::{upgrade_apply, upgrade_check};
 use clap::{Parser, Subcommand};
 use open_compute_core::{ErrorCode, PlatformError};
 use open_compute_runtime::{PackageReleaseRequest, load_runtime_lock, package_release_bundle};
 use open_compute_storage::DataDir;
+use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -45,6 +54,33 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print the versioned P1 product and release capability contract.
+    Capabilities {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Offline full-platform snapshot operations.
+    Backup {
+        /// Backup subcommand.
+        #[command(subcommand)]
+        command: BackupCommand,
+    },
+    /// Offline forward-only release upgrade operations.
+    Upgrade {
+        /// Upgrade subcommand.
+        #[command(subcommand)]
+        command: UpgradeCommand,
+    },
+    /// Generate a bounded, secret-scanned local support archive.
+    SupportBundle {
+        /// Absolute nonexistent output tar path.
+        #[arg(long)]
+        output: PathBuf,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Offline scheduler recovery utilities.
     Scheduler {
         /// Scheduler subcommand.
@@ -68,6 +104,9 @@ pub enum Command {
         /// Absolute default config copied into `share/`.
         #[arg(long)]
         default_config: PathBuf,
+        /// Absolute P1 operator runbook directory copied into `docs/runbooks/`.
+        #[arg(long)]
+        runbooks: PathBuf,
         /// Download the official archive over HTTPS at packaging time.
         #[arg(long)]
         download: bool,
@@ -82,6 +121,121 @@ pub enum Command {
 pub enum ConfigCommand {
     /// Static parse and validation only.
     Check {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `platformd backup` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum BackupCommand {
+    /// Create and fully verify a committed offline snapshot.
+    Create {
+        /// Bounded human-readable audit label.
+        #[arg(long)]
+        name: String,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List authenticated committed snapshots for this platform.
+    List {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect one authenticated committed snapshot.
+    Inspect {
+        /// `UUIDv7` snapshot identity.
+        #[arg(long = "snapshot")]
+        snapshot_id: String,
+        /// Stream and hash every owned object and immutable reference.
+        #[arg(long)]
+        verify: bool,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete the exact authenticated owned objects for one snapshot.
+    Delete {
+        /// `UUIDv7` snapshot identity.
+        #[arg(long = "snapshot")]
+        snapshot_id: String,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate an authenticated retention dry-run plan without deleting objects.
+    RetentionPlan {
+        /// Retain this many newest committed snapshots unconditionally.
+        #[arg(long)]
+        keep_last: u32,
+        /// Delete only snapshots at least this old, in seconds.
+        #[arg(long)]
+        max_age_seconds: Option<u64>,
+        /// Retain snapshots with this exact label; may be repeated.
+        #[arg(long = "keep-label")]
+        keep_labels: Vec<String>,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove exact-layout incomplete uploads older than the configured grace period.
+    CleanupIncomplete {
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove object bytes from one exact failed fresh-host restore staging identity.
+    CleanupRestore {
+        /// `UUIDv7` suffix reported by the retained failure receipt.
+        #[arg(long = "staging")]
+        staging_id: String,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record that the documented post-restore product smoke completed successfully.
+    AttestRestoreSmoke {
+        /// Snapshot restored by the receipt being attested.
+        #[arg(long = "snapshot")]
+        snapshot_id: String,
+        /// Explicit operator assertion that every documented smoke step passed.
+        #[arg(long)]
+        passed: bool,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore one exact-release snapshot into a fresh data directory.
+    Restore {
+        /// `UUIDv7` snapshot identity.
+        #[arg(long = "snapshot")]
+        snapshot_id: String,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `platformd upgrade` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum UpgradeCommand {
+    /// Verify source schemas, release compatibility, and a committed rollback snapshot.
+    Check {
+        /// Verified pre-upgrade snapshot `UUIDv7`.
+        #[arg(long = "from-snapshot")]
+        snapshot_id: String,
+        /// Emit versioned JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Apply pending checksummed migrations while the daemon remains stopped.
+    Apply {
+        /// Verified pre-upgrade snapshot `UUIDv7`.
+        #[arg(long = "from-snapshot")]
+        snapshot_id: String,
         /// Emit versioned JSON.
         #[arg(long)]
         json: bool,
@@ -109,18 +263,27 @@ where
 }
 
 /// Execute a parsed CLI against stdout/stderr.
-pub async fn execute(cli: Cli, stdout: &mut impl Write, stderr: &mut impl Write) -> ExitCode {
-    execute_with_package_binary(cli, stdout, stderr, None).await
+pub fn execute<'a>(
+    cli: Cli,
+    stdout: &'a mut impl Write,
+    stderr: &'a mut impl Write,
+) -> std::pin::Pin<Box<dyn Future<Output = ExitCode> + 'a>> {
+    Box::pin(execute_with_package_binary(cli, stdout, stderr, None))
 }
 
 #[cfg(test)]
-pub(crate) async fn execute_with_test_binary(
+pub(crate) fn execute_with_test_binary<'a>(
     cli: Cli,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-    platformd: &Path,
-) -> ExitCode {
-    execute_with_package_binary(cli, stdout, stderr, Some(platformd)).await
+    stdout: &'a mut impl Write,
+    stderr: &'a mut impl Write,
+    platformd: &'a Path,
+) -> std::pin::Pin<Box<dyn Future<Output = ExitCode> + 'a>> {
+    Box::pin(execute_with_package_binary(
+        cli,
+        stdout,
+        stderr,
+        Some(platformd),
+    ))
 }
 
 async fn execute_with_package_binary(
@@ -129,7 +292,7 @@ async fn execute_with_package_binary(
     stderr: &mut impl Write,
     platformd: Option<&Path>,
 ) -> ExitCode {
-    match run(cli, stdout, platformd).await {
+    match Box::pin(run(cli, stdout, platformd)).await {
         Ok(code) => code,
         Err(err) => {
             let _ = emit_failure(&err, stderr);
@@ -149,6 +312,7 @@ async fn run(
         assets,
         license,
         default_config,
+        runbooks,
         download,
         archive,
     } = cli.command
@@ -160,6 +324,16 @@ async fn run(
             ));
         }
         let (parsed, _) = load_runtime_lock(&lock)?;
+        let mut loaded = load_platform_config(&default_config)?;
+        loaded.config.runtime.lock_file = lock.clone();
+        loaded.config.runtime.assets_dir = assets.clone();
+        let release_json =
+            serde_json::to_vec(&platform_release_metadata(&loaded)?).map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::ReleaseUnsupported,
+                    "release metadata serialization failed",
+                )
+            })?;
         let archive_bytes = match archive {
             Some(path) => Some(std::fs::read(&path).map_err(|_| {
                 PlatformError::new(ErrorCode::PathInvalid, "failed to read local archive")
@@ -182,6 +356,8 @@ async fn run(
             assets_dir: &assets,
             license_file: &license,
             default_config: &default_config,
+            runbooks_dir: &runbooks,
+            release_json: &release_json,
             download,
             archive_bytes: archive_bytes.as_deref(),
         })?;
@@ -211,7 +387,7 @@ async fn run(
             } else {
                 DoctorMode::Basic
             };
-            let report = doctor_report(&loaded, mode).await;
+            let report = Box::pin(doctor_report(&loaded, mode)).await;
             report.write(stdout, json)?;
             if report.failed() {
                 Ok(ExitCode::from(ExitClass::Doctor.code()))
@@ -219,9 +395,135 @@ async fn run(
                 Ok(ExitCode::from(ExitClass::Ok.code()))
             }
         }
+        Command::Capabilities { json } => {
+            let loaded = load_platform_config(config_path)?;
+            let capabilities = platform_capabilities(&loaded)?;
+            write_capabilities(&capabilities, stdout, json)?;
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
+        Command::Backup { command } => {
+            let loaded = load_platform_config(config_path)?;
+            MetricsRegistry::validate_limits(&loaded.config.metrics)?;
+            match command {
+                BackupCommand::Create { name, json } => {
+                    let result = Box::pin(interruptible_offline(Box::pin(backup_create(
+                        &loaded, &name,
+                    ))))
+                    .await?;
+                    let human = format!("SNAPSHOT_OK {}", result.snapshot_id);
+                    write_result(&result, stdout, json, &human)?;
+                }
+                BackupCommand::List { json } => {
+                    let result = Box::pin(backup_list(&loaded)).await?;
+                    let human = format!("SNAPSHOTS_OK {}", result.len());
+                    write_result(&result, stdout, json, &human)?;
+                }
+                BackupCommand::Inspect {
+                    snapshot_id,
+                    verify,
+                    json,
+                } => {
+                    let result = Box::pin(backup_inspect(&loaded, &snapshot_id, verify)).await?;
+                    let human = format!("SNAPSHOT_OK {}", result.snapshot_id);
+                    write_result(&result, stdout, json, &human)?;
+                }
+                BackupCommand::Delete { snapshot_id, json } => {
+                    let result = Box::pin(interruptible_offline(Box::pin(backup_delete(
+                        &loaded,
+                        &snapshot_id,
+                    ))))
+                    .await?;
+                    let human = format!("SNAPSHOT_DELETED {}", result.snapshot_id);
+                    write_result(&result, stdout, json, &human)?;
+                }
+                BackupCommand::RetentionPlan {
+                    keep_last,
+                    max_age_seconds,
+                    keep_labels,
+                    json,
+                } => {
+                    let result = Box::pin(backup_retention_plan(
+                        &loaded,
+                        keep_last,
+                        max_age_seconds,
+                        keep_labels,
+                    ))
+                    .await?;
+                    let human = format!("RETENTION_PLAN_OK {}", result.delete.len());
+                    write_result(&result, stdout, json, &human)?;
+                }
+                BackupCommand::CleanupIncomplete { json } => {
+                    let result = Box::pin(interruptible_offline(Box::pin(
+                        backup_cleanup_incomplete(&loaded),
+                    )))
+                    .await?;
+                    let human = format!("INCOMPLETE_CLEANUP_OK {}", result.objects);
+                    write_result(&result, stdout, json, &human)?;
+                }
+                BackupCommand::CleanupRestore { staging_id, json } => {
+                    let result = backup_cleanup_restore(&loaded, &staging_id)?;
+                    let human = format!("RESTORE_STAGING_CLEANUP_OK {}", result.staging_id);
+                    write_result(&result, stdout, json, &human)?;
+                }
+                BackupCommand::AttestRestoreSmoke {
+                    snapshot_id,
+                    passed,
+                    json,
+                } => {
+                    let result = Box::pin(interruptible_offline(Box::pin(
+                        backup_attest_restore_smoke(&loaded, &snapshot_id, passed),
+                    )))
+                    .await?;
+                    let human = format!("RESTORE_SMOKE_ATTESTED {}", result.snapshot_id);
+                    write_result(&result, stdout, json, &human)?;
+                }
+                BackupCommand::Restore { snapshot_id, json } => {
+                    let result = Box::pin(interruptible_offline(Box::pin(backup_restore(
+                        &loaded,
+                        &snapshot_id,
+                    ))))
+                    .await?;
+                    let human = format!("RESTORE_OK {}", result.snapshot_id);
+                    write_result(&result, stdout, json, &human)?;
+                }
+            }
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
+        Command::Upgrade { command } => {
+            let loaded = load_platform_config(config_path)?;
+            MetricsRegistry::validate_limits(&loaded.config.metrics)?;
+            match command {
+                UpgradeCommand::Check { snapshot_id, json } => {
+                    let result = Box::pin(interruptible_offline(Box::pin(upgrade_check(
+                        &loaded,
+                        &snapshot_id,
+                    ))))
+                    .await?;
+                    let human = format!("UPGRADE_READY {}", result.from_snapshot);
+                    write_result(&result, stdout, json, &human)?;
+                }
+                UpgradeCommand::Apply { snapshot_id, json } => {
+                    let result = Box::pin(interruptible_offline(Box::pin(upgrade_apply(
+                        &loaded,
+                        &snapshot_id,
+                    ))))
+                    .await?;
+                    let human = format!("UPGRADE_OK {}", result.from_snapshot);
+                    write_result(&result, stdout, json, &human)?;
+                }
+            }
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
+        Command::SupportBundle { output, json } => {
+            let loaded = load_platform_config(config_path)?;
+            let result = Box::pin(create_support_bundle(&loaded, &output)).await?;
+            let human = format!("SUPPORT_BUNDLE_OK {}", result.output);
+            write_result(&result, stdout, json, &human)?;
+            Ok(ExitCode::from(ExitClass::Ok.code()))
+        }
         Command::Run => {
             let loaded = load_platform_config(config_path)?;
-            run_platform(loaded).await?;
+            Box::pin(run_platform(loaded)).await?;
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
         Command::Scheduler {
@@ -245,6 +547,37 @@ async fn run(
         }
         Command::PackageRelease { .. } => unreachable!("handled before config load"),
     }
+}
+
+async fn interruptible_offline<T>(
+    operation: impl Future<Output = Result<T, PlatformError>>,
+) -> Result<T, PlatformError> {
+    let mut sigterm =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).ok();
+    tokio::pin!(operation);
+    tokio::select! {
+        result = &mut operation => result,
+        _ = async {
+            match sigterm.as_mut() {
+                Some(signal) => { signal.recv().await; }
+                None => std::future::pending::<()>().await,
+            }
+        } => Err(offline_interrupted()),
+        _ = async {
+            match sigint.as_mut() {
+                Some(signal) => { signal.recv().await; }
+                None => std::future::pending::<()>().await,
+            }
+        } => Err(offline_interrupted()),
+    }
+}
+
+fn offline_interrupted() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::PlatformUnavailable,
+        "offline operation was interrupted before completion",
+    )
 }
 
 fn write_config_check(out: &mut impl Write, json: bool) -> Result<(), PlatformError> {

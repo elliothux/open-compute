@@ -11,13 +11,13 @@ use crate::scheduler::SchedulerService;
 use crate::scheduler_http;
 use crate::workers_http::{self, WorkerApiState};
 use axum::body::Body;
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use open_compute_core::config::ServerConfig;
-use open_compute_core::{ReadinessReason, RequestId, SecretString};
+use open_compute_core::{ErrorCode, OperationClass, ReadinessReason, RequestId, SecretString};
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
 use serde::Serialize;
 use std::future::Future;
@@ -32,6 +32,10 @@ const MAX_HEADER_BYTES: usize = 8192;
 const MAX_HEADER_TOTAL: usize = 16_384;
 const MAX_DEPLOYMENT_HEADER_TOTAL: usize =
     workers_http::MAX_DEPLOYMENT_METADATA_HEADER_BYTES + MAX_HEADER_TOTAL;
+
+/// Stable error metadata attached internally for low-cardinality product metrics.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ProductErrorCode(pub ErrorCode);
 
 /// Shared HTTP state.
 #[derive(Clone)]
@@ -223,17 +227,22 @@ impl HttpState {
 
 /// Public routes only.
 pub fn public_router(state: HttpState) -> Router {
+    let middleware_state = state.clone();
     Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .fallback(workers_http::public_ingress)
-        .layer(axum::middleware::from_fn(bounds_middleware))
+        .layer(axum::middleware::from_fn_with_state(
+            middleware_state,
+            bounds_middleware,
+        ))
         .with_state(state)
 }
 
 /// Admin routes, including public health plus status/metrics.
 pub fn admin_router(state: HttpState) -> Router {
     let metrics_enabled = state.metrics_enabled;
+    let middleware_state = state.clone();
     let mut router = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
@@ -250,13 +259,17 @@ pub fn admin_router(state: HttpState) -> Router {
     router = router.merge(scheduler_http::control_router());
     router
         .fallback(fallback)
-        .layer(axum::middleware::from_fn(bounds_middleware))
+        .layer(axum::middleware::from_fn_with_state(
+            middleware_state,
+            bounds_middleware,
+        ))
         .with_state(state)
 }
 
 /// Merged public+admin on one listener.
 pub fn merged_router(state: HttpState) -> Router {
     let metrics_enabled = state.metrics_enabled;
+    let middleware_state = state.clone();
     let mut router = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
@@ -272,7 +285,10 @@ pub fn merged_router(state: HttpState) -> Router {
         .merge(do_http::control_router())
         .merge(scheduler_http::control_router())
         .fallback(workers_http::public_ingress)
-        .layer(axum::middleware::from_fn(bounds_middleware))
+        .layer(axum::middleware::from_fn_with_state(
+            middleware_state,
+            bounds_middleware,
+        ))
         .with_state(state)
 }
 
@@ -280,7 +296,7 @@ async fn live() -> StatusCode {
     StatusCode::OK
 }
 
-async fn ready(axum::extract::State(state): axum::extract::State<HttpState>) -> Response {
+async fn ready(State(state): State<HttpState>) -> Response {
     let reason = state.health.readiness();
     if reason.is_ready() {
         StatusCode::OK.into_response()
@@ -293,10 +309,7 @@ async fn ready(axum::extract::State(state): axum::extract::State<HttpState>) -> 
     }
 }
 
-async fn status(
-    axum::extract::State(state): axum::extract::State<HttpState>,
-    request: Request,
-) -> Response {
+async fn status(State(state): State<HttpState>, request: Request) -> Response {
     if !authorize(&state, &request) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -310,10 +323,7 @@ async fn status(
     .into_response()
 }
 
-async fn metrics_handler(
-    axum::extract::State(state): axum::extract::State<HttpState>,
-    request: Request,
-) -> Response {
+async fn metrics_handler(State(state): State<HttpState>, request: Request) -> Response {
     if !authorize(&state, &request) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -348,6 +358,7 @@ async fn fallback(method: Method) -> StatusCode {
 }
 
 async fn bounds_middleware(
+    State(state): State<HttpState>,
     mut request: Request,
     next: axum::middleware::Next,
 ) -> Result<Response, StatusCode> {
@@ -403,8 +414,29 @@ async fn bounds_middleware(
     let id = RequestId::generate();
     request.extensions_mut().insert(id);
     let route = request.uri().path().to_owned();
+    let is_mutation = !matches!(*request.method(), Method::GET | Method::HEAD);
     let method = bound_method(request.method());
     let mut response = next.run(request).await;
+    if let Some(error) = response.extensions().get::<ProductErrorCode>()
+        && let Some(operation) = product_operation(&route)
+    {
+        state.metrics.observe_product_error(operation, error.0);
+        if matches!(
+            error.0,
+            ErrorCode::QuotaExceeded
+                | ErrorCode::AdmissionBusy
+                | ErrorCode::StoragePressure
+                | ErrorCode::DiskHardLimit
+                | ErrorCode::PlatformUnavailable
+        ) {
+            state.metrics.observe_admission(operation, Some(error.0));
+        }
+    } else if is_mutation
+        && response.status().is_success()
+        && let Some(operation) = product_operation(&route)
+    {
+        state.metrics.observe_admission(operation, None);
+    }
     let status = response.status().as_u16();
     response.headers_mut().insert(
         REQUEST_ID_HEADER,
@@ -419,6 +451,22 @@ async fn bounds_middleware(
         "http"
     );
     Ok(response)
+}
+
+fn product_operation(path: &str) -> Option<OperationClass> {
+    if path.contains("/workers") {
+        Some(OperationClass::Workers)
+    } else if path.contains("/kv/") {
+        Some(OperationClass::Kv)
+    } else if path.contains("/r2/") {
+        Some(OperationClass::R2)
+    } else if path.contains("/d1/") {
+        Some(OperationClass::D1)
+    } else if path.contains("/durable-objects/") {
+        Some(OperationClass::DurableObjects)
+    } else {
+        None
+    }
 }
 
 fn bound_route(path: &str) -> &'static str {
@@ -447,7 +495,7 @@ pub async fn bind(
 ) -> Result<TcpListener, open_compute_core::PlatformError> {
     TcpListener::bind(addr).await.map_err(|_| {
         open_compute_core::PlatformError::new(
-            open_compute_core::ErrorCode::ConfigInvalid,
+            ErrorCode::ConfigInvalid,
             "failed to bind health listener",
         )
     })
@@ -464,7 +512,7 @@ pub async fn serve_until(
         .await
         .map_err(|_| {
             open_compute_core::PlatformError::new(
-                open_compute_core::ErrorCode::ConfigInvalid,
+                ErrorCode::ConfigInvalid,
                 "health listener failed",
             )
         })

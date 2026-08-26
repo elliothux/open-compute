@@ -27,7 +27,6 @@ const META_VERSION: &str = "oc-r2-version";
 const META_CUSTOM: &str = "oc-r2-custom";
 const META_MD5: &str = "oc-r2-md5";
 const OBJECTS_SUFFIX: &str = "objects/";
-const MARKER_SUFFIX: &str = "meta/identity.json";
 
 /// Compile-time typed tenant object store sharing only the configured S3 client context.
 #[derive(Clone, Debug)]
@@ -84,7 +83,7 @@ impl R2ObjectStore {
             return Err(invariant());
         }
         let bytes = serde_json::to_vec(identity).map_err(|_| invariant())?;
-        let key = format!("{}{}", locator.physical_prefix, MARKER_SUFFIX);
+        let key = locator.identity_marker_key();
         let result = self
             .client
             .inner()
@@ -117,7 +116,7 @@ impl R2ObjectStore {
         &self,
         locator: &R2BucketLocator,
     ) -> Result<Option<R2BucketIdentity>, PlatformError> {
-        let key = format!("{}{}", locator.physical_prefix, MARKER_SUFFIX);
+        let key = locator.identity_marker_key();
         let result = self
             .client
             .inner()
@@ -146,7 +145,7 @@ impl R2ObjectStore {
 
     /// Remove and confirm absence of the immutable identity marker.
     pub async fn delete_identity(&self, locator: &R2BucketLocator) -> Result<(), PlatformError> {
-        let key = format!("{}{}", locator.physical_prefix, MARKER_SUFFIX);
+        let key = locator.identity_marker_key();
         self.client
             .inner()
             .delete_object()

@@ -220,6 +220,24 @@ pub(crate) fn validate_authority_fd(file: &File) -> Result<(), PlatformError> {
     Ok(())
 }
 
+/// Validate an already-opened regular file that is readable authority but may be mode 0644.
+///
+/// Stock workerd can create opaque localDisk files with owner/group/world read bits. Snapshot
+/// staging always narrows the copied bytes to 0600 and still rejects any group/world-writable
+/// source.
+pub(crate) fn validate_owned_read_fd(file: &File) -> Result<(), PlatformError> {
+    let meta = file.metadata().map_err(|_| {
+        PlatformError::new(ErrorCode::PathInvalid, "failed to fstat opened owned file")
+    })?;
+    if !meta.file_type().is_file() {
+        return Err(PlatformError::new(
+            ErrorCode::PathInvalid,
+            "owned path must be a regular file",
+        ));
+    }
+    reject_group_world_writable(&meta, false)
+}
+
 pub(crate) fn fsync_dir(path: &Path) -> Result<(), PlatformError> {
     let dir = File::open(path).map_err(|_| {
         PlatformError::new(ErrorCode::PathInvalid, "failed to open parent directory")

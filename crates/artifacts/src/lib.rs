@@ -15,6 +15,7 @@ mod preflight;
 mod r2;
 mod r2_model;
 mod r2_preflight;
+mod snapshot;
 mod store;
 
 pub use artifact::{ARTIFACT_KEY_VERSION, ArtifactRef};
@@ -36,6 +37,7 @@ pub use r2_model::{
     R2Range, R2UploadSource, UserObjectKey,
 };
 pub use r2_preflight::{R2PreflightOutcome, preflight_r2};
+pub use snapshot::{CommittedSnapshot, IncompleteSnapshotCleanup, SnapshotObjectStore};
 pub use store::{ArtifactCandidate, ArtifactStore};
 
 #[cfg(any(test, feature = "test-support"))]

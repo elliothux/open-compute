@@ -11,6 +11,12 @@ use uuid::Uuid;
 
 const SCHEMA_VERSION: i64 = 1;
 const DATA_FORMAT: &str = "open-compute-scheduler-v1";
+
+/// Current scheduler database schema implemented by this binary.
+#[must_use]
+pub const fn current_scheduler_schema_version() -> i64 {
+    SCHEMA_VERSION
+}
 const MIGRATION: &str = include_str!("../scheduler-migrations/001_scheduler.sql");
 const MIGRATION_NAME: &str = "001_scheduler";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

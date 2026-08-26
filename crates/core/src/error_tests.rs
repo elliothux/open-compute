@@ -29,6 +29,15 @@ fn every_section_16_failure_has_a_stable_code() {
         ErrorCode::RuntimeExitedInFlight,
         ErrorCode::ProcessKilled,
         ErrorCode::DiskHardLimit,
+        ErrorCode::QuotaExceeded,
+        ErrorCode::AdmissionBusy,
+        ErrorCode::StoragePressure,
+        ErrorCode::PlatformUnavailable,
+        ErrorCode::SnapshotInvalid,
+        ErrorCode::RestoreInvalid,
+        ErrorCode::UpgradeRequired,
+        ErrorCode::ReleaseUnsupported,
+        ErrorCode::SupportBundleInvalid,
         ErrorCode::DataDirInUse,
     ] {
         assert!(!code.as_str().is_empty());
@@ -36,10 +45,23 @@ fn every_section_16_failure_has_a_stable_code() {
 }
 
 #[test]
-fn readiness_ready_is_the_only_ready_reason() {
+fn readiness_distinguishes_serviceable_degradation_from_required_failure() {
     assert!(ReadinessReason::Ready.is_ready());
+    assert!(ReadinessReason::SnapshotStale.is_ready());
+    assert!(ReadinessReason::DiskHardLimit.is_ready());
     assert!(!ReadinessReason::Starting.is_ready());
+    assert!(!ReadinessReason::S3Unavailable.is_ready());
     assert_eq!(ReadinessReason::S3Unavailable.as_str(), "S3_UNAVAILABLE");
+}
+
+#[test]
+fn system_scheduler_clock_produces_future_monotonic_deadlines() {
+    use crate::{SchedulerClock as _, SystemSchedulerClock};
+    use std::time::{Duration, Instant};
+
+    let before = Instant::now();
+    let deadline = SystemSchedulerClock.monotonic_deadline(Duration::from_millis(1));
+    assert!(deadline >= before);
 }
 
 #[test]
@@ -102,6 +124,70 @@ fn every_error_and_readiness_token_formats_stably() {
         ErrorCode::BindingProtocolError,
         ErrorCode::BindingLimitExceeded,
         ErrorCode::BindingResultUnknown,
+        ErrorCode::KvKeyInvalid,
+        ErrorCode::KvKeyTooLarge,
+        ErrorCode::KvValueTooLarge,
+        ErrorCode::KvMetadataInvalid,
+        ErrorCode::KvMetadataTooLarge,
+        ErrorCode::KvInvalidOptions,
+        ErrorCode::KvTooManyKeys,
+        ErrorCode::KvResponseTooLarge,
+        ErrorCode::KvCursorInvalid,
+        ErrorCode::KvBusy,
+        ErrorCode::KvStorageFull,
+        ErrorCode::KvUnavailable,
+        ErrorCode::KvCorrupt,
+        ErrorCode::KvResultUnknown,
+        ErrorCode::KvInternalProtocolError,
+        ErrorCode::R2KeyInvalid,
+        ErrorCode::R2KeyTooLarge,
+        ErrorCode::R2InvalidOptions,
+        ErrorCode::R2UnsupportedCondition,
+        ErrorCode::R2UnsupportedFeature,
+        ErrorCode::R2ObjectTooLarge,
+        ErrorCode::R2MetadataTooLarge,
+        ErrorCode::R2CursorInvalid,
+        ErrorCode::R2BucketNotEmpty,
+        ErrorCode::R2PreconditionFailed,
+        ErrorCode::R2Overloaded,
+        ErrorCode::R2ProviderUnavailable,
+        ErrorCode::R2ResultUnknown,
+        ErrorCode::R2ObjectMetadataInvalid,
+        ErrorCode::R2PrefixCollision,
+        ErrorCode::D1TypeError,
+        ErrorCode::D1SqlInvalid,
+        ErrorCode::D1ParameterMismatch,
+        ErrorCode::D1AuthorizerDenied,
+        ErrorCode::D1LimitError,
+        ErrorCode::D1Timeout,
+        ErrorCode::D1ColumnNotFound,
+        ErrorCode::D1InvalidBatch,
+        ErrorCode::D1SessionUnsupported,
+        ErrorCode::D1MigrationDrift,
+        ErrorCode::D1DatabaseFull,
+        ErrorCode::D1Overloaded,
+        ErrorCode::D1ResultUnknown,
+        ErrorCode::D1DatabaseCorrupt,
+        ErrorCode::D1IdentityMismatch,
+        ErrorCode::D1InternalProtocolError,
+        ErrorCode::DoNamespaceNotFound,
+        ErrorCode::DoIdInvalid,
+        ErrorCode::DoObjectDeleting,
+        ErrorCode::DoDeploymentStale,
+        ErrorCode::DoClassNotFound,
+        ErrorCode::DoStorageUnavailable,
+        ErrorCode::DoStorageLimit,
+        ErrorCode::DoDispatchTimeout,
+        ErrorCode::DoRpcUnsupported,
+        ErrorCode::DoRuntimeException,
+        ErrorCode::DoPlacementOptionUnsupported,
+        ErrorCode::DoNamespaceNotEmpty,
+        ErrorCode::DoInternalProtocolError,
+        ErrorCode::SchedulerUnavailable,
+        ErrorCode::SchedulerCorrupt,
+        ErrorCode::SchedulerBusy,
+        ErrorCode::SchedulerInternalProtocolError,
+        ErrorCode::DoAlarmIndexUnavailable,
         ErrorCode::Internal,
     ];
     for code in codes {
@@ -121,10 +207,27 @@ fn every_error_and_readiness_token_formats_stably() {
         ReadinessReason::DataDirInUse,
         ReadinessReason::DiskHardLimit,
         ReadinessReason::ConfigInvalid,
+        ReadinessReason::SchedulerUnavailable,
+        ReadinessReason::SchedulerBacklog,
+        ReadinessReason::S3Degraded,
+        ReadinessReason::DiskSoftLimit,
+        ReadinessReason::SnapshotStale,
         ReadinessReason::Ready,
     ];
     for reason in reasons {
         assert_eq!(reason.to_string(), reason.as_str());
-        assert_eq!(reason.is_ready(), reason == ReadinessReason::Ready);
+        assert_eq!(
+            reason.is_ready(),
+            matches!(
+                reason,
+                ReadinessReason::Ready
+                    | ReadinessReason::SchedulerUnavailable
+                    | ReadinessReason::SchedulerBacklog
+                    | ReadinessReason::S3Degraded
+                    | ReadinessReason::DiskSoftLimit
+                    | ReadinessReason::DiskHardLimit
+                    | ReadinessReason::SnapshotStale
+            )
+        );
     }
 }

@@ -2,7 +2,9 @@
 
 use crate::metrics::{KvGauge, KvGaugeGuard, KvStagingGauge, MetricsRegistry};
 use base64::Engine as _;
-use open_compute_core::{Clock, ErrorCode, KvConfig, PlatformError, ResourceAvailability};
+use open_compute_core::{
+    Clock, ErrorCode, KvConfig, OperationClass, PlatformError, ResourceAvailability,
+};
 use open_compute_storage::{
     AuthorizedBinding, KV_MAX_LIST_LIMIT, KV_MIN_CACHE_TTL_SECONDS, KV_MIN_EXPIRATION_TTL_SECONDS,
     KvEngine, KvEntry, KvEntryInfo, KvListRow, KvNamespaceRepository, KvPaths, KvPutOptions,
@@ -278,6 +280,23 @@ impl SqliteKvBindingExecutor {
         command: KvCommand,
     ) -> Result<KvCommandResult, PlatformError> {
         let result = (|| {
+            let reservation_bytes = match &command {
+                KvCommand::Put { value, .. } => Some(value.len() as u64 + 64 * 1024),
+                KvCommand::PutStaged { value, .. } => Some(value.length as u64 + 64 * 1024),
+                _ => None,
+            };
+            let admission = reservation_bytes
+                .map(|bytes| self.storage.reserve_mutation(OperationClass::Kv, bytes))
+                .transpose();
+            if let Some(metrics) = &self.metrics
+                && reservation_bytes.is_some()
+            {
+                metrics.observe_admission(
+                    OperationClass::Kv,
+                    admission.as_ref().err().map(PlatformError::code),
+                );
+            }
+            let _admission = admission?;
             let mutation = matches!(
                 &command,
                 KvCommand::Put { .. } | KvCommand::PutStaged { .. } | KvCommand::Delete { .. }
@@ -309,6 +328,9 @@ impl SqliteKvBindingExecutor {
             handle.touch(self.effective_now_ms());
             result
         })();
+        if let (Some(metrics), Err(error)) = (&self.metrics, &result) {
+            metrics.observe_product_error(OperationClass::Kv, error.code());
+        }
         self.isolate_failure(binding, &result);
         result
     }
@@ -349,6 +371,9 @@ impl SqliteKvBindingExecutor {
             handle.touch(self.effective_now_ms());
             result
         })();
+        if let (Some(metrics), Err(error)) = (&self.metrics, &result) {
+            metrics.observe_product_error(OperationClass::Kv, error.code());
+        }
         self.isolate_failure(binding, &result);
         result
     }

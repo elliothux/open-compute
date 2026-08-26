@@ -1,6 +1,6 @@
 //! P0.7 Durable Object namespace and object lifecycle control API.
 
-use crate::http::{HttpState, authorize};
+use crate::http::{HttpState, ProductErrorCode, authorize};
 use crate::metrics::{DoFacetReloadReason, DoReconcileState, MetricsRegistry};
 use crate::runtime_bridge::WorkerdTransport;
 use axum::Router;
@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use open_compute_core::{
     AccountId, BindingKind, DurableObjectId, DurableObjectState, DurableObjectsConfig, ErrorCode,
-    PlatformError, RequestId, ResourceId, WorkerId,
+    OperationClass, PlatformError, RequestId, ResourceId, WorkerId,
 };
 use open_compute_storage::{
     AuthorizedDurableObjectDelete, DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRecord,
@@ -344,6 +344,13 @@ async fn rename_namespace(
     if body.name.len() > api.config.max_namespace_name_bytes as usize {
         return error_response(invalid(), request_id);
     }
+    let _admission = match api
+        .storage
+        .reserve_mutation(OperationClass::DurableObjects, 64 * 1024)
+    {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
     let namespace =
         match DurableObjectRepository::new(&api.storage).get_namespace(account_id, namespace_id) {
             Ok(value) => value,
@@ -621,16 +628,23 @@ fn error_response(error: impl Into<PlatformError>, request_id: RequestId) -> Res
         ErrorCode::DoStorageUnavailable | ErrorCode::DoDispatchTimeout => {
             StatusCode::SERVICE_UNAVAILABLE
         }
+        ErrorCode::QuotaExceeded | ErrorCode::AdmissionBusy => StatusCode::TOO_MANY_REQUESTS,
+        ErrorCode::StoragePressure | ErrorCode::DiskHardLimit | ErrorCode::DoStorageLimit => {
+            StatusCode::INSUFFICIENT_STORAGE
+        }
+        ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::ResourceNameConflict => StatusCode::CONFLICT,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
-    json(
+    let mut response = json(
         &serde_json::json!({
             "ok": false,
             "error": { "code": code.as_str(), "message": "Durable Object operation failed", "requestId": request_id }
         }),
         status,
-    )
+    );
+    response.extensions_mut().insert(ProductErrorCode(code));
+    response
 }
 
 fn invalid() -> PlatformError {
