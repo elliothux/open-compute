@@ -70,7 +70,9 @@ platformd --config /abs/config.toml run
 ./scripts/dev.sh doctor --full
 ```
 
-测试与 Gate 仍使用测试进程内的 SigV4 S3 provider：
+测试与 Gate 仍使用测试进程内的 SigV4 S3 provider。开发、审查和修复期间只跑一轮相关 Gate；
+实现收尾、源码冻结后才跑最终三轮验收和完整 coverage。单轮命令与旧入口限制见
+[Gate 验证节奏](docs/testing.md)。下面列出完整检查和最终 Gate 入口，不是每次中间改动都要重跑的清单：
 
 ```sh
 cargo fmt --all --check

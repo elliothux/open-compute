@@ -1,6 +1,6 @@
 # P2.4：Workflow Core 详细设计
 
-> 状态：待实现；必须在 P2.3 Queue Consumer/Cron Exit Gate 通过后开始
+> 状态：已实现并完成最终验收；P2.4 为 Conditional Go（DO 内 create 按 output-gate 结论 fail closed）。最终结论与证据见 [P2.4 Gate 结果](./p2-4-gate-results.md)。
 >
 > 前置基线：P2.1、P2.2 已由用户确认跑通；P2.3 按
 > [Queue Consumer 与 Cron 详细设计](./p2-3-queue-consumer-cron.md)完成后，Workflow 才能复用
@@ -723,7 +723,11 @@ Private envelope：
 }
 ```
 
-Run token只存在 trusted dispatcher props/private RPC，不传给 tenant `event` 或 `step context`。
+Run token 只存在 system isolate 的 trusted dispatcher/controller，不传给 tenant `event` 或 `step context`。
+step token 同样不跨入 tenant realm；controller 持有当前顺序 step 的 grant，替 tenant facade 注入
+commit token，只返回无令牌的执行/replay verdict。不能仅依赖闭包隐藏异步返回值：恶意 tenant 可以
+修改 Promise intrinsics 观察它。controller 是 request-scoped native `RpcTarget`，调用结束显式销毁，
+丢失后只能依靠 SQLite lease recovery，不形成内存 authority。
 
 ### 10.2 realm 内流程
 
@@ -1167,6 +1171,10 @@ Authenticated inspect返回：
 - coverage与results文档。
 
 ## 20. 测试矩阵
+
+开发、审查与修复期间每次只跑一轮相关 Gate：`OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-4.sh`。
+实现收尾、源码冻结后才运行最终三轮及相关 aggregate/coverage；若还需改代码，先回到单轮反馈，
+不要在中间迭代重复整条历史回归链。具体命令和证据口径见 [Gate 验证节奏](./testing.md)。
 
 ### 20.1 Definition/binding
 

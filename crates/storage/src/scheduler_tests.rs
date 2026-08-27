@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "scheduler/workflow/migration_tests.rs"]
+mod workflow_migration;
 use open_compute_core::{
     AccountId, CronActivationId, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId, WorkerId,
 };
@@ -297,7 +300,7 @@ fn migrates_and_reopens_the_independent_database() {
 #[test]
 fn scheduler_registry_is_contiguous_and_future_schema_fails_closed() {
     let registry = scheduler_migration_registry();
-    assert_eq!(registry.len(), 4);
+    assert_eq!(registry.len(), 5);
     assert_eq!(registry[0].0, 1);
     assert_eq!(registry[0].1, "001_scheduler");
     assert_eq!(registry[1].0, 2);
@@ -306,13 +309,15 @@ fn scheduler_registry_is_contiguous_and_future_schema_fails_closed() {
     assert_eq!(registry[2].1, "003_queue_consumer");
     assert_eq!(registry[3].0, 4);
     assert_eq!(registry[3].1, "004_cron");
+    assert_eq!(registry[4].0, 5);
+    assert_eq!(registry[4].1, "005_workflow_core");
 
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("scheduler.sqlite");
     let store = open_store(&temp, 10);
     drop(store);
     let connection = Connection::open(&path).unwrap();
-    connection.pragma_update(None, "user_version", 5).unwrap();
+    connection.pragma_update(None, "user_version", 6).unwrap();
     drop(connection);
     assert_eq!(
         SchedulerStore::open(&path, 100, 20).unwrap_err().code(),
@@ -1273,7 +1278,9 @@ fn explicit_corrupt_recovery_quarantines_files_and_refuses_healthy_authority() {
         free_space_soft_bytes: 2,
         free_space_hard_bytes: 1,
     };
-    let data_dir = crate::DataDir::acquire(&config).unwrap();
+    let storage =
+        crate::PlatformStorage::bootstrap(&config, &open_compute_core::SystemClock).unwrap();
+    let data_dir = storage.data_dir();
     let scheduler = data_dir.ensure_scheduler_db().unwrap();
     std::fs::write(&scheduler, b"not a sqlite database").unwrap();
     let wal = std::path::PathBuf::from(format!("{}-wal", scheduler.display()));

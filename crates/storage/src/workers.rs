@@ -9,6 +9,9 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use uuid::Uuid;
 
+mod deployment_create;
+pub use deployment_create::NewDeploymentProducts;
+
 /// Current immutable loader descriptor schema.
 pub const LOADER_SCHEMA_VERSION: i64 = 1;
 
@@ -151,6 +154,8 @@ pub struct DeploymentSnapshot {
     pub bindings: Vec<crate::DeploymentBindingRecord>,
     /// Immutable Queue producer bindings ordered by env name.
     pub queue_bindings: Vec<crate::QueueProducerBindingRecord>,
+    /// Immutable Workflow caller bindings ordered by env name.
+    pub workflow_bindings: Vec<crate::WorkflowBindingRecord>,
 }
 
 /// Route kind supported by P0.2.
@@ -448,197 +453,6 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Allocate the next Worker-local version and insert all immutable rows atomically.
-    pub fn insert_staging_deployment(
-        &self,
-        input: &NewDeployment,
-    ) -> Result<DeploymentRecord, PlatformError> {
-        self.insert_staging_deployment_with_bindings(input, &[])
-    }
-
-    /// Insert deployment metadata, env, and immutable resource bindings atomically.
-    pub fn insert_staging_deployment_with_bindings(
-        &self,
-        input: &NewDeployment,
-        bindings: &[crate::NewDeploymentBinding],
-    ) -> Result<DeploymentRecord, PlatformError> {
-        self.insert_staging_deployment_with_bindings_and_limit(input, bindings, u32::MAX)
-    }
-
-    /// Insert deployment metadata while atomically enforcing the Worker retention ceiling.
-    pub fn insert_staging_deployment_with_bindings_and_limit(
-        &self,
-        input: &NewDeployment,
-        bindings: &[crate::NewDeploymentBinding],
-        max_retained: u32,
-    ) -> Result<DeploymentRecord, PlatformError> {
-        self.insert_staging_deployment_with_all_bindings_and_limit(
-            input,
-            bindings,
-            &[],
-            max_retained,
-        )
-    }
-
-    /// Insert deployment metadata and both frozen resource and Queue bindings atomically.
-    pub fn insert_staging_deployment_with_all_bindings_and_limit(
-        &self,
-        input: &NewDeployment,
-        bindings: &[crate::NewDeploymentBinding],
-        queue_bindings: &[crate::NewQueueProducerBinding],
-        max_retained: u32,
-    ) -> Result<DeploymentRecord, PlatformError> {
-        self.insert_staging_deployment_with_products_and_limit(
-            input,
-            bindings,
-            queue_bindings,
-            &[],
-            None,
-            max_retained,
-        )
-    }
-
-    /// Insert deployment metadata, bindings, Queue consumers, and Cron declarations atomically.
-    pub fn insert_staging_deployment_with_products_and_limit(
-        &self,
-        input: &NewDeployment,
-        bindings: &[crate::NewDeploymentBinding],
-        queue_bindings: &[crate::NewQueueProducerBinding],
-        queue_consumers: &[crate::NewQueueConsumerDeclaration],
-        cron: Option<&crate::NewCronConfig>,
-        max_retained: u32,
-    ) -> Result<DeploymentRecord, PlatformError> {
-        if max_retained == 0 {
-            return Err(PlatformError::new(
-                ErrorCode::LimitInvalid,
-                "deployment count limit must be greater than zero",
-            ));
-        }
-        let flags_json = serde_json::to_vec(&input.compatibility_flags).map_err(|_| invariant())?;
-        let limits_json = serde_json::to_vec(&input.limits).map_err(|_| invariant())?;
-        self.db.with_immediate(|tx| {
-            require_live_worker(tx, input.account_id, input.worker_id)?;
-            let retained_count: i64 = tx
-                .query_row(
-                    "SELECT COUNT(*) FROM worker_deployments
-                     WHERE worker_id = ?1 AND deleted_at_ms IS NULL",
-                    [input.worker_id.to_string()],
-                    |row| row.get(0),
-                )
-                .map_err(|_| db_error())?;
-            if retained_count >= i64::from(max_retained) {
-                return Err(PlatformError::new(
-                    ErrorCode::QuotaExceeded,
-                    "Worker deployment count quota was exceeded",
-                ));
-            }
-            let version: i64 = tx
-                .query_row(
-                    "SELECT COALESCE(MAX(version_number), 0) + 1
-                 FROM worker_deployments WHERE worker_id = ?1",
-                    [input.worker_id.to_string()],
-                    |row| row.get(0),
-                )
-                .map_err(|_| db_error())?;
-            tx.execute(
-                "INSERT INTO worker_deployments
-                 (id, worker_id, version_number, state, artifact_sha256, artifact_size,
-                  artifact_schema_version, main_module, compatibility_date,
-                  compatibility_flags_json, limits_json, worker_code_sha256,
-                  loader_schema_version, created_at_ms, ready_at_ms, rejected_at_ms,
-                  rejection_code, deleted_at_ms)
-                 VALUES (?1, ?2, ?3, 'staging', ?4, ?5, ?6, ?7, ?8,
-                         ?9, ?10, ?11, ?12, ?13, NULL, NULL, NULL, NULL)",
-                params![
-                    input.id.to_string(),
-                    input.worker_id.to_string(),
-                    version,
-                    input.artifact_sha256.as_slice(),
-                    i64::try_from(input.artifact_size).map_err(|_| PlatformError::new(
-                        ErrorCode::BundleTooLarge,
-                        "bundle size exceeds SQLite integer range",
-                    ))?,
-                    i64::from(input.artifact_schema_version),
-                    input.main_module,
-                    input.compatibility_date,
-                    flags_json,
-                    limits_json,
-                    input.worker_code_sha256.as_slice(),
-                    LOADER_SCHEMA_VERSION,
-                    input.now_ms,
-                ],
-            )
-            .map_err(|_| db_error())?;
-            for (name, value) in &input.vars {
-                tx.execute(
-                    "INSERT INTO deployment_vars (deployment_id, name, value_json)
-                     VALUES (?1, ?2, ?3)",
-                    params![input.id.to_string(), name, value],
-                )
-                .map_err(|_| db_error())?;
-            }
-            for secret in input.secrets.values() {
-                tx.execute(
-                    "INSERT INTO deployment_secrets
-                     (deployment_id, name, revision_id, key_id, algorithm, nonce, ciphertext)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        input.id.to_string(),
-                        secret.name,
-                        secret.revision_id,
-                        secret.envelope.key_id,
-                        secret.envelope.algorithm,
-                        secret.envelope.nonce,
-                        secret.envelope.ciphertext,
-                    ],
-                )
-                .map_err(|_| db_error())?;
-            }
-            crate::bindings::insert_staging_bindings(tx, input.id, bindings, input.now_ms)?;
-            crate::queues::insert_staging_bindings(tx, input.id, queue_bindings, input.now_ms)?;
-            crate::queue_consumers::insert_staging_declarations(
-                tx,
-                input.id,
-                queue_consumers,
-                input.now_ms,
-            )?;
-            if let Some(cron) = cron {
-                crate::cron::insert_staging_config(tx, input.id, cron, input.now_ms)?;
-            }
-            audit(
-                tx,
-                input.account_id,
-                "deployment.create",
-                "deployment",
-                &input.id.to_string(),
-                input.request_id,
-                format!("{{\"state\":\"staging\",\"version\":{version}}}").as_bytes(),
-                input.now_ms,
-            )?;
-            Ok(DeploymentRecord {
-                id: input.id,
-                worker_id: input.worker_id,
-                version_number: u64::try_from(version).map_err(|_| invariant())?,
-                state: DeploymentState::Staging,
-                artifact_sha256: input.artifact_sha256,
-                artifact_size: input.artifact_size,
-                artifact_schema_version: input.artifact_schema_version,
-                main_module: input.main_module.clone(),
-                compatibility_date: input.compatibility_date.clone(),
-                compatibility_flags: input.compatibility_flags.clone(),
-                limits: input.limits.clone(),
-                worker_code_sha256: input.worker_code_sha256,
-                loader_schema_version: u32::try_from(LOADER_SCHEMA_VERSION)
-                    .map_err(|_| invariant())?,
-                created_at_ms: input.now_ms,
-                ready_at_ms: None,
-                rejected_at_ms: None,
-                rejection_code: None,
-                deleted_at_ms: None,
-            })
-        })
-    }
-
     /// Transition staging to validating.
     pub fn begin_validation(&self, deployment_id: DeploymentId) -> Result<(), PlatformError> {
         self.transition(
@@ -881,6 +695,10 @@ impl<'a> WorkerRepository<'a> {
                 secrets,
                 bindings,
                 queue_bindings,
+                workflow_bindings: crate::workflows::bindings::read_workflow_bindings(
+                    conn,
+                    deployment_id,
+                )?,
             })
         })
     }
@@ -1664,6 +1482,11 @@ impl<'a> WorkerRepository<'a> {
             )
             .map_err(|_| db_error())?;
             tx.execute(
+                "DELETE FROM workflow_bindings WHERE deployment_id = ?1",
+                [deployment_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
                 "DELETE FROM deployment_bindings WHERE deployment_id = ?1",
                 [deployment_id.to_string()],
             )
@@ -1791,6 +1614,11 @@ impl<'a> WorkerRepository<'a> {
                 .map_err(|_| db_error())?;
                 tx.execute(
                     "DELETE FROM queue_producer_bindings WHERE deployment_id = ?1",
+                    [&deployment],
+                )
+                .map_err(|_| db_error())?;
+                tx.execute(
+                    "DELETE FROM workflow_bindings WHERE deployment_id = ?1",
                     [&deployment],
                 )
                 .map_err(|_| db_error())?;

@@ -78,6 +78,8 @@ pub struct SchedulerInspection {
     pub queue_consumers: QueueConsumerInspectionSummary,
     /// Cron schedule and logical-run authority summary.
     pub cron: CronInspectionSummary,
+    /// Durable Workflow states and retained logical bytes, excluding tenant content.
+    pub workflow: WorkflowInspection,
     /// Invalid claim/token invariant rows found by a bounded aggregate query.
     pub invalid_rows: u64,
 }
@@ -330,7 +332,9 @@ pub fn inspect_scheduler_db(
         .saturating_add(queue_consumers.orphan_batches)
         .saturating_add(queue_consumers.unavailable_dlq_targets)
         .saturating_add(cron.parser_version_mismatches)
-        .saturating_add(cron.invalid_next_fire);
+        .saturating_add(cron.invalid_next_fire)
+        .saturating_add(workflow::workflow_invalid_rows(&connection)?);
+    let workflow = workflow::workflow_inspection_connection(&connection, now_ms)?;
     Ok(SchedulerInspection {
         schema_version,
         data_format,
@@ -340,6 +344,7 @@ pub fn inspect_scheduler_db(
         queue,
         queue_consumers,
         cron,
+        workflow,
         invalid_rows,
     })
 }

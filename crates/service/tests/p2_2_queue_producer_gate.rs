@@ -102,6 +102,7 @@ async fn p2_2_real_queue_producer_matrix() {
                 None,
                 DurableObjectsConfig::default(),
                 open_compute_core::QueuesConfig::default(),
+                open_compute_core::WorkflowsConfig::default(),
                 Some(scheduler),
                 async move {
                     let _ = binding_shutdown.changed().await;

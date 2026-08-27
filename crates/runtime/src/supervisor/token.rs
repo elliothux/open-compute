@@ -79,29 +79,62 @@ impl GenerationAuthRegistry {
     /// Authenticate a token and bind its first bounded process-generation claim.
     /// Subsequent requests must present the same claim.
     pub fn authorize(&self, token: &str, generation: &str) -> bool {
+        self.with_authorized(token, generation, || ()).is_some()
+    }
+
+    /// Execute a short synchronous authority transaction while generation rotation is fenced.
+    /// The callback must not await or re-enter this registry.
+    pub fn with_authorized<T>(
+        &self,
+        token: &str,
+        generation: &str,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
         if generation.is_empty()
             || generation.len() > 128
             || generation.bytes().any(|byte| byte.is_ascii_control())
         {
-            return false;
+            return None;
         }
         let mut guard = self
             .active
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(active) = guard.as_mut() else {
-            return false;
-        };
+        let active = guard.as_mut()?;
         if !constant_time_equal(token.as_bytes(), active.token.expose().as_bytes()) {
-            return false;
+            return None;
         }
         match &active.claimed_generation {
-            Some(claimed) => constant_time_equal(generation.as_bytes(), claimed.as_bytes()),
+            Some(claimed) if !constant_time_equal(generation.as_bytes(), claimed.as_bytes()) => {
+                return None;
+            }
+            Some(_) => {}
             None => {
                 active.claimed_generation = Some(generation.to_owned());
-                true
             }
         }
+        Some(operation())
+    }
+
+    /// Commit a host-owned response only while its exact request credential is still current.
+    /// The callback must be synchronous, bounded, and must not re-enter this registry.
+    pub fn with_current<T>(
+        &self,
+        credential: &GenerationCredential,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let guard = self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let active = guard.as_ref()?;
+        if !constant_time_equal(
+            active.token.expose().as_bytes(),
+            credential.expose().as_bytes(),
+        ) {
+            return None;
+        }
+        Some(operation())
     }
 
     /// Non-secret active token fingerprint for tests and diagnostics.

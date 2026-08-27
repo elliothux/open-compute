@@ -29,9 +29,10 @@
 - Coverage setup (portable): `cargo install cargo-llvm-cov --locked`
 - Coverage run (from the repository root): `./scripts/coverage.sh`
 - Coverage reports: `target/llvm-cov/html/index.html`, `target/llvm-cov/lcov.info`, and `target/llvm-cov/summary.json`
-- G0 stock-workerd regression: `./poc/g0 test all`
-- P0.1 process Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-1.sh`
-- P0.2 Worker Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-2.sh`
+- Development Gate: one relevant round per iteration; commands and legacy runner limits are documented in `docs/testing.md`.
+- Final G0 stock-workerd regression: `./poc/g0 test all`
+- Final P0.1 process Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-1.sh`
+- Final P0.2 Worker Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-2.sh`
 
 ## Architecture and Ownership
 
@@ -102,6 +103,8 @@
 
 ## Testing
 
+- While implementation, review, or fixes are still in progress, run one relevant Gate round per iteration. Do not repeatedly run three-round or recursively chained historical aggregates during development. Use a supported single-round option or the relevant test target directly; never assume an environment variable changes a runner that does not read it. See `docs/testing.md`.
+- Run the required three-round final Gates only after implementation and review/fix work are complete and the source is frozen for acceptance. If a failure requires code changes, return to focused single-round validation, then rerun the affected final checks once the fix is ready. A one-round development pass is not final aggregate evidence.
 - Put focused unit tests beside their owning module and cross-crate/process behavior in crate integration tests. Test public behavior and invariants, not private implementation details.
 - Add focused success and failure-path tests with behavior changes. Dedicated `tests/**`, `src/tests.rs`, nested `src/**/*_tests.rs`, `src/mock_s3.rs`, and the supervisor fixture are excluded from line coverage because they contain test or mock code; never place production logic in an excluded file, exclude any production source, add coverage-only branches, or weaken an assertion merely to make a metric or Gate pass.
 - Security, persistence, protocol, and process-lifecycle changes require regression coverage for success and failure paths, including restart/crash behavior when relevant.
@@ -120,7 +123,7 @@
 
 ## Verification and Git
 
-- Before finishing code changes, remove dead code and run format, clippy, the workspace test suite, no-default-features check, metadata, dependency-boundary check, and `./scripts/coverage.sh`. Workspace Rust line coverage must remain at or above 90.00%; never lower the threshold. Coverage includes real-runtime P0 tests but does not replace the relevant three-round P0/G0 Gate for runtime, process, persistence, Worker, routing, egress, packaging, or security changes.
+- After implementation and review/fix work are complete, remove dead code and run final acceptance: format, clippy, the workspace test suite, no-default-features check, metadata, dependency-boundary check, and `./scripts/coverage.sh`. Workspace Rust line coverage must remain at or above 90.00%; never lower the threshold. Coverage includes real-runtime P0 tests but does not replace the relevant final three-round P0/G0 Gate for runtime, process, persistence, Worker, routing, egress, packaging, or security changes. Do not repeat this full acceptance loop for each intermediate edit.
 - Documentation-only and policy-only edits do not require Rust checks; run `git diff --check` and verify commands, paths, and generated-file claims against the repository.
 - If a required check cannot run, report the exact reason and the next best evidence. Never report a command as passing before it exits successfully.
 - Keep diffs focused and preserve unrelated user changes. Do not rewrite Git history, delete retained failure evidence, or clean the workspace unless explicitly requested.

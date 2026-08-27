@@ -1,21 +1,8 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
-import r2FacadeSource from "r2-facade-source";
-import d1FacadeSource from "d1-facade-source";
-import doFacadeSource from "do-facade-source";
-import doIdCodecSource from "do-id-codec-source";
-import doAlarmShimSource from "do-alarm-shim-source";
-import queueFacadeSource from "queue-facade-source";
-import {
-  DO_ALARM_SHIM_MODULE,
-  D1_FACADE_MODULE,
-  DO_FACADE_MODULE,
-  DO_ID_CODEC_MODULE,
-  LOADED_ISOLATE_RESERVED_MODULES,
-  LOADED_ISOLATE_WRAPPER_MODULE,
-  QUEUE_FACADE_MODULE,
-  R2_FACADE_MODULE,
-  generateBindingWrapper,
-} from "./loaded-isolate-wrapper-generator.js";
+import { bytes, modulesFor } from "./loaded-isolate-modules.js";
+export { modulesFor } from "./loaded-isolate-modules.js";
+import { handleWorkflow } from "./workflow-host.js";
+export { WorkflowBindingTransport } from "./workflow-host.js";
 import { makeR2TransportBase } from "./r2-transport.js";
 import { makeD1TransportBase } from "./d1-transport.js";
 
@@ -108,84 +95,6 @@ function classify(error) {
     return ["BUNDLE_RUNTIME_INVALID", 422];
   }
   return ["RUNTIME_INTERNAL", 500];
-}
-
-function bytes(base64) {
-  const binary = atob(base64);
-  const value = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) value[i] = binary.charCodeAt(i);
-  return value;
-}
-
-function moduleValue(module) {
-  const raw = bytes(module.bytesBase64);
-  switch (module.type) {
-    case "esModule":
-      return { js: new TextDecoder("utf-8", { fatal: true }).decode(raw) };
-    case "commonJsModule":
-      return { cjs: new TextDecoder("utf-8", { fatal: true }).decode(raw) };
-    case "text":
-      return { text: new TextDecoder("utf-8", { fatal: true }).decode(raw) };
-    case "json":
-      return { json: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw)) };
-    case "data":
-      return { data: raw };
-    case "wasm":
-      return { wasm: raw };
-    default:
-      throw new Error("unsupported module representation");
-  }
-}
-
-export function modulesFor(snapshot, validation, entrypointName, durableObject = false) {
-  const modules = {};
-  for (const module of snapshot.modules) modules[module.name] = moduleValue(module);
-  const r2Bindings = (snapshot.bindings || [])
-    .filter((binding) => binding.kind === "r2_bucket" && binding.capabilityVersion === 1)
-    .map((binding) => binding.name);
-  const d1Bindings = (snapshot.bindings || [])
-    .filter((binding) => binding.kind === "d1_database" && binding.capabilityVersion === 1)
-    .map((binding) => binding.name);
-  const doBindings = (snapshot.bindings || [])
-    .filter((binding) => binding.kind === "do_namespace" && binding.capabilityVersion === 1)
-    .map((binding) => binding.name);
-  const queueBindings = (snapshot.bindings || [])
-    .filter((binding) => binding.kind === "queue_producer" && binding.capabilityVersion === 1)
-    .map((binding) => binding.name);
-  for (const reserved of LOADED_ISOLATE_RESERVED_MODULES) {
-    if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
-      throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
-    }
-  }
-  if (r2Bindings.length) modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
-  if (d1Bindings.length) modules[D1_FACADE_MODULE] = { js: d1FacadeSource };
-  if (doBindings.length) {
-    modules[DO_ID_CODEC_MODULE] = { js: doIdCodecSource };
-    modules[DO_FACADE_MODULE] = { js: doFacadeSource };
-  }
-  if (queueBindings.length) modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
-  if (entrypointName && durableObject) {
-    modules[DO_ALARM_SHIM_MODULE] = { js: doAlarmShimSource };
-  }
-  modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
-    js: generateBindingWrapper(
-      snapshot.mainModule,
-      r2Bindings,
-      d1Bindings,
-      doBindings,
-      entrypointName,
-      durableObject,
-      queueBindings,
-    ),
-  };
-  let mainModule = LOADED_ISOLATE_WRAPPER_MODULE;
-  if (validation) {
-    const wrapper = "__open_compute_validation__.js";
-    const exportName = entrypointName || "default";
-    modules[wrapper] = { js: `import * as tenant from ${JSON.stringify(`./${mainModule}`)};\nif (!(${JSON.stringify(exportName)} in tenant)) throw new Error(\"missing entrypoint\");\nexport default { fetch() { return new Response(\"open-compute-validation-v1\"); } };` };
-    return { modules, mainModule: wrapper };
-  }
-  return { modules, mainModule };
 }
 
 function assertEnvelope(request, validation, entrypointName) {
@@ -551,7 +460,11 @@ async function decodeSingleEntry(response) {
   return { value, metadata, expiration: expiration < 0n ? null : Number(expiration) };
 }
 
-function trustedBindingProps(descriptor, deploymentId, routeGeneration, accountId, workerId) {
+function trustedBindingProps(descriptor, deploymentId, routeGeneration, accountId, workerId, durableObject) {
+  if (descriptor.kind === "workflow") {
+    return Object.freeze({ bindingId: descriptor.bindingId, deploymentId,
+      descriptorSha256: descriptor.descriptorSha256, durableObject });
+  }
   if (descriptor.kind === "queue_producer") {
     return Object.freeze({
       accountId,
@@ -954,7 +867,7 @@ export class AlarmIndex extends WorkerEntrypoint {
   }
 }
 
-function makeBinding(ctx, descriptor, deploymentId, routeGeneration, accountId, workerId, policy) {
+function makeBinding(ctx, descriptor, deploymentId, routeGeneration, accountId, workerId, policy, durableObject) {
   const capability = `${descriptor.kind}@${descriptor.capabilityVersion}`;
   const props = trustedBindingProps(
     descriptor,
@@ -962,6 +875,7 @@ function makeBinding(ctx, descriptor, deploymentId, routeGeneration, accountId, 
     routeGeneration,
     accountId,
     workerId,
+    durableObject,
   );
   switch (capability) {
     case "kv_namespace@1":
@@ -978,6 +892,8 @@ function makeBinding(ctx, descriptor, deploymentId, routeGeneration, accountId, 
       });
     case "queue_producer@1":
       return ctx.exports.QueueTransport({ props });
+    case "workflow@1":
+      return ctx.exports.WorkflowBindingTransport({ props });
     case "do_namespace@1": {
       if (!/^[0-9a-f]{16}$/.test(descriptor.namespacePrefix)
           || typeof descriptor.namespaceNameKey !== "string") {
@@ -996,7 +912,7 @@ function makeBinding(ctx, descriptor, deploymentId, routeGeneration, accountId, 
   }
 }
 
-export function tenantEnv(snapshot, ctx, deploymentId, policy) {
+export function tenantEnv(snapshot, ctx, deploymentId, policy, durableObject = false) {
   const env = { ...snapshot.env };
   const [accountId, workerId] = snapshot.loaderKey.split("/");
   for (const descriptor of snapshot.bindings || []) {
@@ -1011,6 +927,7 @@ export function tenantEnv(snapshot, ctx, deploymentId, policy) {
       accountId,
       workerId,
       policy,
+      durableObject,
     );
   }
   return env;
@@ -1267,6 +1184,9 @@ async function validateDurableObjectClass(request, env) {
 export default {
   async fetch(request, env, ctx) {
     const path = new URL(request.url).pathname;
+    if (request.method === "POST" && ["/internal/workflow", "/internal/validate-workflow"].includes(path)) {
+      return handleWorkflow(request, env, ctx, path === "/internal/validate-workflow");
+    }
     if (request.method === "POST" && path === "/internal/dispatch") return handle(request, env, ctx, false);
     if (request.method === "POST" && path === "/internal/queue") {
       return handleQueue(request, env, ctx);

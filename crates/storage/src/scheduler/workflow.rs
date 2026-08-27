@@ -1,0 +1,160 @@
+//! Durable sequential Workflow runs and immutable step history.
+
+use super::SchedulerStore;
+use crate::{WorkflowInstanceIdentity, WorkflowTarget};
+use open_compute_core::{
+    ErrorCode, PlatformError, WorkflowFence, WorkflowInstanceId, WorkflowToken, WorkflowsConfig,
+};
+use rand::TryRngCore as _;
+use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, params};
+use sha2::{Digest as _, Sha256};
+
+#[path = "workflow/doctor.rs"]
+mod doctor;
+#[path = "workflow/helpers.rs"]
+mod helpers;
+pub use doctor::{WorkflowDatabaseInspection, inspect_workflow_databases};
+#[path = "workflow/inspection.rs"]
+mod inspection;
+pub(super) use inspection::{workflow_inspection_connection, workflow_invalid_rows};
+#[path = "workflow/model.rs"]
+mod model;
+#[path = "workflow/runs.rs"]
+mod runs;
+#[path = "workflow/steps.rs"]
+mod steps;
+use helpers::*;
+pub use model::*;
+
+#[cfg(test)]
+#[path = "workflow/workflow_tests.rs"]
+mod tests;
+
+impl SchedulerStore {
+    /// Insert durable input after control reserved the immutable target and public identity.
+    /// A repeat is accepted only if every immutable field and input byte matches.
+    pub fn insert_workflow(
+        &self,
+        identity: &WorkflowInstanceIdentity,
+        input: &str,
+        limits: &WorkflowsConfig,
+    ) -> Result<(), PlatformError> {
+        limits.validate()?;
+        open_compute_core::workflow::validate_workflow_instance_id(&identity.external_instance_id)?;
+        let input =
+            open_compute_core::workflow::canonical_json(input, ErrorCode::WorkflowPayloadTooLarge)?;
+        if identity.instance_generation != 1
+            || crate::workflows::helpers::version_digest(&identity.target)?
+                != identity.target.descriptor_sha256
+        {
+            return Err(error(ErrorCode::WorkflowInvariantViolation));
+        }
+        let mut conn = self.lock()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        if let Some(existing) = tx
+            .query_row(
+                &format!("{INSTANCE_SELECT} WHERE id=?1"),
+                [identity.instance_id.to_string()],
+                instance_row,
+            )
+            .optional()
+            .map_err(sql_error)?
+        {
+            if existing.identity != *identity || existing.input_json != input {
+                return Err(error(ErrorCode::WorkflowInvariantViolation));
+            }
+            return Ok(());
+        }
+        let (total,active,per_definition): (u64,u64,u64) = tx.query_row(
+            "SELECT COUNT(*),coalesce(SUM(state IN ('queued','running')),0),coalesce(SUM(definition_id=?2),0)
+             FROM workflow_instances WHERE account_id=?1",
+            params![identity.target.account_id.to_string(),identity.target.definition_id.to_string()],
+            |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).map_err(sql_error)?;
+        if total >= u64::from(limits.max_instances_per_account)
+            || active >= u64::from(limits.max_active_per_account)
+            || per_definition >= u64::from(limits.max_instances_per_definition)
+        {
+            return Err(error(ErrorCode::WorkflowStateQuotaExceeded));
+        }
+        let target = &identity.target;
+        capacity(
+            &tx,
+            target.account_id,
+            0,
+            input.len() + failure_json().len(),
+            false,
+            limits,
+        )?;
+        tx.execute("INSERT INTO workflow_instances(id,account_id,definition_id,definition_name,external_instance_id,
+            version_id,worker_id,deployment_id,worker_code_sha256,loader_schema_version,capability_version,descriptor_sha256,
+            class_name,creation_nonce,instance_generation,state,input_json,next_run_at_ms,state_bytes,created_at_ms,updated_at_ms)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,1,'queued',?15,?16,?17,?16,?16)",
+            params![identity.instance_id.to_string(),target.account_id.to_string(),target.definition_id.to_string(),target.definition_name,
+                identity.external_instance_id,target.version_id.to_string(),target.worker_id.to_string(),target.deployment_id.to_string(),
+                target.worker_code_sha256.as_slice(),target.loader_schema_version,target.capability_version,target.descriptor_sha256.as_slice(),
+                target.class_name,identity.creation_nonce.as_bytes().as_slice(),input.as_bytes(),identity.created_at_ms,input.len()])
+            .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)
+    }
+
+    /// Read authoritative scheduler state without reading any step history.
+    pub fn workflow_instance(
+        &self,
+        id: WorkflowInstanceId,
+    ) -> Result<Option<WorkflowInstanceRecord>, PlatformError> {
+        self.lock()?
+            .query_row(
+                &format!("{INSTANCE_SELECT} WHERE id=?1"),
+                [id.to_string()],
+                instance_row,
+            )
+            .optional()
+            .map_err(sql_error)
+    }
+
+    /// Read a bounded reconciliation page, including terminal history for referrer checks.
+    pub fn workflow_instance_ids(
+        &self,
+        after: Option<WorkflowInstanceId>,
+        limit: u32,
+    ) -> Result<Vec<WorkflowInstanceId>, PlatformError> {
+        bounded(limit)?;
+        let conn = self.lock()?;
+        let mut statement = conn
+            .prepare("SELECT id FROM workflow_instances WHERE id>?1 ORDER BY id LIMIT ?2")
+            .map_err(sql_error)?;
+        statement
+            .query_map(
+                params![after.map_or_else(String::new, |id| id.to_string()), limit],
+                |row| {
+                    row.get::<_, String>(0)?
+                        .parse()
+                        .map_err(|_| rusqlite::Error::InvalidQuery)
+                },
+            )
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    /// Preflight state capacity before taking a control reservation; insertion rechecks atomically.
+    pub fn check_workflow_create_capacity(
+        &self,
+        account: open_compute_core::AccountId,
+        input_bytes: usize,
+        limits: &WorkflowsConfig,
+    ) -> Result<(), PlatformError> {
+        limits.validate()?;
+        let conn = self.lock()?;
+        capacity(
+            &conn,
+            account,
+            0,
+            input_bytes + failure_json().len(),
+            false,
+            limits,
+        )
+    }
+}

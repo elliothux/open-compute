@@ -489,10 +489,8 @@ fn scheduler_pool_defaults_preserve_p0_8_config_and_enable_p2_3_products() {
     assert!(queue.scheduler.pool(SchedulerKind::Queue).enabled);
     let cron = parse_ok("[scheduler.pools.cron]\nenabled = true\n");
     assert!(cron.scheduler.pool(SchedulerKind::Cron).enabled);
-    assert_eq!(
-        parse_err("[scheduler.pools.workflow]\nenabled = true\n").code(),
-        ErrorCode::SchedulerKindNotEnabled
-    );
+    let workflow = parse_ok("[scheduler.pools.workflow]\nenabled = true\n");
+    assert!(workflow.scheduler.pool(SchedulerKind::Workflow).enabled);
 }
 
 #[test]

@@ -333,6 +333,54 @@ pub enum ErrorCode {
     CronCustomEventUnsupported,
     /// Queue catalog, binding, projection, or counter authority is inconsistent.
     QueueInvariantViolation,
+    /// Requested Workflow definition does not exist in the authorized account.
+    WorkflowNotFound,
+    /// Workflow lifecycle does not admit this operation.
+    WorkflowNotReady,
+    /// The frozen Workflow version failed runtime validation or is not ready.
+    WorkflowVersionNotReady,
+    /// Workflow binding identity, descriptor, or lifecycle generation is stale.
+    WorkflowBindingStale,
+    /// External Workflow instance identity violates the capability validator.
+    WorkflowInstanceIdInvalid,
+    /// This definition already reserved the external instance identity.
+    WorkflowInstanceAlreadyExists,
+    /// Workflow instance does not exist in the authorized definition.
+    WorkflowInstanceNotFound,
+    /// Canonical Workflow input exceeds the byte limit.
+    WorkflowPayloadTooLarge,
+    /// Canonical Workflow result exceeds the byte limit.
+    WorkflowResultTooLarge,
+    /// Workflow JSON value or depth is outside the supported subset.
+    WorkflowSerializationUnsupported,
+    /// Workflow instance or account durable-state quota would be exceeded.
+    WorkflowStateQuotaExceeded,
+    /// Workflow step count exceeds the configured local limit.
+    WorkflowStepLimitExceeded,
+    /// Workflow retry, timeout, or rollback overload is unsupported.
+    WorkflowStepConfigUnsupported,
+    /// Workflow has concurrent or unawaited steps.
+    WorkflowParallelStepUnsupported,
+    /// Workflow method is outside capability V1.
+    WorkflowMethodUnsupported,
+    /// Replay descriptor or completed frontier differs from durable history.
+    WorkflowNonDeterministic,
+    /// Workflow run generation, token, or lease is no longer current.
+    WorkflowRunStale,
+    /// Workflow step token is no longer current.
+    WorkflowStepStale,
+    /// Durable Object Workflow mutation lacks native output-gate equivalence.
+    WorkflowDoOutputGateUnsupported,
+    /// Workflow transport or persistence outcome is unknown.
+    WorkflowRuntimeUnavailable,
+    /// Workflow tenant code failed with a sanitized known outcome.
+    WorkflowExecutionFailed,
+    /// Workflow definition or version still has a live referrer.
+    WorkflowReferenced,
+    /// Workflow durable identity, descriptor, or state is inconsistent.
+    WorkflowInvariantViolation,
+    /// A live Workflow definition already owns the requested account-scoped name.
+    WorkflowNameConflict,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -503,6 +551,30 @@ impl ErrorCode {
             Self::CronActivationStale => "CRON_ACTIVATION_STALE",
             Self::CronCustomEventUnsupported => "CRON_CUSTOM_EVENT_UNSUPPORTED",
             Self::QueueInvariantViolation => "QUEUE_INVARIANT_VIOLATION",
+            Self::WorkflowNotFound => "WORKFLOW_NOT_FOUND",
+            Self::WorkflowNotReady => "WORKFLOW_NOT_READY",
+            Self::WorkflowVersionNotReady => "WORKFLOW_VERSION_NOT_READY",
+            Self::WorkflowBindingStale => "WORKFLOW_BINDING_STALE",
+            Self::WorkflowInstanceIdInvalid => "WORKFLOW_INSTANCE_ID_INVALID",
+            Self::WorkflowInstanceAlreadyExists => "WORKFLOW_INSTANCE_ALREADY_EXISTS",
+            Self::WorkflowInstanceNotFound => "WORKFLOW_INSTANCE_NOT_FOUND",
+            Self::WorkflowPayloadTooLarge => "WORKFLOW_PAYLOAD_TOO_LARGE",
+            Self::WorkflowResultTooLarge => "WORKFLOW_RESULT_TOO_LARGE",
+            Self::WorkflowSerializationUnsupported => "WORKFLOW_SERIALIZATION_UNSUPPORTED",
+            Self::WorkflowStateQuotaExceeded => "WORKFLOW_STATE_QUOTA_EXCEEDED",
+            Self::WorkflowStepLimitExceeded => "WORKFLOW_STEP_LIMIT_EXCEEDED",
+            Self::WorkflowStepConfigUnsupported => "WORKFLOW_STEP_CONFIG_UNSUPPORTED",
+            Self::WorkflowParallelStepUnsupported => "WORKFLOW_PARALLEL_STEP_UNSUPPORTED",
+            Self::WorkflowMethodUnsupported => "WORKFLOW_METHOD_UNSUPPORTED",
+            Self::WorkflowNonDeterministic => "WORKFLOW_NON_DETERMINISTIC",
+            Self::WorkflowRunStale => "WORKFLOW_RUN_STALE",
+            Self::WorkflowStepStale => "WORKFLOW_STEP_STALE",
+            Self::WorkflowDoOutputGateUnsupported => "WORKFLOW_DO_OUTPUT_GATE_UNSUPPORTED",
+            Self::WorkflowRuntimeUnavailable => "WORKFLOW_RUNTIME_UNAVAILABLE",
+            Self::WorkflowExecutionFailed => "WORKFLOW_EXECUTION_FAILED",
+            Self::WorkflowReferenced => "WORKFLOW_REFERENCED",
+            Self::WorkflowInvariantViolation => "WORKFLOW_INVARIANT_VIOLATION",
+            Self::WorkflowNameConflict => "WORKFLOW_NAME_CONFLICT",
             Self::Internal => "INTERNAL",
         }
     }

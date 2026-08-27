@@ -19,6 +19,7 @@ fn main() {
         ("009_queues", "MIGRATION_009_SHA256"),
         ("010_queue_consumers", "MIGRATION_010_SHA256"),
         ("011_cron_triggers", "MIGRATION_011_SHA256"),
+        ("012_workflows", "MIGRATION_012_SHA256"),
     ];
     let mut generated = String::new();
     for (file, constant) in migrations {
@@ -43,6 +44,7 @@ fn main() {
         ("002_queue_producer", "SCHEDULER_MIGRATION_002_SHA256"),
         ("003_queue_consumer", "SCHEDULER_MIGRATION_003_SHA256"),
         ("004_cron", "SCHEDULER_MIGRATION_004_SHA256"),
+        ("005_workflow_core", "SCHEDULER_MIGRATION_005_SHA256"),
     ] {
         let scheduler_path = manifest_dir
             .join("scheduler-migrations")

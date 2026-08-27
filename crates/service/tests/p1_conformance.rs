@@ -51,7 +51,7 @@ assets_dir = "{assets}"
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 512
+max_series = 1024
 "#,
             data = temp.path().join("data").display(),
             key = temp.path().join("recovery.key").display(),
@@ -104,11 +104,13 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
         "alarms",
         "queues",
         "cron",
+        "workflows",
     ] {
         assert_eq!(products[name]["status"], "supported", "{name}");
         assert!(products[name]["capability_version"].is_number(), "{name}");
     }
-    for name in ["workflows", "websocket_hibernation"] {
+    {
+        let name = "websocket_hibernation";
         assert_eq!(products[name]["status"], "unsupported", "{name}");
         assert!(products[name].get("capability_version").is_none(), "{name}");
     }
@@ -168,6 +170,10 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
             ],
         ),
         ("cron", vec!["scheduled", "noRetry"]),
+        (
+            "workflows",
+            vec!["create", "get", "id", "status", "step.do"],
+        ),
     ]);
     for (product, methods) in expected_methods {
         assert_eq!(

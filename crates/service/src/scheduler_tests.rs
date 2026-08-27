@@ -88,6 +88,7 @@ async fn kernel_run_claims_releases_and_shuts_down_without_polling() {
                 claim_batch: 1,
                 ..SchedulerConfig::default()
             },
+            open_compute_core::WorkflowsConfig::default(),
             clock,
         )
         .with_fault_hook({
@@ -136,6 +137,7 @@ async fn kernel_run_reports_disabled_and_globally_paused_pools() {
             pools.alarm.enabled = false;
             pools.queue.enabled = false;
             pools.cron.enabled = false;
+            pools.workflow.enabled = false;
             config.pools = Some(pools);
         }
         let scheduler = Arc::new(SchedulerService::new(
@@ -143,6 +145,7 @@ async fn kernel_run_reports_disabled_and_globally_paused_pools() {
             storage,
             WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
             config,
+            open_compute_core::WorkflowsConfig::default(),
             Arc::new(DeterministicSchedulerClock::new(10)),
         ));
         if !disabled {
@@ -212,20 +215,39 @@ async fn scheduler_helpers_cover_all_fixed_states_and_completion_results() {
     let alarm = AtomicUsize::new(0);
     let queue = AtomicUsize::new(0);
     let cron = AtomicUsize::new(0);
+    let workflow = AtomicUsize::new(0);
     assert!(admission.reserve(SchedulerKind::Alarm, 1));
     release_completed(
-        &Ok(SchedulerKind::Alarm),
+        SchedulerKind::Alarm,
         &mut admission,
         &global,
         &alarm,
         &queue,
         &cron,
+        &workflow,
     );
     assert_eq!(global.load(Ordering::Acquire), 0);
-    assert!(admission.reserve(SchedulerKind::Alarm, 1));
-    let failed = tokio::spawn(async { panic!("expected test task failure") }).await;
-    release_completed(&failed, &mut admission, &global, &alarm, &queue, &cron);
-    assert_eq!(alarm.load(Ordering::Acquire), 0);
+    assert!(admission.reserve(SchedulerKind::Workflow, 1));
+    let task = tokio::spawn(async {
+        panic!("expected test task failure");
+        #[allow(unreachable_code)]
+        SchedulerKind::Workflow
+    });
+    let task_id = task.id();
+    let mut kinds = std::collections::HashMap::from([(task_id, SchedulerKind::Workflow)]);
+    let failed = task.await.map(|kind| (task_id, kind));
+    let kind = completed_kind(failed, &mut kinds).unwrap();
+    assert_eq!(kind, SchedulerKind::Workflow);
+    release_completed(
+        kind,
+        &mut admission,
+        &global,
+        &alarm,
+        &queue,
+        &cron,
+        &workflow,
+    );
+    assert_eq!(workflow.load(Ordering::Acquire), 0);
 }
 
 #[test]
@@ -411,6 +433,7 @@ async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() 
             storage,
             transport,
             SchedulerConfig::default(),
+            open_compute_core::WorkflowsConfig::default(),
             clock,
         )
         .with_metrics(metrics),

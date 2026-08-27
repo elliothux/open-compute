@@ -391,10 +391,10 @@ fn resource_operation_class(kind: BindingKind) -> Result<OperationClass, Platfor
         BindingKind::R2Bucket => OperationClass::R2,
         BindingKind::D1Database => OperationClass::D1,
         BindingKind::DoNamespace => OperationClass::DurableObjects,
-        BindingKind::QueueProducer => {
+        BindingKind::QueueProducer | BindingKind::Workflow => {
             return Err(PlatformError::new(
                 ErrorCode::BindingTypeMismatch,
-                "Queue producer is not a generic resource driver kind",
+                "binding kind requires its owning product controller",
             ));
         }
     })

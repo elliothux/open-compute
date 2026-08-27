@@ -233,6 +233,7 @@ impl GateStack {
                     Some(d1),
                     DurableObjectsConfig::default(),
                     open_compute_core::QueuesConfig::default(),
+                    open_compute_core::WorkflowsConfig::default(),
                     Some(scheduler_store),
                     async move {
                         let _ = binding_shutdown.changed().await;
@@ -293,6 +294,7 @@ impl GateStack {
                 max_in_flight: 4,
                 ..SchedulerConfig::default()
             },
+            open_compute_core::WorkflowsConfig::default(),
             Arc::new(SystemSchedulerClock),
         ));
         Self {

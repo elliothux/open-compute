@@ -1,5 +1,73 @@
 use super::*;
 
+#[tokio::test]
+async fn body_dispatch_does_not_reuse_connections_or_buffer_input() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = Router::new().fallback(
+        |axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<SocketAddr>,
+         _request: Request| async move { peer.to_string() },
+    );
+    let (shutdown, receiver) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = receiver.await;
+        })
+        .await
+        .unwrap();
+    });
+    let auth = GenerationAuthRegistry::new();
+    auth.activate_for_test(open_compute_core::SecretString::new("aa".repeat(32)));
+    let transport = WorkerdTransport::for_test_endpoint(auth, port);
+    let target = DispatchTarget {
+        account_id: AccountId::generate(),
+        worker_id: WorkerId::generate(),
+        deployment_id: DeploymentId::generate(),
+        worker_code_sha256: "11".repeat(32),
+        entrypoint: None,
+        route_generation: 1,
+        request_id: RequestId::generate(),
+    };
+    let mut peers = HashSet::new();
+    for body in [
+        Body::empty(),
+        Body::from("payload"),
+        Body::from("another payload"),
+        Body::from_stream(futures::stream::pending::<
+            Result<bytes::Bytes, std::io::Error>,
+        >()),
+    ] {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("https://tenant.example/")
+            .header(header::HOST, "tenant.example")
+            .body(body)
+            .unwrap();
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            transport.dispatch(target.clone(), request),
+        )
+        .await
+        .expect("the response must not wait for an unconsumed body")
+        .unwrap();
+        let peer = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert!(
+            peers.insert(peer),
+            "a body-bearing request reused a connection"
+        );
+        // Let the client finish its idle transition before the next request so
+        // this checks pool policy, not a race between response and pool tasks.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    drop(transport);
+    shutdown.send(()).unwrap();
+    server.await.unwrap();
+}
+
 #[test]
 fn tenant_headers_strip_forged_identity_and_hop_by_hop() {
     let mut headers = HeaderMap::new();

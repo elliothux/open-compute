@@ -105,7 +105,7 @@ max_artifact_bytes = 1048576
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 512
+max_series = 1024
 "#,
             public_port = input.public_port,
             data_dir = input.data_dir.display(),
@@ -156,7 +156,7 @@ fn downgrade_control_to_seven(path: &Path) {
         let mut statement = connection
             .prepare(
                 "SELECT name FROM sqlite_master
-                 WHERE type = 'trigger' AND name LIKE '%queue%'",
+                 WHERE type = 'trigger' AND (name LIKE '%queue%' OR name LIKE '%workflow%')",
             )
             .expect("list Queue triggers");
         statement
@@ -172,7 +172,12 @@ fn downgrade_control_to_seven(path: &Path) {
     }
     connection
         .execute_batch(
-            "DROP TABLE cron_activations;
+            "DROP TABLE workflow_instance_referrers;
+             DROP TABLE workflow_referrers;
+             DROP TABLE workflow_bindings;
+             DROP TABLE workflow_versions;
+             DROP TABLE workflow_definitions;
+             DROP TABLE cron_activations;
              DROP TABLE deployment_cron_declarations;
              DROP TABLE deployment_cron_configs;
              DROP TABLE queue_consumers;
@@ -199,7 +204,7 @@ fn downgrade_scheduler_to_one(path: &Path) {
         let mut statement = connection
             .prepare(
                 "SELECT name FROM sqlite_master
-                 WHERE type = 'trigger' AND name LIKE '%queue%'",
+                 WHERE type = 'trigger' AND (name LIKE '%queue%' OR name LIKE '%workflow%')",
             )
             .expect("list scheduler Queue triggers");
         statement
@@ -215,7 +220,9 @@ fn downgrade_scheduler_to_one(path: &Path) {
     }
     connection
         .execute_batch(
-            "DROP TABLE cron_runs;
+            "DROP TABLE workflow_steps;
+             DROP TABLE workflow_instances;
+             DROP TABLE cron_runs;
              DROP TABLE cron_schedules;
              DROP TABLE queue_dlq_pending;
              DROP TABLE queue_delivery_batches;
@@ -630,7 +637,7 @@ async fn upgrade_gate() {
             check["before"]["control"].as_u64(),
             check["target"]["control"].as_u64()
         ),
-        (Some(7), Some(11))
+        (Some(7), Some(12))
     );
 
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).expect("offline");
@@ -670,7 +677,7 @@ async fn upgrade_gate() {
             applied["before"]["control"].as_u64(),
             applied["target"]["control"].as_u64()
         ),
-        (Some(8), Some(11))
+        (Some(8), Some(12))
     );
 
     let doctor = doctor_report(&loaded, DoctorMode::Full).await;

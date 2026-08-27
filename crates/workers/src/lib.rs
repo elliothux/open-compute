@@ -14,6 +14,8 @@ pub mod r2;
 pub mod resource_lifecycle;
 pub mod resource_pins;
 pub mod runtime_source;
+pub mod workflows;
+pub use workflows::{WorkflowController, WorkflowReconcileCursor, WorkflowStatus};
 
 pub use bundle::{
     BundleLimits, CanonicalBundle, ModuleInput, ModuleManifest, ModuleType, StagedBundle,

@@ -6,7 +6,9 @@ export {
   DoTransport,
   KVNamespace,
   OutboundGateway,
+  QueueTransport,
   R2Transport,
+  WorkflowBindingTransport,
 } from "./loader-host.js";
 
 const TOKEN_HEADER = "x-open-compute-binding-token";

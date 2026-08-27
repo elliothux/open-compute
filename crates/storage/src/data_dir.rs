@@ -301,8 +301,9 @@ impl DataDir {
     /// Explicitly quarantine an uninspectable scheduler database and create an empty replacement.
     ///
     /// The exclusive data-directory lock must be held by this [`DataDir`], so a running
-    /// `platformd` cannot race the recovery. The caller must subsequently run bounded alarm
-    /// repair after startup to rebuild the projection from live Durable Objects.
+    /// `platformd` cannot race the recovery. Only a verified alarm-only control authority
+    /// permits rebuilding: Queue, Cron, and Workflow history require a full snapshot restore.
+    /// The caller must subsequently run bounded alarm repair from live Durable Objects.
     pub fn recover_corrupt_scheduler_db(
         &self,
         backup_name: &str,
@@ -324,6 +325,7 @@ impl DataDir {
                 "scheduler recovery refuses an intact database",
             ));
         }
+        self.ensure_scheduler_rebuild_safe(busy_timeout_ms)?;
 
         let mut sources = Vec::new();
         for suffix in ["", "-wal", "-shm"] {
@@ -392,6 +394,40 @@ impl DataDir {
                 }
             }
         }
+    }
+
+    fn ensure_scheduler_rebuild_safe(&self, busy_timeout_ms: u64) -> Result<(), PlatformError> {
+        let path = self.control_db_path();
+        fs::validate_contained(&self.root, &path)?;
+        fs::validate_owned_file(&path, true)?;
+        let control = crate::ControlDb::open_readonly_wal_aware(&path, busy_timeout_ms)?;
+        control.quick_check()?;
+        let schema = crate::migrations::inspect_schema(&control)?;
+        // These are checked schema-owned tables, never operator-supplied SQL identifiers.
+        for (since, table) in [
+            (9, "queues"),
+            (11, "cron_activations"),
+            (12, "workflow_instance_referrers"),
+        ] {
+            if schema >= since {
+                let retained: bool = control.with_read(|connection| {
+                    connection
+                        .query_row(
+                            &format!("SELECT EXISTS(SELECT 1 FROM {table})"),
+                            [],
+                            |row| row.get(0),
+                        )
+                        .map_err(|_| recovery_failed())
+                })?;
+                if retained {
+                    return Err(PlatformError::new(
+                        open_compute_core::ErrorCode::SchedulerUnavailable,
+                        "scheduler retains product authority; full snapshot restore is required",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn validate_children(&self) -> Result<(), PlatformError> {

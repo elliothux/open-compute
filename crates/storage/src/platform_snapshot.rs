@@ -96,6 +96,12 @@ pub fn prepare_platform_snapshot(
         request.created_at_ms,
     )
     .map_err(|error| snapshot_stage(&error, "snapshot scheduler preflight failed"))?;
+    if scheduler_schema.invalid_rows != 0 {
+        return Err(PlatformError::new(
+            ErrorCode::SnapshotInvalid,
+            "snapshot scheduler invariants failed",
+        ));
+    }
     if u32::try_from(control_schema).ok() != Some(request.release.control_schema_version)
         || u32::try_from(scheduler_schema.schema_version).ok()
             != Some(request.release.scheduler_schema_version)

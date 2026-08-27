@@ -489,6 +489,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                 storage.clone(),
                 transport.clone(),
                 loaded.config.scheduler.clone(),
+                loaded.config.workflows.clone(),
                 Arc::new(SystemSchedulerClock),
             )
             .with_metrics(metrics.clone())
@@ -497,6 +498,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     });
     if let Some(scheduler) = &scheduler_service {
         scheduler.repair_products(1_000)?;
+        scheduler.repair_workflows(32)?;
     }
     let bundle_limits = BundleLimits {
         max_artifact_bytes: usize::try_from(loaded.config.workers.max_bundle_bytes).map_err(
@@ -555,6 +557,13 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             .with_metrics(metrics.clone())
             .with_default_max_backlog_bytes(loaded.config.queues.default_max_backlog_bytes)
     });
+    let workflow_api = scheduler_store.as_ref().map(|scheduler| {
+        crate::workflow_http::WorkflowApiState::new(
+            storage.clone(),
+            scheduler.clone(),
+            transport.clone(),
+        )
+    });
     if let Some(api) = &queue_api {
         api.reconcile_pending().await?;
     }
@@ -604,6 +613,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     .with_d1_api(d1_api)
     .with_do_api(do_api)
     .with_queue_api(queue_api)
+    .with_workflow_api(workflow_api)
     .with_scheduler(scheduler_service.clone());
 
     let public_listener = match http::bind(public_addr).await {
@@ -745,6 +755,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let binding_metrics = metrics.clone();
     let binding_do_config = loaded.config.durable_objects.clone();
     let binding_queue_config = loaded.config.queues.clone();
+    let binding_workflow_config = loaded.config.workflows.clone();
     let binding_backend_task = tokio::spawn(async move {
         serve_binding_backend_with_scheduler(
             binding_backend_listener,
@@ -757,6 +768,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             Some(d1_backend),
             binding_do_config,
             binding_queue_config,
+            binding_workflow_config,
             scheduler_store,
             async move {
                 let _ = shutdown_binding.changed().await;

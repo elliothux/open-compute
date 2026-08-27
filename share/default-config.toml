@@ -52,7 +52,7 @@ max_artifact_bytes = 536870912
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 512
+max_series = 1024
 
 [diagnostics]
 max_failed_starts = 32
@@ -150,7 +150,21 @@ claim_batch = 8
 weight = 1
 
 [scheduler.pools.workflow]
-enabled = false
+enabled = true
 max_in_flight = 16
 claim_batch = 16
 weight = 1
+
+[workflows]
+max_in_flight_requests = 64
+max_steps = 1024
+max_state_bytes = 33554432
+max_instances_per_account = 10000
+max_instances_per_definition = 10000
+max_active_per_account = 1000
+max_account_state_bytes = 1073741824
+lease_ms = 60000
+heartbeat_ms = 20000
+dispatch_timeout_ms = 300000
+recovery_backoff_ms = 1000
+creation_grace_ms = 60000

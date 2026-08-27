@@ -215,6 +215,7 @@ struct BackendState {
     do_config: DurableObjectsConfig,
     scheduler: Option<Arc<SchedulerStore>>,
     queue: Option<Arc<QueueBindingService>>,
+    workflow: Option<Arc<crate::workflow_backend::WorkflowBindingService>>,
 }
 
 #[derive(Clone)]
@@ -376,6 +377,7 @@ pub async fn serve_binding_backend_with_products_and_do_config(
         d1,
         do_config,
         QueuesConfig::default(),
+        open_compute_core::WorkflowsConfig::default(),
         None,
         shutdown,
     )
@@ -395,6 +397,7 @@ pub async fn serve_binding_backend_with_scheduler(
     d1: Option<Arc<D1BindingService>>,
     do_config: DurableObjectsConfig,
     queue_config: QueuesConfig,
+    workflow_config: open_compute_core::WorkflowsConfig,
     scheduler: Option<Arc<SchedulerStore>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
@@ -410,6 +413,21 @@ pub async fn serve_binding_backend_with_scheduler(
             None => service,
         })
     });
+    let workflow = scheduler
+        .as_ref()
+        .map(|scheduler| {
+            crate::workflow_backend::WorkflowBindingService::new(
+                storage.clone(),
+                scheduler.clone(),
+                workflow_config,
+            )
+            .map(|service| match &metrics {
+                Some(metrics) => service.with_metrics(metrics.clone()),
+                None => service,
+            })
+        })
+        .transpose()?
+        .map(Arc::new);
     let state = BackendState {
         storage,
         auth,
@@ -422,6 +440,7 @@ pub async fn serve_binding_backend_with_scheduler(
         do_config,
         scheduler,
         queue,
+        workflow,
     };
     let router = Router::new().fallback(handle).with_state(state);
     axum::serve(listener, router.into_make_service())
@@ -565,6 +584,20 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
     }
     if request.uri().path().starts_with("/internal/alarms/v1/") {
         return handle_alarm_index(state, request).await;
+    }
+    if request
+        .uri()
+        .path()
+        .starts_with("/internal/workflows/v1/runs/")
+        || request
+            .uri()
+            .path()
+            .starts_with("/internal/bindings/v1/workflow/")
+    {
+        return match &state.workflow {
+            Some(workflow) => workflow.handle(request, state.auth.clone()).await,
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
     }
     if request
         .uri()

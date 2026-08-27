@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use base64::Engine as _;
 use http_body_util::Limited;
+use hyper::body::Body as _;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
@@ -33,6 +34,10 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
+
+#[path = "runtime_bridge/workflow.rs"]
+mod workflow;
+pub use workflow::{WorkflowDispatchResult, WorkflowRunRequest};
 
 const SOURCE_PATH: &str = "/internal/runtime/v1/deployments/resolve";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
@@ -360,6 +365,7 @@ fn source_error(code: ErrorCode, status: StatusCode) -> Response {
 #[derive(Clone)]
 pub struct WorkerdTransport {
     client: Client<HttpConnector, Body>,
+    body_client: Client<HttpConnector, Body>,
     auth: GenerationAuthRegistry,
     supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     max_request_body: usize,
@@ -383,7 +389,10 @@ impl WorkerdTransport {
         let mut connector = HttpConnector::new();
         connector.enforce_http(true);
         Self {
-            client: Client::builder(TokioExecutor::new()).build(connector),
+            client: Client::builder(TokioExecutor::new()).build(connector.clone()),
+            body_client: Client::builder(TokioExecutor::new())
+                .pool_max_idle_per_host(0)
+                .build(connector),
             auth,
             supervisor,
             max_request_body: DEFAULT_MAX_TENANT_BODY,
@@ -423,9 +432,14 @@ impl WorkerdTransport {
         timeout: Duration,
     ) -> Result<QueueDispatchResult, PlatformError> {
         validate_queue_dispatch_request(request)?;
-        let result = tokio::time::timeout(
+        let (result, _) = tokio::time::timeout(
             timeout,
-            self.custom_event_request("/internal/queue", target, request),
+            self.custom_event_request(
+                "/internal/queue",
+                target,
+                request,
+                MAX_CUSTOM_EVENT_RESPONSE,
+            ),
         )
         .await
         .map_err(|_| {
@@ -445,9 +459,14 @@ impl WorkerdTransport {
         timeout: Duration,
     ) -> Result<ScheduledDispatchResult, PlatformError> {
         validate_scheduled_dispatch_request(request)?;
-        let result = tokio::time::timeout(
+        let (result, _) = tokio::time::timeout(
             timeout,
-            self.custom_event_request("/internal/scheduled", target, request),
+            self.custom_event_request(
+                "/internal/scheduled",
+                target,
+                request,
+                MAX_CUSTOM_EVENT_RESPONSE,
+            ),
         )
         .await
         .map_err(|_| {
@@ -464,7 +483,8 @@ impl WorkerdTransport {
         path: &str,
         target: &DispatchTarget,
         body: &impl Serialize,
-    ) -> Result<T, PlatformError> {
+        max_response: usize,
+    ) -> Result<(T, open_compute_runtime::GenerationCredential), PlatformError> {
         let (port, credential) = self.endpoint()?;
         if target.route_generation < 1 {
             return Err(custom_event_protocol_error());
@@ -503,6 +523,24 @@ impl WorkerdTransport {
             .await
             .map_err(|_| runtime_unavailable())?;
         if !response.status().is_success() {
+            if matches!(path, "/internal/workflow" | "/internal/validate-workflow") {
+                let code = if response.status() == StatusCode::UNPROCESSABLE_ENTITY {
+                    match response
+                        .headers()
+                        .get(ERROR_HEADER)
+                        .and_then(|header| header.to_str().ok())
+                    {
+                        Some("ARTIFACT_INTEGRITY_ERROR") => ErrorCode::ArtifactIntegrityError,
+                        Some("WORKFLOW_INVARIANT_VIOLATION") => {
+                            ErrorCode::WorkflowInvariantViolation
+                        }
+                        _ => ErrorCode::WorkflowVersionNotReady,
+                    }
+                } else {
+                    ErrorCode::WorkflowRuntimeUnavailable
+                };
+                return Err(PlatformError::new(code, "Workflow dispatch failed"));
+            }
             return Err(PlatformError::new(
                 if path == "/internal/queue" {
                     ErrorCode::QueueCustomEventUnsupported
@@ -512,10 +550,14 @@ impl WorkerdTransport {
                 "native custom-event dispatch failed",
             ));
         }
-        let bytes = to_bytes(Body::new(response.into_body()), MAX_CUSTOM_EVENT_RESPONSE)
+        let bytes = to_bytes(Body::new(response.into_body()), max_response)
             .await
             .map_err(|_| custom_event_protocol_error())?;
-        serde_json::from_slice(&bytes).map_err(|_| custom_event_protocol_error())
+        let value = serde_json::from_slice(&bytes).map_err(|_| custom_event_protocol_error())?;
+        if self.auth.with_current(&credential, || ()).is_none() {
+            return Err(runtime_unavailable());
+        }
+        Ok((value, credential))
     }
 
     /// Execute one trusted native facet delete after the control-plane fence commits.
@@ -738,6 +780,14 @@ impl WorkerdTransport {
     ) -> Result<Response, PlatformError> {
         let (port, credential) = self.endpoint()?;
         let (parts, body) = request.into_parts();
+        // A tenant may return without consuming its streaming body. The pinned
+        // workerd can then close this HTTP/1 hop after the response, racing reuse.
+        // Pool only bodyless dispatches; never buffer input or retry a mutation.
+        let client = if body.is_end_stream() {
+            &self.client
+        } else {
+            &self.body_client
+        };
         let original_method = parts.method.as_str().to_owned();
         let original_url = if validation {
             "https://validation.invalid/".to_owned()
@@ -807,7 +857,7 @@ impl WorkerdTransport {
         *internal.method_mut() = Method::POST;
         *internal.uri_mut() = uri;
         *internal.headers_mut() = headers;
-        let response = tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, self.client.request(internal))
+        let response = tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, client.request(internal))
             .await
             .map_err(|_| {
                 PlatformError::new(

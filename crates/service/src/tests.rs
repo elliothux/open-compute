@@ -192,7 +192,7 @@ max_artifact_bytes = 65536
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 512
+max_series = 1024
 {extra}
 "#,
         data.display(),
@@ -367,10 +367,14 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
     }
 
     let loaded = load_platform_config(&path).unwrap();
-    let data_dir = DataDir::acquire(&loaded.config.storage).unwrap();
-    let scheduler_path = data_dir.ensure_scheduler_db().unwrap();
+    let storage = open_compute_storage::PlatformStorage::bootstrap(
+        &loaded.config.storage,
+        &open_compute_core::SystemClock,
+    )
+    .unwrap();
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
     fs::write(&scheduler_path, b"corrupt scheduler").unwrap();
-    drop(data_dir);
+    drop(storage);
     let recovery = parse_from([
         "platformd",
         "--config",
@@ -1320,6 +1324,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         storage,
         transport,
         SchedulerConfig::default(),
+        open_compute_core::WorkflowsConfig::default(),
         Arc::new(SystemSchedulerClock),
     ));
     let state = test_state(HealthCoordinator::new(), Some("scheduler-admin"))
@@ -1359,13 +1364,15 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     assert_eq!(body["version"], 2);
     assert_eq!(body["paused"], false);
     assert_eq!(body["global"]["inFlight"], 0);
-    assert_eq!(body["pools"].as_array().unwrap().len(), 3);
+    assert_eq!(body["pools"].as_array().unwrap().len(), 4);
     assert_eq!(body["pools"][0]["kind"], "do_alarm");
     assert_eq!(body["pools"][0]["ready"], 0);
     assert_eq!(body["pools"][1]["kind"], "queue");
     assert_eq!(body["pools"][1]["ready"], 0);
     assert_eq!(body["pools"][2]["kind"], "cron");
     assert_eq!(body["pools"][2]["ready"], 0);
+    assert_eq!(body["pools"][3]["kind"], "workflow");
+    assert_eq!(body["pools"][3]["ready"], 0);
     assert_eq!(body["queueConsumers"], serde_json::json!([]));
     assert_eq!(body["cronActivations"], serde_json::json!([]));
 
@@ -2332,12 +2339,18 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         capabilities.products["cron"].deviations,
         vec!["OC-CRON-001"]
     );
-    for product in ["workflows", "websocket_hibernation"] {
-        assert_eq!(
-            capabilities.products[product].status,
-            open_compute_core::CapabilityStatus::Unsupported
-        );
-    }
+    assert_eq!(
+        capabilities.products["workflows"].status,
+        open_compute_core::CapabilityStatus::Supported
+    );
+    assert_eq!(
+        capabilities.products["workflows"].deviations,
+        vec!["OC-WORKFLOW-001", "OC-WORKFLOW-002"]
+    );
+    assert_eq!(
+        capabilities.products["websocket_hibernation"].status,
+        open_compute_core::CapabilityStatus::Unsupported
+    );
     let metadata = crate::capabilities::platform_release_metadata(&loaded).unwrap();
     assert!(metadata.validate());
     assert_eq!(metadata.release, capabilities.release);
@@ -2827,6 +2840,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             storage.clone(),
             transport,
             SchedulerConfig::default(),
+            open_compute_core::WorkflowsConfig::default(),
             clock.clone(),
         )
         .with_metrics(metrics),
@@ -2855,19 +2869,14 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         SchedulerKind::Alarm,
         SchedulerKind::Queue,
         SchedulerKind::Cron,
+        SchedulerKind::Workflow,
     ] {
         scheduler.pause_kind(kind).unwrap();
         assert!(scheduler.is_kind_paused(kind).unwrap());
         scheduler.resume_kind(kind).unwrap();
         assert!(!scheduler.is_kind_paused(kind).unwrap());
     }
-    assert_eq!(
-        scheduler
-            .is_kind_paused(SchedulerKind::Workflow)
-            .unwrap_err()
-            .code(),
-        ErrorCode::SchedulerKindNotEnabled
-    );
+    assert!(!scheduler.is_kind_paused(SchedulerKind::Workflow).unwrap());
     assert_eq!(
         scheduler.repair_products(0).unwrap_err().code(),
         ErrorCode::SchedulerUnavailable

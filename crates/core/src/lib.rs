@@ -21,6 +21,7 @@ pub mod resource;
 pub mod scheduler;
 pub mod secret;
 pub mod snapshot_manifest;
+pub mod workflow;
 
 pub use admission::{
     AdmissionReservation, AdmissionReservations, AdmissionSnapshotV1, OperationClass, PlatformMode,
@@ -45,6 +46,7 @@ pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus}
 pub use ids::{
     AccountId, BindingId, CronActivationId, CronRunId, DeploymentId, PlatformId, QueueBatchId,
     QueueConsumerId, QueueId, QueueMessageId, RequestId, ResourceId, StartupId, WorkerId,
+    WorkflowId, WorkflowInstanceId, WorkflowVersionId,
 };
 pub use redact::Redactor;
 pub use release_identity::{
@@ -64,6 +66,7 @@ pub use snapshot_manifest::{
     PlatformSnapshotManifestV1, SnapshotFileRole, SnapshotFileV1, SnapshotImmutableReferenceV1,
     SnapshotTotalsV1, valid_restore_path,
 };
+pub use workflow::{WorkflowFence, WorkflowToken, WorkflowsConfig};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use clock::DeterministicClock;

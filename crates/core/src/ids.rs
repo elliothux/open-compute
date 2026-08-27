@@ -88,6 +88,9 @@ typed_id!(QueueMessageId, "Queue message");
 typed_id!(QueueConsumerId, "Queue consumer");
 typed_id!(QueueBatchId, "Queue delivery batch");
 typed_id!(CronActivationId, "Cron activation");
+typed_id!(WorkflowId, "Workflow definition");
+typed_id!(WorkflowVersionId, "Workflow version");
+typed_id!(WorkflowInstanceId, "Workflow instance");
 typed_id!(CronRunId, "Cron logical run");
 
 fn canonical(uuid: Uuid) -> String {

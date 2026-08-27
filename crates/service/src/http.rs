@@ -11,6 +11,7 @@ use crate::r2_http::{self, R2ApiState};
 use crate::scheduler::SchedulerService;
 use crate::scheduler_http;
 use crate::workers_http::{self, WorkerApiState};
+use crate::workflow_http::{self, WorkflowApiState};
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
@@ -52,6 +53,7 @@ pub struct HttpState {
     d1_api: Option<Arc<D1ApiState>>,
     do_api: Option<Arc<DoApiState>>,
     queue_api: Option<Arc<QueueApiState>>,
+    workflow_api: Option<Arc<WorkflowApiState>>,
     scheduler: Option<Arc<SchedulerService>>,
 }
 
@@ -66,6 +68,7 @@ impl std::fmt::Debug for HttpState {
             .field("d1_api", &self.d1_api.is_some())
             .field("do_api", &self.do_api.is_some())
             .field("queue_api", &self.queue_api.is_some())
+            .field("workflow_api", &self.workflow_api.is_some())
             .field("scheduler", &self.scheduler.is_some())
             .finish_non_exhaustive()
     }
@@ -117,6 +120,7 @@ impl HttpState {
             d1_api: None,
             do_api: None,
             queue_api: None,
+            workflow_api: None,
             scheduler: None,
         })
     }
@@ -141,6 +145,7 @@ impl HttpState {
             d1_api: None,
             do_api: None,
             queue_api: None,
+            workflow_api: None,
             scheduler: None,
         }
     }
@@ -223,6 +228,17 @@ impl HttpState {
         self.queue_api.as_ref()
     }
 
+    /// Attach the Workflow catalog and bounded operator history.
+    #[must_use]
+    pub fn with_workflow_api(mut self, workflow_api: Option<WorkflowApiState>) -> Self {
+        self.workflow_api = workflow_api.map(Arc::new);
+        self
+    }
+
+    pub(crate) fn workflow_api(&self) -> Option<&Arc<WorkflowApiState>> {
+        self.workflow_api.as_ref()
+    }
+
     /// Attach the P0.8 scheduler operator surface.
     #[must_use]
     pub fn with_scheduler(mut self, scheduler: Option<Arc<SchedulerService>>) -> Self {
@@ -276,6 +292,7 @@ pub fn admin_router(state: HttpState) -> Router {
     router = router.merge(r2_http::control_router());
     router = router.merge(scheduler_http::control_router());
     router = router.merge(queue_http::control_router());
+    router = router.merge(workflow_http::control_router());
     router
         .fallback(fallback)
         .layer(axum::middleware::from_fn_with_state(
@@ -304,6 +321,7 @@ pub fn merged_router(state: HttpState) -> Router {
         .merge(do_http::control_router())
         .merge(scheduler_http::control_router())
         .merge(queue_http::control_router())
+        .merge(workflow_http::control_router())
         .fallback(workers_http::public_ingress)
         .layer(axum::middleware::from_fn_with_state(
             middleware_state,

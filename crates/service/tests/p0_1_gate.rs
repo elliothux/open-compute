@@ -494,8 +494,9 @@ fn wait_ready(round: &mut Round, secs: u64) {
         std::thread::sleep(Duration::from_millis(40));
     }
     panic!(
-        "timeout waiting ready; listeners={:?}: {}",
+        "timeout waiting ready; listeners={:?}; health={:?}: {}",
         listen_ports(pid),
+        public_health_port(pid).and_then(|port| http_get(port, "/health/status")),
         read_lossy(&round.stderr)
     );
 }

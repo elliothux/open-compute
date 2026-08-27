@@ -23,3 +23,6 @@
 
 # Successful P0.1 run artifacts. Retain failure evidence under failed/.
 /.p0-1-run/*
+
+# Workflow Gate process artifacts, including retained failed/ diagnostics.
+/.p2-4-run/*

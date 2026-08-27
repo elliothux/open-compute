@@ -383,7 +383,10 @@ fn normalize_restored_scheduler(
             "restore scheduler runtime mode could not be verified",
         )
     })?;
-    if !inspection.journal_mode.eq_ignore_ascii_case("wal") || inspection.synchronous != 2 {
+    if !inspection.journal_mode.eq_ignore_ascii_case("wal")
+        || inspection.synchronous != 2
+        || inspection.invalid_rows != 0
+    {
         return Err(restore_invalid());
     }
     Ok(())

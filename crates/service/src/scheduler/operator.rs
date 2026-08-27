@@ -321,7 +321,7 @@ impl SchedulerService {
             SchedulerKind::Alarm => self.alarm_paused.load(Ordering::Acquire),
             SchedulerKind::Queue => self.queue_paused.load(Ordering::Acquire),
             SchedulerKind::Cron => self.cron_paused.load(Ordering::Acquire),
-            SchedulerKind::Workflow => unreachable!(),
+            SchedulerKind::Workflow => self.workflow_paused.load(Ordering::Acquire),
         })
     }
 
@@ -337,8 +337,10 @@ impl SchedulerService {
         let alarm = self.config.pool(SchedulerKind::Alarm);
         let queue = self.config.pool(SchedulerKind::Queue);
         let cron = self.config.pool(SchedulerKind::Cron);
+        let workflow = self.config.pool(SchedulerKind::Workflow);
         let queue_summary = self.store.queue_consumer_workload_summary(now_ms)?;
         let cron_summary = self.store.cron_workload_summary(now_ms)?;
+        let workflow_summary = self.store.workflow_workload_summary(now_ms)?;
         let mut queue_consumers = Vec::new();
         for record in QueueConsumerRepository::new(self.storage.db()).list_live(1_000)? {
             let runtime = self.store.inspect_queue_consumer_runtime(
@@ -452,6 +454,24 @@ impl SchedulerService {
                     next_due_at: cron_summary.next_due_at_ms,
                     in_flight: self.cron_in_flight.load(Ordering::Acquire),
                     max_in_flight: cron.max_in_flight,
+                },
+                SchedulerPoolInspect {
+                    kind: SchedulerKind::Workflow,
+                    enabled: workflow.enabled,
+                    state: if !workflow.enabled {
+                        SchedulerPoolState::Disabled
+                    } else if self.is_paused() || self.workflow_paused.load(Ordering::Acquire) {
+                        SchedulerPoolState::Paused
+                    } else {
+                        self.workflow_pool_state()
+                    },
+                    ready: workflow_summary.ready,
+                    claimed: workflow_summary.claimed,
+                    expired: workflow_summary.expired,
+                    oldest_due_at: workflow_summary.oldest_due_at_ms,
+                    next_due_at: workflow_summary.next_due_at_ms,
+                    in_flight: self.workflow_in_flight.load(Ordering::Acquire),
+                    max_in_flight: workflow.max_in_flight,
                 },
             ],
             queue_consumers,

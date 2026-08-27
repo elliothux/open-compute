@@ -29,6 +29,11 @@ pub mod scheduler;
 mod snapshot_staging;
 pub mod upgrade;
 pub mod workers;
+pub mod workflows;
+pub use workflows::{
+    WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition, WorkflowInstanceIdentity,
+    WorkflowRefState, WorkflowRepository, WorkflowReservation, WorkflowTarget, WorkflowVersion,
+};
 
 pub use bindings::{
     AuthorizedBinding, BindingRepository, DeploymentBindingRecord, NewDeploymentBinding,
@@ -122,8 +127,9 @@ pub use upgrade::{
 };
 pub use workers::{
     DeploymentRecord, DeploymentReferrer, DeploymentSnapshot, DeploymentState,
-    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment, RetentionCandidate, RouteKind,
-    RouteRecord, RouteSnapshot, StoredDeploymentSecret, WorkerRecord, WorkerRepository,
+    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment, NewDeploymentProducts,
+    RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot, StoredDeploymentSecret,
+    WorkerRecord, WorkerRepository,
 };
 
 use open_compute_core::clock::Clock;

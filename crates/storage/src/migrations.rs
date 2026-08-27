@@ -19,7 +19,8 @@ const MIGRATION_008_SQL: &str = include_str!("../migrations/008_p1_format_freeze
 const MIGRATION_009_SQL: &str = include_str!("../migrations/009_queues.sql");
 const MIGRATION_010_SQL: &str = include_str!("../migrations/010_queue_consumers.sql");
 const MIGRATION_011_SQL: &str = include_str!("../migrations/011_cron_triggers.sql");
-const CURRENT_VERSION: i64 = 11;
+const MIGRATION_012_SQL: &str = include_str!("../migrations/012_workflows.sql");
+const CURRENT_VERSION: i64 = 12;
 const MIGRATION_001_NAME: &str = "001_init";
 const MIGRATION_002_NAME: &str = "002_workers_runtime";
 const MIGRATION_003_NAME: &str = "003_resource_bindings";
@@ -31,6 +32,7 @@ const MIGRATION_008_NAME: &str = "008_p1_format_freeze";
 const MIGRATION_009_NAME: &str = "009_queues";
 const MIGRATION_010_NAME: &str = "010_queue_consumers";
 const MIGRATION_011_NAME: &str = "011_cron_triggers";
+const MIGRATION_012_NAME: &str = "012_workflows";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Test-only deterministic fault injection points.
@@ -202,6 +204,18 @@ fn apply_inner(
             fault,
         )?;
     }
+    if db.user_version()? < 12 {
+        apply_one(
+            db,
+            clock,
+            12,
+            MIGRATION_012_NAME,
+            MIGRATION_012_SQL,
+            &MIGRATION_012_SHA256,
+            #[cfg(any(test, feature = "test-support"))]
+            fault,
+        )?;
+    }
     Ok(())
 }
 
@@ -331,6 +345,7 @@ pub(crate) fn expected_checksum(version: i64) -> Result<&'static [u8], PlatformE
         9 => Ok(&MIGRATION_009_SHA256),
         10 => Ok(&MIGRATION_010_SHA256),
         11 => Ok(&MIGRATION_011_SHA256),
+        12 => Ok(&MIGRATION_012_SHA256),
         v if v > CURRENT_VERSION => Err(PlatformError::new(
             ErrorCode::SchemaTooNew,
             "on-disk schema is newer than this binary",
@@ -447,6 +462,15 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
             "deployment_cron_configs",
             "deployment_cron_declarations",
             "cron_activations",
+        ]);
+    }
+    if version >= 12 {
+        tables.extend([
+            "workflow_definitions",
+            "workflow_versions",
+            "workflow_bindings",
+            "workflow_referrers",
+            "workflow_instance_referrers",
         ]);
     }
     for table in tables {
@@ -656,6 +680,7 @@ pub fn migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
         (9, MIGRATION_009_NAME, MIGRATION_009_SHA256),
         (10, MIGRATION_010_NAME, MIGRATION_010_SHA256),
         (11, MIGRATION_011_NAME, MIGRATION_011_SHA256),
+        (12, MIGRATION_012_NAME, MIGRATION_012_SHA256),
     ]
 }
 

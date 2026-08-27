@@ -114,7 +114,10 @@ fn p1_owned_schema_inspection_sees_uncheckpointed_bootstrap_wal() {
     drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
 
     let state = crate::inspect_owned_schema(storage.data_dir(), storage.db(), 5_000, 1).unwrap();
-    assert_eq!(state.control, 11);
+    assert_eq!(
+        i64::from(state.control),
+        crate::migrations::current_schema_version()
+    );
     assert_eq!(
         state.scheduler,
         u32::try_from(crate::current_scheduler_schema_version()).unwrap()
@@ -241,7 +244,7 @@ fn p1_schema_inspection_checks_live_kv_and_d1_files_and_apply_is_idempotent() {
         snapshot_id: &snapshot_id,
         label: "resource-schema-snapshot",
         created_at_ms: 2,
-        release: p1_release_identity(11),
+        release: p1_release_identity(),
         master_key_fingerprint: key.fingerprint(),
         s3_authority_fingerprint: &"d".repeat(64),
         r2_prefix_fingerprint: &"e".repeat(64),
@@ -2164,7 +2167,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 11);
+    assert_eq!(crate::migrations::current_schema_version(), 12);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2185,7 +2188,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert!(crate::migrations::expected_checksum(7).is_ok());
     assert!(crate::migrations::expected_checksum(8).is_ok());
     assert_eq!(
-        crate::migrations::expected_checksum(12).unwrap_err().code(),
+        crate::migrations::expected_checksum(13).unwrap_err().code(),
         ErrorCode::SchemaTooNew
     );
     assert_eq!(
@@ -2385,19 +2388,19 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
                     request_id: request,
                     now_ms,
                 },
-                &[],
-                &[],
-                &[NewQueueConsumerDeclaration {
-                    id: declaration_id,
-                    queue_id,
-                    queue_lifecycle_generation: 1,
-                    entrypoint: None,
-                    config: QueueConsumerConfig::default(),
-                    dead_letter_queue: None,
-                    capability_version: 1,
-                    descriptor_sha256: [7; 32],
-                }],
-                None,
+                &crate::NewDeploymentProducts {
+                    queue_consumers: &[NewQueueConsumerDeclaration {
+                        id: declaration_id,
+                        queue_id,
+                        queue_lifecycle_generation: 1,
+                        entrypoint: None,
+                        config: QueueConsumerConfig::default(),
+                        dead_letter_queue: None,
+                        capability_version: 1,
+                        descriptor_sha256: [7; 32],
+                    }],
+                    ..Default::default()
+                },
                 10,
             )
             .unwrap();
@@ -2956,7 +2959,7 @@ fn control_db_operations_fail_closed_when_foreign_keys_are_disabled() {
     );
 }
 
-fn p1_release_identity(control_schema_version: u32) -> PlatformReleaseIdentityV1 {
+fn p1_release_identity() -> PlatformReleaseIdentityV1 {
     PlatformReleaseIdentityV1 {
         schema_version: 1,
         platform_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -2966,8 +2969,8 @@ fn p1_release_identity(control_schema_version: u32) -> PlatformReleaseIdentityV1
         workerd_lock_sha256: "a".repeat(64),
         runtime_assets_sha256: "b".repeat(64),
         facade_capability_version: 1,
-        control_schema_version,
-        scheduler_schema_version: 4,
+        control_schema_version: u32::try_from(crate::migrations::current_schema_version()).unwrap(),
+        scheduler_schema_version: u32::try_from(crate::current_scheduler_schema_version()).unwrap(),
         kv_schema_version_min: crate::KV_SCHEMA_VERSION,
         kv_schema_version_max: crate::KV_SCHEMA_VERSION,
         d1_schema_version_min: crate::D1_DATABASE_SCHEMA_VERSION,
@@ -2984,7 +2987,7 @@ fn downgrade_control_to_v8(path: &Path) {
         let mut statement = control
             .prepare(
                 "SELECT name FROM sqlite_master WHERE type = 'trigger'
-                 AND (name LIKE '%queue%' OR name LIKE '%cron%')",
+                 AND (name LIKE '%queue%' OR name LIKE '%cron%' OR name LIKE '%workflow%')",
             )
             .unwrap();
         statement
@@ -3000,7 +3003,12 @@ fn downgrade_control_to_v8(path: &Path) {
     }
     control
         .execute_batch(
-            "DROP TABLE cron_activations;
+            "DROP TABLE workflow_instance_referrers;
+             DROP TABLE workflow_referrers;
+             DROP TABLE workflow_bindings;
+             DROP TABLE workflow_versions;
+             DROP TABLE workflow_definitions;
+             DROP TABLE cron_activations;
              DROP TABLE deployment_cron_declarations;
              DROP TABLE deployment_cron_configs;
              DROP TABLE queue_consumers;
@@ -3042,7 +3050,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         snapshot_id: &snapshot_id,
         label: "p1-test",
         created_at_ms: 1,
-        release: p1_release_identity(11),
+        release: p1_release_identity(),
         master_key_fingerprint: key.fingerprint(),
         s3_authority_fingerprint: &"d".repeat(64),
         r2_prefix_fingerprint: &"e".repeat(64),
@@ -3205,7 +3213,7 @@ fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
     let before = crate::inspect_offline_schema(&data_dir, 5_000, 1).unwrap();
     assert_eq!(before.control, 8);
     let after = crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap();
-    assert_eq!(after.control, 11);
+    assert_eq!(after.control, 12);
     assert_eq!(
         crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap(),
         after
@@ -3498,7 +3506,7 @@ fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
     drop(reader);
     drop(scheduler);
     let inspection = crate::inspect_scheduler_db(&scheduler_path, 5_000, 61_000).unwrap();
-    assert_eq!(inspection.schema_version, 4);
+    assert_eq!(inspection.schema_version, 5);
     assert_eq!(inspection.queue.queues, 1);
     assert_eq!(inspection.queue.backlog_messages, 0);
     assert_eq!(inspection.queue.counter_mismatches, 0);

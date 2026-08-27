@@ -106,6 +106,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
                 None,
                 PlatformConfig::default().durable_objects,
                 open_compute_core::QueuesConfig::default(),
+                open_compute_core::WorkflowsConfig::default(),
                 Some(scheduler),
                 async move {
                     let _ = binding_shutdown.changed().await;
@@ -198,6 +199,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             storage.clone(),
             transport.clone(),
             scheduler_config,
+            open_compute_core::WorkflowsConfig::default(),
             Arc::new(SystemSchedulerClock),
         )
         .with_metrics(scheduler_metrics)

@@ -24,6 +24,12 @@ pub const DO_ID_CODEC_MODULE_NAME: &str = "__open_compute_do_id_codec__.js";
 pub const DO_ALARM_SHIM_MODULE_NAME: &str = "__open_compute_do_alarm_shim__.js";
 /// Reserved dynamic module containing the tenant-local Queue producer facade.
 pub const QUEUE_FACADE_MODULE_NAME: &str = "__open_compute_queue_facade__.js";
+/// Reserved dynamic module for the Workflow caller facade.
+pub const WORKFLOW_FACADE_MODULE_NAME: &str = "__open_compute_workflow_facade__.js";
+/// Reserved dynamic module for the bounded Workflow JSON codec.
+pub const WORKFLOW_JSON_MODULE_NAME: &str = "__open_compute_workflow_json__.js";
+/// Reserved private Workflow runner module identity, never a tenant bundle module.
+pub const WORKFLOW_RUNNER_MODULE_NAME: &str = "__open_compute_workflow_runner__.js";
 /// Reserved deterministic main-module wrapper generated for local product facades.
 pub const LOADED_ISOLATE_WRAPPER_MODULE_NAME: &str = "__open_compute_loaded_isolate_wrapper__.js";
 /// Earliest compatibility date accepted by the pinned P1 policy.
@@ -43,6 +49,12 @@ const QUEUE_FACADE_SOURCE: &[u8] =
     include_bytes!("../../../runtime/system-workers/queue-facade.js");
 const LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE: &[u8] =
     include_bytes!("../../../runtime/system-workers/loaded-isolate-wrapper-generator.js");
+const WORKFLOW_WRAPPER_GENERATOR_SOURCE: &[u8] =
+    include_bytes!("../../../runtime/system-workers/loaded-isolate-wrapper-generator-v2.js");
+const WORKFLOW_FACADE_SOURCE: &[u8] =
+    include_bytes!("../../../runtime/system-workers/workflow-facade.js");
+const WORKFLOW_JSON_SOURCE: &[u8] =
+    include_bytes!("../../../runtime/system-workers/workflow-json.js");
 
 /// Exact loaded-isolate source identity frozen into a facade deployment descriptor.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -80,6 +92,15 @@ pub struct LoadedIsolateInjectionV1 {
     /// SHA-256 of the exact injected Queue producer facade source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_facade_sha256: Option<String>,
+    /// Local Workflow facade capability when a caller binding is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_facade_capability_version: Option<u32>,
+    /// Frozen tenant-local Workflow caller facade source digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_facade_sha256: Option<String>,
+    /// Frozen canonical JSON codec source digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_json_sha256: Option<String>,
     /// SHA-256 of the exact deterministic wrapper generator source.
     pub loaded_isolate_wrapper_generator_sha256: String,
 }
@@ -88,6 +109,7 @@ impl LoadedIsolateInjectionV1 {
     fn for_bindings(
         bindings: &[BindingDescriptorV1],
         queue_bindings: &[QueueProducerBindingDescriptorV1],
+        workflow_bindings: &[open_compute_storage::WorkflowBindingDescriptor],
     ) -> Option<Self> {
         let r2 = bindings
             .iter()
@@ -99,7 +121,8 @@ impl LoadedIsolateInjectionV1 {
             .iter()
             .any(|binding| binding.kind == BindingKind::DoNamespace);
         let queue = !queue_bindings.is_empty();
-        (r2 || d1 || durable_objects || queue).then(|| Self {
+        let workflow = !workflow_bindings.is_empty();
+        (r2 || d1 || durable_objects || queue || workflow).then(|| Self {
             schema_version: 1,
             r2_facade_capability_version: r2.then_some(1),
             r2_facade_sha256: r2.then(|| hex::encode(Sha256::digest(R2_FACADE_SOURCE))),
@@ -114,9 +137,16 @@ impl LoadedIsolateInjectionV1 {
                 .then(|| hex::encode(Sha256::digest(DO_ALARM_SHIM_SOURCE))),
             queue_facade_capability_version: queue.then_some(1),
             queue_facade_sha256: queue.then(|| hex::encode(Sha256::digest(QUEUE_FACADE_SOURCE))),
-            loaded_isolate_wrapper_generator_sha256: hex::encode(Sha256::digest(
-                LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE,
-            )),
+            workflow_facade_capability_version: workflow.then_some(1),
+            workflow_facade_sha256: workflow
+                .then(|| hex::encode(Sha256::digest(WORKFLOW_FACADE_SOURCE))),
+            workflow_json_sha256: workflow
+                .then(|| hex::encode(Sha256::digest(WORKFLOW_JSON_SOURCE))),
+            loaded_isolate_wrapper_generator_sha256: hex::encode(Sha256::digest(if workflow {
+                WORKFLOW_WRAPPER_GENERATOR_SOURCE
+            } else {
+                LOADED_ISOLATE_WRAPPER_GENERATOR_SOURCE
+            })),
         })
     }
 }
@@ -171,7 +201,10 @@ impl BindingDescriptorV1 {
         config: CanonicalBindingConfig,
     ) -> Result<Self, PlatformError> {
         validate_env_name(&name)?;
-        if name.len() > 64 || resource_spec_generation == 0 || kind == BindingKind::QueueProducer {
+        if name.len() > 64
+            || resource_spec_generation == 0
+            || matches!(kind, BindingKind::QueueProducer | BindingKind::Workflow)
+        {
             return Err(binding_invariant());
         }
         if capability_version != 1 {
@@ -304,6 +337,9 @@ pub struct WorkerCodeDescriptorV1 {
     /// Canonically sorted immutable Queue producer binding descriptors.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
+    /// Logical Workflow bindings, omitted for byte-identical pre-Workflow descriptors.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
     /// Exact loaded-isolate facade sources required by product bindings.
     pub loaded_isolate_injection: Option<LoadedIsolateInjectionV1>,
     /// Immutable limits profile document.
@@ -331,7 +367,7 @@ impl WorkerCodeDescriptorV1 {
         limits: serde_json::Value,
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
-        Self::new_with_queue_bindings(
+        Self::new_with_product_bindings(
             account_id,
             worker_id,
             deployment_id,
@@ -343,14 +379,15 @@ impl WorkerCodeDescriptorV1 {
             secret_revisions,
             binding_descriptors,
             Vec::new(),
+            Vec::new(),
             limits,
             loader_schema_version,
         )
     }
 
-    /// Build and validate the canonical descriptor with independent Queue bindings.
+    /// Build and validate the canonical descriptor with independent product bindings.
     #[allow(clippy::too_many_arguments)]
-    pub fn new_with_queue_bindings(
+    pub fn new_with_product_bindings(
         account_id: AccountId,
         worker_id: WorkerId,
         deployment_id: DeploymentId,
@@ -362,6 +399,7 @@ impl WorkerCodeDescriptorV1 {
         mut secret_revisions: Vec<SecretDescriptor>,
         mut binding_descriptors: Vec<BindingDescriptorV1>,
         mut queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
+        mut workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
         limits: serde_json::Value,
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
@@ -431,9 +469,17 @@ impl WorkerCodeDescriptorV1 {
                 ));
             }
         }
+        workflow_binding_descriptors.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+        for binding in &workflow_binding_descriptors {
+            binding.sha256()?;
+            if !env_names.insert(&binding.name) {
+                return Err(binding_invariant());
+            }
+        }
         let loaded_isolate_injection = LoadedIsolateInjectionV1::for_bindings(
             &binding_descriptors,
             &queue_binding_descriptors,
+            &workflow_binding_descriptors,
         );
         validate_limits(&limits)?;
         Ok(Self {
@@ -450,6 +496,7 @@ impl WorkerCodeDescriptorV1 {
             binding_descriptors,
             queue_binding_descriptors,
             loaded_isolate_injection,
+            workflow_binding_descriptors,
             limits,
             global_outbound_policy_version: GLOBAL_OUTBOUND_POLICY_VERSION,
             loader_schema_version,

@@ -16,6 +16,8 @@ mod queue;
 mod runner;
 #[path = "scheduler/wake.rs"]
 mod wake;
+#[path = "scheduler/workflow.rs"]
+mod workflow;
 
 use crate::metrics::{AlarmOutcome, MetricsRegistry};
 use crate::runtime_bridge::WorkerdTransport;
@@ -51,19 +53,27 @@ pub struct SchedulerService {
     storage: Arc<PlatformStorage>,
     transport: WorkerdTransport,
     config: SchedulerConfig,
+    workflows: open_compute_core::WorkflowsConfig,
+    workflow_reconcile_cursor: Mutex<open_compute_workers::WorkflowReconcileCursor>,
+    workflow_infra_failures: AtomicUsize,
+    workflow_version_cursor: Mutex<Option<open_compute_core::WorkflowVersionId>>,
+    workflow_artifact_cursor: Mutex<Option<open_compute_core::WorkflowInstanceId>>,
     clock: Arc<dyn SchedulerClock>,
     observed_wall_floor_ms: AtomicI64,
     paused: AtomicBool,
     alarm_paused: AtomicBool,
     queue_paused: AtomicBool,
     cron_paused: AtomicBool,
+    workflow_paused: AtomicBool,
     alarm_pool_state: AtomicU8,
     queue_pool_state: AtomicU8,
     cron_pool_state: AtomicU8,
+    workflow_pool_state: AtomicU8,
     global_in_flight: AtomicUsize,
     alarm_in_flight: AtomicUsize,
     queue_in_flight: AtomicUsize,
     cron_in_flight: AtomicUsize,
+    workflow_in_flight: AtomicUsize,
     next_wake_at_ms: AtomicI64,
     wake: WakeCoordinator,
     repair_cursor: Mutex<Option<RepairCursor>>,
@@ -219,6 +229,7 @@ impl SchedulerService {
         storage: Arc<PlatformStorage>,
         transport: WorkerdTransport,
         config: SchedulerConfig,
+        workflows: open_compute_core::WorkflowsConfig,
         clock: Arc<dyn SchedulerClock>,
     ) -> Self {
         let wall = clock.wall_time_ms();
@@ -230,17 +241,26 @@ impl SchedulerService {
         let alarm_enabled = config.pool(SchedulerKind::Alarm).enabled;
         let queue_enabled = config.pool(SchedulerKind::Queue).enabled;
         let cron_enabled = config.pool(SchedulerKind::Cron).enabled;
+        let workflow_enabled = config.pool(SchedulerKind::Workflow).enabled;
         Self {
             store,
             storage,
             transport,
             config,
+            workflows,
+            workflow_reconcile_cursor: Mutex::new(
+                open_compute_workers::WorkflowReconcileCursor::default(),
+            ),
+            workflow_infra_failures: AtomicUsize::new(0),
+            workflow_version_cursor: Mutex::new(None),
+            workflow_artifact_cursor: Mutex::new(None),
             clock,
             observed_wall_floor_ms: AtomicI64::new(wall),
             paused: AtomicBool::new(false),
             alarm_paused: AtomicBool::new(false),
             queue_paused: AtomicBool::new(false),
             cron_paused: AtomicBool::new(false),
+            workflow_paused: AtomicBool::new(false),
             alarm_pool_state: AtomicU8::new(encode_pool_state(if alarm_enabled {
                 SchedulerPoolState::Ready
             } else {
@@ -256,10 +276,16 @@ impl SchedulerService {
             } else {
                 SchedulerPoolState::Disabled
             })),
+            workflow_pool_state: AtomicU8::new(encode_pool_state(if workflow_enabled {
+                SchedulerPoolState::Ready
+            } else {
+                SchedulerPoolState::Disabled
+            })),
             global_in_flight: AtomicUsize::new(0),
             alarm_in_flight: AtomicUsize::new(0),
             queue_in_flight: AtomicUsize::new(0),
             cron_in_flight: AtomicUsize::new(0),
+            workflow_in_flight: AtomicUsize::new(0),
             next_wake_at_ms: AtomicI64::new(-1),
             wake,
             repair_cursor: Mutex::new(None),
@@ -336,7 +362,10 @@ impl SchedulerService {
                 self.cron_paused.store(true, Ordering::Release);
                 self.set_cron_pool_state(SchedulerPoolState::Paused);
             }
-            SchedulerKind::Workflow => unreachable!(),
+            SchedulerKind::Workflow => {
+                self.workflow_paused.store(true, Ordering::Release);
+                self.set_workflow_pool_state(SchedulerPoolState::Paused);
+            }
         }
         self.wake.notify();
         Ok(())
@@ -358,18 +387,18 @@ impl SchedulerService {
                 self.cron_paused.store(false, Ordering::Release);
                 self.set_cron_pool_state(SchedulerPoolState::Ready);
             }
-            SchedulerKind::Workflow => unreachable!(),
+            SchedulerKind::Workflow => {
+                self.workflow_paused.store(false, Ordering::Release);
+                self.workflow_infra_failures.store(0, Ordering::Release);
+                self.set_workflow_pool_state(SchedulerPoolState::Ready);
+            }
         }
         self.wake.notify();
         Ok(())
     }
 
     fn ensure_kind_enabled(&self, kind: SchedulerKind) -> Result<(), PlatformError> {
-        if matches!(
-            kind,
-            SchedulerKind::Alarm | SchedulerKind::Queue | SchedulerKind::Cron
-        ) && self.config.pool(kind).enabled
-        {
+        if self.config.pool(kind).enabled {
             return Ok(());
         }
         Err(PlatformError::new(
@@ -393,6 +422,20 @@ impl SchedulerService {
     fn observe_pool_health(&self, state: SchedulerPoolState) {
         let Some(health) = &self.health else {
             return;
+        };
+        let states = [
+            state,
+            self.alarm_pool_state(),
+            self.queue_pool_state(),
+            self.cron_pool_state(),
+            self.workflow_pool_state(),
+        ];
+        let state = if states.contains(&SchedulerPoolState::CircuitOpen) {
+            SchedulerPoolState::CircuitOpen
+        } else if states.contains(&SchedulerPoolState::Backoff) {
+            SchedulerPoolState::Backoff
+        } else {
+            state
         };
         let (component, reason) = match state {
             SchedulerPoolState::CircuitOpen => (
@@ -452,12 +495,21 @@ impl SchedulerService {
             now_ms.saturating_sub(due)
                 > i64::try_from(self.config.repair_interval_ms).unwrap_or(i64::MAX)
         });
-        let (state, reason) = if self.alarm_pool_state() == SchedulerPoolState::CircuitOpen {
+        let pool_states = [
+            self.alarm_pool_state(),
+            self.queue_pool_state(),
+            self.cron_pool_state(),
+            self.workflow_pool_state(),
+        ];
+        let (state, reason) = if pool_states.contains(&SchedulerPoolState::CircuitOpen) {
             (
                 ComponentState::Degraded,
                 ReadinessReason::SchedulerUnavailable,
             )
-        } else if lagged || summary.expired_claims > 0 {
+        } else if lagged
+            || summary.expired_claims > 0
+            || pool_states.contains(&SchedulerPoolState::Backoff)
+        {
             (ComponentState::Degraded, ReadinessReason::SchedulerBacklog)
         } else {
             (ComponentState::Healthy, ReadinessReason::Ready)
@@ -472,20 +524,14 @@ impl SchedulerService {
 }
 
 fn release_completed(
-    completed: &Result<SchedulerKind, tokio::task::JoinError>,
+    kind: SchedulerKind,
     admission: &mut AdmissionTracker,
     global_in_flight: &AtomicUsize,
     alarm_in_flight: &AtomicUsize,
     queue_in_flight: &AtomicUsize,
     cron_in_flight: &AtomicUsize,
+    workflow_in_flight: &AtomicUsize,
 ) {
-    let kind = match completed {
-        Ok(kind) => *kind,
-        Err(_) => {
-            tracing::warn!("scheduler dispatch task failed");
-            SchedulerKind::Alarm
-        }
-    };
     admission.release(kind, 1);
     store_admission_metrics(
         admission,
@@ -493,7 +539,22 @@ fn release_completed(
         alarm_in_flight,
         queue_in_flight,
         cron_in_flight,
+        workflow_in_flight,
     );
+}
+
+fn completed_kind(
+    completed: Result<(tokio::task::Id, SchedulerKind), tokio::task::JoinError>,
+    kinds: &mut std::collections::HashMap<tokio::task::Id, SchedulerKind>,
+) -> Result<SchedulerKind, PlatformError> {
+    let id = match completed {
+        Ok((id, _)) => id,
+        Err(error) => {
+            tracing::warn!("scheduler dispatch task failed; lease retained");
+            error.id()
+        }
+    };
+    kinds.remove(&id).ok_or_else(scheduler_task_failed)
 }
 
 fn store_admission_metrics(
@@ -502,6 +563,7 @@ fn store_admission_metrics(
     alarm_in_flight: &AtomicUsize,
     queue_in_flight: &AtomicUsize,
     cron_in_flight: &AtomicUsize,
+    workflow_in_flight: &AtomicUsize,
 ) {
     global_in_flight.store(admission.global_in_flight(), Ordering::Release);
     alarm_in_flight.store(
@@ -514,6 +576,10 @@ fn store_admission_metrics(
     );
     cron_in_flight.store(
         admission.pool_in_flight(SchedulerKind::Cron),
+        Ordering::Release,
+    );
+    workflow_in_flight.store(
+        admission.pool_in_flight(SchedulerKind::Workflow),
         Ordering::Release,
     );
 }

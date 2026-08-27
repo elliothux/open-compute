@@ -36,6 +36,9 @@ struct SnapshotPolicyV1<'a> {
     d1: &'a D1Config,
     durable_objects: &'a DurableObjectsConfig,
     scheduler: &'a SchedulerConfig,
+    // Preserve signed pre-Workflow policy fingerprints when the new policy is at its default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workflows: Option<&'a open_compute_core::WorkflowsConfig>,
     cache: &'a CacheConfig,
 }
 
@@ -141,7 +144,7 @@ pub fn platform_release_metadata(
             ("snapshots".to_owned(), vec![1]),
         ]),
         workerd_local_disk_gate_result: "p0.7-stock-workerd".to_owned(),
-        conformance_result: "go-p2.3-queue-consumer-cron-v1".to_owned(),
+        conformance_result: "go-p2.4-workflow-core-v1".to_owned(),
         websocket_hibernation_result: "no-go:p1.8-unsupported".to_owned(),
     };
     if !metadata.validate() {
@@ -165,6 +168,8 @@ pub fn platform_config_policy_sha256(loaded: &LoadedConfig) -> Result<String, Pl
         d1: &config.d1,
         durable_objects: &config.durable_objects,
         scheduler: &config.scheduler,
+        workflows: (config.workflows != open_compute_core::WorkflowsConfig::default())
+            .then_some(&config.workflows),
         cache: &config.cache,
     })
     .map_err(|_| capability_invalid())?;
@@ -277,9 +282,14 @@ fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
         "cron".to_owned(),
         supported(&["scheduled", "noRetry"], &["OC-CRON-001"]),
     );
-    for name in ["workflows", "websocket_hibernation"] {
-        products.insert(name.to_owned(), unsupported());
-    }
+    products.insert(
+        "workflows".to_owned(),
+        supported(
+            &["create", "get", "id", "status", "step.do"],
+            &["OC-WORKFLOW-001", "OC-WORKFLOW-002"],
+        ),
+    );
+    products.insert("websocket_hibernation".to_owned(), unsupported());
     products
 }
 
@@ -317,6 +327,52 @@ fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
         .scheduler
         .pool(open_compute_core::SchedulerKind::Cron);
     BTreeMap::from([
+        (
+            "workflows.max_json_bytes".to_owned(),
+            open_compute_core::workflow::WORKFLOW_JSON_MAX_BYTES as u64,
+        ),
+        (
+            "workflows.max_steps".to_owned(),
+            u64::from(config.workflows.max_steps),
+        ),
+        (
+            "workflows.max_state_bytes".to_owned(),
+            config.workflows.max_state_bytes,
+        ),
+        (
+            "workflows.max_account_state_bytes".to_owned(),
+            config.workflows.max_account_state_bytes,
+        ),
+        (
+            "workflows.max_instances_per_account".to_owned(),
+            u64::from(config.workflows.max_instances_per_account),
+        ),
+        (
+            "workflows.max_instances_per_definition".to_owned(),
+            u64::from(config.workflows.max_instances_per_definition),
+        ),
+        (
+            "workflows.max_active_per_account".to_owned(),
+            u64::from(config.workflows.max_active_per_account),
+        ),
+        ("workflows.lease_ms".to_owned(), config.workflows.lease_ms),
+        (
+            "workflows.heartbeat_ms".to_owned(),
+            config.workflows.heartbeat_ms,
+        ),
+        (
+            "workflows.dispatch_timeout_ms".to_owned(),
+            config.workflows.dispatch_timeout_ms,
+        ),
+        (
+            "scheduler.pools.workflow.max_in_flight".to_owned(),
+            u64::from(
+                config
+                    .scheduler
+                    .pool(open_compute_core::SchedulerKind::Workflow)
+                    .max_in_flight,
+            ),
+        ),
         (
             "workers.max_bundle_bytes".to_owned(),
             config.workers.max_bundle_bytes,
@@ -465,3 +521,7 @@ fn capability_invalid() -> PlatformError {
         "platform capability registry is invalid",
     )
 }
+
+#[cfg(test)]
+#[path = "capabilities_tests.rs"]
+mod tests;

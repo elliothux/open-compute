@@ -11,6 +11,7 @@ impl SchedulerService {
         let alarm = self.config.pool(SchedulerKind::Alarm);
         let queue = self.config.pool(SchedulerKind::Queue);
         let cron = self.config.pool(SchedulerKind::Cron);
+        let workflow = self.config.pool(SchedulerKind::Workflow);
         let pool_caps = SchedulerKind::ALL.map(|kind| {
             usize::try_from(self.config.pool(kind).max_in_flight).unwrap_or(usize::MAX)
         });
@@ -28,18 +29,30 @@ impl SchedulerService {
         let mut pool = PoolRuntime::ready();
         let mut queue_pool = PoolRuntime::ready();
         let mut cron_pool = PoolRuntime::ready();
+        let mut workflow_pool = PoolRuntime::ready();
         let mut repair_deadline = self.clock.monotonic_now();
         let mut dispatches = JoinSet::new();
+        let mut version_reconcile = JoinSet::new();
+        let mut dispatch_kinds = std::collections::HashMap::new();
 
         loop {
-            while let Some(completed) = dispatches.try_join_next() {
+            while let Some(result) = version_reconcile.try_join_next() {
+                if !matches!(result, Ok(Ok(()))) {
+                    tracing::warn!(
+                        code = "WORKFLOW_RUNTIME_UNAVAILABLE",
+                        "Workflow version reconciliation failed"
+                    );
+                }
+            }
+            while let Some(completed) = dispatches.try_join_next_with_id() {
                 release_completed(
-                    &completed,
+                    completed_kind(completed, &mut dispatch_kinds)?,
                     &mut admission,
                     &self.global_in_flight,
                     &self.alarm_in_flight,
                     &self.queue_in_flight,
                     &self.cron_in_flight,
+                    &self.workflow_in_flight,
                 );
             }
             if *shutdown.borrow() {
@@ -51,6 +64,21 @@ impl SchedulerService {
             pool.refresh_deadline(now_mono);
             queue_pool.refresh_deadline(now_mono);
             cron_pool.refresh_deadline(now_mono);
+            workflow_pool.refresh_deadline(now_mono);
+            if self.workflow_pool_state() == SchedulerPoolState::CircuitOpen {
+                workflow_pool.permanent_failure();
+            } else if workflow_pool.state() == SchedulerPoolState::CircuitOpen
+                && self.workflow_pool_state() == SchedulerPoolState::Ready
+            {
+                workflow_pool.probe_succeeded();
+            }
+            if !workflow.enabled {
+                self.set_workflow_pool_state(SchedulerPoolState::Disabled);
+            } else if self.is_paused() || self.workflow_paused.load(Ordering::Acquire) {
+                self.set_workflow_pool_state(SchedulerPoolState::Paused);
+            } else {
+                self.set_workflow_pool_state(workflow_pool.state());
+            }
             if pool.state() == SchedulerPoolState::CircuitOpen
                 && self.alarm_pool_state() == SchedulerPoolState::Ready
             {
@@ -89,6 +117,21 @@ impl SchedulerService {
             }
 
             if now_mono >= repair_deadline {
+                if version_reconcile.is_empty() && !self.is_paused() && workflow.enabled {
+                    let service = self.clone();
+                    version_reconcile
+                        .spawn(async move { service.reconcile_workflow_versions(1).await });
+                }
+                if let Err(error) = self.repair_workflows(32) {
+                    if error.code() == ErrorCode::WorkflowInvariantViolation {
+                        workflow_pool.permanent_failure();
+                        self.set_workflow_pool_state(workflow_pool.state());
+                    }
+                    tracing::warn!(
+                        code = error.code().as_str(),
+                        "Workflow reconciliation failed"
+                    );
+                }
                 if let Err(error) = self.repair_once().await {
                     tracing::warn!(
                         code = error.code().as_str(),
@@ -105,6 +148,7 @@ impl SchedulerService {
             let queue_retention = self.store.queue_workload_summary(now_ms)?;
             let queue_summary = self.store.queue_consumer_workload_summary(now_ms)?;
             let cron_summary = self.store.cron_workload_summary(now_ms)?;
+            let workflow_summary = self.store.workflow_workload_summary(now_ms)?;
             set_atomic_option_i64(
                 &self.next_wake_at_ms,
                 minimum_timestamp([
@@ -112,12 +156,18 @@ impl SchedulerService {
                     queue_retention.next_due_at_ms,
                     queue_summary.next_due_at_ms,
                     cron_summary.next_due_at_ms,
+                    workflow_summary.next_due_at_ms,
                 ]),
             );
             if let Some(metrics) = &self.metrics {
                 metrics.observe_scheduler_workload(SchedulerKind::Alarm, summary, now_ms);
                 metrics.observe_scheduler_workload(SchedulerKind::Queue, queue_summary, now_ms);
                 metrics.observe_scheduler_workload(SchedulerKind::Cron, cron_summary, now_ms);
+                metrics.observe_scheduler_workload(
+                    SchedulerKind::Workflow,
+                    workflow_summary,
+                    now_ms,
+                );
                 metrics.set_cron_lag(
                     cron_summary
                         .oldest_due_at_ms
@@ -172,6 +222,10 @@ impl SchedulerService {
                 && !self.is_paused()
                 && !self.cron_paused.load(Ordering::Acquire)
                 && cron_pool.state() == SchedulerPoolState::Ready;
+            let workflow_runnable = workflow.enabled
+                && !self.is_paused()
+                && !self.workflow_paused.load(Ordering::Acquire)
+                && workflow_pool.state() == SchedulerPoolState::Ready;
             if admission.available_global() > 0 {
                 let mut ready = [false; SchedulerKind::ALL.len()];
                 ready[SchedulerKind::Alarm.index()] =
@@ -180,6 +234,8 @@ impl SchedulerService {
                     queue_runnable && (queue_summary.ready > 0 || queue_summary.expired > 0);
                 ready[SchedulerKind::Cron.index()] =
                     cron_runnable && (cron_summary.ready > 0 || cron_summary.expired > 0);
+                ready[SchedulerKind::Workflow.index()] = workflow_runnable
+                    && (workflow_summary.ready > 0 || workflow_summary.expired > 0);
                 let selected = selector.select(
                     ready,
                     admission.available_pools(),
@@ -209,13 +265,15 @@ impl SchedulerService {
                                     &self.alarm_in_flight,
                                     &self.queue_in_flight,
                                     &self.cron_in_flight,
+                                    &self.workflow_in_flight,
                                 );
                                 for job in jobs {
                                     let service = self.clone();
-                                    dispatches.spawn(async move {
+                                    let handle = dispatches.spawn(async move {
                                         service.dispatch_one(job).await;
                                         SchedulerKind::Alarm
                                     });
+                                    dispatch_kinds.insert(handle.id(), SchedulerKind::Alarm);
                                 }
                             }
                         }
@@ -268,13 +326,15 @@ impl SchedulerService {
                                     &self.alarm_in_flight,
                                     &self.queue_in_flight,
                                     &self.cron_in_flight,
+                                    &self.workflow_in_flight,
                                 );
                                 for batch in batches {
                                     let service = self.clone();
-                                    dispatches.spawn(async move {
+                                    let handle = dispatches.spawn(async move {
                                         service.dispatch_queue_batch(batch).await;
                                         SchedulerKind::Queue
                                     });
+                                    dispatch_kinds.insert(handle.id(), SchedulerKind::Queue);
                                 }
                                 self.set_queue_pool_state(queue_pool.state());
                             }
@@ -327,13 +387,15 @@ impl SchedulerService {
                                     &self.alarm_in_flight,
                                     &self.queue_in_flight,
                                     &self.cron_in_flight,
+                                    &self.workflow_in_flight,
                                 );
                                 for run in runs {
                                     let service = self.clone();
-                                    dispatches.spawn(async move {
+                                    let handle = dispatches.spawn(async move {
                                         service.dispatch_cron_run(run).await;
                                         SchedulerKind::Cron
                                     });
+                                    dispatch_kinds.insert(handle.id(), SchedulerKind::Cron);
                                 }
                                 self.set_cron_pool_state(cron_pool.state());
                             }
@@ -355,6 +417,70 @@ impl SchedulerService {
                             tracing::warn!(
                                 code = error.code().as_str(),
                                 "Cron claim entered bounded backoff"
+                            );
+                        }
+                    }
+                }
+                let selected_workflow = selected
+                    .iter()
+                    .filter(|kind| **kind == SchedulerKind::Workflow)
+                    .count()
+                    .min(usize::try_from(workflow.claim_batch).unwrap_or(usize::MAX));
+                if selected_workflow > 0 {
+                    match self
+                        .claim_workflows(u32::try_from(selected_workflow).unwrap_or(u32::MAX))
+                        .await
+                    {
+                        Ok(runs) => {
+                            backoff.reset(SchedulerKind::Workflow);
+                            workflow_pool.probe_succeeded();
+                            selector.refund(
+                                SchedulerKind::Workflow,
+                                selected_workflow.saturating_sub(runs.len()),
+                            );
+                            if !runs.is_empty() {
+                                if !admission.reserve(SchedulerKind::Workflow, runs.len()) {
+                                    return Err(scheduler_task_failed());
+                                }
+                                store_admission_metrics(
+                                    &admission,
+                                    &self.global_in_flight,
+                                    &self.alarm_in_flight,
+                                    &self.queue_in_flight,
+                                    &self.workflow_in_flight,
+                                    &self.workflow_in_flight,
+                                );
+                                for run in runs {
+                                    let service = self.clone();
+                                    let handle = dispatches.spawn(async move {
+                                        service.dispatch_workflow_run(run).await;
+                                        SchedulerKind::Workflow
+                                    });
+                                    dispatch_kinds.insert(handle.id(), SchedulerKind::Workflow);
+                                }
+                                self.set_workflow_pool_state(workflow_pool.state());
+                            }
+                        }
+                        Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
+                            return Err(error);
+                        }
+                        Err(error)
+                            if permanent_pool_error(error.code())
+                                || error.code() == ErrorCode::WorkflowInvariantViolation =>
+                        {
+                            workflow_pool.permanent_failure();
+                            self.set_workflow_pool_state(workflow_pool.state());
+                        }
+                        Err(error) => {
+                            let delay = backoff.fail(
+                                SchedulerKind::Workflow,
+                                infrastructure_error_class(error.code()),
+                            );
+                            workflow_pool.transient_failure(self.clock.monotonic_deadline(delay));
+                            self.set_workflow_pool_state(workflow_pool.state());
+                            tracing::warn!(
+                                code = error.code().as_str(),
+                                "Workflow claim entered bounded backoff"
                             );
                         }
                     }
@@ -389,6 +515,18 @@ impl SchedulerService {
                     reason: WakeReason::Due,
                 });
             }
+            if workflow_runnable && let Some(next_due_at_ms) = workflow_summary.next_due_at_ms {
+                deadlines.push(WakeDeadline {
+                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
+                    reason: WakeReason::Due,
+                });
+            }
+            if let Some(retry_at) = workflow_pool.retry_at() {
+                deadlines.push(WakeDeadline {
+                    at: retry_at,
+                    reason: WakeReason::Backoff,
+                });
+            }
             if let Some(retry_at) = pool.retry_at() {
                 deadlines.push(WakeDeadline {
                     at: retry_at,
@@ -415,15 +553,16 @@ impl SchedulerService {
                         break;
                     }
                 }
-                completed = dispatches.join_next(), if !dispatches.is_empty() => {
+                completed = dispatches.join_next_with_id(), if !dispatches.is_empty() => {
                     if let Some(completed) = completed {
                         release_completed(
-                            &completed,
+                            completed_kind(completed, &mut dispatch_kinds)?,
                             &mut admission,
                             &self.global_in_flight,
                             &self.alarm_in_flight,
                             &self.queue_in_flight,
                             &self.cron_in_flight,
+                            &self.workflow_in_flight,
                         );
                     }
                 }
@@ -432,6 +571,7 @@ impl SchedulerService {
         }
 
         self.wake.notify();
+        version_reconcile.shutdown().await;
         let _ = bounded_drain(
             self.clock.as_ref(),
             Duration::from_millis(self.config.shutdown_drain_ms),
@@ -450,12 +590,17 @@ impl SchedulerService {
             SchedulerKind::Cron,
             admission.pool_in_flight(SchedulerKind::Cron),
         );
+        admission.release(
+            SchedulerKind::Workflow,
+            admission.pool_in_flight(SchedulerKind::Workflow),
+        );
         store_admission_metrics(
             &admission,
             &self.global_in_flight,
             &self.alarm_in_flight,
             &self.queue_in_flight,
             &self.cron_in_flight,
+            &self.workflow_in_flight,
         );
         Ok(())
     }
@@ -465,6 +610,7 @@ impl SchedulerService {
         let alarm = self.config.pool(SchedulerKind::Alarm);
         let queue = self.config.pool(SchedulerKind::Queue);
         let cron = self.config.pool(SchedulerKind::Cron);
+        let workflow = self.config.pool(SchedulerKind::Workflow);
         let mut completed = self.poll_queue_once()?;
         if queue.enabled && !self.is_paused() && !self.queue_paused.load(Ordering::Acquire) {
             let batches = self
@@ -501,6 +647,30 @@ impl SchedulerService {
                     |run| {
                         let service = self.clone();
                         async move { service.dispatch_cron_run(run).await }
+                    },
+                )
+                .await;
+        }
+        if workflow.enabled
+            && !self.is_paused()
+            && !self.workflow_paused.load(Ordering::Acquire)
+            && self.workflow_pool_state() != SchedulerPoolState::CircuitOpen
+        {
+            let runs = self
+                .claim_workflows(
+                    workflow
+                        .claim_batch
+                        .min(workflow.max_in_flight)
+                        .min(self.config.max_in_flight),
+                )
+                .await?;
+            completed = completed.saturating_add(runs.len());
+            stream::iter(runs)
+                .for_each_concurrent(
+                    usize::try_from(workflow.max_in_flight).unwrap_or(usize::MAX),
+                    |run| {
+                        let service = self.clone();
+                        async move { service.dispatch_workflow_run(run).await }
                     },
                 )
                 .await;

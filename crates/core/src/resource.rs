@@ -19,6 +19,8 @@ pub enum BindingKind {
     DoNamespace,
     /// Queue producer runtime binding; never a generic P0 resource driver.
     QueueProducer,
+    /// Logical Workflow caller binding; execution state is not a generic resource driver.
+    Workflow,
 }
 
 impl BindingKind {
@@ -31,6 +33,7 @@ impl BindingKind {
             Self::D1Database => "d1_database",
             Self::DoNamespace => "do_namespace",
             Self::QueueProducer => "queue_producer",
+            Self::Workflow => "workflow",
         }
     }
 }
@@ -51,6 +54,7 @@ impl FromStr for BindingKind {
             "d1_database" => Ok(Self::D1Database),
             "do_namespace" => Ok(Self::DoNamespace),
             "queue_producer" => Ok(Self::QueueProducer),
+            "workflow" => Ok(Self::Workflow),
             _ => Err(resource_type_error()),
         }
     }

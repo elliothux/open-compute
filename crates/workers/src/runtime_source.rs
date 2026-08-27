@@ -95,6 +95,17 @@ impl std::fmt::Debug for RuntimeModule {
     }
 }
 
+/// Verified Workflow facade descriptor with its independently checked canonical digest.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeWorkflowBinding {
+    /// Frozen catalog binding identity.
+    #[serde(flatten)]
+    pub descriptor: open_compute_storage::WorkflowBindingDescriptor,
+    /// Canonical digest used by the trusted private binding backend.
+    pub descriptor_sha256: String,
+}
+
 /// Fully verified immutable deployment assembly.
 #[derive(Clone)]
 pub struct RuntimeSnapshot {
@@ -120,6 +131,8 @@ pub struct RuntimeSnapshot {
     pub bindings: Vec<RuntimeBinding>,
     /// Verified Queue producer bindings. Empty in validation and probe scopes.
     pub queue_bindings: Vec<RuntimeQueueBinding>,
+    /// Verified Workflow caller bindings, carrying no execution or creation tokens.
+    pub workflow_bindings: Vec<RuntimeWorkflowBinding>,
     /// Immutable resource limits.
     pub limits: serde_json::Value,
 }
@@ -135,6 +148,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("secret_count", &self.secrets.len())
             .field("binding_count", &self.bindings.len())
             .field("queue_binding_count", &self.queue_bindings.len())
+            .field("workflow_binding_count", &self.workflow_bindings.len())
             .finish_non_exhaustive()
     }
 }
@@ -344,7 +358,20 @@ impl RuntimeSource {
                 descriptor_sha256: hex::encode(digest),
             });
         }
-        let descriptor = WorkerCodeDescriptorV1::new_with_queue_bindings(
+        let mut workflow_binding_descriptors = Vec::with_capacity(snapshot.workflow_bindings.len());
+        let mut runtime_workflow_bindings = Vec::with_capacity(snapshot.workflow_bindings.len());
+        for binding in &snapshot.workflow_bindings {
+            let digest = binding.descriptor.sha256()?;
+            if digest != binding.descriptor_sha256 {
+                return Err(invariant());
+            }
+            workflow_binding_descriptors.push(binding.descriptor.clone());
+            runtime_workflow_bindings.push(RuntimeWorkflowBinding {
+                descriptor: binding.descriptor.clone(),
+                descriptor_sha256: hex::encode(digest),
+            });
+        }
+        let descriptor = WorkerCodeDescriptorV1::new_with_product_bindings(
             account_id,
             worker_id,
             deployment_id,
@@ -356,6 +383,7 @@ impl RuntimeSource {
             secret_descriptors,
             binding_descriptors,
             queue_binding_descriptors,
+            workflow_binding_descriptors,
             snapshot.deployment.limits.clone(),
             snapshot.deployment.loader_schema_version,
         )?;
@@ -403,6 +431,7 @@ impl RuntimeSource {
             secrets,
             bindings: runtime_bindings,
             queue_bindings: runtime_queue_bindings,
+            workflow_bindings: runtime_workflow_bindings,
             limits: snapshot.deployment.limits,
         })
     }
@@ -455,6 +484,7 @@ impl RuntimeSource {
         enum BindingPayload<'a> {
             Resource(ResourceBindingPayload<'a>),
             Queue(QueueBindingPayload<'a>),
+            Workflow(&'a RuntimeWorkflowBinding),
         }
         let modules = snapshot
             .modules
@@ -499,6 +529,12 @@ impl RuntimeSource {
                     descriptor_sha256: &binding.descriptor_sha256,
                 })
             }))
+            .chain(
+                snapshot
+                    .workflow_bindings
+                    .iter()
+                    .map(BindingPayload::Workflow),
+            )
             .collect();
         let bytes = serde_json::to_vec(&Payload {
             schema_version: 1,

@@ -112,7 +112,7 @@ emergency_reserve_bytes = 16777216
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 512
+max_series = 1024
 "#,
             data_dir = data_dir.display(),
             master_key = data_dir.join("keys/master.key").display(),

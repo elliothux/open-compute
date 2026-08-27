@@ -53,6 +53,8 @@ pub struct PlatformConfig {
     pub d1: D1Config,
     /// Queue producer backlog and request-admission limits.
     pub queues: QueuesConfig,
+    /// Workflow sequential execution, leases, and local retained-state capacity.
+    pub workflows: crate::WorkflowsConfig,
     /// Durable Object identity, dispatch, RPC, and local-disk policy.
     pub durable_objects: DurableObjectsConfig,
     /// Durable Object alarm scheduler policy.
@@ -90,6 +92,7 @@ impl PlatformConfig {
         self.r2.validate()?;
         self.d1.validate()?;
         self.queues.validate()?;
+        self.workflows.validate()?;
         self.durable_objects.validate()?;
         self.scheduler.validate()?;
         Ok(())
@@ -599,7 +602,7 @@ impl Default for MetricsConfig {
         Self {
             enabled: true,
             max_label_value_bytes: 64,
-            max_series: 512,
+            max_series: 1024,
         }
     }
 }
@@ -1067,15 +1070,6 @@ impl SchedulerPoolConfig {
         }
     }
 
-    fn future_default(max_in_flight: u32, claim_batch: u32) -> Self {
-        Self {
-            enabled: false,
-            max_in_flight,
-            claim_batch,
-            weight: 1,
-        }
-    }
-
     fn validate(self) -> bool {
         self.max_in_flight > 0
             && self.max_in_flight <= 4096
@@ -1102,7 +1096,7 @@ pub struct SchedulerPoolsConfig {
     pub queue: SchedulerPoolConfig,
     /// Cron logical-slot and dispatch pool.
     pub cron: SchedulerPoolConfig,
-    /// Workflow pool reserved until P2.4.
+    /// Sequential durable Workflow activation pool.
     pub workflow: SchedulerPoolConfig,
 }
 
@@ -1122,7 +1116,12 @@ impl Default for SchedulerPoolsConfig {
                 claim_batch: 8,
                 weight: 1,
             },
-            workflow: SchedulerPoolConfig::future_default(16, 16),
+            workflow: SchedulerPoolConfig {
+                enabled: true,
+                max_in_flight: 16,
+                claim_batch: 16,
+                weight: 1,
+            },
         }
     }
 }
@@ -1243,22 +1242,15 @@ impl SchedulerConfig {
                 "scheduler policy is outside the hard platform bounds",
             ));
         }
-        if let Some(pools) = &self.pools {
-            if ![pools.alarm, pools.queue, pools.cron, pools.workflow]
+        if let Some(pools) = &self.pools
+            && ![pools.alarm, pools.queue, pools.cron, pools.workflow]
                 .into_iter()
                 .all(SchedulerPoolConfig::validate)
-            {
-                return Err(PlatformError::new(
-                    ErrorCode::LimitInvalid,
-                    "scheduler pool policy is outside the hard platform bounds",
-                ));
-            }
-            if pools.workflow.enabled {
-                return Err(PlatformError::new(
-                    ErrorCode::SchedulerKindNotEnabled,
-                    "scheduler workload kind is not enabled in this release",
-                ));
-            }
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "scheduler pool policy is outside the hard platform bounds",
+            ));
         }
         Ok(())
     }

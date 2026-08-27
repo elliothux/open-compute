@@ -36,6 +36,23 @@ mod snapshot_pins;
 pub mod support_bundle;
 pub mod upgrade_cli;
 pub mod workers_http;
+pub mod workflow_backend;
+pub mod workflow_http;
+
+/// Compose the production promotion owner for real-process integration fixtures.
+/// This entry point is absent from ordinary production builds.
+#[cfg(feature = "test-support")]
+#[must_use]
+pub fn product_promotion_for_test(
+    storage: std::sync::Arc<open_compute_storage::PlatformStorage>,
+    scheduler: std::sync::Arc<open_compute_storage::SchedulerStore>,
+) -> std::sync::Arc<dyn open_compute_workers::ProductPromotionCoordinator> {
+    std::sync::Arc::new(p2_3_promotion::P23PromotionCoordinator::new(
+        storage,
+        scheduler,
+        std::time::Duration::from_secs(1),
+    ))
+}
 
 pub use binding_backend::{
     KvBindingExecutor, UnavailableKvBindingExecutor, bind_binding_backend, serve_binding_backend,

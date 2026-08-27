@@ -3,6 +3,8 @@
 use crate::capabilities::platform_release_metadata;
 use crate::config_load::LoadedConfig;
 use crate::metrics::MetricsRegistry;
+#[path = "doctor_workflow.rs"]
+mod workflow;
 use open_compute_artifacts::{
     ArtifactCache, S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
     sample_cache_integrity,
@@ -340,6 +342,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                 unix_ms(),
             ) {
                 Ok(scheduler) => {
+                    checks.push(workflow::inspect(loaded, &root.root));
                     let mode_ok = scheduler.journal_mode.eq_ignore_ascii_case("wal")
                         && scheduler.synchronous == 2;
                     checks.push(if mode_ok {

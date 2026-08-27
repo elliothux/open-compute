@@ -103,7 +103,7 @@ max_artifact_bytes = 65536
 [metrics]
 enabled = true
 max_label_value_bytes = 64
-max_series = 512
+max_series = 1024
 "#,
             data = input.data_dir.display(),
             key = input.master_key.display(),

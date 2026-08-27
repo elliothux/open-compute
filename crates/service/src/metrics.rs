@@ -24,6 +24,8 @@ mod r2;
 mod resource;
 #[path = "metrics_scheduler.rs"]
 mod scheduler;
+#[path = "metrics_workflow.rs"]
+mod workflow;
 use d1::write_d1_metrics;
 pub(crate) use d1::{D1Lifecycle, D1LifecycleGuard, D1Operation};
 use durable_objects::write_do_metrics;
@@ -44,9 +46,10 @@ pub use resource::{BindingBackendOperation, ResourceOperation};
 use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
 use scheduler::write_scheduler_metrics;
 pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
+pub(crate) use workflow::WorkflowOutcome;
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 489;
+pub const REQUIRED_SERIES: u64 = 517;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -280,6 +283,7 @@ struct Inner {
     alarm_repair: [u64; 6],
     alarm_lag_seconds: f64,
     queue: queue::QueueMetrics,
+    workflow: workflow::WorkflowMetrics,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -393,6 +397,7 @@ impl MetricsRegistry {
                 alarm_repair: [0; 6],
                 alarm_lag_seconds: 0.0,
                 queue: queue::QueueMetrics::default(),
+                workflow: workflow::WorkflowMetrics::default(),
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -825,6 +830,7 @@ impl MetricsRegistry {
         write_do_metrics(&mut out, &g);
         write_scheduler_metrics(&mut out, &g);
         write_queue_metrics(&mut out, &g);
+        workflow::write_workflow_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }

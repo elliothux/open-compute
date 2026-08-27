@@ -26,6 +26,14 @@ mod queue_consumer;
 mod summary;
 #[path = "scheduler/wake.rs"]
 mod wake;
+#[path = "scheduler/workflow.rs"]
+mod workflow;
+
+pub use workflow::{
+    ClaimedWorkflowRun, WorkflowCompletion, WorkflowDatabaseInspection, WorkflowFailure,
+    WorkflowInspection, WorkflowInstanceInspection, WorkflowInstanceRecord, WorkflowState,
+    WorkflowStepGrant, WorkflowStepIdentity, WorkflowStepInspection, inspect_workflow_databases,
+};
 
 pub use cron::{
     ClaimedCronRun, CronCompletion, CronCompletionResult, CronRuntimeInspection,
