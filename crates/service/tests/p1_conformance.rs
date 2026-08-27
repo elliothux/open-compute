@@ -103,11 +103,12 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
         "durable_objects",
         "alarms",
         "queues",
+        "cron",
     ] {
         assert_eq!(products[name]["status"], "supported", "{name}");
         assert!(products[name]["capability_version"].is_number(), "{name}");
     }
-    for name in ["cron", "workflows", "websocket_hibernation"] {
+    for name in ["workflows", "websocket_hibernation"] {
         assert_eq!(products[name]["status"], "unsupported", "{name}");
         assert!(products[name].get("capability_version").is_none(), "{name}");
     }
@@ -153,7 +154,20 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
             "alarms",
             vec!["getAlarm", "setAlarm", "deleteAlarm", "alarm"],
         ),
-        ("queues", vec!["send", "sendBatch", "metrics"]),
+        (
+            "queues",
+            vec![
+                "send",
+                "sendBatch",
+                "metrics",
+                "queue",
+                "ack",
+                "retry",
+                "ackAll",
+                "retryAll",
+            ],
+        ),
+        ("cron", vec!["scheduled", "noRetry"]),
     ]);
     for (product, methods) in expected_methods {
         assert_eq!(

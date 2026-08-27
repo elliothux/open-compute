@@ -27,6 +27,9 @@ const BINDING_FRAME_CONTENT_TYPE = "application/vnd.open-compute.kv.v1+frame";
 const MAX_BINDING_KEY_BYTES = 512;
 const MAX_KV_VALUE_BYTES = 25 * 1024 * 1024;
 const MAX_KV_KEYS = 100;
+const MAX_QUEUE_MESSAGES = 100;
+const MAX_QUEUE_BODY_BYTES = 128 * 1024;
+const MAX_QUEUE_BATCH_BYTES = 256 * 1024;
 let startupGeneration;
 const assembling = new Map();
 const seenHashes = new Map();
@@ -149,37 +152,33 @@ export function modulesFor(snapshot, validation, entrypointName, durableObject =
   const queueBindings = (snapshot.bindings || [])
     .filter((binding) => binding.kind === "queue_producer" && binding.capabilityVersion === 1)
     .map((binding) => binding.name);
-  let mainModule = snapshot.mainModule;
-  if (r2Bindings.length || d1Bindings.length || doBindings.length
-      || queueBindings.length || entrypointName) {
-    for (const reserved of LOADED_ISOLATE_RESERVED_MODULES) {
-      if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
-        throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
-      }
+  for (const reserved of LOADED_ISOLATE_RESERVED_MODULES) {
+    if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
+      throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
     }
-    if (r2Bindings.length) modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
-    if (d1Bindings.length) modules[D1_FACADE_MODULE] = { js: d1FacadeSource };
-    if (doBindings.length) {
-      modules[DO_ID_CODEC_MODULE] = { js: doIdCodecSource };
-      modules[DO_FACADE_MODULE] = { js: doFacadeSource };
-    }
-    if (queueBindings.length) modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
-    if (entrypointName && durableObject) {
-      modules[DO_ALARM_SHIM_MODULE] = { js: doAlarmShimSource };
-    }
-    modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
-      js: generateBindingWrapper(
-        snapshot.mainModule,
-        r2Bindings,
-        d1Bindings,
-        doBindings,
-        entrypointName,
-        durableObject,
-        queueBindings,
-      ),
-    };
-    mainModule = LOADED_ISOLATE_WRAPPER_MODULE;
   }
+  if (r2Bindings.length) modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
+  if (d1Bindings.length) modules[D1_FACADE_MODULE] = { js: d1FacadeSource };
+  if (doBindings.length) {
+    modules[DO_ID_CODEC_MODULE] = { js: doIdCodecSource };
+    modules[DO_FACADE_MODULE] = { js: doFacadeSource };
+  }
+  if (queueBindings.length) modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
+  if (entrypointName && durableObject) {
+    modules[DO_ALARM_SHIM_MODULE] = { js: doAlarmShimSource };
+  }
+  modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
+    js: generateBindingWrapper(
+      snapshot.mainModule,
+      r2Bindings,
+      d1Bindings,
+      doBindings,
+      entrypointName,
+      durableObject,
+      queueBindings,
+    ),
+  };
+  let mainModule = LOADED_ISOLATE_WRAPPER_MODULE;
   if (validation) {
     const wrapper = "__open_compute_validation__.js";
     const exportName = entrypointName || "default";
@@ -1100,6 +1099,131 @@ async function handle(request, env, ctx, validation) {
   }
 }
 
+function customEventMessageBody(message) {
+  if (!message || typeof message !== "object"
+      || typeof message.bodyBase64 !== "string") {
+    throw bindingError("QUEUE_DISPOSITION_INVALID");
+  }
+  const raw = bytes(message.bodyBase64);
+  if (raw.byteLength > MAX_QUEUE_BODY_BYTES) {
+    throw bindingError("QUEUE_DISPOSITION_INVALID");
+  }
+  let body;
+  switch (message.contentType) {
+    case "json":
+      body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
+      break;
+    case "text":
+      body = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+      break;
+    case "bytes":
+      body = raw;
+      break;
+    default:
+      throw bindingError("QUEUE_DISPOSITION_INVALID");
+  }
+  return { body, byteLength: raw.byteLength };
+}
+
+async function customEventTarget(request, env, ctx) {
+  const entrypoint = request.headers.get("x-open-compute-entrypoint") || undefined;
+  const envelope = assertEnvelope(request, false, entrypoint);
+  const internalToken = request.headers.get(TOKEN_HEADER) || "";
+  const snapshot = await resolveSnapshot(env, envelope, false, Boolean(entrypoint), internalToken);
+  const prior = seenHashes.get(envelope.runtimeKey);
+  if (prior && prior !== snapshot.workerCodeSha256) {
+    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+  }
+  seenHashes.set(envelope.runtimeKey, snapshot.workerCodeSha256);
+  const code = await assembleOnce(envelope.runtimeKey, async () => {
+    const built = modulesFor(snapshot, false, entrypoint);
+    const deploymentId = envelope.loaderKey.split("/")[2];
+    return {
+      compatibilityDate: snapshot.compatibilityDate,
+      compatibilityFlags: snapshot.compatibilityFlags,
+      mainModule: built.mainModule,
+      modules: built.modules,
+      env: tenantEnv(snapshot, ctx, deploymentId, doPolicy(env)),
+      globalOutbound: ctx.exports.OutboundGateway({
+        props: { deploymentId, policyVersion: 1 },
+      }),
+      limits: PROFILE,
+    };
+  });
+  let cold = false;
+  const stub = env.LOADER.get(envelope.runtimeKey, async () => {
+    cold = true;
+    return code;
+  });
+  return {
+    target: stub.getEntrypoint(entrypoint, { limits: PROFILE }),
+    loaderOutcome: () => cold ? "cold" : "warm",
+  };
+}
+
+async function handleQueue(request, env, ctx) {
+  try {
+    const payload = await request.json();
+    if (!payload || typeof payload !== "object"
+        || typeof payload.queueName !== "string" || payload.queueName.length < 1
+        || payload.queueName.length > 128 || !Array.isArray(payload.messages)
+        || payload.messages.length < 1 || payload.messages.length > MAX_QUEUE_MESSAGES) {
+      throw bindingError("QUEUE_DISPOSITION_INVALID");
+    }
+    let totalBytes = 0;
+    const messages = payload.messages.map((message) => {
+      if (!message || typeof message.id !== "string"
+          || !Number.isSafeInteger(message.timestampMs) || message.timestampMs < 0
+          || !Number.isSafeInteger(message.attempts)
+          || message.attempts < 1 || message.attempts > 101) {
+        throw bindingError("QUEUE_DISPOSITION_INVALID");
+      }
+      const decoded = customEventMessageBody(message);
+      totalBytes += decoded.byteLength;
+      if (totalBytes > MAX_QUEUE_BATCH_BYTES) {
+        throw bindingError("QUEUE_DISPOSITION_INVALID");
+      }
+      return {
+        id: message.id,
+        timestamp: new Date(message.timestampMs),
+        attempts: message.attempts,
+        body: decoded.body,
+      };
+    });
+    const loaded = await customEventTarget(request, env, ctx);
+    const result = await loaded.target.queue(payload.queueName, messages);
+    const response = Response.json(result);
+    response.headers.set("x-open-compute-loader-outcome", loaded.loaderOutcome());
+    return response;
+  } catch (error) {
+    const stable = error && error.stableCode;
+    return stableError(stable || "QUEUE_CUSTOM_EVENT_UNSUPPORTED", stable ? 422 : 500, null);
+  }
+}
+
+async function handleScheduled(request, env, ctx) {
+  try {
+    const payload = await request.json();
+    if (!payload || typeof payload !== "object"
+        || !Number.isSafeInteger(payload.scheduledTimeMs) || payload.scheduledTimeMs < 0
+        || typeof payload.cron !== "string" || payload.cron.length < 1
+        || payload.cron.length > 256) {
+      throw bindingError("CRON_EXPRESSION_INVALID");
+    }
+    const loaded = await customEventTarget(request, env, ctx);
+    const result = await loaded.target.scheduled({
+      scheduledTime: new Date(payload.scheduledTimeMs),
+      cron: payload.cron,
+    });
+    const response = Response.json(result);
+    response.headers.set("x-open-compute-loader-outcome", loaded.loaderOutcome());
+    return response;
+  } catch (error) {
+    const stable = error && error.stableCode;
+    return stableError(stable || "CRON_CUSTOM_EVENT_UNSUPPORTED", stable ? 422 : 500, null);
+  }
+}
+
 function moduleExportsDurableObjectClass(modules, className) {
   const patterns = [
     new RegExp(`export\\s+class\\s+${className}\\b`),
@@ -1144,6 +1268,12 @@ export default {
   async fetch(request, env, ctx) {
     const path = new URL(request.url).pathname;
     if (request.method === "POST" && path === "/internal/dispatch") return handle(request, env, ctx, false);
+    if (request.method === "POST" && path === "/internal/queue") {
+      return handleQueue(request, env, ctx);
+    }
+    if (request.method === "POST" && path === "/internal/scheduled") {
+      return handleScheduled(request, env, ctx);
+    }
     if (request.method === "POST" && path === "/internal/validate") return handle(request, env, ctx, true);
     if (request.method === "POST" && path === "/internal/validate-do") {
       return validateDurableObjectClass(request, env);

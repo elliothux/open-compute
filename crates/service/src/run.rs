@@ -13,6 +13,7 @@ use crate::kv_http::KvApiState;
 use crate::metrics::{
     DoFacetReloadReason, KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage,
 };
+use crate::p2_3_promotion::P23PromotionCoordinator;
 use crate::queue_http::QueueApiState;
 use crate::r2_backend::R2BindingService;
 use crate::r2_http::R2ApiState;
@@ -494,6 +495,9 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             .with_health(health.clone()),
         )
     });
+    if let Some(scheduler) = &scheduler_service {
+        scheduler.repair_products(1_000)?;
+    }
     let bundle_limits = BundleLimits {
         max_artifact_bytes: usize::try_from(loaded.config.workers.max_bundle_bytes).map_err(
             |_| PlatformError::new(ErrorCode::LimitInvalid, "Worker bundle limit is invalid"),
@@ -557,6 +561,22 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     metrics.set_do_runtime_gauges(0, 0, 0);
     let maintenance_do_api = do_api.clone();
     let supervisor_for_http = supervisor_handle.clone();
+    let mut worker_api = WorkerApiState::new(
+        storage.clone(),
+        store.clone(),
+        transport.clone(),
+        deployment_pins.clone(),
+        bundle_limits,
+        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
+    )
+    .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency);
+    if let Some(scheduler) = &scheduler_store {
+        worker_api = worker_api.with_product_promoter(Arc::new(P23PromotionCoordinator::new(
+            storage.clone(),
+            scheduler.clone(),
+            Duration::from_millis(loaded.config.scheduler.shutdown_drain_ms),
+        )));
+    }
     let state = HttpState::new(
         health.clone(),
         metrics.clone(),
@@ -569,14 +589,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                 .and_then(|g| g.as_ref().map(|s| SanitizedSupervisor::from(&s.snapshot())))
         }),
     )?
-    .with_worker_api(WorkerApiState::new(
-        storage.clone(),
-        store.clone(),
-        transport.clone(),
-        deployment_pins.clone(),
-        bundle_limits,
-        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-    ))
+    .with_worker_api(worker_api)
     .with_kv_api(
         KvApiState::new(
             storage.clone(),

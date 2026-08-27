@@ -47,7 +47,13 @@ const ingressWorker :Workerd.Worker = (
 
 const loaderHostWorker :Workerd.Worker = (
   compatibilityDate = "2026-08-22",
-  compatibilityFlags = ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
+  compatibilityFlags = [
+    "nodejs_compat",
+    "rpc",
+    "enable_ctx_exports",
+    "experimental",
+    "service_binding_extra_handlers",
+  ],
   modules = [
     (name = "loader-host.js", esModule = embed "system-workers/loader-host.js"),
     (name = "r2-facade-source", text = embed "system-workers/r2-facade.js"),

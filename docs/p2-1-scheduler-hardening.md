@@ -12,8 +12,9 @@
 > 直接依赖：[P0.8：Scheduler Kernel 与 Durable Object Alarms](./p0-8-scheduler-do-alarms.md)、
 > [P1：P0 平台加固](./p1-platform-hardening.md)
 >
-> 后续消费者：[P2.2：Queue Producer](./p2-2-queue-producer.md)、P2.3 Queue Consumer/Cron、
-> P2.4 至 P2.6 Workflow。
+> 后续消费者：[P2.2：Queue Producer](./p2-2-queue-producer.md)、
+> [P2.3：Queue Consumer/Cron](./p2-3-queue-consumer-cron.md)、
+> [P2.4：Workflow Core](./p2-4-workflow-core.md) 至 P2.6 Workflow。
 
 P2.1 不增加新的 Cloudflare 产品 API。它把 P0.8 中只服务 Durable Object alarm 的单 workload
 循环，收敛成 Alarm、Queue、Cron、Workflow 可以共同使用的单节点 scheduler 内核，同时完整保留

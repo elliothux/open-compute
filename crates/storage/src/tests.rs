@@ -5,15 +5,16 @@ use crate::fs as sfs;
 use crate::master_key;
 use crate::migrations::MigrationFault;
 use crate::{
-    DataDir, DeploymentState, IdempotencyReservation, NewDeployment, PlatformStorage,
-    ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, SecretCrypto,
-    StoredDeploymentSecret, WorkerRepository, atomic_write, inspect_durable_object_storage,
+    DataDir, DeploymentState, IdempotencyReservation, NewDeployment, NewQueueConsumerDeclaration,
+    PlatformStorage, QueueConsumerConfig, QueueConsumerRepository, ReserveResourceCreate,
+    ResourceCreateReservation, ResourceRepository, SecretCrypto, StoredDeploymentSecret,
+    WorkerRepository, atomic_write, inspect_durable_object_storage,
 };
 use open_compute_core::clock::{DeterministicClock, SystemClock};
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{
     AccountId, BindingKind, DeploymentId, ErrorCode, HardeningConfig, OperationClass,
-    PlatformReleaseIdentityV1, ResourceId, SecretBytes, WorkerId,
+    PlatformReleaseIdentityV1, QueueConsumerId, ResourceId, SecretBytes, WorkerId,
 };
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -113,7 +114,7 @@ fn p1_owned_schema_inspection_sees_uncheckpointed_bootstrap_wal() {
     drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
 
     let state = crate::inspect_owned_schema(storage.data_dir(), storage.db(), 5_000, 1).unwrap();
-    assert_eq!(state.control, 9);
+    assert_eq!(state.control, 11);
     assert_eq!(
         state.scheduler,
         u32::try_from(crate::current_scheduler_schema_version()).unwrap()
@@ -240,7 +241,7 @@ fn p1_schema_inspection_checks_live_kv_and_d1_files_and_apply_is_idempotent() {
         snapshot_id: &snapshot_id,
         label: "resource-schema-snapshot",
         created_at_ms: 2,
-        release: p1_release_identity(9),
+        release: p1_release_identity(11),
         master_key_fingerprint: key.fingerprint(),
         s3_authority_fingerprint: &"d".repeat(64),
         r2_prefix_fingerprint: &"e".repeat(64),
@@ -2163,7 +2164,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 9);
+    assert_eq!(crate::migrations::current_schema_version(), 11);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2173,6 +2174,8 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert_eq!(crate::migrations::migration_007_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_008_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_009_checksum().len(), 32);
+    assert_eq!(crate::migrations::migration_010_checksum().len(), 32);
+    assert_eq!(crate::migrations::migration_011_checksum().len(), 32);
     assert!(crate::migrations::expected_checksum(1).is_ok());
     assert!(crate::migrations::expected_checksum(2).is_ok());
     assert!(crate::migrations::expected_checksum(3).is_ok());
@@ -2182,7 +2185,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert!(crate::migrations::expected_checksum(7).is_ok());
     assert!(crate::migrations::expected_checksum(8).is_ok());
     assert_eq!(
-        crate::migrations::expected_checksum(10).unwrap_err().code(),
+        crate::migrations::expected_checksum(12).unwrap_err().code(),
         ErrorCode::SchemaTooNew
     );
     assert_eq!(
@@ -2337,6 +2340,114 @@ fn insert_ready(
     repo.begin_validation(id).unwrap();
     repo.mark_ready(id, now + 1).unwrap();
     id
+}
+
+#[test]
+fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let queue_id = open_compute_core::QueueId::generate();
+    let queue_config = crate::QueueConfig::default();
+    let queues = crate::QueueRepository::new(storage.db());
+    queues
+        .insert_creating(account, queue_id, "one-consumer", queue_config, 1)
+        .unwrap();
+    queues.mark_ready(account, queue_id, 2).unwrap();
+
+    let workers = WorkerRepository::new(storage.db());
+    let request = open_compute_core::RequestId::generate();
+    let (first_worker, _) = workers
+        .create_worker(account, "consumer-race-a", request, 3)
+        .unwrap();
+    let (second_worker, _) = workers
+        .create_worker(account, "consumer-race-b", request, 4)
+        .unwrap();
+    let create_declaration = |worker_id: WorkerId, now_ms: i64| {
+        let deployment_id = DeploymentId::generate();
+        let declaration_id = QueueConsumerId::generate();
+        workers
+            .insert_staging_deployment_with_products_and_limit(
+                &NewDeployment {
+                    id: deployment_id,
+                    account_id: account,
+                    worker_id,
+                    artifact_sha256: [5; 32],
+                    artifact_size: 100,
+                    artifact_schema_version: 1,
+                    main_module: "index.js".to_owned(),
+                    compatibility_date: "2026-08-22".to_owned(),
+                    compatibility_flags: Vec::new(),
+                    limits: serde_json::json!({"profile":"default"}),
+                    worker_code_sha256: [6; 32],
+                    vars: BTreeMap::new(),
+                    secrets: BTreeMap::new(),
+                    request_id: request,
+                    now_ms,
+                },
+                &[],
+                &[],
+                &[NewQueueConsumerDeclaration {
+                    id: declaration_id,
+                    queue_id,
+                    queue_lifecycle_generation: 1,
+                    entrypoint: None,
+                    config: QueueConsumerConfig::default(),
+                    dead_letter_queue: None,
+                    capability_version: 1,
+                    descriptor_sha256: [7; 32],
+                }],
+                None,
+                10,
+            )
+            .unwrap();
+        workers.begin_validation(deployment_id).unwrap();
+        workers.mark_ready(deployment_id, now_ms + 1).unwrap();
+        QueueConsumerRepository::new(storage.db())
+            .declaration(declaration_id)
+            .unwrap()
+    };
+    let first = create_declaration(first_worker.id, 10);
+    let second = create_declaration(second_worker.id, 20);
+    let first_db = crate::ControlDb::open(&root.join("control.sqlite"), 5_000).unwrap();
+    let second_db = crate::ControlDb::open(&root.join("control.sqlite"), 5_000).unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let results = thread::scope(|scope| {
+        let first_barrier = barrier.clone();
+        let first_handle = scope.spawn(move || {
+            first_barrier.wait();
+            QueueConsumerRepository::new(&first_db).create_attachment(
+                account,
+                first_worker.id,
+                &first,
+                30,
+            )
+        });
+        let second_barrier = barrier.clone();
+        let second_handle = scope.spawn(move || {
+            second_barrier.wait();
+            QueueConsumerRepository::new(&second_db).create_attachment(
+                account,
+                second_worker.id,
+                &second,
+                30,
+            )
+        });
+        [first_handle.join().unwrap(), second_handle.join().unwrap()]
+    });
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    let failure = results
+        .iter()
+        .find_map(|result| result.as_ref().err())
+        .unwrap();
+    assert_eq!(failure.code(), ErrorCode::QueueConsumerConflict);
+    assert_eq!(
+        QueueConsumerRepository::new(storage.db())
+            .list_live(10)
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -2856,7 +2967,7 @@ fn p1_release_identity(control_schema_version: u32) -> PlatformReleaseIdentityV1
         runtime_assets_sha256: "b".repeat(64),
         facade_capability_version: 1,
         control_schema_version,
-        scheduler_schema_version: 2,
+        scheduler_schema_version: 4,
         kv_schema_version_min: crate::KV_SCHEMA_VERSION,
         kv_schema_version_max: crate::KV_SCHEMA_VERSION,
         d1_schema_version_min: crate::D1_DATABASE_SCHEMA_VERSION,
@@ -2872,7 +2983,8 @@ fn downgrade_control_to_v8(path: &Path) {
     let triggers = {
         let mut statement = control
             .prepare(
-                "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '%queue%'",
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'
+                 AND (name LIKE '%queue%' OR name LIKE '%cron%')",
             )
             .unwrap();
         statement
@@ -2888,11 +3000,16 @@ fn downgrade_control_to_v8(path: &Path) {
     }
     control
         .execute_batch(
-            "DROP TABLE queue_referrers;
+            "DROP TABLE cron_activations;
+             DROP TABLE deployment_cron_declarations;
+             DROP TABLE deployment_cron_configs;
+             DROP TABLE queue_consumers;
+             DROP TABLE deployment_queue_consumers;
+             DROP TABLE queue_referrers;
              DROP TABLE queue_producer_bindings;
              ALTER TABLE control_idempotency DROP COLUMN queue_id;
              DROP TABLE queues;
-             DELETE FROM schema_migrations WHERE version = 9;
+             DELETE FROM schema_migrations WHERE version >= 9;
              PRAGMA user_version = 8;",
         )
         .unwrap();
@@ -2925,7 +3042,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         snapshot_id: &snapshot_id,
         label: "p1-test",
         created_at_ms: 1,
-        release: p1_release_identity(9),
+        release: p1_release_identity(11),
         master_key_fingerprint: key.fingerprint(),
         s3_authority_fingerprint: &"d".repeat(64),
         r2_prefix_fingerprint: &"e".repeat(64),
@@ -2961,7 +3078,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         crate::apply_offline_upgrade(&data_dir, 5_000, 1)
             .unwrap()
             .control,
-        9
+        u32::try_from(crate::migrations::current_schema_version()).unwrap()
     );
 
     assert_eq!(
@@ -2990,7 +3107,8 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
             .code(),
         ErrorCode::SnapshotInvalid
     );
-    request.release.control_schema_version = 9;
+    request.release.control_schema_version =
+        u32::try_from(crate::migrations::current_schema_version()).unwrap();
     let mut prepared = crate::prepare_platform_snapshot(&data_dir, &request).unwrap();
     assert!(prepared.manifest.files.iter().any(|file| {
         file.role == open_compute_core::SnapshotFileRole::DurableObjectFile
@@ -3087,7 +3205,7 @@ fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
     let before = crate::inspect_offline_schema(&data_dir, 5_000, 1).unwrap();
     assert_eq!(before.control, 8);
     let after = crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap();
-    assert_eq!(after.control, 9);
+    assert_eq!(after.control, 11);
     assert_eq!(
         crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap(),
         after
@@ -3380,7 +3498,7 @@ fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
     drop(reader);
     drop(scheduler);
     let inspection = crate::inspect_scheduler_db(&scheduler_path, 5_000, 61_000).unwrap();
-    assert_eq!(inspection.schema_version, 2);
+    assert_eq!(inspection.schema_version, 4);
     assert_eq!(inspection.queue.queues, 1);
     assert_eq!(inspection.queue.backlog_messages, 0);
     assert_eq!(inspection.queue.counter_mismatches, 0);

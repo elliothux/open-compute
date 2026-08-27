@@ -14,6 +14,8 @@ pub(super) struct SchedulerMigration {
 
 const MIGRATION_001_SQL: &str = include_str!("../../scheduler-migrations/001_scheduler.sql");
 const MIGRATION_002_SQL: &str = include_str!("../../scheduler-migrations/002_queue_producer.sql");
+const MIGRATION_003_SQL: &str = include_str!("../../scheduler-migrations/003_queue_consumer.sql");
+const MIGRATION_004_SQL: &str = include_str!("../../scheduler-migrations/004_cron.sql");
 
 pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[
     SchedulerMigration {
@@ -27,6 +29,18 @@ pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[
         name: "002_queue_producer",
         sql: MIGRATION_002_SQL,
         checksum: &crate::migrations::SCHEDULER_MIGRATION_002_SHA256,
+    },
+    SchedulerMigration {
+        version: 3,
+        name: "003_queue_consumer",
+        sql: MIGRATION_003_SQL,
+        checksum: &crate::migrations::SCHEDULER_MIGRATION_003_SHA256,
+    },
+    SchedulerMigration {
+        version: 4,
+        name: "004_cron",
+        sql: MIGRATION_004_SQL,
+        checksum: &crate::migrations::SCHEDULER_MIGRATION_004_SHA256,
     },
 ];
 

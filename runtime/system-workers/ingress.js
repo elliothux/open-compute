@@ -4,6 +4,8 @@ const INTERNAL_PATHS = new Set([
   "/internal/dispatch",
   "/internal/validate",
   "/internal/validate-do",
+  "/internal/queue",
+  "/internal/scheduled",
 ]);
 const DO_ADMIN_PATH = "/internal/do-delete";
 const DO_ALARM_PATHS = new Set(["/internal/do-alarm", "/internal/do-alarm-repair"]);

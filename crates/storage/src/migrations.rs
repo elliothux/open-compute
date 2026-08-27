@@ -17,7 +17,9 @@ const MIGRATION_006_SQL: &str = include_str!("../migrations/006_d1.sql");
 const MIGRATION_007_SQL: &str = include_str!("../migrations/007_durable_objects.sql");
 const MIGRATION_008_SQL: &str = include_str!("../migrations/008_p1_format_freeze.sql");
 const MIGRATION_009_SQL: &str = include_str!("../migrations/009_queues.sql");
-const CURRENT_VERSION: i64 = 9;
+const MIGRATION_010_SQL: &str = include_str!("../migrations/010_queue_consumers.sql");
+const MIGRATION_011_SQL: &str = include_str!("../migrations/011_cron_triggers.sql");
+const CURRENT_VERSION: i64 = 11;
 const MIGRATION_001_NAME: &str = "001_init";
 const MIGRATION_002_NAME: &str = "002_workers_runtime";
 const MIGRATION_003_NAME: &str = "003_resource_bindings";
@@ -27,6 +29,8 @@ const MIGRATION_006_NAME: &str = "006_d1";
 const MIGRATION_007_NAME: &str = "007_durable_objects";
 const MIGRATION_008_NAME: &str = "008_p1_format_freeze";
 const MIGRATION_009_NAME: &str = "009_queues";
+const MIGRATION_010_NAME: &str = "010_queue_consumers";
+const MIGRATION_011_NAME: &str = "011_cron_triggers";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Test-only deterministic fault injection points.
@@ -174,6 +178,30 @@ fn apply_inner(
             fault,
         )?;
     }
+    if db.user_version()? < 10 {
+        apply_one(
+            db,
+            clock,
+            10,
+            MIGRATION_010_NAME,
+            MIGRATION_010_SQL,
+            &MIGRATION_010_SHA256,
+            #[cfg(any(test, feature = "test-support"))]
+            fault,
+        )?;
+    }
+    if db.user_version()? < 11 {
+        apply_one(
+            db,
+            clock,
+            11,
+            MIGRATION_011_NAME,
+            MIGRATION_011_SQL,
+            &MIGRATION_011_SHA256,
+            #[cfg(any(test, feature = "test-support"))]
+            fault,
+        )?;
+    }
     Ok(())
 }
 
@@ -301,6 +329,8 @@ pub(crate) fn expected_checksum(version: i64) -> Result<&'static [u8], PlatformE
         7 => Ok(&MIGRATION_007_SHA256),
         8 => Ok(&MIGRATION_008_SHA256),
         9 => Ok(&MIGRATION_009_SHA256),
+        10 => Ok(&MIGRATION_010_SHA256),
+        11 => Ok(&MIGRATION_011_SHA256),
         v if v > CURRENT_VERSION => Err(PlatformError::new(
             ErrorCode::SchemaTooNew,
             "on-disk schema is newer than this binary",
@@ -408,6 +438,16 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
     }
     if version >= 9 {
         tables.extend(["queues", "queue_producer_bindings", "queue_referrers"]);
+    }
+    if version >= 10 {
+        tables.extend(["deployment_queue_consumers", "queue_consumers"]);
+    }
+    if version >= 11 {
+        tables.extend([
+            "deployment_cron_configs",
+            "deployment_cron_declarations",
+            "cron_activations",
+        ]);
     }
     for table in tables {
         let sql: String = tx
@@ -589,6 +629,18 @@ pub fn migration_009_checksum() -> &'static [u8; 32] {
     &MIGRATION_009_SHA256
 }
 
+/// Compiled SHA-256 for the P2.3 Queue consumer control schema.
+#[must_use]
+pub fn migration_010_checksum() -> &'static [u8; 32] {
+    &MIGRATION_010_SHA256
+}
+
+/// Compiled SHA-256 for the P2.3 Cron control schema.
+#[must_use]
+pub fn migration_011_checksum() -> &'static [u8; 32] {
+    &MIGRATION_011_SHA256
+}
+
 /// Ordered production migration identities and checksums.
 #[must_use]
 pub fn migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
@@ -602,6 +654,8 @@ pub fn migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
         (7, MIGRATION_007_NAME, MIGRATION_007_SHA256),
         (8, MIGRATION_008_NAME, MIGRATION_008_SHA256),
         (9, MIGRATION_009_NAME, MIGRATION_009_SHA256),
+        (10, MIGRATION_010_NAME, MIGRATION_010_SHA256),
+        (11, MIGRATION_011_NAME, MIGRATION_011_SHA256),
     ]
 }
 

@@ -6,20 +6,27 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
+use base64::Engine as _;
 use http_body_util::Limited;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
-use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, WorkerId};
+use open_compute_core::{
+    AccountId, CronSchedule, DeploymentId, ErrorCode, PlatformError, QueueMessageId, RequestId,
+    WorkerId,
+};
 use open_compute_runtime::{
     GenerationAuthRegistry, SupervisorState, TOKEN_HEADER, WorkerdSupervisor,
 };
-use open_compute_storage::{AuthorizedDurableObjectDelete, ClaimedJob};
+use open_compute_storage::{
+    AuthorizedDurableObjectDelete, ClaimedJob, QUEUE_MAX_MESSAGE_BYTES, QueueContentType,
+};
 use open_compute_workers::{
     RuntimeScope, RuntimeSource, RuntimeValidator, ValidationCandidate, loader_key,
 };
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
@@ -32,6 +39,8 @@ const ERROR_HEADER: &str = "x-open-compute-error-code";
 const MAX_SOURCE_REQUEST: usize = 4096;
 const DEFAULT_MAX_TENANT_BODY: usize = 16 * 1024 * 1024;
 const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_CUSTOM_EVENT_RESPONSE: usize = 64 * 1024;
+const MAX_QUEUE_CUSTOM_EVENT_REQUEST: usize = 18 * 1024 * 1024;
 
 /// Internal-only observation of the native `WorkerLoader` cache path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,6 +101,90 @@ pub struct AlarmRepairResult {
     /// Authoritative row token when `exists`.
     #[serde(default)]
     pub row_token: Option<String>,
+}
+
+/// One trusted message delivered through the native Queue custom-event path.
+#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueDispatchMessage {
+    /// Immutable scheduler message identity.
+    pub id: String,
+    /// Original enqueue timestamp.
+    pub timestamp_ms: i64,
+    /// One-based product delivery attempt exposed to the handler.
+    pub attempts: u16,
+    /// Persisted body representation.
+    pub content_type: QueueContentType,
+    /// Standard-base64 serialized body bytes.
+    pub body_base64: String,
+}
+
+/// Trusted native Queue custom-event request assembled after a durable claim.
+#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueDispatchRequest {
+    /// Tenant-visible Queue name.
+    pub queue_name: String,
+    /// Bounded claimed membership in deterministic order.
+    pub messages: Vec<QueueDispatchMessage>,
+}
+
+/// Native batch-level retry decision.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueueRetryBatchResult {
+    /// Whether remaining undecided messages should retry.
+    pub retry: bool,
+    /// Optional explicit retry delay.
+    #[serde(default)]
+    pub delay_seconds: Option<i64>,
+}
+
+/// Native per-message retry decision.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueueRetryMessageResult {
+    /// Claimed message identity.
+    pub msg_id: String,
+    /// Optional explicit retry delay.
+    #[serde(default)]
+    pub delay_seconds: Option<i64>,
+}
+
+/// Strict result returned by workerd's native Queue dispatcher.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueueDispatchResult {
+    /// Pinned workerd event outcome spelling.
+    pub outcome: String,
+    /// Native batch acknowledgement flag.
+    pub ack_all: bool,
+    /// Native batch retry decision.
+    pub retry_batch: QueueRetryBatchResult,
+    /// Native explicit acknowledgement identities.
+    pub explicit_acks: Vec<String>,
+    /// Native explicit retry decisions.
+    pub retry_messages: Vec<QueueRetryMessageResult>,
+}
+
+/// Trusted scheduled custom-event request.
+#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledDispatchRequest {
+    /// Logical UTC slot in Unix milliseconds.
+    pub scheduled_time_ms: i64,
+    /// Exact deployment-declared expression.
+    pub cron: String,
+}
+
+/// Strict result returned by workerd's native scheduled dispatcher.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScheduledDispatchResult {
+    /// Pinned workerd event outcome spelling.
+    pub outcome: String,
+    /// Whether `controller.noRetry()` disabled product retry.
+    pub no_retry: bool,
 }
 
 #[derive(Serialize)]
@@ -270,6 +363,8 @@ pub struct WorkerdTransport {
     auth: GenerationAuthRegistry,
     supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     max_request_body: usize,
+    #[cfg(test)]
+    test_endpoint: Option<u16>,
 }
 
 impl std::fmt::Debug for WorkerdTransport {
@@ -292,7 +387,16 @@ impl WorkerdTransport {
             auth,
             supervisor,
             max_request_body: DEFAULT_MAX_TENANT_BODY,
+            #[cfg(test)]
+            test_endpoint: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_endpoint(auth: GenerationAuthRegistry, port: u16) -> Self {
+        let mut transport = Self::new(auth, Arc::new(Mutex::new(None)));
+        transport.test_endpoint = Some(port);
+        transport
     }
 
     /// Apply the host-observed streaming request body ceiling.
@@ -309,6 +413,109 @@ impl WorkerdTransport {
         request: Request,
     ) -> Result<Response, PlatformError> {
         self.send(target, request, false, false).await
+    }
+
+    /// Deliver one frozen Queue claim through workerd's native custom-event API.
+    pub async fn dispatch_queue(
+        &self,
+        target: &DispatchTarget,
+        request: &QueueDispatchRequest,
+        timeout: Duration,
+    ) -> Result<QueueDispatchResult, PlatformError> {
+        validate_queue_dispatch_request(request)?;
+        let result = tokio::time::timeout(
+            timeout,
+            self.custom_event_request("/internal/queue", target, request),
+        )
+        .await
+        .map_err(|_| {
+            PlatformError::new(
+                ErrorCode::QueueSendResultUnknown,
+                "Queue custom-event result is unknown",
+            )
+        })??;
+        validate_queue_dispatch_result(result, request.messages.len())
+    }
+
+    /// Deliver one frozen Cron run through workerd's native scheduled API.
+    pub async fn dispatch_scheduled(
+        &self,
+        target: &DispatchTarget,
+        request: &ScheduledDispatchRequest,
+        timeout: Duration,
+    ) -> Result<ScheduledDispatchResult, PlatformError> {
+        validate_scheduled_dispatch_request(request)?;
+        let result = tokio::time::timeout(
+            timeout,
+            self.custom_event_request("/internal/scheduled", target, request),
+        )
+        .await
+        .map_err(|_| {
+            PlatformError::new(
+                ErrorCode::SchedulerUnavailable,
+                "scheduled custom-event result is unknown",
+            )
+        })??;
+        validate_scheduled_dispatch_result(result)
+    }
+
+    async fn custom_event_request<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        target: &DispatchTarget,
+        body: &impl Serialize,
+    ) -> Result<T, PlatformError> {
+        let (port, credential) = self.endpoint()?;
+        if target.route_generation < 1 {
+            return Err(custom_event_protocol_error());
+        }
+        let bytes = serde_json::to_vec(body).map_err(|_| custom_event_protocol_error())?;
+        let mut request = hyper::Request::builder()
+            .method(Method::POST)
+            .uri(format!("http://127.0.0.1:{port}{path}"))
+            .header(TOKEN_HEADER, credential.expose())
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-open-compute-account-id", target.account_id.to_string())
+            .header("x-open-compute-worker-id", target.worker_id.to_string())
+            .header(
+                "x-open-compute-deployment-id",
+                target.deployment_id.to_string(),
+            )
+            .header("x-open-compute-loader-key", target.loader_key())
+            .header(
+                "x-open-compute-worker-code-sha256",
+                &target.worker_code_sha256,
+            )
+            .header(
+                "x-open-compute-route-generation",
+                target.route_generation.to_string(),
+            )
+            .header("x-open-compute-request-id", target.request_id.to_string());
+        if let Some(entrypoint) = &target.entrypoint {
+            request = request.header("x-open-compute-entrypoint", entrypoint);
+        }
+        let request = request
+            .body(Body::from(bytes))
+            .map_err(|_| custom_event_protocol_error())?;
+        let response = self
+            .client
+            .request(request)
+            .await
+            .map_err(|_| runtime_unavailable())?;
+        if !response.status().is_success() {
+            return Err(PlatformError::new(
+                if path == "/internal/queue" {
+                    ErrorCode::QueueCustomEventUnsupported
+                } else {
+                    ErrorCode::CronCustomEventUnsupported
+                },
+                "native custom-event dispatch failed",
+            ));
+        }
+        let bytes = to_bytes(Body::new(response.into_body()), MAX_CUSTOM_EVENT_RESPONSE)
+            .await
+            .map_err(|_| custom_event_protocol_error())?;
+        serde_json::from_slice(&bytes).map_err(|_| custom_event_protocol_error())
     }
 
     /// Execute one trusted native facet delete after the control-plane fence commits.
@@ -627,6 +834,11 @@ impl WorkerdTransport {
     }
 
     fn endpoint(&self) -> Result<(u16, open_compute_runtime::GenerationCredential), PlatformError> {
+        #[cfg(test)]
+        if let Some(port) = self.test_endpoint {
+            let credential = self.auth.credential().ok_or_else(runtime_unavailable)?;
+            return Ok((port, credential));
+        }
         let supervisor = self
             .supervisor
             .lock()
@@ -667,6 +879,126 @@ fn validate_alarm_dispatch_result(
     shape_valid
         .then_some(result)
         .ok_or_else(alarm_protocol_error)
+}
+
+fn validate_queue_dispatch_result(
+    result: QueueDispatchResult,
+    message_count: usize,
+) -> Result<QueueDispatchResult, PlatformError> {
+    let bounded = message_count > 0
+        && message_count <= 100
+        && result.explicit_acks.len() <= message_count
+        && result.retry_messages.len() <= message_count;
+    let outcome = matches!(
+        result.outcome.as_str(),
+        "ok" | "exception"
+            | "canceled"
+            | "killSwitch"
+            | "daemonDown"
+            | "exceededCpu"
+            | "exceededMemory"
+            | "loadShed"
+            | "responseStreamDisconnected"
+            | "scriptNotFound"
+            | "internalError"
+            | "exceededWallTime"
+            | "aborted"
+            | "unknown"
+    );
+    let delay = |value: Option<i64>| value.is_none_or(|value| (0..=86_400).contains(&value));
+    let decisions = delay(result.retry_batch.delay_seconds)
+        && result
+            .retry_messages
+            .iter()
+            .all(|decision| !decision.msg_id.is_empty() && delay(decision.delay_seconds))
+        && result
+            .explicit_acks
+            .iter()
+            .all(|id| !id.is_empty() && id.len() <= 128);
+    (bounded && outcome && decisions)
+        .then_some(result)
+        .ok_or_else(queue_protocol_error)
+}
+
+fn validate_queue_dispatch_request(request: &QueueDispatchRequest) -> Result<(), PlatformError> {
+    if request.queue_name.is_empty()
+        || request.queue_name.len() > 128
+        || request.queue_name.chars().any(char::is_control)
+        || request.messages.is_empty()
+        || request.messages.len() > 100
+    {
+        return Err(queue_protocol_error());
+    }
+    let mut identities = HashSet::with_capacity(request.messages.len());
+    let mut total = 0_usize;
+    for message in &request.messages {
+        let id: QueueMessageId = message.id.parse().map_err(|_| queue_protocol_error())?;
+        if !identities.insert(id)
+            || message.timestamp_ms < 0
+            || !(1..=101).contains(&message.attempts)
+        {
+            return Err(queue_protocol_error());
+        }
+        let body = base64::engine::general_purpose::STANDARD
+            .decode(&message.body_base64)
+            .map_err(|_| queue_protocol_error())?;
+        if u64::try_from(body.len()).map_err(|_| queue_protocol_error())? > QUEUE_MAX_MESSAGE_BYTES
+        {
+            return Err(queue_protocol_error());
+        }
+        match message.content_type {
+            QueueContentType::Json => {
+                serde_json::from_slice::<serde_json::Value>(&body)
+                    .map_err(|_| queue_protocol_error())?;
+            }
+            QueueContentType::Text => {
+                std::str::from_utf8(&body).map_err(|_| queue_protocol_error())?;
+            }
+            QueueContentType::Bytes => {}
+        }
+        total = total
+            .checked_add(message.body_base64.len())
+            .ok_or_else(queue_protocol_error)?;
+    }
+    if total > MAX_QUEUE_CUSTOM_EVENT_REQUEST {
+        return Err(queue_protocol_error());
+    }
+    Ok(())
+}
+
+fn validate_scheduled_dispatch_request(
+    request: &ScheduledDispatchRequest,
+) -> Result<(), PlatformError> {
+    if request.scheduled_time_ms < 0 || request.scheduled_time_ms % 60_000 != 0 {
+        return Err(PlatformError::new(
+            ErrorCode::CronActivationStale,
+            "Cron logical slot is invalid",
+        ));
+    }
+    CronSchedule::parse(&request.cron).map(|_| ())
+}
+
+fn validate_scheduled_dispatch_result(
+    result: ScheduledDispatchResult,
+) -> Result<ScheduledDispatchResult, PlatformError> {
+    matches!(
+        result.outcome.as_str(),
+        "ok" | "exception"
+            | "canceled"
+            | "killSwitch"
+            | "daemonDown"
+            | "exceededCpu"
+            | "exceededMemory"
+            | "loadShed"
+            | "responseStreamDisconnected"
+            | "scriptNotFound"
+            | "internalError"
+            | "exceededWallTime"
+            | "aborted"
+            | "unknown"
+    )
+    .then_some(result)
+    .ok_or_else(custom_event_protocol_error)
 }
 
 fn validate_alarm_repair_result(
@@ -846,6 +1178,20 @@ fn alarm_protocol_error() -> PlatformError {
     PlatformError::new(
         ErrorCode::SchedulerInternalProtocolError,
         "private alarm dispatch response is invalid",
+    )
+}
+
+fn queue_protocol_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::QueueDispositionInvalid,
+        "native Queue disposition is invalid",
+    )
+}
+
+fn custom_event_protocol_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::SchedulerInternalProtocolError,
+        "native custom-event response is invalid",
     )
 }
 

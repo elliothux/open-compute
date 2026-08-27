@@ -303,6 +303,34 @@ pub enum ErrorCode {
     QueueSendResultUnknown,
     /// Durable Object Queue producer is disabled until output-gate equivalence is proven.
     QueueDoOutputGateUnsupported,
+    /// A Queue already has a non-tombstoned push consumer.
+    QueueConsumerConflict,
+    /// Queue consumer control or scheduler authority is not ready for dispatch.
+    QueueConsumerNotReady,
+    /// Queue consumer projection has not converged to control authority.
+    QueueConsumerProjectionPending,
+    /// A Queue claim or completion references an obsolete consumer generation.
+    QueueConsumerGenerationStale,
+    /// Native Queue disposition contains an invalid or forged decision.
+    QueueDispositionInvalid,
+    /// Queue retry delay is outside the supported integer range.
+    QueueRetryDelayInvalid,
+    /// A dead-letter Queue target violates identity or lifecycle policy.
+    QueueDlqInvalid,
+    /// A terminal message is retained while its dead-letter target is backpressured.
+    QueueDlqBackpressured,
+    /// The pinned runtime cannot provide the native Queue custom event contract.
+    QueueCustomEventUnsupported,
+    /// Cron expression is syntactically invalid.
+    CronExpressionInvalid,
+    /// Cron expression uses syntax outside the published local capability.
+    CronExpressionUnsupported,
+    /// Cron scheduler projection has not converged to control authority.
+    CronProjectionPending,
+    /// A Cron run or completion references an obsolete activation generation.
+    CronActivationStale,
+    /// The pinned runtime cannot provide the native scheduled custom event contract.
+    CronCustomEventUnsupported,
     /// Queue catalog, binding, projection, or counter authority is inconsistent.
     QueueInvariantViolation,
     /// A secret-safe internal P0.2 failure.
@@ -460,6 +488,20 @@ impl ErrorCode {
             Self::QueueStorageUnavailable => "QUEUE_STORAGE_UNAVAILABLE",
             Self::QueueSendResultUnknown => "QUEUE_SEND_RESULT_UNKNOWN",
             Self::QueueDoOutputGateUnsupported => "QUEUE_DO_OUTPUT_GATE_UNSUPPORTED",
+            Self::QueueConsumerConflict => "QUEUE_CONSUMER_CONFLICT",
+            Self::QueueConsumerNotReady => "QUEUE_CONSUMER_NOT_READY",
+            Self::QueueConsumerProjectionPending => "QUEUE_CONSUMER_PROJECTION_PENDING",
+            Self::QueueConsumerGenerationStale => "QUEUE_CONSUMER_GENERATION_STALE",
+            Self::QueueDispositionInvalid => "QUEUE_DISPOSITION_INVALID",
+            Self::QueueRetryDelayInvalid => "QUEUE_RETRY_DELAY_INVALID",
+            Self::QueueDlqInvalid => "QUEUE_DLQ_INVALID",
+            Self::QueueDlqBackpressured => "QUEUE_DLQ_BACKPRESSURED",
+            Self::QueueCustomEventUnsupported => "QUEUE_CUSTOM_EVENT_UNSUPPORTED",
+            Self::CronExpressionInvalid => "CRON_EXPRESSION_INVALID",
+            Self::CronExpressionUnsupported => "CRON_EXPRESSION_UNSUPPORTED",
+            Self::CronProjectionPending => "CRON_PROJECTION_PENDING",
+            Self::CronActivationStale => "CRON_ACTIVATION_STALE",
+            Self::CronCustomEventUnsupported => "CRON_CUSTOM_EVENT_UNSUPPORTED",
             Self::QueueInvariantViolation => "QUEUE_INVARIANT_VIOLATION",
             Self::Internal => "INTERNAL",
         }

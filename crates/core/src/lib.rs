@@ -10,6 +10,7 @@ pub mod admission;
 pub mod capability;
 pub mod clock;
 pub mod config;
+pub mod cron;
 pub mod durable_objects;
 pub mod error;
 pub mod health;
@@ -34,6 +35,7 @@ pub use config::{
     SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig,
     StorageConfig, WorkersConfig, validate_bootstrap_config_path,
 };
+pub use cron::CronSchedule;
 pub use durable_objects::{
     DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAME_MAX_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES,
     DurableObjectId, DurableObjectState, durable_object_namespace_prefix,
@@ -41,8 +43,8 @@ pub use durable_objects::{
 pub use error::{ErrorCode, PlatformError, ReadinessReason};
 pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus};
 pub use ids::{
-    AccountId, BindingId, DeploymentId, PlatformId, QueueId, QueueMessageId, RequestId, ResourceId,
-    StartupId, WorkerId,
+    AccountId, BindingId, CronActivationId, CronRunId, DeploymentId, PlatformId, QueueBatchId,
+    QueueConsumerId, QueueId, QueueMessageId, RequestId, ResourceId, StartupId, WorkerId,
 };
 pub use redact::Redactor;
 pub use release_identity::{

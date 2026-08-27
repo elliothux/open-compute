@@ -924,7 +924,7 @@ impl Default for D1Config {
     }
 }
 
-/// P2.2 Queue producer local backlog and concurrency policy.
+/// Queue producer and consumer local backlog and concurrency policy.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct QueuesConfig {
@@ -934,6 +934,8 @@ pub struct QueuesConfig {
     pub max_in_flight_requests: u32,
     /// Private producer requests admitted concurrently for one immutable binding.
     pub max_in_flight_requests_per_binding: u32,
+    /// Maximum concurrency accepted in one immutable Queue consumer declaration.
+    pub max_consumer_concurrency: u32,
 }
 
 impl QueuesConfig {
@@ -944,6 +946,8 @@ impl QueuesConfig {
             || self.max_in_flight_requests > 4096
             || self.max_in_flight_requests_per_binding == 0
             || self.max_in_flight_requests_per_binding > self.max_in_flight_requests
+            || self.max_consumer_concurrency == 0
+            || self.max_consumer_concurrency > 4096
         {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
@@ -960,6 +964,7 @@ impl Default for QueuesConfig {
             default_max_backlog_bytes: 1024 * 1024 * 1024,
             max_in_flight_requests: 64,
             max_in_flight_requests_per_binding: 8,
+            max_consumer_concurrency: 32,
         }
     }
 }
@@ -1087,15 +1092,15 @@ impl Default for SchedulerPoolConfig {
     }
 }
 
-/// Fixed scheduler pool registry; Alarm and Queue are enabled while later products stay disabled.
+/// Fixed scheduler pool registry; Alarm, Queue, and Cron are production workloads.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct SchedulerPoolsConfig {
     /// Durable Object alarm pool.
     pub alarm: SchedulerPoolConfig,
-    /// Queue producer retention-maintenance pool.
+    /// Queue consumer and retention-maintenance pool.
     pub queue: SchedulerPoolConfig,
-    /// Cron pool reserved until P2.3.
+    /// Cron logical-slot and dispatch pool.
     pub cron: SchedulerPoolConfig,
     /// Workflow pool reserved until P2.4.
     pub workflow: SchedulerPoolConfig,
@@ -1107,11 +1112,16 @@ impl Default for SchedulerPoolsConfig {
             alarm: SchedulerPoolConfig::alarm_default(),
             queue: SchedulerPoolConfig {
                 enabled: true,
-                max_in_flight: 1,
-                claim_batch: 256,
+                max_in_flight: 32,
+                claim_batch: 32,
                 weight: 1,
             },
-            cron: SchedulerPoolConfig::future_default(8, 8),
+            cron: SchedulerPoolConfig {
+                enabled: true,
+                max_in_flight: 8,
+                claim_batch: 8,
+                weight: 1,
+            },
             workflow: SchedulerPoolConfig::future_default(16, 16),
         }
     }
@@ -1139,6 +1149,14 @@ pub struct SchedulerConfig {
     pub repair_interval_ms: u64,
     /// Maximum graceful-shutdown wait for in-flight alarm dispatches.
     pub shutdown_drain_ms: u64,
+    /// Grace within which at most the newest missed Cron slot is projected.
+    pub cron_misfire_grace_ms: u64,
+    /// Number of retries after an initial known Cron handler failure.
+    pub cron_max_retries: u8,
+    /// Per-activation terminal Cron history row cap.
+    pub cron_history_limit: u32,
+    /// Maximum terminal Cron history age.
+    pub cron_history_retention_ms: u64,
     /// Optional per-pool policy; absence preserves the P0.8 Alarm settings.
     pub pools: Option<SchedulerPoolsConfig>,
 }
@@ -1155,6 +1173,10 @@ impl Default for SchedulerConfig {
             repair_batch: 100,
             repair_interval_ms: 30_000,
             shutdown_drain_ms: 10_000,
+            cron_misfire_grace_ms: 300_000,
+            cron_max_retries: 3,
+            cron_history_limit: 100,
+            cron_history_retention_ms: 7 * 24 * 60 * 60 * 1000,
             pools: None,
         }
     }
@@ -1209,6 +1231,12 @@ impl SchedulerConfig {
             || self.repair_interval_ms == 0
             || self.repair_interval_ms > 24 * 60 * 60 * 1000
             || self.shutdown_drain_ms > 5 * 60 * 1000
+            || self.cron_misfire_grace_ms > 24 * 60 * 60 * 1000
+            || self.cron_max_retries > 3
+            || self.cron_history_limit == 0
+            || self.cron_history_limit > 10_000
+            || self.cron_history_retention_ms == 0
+            || self.cron_history_retention_ms > 365 * 24 * 60 * 60 * 1000
         {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
@@ -1225,7 +1253,7 @@ impl SchedulerConfig {
                     "scheduler pool policy is outside the hard platform bounds",
                 ));
             }
-            if pools.cron.enabled || pools.workflow.enabled {
+            if pools.workflow.enabled {
                 return Err(PlatformError::new(
                     ErrorCode::SchedulerKindNotEnabled,
                     "scheduler workload kind is not enabled in this release",

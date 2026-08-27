@@ -36,6 +36,7 @@ use kv::{lifecycle_index, maintenance_index, operation_index, write_kv_metrics};
 pub use p1::WebSocketCloseReason;
 use p1::{P1Metrics, write_p1_metrics};
 use queue::write_queue_metrics;
+pub(crate) use queue::{CronRunOutcome, QueueConsumerBatchOutcome};
 pub(crate) use queue::{QueueMetricOperation, QueueReconcileOperation};
 use r2::write_r2_metrics;
 pub(crate) use r2::{R2Operation, R2ProviderError, R2StreamDirection, R2StreamGuard};
@@ -45,7 +46,7 @@ use scheduler::write_scheduler_metrics;
 pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 463;
+pub const REQUIRED_SERIES: u64 = 489;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 

@@ -4,7 +4,10 @@ use base64::Engine as _;
 use open_compute_artifacts::{
     MockS3, S3ArtifactClient, SnapshotObjectStore, resolve_s3_credentials,
 };
-use open_compute_core::{ErrorCode, PlatformSnapshotManifestV1, RequestId, SystemClock};
+use open_compute_core::{
+    CronActivationId, DeploymentId, ErrorCode, PlatformSnapshotManifestV1, RequestId, SystemClock,
+    WorkerId,
+};
 use open_compute_service::backup_cli::{
     backup_attest_restore_smoke, backup_create, backup_delete, backup_inspect, backup_list,
     backup_restore, backup_retention_plan,
@@ -244,6 +247,67 @@ async fn snapshot_restore_gate() {
             1_001,
         )
         .expect("enqueue snapshot Queue message");
+    let consumer_id = open_compute_core::QueueConsumerId::generate();
+    let worker_id = WorkerId::generate();
+    let deployment_id = DeploymentId::generate();
+    scheduler
+        .ensure_queue_consumer_projection(&open_compute_storage::QueueConsumerProjection {
+            consumer_id,
+            queue_id: snapshot_queue,
+            consumer_generation: 1,
+            deployment_id,
+            worker_id,
+            execution_generation: 1,
+            entrypoint: None,
+            config: open_compute_storage::QueueConsumerConfig {
+                max_batch_size: 1,
+                ..open_compute_storage::QueueConsumerConfig::default()
+            },
+            dead_letter_queue: None,
+            descriptor_sha256: [7; 32],
+            updated_at_ms: 1_002,
+        })
+        .expect("stage snapshot Queue consumer");
+    scheduler
+        .activate_queue_consumer(consumer_id, 1, 1_002)
+        .expect("activate snapshot Queue consumer");
+    let claimed_queue = scheduler
+        .claim_queue_batches(1_002, 1_000, 250, 1)
+        .expect("claim snapshot Queue batch")
+        .pop()
+        .expect("claimed snapshot Queue batch");
+
+    let activation_id = CronActivationId::generate();
+    scheduler
+        .ensure_cron_schedule_projection(&open_compute_storage::CronScheduleProjection {
+            activation_id,
+            account_id,
+            worker_id,
+            deployment_id,
+            execution_generation: 1,
+            activation_generation: 1,
+            expression: "* * * * *".to_owned(),
+            expression_sha256: [8; 32],
+            parser_version: 1,
+            next_fire_at_ms: 60_000,
+            updated_at_ms: 1_002,
+        })
+        .expect("stage snapshot Cron schedule");
+    scheduler
+        .activate_cron_schedule(activation_id, 1, 1_002)
+        .expect("activate snapshot Cron schedule");
+    assert_eq!(
+        scheduler
+            .project_due_cron_slots(60_000, 60_000, 1)
+            .expect("project snapshot Cron slot")
+            .projected,
+        1
+    );
+    let claimed_cron = scheduler
+        .claim_cron_runs(60_000, 1_000, 250, 1)
+        .expect("claim snapshot Cron run")
+        .pop()
+        .expect("claimed snapshot Cron run");
     let do_root = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -615,6 +679,40 @@ async fn snapshot_restore_gate() {
         let restored_scheduler =
             SchedulerStore::open(&restored_storage.data_dir().scheduler_db_path(), 5_000, 1)
                 .expect("open restored Queue scheduler");
+        assert_eq!(
+            restored_scheduler
+                .recover_expired_queue_batches(61_000, 250, 10)
+                .expect("recover restored Queue lease"),
+            1
+        );
+        let stale_queue = restored_scheduler
+            .complete_queue_batch(
+                &claimed_queue,
+                &[open_compute_storage::QueueCompletionDecision {
+                    message_id: claimed_queue.messages[0].id,
+                    action: open_compute_storage::QueueCompletionAction::Ack,
+                }],
+                61_001,
+            )
+            .expect("old Queue completion is classified");
+        assert!(stale_queue.stale);
+        assert_eq!(
+            restored_scheduler
+                .recover_expired_cron_runs(61_000, 250, 10)
+                .expect("recover restored Cron lease"),
+            1
+        );
+        assert_eq!(
+            restored_scheduler
+                .complete_cron_run(
+                    &claimed_cron,
+                    open_compute_storage::CronCompletion::Success,
+                    61_001,
+                    2,
+                )
+                .expect("old Cron completion is classified"),
+            open_compute_storage::CronCompletionResult::Stale
+        );
         let metrics = restored_scheduler
             .queue_metrics(
                 snapshot_queue,
@@ -625,6 +723,11 @@ async fn snapshot_restore_gate() {
         assert_eq!(metrics.backlog_count, 1);
         assert_eq!(metrics.backlog_bytes, 19);
         assert_eq!(metrics.oldest_message_timestamp_ms, Some(1_001));
+        let cron = restored_scheduler
+            .inspect_cron_runtime(activation_id, 1, 61_001)
+            .expect("restored Cron authority");
+        assert!(cron.projection_exists);
+        assert_eq!(cron.ready_runs, 1);
     }
     assert!(
         backup_attest_restore_smoke(&restore_loaded, &first.snapshot_id, false)

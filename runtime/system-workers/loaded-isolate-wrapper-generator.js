@@ -124,10 +124,22 @@ function wrapInstance(instance, env) {
     }
   });
 }
-function wrapHandler(owner, fn) {
+function normalizedEvent(kind, event) {
+  if (kind === "scheduled" && event && event.type === undefined) {
+    return new Proxy(event, {
+      get(target, property) {
+        if (property === "type") return "scheduled";
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  }
+  return event;
+}
+function wrapHandler(owner, fn, kind) {
   return function(event, env, ctx) {
     const wrapped = wrapEnv(env);
-    return invoke(owner, fn, [event, wrapped, ctx], wrapped);
+    return invoke(owner, fn, [normalizedEvent(kind, event), wrapped, ctx], wrapped);
   };
 }
 const raw = tenant.default;
@@ -135,7 +147,7 @@ let wrappedDefault = raw;
 if (raw && typeof raw === "object") {
   wrappedDefault = { ...raw };
   for (const key of ["fetch", "scheduled", "queue", "tail"]) {
-    if (typeof raw[key] === "function") wrappedDefault[key] = wrapHandler(raw, raw[key]);
+    if (typeof raw[key] === "function") wrappedDefault[key] = wrapHandler(raw, raw[key], key);
   }
 } else if (typeof raw === "function") {
   if (/^\\s*class\\b/.test(Function.prototype.toString.call(raw))) {
@@ -147,7 +159,7 @@ if (raw && typeof raw === "object") {
       }
     };
   } else {
-    wrappedDefault = { fetch: wrapHandler(undefined, raw) };
+    wrappedDefault = { fetch: wrapHandler(undefined, raw, "fetch") };
   }
 }
 ${named}

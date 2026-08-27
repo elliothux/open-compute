@@ -25,8 +25,12 @@ use crate::run::{
 use crate::runtime_bridge::WorkerdTransport;
 use crate::scheduler::SchedulerService;
 use crate::workers_http::WorkerApiState;
+use axum::Json;
+use axum::Router;
 use axum::body::Body;
+use axum::extract::State;
 use axum::http::{Request, StatusCode};
+use axum::routing::post;
 use clap::CommandFactory;
 use open_compute_core::config::SecretReference;
 use open_compute_core::{
@@ -37,7 +41,9 @@ use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
 use open_compute_storage::{DataDir, SchedulerStore, SchedulerSummary, inspect_scheduler_db};
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, DeploymentPins, ModuleInput, ModuleType,
+    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
+    DeploymentController, DeploymentPins, ModuleInput, ModuleType, ProductPromotionCoordinator,
+    ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, ValidationCandidate,
 };
 use sha2::Digest;
 use std::fs::{self, File};
@@ -50,6 +56,24 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt;
+
+#[derive(Clone)]
+struct FakeCustomEventResponses {
+    queue: Arc<Mutex<serde_json::Value>>,
+    cron: Arc<Mutex<serde_json::Value>>,
+}
+
+async fn fake_queue_custom_event(
+    State(responses): State<FakeCustomEventResponses>,
+) -> Json<serde_json::Value> {
+    Json(responses.queue.lock().unwrap().clone())
+}
+
+async fn fake_cron_custom_event(
+    State(responses): State<FakeCustomEventResponses>,
+) -> Json<serde_json::Value> {
+    Json(responses.cron.lock().unwrap().clone())
+}
 
 fn host_target() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
@@ -1335,11 +1359,36 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     assert_eq!(body["version"], 2);
     assert_eq!(body["paused"], false);
     assert_eq!(body["global"]["inFlight"], 0);
-    assert_eq!(body["pools"].as_array().unwrap().len(), 2);
+    assert_eq!(body["pools"].as_array().unwrap().len(), 3);
     assert_eq!(body["pools"][0]["kind"], "do_alarm");
     assert_eq!(body["pools"][0]["ready"], 0);
     assert_eq!(body["pools"][1]["kind"], "queue");
     assert_eq!(body["pools"][1]["ready"], 0);
+    assert_eq!(body["pools"][2]["kind"], "cron");
+    assert_eq!(body["pools"][2]["ready"], 0);
+    assert_eq!(body["queueConsumers"], serde_json::json!([]));
+    assert_eq!(body["cronActivations"], serde_json::json!([]));
+
+    let operator_inspect = app
+        .clone()
+        .oneshot(request("GET", "/v1/operator/queue-consumers"))
+        .await
+        .unwrap();
+    assert_eq!(operator_inspect.status(), StatusCode::OK);
+    let invalid_consumer = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/operator/queue-consumers/not-an-id/pause")
+                .header("authorization", "Bearer scheduler-admin")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"consumerGeneration":1}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_consumer.status(), StatusCode::BAD_REQUEST);
 
     let queue_id = open_compute_core::QueueId::generate();
     store
@@ -2275,7 +2324,15 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         capabilities.products["queues"].deviations,
         vec!["OC-QUEUE-001"]
     );
-    for product in ["cron", "workflows", "websocket_hibernation"] {
+    assert_eq!(
+        capabilities.products["cron"].status,
+        open_compute_core::CapabilityStatus::Supported
+    );
+    assert_eq!(
+        capabilities.products["cron"].deviations,
+        vec!["OC-CRON-001"]
+    );
+    for product in ["workflows", "websocket_hibernation"] {
         assert_eq!(
             capabilities.products[product].status,
             open_compute_core::CapabilityStatus::Unsupported
@@ -2573,6 +2630,816 @@ async fn initialized_worker_http_fixture() -> (
         test_state(HealthCoordinator::new(), Some("admin-token")).with_worker_api(api),
         account,
     )
+}
+
+#[tokio::test]
+async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted_update() {
+    let (_dir, path, _mock) = initialized_doctor_fixture().await;
+    let loaded = load_platform_config(&path).unwrap();
+    let storage = Arc::new(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &loaded.config.storage,
+            &open_compute_core::SystemClock,
+        )
+        .unwrap(),
+    );
+    let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
+    let scheduler_store = Arc::new(SchedulerStore::open(&scheduler_path, 100, 1).unwrap());
+    let account = storage.identity().default_account_id;
+    let queue_id = open_compute_core::QueueId::generate();
+    let queue_config = open_compute_storage::QueueConfig::default();
+    let queues = open_compute_storage::QueueRepository::new(storage.db());
+    queues
+        .insert_creating(account, queue_id, "promotion-queue", queue_config, 1)
+        .unwrap();
+    scheduler_store
+        .create_queue_projection(&open_compute_storage::QueueProjection {
+            queue_id,
+            account_id: account,
+            lifecycle_generation: 1,
+            config_generation: 1,
+            config: queue_config,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        })
+        .unwrap();
+    queues.mark_ready(account, queue_id, 2).unwrap();
+
+    let workers = open_compute_storage::WorkerRepository::new(storage.db());
+    let (worker, _) = workers
+        .create_worker(
+            account,
+            "p2-3-promotion",
+            open_compute_core::RequestId::generate(),
+            2,
+        )
+        .unwrap();
+    let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
+    let client = open_compute_artifacts::S3ArtifactClient::connect(
+        &loaded.config.s3,
+        &credentials,
+        loaded.config.cache.max_artifact_bytes,
+    )
+    .unwrap();
+    let validator: Arc<dyn RuntimeValidator> = Arc::new(|_: ValidationCandidate| async { Ok(()) });
+    let promoter = Arc::new(crate::p2_3_promotion::P23PromotionCoordinator::new(
+        storage.clone(),
+        scheduler_store.clone(),
+        Duration::from_millis(100),
+    ));
+    let controller = DeploymentController::new(
+        &storage,
+        open_compute_artifacts::ArtifactStore::new(client),
+        validator,
+        BundleLimits::default(),
+    )
+    .with_product_promoter(promoter.clone());
+
+    let request = |key: &str, label: &str, promote: bool, cron: &str, batch_size: u32| {
+        let source = format!(
+            "export default {{ fetch() {{ return new Response('{label}'); }}, queue() {{}}, scheduled() {{}} }};"
+        );
+        let bundle = CanonicalBundle::build(
+            "index.js",
+            vec![ModuleInput {
+                name: "index.js".to_owned(),
+                module_type: ModuleType::EsModule,
+                bytes: source.into_bytes(),
+            }],
+            BundleLimits::default(),
+        )
+        .unwrap();
+        CreateDeploymentRequest {
+            account_id: account,
+            worker_id: worker.id,
+            idempotency_key: key.to_owned(),
+            bundle: bundle.into_bytes().into(),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: Vec::new(),
+            vars: std::collections::BTreeMap::new(),
+            secrets: std::collections::BTreeMap::new(),
+            bindings: std::collections::BTreeMap::new(),
+            queue_consumers: vec![QueueConsumerInput {
+                queue: queue_id,
+                entrypoint: None,
+                config: open_compute_storage::QueueConsumerConfig {
+                    max_batch_size: batch_size,
+                    ..open_compute_storage::QueueConsumerConfig::default()
+                },
+                dead_letter_queue: None,
+            }],
+            crons: Some(vec![cron.to_owned()]),
+            limits: serde_json::json!({"profile": "default"}),
+            promote,
+            request_id: open_compute_core::RequestId::generate(),
+            now_ms: 60_000,
+        }
+    };
+
+    let first = controller
+        .create_deployment(request("p23-first", "first", true, "*/5 * * * *", 10))
+        .await
+        .unwrap();
+    let first_id = match first {
+        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
+        CreateDeploymentOutcome::Replay(_) => panic!("first P2.3 deployment replayed"),
+    };
+    let consumer_repo = open_compute_storage::QueueConsumerRepository::new(storage.db());
+    let first_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
+    assert_eq!(
+        first_consumer.state,
+        open_compute_storage::QueueConsumerState::Active
+    );
+    assert_eq!(first_consumer.deployment_id, first_id);
+    assert!(
+        scheduler_store
+            .inspect_queue_consumer_runtime(queue_id, first_consumer.id, 1)
+            .unwrap()
+            .projection_exists
+    );
+    let first_crons = open_compute_storage::CronRepository::new(storage.db())
+        .live_for_worker(worker.id)
+        .unwrap();
+    assert_eq!(first_crons.len(), 1);
+    assert_eq!(
+        first_crons[0].state,
+        open_compute_storage::CronActivationState::Active
+    );
+
+    promoter
+        .promote(ProductPromotionRequest {
+            account_id: account,
+            worker_id: worker.id,
+            deployment_id: first_id,
+            request_id: open_compute_core::RequestId::generate(),
+            now_ms: 60_001,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        consumer_repo
+            .live_for_queue(queue_id)
+            .unwrap()
+            .unwrap()
+            .consumer_generation,
+        1
+    );
+
+    let responses = FakeCustomEventResponses {
+        queue: Arc::new(Mutex::new(serde_json::json!({
+            "outcome": "ok",
+            "ackAll": true,
+            "retryBatch": {"retry": false},
+            "explicitAcks": [],
+            "retryMessages": []
+        }))),
+        cron: Arc::new(Mutex::new(serde_json::json!({
+            "outcome": "ok",
+            "noRetry": false
+        }))),
+    };
+    let custom_event_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let custom_event_port = custom_event_listener.local_addr().unwrap().port();
+    let server_responses = responses.clone();
+    let custom_event_task = tokio::spawn(async move {
+        axum::serve(
+            custom_event_listener,
+            Router::new()
+                .route("/internal/queue", post(fake_queue_custom_event))
+                .route("/internal/scheduled", post(fake_cron_custom_event))
+                .with_state(server_responses)
+                .into_make_service(),
+        )
+        .await
+        .unwrap();
+    });
+    let auth = GenerationAuthRegistry::new();
+    auth.activate_for_test(SecretString::new("11".repeat(32)));
+    let transport = WorkerdTransport::for_test_endpoint(auth, custom_event_port);
+    let clock = Arc::new(open_compute_core::DeterministicSchedulerClock::new(300_000));
+    let metrics =
+        Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "test").unwrap());
+    let scheduler = Arc::new(
+        SchedulerService::new(
+            scheduler_store.clone(),
+            storage.clone(),
+            transport,
+            SchedulerConfig::default(),
+            clock.clone(),
+        )
+        .with_metrics(metrics),
+    );
+    scheduler_store
+        .enqueue_queue(
+            &open_compute_storage::QueueEnqueueRequest {
+                queue_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![open_compute_storage::QueueMessageInput {
+                    content_type: open_compute_storage::QueueContentType::Json,
+                    body: br#"{"event":"first"}"#.to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            300_000,
+        )
+        .unwrap();
+    clock.set_wall_time_ms(305_000);
+    let before_dispatch = scheduler.inspect().unwrap();
+    assert_eq!(before_dispatch.queue_consumers.len(), 1);
+    assert_eq!(before_dispatch.cron_activations.len(), 1);
+    for kind in [
+        SchedulerKind::Alarm,
+        SchedulerKind::Queue,
+        SchedulerKind::Cron,
+    ] {
+        scheduler.pause_kind(kind).unwrap();
+        assert!(scheduler.is_kind_paused(kind).unwrap());
+        scheduler.resume_kind(kind).unwrap();
+        assert!(!scheduler.is_kind_paused(kind).unwrap());
+    }
+    assert_eq!(
+        scheduler
+            .is_kind_paused(SchedulerKind::Workflow)
+            .unwrap_err()
+            .code(),
+        ErrorCode::SchedulerKindNotEnabled
+    );
+    assert_eq!(
+        scheduler.repair_products(0).unwrap_err().code(),
+        ErrorCode::SchedulerUnavailable
+    );
+    assert!(scheduler.repair_products(1_000).unwrap() >= 2);
+
+    let (kernel_shutdown, kernel_shutdown_rx) = tokio::sync::watch::channel(false);
+    let kernel = tokio::spawn(scheduler.clone().run(kernel_shutdown_rx));
+    for _ in 0..10_000 {
+        let queue_empty = scheduler_store.queue_backlog_totals().unwrap().0 == 0;
+        let cron_complete = scheduler
+            .inspect()
+            .unwrap()
+            .cron_activations
+            .first()
+            .and_then(|activation| activation.last_outcome.as_deref())
+            == Some("complete");
+        if queue_empty && cron_complete {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let dispatched = scheduler.inspect().unwrap();
+    assert_eq!(
+        scheduler_store.queue_backlog_totals().unwrap(),
+        (0, 0),
+        "{dispatched:?}"
+    );
+    assert_eq!(
+        scheduler
+            .inspect()
+            .unwrap()
+            .cron_activations
+            .first()
+            .and_then(|activation| activation.last_outcome.as_deref()),
+        Some("complete")
+    );
+    kernel_shutdown.send(true).unwrap();
+    kernel.await.unwrap().unwrap();
+
+    *responses.queue.lock().unwrap() = serde_json::json!({
+        "outcome": "exception",
+        "ackAll": false,
+        "retryBatch": {"retry": false},
+        "explicitAcks": [],
+        "retryMessages": []
+    });
+    *responses.cron.lock().unwrap() = serde_json::json!({
+        "outcome": "exception",
+        "noRetry": false
+    });
+    clock.set_wall_time_ms(600_000);
+    scheduler_store
+        .enqueue_queue(
+            &open_compute_storage::QueueEnqueueRequest {
+                queue_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![open_compute_storage::QueueMessageInput {
+                    content_type: open_compute_storage::QueueContentType::Text,
+                    body: b"retry".to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            600_000,
+        )
+        .unwrap();
+    clock.set_wall_time_ms(605_000);
+    let [retry_batch] = scheduler
+        .claim_queue_consumers(1)
+        .await
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let [retry_run] = scheduler.claim_cron(1).await.unwrap().try_into().unwrap();
+    scheduler
+        .clone()
+        .dispatch_queue_batch(retry_batch.clone())
+        .await;
+    scheduler.clone().dispatch_cron_run(retry_run.clone()).await;
+    assert_eq!(scheduler_store.queue_backlog_totals().unwrap().0, 1);
+
+    *responses.queue.lock().unwrap() = serde_json::json!({
+        "outcome": "ok",
+        "ackAll": true,
+        "retryBatch": {"retry": false},
+        "explicitAcks": [],
+        "retryMessages": []
+    });
+    *responses.cron.lock().unwrap() = serde_json::json!({
+        "outcome": "ok",
+        "noRetry": false
+    });
+    scheduler
+        .clone()
+        .dispatch_queue_batch(retry_batch.clone())
+        .await;
+    scheduler.clone().dispatch_cron_run(retry_run.clone()).await;
+
+    let mut missing_queue_authority = retry_batch.clone();
+    missing_queue_authority.worker_id = open_compute_core::WorkerId::generate();
+    scheduler
+        .clone()
+        .dispatch_queue_batch(missing_queue_authority)
+        .await;
+    let mut missing_queue_deployment = retry_batch.clone();
+    missing_queue_deployment.deployment_id = open_compute_core::DeploymentId::generate();
+    scheduler
+        .clone()
+        .dispatch_queue_batch(missing_queue_deployment)
+        .await;
+    let mut invalid_queue_generation = retry_batch.clone();
+    invalid_queue_generation.execution_generation = u64::MAX;
+    scheduler
+        .clone()
+        .dispatch_queue_batch(invalid_queue_generation)
+        .await;
+    let mut missing_cron_authority = retry_run.clone();
+    missing_cron_authority.worker_id = open_compute_core::WorkerId::generate();
+    scheduler
+        .clone()
+        .dispatch_cron_run(missing_cron_authority)
+        .await;
+    let mut invalid_cron_generation = retry_run.clone();
+    invalid_cron_generation.execution_generation = u64::MAX;
+    scheduler
+        .clone()
+        .dispatch_cron_run(invalid_cron_generation)
+        .await;
+
+    clock.set_wall_time_ms(610_000);
+    let [unknown_batch] = scheduler
+        .claim_queue_consumers(1)
+        .await
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let [unknown_run] = scheduler.claim_cron(1).await.unwrap().try_into().unwrap();
+    *responses.queue.lock().unwrap() = serde_json::json!({
+        "outcome": "ok",
+        "ackAll": false,
+        "retryBatch": {"retry": false},
+        "explicitAcks": [open_compute_core::QueueMessageId::generate().to_string()],
+        "retryMessages": []
+    });
+    *responses.cron.lock().unwrap() = serde_json::json!({
+        "outcome": "aborted",
+        "noRetry": false
+    });
+    scheduler
+        .clone()
+        .dispatch_queue_batch(unknown_batch.clone())
+        .await;
+    scheduler
+        .clone()
+        .dispatch_cron_run(unknown_run.clone())
+        .await;
+    *responses.queue.lock().unwrap() = serde_json::json!({
+        "outcome": "aborted",
+        "ackAll": false,
+        "retryBatch": {"retry": false},
+        "explicitAcks": [],
+        "retryMessages": []
+    });
+    scheduler
+        .clone()
+        .dispatch_queue_batch(unknown_batch.clone())
+        .await;
+    *responses.queue.lock().unwrap() = serde_json::json!({"outcome": "forged"});
+    *responses.cron.lock().unwrap() = serde_json::json!({"outcome": "ok"});
+    scheduler.clone().dispatch_queue_batch(unknown_batch).await;
+    scheduler.clone().dispatch_cron_run(unknown_run).await;
+
+    *responses.queue.lock().unwrap() = serde_json::json!({
+        "outcome": "ok",
+        "ackAll": true,
+        "retryBatch": {"retry": false},
+        "explicitAcks": [],
+        "retryMessages": []
+    });
+    *responses.cron.lock().unwrap() = serde_json::json!({
+        "outcome": "ok",
+        "noRetry": false
+    });
+    clock.set_wall_time_ms(700_000);
+    assert_eq!(scheduler.poll_once().await.unwrap(), 0);
+    clock.set_wall_time_ms(701_000);
+    assert!(scheduler.poll_once().await.unwrap() >= 1);
+    clock.set_wall_time_ms(706_000);
+    for batch in scheduler_store
+        .claim_queue_batches(706_000, 60_000, 250, 1)
+        .unwrap()
+    {
+        scheduler.clone().dispatch_queue_batch(batch).await;
+    }
+    for run in scheduler_store
+        .claim_cron_runs(706_000, 60_000, 250, 1)
+        .unwrap()
+    {
+        scheduler.clone().dispatch_cron_run(run).await;
+    }
+    assert_eq!(scheduler_store.queue_backlog_totals().unwrap(), (0, 0));
+    *responses.cron.lock().unwrap() = serde_json::json!({
+        "outcome": "exception",
+        "noRetry": true
+    });
+    clock.set_wall_time_ms(900_000);
+    let [terminal_run] = scheduler.claim_cron(1).await.unwrap().try_into().unwrap();
+    scheduler.clone().dispatch_cron_run(terminal_run).await;
+    assert_eq!(
+        scheduler
+            .inspect()
+            .unwrap()
+            .cron_activations
+            .first()
+            .and_then(|activation| activation.last_outcome.as_deref()),
+        Some("failed")
+    );
+    *responses.cron.lock().unwrap() = serde_json::json!({
+        "outcome": "ok",
+        "noRetry": false
+    });
+    let audit_count = || {
+        let connection = rusqlite::Connection::open(storage.data_dir().control_db_path()).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM control_audit_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        u64::try_from(count).unwrap()
+    };
+    let audit_before = audit_count();
+    for result in [
+        scheduler.pause_queue_consumer_operator(
+            first_consumer.id,
+            2,
+            open_compute_core::RequestId::generate(),
+        ),
+        scheduler.resume_queue_consumer_operator(
+            first_consumer.id,
+            2,
+            open_compute_core::RequestId::generate(),
+        ),
+    ] {
+        assert_eq!(
+            result.unwrap_err().code(),
+            ErrorCode::QueueConsumerGenerationStale
+        );
+    }
+    scheduler
+        .pause_queue_consumer_operator(
+            first_consumer.id,
+            1,
+            open_compute_core::RequestId::generate(),
+        )
+        .unwrap();
+    scheduler
+        .pause_queue_consumer_operator(
+            first_consumer.id,
+            1,
+            open_compute_core::RequestId::generate(),
+        )
+        .unwrap();
+    assert_eq!(audit_count(), audit_before + 1);
+    scheduler
+        .resume_queue_consumer_operator(
+            first_consumer.id,
+            1,
+            open_compute_core::RequestId::generate(),
+        )
+        .unwrap();
+    scheduler
+        .resume_queue_consumer_operator(
+            first_consumer.id,
+            1,
+            open_compute_core::RequestId::generate(),
+        )
+        .unwrap();
+    scheduler
+        .pause_queue_consumer_operator(
+            first_consumer.id,
+            1,
+            open_compute_core::RequestId::generate(),
+        )
+        .unwrap();
+    assert_eq!(audit_count(), audit_before + 3);
+    assert!(scheduler.repair_products(1_000).unwrap() >= 2);
+
+    let second = controller
+        .create_deployment(request("p23-second", "second", true, "0 * * * *", 20))
+        .await
+        .unwrap();
+    let second_id = match second {
+        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
+        CreateDeploymentOutcome::Replay(_) => panic!("second P2.3 deployment replayed"),
+    };
+    let second_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
+    assert_eq!(second_consumer.consumer_generation, 2);
+    assert_eq!(second_consumer.deployment_id, second_id);
+    assert_eq!(
+        second_consumer.state,
+        open_compute_storage::QueueConsumerState::Paused
+    );
+
+    let third = controller
+        .create_deployment(request("p23-third", "third", false, "30 * * * *", 30))
+        .await
+        .unwrap();
+    let third_id = match third {
+        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
+        CreateDeploymentOutcome::Replay(_) => panic!("third P2.3 deployment replayed"),
+    };
+    let third_declaration = consumer_repo
+        .deployment_declarations(third_id)
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    assert!(
+        consumer_repo
+            .begin_update(second_consumer.id, 2, &third_declaration, 60_002)
+            .unwrap()
+    );
+    for result in [
+        scheduler.pause_queue_consumer_operator(
+            second_consumer.id,
+            3,
+            open_compute_core::RequestId::generate(),
+        ),
+        scheduler.resume_queue_consumer_operator(
+            second_consumer.id,
+            3,
+            open_compute_core::RequestId::generate(),
+        ),
+    ] {
+        assert_eq!(
+            result.unwrap_err().code(),
+            ErrorCode::QueueConsumerGenerationStale
+        );
+    }
+    assert!(scheduler.repair_products(1_000).unwrap() > 0);
+    let reconciled = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
+    assert_eq!(
+        reconciled.state,
+        open_compute_storage::QueueConsumerState::Updating
+    );
+    assert_eq!(reconciled.deployment_id, third_id);
+    assert_eq!(reconciled.pending_deployment_id, None);
+    let pre_promote_crons = open_compute_storage::CronRepository::new(storage.db())
+        .live_for_worker(worker.id)
+        .unwrap();
+    assert_eq!(pre_promote_crons.len(), 1);
+    assert_eq!(
+        open_compute_storage::CronRepository::new(storage.db())
+            .retire_before(
+                worker.id,
+                pre_promote_crons[0].activation_generation + 1,
+                60_003,
+            )
+            .unwrap(),
+        1
+    );
+    assert!(scheduler.repair_products(1_000).unwrap() > 0);
+    workers
+        .promote(
+            account,
+            worker.id,
+            third_id,
+            Some(second_id),
+            open_compute_core::RequestId::generate(),
+            60_003,
+        )
+        .unwrap();
+    assert!(scheduler.repair_products(1_000).unwrap() > 0);
+    assert_eq!(
+        consumer_repo
+            .live_for_queue(queue_id)
+            .unwrap()
+            .unwrap()
+            .state,
+        open_compute_storage::QueueConsumerState::Paused
+    );
+    promoter
+        .promote(ProductPromotionRequest {
+            account_id: account,
+            worker_id: worker.id,
+            deployment_id: third_id,
+            request_id: open_compute_core::RequestId::generate(),
+            now_ms: 60_003,
+        })
+        .await
+        .unwrap();
+    let recovered = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
+    assert_eq!(recovered.consumer_generation, 3);
+    assert_eq!(recovered.deployment_id, third_id);
+    assert_eq!(
+        recovered.state,
+        open_compute_storage::QueueConsumerState::Paused
+    );
+    assert_eq!(
+        workers
+            .get_worker(account, worker.id)
+            .unwrap()
+            .active_deployment_id,
+        Some(third_id)
+    );
+    let live_crons = open_compute_storage::CronRepository::new(storage.db())
+        .live_for_worker(worker.id)
+        .unwrap();
+    assert_eq!(live_crons.len(), 1);
+    assert_eq!(live_crons[0].expression, "30 * * * *");
+    assert_eq!(
+        live_crons[0].state,
+        open_compute_storage::CronActivationState::Active
+    );
+    assert_eq!(
+        open_compute_storage::inspect_p23_cross_database(
+            &storage.data_dir().control_db_path(),
+            &scheduler_path,
+            100,
+        )
+        .unwrap(),
+        open_compute_storage::P23CrossDatabaseInspection::default()
+    );
+
+    let mut inherit = request("p23-inherit", "inherit", true, "ignored", 40);
+    inherit.crons = None;
+    let inherited = controller.create_deployment(inherit).await.unwrap();
+    let inherited_id = match inherited {
+        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
+        CreateDeploymentOutcome::Replay(_) => panic!("inherited P2.3 deployment replayed"),
+    };
+    let inherited_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
+    assert_eq!(inherited_consumer.consumer_generation, 4);
+    assert_eq!(inherited_consumer.deployment_id, inherited_id);
+    let inherited_crons = open_compute_storage::CronRepository::new(storage.db())
+        .live_for_worker(worker.id)
+        .unwrap();
+    assert_eq!(inherited_crons.len(), 1);
+    assert_eq!(inherited_crons[0].expression, "30 * * * *");
+    assert_eq!(inherited_crons[0].deployment_id, inherited_id);
+    let inherited_declaration = consumer_repo
+        .deployment_declarations(inherited_id)
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    let inherited_cron_declarations = vec![open_compute_storage::CronDeclaration {
+        id: open_compute_core::CronActivationId::generate(),
+        deployment_id: inherited_id,
+        expression: inherited_crons[0].expression.clone(),
+        expression_sha256: inherited_crons[0].expression_sha256,
+        parser_version: inherited_crons[0].parser_version,
+        created_at_ms: 706_002,
+    }];
+    assert!(
+        consumer_repo
+            .begin_delete(
+                inherited_consumer.id,
+                inherited_consumer.consumer_generation,
+                706_001,
+            )
+            .unwrap()
+    );
+    assert_eq!(
+        open_compute_storage::CronRepository::new(storage.db())
+            .retire_before(
+                worker.id,
+                inherited_crons[0].activation_generation + 1,
+                706_001,
+            )
+            .unwrap(),
+        1
+    );
+    assert!(scheduler.repair_products(1_000).unwrap() >= 2);
+    assert!(consumer_repo.live_for_queue(queue_id).unwrap().is_none());
+    assert!(
+        open_compute_storage::CronRepository::new(storage.db())
+            .live_for_worker(worker.id)
+            .unwrap()
+            .is_empty()
+    );
+    let reactivated = consumer_repo
+        .create_attachment(account, worker.id, &inherited_declaration, 706_002)
+        .unwrap();
+    let restaged = open_compute_storage::CronRepository::new(storage.db())
+        .stage_activations(
+            account,
+            worker.id,
+            inherited_id,
+            inherited_crons[0].activation_generation + 1,
+            &inherited_cron_declarations,
+            706_002,
+        )
+        .unwrap();
+    assert_eq!(restaged.len(), 1);
+    assert!(scheduler.repair_products(1_000).unwrap() >= 2);
+    assert_eq!(
+        consumer_repo.get(reactivated.id).unwrap().state,
+        open_compute_storage::QueueConsumerState::Active
+    );
+    assert_eq!(
+        open_compute_storage::CronRepository::new(storage.db())
+            .live_for_worker(worker.id)
+            .unwrap()[0]
+            .state,
+        open_compute_storage::CronActivationState::Active
+    );
+    assert!(
+        consumer_repo
+            .begin_update(
+                reactivated.id,
+                reactivated.consumer_generation,
+                &inherited_declaration,
+                706_003,
+            )
+            .unwrap()
+    );
+    assert!(scheduler.repair_products(1_000).unwrap() >= 2);
+    let reactivated = consumer_repo.get(reactivated.id).unwrap();
+    assert_eq!(reactivated.consumer_generation, 2);
+    assert_eq!(
+        reactivated.state,
+        open_compute_storage::QueueConsumerState::Active
+    );
+    assert!(
+        consumer_repo
+            .begin_delete(reactivated.id, reactivated.consumer_generation, 706_004)
+            .unwrap()
+    );
+    assert_eq!(
+        open_compute_storage::CronRepository::new(storage.db())
+            .retire_before(worker.id, restaged[0].activation_generation + 1, 706_004,)
+            .unwrap(),
+        1
+    );
+    assert!(scheduler.repair_products(1_000).unwrap() >= 2);
+
+    let mut empty = request("p23-empty", "empty", true, "ignored", 10);
+    empty.queue_consumers.clear();
+    empty.crons = Some(Vec::new());
+    let emptied = controller.create_deployment(empty).await.unwrap();
+    let emptied_id = match emptied {
+        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
+        CreateDeploymentOutcome::Replay(_) => panic!("empty P2.3 deployment replayed"),
+    };
+    assert_eq!(
+        workers
+            .get_worker(account, worker.id)
+            .unwrap()
+            .active_deployment_id,
+        Some(emptied_id)
+    );
+    assert!(consumer_repo.live_for_queue(queue_id).unwrap().is_none());
+    assert!(
+        open_compute_storage::CronRepository::new(storage.db())
+            .live_for_worker(worker.id)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        open_compute_storage::inspect_p23_cross_database(
+            &storage.data_dir().control_db_path(),
+            &scheduler_path,
+            100,
+        )
+        .unwrap(),
+        open_compute_storage::P23CrossDatabaseInspection::default()
+    );
+    custom_event_task.abort();
+    let _ = custom_event_task.await;
 }
 
 #[tokio::test]

@@ -2,6 +2,7 @@
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, header};
+use base64::Engine as _;
 use bytes::Bytes;
 use futures::Stream;
 use http_body_util::BodyExt as _;
@@ -11,8 +12,8 @@ use open_compute_artifacts::{
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{PlatformConfig, RuntimeConfig, StorageConfig};
 use open_compute_core::{
-    ComponentName, ComponentState, ErrorCode, MetricsConfig, ReadinessReason, Redactor, RequestId,
-    SecretString, ServerConfig,
+    ComponentName, ComponentState, ErrorCode, MetricsConfig, QueueMessageId, ReadinessReason,
+    Redactor, RequestId, SecretString, ServerConfig,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -21,14 +22,15 @@ use open_compute_runtime::{
 };
 use open_compute_service::http::{HttpState, merged_router};
 use open_compute_service::runtime_bridge::{
-    DispatchTarget, LoaderOutcome, WorkerdTransport, bind_runtime_source, serve_runtime_source,
+    DispatchTarget, LoaderOutcome, QueueDispatchMessage, QueueDispatchRequest,
+    ScheduledDispatchRequest, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
 use open_compute_service::workers_http::WorkerApiState;
 use open_compute_service::{
     HealthCoordinator, MetricsRegistry, UnavailableKvBindingExecutor, bind_binding_backend,
     serve_binding_backend,
 };
-use open_compute_storage::{DeploymentState, PlatformStorage, WorkerRepository};
+use open_compute_storage::{DeploymentState, PlatformStorage, QueueContentType, WorkerRepository};
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
     DeploymentController, DeploymentPins, ModuleInput, ModuleType, ResourcePins, RuntimeSource,
@@ -197,6 +199,139 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     assert_eq!(warm.status, 200);
     assert_eq!(warm.loader_outcome, Some(LoaderOutcome::Warm));
     assert!(warm.body.contains("A:warm:production:gate-secret"));
+
+    // Native Queue and scheduled custom events traverse the same immutable dynamic loader.
+    let queue_ids = [
+        QueueMessageId::generate(),
+        QueueMessageId::generate(),
+        QueueMessageId::generate(),
+    ];
+    let queue_result = transport
+        .dispatch_queue(
+            &dispatch_target(account, worker.id, &a, None),
+            &QueueDispatchRequest {
+                queue_name: "runtime-gate".to_owned(),
+                messages: vec![
+                    QueueDispatchMessage {
+                        id: queue_ids[0].to_string(),
+                        timestamp_ms: 1_787_700_000_000,
+                        attempts: 1,
+                        content_type: QueueContentType::Text,
+                        body_base64: base64::engine::general_purpose::STANDARD.encode("ack"),
+                    },
+                    QueueDispatchMessage {
+                        id: queue_ids[1].to_string(),
+                        timestamp_ms: 1_787_700_000_001,
+                        attempts: 2,
+                        content_type: QueueContentType::Json,
+                        body_base64: base64::engine::general_purpose::STANDARD
+                            .encode(br#"{"action":"retry"}"#),
+                    },
+                    QueueDispatchMessage {
+                        id: queue_ids[2].to_string(),
+                        timestamp_ms: 1_787_700_000_002,
+                        attempts: 3,
+                        content_type: QueueContentType::Bytes,
+                        body_base64: base64::engine::general_purpose::STANDARD.encode([0, 255, 7]),
+                    },
+                ],
+            },
+            Duration::from_secs(5),
+        )
+        .await;
+    let queue_result = match queue_result {
+        Ok(result) => result,
+        Err(error) => {
+            supervisor.shutdown().await;
+            panic!(
+                "native Queue custom event: {error:?}; diagnostics: {:?}",
+                supervisor.last_diagnostics()
+            );
+        }
+    };
+    assert_eq!(queue_result.outcome, "ok");
+    assert_eq!(queue_result.explicit_acks, [queue_ids[0].to_string()]);
+    assert_eq!(queue_result.retry_messages.len(), 1);
+    assert_eq!(
+        queue_result.retry_messages[0].msg_id,
+        queue_ids[1].to_string()
+    );
+    assert_eq!(queue_result.retry_messages[0].delay_seconds, Some(7));
+    assert!(!queue_result.ack_all);
+    assert!(!queue_result.retry_batch.retry);
+
+    let scheduled = transport
+        .dispatch_scheduled(
+            &dispatch_target(account, worker.id, &a, None),
+            &ScheduledDispatchRequest {
+                scheduled_time_ms: 1_787_700_060_000,
+                cron: "*/5 * * * *".to_owned(),
+            },
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("native scheduled custom event");
+    assert_eq!(scheduled.outcome, "ok");
+    assert!(scheduled.no_retry);
+
+    for (queue_name, expected) in [
+        ("runtime-gate-throw", "exception"),
+        ("runtime-gate-wait-until", "exception"),
+    ] {
+        let result = transport
+            .dispatch_queue(
+                &dispatch_target(account, worker.id, &a, None),
+                &QueueDispatchRequest {
+                    queue_name: queue_name.to_owned(),
+                    messages: vec![QueueDispatchMessage {
+                        id: QueueMessageId::generate().to_string(),
+                        timestamp_ms: 1_787_700_000_000,
+                        attempts: 1,
+                        content_type: QueueContentType::Text,
+                        body_base64: base64::engine::general_purpose::STANDARD.encode("failure"),
+                    }],
+                },
+                Duration::from_secs(5),
+            )
+            .await
+            .expect("known Queue failure result");
+        assert_eq!(result.outcome, expected);
+    }
+    for cron in ["1 * * * *", "2 * * * *"] {
+        let result = transport
+            .dispatch_scheduled(
+                &dispatch_target(account, worker.id, &a, None),
+                &ScheduledDispatchRequest {
+                    scheduled_time_ms: 1_787_700_060_000,
+                    cron: cron.to_owned(),
+                },
+                Duration::from_secs(5),
+            )
+            .await
+            .expect("known scheduled failure result");
+        assert_eq!(result.outcome, "exception");
+        assert!(!result.no_retry);
+    }
+
+    let named_queue = transport
+        .dispatch_queue(
+            &dispatch_target(account, worker.id, &a, Some("Named")),
+            &QueueDispatchRequest {
+                queue_name: "runtime-gate".to_owned(),
+                messages: vec![QueueDispatchMessage {
+                    id: QueueMessageId::generate().to_string(),
+                    timestamp_ms: 1_787_700_000_003,
+                    attempts: 1,
+                    content_type: QueueContentType::Text,
+                    body_base64: base64::engine::general_purpose::STANDARD.encode("named"),
+                }],
+            },
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("named Queue custom event");
+    assert_eq!(named_queue.outcome, "ok");
+    assert!(named_queue.ack_all);
 
     let named = dispatch(&transport, account, worker.id, &a, Some("Named"), "named").await;
     assert_eq!(named.status, 200, "unexpected named response: {named:?}");
@@ -411,6 +546,24 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     // Once response headers/body have started, a runtime crash truncates the
     // stream. platformd must not rewrite or replay it as a clean JSON error.
     let crash_pid = supervisor.snapshot().pid.unwrap();
+    let timeout = transport
+        .dispatch_queue(
+            &dispatch_target(account, worker.id, &a, None),
+            &QueueDispatchRequest {
+                queue_name: "runtime-gate-timeout".to_owned(),
+                messages: vec![QueueDispatchMessage {
+                    id: QueueMessageId::generate().to_string(),
+                    timestamp_ms: 1_787_700_000_000,
+                    attempts: 1,
+                    content_type: QueueContentType::Text,
+                    body_base64: base64::engine::general_purpose::STANDARD.encode("timeout"),
+                }],
+            },
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(timeout.code(), ErrorCode::QueueSendResultUnknown);
     let crash_response = transport
         .dispatch(
             dispatch_target(account, worker.id, &a, None),
@@ -446,6 +599,36 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
             .status,
         200
     );
+    let restarted_queue = transport
+        .dispatch_queue(
+            &dispatch_target(account, worker.id, &a, None),
+            &QueueDispatchRequest {
+                queue_name: "runtime-gate-throw".to_owned(),
+                messages: vec![QueueDispatchMessage {
+                    id: QueueMessageId::generate().to_string(),
+                    timestamp_ms: 1_787_700_000_000,
+                    attempts: 1,
+                    content_type: QueueContentType::Text,
+                    body_base64: base64::engine::general_purpose::STANDARD.encode("restart"),
+                }],
+            },
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("Queue custom event after restart");
+    assert_eq!(restarted_queue.outcome, "exception");
+    let restarted_scheduled = transport
+        .dispatch_scheduled(
+            &dispatch_target(account, worker.id, &a, None),
+            &ScheduledDispatchRequest {
+                scheduled_time_ms: 1_787_700_060_000,
+                cron: "1 * * * *".to_owned(),
+            },
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("scheduled custom event after restart");
+    assert_eq!(restarted_scheduled.outcome, "exception");
 
     // A warm WorkerLoader entry must not bypass the pre-get source/descriptor
     // check. Corrupting the authority after warm load fails closed instead of
@@ -538,6 +721,8 @@ export default {
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
+        queue_consumers: Vec::new(),
+        crons: None,
         limits: serde_json::json!({"profile":"default"}),
         promote: false,
         request_id: RequestId::generate(),
@@ -613,6 +798,8 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
+        queue_consumers: Vec::new(),
+        crons: None,
         limits: serde_json::json!({"profile":"default"}),
         promote: false,
         request_id: RequestId::generate(),
@@ -1126,6 +1313,10 @@ fn create_request(
             r#"import {{ WorkerEntrypoint }} from "cloudflare:workers";
 export class Named extends WorkerEntrypoint {{
   async fetch(request) {{ return new Response("named:{label}:" + await request.text()); }}
+  async queue(batch) {{
+    if (batch.queue !== "runtime-gate" || batch.messages[0].body !== "named") throw new Error("named queue shape");
+    batch.ackAll();
+  }}
 }}
 export default {{
   async fetch(request, env) {{
@@ -1154,6 +1345,32 @@ export default {{
       }});
     }}
     return new Response("{label}:" + content + ":" + env.MODE + ":" + env.API_TOKEN + ":" + Object.keys(env).sort().join(","));
+  }},
+  async queue(batch, env, ctx) {{
+    if (batch.queue === "runtime-gate-throw") throw new Error("queue failure");
+    if (batch.queue === "runtime-gate-wait-until") {{
+      ctx.waitUntil(Promise.reject(new Error("queue waitUntil failure")));
+      return;
+    }}
+    if (batch.queue === "runtime-gate-timeout") await new Promise((resolve) => setTimeout(resolve, 10000));
+    if (batch.queue !== "runtime-gate" || env.MODE !== "production" || batch.messages.length !== 3) throw new Error("queue shape");
+    const [text, json, binary] = batch.messages;
+    if (text.body !== "ack" || !(text.timestamp instanceof Date) || text.attempts !== 1) throw new Error("text shape");
+    if (json.body.action !== "retry" || json.attempts !== 2) throw new Error("json shape");
+    if (!(binary.body instanceof Uint8Array) || binary.body[1] !== 255 || binary.attempts !== 3) throw new Error("bytes shape");
+    text.ack();
+    text.retry({{ delaySeconds: 99 }});
+    json.retry({{ delaySeconds: 7 }});
+  }},
+  async scheduled(controller, env, ctx) {{
+    if (controller.cron === "1 * * * *") throw new Error("scheduled failure");
+    if (controller.cron === "2 * * * *") {{
+      ctx.waitUntil(Promise.reject(new Error("scheduled waitUntil failure")));
+      return;
+    }}
+    if (controller.type !== "scheduled" || controller.cron !== "*/5 * * * *"
+        || controller.scheduledTime !== 1787700060000 || env.MODE !== "production") throw new Error("scheduled shape");
+    controller.noRetry();
   }}
 }};"#
         )
@@ -1182,6 +1399,8 @@ export default {{
         vars,
         secrets,
         bindings: BTreeMap::new(),
+        queue_consumers: Vec::new(),
+        crons: None,
         limits: serde_json::json!({"profile":"default"}),
         promote,
         request_id: RequestId::generate(),

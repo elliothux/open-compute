@@ -34,8 +34,8 @@ pub use kv::KvResourceDriver;
 pub use pins::{DeploymentPin, DeploymentPins};
 pub use pipeline::{
     CreateDeploymentOutcome, CreateDeploymentRequest, CreateDeploymentResult,
-    DeploymentBindingInput, DeploymentBundle, DeploymentController, RuntimeValidator,
-    ValidationCandidate,
+    DeploymentBindingInput, DeploymentBundle, DeploymentController, ProductPromotionCoordinator,
+    ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, ValidationCandidate,
 };
 pub use queue_lifecycle::{
     CreateQueueOutcome, CreateQueueRequest, CreateQueueResult, DeleteQueueResult, QueueController,

@@ -85,6 +85,10 @@ typed_id!(ResourceId, "resource");
 typed_id!(BindingId, "deployment binding");
 typed_id!(QueueId, "Queue resource");
 typed_id!(QueueMessageId, "Queue message");
+typed_id!(QueueConsumerId, "Queue consumer");
+typed_id!(QueueBatchId, "Queue delivery batch");
+typed_id!(CronActivationId, "Cron activation");
+typed_id!(CronRunId, "Cron logical run");
 
 fn canonical(uuid: Uuid) -> String {
     uuid.as_hyphenated()

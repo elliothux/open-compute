@@ -12,8 +12,8 @@
 > [P1：P0 平台加固](./p1-platform-hardening.md)、
 > [P2.1：Scheduler 多 Workload 内核](./p2-1-scheduler-hardening.md)
 >
-> 后续消费者：P2.3 Queue Consumer/Cron。在 P2.2 结束前不实现 `queue()` handler、ack/retry、
-> consumer concurrency、DLQ 或 Cron。
+> 后续消费者：[P2.3：Queue Consumer/Cron](./p2-3-queue-consumer-cron.md)。在 P2.2 结束前不实现
+> `queue()` handler、ack/retry、consumer concurrency、DLQ 或 Cron。
 
 P2.2 实现 Queue resource lifecycle 和 Worker producer binding：`send()`、`sendBatch()`、
 `metrics()`、delivery delay、payload limit、持久化、隔离、restart/restore。消息 authority 放在

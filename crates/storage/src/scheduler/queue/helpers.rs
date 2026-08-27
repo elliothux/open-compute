@@ -208,7 +208,8 @@ pub(super) fn select_delete_candidates(
     let mut statement = tx
         .prepare(
             "SELECT seq, body_bytes FROM queue_messages
-             WHERE (?1 IS NULL OR queue_id = ?1) AND (?2 IS NULL OR expires_at_ms <= ?2)
+             WHERE state = 'ready'
+               AND (?1 IS NULL OR queue_id = ?1) AND (?2 IS NULL OR expires_at_ms <= ?2)
              ORDER BY expires_at_ms, queue_id, seq LIMIT ?3",
         )
         .map_err(map_sql_error)?;
@@ -242,9 +243,9 @@ pub(in crate::scheduler) fn queue_workload_summary_connection(
 ) -> Result<WorkloadSummary, PlatformError> {
     let (ready, oldest, next): (i64, Option<i64>, Option<i64>) = connection
         .query_row(
-            "SELECT COUNT(*) FILTER (WHERE expires_at_ms <= ?1),
-                    MIN(expires_at_ms) FILTER (WHERE expires_at_ms <= ?1),
-                    MIN(expires_at_ms)
+            "SELECT COUNT(*) FILTER (WHERE state = 'ready' AND expires_at_ms <= ?1),
+                    MIN(expires_at_ms) FILTER (WHERE state = 'ready' AND expires_at_ms <= ?1),
+                    MIN(expires_at_ms) FILTER (WHERE state = 'ready')
              FROM queue_messages",
             [now_ms],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),

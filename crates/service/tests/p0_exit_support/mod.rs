@@ -491,6 +491,8 @@ pub(super) fn deployment_request(
         vars: BTreeMap::from([("RELEASE".to_owned(), serde_json::json!(release))]),
         secrets: BTreeMap::new(),
         bindings: resources,
+        queue_consumers: Vec::new(),
+        crons: None,
         limits: serde_json::json!({"profile":"default"}),
         promote,
         request_id: RequestId::generate(),

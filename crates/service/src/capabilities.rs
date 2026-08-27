@@ -141,7 +141,7 @@ pub fn platform_release_metadata(
             ("snapshots".to_owned(), vec![1]),
         ]),
         workerd_local_disk_gate_result: "p0.7-stock-workerd".to_owned(),
-        conformance_result: "conditional-go-p2.2-queue-producer-v1".to_owned(),
+        conformance_result: "go-p2.3-queue-consumer-cron-v1".to_owned(),
         websocket_hibernation_result: "no-go:p1.8-unsupported".to_owned(),
     };
     if !metadata.validate() {
@@ -259,9 +259,25 @@ fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
     );
     products.insert(
         "queues".to_owned(),
-        supported(&["send", "sendBatch", "metrics"], &["OC-QUEUE-001"]),
+        supported(
+            &[
+                "send",
+                "sendBatch",
+                "metrics",
+                "queue",
+                "ack",
+                "retry",
+                "ackAll",
+                "retryAll",
+            ],
+            &["OC-QUEUE-001"],
+        ),
     );
-    for name in ["cron", "workflows", "websocket_hibernation"] {
+    products.insert(
+        "cron".to_owned(),
+        supported(&["scheduled", "noRetry"], &["OC-CRON-001"]),
+    );
+    for name in ["workflows", "websocket_hibernation"] {
         products.insert(name.to_owned(), unsupported());
     }
     products
@@ -297,6 +313,9 @@ fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
     let queue = config
         .scheduler
         .pool(open_compute_core::SchedulerKind::Queue);
+    let cron = config
+        .scheduler
+        .pool(open_compute_core::SchedulerKind::Cron);
     BTreeMap::from([
         (
             "workers.max_bundle_bytes".to_owned(),
@@ -348,6 +367,30 @@ fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
             u64::from(queue.weight),
         ),
         (
+            "scheduler.pools.cron.max_in_flight".to_owned(),
+            u64::from(cron.max_in_flight),
+        ),
+        (
+            "scheduler.pools.cron.claim_batch".to_owned(),
+            u64::from(cron.claim_batch),
+        ),
+        (
+            "scheduler.pools.cron.weight".to_owned(),
+            u64::from(cron.weight),
+        ),
+        (
+            "scheduler.cron_misfire_grace_ms".to_owned(),
+            config.scheduler.cron_misfire_grace_ms,
+        ),
+        (
+            "scheduler.cron_max_retries".to_owned(),
+            u64::from(config.scheduler.cron_max_retries),
+        ),
+        (
+            "scheduler.cron_history_limit".to_owned(),
+            u64::from(config.scheduler.cron_history_limit),
+        ),
+        (
             "queues.max_message_bytes".to_owned(),
             QUEUE_MAX_MESSAGE_BYTES,
         ),
@@ -371,6 +414,10 @@ fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
         (
             "queues.max_in_flight_requests_per_binding".to_owned(),
             u64::from(config.queues.max_in_flight_requests_per_binding),
+        ),
+        (
+            "queues.max_consumer_concurrency".to_owned(),
+            u64::from(config.queues.max_consumer_concurrency),
         ),
         (
             "hardening.max_workers_per_account".to_owned(),

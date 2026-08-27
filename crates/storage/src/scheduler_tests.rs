@@ -1,4 +1,7 @@
 use super::*;
+use open_compute_core::{
+    AccountId, CronActivationId, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId, WorkerId,
+};
 
 fn object(namespace: ResourceId, byte: u8) -> DurableObjectId {
     let mut bytes = [byte; open_compute_core::DURABLE_OBJECT_ID_BYTES];
@@ -38,6 +41,230 @@ fn open_store(temp: &tempfile::TempDir, now_ms: i64) -> SchedulerStore {
     SchedulerStore::open(&path, 100, now_ms).unwrap()
 }
 
+fn create_scheduler_fixture_at_version(path: &std::path::Path, version: usize) -> Connection {
+    let mut connection = Connection::open(path).unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", "ON")
+        .unwrap();
+    for migration in SCHEDULER_MIGRATIONS.iter().take(version) {
+        let tx = connection.transaction().unwrap();
+        tx.execute_batch(migration.sql).unwrap();
+        if migration.version == 1 {
+            tx.execute(
+                "INSERT INTO scheduler_meta
+                 (singleton, schema_version, data_format, created_at_ms, updated_at_ms)
+                 VALUES (1, 1, ?1, 1, 1)",
+                [DATA_FORMAT],
+            )
+            .unwrap();
+        } else {
+            tx.execute(
+                "UPDATE scheduler_meta SET schema_version = ?1, updated_at_ms = 1
+                 WHERE singleton = 1",
+                [migration.version],
+            )
+            .unwrap();
+        }
+        tx.execute(
+            "INSERT INTO scheduler_migrations
+             (version, name, checksum_sha256, applied_at_ms, app_version)
+             VALUES (?1, ?2, ?3, 1, ?4)",
+            params![
+                migration.version,
+                migration.name,
+                migration.checksum.as_slice(),
+                APP_VERSION,
+            ],
+        )
+        .unwrap();
+        tx.pragma_update(None, "user_version", migration.version)
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    connection
+}
+
+#[test]
+fn migration_003_upgrades_a_real_v2_backlog_and_preserves_producer_delivery() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("scheduler.sqlite");
+    let queue_id = QueueId::generate();
+    let message_id = QueueMessageId::generate();
+    let connection = create_scheduler_fixture_at_version(&path, 2);
+    connection
+        .execute(
+            "INSERT INTO queue_state
+             (queue_id, account_id, lifecycle_generation, config_generation, state,
+              delivery_delay_seconds, retention_seconds, max_message_bytes,
+              max_batch_messages, max_batch_bytes, max_backlog_bytes,
+              message_count, message_bytes, created_at_ms, updated_at_ms)
+             VALUES (?1, ?2, 1, 1, 'accepting', 0, 60, 1024, 100, 4096,
+                     8192, 0, 0, 100, 100)",
+            params![queue_id.to_string(), AccountId::generate().to_string()],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO queue_messages
+             (id, queue_id, queue_generation, enqueued_at_ms, available_at_ms,
+              expires_at_ms, content_type, body, body_bytes)
+             VALUES (?1, ?2, 1, 100, 100, 60100, 'text', X'7632', 2)",
+            params![message_id.to_string(), queue_id.to_string()],
+        )
+        .unwrap();
+    drop(connection);
+
+    let store = SchedulerStore::open(&path, 100, 200).unwrap();
+    let metrics = store.queue_metrics(queue_id, 1, 1).unwrap();
+    assert_eq!(metrics.backlog_count, 1);
+    assert_eq!(metrics.backlog_bytes, 2);
+    store
+        .enqueue_queue(
+            &QueueEnqueueRequest {
+                queue_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![QueueMessageInput {
+                    content_type: QueueContentType::Text,
+                    body: b"after-upgrade".to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            200,
+        )
+        .unwrap();
+    assert_eq!(
+        store.queue_metrics(queue_id, 1, 1).unwrap().backlog_count,
+        2
+    );
+    drop(store);
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT state, attempts, claim_batch_id, consumer_id,
+                        consumer_generation FROM queue_messages WHERE id = ?1",
+                [message_id.to_string()],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                )),
+            )
+            .unwrap(),
+        ("ready".to_owned(), 0, None, None, None)
+    );
+}
+
+#[test]
+fn migration_004_preserves_a_real_v3_claim_without_mutating_queue_authority() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("scheduler.sqlite");
+    let queue_id = QueueId::generate();
+    let account_id = AccountId::generate();
+    let message_id = QueueMessageId::generate();
+    let consumer_id = QueueConsumerId::generate();
+    let batch_id = QueueBatchId::generate();
+    let deployment_id = DeploymentId::generate();
+    let worker_id = WorkerId::generate();
+    let token = [9_u8; 32];
+    let connection = create_scheduler_fixture_at_version(&path, 3);
+    connection
+        .execute_batch(&format!(
+            "INSERT INTO queue_state
+             (queue_id, account_id, lifecycle_generation, config_generation, state,
+              delivery_delay_seconds, retention_seconds, max_message_bytes,
+              max_batch_messages, max_batch_bytes, max_backlog_bytes,
+              message_count, message_bytes, created_at_ms, updated_at_ms)
+             VALUES ('{queue_id}', '{account_id}', 1, 1, 'accepting', 0, 60, 1024,
+                     100, 4096, 8192, 0, 0, 100, 100);
+             INSERT INTO queue_messages
+             (id, queue_id, queue_generation, enqueued_at_ms, available_at_ms,
+              expires_at_ms, content_type, body, body_bytes)
+             VALUES ('{message_id}', '{queue_id}', 1, 100, 100, 60100, 'text', X'7633', 2);
+             INSERT INTO queue_consumer_state
+             (consumer_id, queue_id, consumer_generation, deployment_id, worker_id,
+              execution_generation, entrypoint, state, max_batch_size,
+              max_batch_timeout_ms, max_retries, retry_delay_seconds,
+              max_concurrency, dlq_queue_id, dlq_queue_generation,
+              descriptor_sha256, updated_at_ms)
+             VALUES ('{consumer_id}', '{queue_id}', 1, '{deployment_id}', '{worker_id}',
+                     1, NULL, 'accepting', 10, 5000, 3, 0, 1, NULL, NULL,
+                     zeroblob(32), 100);"
+        ))
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO queue_delivery_batches
+             (id, queue_id, consumer_id, consumer_generation, deployment_id,
+              execution_generation, entrypoint, claim_token, state, claimed_at_ms,
+              claim_until_ms, message_count, created_at_ms)
+             VALUES (?1, ?2, ?3, 1, ?4, 1, NULL, ?5, 'claimed', 200, 10000, 1, 200)",
+            params![
+                batch_id.to_string(),
+                queue_id.to_string(),
+                consumer_id.to_string(),
+                deployment_id.to_string(),
+                token.as_slice(),
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE queue_messages SET state = 'claimed', claim_batch_id = ?1,
+                    consumer_id = ?2, consumer_generation = 1, claim_token = ?3,
+                    claim_until_ms = 10000, claimed_at_ms = 200
+             WHERE id = ?4",
+            params![
+                batch_id.to_string(),
+                consumer_id.to_string(),
+                token.as_slice(),
+                message_id.to_string(),
+            ],
+        )
+        .unwrap();
+    drop(connection);
+
+    drop(SchedulerStore::open(&path, 100, 300).unwrap());
+    let connection = Connection::open(&path).unwrap();
+    let preserved: (String, String, Vec<u8>, i64, i64) = connection
+        .query_row(
+            "SELECT state, claim_batch_id, claim_token, claim_until_ms, attempts
+             FROM queue_messages WHERE id = ?1",
+            [message_id.to_string()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        preserved,
+        (
+            "claimed".to_owned(),
+            batch_id.to_string(),
+            token.to_vec(),
+            10_000,
+            0,
+        )
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM cron_schedules", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
 #[test]
 fn migrates_and_reopens_the_independent_database() {
     let temp = tempfile::tempdir().unwrap();
@@ -70,18 +297,22 @@ fn migrates_and_reopens_the_independent_database() {
 #[test]
 fn scheduler_registry_is_contiguous_and_future_schema_fails_closed() {
     let registry = scheduler_migration_registry();
-    assert_eq!(registry.len(), 2);
+    assert_eq!(registry.len(), 4);
     assert_eq!(registry[0].0, 1);
     assert_eq!(registry[0].1, "001_scheduler");
     assert_eq!(registry[1].0, 2);
     assert_eq!(registry[1].1, "002_queue_producer");
+    assert_eq!(registry[2].0, 3);
+    assert_eq!(registry[2].1, "003_queue_consumer");
+    assert_eq!(registry[3].0, 4);
+    assert_eq!(registry[3].1, "004_cron");
 
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("scheduler.sqlite");
     let store = open_store(&temp, 10);
     drop(store);
     let connection = Connection::open(&path).unwrap();
-    connection.pragma_update(None, "user_version", 3).unwrap();
+    connection.pragma_update(None, "user_version", 5).unwrap();
     drop(connection);
     assert_eq!(
         SchedulerStore::open(&path, 100, 20).unwrap_err().code(),
@@ -409,8 +640,8 @@ fn queue_projection_enqueue_retention_and_repair_boundaries_are_complete() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("scheduler.sqlite");
     let store = open_store(&temp, 1);
-    let queue_id = open_compute_core::QueueId::generate();
-    let account_id = open_compute_core::AccountId::generate();
+    let queue_id = QueueId::generate();
+    let account_id = AccountId::generate();
     let config = crate::QueueConfig {
         retention_seconds: 60,
         max_message_bytes: 4,
@@ -478,14 +709,14 @@ fn queue_projection_enqueue_retention_and_repair_boundaries_are_complete() {
         ErrorCode::QueueInvariantViolation
     );
     let mut missing = projection.clone();
-    missing.queue_id = open_compute_core::QueueId::generate();
+    missing.queue_id = QueueId::generate();
     assert_eq!(
         store.verify_queue_projection(&missing).unwrap_err().code(),
         ErrorCode::QueueInvariantViolation
     );
     assert_eq!(
         store
-            .begin_queue_config(open_compute_core::QueueId::generate(), 1, 1, 2)
+            .begin_queue_config(QueueId::generate(), 1, 1, 2)
             .unwrap_err()
             .code(),
         ErrorCode::QueueConfigPending
@@ -671,7 +902,7 @@ fn queue_projection_enqueue_retention_and_repair_boundaries_are_complete() {
         ErrorCode::QueueInvariantViolation
     );
 
-    let config_queue = open_compute_core::QueueId::generate();
+    let config_queue = QueueId::generate();
     let mut config_projection = projection.clone();
     config_projection.queue_id = config_queue;
     store.create_queue_projection(&config_projection).unwrap();
@@ -703,6 +934,329 @@ fn queue_projection_enqueue_retention_and_repair_boundaries_are_complete() {
             .code(),
         ErrorCode::QueueInvariantViolation
     );
+}
+
+#[test]
+fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = open_store(&temp, 1);
+    let account_id = AccountId::generate();
+    let source_id = QueueId::generate();
+    let dlq_id = QueueId::generate();
+    let queue_config = crate::QueueConfig {
+        retention_seconds: 60,
+        max_message_bytes: 1024,
+        max_batch_messages: 100,
+        max_batch_bytes: 4096,
+        max_backlog_bytes: 4096,
+        ..crate::QueueConfig::default()
+    };
+    for queue_id in [source_id, dlq_id] {
+        store
+            .create_queue_projection(&QueueProjection {
+                queue_id,
+                account_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                config: queue_config,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            })
+            .unwrap();
+    }
+    let consumer_id = QueueConsumerId::generate();
+    let deployment_id = DeploymentId::generate();
+    let worker_id = WorkerId::generate();
+    let consumer = QueueConsumerProjection {
+        consumer_id,
+        queue_id: source_id,
+        consumer_generation: 1,
+        deployment_id,
+        worker_id,
+        execution_generation: 1,
+        entrypoint: None,
+        config: crate::QueueConsumerConfig {
+            max_batch_size: 2,
+            max_batch_timeout_seconds: 0,
+            max_retries: 1,
+            retry_delay_seconds: 0,
+            max_concurrency: 1,
+        },
+        dead_letter_queue: Some((dlq_id, 1)),
+        descriptor_sha256: [7; 32],
+        updated_at_ms: 1,
+    };
+    store.ensure_queue_consumer_projection(&consumer).unwrap();
+    store.activate_queue_consumer(consumer_id, 1, 2).unwrap();
+    let enqueue = store
+        .enqueue_queue(
+            &QueueEnqueueRequest {
+                queue_id: source_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![
+                    QueueMessageInput {
+                        content_type: QueueContentType::Text,
+                        body: b"first".to_vec(),
+                        delay_seconds: None,
+                    },
+                    QueueMessageInput {
+                        content_type: QueueContentType::Bytes,
+                        body: vec![0, 255],
+                        delay_seconds: None,
+                    },
+                ],
+            },
+            10,
+        )
+        .unwrap();
+    let [first] = store
+        .claim_queue_batches(10, 100, 5, 1)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(first.messages.len(), 2);
+    assert_eq!(first.messages[0].delivery_attempt, 1);
+    let summary = store
+        .complete_queue_batch(
+            &first,
+            &[
+                QueueCompletionDecision {
+                    message_id: first.messages[0].id,
+                    action: QueueCompletionAction::Ack,
+                },
+                QueueCompletionDecision {
+                    message_id: first.messages[1].id,
+                    action: QueueCompletionAction::Retry { delay_seconds: 0 },
+                },
+            ],
+            11,
+        )
+        .unwrap();
+    assert_eq!(summary.acknowledged, 1);
+    assert_eq!(summary.retried, 1);
+    assert_eq!(
+        store.queue_metrics(source_id, 1, 1).unwrap().backlog_count,
+        1
+    );
+    assert!(
+        store
+            .complete_queue_batch(&first, &[], 12)
+            .unwrap_err()
+            .code()
+            == ErrorCode::QueueDispositionInvalid
+    );
+
+    let [second] = store
+        .claim_queue_batches(12, 100, 5, 1)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(second.messages[0].delivery_attempt, 2);
+    store.begin_queue_config(dlq_id, 1, 1, 12).unwrap();
+    let pending = store
+        .complete_queue_batch(
+            &second,
+            &[QueueCompletionDecision {
+                message_id: second.messages[0].id,
+                action: QueueCompletionAction::Retry { delay_seconds: 0 },
+            }],
+            13,
+        )
+        .unwrap();
+    assert_eq!(pending.dlq_pending, 1);
+    assert_eq!(
+        store.queue_metrics(source_id, 1, 1).unwrap().backlog_count,
+        1
+    );
+    store.finish_queue_config(dlq_id, 1, 1, 14).unwrap();
+    let forwarded = store.forward_queue_dlq_pending(1_013, 100, 10).unwrap();
+    assert_eq!(forwarded.moved, 1);
+    assert_eq!(
+        store.queue_metrics(source_id, 1, 1).unwrap().backlog_count,
+        0
+    );
+    assert_eq!(store.queue_metrics(dlq_id, 1, 1).unwrap().backlog_count, 1);
+    assert_eq!(enqueue.message_ids.len(), 2);
+
+    store
+        .enqueue_queue(
+            &QueueEnqueueRequest {
+                queue_id: source_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![QueueMessageInput {
+                    content_type: QueueContentType::Json,
+                    body: b"{}".to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            2_000,
+        )
+        .unwrap();
+    let [unknown] = store
+        .claim_queue_batches(2_000, 10, 5, 1)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(store.recover_expired_queue_batches(2_010, 5, 1).unwrap(), 1);
+    let [recovered] = store
+        .claim_queue_batches(2_015, 10, 5, 1)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(
+        unknown.messages[0].delivery_attempt,
+        recovered.messages[0].delivery_attempt
+    );
+    assert_ne!(unknown.claim_token, recovered.claim_token);
+    store
+        .complete_queue_batch(
+            &recovered,
+            &[QueueCompletionDecision {
+                message_id: recovered.messages[0].id,
+                action: QueueCompletionAction::Ack,
+            }],
+            2_016,
+        )
+        .unwrap();
+
+    store
+        .enqueue_queue(
+            &QueueEnqueueRequest {
+                queue_id: source_id,
+                lifecycle_generation: 1,
+                config_generation: 1,
+                batch_delay_seconds: None,
+                messages: vec![QueueMessageInput {
+                    content_type: QueueContentType::Text,
+                    body: b"retention-race".to_vec(),
+                    delay_seconds: None,
+                }],
+            },
+            4_000,
+        )
+        .unwrap();
+    let [_claimed_at_expiry] = store
+        .claim_queue_batches(4_000, 70_000, 5, 1)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    store.sweep_queue_retention(65_000, 10, 4096).unwrap();
+    assert_eq!(
+        store.queue_metrics(source_id, 1, 1).unwrap().backlog_count,
+        1,
+        "retention must not delete an in-flight claim"
+    );
+    assert_eq!(
+        store.recover_expired_queue_batches(74_000, 5, 1).unwrap(),
+        1
+    );
+    assert_eq!(
+        store
+            .sweep_queue_retention(74_000, 10, 4096)
+            .unwrap()
+            .messages,
+        1,
+        "an expired message becomes retention-eligible after lease recovery"
+    );
+}
+
+#[test]
+fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = open_store(&temp, 1);
+    let activation_id = CronActivationId::generate();
+    let projection = CronScheduleProjection {
+        activation_id,
+        account_id: AccountId::generate(),
+        worker_id: WorkerId::generate(),
+        deployment_id: DeploymentId::generate(),
+        execution_generation: 1,
+        activation_generation: 1,
+        expression: "* * * * *".to_owned(),
+        expression_sha256: [9; 32],
+        parser_version: 1,
+        next_fire_at_ms: 60_000,
+        updated_at_ms: 1,
+    };
+    store.ensure_cron_schedule_projection(&projection).unwrap();
+    store.activate_cron_schedule(activation_id, 1, 2).unwrap();
+    assert_eq!(
+        store
+            .project_due_cron_slots(60_000, 300_000, 10)
+            .unwrap()
+            .projected,
+        1
+    );
+    assert_eq!(
+        store
+            .project_due_cron_slots(60_000, 300_000, 10)
+            .unwrap()
+            .projected,
+        0
+    );
+    let [first] = store
+        .claim_cron_runs(60_000, 100, 5, 10)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(first.scheduled_at_ms, 60_000);
+    assert_eq!(
+        store
+            .complete_cron_run(
+                &first,
+                CronCompletion::Failure {
+                    no_retry: false,
+                    error_code: "CRON_RUNTIME_EXCEPTION",
+                },
+                60_001,
+                3,
+            )
+            .unwrap(),
+        CronCompletionResult::Retried
+    );
+    let retry_at = store
+        .cron_workload_summary(i64::MAX)
+        .unwrap()
+        .oldest_due_at_ms
+        .unwrap();
+    let [retry] = store
+        .claim_cron_runs(retry_at, 10, 5, 10)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(retry.id, first.id);
+    assert_eq!(retry.attempt, 1);
+    assert_eq!(
+        store
+            .recover_expired_cron_runs(retry_at + 10, 5, 1)
+            .unwrap(),
+        1
+    );
+    let [recovered] = store
+        .claim_cron_runs(retry_at + 15, 10, 5, 10)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(recovered.id, first.id);
+    assert_eq!(recovered.attempt, 1);
+    assert_ne!(recovered.claim_token, retry.claim_token);
+    assert_eq!(
+        store
+            .complete_cron_run(&recovered, CronCompletion::Success, retry_at + 16, 3)
+            .unwrap(),
+        CronCompletionResult::Terminal
+    );
+    assert_eq!(
+        store
+            .complete_cron_run(&retry, CronCompletion::Success, retry_at + 17, 3)
+            .unwrap(),
+        CronCompletionResult::Stale
+    );
+    assert_eq!(store.gc_cron_history(retry_at + 18, 1, 100).unwrap(), 1);
 }
 
 #[test]

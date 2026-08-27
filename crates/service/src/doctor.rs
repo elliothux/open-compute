@@ -16,7 +16,7 @@ use open_compute_runtime::{
 };
 use open_compute_storage::{
     inspect_control_db, inspect_data_root, inspect_durable_object_storage, inspect_master_key,
-    inspect_resources, inspect_scheduler_db, read_operation_receipt,
+    inspect_p23_cross_database, inspect_resources, inspect_scheduler_db, read_operation_receipt,
 };
 use serde::Serialize;
 use std::io::Write;
@@ -382,6 +382,89 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                             summary.expired_claims
                         )),
                     ));
+                    let consumers = scheduler.queue_consumers;
+                    checks.push(
+                        if consumers.orphan_batches == 0 && consumers.unavailable_dlq_targets == 0 {
+                            ok(
+                                "queue_consumer_invariants",
+                                "Queue consumer batches and DLQ targets are consistent",
+                                Some(format!(
+                                    "consumers={} batches={} claimed={} dlq_pending={}",
+                                    consumers.consumers,
+                                    consumers.claimed_batches,
+                                    consumers.claimed_messages,
+                                    consumers.dlq_pending
+                                )),
+                            )
+                        } else {
+                            failed(
+                                "queue_consumer_invariants",
+                                ErrorCode::SchedulerCorrupt,
+                                "Queue consumer batch or DLQ target invariant failed",
+                                Some(format!(
+                                    "orphan_batches={} unavailable_dlq_targets={}",
+                                    consumers.orphan_batches, consumers.unavailable_dlq_targets
+                                )),
+                            )
+                        },
+                    );
+                    let cron = scheduler.cron;
+                    checks.push(
+                        if cron.parser_version_mismatches == 0 && cron.invalid_next_fire == 0 {
+                            ok(
+                                "cron_invariants",
+                                "Cron parser versions and next-fire projections are valid",
+                                Some(format!(
+                                    "schedules={} runs={} ready={} claimed={}",
+                                    cron.schedules, cron.runs, cron.ready_runs, cron.claimed_runs
+                                )),
+                            )
+                        } else {
+                            failed(
+                                "cron_invariants",
+                                ErrorCode::SchedulerCorrupt,
+                                "Cron parser version or next-fire invariant failed",
+                                Some(format!(
+                                    "parser_mismatch={} invalid_next_fire={}",
+                                    cron.parser_version_mismatches, cron.invalid_next_fire
+                                )),
+                            )
+                        },
+                    );
+                    match inspect_p23_cross_database(
+                        &root.root.join("control.sqlite"),
+                        &path,
+                        loaded.config.storage.sqlite_busy_timeout_ms,
+                    ) {
+                        Ok(cross)
+                            if cross.queue_consumer_projection_mismatches == 0
+                                && cross.cron_projection_mismatches == 0
+                                && cross.deployment_referrer_mismatches == 0 =>
+                        {
+                            checks.push(ok(
+                                "p2_3_cross_database",
+                                "Queue/Cron projections and deployment referrers match control authority",
+                                Some("0".to_owned()),
+                            ));
+                        }
+                        Ok(cross) => checks.push(failed(
+                            "p2_3_cross_database",
+                            ErrorCode::SchedulerCorrupt,
+                            "Queue/Cron projection or deployment-referrer authority diverged",
+                            Some(format!(
+                                "queue={} cron={} referrers={}",
+                                cross.queue_consumer_projection_mismatches,
+                                cross.cron_projection_mismatches,
+                                cross.deployment_referrer_mismatches,
+                            )),
+                        )),
+                        Err(error) => checks.push(failed(
+                            "p2_3_cross_database",
+                            error.code(),
+                            error.message(),
+                            None,
+                        )),
+                    }
                 }
                 Err(error) => {
                     checks.push(failed(
@@ -396,6 +479,18 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                     ));
                     checks.push(skipped(
                         "scheduler_summary",
+                        "scheduler database is not inspectable",
+                    ));
+                    checks.push(skipped(
+                        "queue_consumer_invariants",
+                        "scheduler database is not inspectable",
+                    ));
+                    checks.push(skipped(
+                        "cron_invariants",
+                        "scheduler database is not inspectable",
+                    ));
+                    checks.push(skipped(
+                        "p2_3_cross_database",
                         "scheduler database is not inspectable",
                     ));
                 }
@@ -414,11 +509,29 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                 "scheduler_summary",
                 "data directory exclusive lock is held by another instance",
             ));
+            checks.push(skipped(
+                "queue_consumer_invariants",
+                "data directory exclusive lock is held by another instance",
+            ));
+            checks.push(skipped(
+                "cron_invariants",
+                "data directory exclusive lock is held by another instance",
+            ));
+            checks.push(skipped(
+                "p2_3_cross_database",
+                "data directory exclusive lock is held by another instance",
+            ));
         }
         None => {
             checks.push(skipped("scheduler_sqlite", "data directory is missing"));
             checks.push(skipped("scheduler_invariants", "data directory is missing"));
             checks.push(skipped("scheduler_summary", "data directory is missing"));
+            checks.push(skipped(
+                "queue_consumer_invariants",
+                "data directory is missing",
+            ));
+            checks.push(skipped("cron_invariants", "data directory is missing"));
+            checks.push(skipped("p2_3_cross_database", "data directory is missing"));
         }
     }
 

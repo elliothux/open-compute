@@ -21,6 +21,7 @@ pub mod http;
 pub mod kv_backend;
 pub mod kv_http;
 pub mod metrics;
+mod p2_3_promotion;
 pub mod queue_backend;
 pub mod queue_http;
 pub mod r2_backend;

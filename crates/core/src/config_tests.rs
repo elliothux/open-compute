@@ -459,7 +459,7 @@ fn private_config_helpers_cover_single_source_boundaries() {
 }
 
 #[test]
-fn scheduler_pool_defaults_preserve_p0_8_config_and_reject_unreleased_products() {
+fn scheduler_pool_defaults_preserve_p0_8_config_and_enable_p2_3_products() {
     let legacy =
         parse_ok("[scheduler]\nmax_in_flight = 7\nclaim_batch = 12\nclaim_lease_ms = 60000\n");
     assert!(legacy.scheduler.pools.is_none());
@@ -487,18 +487,12 @@ fn scheduler_pool_defaults_preserve_p0_8_config_and_reject_unreleased_products()
     );
     let queue = parse_ok("[scheduler.pools.queue]\nenabled = true\n");
     assert!(queue.scheduler.pool(SchedulerKind::Queue).enabled);
-    for kind in [
-        ("cron", SchedulerKind::Cron),
-        ("workflow", SchedulerKind::Workflow),
-    ] {
-        let input = format!("[scheduler.pools.{}]\nenabled = true\n", kind.0);
-        assert_eq!(
-            parse_err(&input).code(),
-            ErrorCode::SchedulerKindNotEnabled,
-            "{} unexpectedly enabled",
-            kind.1.as_str()
-        );
-    }
+    let cron = parse_ok("[scheduler.pools.cron]\nenabled = true\n");
+    assert!(cron.scheduler.pool(SchedulerKind::Cron).enabled);
+    assert_eq!(
+        parse_err("[scheduler.pools.workflow]\nenabled = true\n").code(),
+        ErrorCode::SchedulerKindNotEnabled
+    );
 }
 
 #[test]

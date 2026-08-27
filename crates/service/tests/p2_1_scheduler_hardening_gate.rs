@@ -205,9 +205,13 @@ fn p2_1_five_fresh_process_crash_boundaries_recover_exactly() {
 
 #[test]
 fn p2_1_schema_and_product_scope_remain_frozen() {
-    assert_eq!(scheduler_migration_registry().len(), 2);
-    assert_eq!(scheduler_migration_registry()[0].0, 1);
-    assert_eq!(scheduler_migration_registry()[1].0, 2);
+    let migrations = scheduler_migration_registry();
+    assert!(migrations.len() >= 2);
+    assert_eq!((migrations[0].0, migrations[0].1), (1, "001_scheduler"));
+    assert_eq!(
+        (migrations[1].0, migrations[1].1),
+        (2, "002_queue_producer")
+    );
     assert_eq!(
         SchedulerKind::ALL.map(SchedulerKind::as_str),
         ["do_alarm", "queue", "cron", "workflow"]

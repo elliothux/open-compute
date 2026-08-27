@@ -22,7 +22,8 @@ use open_compute_storage::{
 };
 use open_compute_workers::{
     BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBindingInput,
-    DeploymentBundle, DeploymentController, DeploymentPin, DeploymentPins, RuntimeValidator,
+    DeploymentBundle, DeploymentController, DeploymentPin, DeploymentPins,
+    ProductPromotionCoordinator, ProductPromotionRequest, QueueConsumerInput, RuntimeValidator,
     StagedBundle,
 };
 use serde::Deserialize;
@@ -56,6 +57,8 @@ pub struct WorkerApiState {
     pins: DeploymentPins,
     bundle_limits: BundleLimits,
     delete_drain_timeout: Duration,
+    max_queue_consumer_concurrency: u32,
+    product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
 }
 
 impl std::fmt::Debug for WorkerApiState {
@@ -85,7 +88,23 @@ impl WorkerApiState {
             pins,
             bundle_limits,
             delete_drain_timeout,
+            max_queue_consumer_concurrency: 32,
+            product_promoter: None,
         }
+    }
+
+    /// Apply the operator-local Queue consumer concurrency ceiling.
+    #[must_use]
+    pub fn with_queue_consumer_limit(mut self, maximum: u32) -> Self {
+        self.max_queue_consumer_concurrency = maximum.max(1);
+        self
+    }
+
+    /// Attach the Queue/Cron cross-database promotion owner.
+    #[must_use]
+    pub fn with_product_promoter(mut self, promoter: Arc<dyn ProductPromotionCoordinator>) -> Self {
+        self.product_promoter = Some(promoter);
+        self
     }
 
     /// Process-local dispatch/deletion pin registry.
@@ -275,6 +294,9 @@ struct DeploymentMetadata {
     secrets: BTreeMap<String, SecretString>,
     #[serde(default)]
     bindings: BTreeMap<String, DeploymentBindingInput>,
+    #[serde(default)]
+    queue_consumers: Vec<QueueConsumerInput>,
+    crons: Option<Vec<String>>,
     #[serde(default = "default_limits")]
     limits: serde_json::Value,
     #[serde(default)]
@@ -347,12 +369,16 @@ async fn create_deployment(
         );
     }
     let validator: Arc<dyn RuntimeValidator> = Arc::new(api.transport.clone());
-    let controller = DeploymentController::new(
+    let mut controller = DeploymentController::new(
         &api.storage,
         api.artifacts.clone(),
         validator,
         api.bundle_limits,
-    );
+    )
+    .with_queue_consumer_limit(api.max_queue_consumer_concurrency);
+    if let Some(promoter) = &api.product_promoter {
+        controller = controller.with_product_promoter(promoter.clone());
+    }
     let result = controller
         .create_deployment(CreateDeploymentRequest {
             account_id,
@@ -364,6 +390,8 @@ async fn create_deployment(
             vars: metadata.vars,
             secrets: metadata.secrets,
             bindings: metadata.bindings,
+            queue_consumers: metadata.queue_consumers,
+            crons: metadata.crons,
             limits: metadata.limits,
             promote: metadata.promote,
             request_id,
@@ -521,6 +549,14 @@ async fn promotion_impl(
                 .reserve_mutation(OperationClass::Workers, 64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
             let worker_before = repo.get_worker(account_id, worker_id)?;
+            if body.expected_active_deployment_id.is_some()
+                && body.expected_active_deployment_id != worker_before.active_deployment_id
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::IdempotencyConflict,
+                    "promotion compare-and-swap precondition failed",
+                ));
+            }
             let deployment =
                 repo.get_deployment(account_id, worker_id, body.target_deployment_id)?;
             let reloads_durable_objects = BindingRepository::new(api.storage.db())
@@ -542,15 +578,29 @@ async fn promotion_impl(
                         .await?;
                 }
             }
-            let worker = repo.promote_checked(
-                account_id,
-                worker_id,
-                body.target_deployment_id,
-                body.expected_active_deployment_id,
-                Some(worker_before.route_generation),
-                request_id,
-                now_ms(),
-            )?;
+            let promoted_at_ms = now_ms();
+            if let Some(promoter) = &api.product_promoter {
+                promoter
+                    .promote(ProductPromotionRequest {
+                        account_id,
+                        worker_id,
+                        deployment_id: body.target_deployment_id,
+                        request_id,
+                        now_ms: promoted_at_ms,
+                    })
+                    .await?;
+            } else {
+                repo.promote_checked(
+                    account_id,
+                    worker_id,
+                    body.target_deployment_id,
+                    body.expected_active_deployment_id,
+                    Some(worker_before.route_generation),
+                    request_id,
+                    promoted_at_ms,
+                )?;
+            }
+            let worker = repo.get_worker(account_id, worker_id)?;
             if reloads_durable_objects {
                 metrics.inc_do_facet_reload(DoFacetReloadReason::Promotion);
             }

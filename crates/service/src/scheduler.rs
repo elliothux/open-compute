@@ -2,12 +2,18 @@
 
 #[path = "scheduler/alarm.rs"]
 mod alarm;
+#[path = "scheduler/cron.rs"]
+mod cron;
 #[path = "scheduler/fairness.rs"]
 mod fairness;
 #[path = "scheduler/kernel.rs"]
 mod kernel;
+#[path = "scheduler/operator.rs"]
+mod operator;
 #[path = "scheduler/queue.rs"]
 mod queue;
+#[path = "scheduler/runner.rs"]
+mod runner;
 #[path = "scheduler/wake.rs"]
 mod wake;
 
@@ -19,11 +25,13 @@ use kernel::{
     AdmissionTracker, InfrastructureBackoff, PoolRuntime, bounded_drain, permanent_pool_error,
 };
 use open_compute_core::{
-    ComponentName, ComponentState, DurableObjectId, ErrorCode, PlatformError, ReadinessReason,
-    ResourceId, SchedulerClock, SchedulerConfig, SchedulerKind, SchedulerPoolState,
+    AccountId, ComponentName, ComponentState, CronActivationId, DeploymentId, DurableObjectId,
+    ErrorCode, PlatformError, QueueConsumerId, QueueId, ReadinessReason, ResourceId,
+    SchedulerClock, SchedulerConfig, SchedulerKind, SchedulerPoolState, WorkerId,
 };
 use open_compute_storage::{
-    DurableObjectRecord, PlatformStorage, SchedulerStore, SchedulerSummary,
+    CronActivationState, DurableObjectRecord, PlatformStorage, QueueConsumerState, SchedulerStore,
+    SchedulerSummary,
 };
 use serde::Serialize;
 use std::future::Future;
@@ -48,14 +56,18 @@ pub struct SchedulerService {
     paused: AtomicBool,
     alarm_paused: AtomicBool,
     queue_paused: AtomicBool,
+    cron_paused: AtomicBool,
     alarm_pool_state: AtomicU8,
     queue_pool_state: AtomicU8,
+    cron_pool_state: AtomicU8,
     global_in_flight: AtomicUsize,
     alarm_in_flight: AtomicUsize,
     queue_in_flight: AtomicUsize,
+    cron_in_flight: AtomicUsize,
     next_wake_at_ms: AtomicI64,
     wake: WakeCoordinator,
     repair_cursor: Mutex<Option<RepairCursor>>,
+    queue_claim_cursor: Mutex<Option<QueueId>>,
     metrics: Option<Arc<MetricsRegistry>>,
     health: Option<crate::health::HealthCoordinator>,
     #[cfg(any(test, feature = "test-support"))]
@@ -74,6 +86,10 @@ pub struct SchedulerInspectV2 {
     pub global: SchedulerGlobalInspect,
     /// Registered production pools only.
     pub pools: Vec<SchedulerPoolInspect>,
+    /// Bounded Queue consumer operator details without message bodies or claim tokens.
+    pub queue_consumers: Vec<QueueConsumerInspect>,
+    /// Bounded Cron activation operator details.
+    pub cron_activations: Vec<CronActivationInspect>,
 }
 
 /// Global scheduler admission facts.
@@ -114,6 +130,78 @@ pub struct SchedulerPoolInspect {
     pub max_in_flight: u32,
 }
 
+/// One authenticated Queue consumer operator view.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueConsumerInspect {
+    /// Live attachment identity.
+    pub id: QueueConsumerId,
+    /// Owning account.
+    pub account_id: AccountId,
+    /// Source Queue identity.
+    pub queue_id: QueueId,
+    /// Owning Worker.
+    pub worker_id: WorkerId,
+    /// Frozen target deployment.
+    pub deployment_id: DeploymentId,
+    /// Persisted next target while the old generation drains.
+    pub pending_deployment_id: Option<DeploymentId>,
+    /// Exact completion/claim generation.
+    pub generation: u64,
+    /// Control lifecycle state.
+    pub state: QueueConsumerState,
+    /// Whether the exact scheduler projection exists.
+    pub projection_exists: bool,
+    /// Total retained source messages.
+    pub backlog_messages: u64,
+    /// Total retained source body bytes.
+    pub backlog_bytes: u64,
+    /// Ready source messages.
+    pub ready_messages: u64,
+    /// Claimed batches for this generation.
+    pub claimed_batches: u64,
+    /// Claimed messages for this generation.
+    pub claimed_messages: u64,
+    /// Terminal messages waiting for DLQ capacity.
+    pub dlq_pending: u64,
+}
+
+/// One authenticated Cron activation operator view.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CronActivationInspect {
+    /// Live activation identity.
+    pub id: CronActivationId,
+    /// Owning account.
+    pub account_id: AccountId,
+    /// Owning Worker.
+    pub worker_id: WorkerId,
+    /// Frozen target deployment.
+    pub deployment_id: DeploymentId,
+    /// Exact declared expression.
+    pub expression: String,
+    /// Parser contract version.
+    pub parser_version: u32,
+    /// Exact activation generation.
+    pub generation: u64,
+    /// Control lifecycle state.
+    pub state: CronActivationState,
+    /// Whether the exact scheduler projection exists.
+    pub projection_exists: bool,
+    /// Scheduler projection state.
+    pub schedule_state: Option<String>,
+    /// Next logical UTC slot.
+    pub next_fire_at: Option<i64>,
+    /// Ready logical runs.
+    pub ready_runs: u64,
+    /// Claimed logical runs.
+    pub claimed_runs: u64,
+    /// Last retained terminal outcome.
+    pub last_outcome: Option<String>,
+    /// Oldest ready logical-run lag.
+    pub lag_ms: u64,
+}
+
 impl std::fmt::Debug for SchedulerService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SchedulerService")
@@ -141,6 +229,7 @@ impl SchedulerService {
         );
         let alarm_enabled = config.pool(SchedulerKind::Alarm).enabled;
         let queue_enabled = config.pool(SchedulerKind::Queue).enabled;
+        let cron_enabled = config.pool(SchedulerKind::Cron).enabled;
         Self {
             store,
             storage,
@@ -151,6 +240,7 @@ impl SchedulerService {
             paused: AtomicBool::new(false),
             alarm_paused: AtomicBool::new(false),
             queue_paused: AtomicBool::new(false),
+            cron_paused: AtomicBool::new(false),
             alarm_pool_state: AtomicU8::new(encode_pool_state(if alarm_enabled {
                 SchedulerPoolState::Ready
             } else {
@@ -161,12 +251,19 @@ impl SchedulerService {
             } else {
                 SchedulerPoolState::Disabled
             })),
+            cron_pool_state: AtomicU8::new(encode_pool_state(if cron_enabled {
+                SchedulerPoolState::Ready
+            } else {
+                SchedulerPoolState::Disabled
+            })),
             global_in_flight: AtomicUsize::new(0),
             alarm_in_flight: AtomicUsize::new(0),
             queue_in_flight: AtomicUsize::new(0),
+            cron_in_flight: AtomicUsize::new(0),
             next_wake_at_ms: AtomicI64::new(-1),
             wake,
             repair_cursor: Mutex::new(None),
+            queue_claim_cursor: Mutex::new(None),
             metrics: None,
             health: None,
             #[cfg(any(test, feature = "test-support"))]
@@ -235,7 +332,11 @@ impl SchedulerService {
                 self.queue_paused.store(true, Ordering::Release);
                 self.set_queue_pool_state(SchedulerPoolState::Paused);
             }
-            SchedulerKind::Cron | SchedulerKind::Workflow => unreachable!(),
+            SchedulerKind::Cron => {
+                self.cron_paused.store(true, Ordering::Release);
+                self.set_cron_pool_state(SchedulerPoolState::Paused);
+            }
+            SchedulerKind::Workflow => unreachable!(),
         }
         self.wake.notify();
         Ok(())
@@ -253,325 +354,21 @@ impl SchedulerService {
                 self.queue_paused.store(false, Ordering::Release);
                 self.set_queue_pool_state(SchedulerPoolState::Ready);
             }
-            SchedulerKind::Cron | SchedulerKind::Workflow => unreachable!(),
+            SchedulerKind::Cron => {
+                self.cron_paused.store(false, Ordering::Release);
+                self.set_cron_pool_state(SchedulerPoolState::Ready);
+            }
+            SchedulerKind::Workflow => unreachable!(),
         }
         self.wake.notify();
         Ok(())
-    }
-
-    /// Whether a fixed workload is process-locally paused.
-    pub fn is_kind_paused(&self, kind: SchedulerKind) -> Result<bool, PlatformError> {
-        self.ensure_kind_enabled(kind)?;
-        Ok(match kind {
-            SchedulerKind::Alarm => self.alarm_paused.load(Ordering::Acquire),
-            SchedulerKind::Queue => self.queue_paused.load(Ordering::Acquire),
-            SchedulerKind::Cron | SchedulerKind::Workflow => unreachable!(),
-        })
-    }
-
-    /// Low-cardinality state summary for health and operator inspection.
-    pub fn summary(&self) -> Result<SchedulerSummary, PlatformError> {
-        self.store.summary(self.observed_wall_time_ms())
-    }
-
-    /// Versioned global and registered-pool operator state.
-    pub fn inspect(&self) -> Result<SchedulerInspectV2, PlatformError> {
-        let now_ms = self.observed_wall_time_ms();
-        let summary = self.store.workload_summary(now_ms)?;
-        let alarm = self.config.pool(SchedulerKind::Alarm);
-        let queue = self.config.pool(SchedulerKind::Queue);
-        let state = if !alarm.enabled {
-            SchedulerPoolState::Disabled
-        } else if self.is_paused() || self.alarm_paused.load(Ordering::Acquire) {
-            SchedulerPoolState::Paused
-        } else {
-            self.alarm_pool_state()
-        };
-        Ok(SchedulerInspectV2 {
-            version: 2,
-            paused: self.is_paused(),
-            global: SchedulerGlobalInspect {
-                in_flight: self.global_in_flight.load(Ordering::Acquire),
-                max_in_flight: self.config.max_in_flight,
-                next_wake_at: atomic_option_i64(&self.next_wake_at_ms),
-            },
-            pools: vec![
-                SchedulerPoolInspect {
-                    kind: SchedulerKind::Alarm,
-                    enabled: alarm.enabled,
-                    state,
-                    ready: summary.ready,
-                    claimed: summary.claimed,
-                    expired: summary.expired,
-                    oldest_due_at: summary.oldest_due_at_ms,
-                    next_due_at: summary.next_due_at_ms,
-                    in_flight: self.alarm_in_flight.load(Ordering::Acquire),
-                    max_in_flight: alarm.max_in_flight,
-                },
-                SchedulerPoolInspect {
-                    kind: SchedulerKind::Queue,
-                    enabled: queue.enabled,
-                    state: if !queue.enabled {
-                        SchedulerPoolState::Disabled
-                    } else if self.is_paused() || self.queue_paused.load(Ordering::Acquire) {
-                        SchedulerPoolState::Paused
-                    } else {
-                        self.queue_pool_state()
-                    },
-                    ready: self.store.queue_workload_summary(now_ms)?.ready,
-                    claimed: 0,
-                    expired: 0,
-                    oldest_due_at: self.store.queue_workload_summary(now_ms)?.oldest_due_at_ms,
-                    next_due_at: self.store.queue_workload_summary(now_ms)?.next_due_at_ms,
-                    in_flight: self.queue_in_flight.load(Ordering::Acquire),
-                    max_in_flight: queue.max_in_flight,
-                },
-            ],
-        })
-    }
-
-    /// Run generation-safe claim/repair loops, then boundedly drain in-flight dispatches.
-    pub async fn run(
-        self: Arc<Self>,
-        mut shutdown: watch::Receiver<bool>,
-    ) -> Result<(), PlatformError> {
-        let alarm = self.config.pool(SchedulerKind::Alarm);
-        let queue = self.config.pool(SchedulerKind::Queue);
-        let pool_caps = SchedulerKind::ALL.map(|kind| {
-            usize::try_from(self.config.pool(kind).max_in_flight).unwrap_or(usize::MAX)
-        });
-        let weights = SchedulerKind::ALL.map(|kind| self.config.pool(kind).weight);
-        let mut admission = AdmissionTracker::new(
-            usize::try_from(self.config.max_in_flight).unwrap_or(usize::MAX),
-            pool_caps,
-        );
-        let mut selector = FairSelector::new(weights);
-        let mut backoff = InfrastructureBackoff::new(
-            self.observed_wall_time_ms().unsigned_abs(),
-            Duration::from_millis(25),
-            Duration::from_secs(5),
-        );
-        let mut pool = PoolRuntime::ready();
-        let mut repair_deadline = self.clock.monotonic_now();
-        let mut dispatches = JoinSet::new();
-
-        loop {
-            while let Some(completed) = dispatches.try_join_next() {
-                release_completed(
-                    &completed,
-                    &mut admission,
-                    &self.global_in_flight,
-                    &self.alarm_in_flight,
-                );
-            }
-            if *shutdown.borrow() {
-                break;
-            }
-
-            let observed_generation = self.wake.generation();
-            let now_mono = self.clock.monotonic_now();
-            pool.refresh_deadline(now_mono);
-            if pool.state() == SchedulerPoolState::CircuitOpen
-                && self.alarm_pool_state() == SchedulerPoolState::Ready
-            {
-                pool.probe_succeeded();
-            }
-            if self.is_paused() || self.alarm_paused.load(Ordering::Acquire) {
-                self.set_alarm_pool_state(SchedulerPoolState::Paused);
-            } else {
-                self.set_alarm_pool_state(pool.state());
-            }
-
-            if now_mono >= repair_deadline {
-                if let Err(error) = self.repair_once().await {
-                    tracing::warn!(
-                        code = error.code().as_str(),
-                        "scheduler alarm repair pass failed"
-                    );
-                }
-                repair_deadline = self
-                    .clock
-                    .monotonic_deadline(Duration::from_millis(self.config.repair_interval_ms));
-            }
-
-            let now_ms = self.observed_wall_time_ms();
-            let summary = self.pool_summary(now_ms).await?;
-            let queue_summary = self.store.queue_workload_summary(now_ms)?;
-            set_atomic_option_i64(
-                &self.next_wake_at_ms,
-                match (summary.next_due_at_ms, queue_summary.next_due_at_ms) {
-                    (Some(left), Some(right)) => Some(left.min(right)),
-                    (left, right) => left.or(right),
-                },
-            );
-            if let Some(metrics) = &self.metrics {
-                metrics.observe_scheduler_workload(SchedulerKind::Alarm, summary, now_ms);
-                metrics.observe_scheduler_workload(SchedulerKind::Queue, queue_summary, now_ms);
-                if let Ok((messages, bytes)) = self.store.queue_backlog_totals() {
-                    metrics.set_queue_backlog(messages, bytes);
-                }
-            }
-            let queue_runnable = queue.enabled
-                && !self.is_paused()
-                && !self.queue_paused.load(Ordering::Acquire)
-                && self.queue_pool_state() != SchedulerPoolState::CircuitOpen;
-            if queue_runnable && queue_summary.ready > 0 {
-                self.run_queue_maintenance(now_ms, queue.claim_batch).await;
-            }
-            let pool_runnable = alarm.enabled
-                && !self.is_paused()
-                && !self.alarm_paused.load(Ordering::Acquire)
-                && pool.state() == SchedulerPoolState::Ready;
-            let has_ready = summary.ready > 0 || summary.expired > 0;
-            if pool_runnable && has_ready && admission.available_global() > 0 {
-                let mut ready = [false; SchedulerKind::ALL.len()];
-                ready[SchedulerKind::Alarm.index()] = true;
-                let selected = selector.select(
-                    ready,
-                    admission.available_pools(),
-                    admission.available_global(),
-                );
-                let selected_alarm = selected
-                    .iter()
-                    .filter(|kind| **kind == SchedulerKind::Alarm)
-                    .count()
-                    .min(usize::try_from(alarm.claim_batch).unwrap_or(usize::MAX));
-                if selected_alarm > 0 {
-                    match self
-                        .claim(u32::try_from(selected_alarm).unwrap_or(u32::MAX))
-                        .await
-                    {
-                        Ok(jobs) => {
-                            backoff.reset(SchedulerKind::Alarm);
-                            let unused = selected_alarm.saturating_sub(jobs.len());
-                            selector.refund(SchedulerKind::Alarm, unused);
-                            if !jobs.is_empty() {
-                                if !admission.reserve(SchedulerKind::Alarm, jobs.len()) {
-                                    return Err(scheduler_task_failed());
-                                }
-                                store_admission_metrics(
-                                    &admission,
-                                    &self.global_in_flight,
-                                    &self.alarm_in_flight,
-                                );
-                                for job in jobs {
-                                    let service = self.clone();
-                                    dispatches.spawn(async move {
-                                        service.dispatch_one(job).await;
-                                        SchedulerKind::Alarm
-                                    });
-                                }
-                                continue;
-                            }
-                        }
-                        Err(error) if error.code() == ErrorCode::SchedulerCorrupt => {
-                            return Err(error);
-                        }
-                        Err(error) if permanent_pool_error(error.code()) => {
-                            pool.permanent_failure();
-                            self.set_alarm_pool_state(pool.state());
-                            self.observe_pool_health(pool.state());
-                        }
-                        Err(error) => {
-                            let delay = backoff.fail(
-                                SchedulerKind::Alarm,
-                                infrastructure_error_class(error.code()),
-                            );
-                            pool.transient_failure(self.clock.monotonic_deadline(delay));
-                            self.set_alarm_pool_state(pool.state());
-                            tracing::warn!(
-                                code = error.code().as_str(),
-                                "scheduler due claim entered bounded backoff"
-                            );
-                        }
-                    }
-                }
-            }
-
-            let mut deadlines = vec![WakeDeadline {
-                at: repair_deadline,
-                reason: WakeReason::Repair,
-            }];
-            if pool_runnable && let Some(next_due_at_ms) = summary.next_due_at_ms {
-                deadlines.push(WakeDeadline {
-                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
-                    reason: WakeReason::Due,
-                });
-            }
-            if queue_runnable && let Some(next_due_at_ms) = queue_summary.next_due_at_ms {
-                deadlines.push(WakeDeadline {
-                    at: self.wake.wall_deadline(now_ms, next_due_at_ms),
-                    reason: WakeReason::Due,
-                });
-            }
-            if let Some(retry_at) = pool.retry_at() {
-                deadlines.push(WakeDeadline {
-                    at: retry_at,
-                    reason: WakeReason::Backoff,
-                });
-            }
-            let wait = self.wake.wait(observed_generation, &deadlines);
-            tokio::pin!(wait);
-            tokio::select! {
-                changed = shutdown.changed() => {
-                    if changed.is_err() || *shutdown.borrow() {
-                        break;
-                    }
-                }
-                completed = dispatches.join_next(), if !dispatches.is_empty() => {
-                    if let Some(completed) = completed {
-                        release_completed(
-                            &completed,
-                            &mut admission,
-                            &self.global_in_flight,
-                            &self.alarm_in_flight,
-                        );
-                    }
-                }
-                reason = &mut wait => self.observe_wake(reason),
-            }
-        }
-
-        self.wake.notify();
-        let _ = bounded_drain(
-            self.clock.as_ref(),
-            Duration::from_millis(self.config.shutdown_drain_ms),
-            &mut dispatches,
-        )
-        .await;
-        admission.release(
-            SchedulerKind::Alarm,
-            admission.pool_in_flight(SchedulerKind::Alarm),
-        );
-        store_admission_metrics(&admission, &self.global_in_flight, &self.alarm_in_flight);
-        Ok(())
-    }
-
-    /// Claim and deliver one deterministic due batch without real scheduler sleeps.
-    pub async fn poll_once(self: &Arc<Self>) -> Result<usize, PlatformError> {
-        let alarm = self.config.pool(SchedulerKind::Alarm);
-        let completed = self.poll_queue_once()?;
-        if !alarm.enabled || self.is_paused() || self.alarm_paused.load(Ordering::Acquire) {
-            return Ok(completed);
-        }
-        let batch = alarm
-            .claim_batch
-            .min(alarm.max_in_flight)
-            .min(self.config.max_in_flight);
-        let jobs = self.claim(batch).await?;
-        let count = jobs.len();
-        stream::iter(jobs)
-            .for_each_concurrent(usize::try_from(batch).unwrap_or(usize::MAX), |job| {
-                let service = self.clone();
-                async move { service.dispatch_one(job).await }
-            })
-            .await;
-        Ok(completed.saturating_add(count))
     }
 
     fn ensure_kind_enabled(&self, kind: SchedulerKind) -> Result<(), PlatformError> {
-        if matches!(kind, SchedulerKind::Alarm | SchedulerKind::Queue)
-            && self.config.pool(kind).enabled
+        if matches!(
+            kind,
+            SchedulerKind::Alarm | SchedulerKind::Queue | SchedulerKind::Cron
+        ) && self.config.pool(kind).enabled
         {
             return Ok(());
         }
@@ -679,6 +476,8 @@ fn release_completed(
     admission: &mut AdmissionTracker,
     global_in_flight: &AtomicUsize,
     alarm_in_flight: &AtomicUsize,
+    queue_in_flight: &AtomicUsize,
+    cron_in_flight: &AtomicUsize,
 ) {
     let kind = match completed {
         Ok(kind) => *kind,
@@ -688,19 +487,39 @@ fn release_completed(
         }
     };
     admission.release(kind, 1);
-    store_admission_metrics(admission, global_in_flight, alarm_in_flight);
+    store_admission_metrics(
+        admission,
+        global_in_flight,
+        alarm_in_flight,
+        queue_in_flight,
+        cron_in_flight,
+    );
 }
 
 fn store_admission_metrics(
     admission: &AdmissionTracker,
     global_in_flight: &AtomicUsize,
     alarm_in_flight: &AtomicUsize,
+    queue_in_flight: &AtomicUsize,
+    cron_in_flight: &AtomicUsize,
 ) {
     global_in_flight.store(admission.global_in_flight(), Ordering::Release);
     alarm_in_flight.store(
         admission.pool_in_flight(SchedulerKind::Alarm),
         Ordering::Release,
     );
+    queue_in_flight.store(
+        admission.pool_in_flight(SchedulerKind::Queue),
+        Ordering::Release,
+    );
+    cron_in_flight.store(
+        admission.pool_in_flight(SchedulerKind::Cron),
+        Ordering::Release,
+    );
+}
+
+fn minimum_timestamp<const N: usize>(values: [Option<i64>; N]) -> Option<i64> {
+    values.into_iter().flatten().min()
 }
 
 const fn infrastructure_error_class(code: ErrorCode) -> u64 {
@@ -787,6 +606,13 @@ fn scheduler_task_failed() -> PlatformError {
     PlatformError::new(
         ErrorCode::SchedulerUnavailable,
         "scheduler blocking task failed",
+    )
+}
+
+fn queue_consumer_generation_stale() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::QueueConsumerGenerationStale,
+        "Queue consumer generation is stale",
     )
 }
 

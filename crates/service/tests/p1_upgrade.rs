@@ -172,7 +172,12 @@ fn downgrade_control_to_seven(path: &Path) {
     }
     connection
         .execute_batch(
-            "DROP TABLE queue_referrers;
+            "DROP TABLE cron_activations;
+             DROP TABLE deployment_cron_declarations;
+             DROP TABLE deployment_cron_configs;
+             DROP TABLE queue_consumers;
+             DROP TABLE deployment_queue_consumers;
+             DROP TABLE queue_referrers;
              DROP TABLE queue_producer_bindings;
              ALTER TABLE control_idempotency DROP COLUMN queue_id;
              DROP TABLE queues;
@@ -210,9 +215,14 @@ fn downgrade_scheduler_to_one(path: &Path) {
     }
     connection
         .execute_batch(
-            "DROP TABLE queue_messages;
+            "DROP TABLE cron_runs;
+             DROP TABLE cron_schedules;
+             DROP TABLE queue_dlq_pending;
+             DROP TABLE queue_delivery_batches;
+             DROP TABLE queue_consumer_state;
+             DROP TABLE queue_messages;
              DROP TABLE queue_state;
-             DELETE FROM scheduler_migrations WHERE version = 2;
+             DELETE FROM scheduler_migrations WHERE version >= 2;
              UPDATE scheduler_meta SET schema_version = 1;
              PRAGMA user_version = 1;
              PRAGMA wal_checkpoint(TRUNCATE);",
@@ -620,7 +630,7 @@ async fn upgrade_gate() {
             check["before"]["control"].as_u64(),
             check["target"]["control"].as_u64()
         ),
-        (Some(7), Some(9))
+        (Some(7), Some(11))
     );
 
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).expect("offline");
@@ -660,7 +670,7 @@ async fn upgrade_gate() {
             applied["before"]["control"].as_u64(),
             applied["target"]["control"].as_u64()
         ),
-        (Some(8), Some(9))
+        (Some(8), Some(11))
     );
 
     let doctor = doctor_report(&loaded, DoctorMode::Full).await;

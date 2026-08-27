@@ -71,6 +71,129 @@ fn private_alarm_result_shapes_are_strict() {
     );
 }
 
+#[test]
+fn queue_and_scheduled_custom_event_protocols_are_bounded_and_strict() {
+    let message_id = QueueMessageId::generate().to_string();
+    let request = QueueDispatchRequest {
+        queue_name: "events".to_owned(),
+        messages: vec![QueueDispatchMessage {
+            id: message_id.clone(),
+            timestamp_ms: 60_000,
+            attempts: 1,
+            content_type: QueueContentType::Json,
+            body_base64: base64::engine::general_purpose::STANDARD.encode(br#"{"ok":true}"#),
+        }],
+    };
+    assert!(validate_queue_dispatch_request(&request).is_ok());
+    for invalid in [
+        QueueDispatchRequest {
+            queue_name: String::new(),
+            ..request.clone()
+        },
+        QueueDispatchRequest {
+            messages: Vec::new(),
+            ..request.clone()
+        },
+        QueueDispatchRequest {
+            messages: vec![QueueDispatchMessage {
+                id: message_id.clone(),
+                attempts: 0,
+                ..request.messages[0].clone()
+            }],
+            ..request.clone()
+        },
+        QueueDispatchRequest {
+            messages: vec![QueueDispatchMessage {
+                id: message_id.clone(),
+                body_base64: "not-base64".to_owned(),
+                ..request.messages[0].clone()
+            }],
+            ..request.clone()
+        },
+        QueueDispatchRequest {
+            messages: vec![request.messages[0].clone(), request.messages[0].clone()],
+            ..request.clone()
+        },
+    ] {
+        assert_eq!(
+            validate_queue_dispatch_request(&invalid)
+                .unwrap_err()
+                .code(),
+            ErrorCode::QueueDispositionInvalid
+        );
+    }
+
+    let result = QueueDispatchResult {
+        outcome: "ok".to_owned(),
+        ack_all: true,
+        retry_batch: QueueRetryBatchResult {
+            retry: false,
+            delay_seconds: None,
+        },
+        explicit_acks: vec![message_id.clone()],
+        retry_messages: Vec::new(),
+    };
+    assert!(validate_queue_dispatch_result(result.clone(), 1).is_ok());
+    assert_eq!(
+        validate_queue_dispatch_result(
+            QueueDispatchResult {
+                outcome: "forged".to_owned(),
+                ..result.clone()
+            },
+            1,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::QueueDispositionInvalid
+    );
+    assert_eq!(
+        validate_queue_dispatch_result(
+            QueueDispatchResult {
+                retry_messages: vec![QueueRetryMessageResult {
+                    msg_id: message_id,
+                    delay_seconds: Some(86_401),
+                }],
+                ..result
+            },
+            1,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::QueueDispositionInvalid
+    );
+
+    let scheduled = ScheduledDispatchRequest {
+        scheduled_time_ms: 120_000,
+        cron: "*/5 * * * *".to_owned(),
+    };
+    assert!(validate_scheduled_dispatch_request(&scheduled).is_ok());
+    assert_eq!(
+        validate_scheduled_dispatch_request(&ScheduledDispatchRequest {
+            scheduled_time_ms: 120_001,
+            ..scheduled.clone()
+        })
+        .unwrap_err()
+        .code(),
+        ErrorCode::CronActivationStale
+    );
+    assert_eq!(
+        validate_scheduled_dispatch_request(&ScheduledDispatchRequest {
+            cron: "bad".to_owned(),
+            ..scheduled
+        })
+        .unwrap_err()
+        .code(),
+        ErrorCode::CronExpressionInvalid
+    );
+    assert!(
+        validate_scheduled_dispatch_result(ScheduledDispatchResult {
+            outcome: "aborted".to_owned(),
+            no_retry: false,
+        })
+        .is_ok()
+    );
+}
+
 #[tokio::test]
 async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     let transport =

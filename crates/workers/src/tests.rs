@@ -20,6 +20,29 @@ use std::fs;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+struct AcceptAllValidator;
+
+impl RuntimeValidator for AcceptAllValidator {
+    fn validate(
+        &self,
+        _candidate: ValidationCandidate,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<(), open_compute_core::PlatformError>> + Send + '_>,
+    > {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn validate_entrypoint(
+        &self,
+        _candidate: ValidationCandidate,
+        _entrypoint: String,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<(), open_compute_core::PlatformError>> + Send + '_>,
+    > {
+        Box::pin(async { Ok(()) })
+    }
+}
+
 fn module(name: &str, bytes: &[u8]) -> ModuleInput {
     ModuleInput {
         name: name.to_owned(),
@@ -1253,6 +1276,8 @@ fn deployment_request(
         vars,
         secrets,
         bindings: BTreeMap::new(),
+        queue_consumers: Vec::new(),
+        crons: None,
         limits: serde_json::json!({"profile": "default"}),
         promote: true,
         request_id: RequestId::generate(),
@@ -1272,7 +1297,7 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
         .create_worker(account, "pipeline", RequestId::generate(), 1)
         .unwrap();
     let mock = MockS3::spawn("open-compute").await;
-    let validator: Arc<dyn RuntimeValidator> = Arc::new(|_: ValidationCandidate| async { Ok(()) });
+    let validator: Arc<dyn RuntimeValidator> = Arc::new(AcceptAllValidator);
     let controller = DeploymentController::new(
         &storage,
         artifact_store(&mock),
@@ -1453,6 +1478,150 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
             .code(),
         ErrorCode::DeploymentInvariantViolation
     );
+}
+
+#[tokio::test]
+async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_crons() {
+    let tmp = tempfile::tempdir().unwrap();
+    let storage = Arc::new(
+        PlatformStorage::bootstrap(&storage_config(&tmp.path().join("data")), &SystemClock)
+            .unwrap(),
+    );
+    let account = storage.identity().default_account_id;
+    let workers = WorkerRepository::new(storage.db());
+    let (worker, _) = workers
+        .create_worker(account, "products", RequestId::generate(), 1)
+        .unwrap();
+    let queues = open_compute_storage::QueueRepository::new(storage.db());
+    let source = open_compute_core::QueueId::generate();
+    let dlq = open_compute_core::QueueId::generate();
+    let pending = open_compute_core::QueueId::generate();
+    for (id, name, ready) in [
+        (source, "product-source", true),
+        (dlq, "product-dlq", true),
+        (pending, "product-pending", false),
+    ] {
+        queues
+            .insert_creating(
+                account,
+                id,
+                name,
+                open_compute_storage::QueueConfig::default(),
+                2,
+            )
+            .unwrap();
+        if ready {
+            queues.mark_ready(account, id, 3).unwrap();
+        }
+    }
+    let mock = MockS3::spawn("open-compute").await;
+    let validator: Arc<dyn RuntimeValidator> = Arc::new(AcceptAllValidator);
+    let controller = DeploymentController::new(
+        &storage,
+        artifact_store(&mock),
+        validator,
+        BundleLimits::default(),
+    )
+    .with_queue_consumer_limit(2);
+    let consumer = QueueConsumerInput {
+        queue: source,
+        entrypoint: Some("Named_$1".to_owned()),
+        config: open_compute_storage::QueueConsumerConfig {
+            max_concurrency: 2,
+            ..open_compute_storage::QueueConsumerConfig::default()
+        },
+        dead_letter_queue: Some(dlq),
+    };
+    let mut valid = deployment_request(account, worker.id, "products-valid", "secret");
+    valid.promote = false;
+    valid.queue_consumers = vec![consumer.clone()];
+    valid.crons = Some(vec!["*/5 * * * *".to_owned(), "*/5 * * * *".to_owned()]);
+    let deployment = match controller.create_deployment(valid).await.unwrap() {
+        CreateDeploymentOutcome::Applied(result) => result.deployment,
+        CreateDeploymentOutcome::Replay(_) => panic!("product deployment replayed"),
+    };
+    let declarations = open_compute_storage::QueueConsumerRepository::new(storage.db())
+        .deployment_declarations(deployment.id)
+        .unwrap();
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(declarations[0].dlq_queue_id, Some(dlq));
+    assert_eq!(declarations[0].dlq_lifecycle_generation, Some(1));
+    let cron = open_compute_storage::CronRepository::new(storage.db())
+        .deployment_config(deployment.id)
+        .unwrap();
+    assert_eq!(cron.declarations.len(), 1);
+    assert_eq!(cron.declarations[0].expression, "*/5 * * * *");
+
+    let mut cases = Vec::new();
+    let mut duplicate = deployment_request(account, worker.id, "products-duplicate", "secret");
+    duplicate.promote = false;
+    duplicate.queue_consumers = vec![consumer.clone(), consumer.clone()];
+    cases.push((duplicate, ErrorCode::QueueConsumerConflict));
+
+    let mut self_dlq = deployment_request(account, worker.id, "products-self-dlq", "secret");
+    self_dlq.promote = false;
+    self_dlq.queue_consumers = vec![QueueConsumerInput {
+        dead_letter_queue: Some(source),
+        ..consumer.clone()
+    }];
+    cases.push((self_dlq, ErrorCode::QueueDlqInvalid));
+
+    let mut pending_dlq = deployment_request(account, worker.id, "products-pending-dlq", "secret");
+    pending_dlq.promote = false;
+    pending_dlq.queue_consumers = vec![QueueConsumerInput {
+        dead_letter_queue: Some(pending),
+        ..consumer.clone()
+    }];
+    cases.push((pending_dlq, ErrorCode::QueueDlqInvalid));
+
+    let mut bad_entry = deployment_request(account, worker.id, "products-entry", "secret");
+    bad_entry.promote = false;
+    bad_entry.queue_consumers = vec![QueueConsumerInput {
+        entrypoint: Some("1-invalid".to_owned()),
+        ..consumer.clone()
+    }];
+    cases.push((bad_entry, ErrorCode::EntrypointNotFound));
+
+    let mut not_ready = deployment_request(account, worker.id, "products-not-ready", "secret");
+    not_ready.promote = false;
+    not_ready.queue_consumers = vec![QueueConsumerInput {
+        queue: pending,
+        dead_letter_queue: None,
+        ..consumer.clone()
+    }];
+    cases.push((not_ready, ErrorCode::QueueConsumerNotReady));
+
+    let mut invalid_config = deployment_request(account, worker.id, "products-config", "secret");
+    invalid_config.promote = false;
+    invalid_config.queue_consumers = vec![QueueConsumerInput {
+        config: open_compute_storage::QueueConsumerConfig {
+            max_concurrency: 3,
+            ..consumer.config
+        },
+        ..consumer.clone()
+    }];
+    cases.push((invalid_config, ErrorCode::LimitInvalid));
+
+    let mut invalid_cron = deployment_request(account, worker.id, "products-cron", "secret");
+    invalid_cron.promote = false;
+    invalid_cron.crons = Some(vec!["not a cron".to_owned()]);
+    cases.push((invalid_cron, ErrorCode::CronExpressionInvalid));
+
+    let mut too_many = deployment_request(account, worker.id, "products-count", "secret");
+    too_many.promote = false;
+    too_many.queue_consumers = vec![consumer; 65];
+    cases.push((too_many, ErrorCode::QuotaExceeded));
+
+    for (request, expected) in cases {
+        assert_eq!(
+            controller
+                .create_deployment(request)
+                .await
+                .unwrap_err()
+                .code(),
+            expected
+        );
+    }
 }
 
 #[test]

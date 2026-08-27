@@ -4,6 +4,7 @@
 
 pub mod bindings;
 pub mod control_db;
+pub mod cron;
 pub mod crypto;
 pub mod d1;
 pub mod data_dir;
@@ -18,6 +19,7 @@ pub mod master_key;
 pub mod migrations;
 pub mod platform_restore;
 pub mod platform_snapshot;
+pub mod queue_consumers;
 pub mod queues;
 pub mod r2;
 pub mod r2_staging;
@@ -32,6 +34,10 @@ pub use bindings::{
     AuthorizedBinding, BindingRepository, DeploymentBindingRecord, NewDeploymentBinding,
 };
 pub use control_db::ControlDb;
+pub use cron::{
+    CRON_PARSER_VERSION, CronActivationRecord, CronActivationState, CronDeclaration,
+    CronDeclarationMode, CronDeploymentConfig, CronRepository, NewCronConfig, NewCronDeclaration,
+};
 pub use crypto::{SecretCrypto, SecretEnvelope};
 pub use d1::{
     D1_DATABASE_SCHEMA_VERSION, D1_MAX_BATCH_STATEMENTS, D1_MAX_BOUND_PARAMS, D1_MAX_COLUMNS,
@@ -76,6 +82,13 @@ pub use platform_snapshot::{
     estimate_platform_snapshot_bytes, prepare_platform_snapshot, sign_snapshot_manifest,
     verify_snapshot_manifest_mac,
 };
+pub use queue_consumers::{
+    NewQueueConsumerDeclaration, QUEUE_CONSUMER_DEFAULT_BATCH_SIZE,
+    QUEUE_CONSUMER_DEFAULT_BATCH_TIMEOUT_SECONDS, QUEUE_CONSUMER_DEFAULT_MAX_CONCURRENCY,
+    QUEUE_CONSUMER_DEFAULT_MAX_RETRIES, QUEUE_CONSUMER_DEFAULT_RETRY_DELAY_SECONDS,
+    QueueConsumerConfig, QueueConsumerDeclaration, QueueConsumerRecord, QueueConsumerRepository,
+    QueueConsumerState,
+};
 pub use queues::{
     AuthorizedQueueBinding, NewQueueProducerBinding, QUEUE_DEFAULT_MAX_BACKLOG_BYTES,
     QUEUE_DEFAULT_RETENTION_SECONDS, QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES,
@@ -92,11 +105,16 @@ pub use resources::{
 };
 pub use restore_cleanup::{RestoreStagingCleanup, cleanup_restore_staging};
 pub use scheduler::{
-    AlarmProjection, ClaimResult, ClaimedJob, QueueContentType, QueueCounterMismatch,
-    QueueDeleteBatch, QueueEnqueueRequest, QueueEnqueueResult, QueueInspectionSummary,
-    QueueMessageInput, QueueMetrics, QueueProjection, SchedulerInspection, SchedulerStore,
-    SchedulerSummary, SchedulerWakeFuture, SchedulerWakeSignal, current_scheduler_schema_version,
-    inspect_scheduler_db, scheduler_migration_registry,
+    AlarmProjection, ClaimResult, ClaimedCronRun, ClaimedJob, ClaimedQueueBatch,
+    ClaimedQueueMessage, CronCompletion, CronCompletionResult, CronInspectionSummary,
+    CronRuntimeInspection, CronScheduleProjection, CronSlotSummary, P23CrossDatabaseInspection,
+    QueueCompletionAction, QueueCompletionDecision, QueueCompletionSummary,
+    QueueConsumerInspectionSummary, QueueConsumerProjection, QueueConsumerRuntimeInspection,
+    QueueContentType, QueueCounterMismatch, QueueDeleteBatch, QueueDlqForwardSummary,
+    QueueEnqueueRequest, QueueEnqueueResult, QueueInspectionSummary, QueueMessageInput,
+    QueueMetrics, QueueProjection, SchedulerInspection, SchedulerStore, SchedulerSummary,
+    SchedulerWakeFuture, SchedulerWakeSignal, current_scheduler_schema_version,
+    inspect_p23_cross_database, inspect_scheduler_db, scheduler_migration_registry,
 };
 pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
 pub use upgrade::{

@@ -1318,28 +1318,37 @@ output-gate Hard Gate、工作包、测试矩阵与 Exit Gate 见
 
 ### P2.3：Queue consumer 与 Cron
 
-- 一个 active consumer；
-- batch claim 和 frozen consumer deployment/generation；
-- per-message/batch ack/retry；
-- max attempts 和 DLQ；
-- consumer concurrency；
-- Cron next-run projection、slot dedup 和 scheduled dispatch。
+按依赖拆成两个可单独验收的交付单元。先实现每 Queue 一个 active push consumer：immutable
+deployment declaration、live attachment、batch size/timeout、frozen consumer deployment/generation、
+per-message/batch ack/retry、Known/Unknown dispatch 分类、max retries、原子 DLQ intake、pause/update
+drain 和三层 concurrency。再实现 UTC-only 五字段 Cron：deployment `inherit/replace` 语义、activation
+handoff、next-run projection、logical slot dedup、bounded misfire 与 native scheduled custom-event dispatch。
 
-Queue crash matrix 必须覆盖 insert、claim、dispatch、handler、ack 和 DLQ move 每个事务
-边界，承诺 at-least-once，不承诺 exactly-once。
+Control 使用 migration 010/011，scheduler 使用 migration 003/004。Queue crash matrix 必须覆盖
+insert、claim、dispatch、handler、ack 和 DLQ move 每个事务边界；Cron 必须覆盖 schedule advance、
+slot insert、promotion handoff 和 wall-clock jump。两者都承诺 at-least-once，不承诺 exactly-once。
+
+详细的 Hard Gate、API/config、control/scheduler schema、claim/completion transaction、DLQ backpressure、
+Cron parser/slot/misfire、reconciler、工作包、测试矩阵与 Exit Gate 见
+[P2.3：Queue Consumer 与 Cron 详细设计](./p2-3-queue-consumer-cron.md)。
 
 ### P2.4：Workflow core
 
-Workflow 在 Queue 验证 scheduler lease 和 crash recovery 后实现：
+Workflow 在 Queue 验证 scheduler lease 和 crash recovery 后实现。Pinned stock workerd 继续通过
+dynamic `workerLoader` 提供隔离、immutable deployment 和 bindings，但完整 Workflow engine 由
+platformd trusted facade + `scheduler.sqlite` 实现，不假设 workerd 内建 Cloudflare control plane。
 
-- definition 和 instance create/status；
-- frozen Worker deployment/class；
-- `run()`；
-- 顺序 `step.do()`；
-- step result persistence 和 replay；
-- generation/run-token fence；
-- terminal success/error；
-- live instance version referrer。
+P2.4 只实现 logical definition/immutable version、caller binding、instance `create/get/status`、冻结
+Worker deployment/class、`WorkflowEntrypoint.run()`、顺序 `step.do()`、bounded canonical JSON、step
+result persistence/replay、generation/run-token/step-token fence、terminal success/error 和 live instance
+deployment referrer。Callback side effect 是 at-least-once；completed step replay 不再执行 callback。
+
+Control 使用 migration 012，scheduler 使用 migration 005。Retry、sleep、event、modifier、retention、
+parallel step 和完整 RpcSerializable 明确留给后续阶段。
+
+详细的 Runtime/DO output-gate Hard Gate、schema、跨库 create saga、step identity/replay、JSON quota、
+terminal/referrer、crash matrix、工作包与 Exit Gate 见
+[P2.4：Workflow Core 详细设计](./p2-4-workflow-core.md)。
 
 ### P2.5：Workflow durable waiting
 

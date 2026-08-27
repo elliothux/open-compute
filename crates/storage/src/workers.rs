@@ -488,6 +488,26 @@ impl<'a> WorkerRepository<'a> {
         queue_bindings: &[crate::NewQueueProducerBinding],
         max_retained: u32,
     ) -> Result<DeploymentRecord, PlatformError> {
+        self.insert_staging_deployment_with_products_and_limit(
+            input,
+            bindings,
+            queue_bindings,
+            &[],
+            None,
+            max_retained,
+        )
+    }
+
+    /// Insert deployment metadata, bindings, Queue consumers, and Cron declarations atomically.
+    pub fn insert_staging_deployment_with_products_and_limit(
+        &self,
+        input: &NewDeployment,
+        bindings: &[crate::NewDeploymentBinding],
+        queue_bindings: &[crate::NewQueueProducerBinding],
+        queue_consumers: &[crate::NewQueueConsumerDeclaration],
+        cron: Option<&crate::NewCronConfig>,
+        max_retained: u32,
+    ) -> Result<DeploymentRecord, PlatformError> {
         if max_retained == 0 {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
@@ -576,6 +596,15 @@ impl<'a> WorkerRepository<'a> {
             }
             crate::bindings::insert_staging_bindings(tx, input.id, bindings, input.now_ms)?;
             crate::queues::insert_staging_bindings(tx, input.id, queue_bindings, input.now_ms)?;
+            crate::queue_consumers::insert_staging_declarations(
+                tx,
+                input.id,
+                queue_consumers,
+                input.now_ms,
+            )?;
+            if let Some(cron) = cron {
+                crate::cron::insert_staging_config(tx, input.id, cron, input.now_ms)?;
+            }
             audit(
                 tx,
                 input.account_id,
@@ -1615,6 +1644,21 @@ impl<'a> WorkerRepository<'a> {
                 ));
             }
             tx.execute(
+                "DELETE FROM deployment_cron_declarations WHERE deployment_id = ?1",
+                [deployment_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
+                "DELETE FROM deployment_cron_configs WHERE deployment_id = ?1",
+                [deployment_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
+                "DELETE FROM deployment_queue_consumers WHERE deployment_id = ?1",
+                [deployment_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
                 "DELETE FROM queue_producer_bindings WHERE deployment_id = ?1",
                 [deployment_id.to_string()],
             )
@@ -1730,6 +1774,21 @@ impl<'a> WorkerRepository<'a> {
             };
             let mut recovered = 0_u32;
             for (deployment, _worker, account) in candidates {
+                tx.execute(
+                    "DELETE FROM deployment_cron_declarations WHERE deployment_id = ?1",
+                    [&deployment],
+                )
+                .map_err(|_| db_error())?;
+                tx.execute(
+                    "DELETE FROM deployment_cron_configs WHERE deployment_id = ?1",
+                    [&deployment],
+                )
+                .map_err(|_| db_error())?;
+                tx.execute(
+                    "DELETE FROM deployment_queue_consumers WHERE deployment_id = ?1",
+                    [&deployment],
+                )
+                .map_err(|_| db_error())?;
                 tx.execute(
                     "DELETE FROM queue_producer_bindings WHERE deployment_id = ?1",
                     [&deployment],

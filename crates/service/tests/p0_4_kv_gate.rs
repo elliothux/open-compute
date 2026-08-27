@@ -415,6 +415,8 @@ fn deployment_request(
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings,
+        queue_consumers: Vec::new(),
+        crons: None,
         limits: serde_json::json!({"profile":"default"}),
         promote: true,
         request_id: RequestId::generate(),

@@ -658,9 +658,16 @@ impl SchedulerStore {
         let candidates = select_delete_candidates(&tx, None, Some(now_ms), max_rows, max_bytes)?;
         let mut bytes = 0_u64;
         for (seq, body_bytes) in &candidates {
+            tx.execute(
+                "DELETE FROM queue_dlq_pending
+                 WHERE message_id = (SELECT id FROM queue_messages WHERE seq = ?1)",
+                [seq],
+            )
+            .map_err(queue_sql_error)?;
             let changed = tx
                 .execute(
-                    "DELETE FROM queue_messages WHERE seq = ?1 AND expires_at_ms <= ?2",
+                    "DELETE FROM queue_messages
+                     WHERE seq = ?1 AND state = 'ready' AND expires_at_ms <= ?2",
                     params![seq, now_ms],
                 )
                 .map_err(queue_sql_error)?;
@@ -671,15 +678,18 @@ impl SchedulerStore {
         }
         let expired_remaining: bool = tx
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM queue_messages WHERE expires_at_ms <= ?1)",
+                "SELECT EXISTS(SELECT 1 FROM queue_messages
+                  WHERE state = 'ready' AND expires_at_ms <= ?1)",
                 [now_ms],
                 |row| row.get(0),
             )
             .map_err(map_sql_error)?;
         let next_expiry_at_ms = tx
-            .query_row("SELECT MIN(expires_at_ms) FROM queue_messages", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT MIN(expires_at_ms) FROM queue_messages WHERE state = 'ready'",
+                [],
+                |row| row.get(0),
+            )
             .map_err(map_sql_error)?;
         tx.commit().map_err(queue_sql_error)?;
         let messages = u64::try_from(candidates.len()).map_err(|_| queue_invariant())?;
@@ -725,9 +735,16 @@ impl SchedulerStore {
         let candidates = select_delete_candidates(&tx, Some(queue_id), None, max_rows, max_bytes)?;
         let mut bytes = 0_u64;
         for (seq, body_bytes) in &candidates {
+            tx.execute(
+                "DELETE FROM queue_dlq_pending
+                 WHERE message_id = (SELECT id FROM queue_messages WHERE seq = ?1)",
+                [seq],
+            )
+            .map_err(queue_sql_error)?;
             let changed = tx
                 .execute(
-                    "DELETE FROM queue_messages WHERE seq = ?1 AND queue_id = ?2",
+                    "DELETE FROM queue_messages
+                     WHERE seq = ?1 AND queue_id = ?2 AND state = 'ready'",
                     params![seq, queue_id.to_string()],
                 )
                 .map_err(queue_sql_error)?;
@@ -744,9 +761,11 @@ impl SchedulerStore {
             )
             .map_err(map_sql_error)?;
         let next_expiry_at_ms = tx
-            .query_row("SELECT MIN(expires_at_ms) FROM queue_messages", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT MIN(expires_at_ms) FROM queue_messages WHERE state = 'ready'",
+                [],
+                |row| row.get(0),
+            )
             .map_err(map_sql_error)?;
         tx.commit().map_err(queue_sql_error)?;
         let messages = u64::try_from(candidates.len()).map_err(|_| queue_invariant())?;

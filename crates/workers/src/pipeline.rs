@@ -1,5 +1,10 @@
 //! Immutable deployment creation pipeline.
 
+#[path = "pipeline/products.rs"]
+mod products;
+
+use products::{prepare_cron_config, validate_product_counts};
+
 use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
@@ -13,19 +18,21 @@ use bytes::Bytes;
 use futures::stream;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
-    ErrorCode, OperationClass, PlatformError, QueueId, RequestId, ResourceId, ResourceState,
-    SecretBytes, SecretString, WorkerId,
+    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions,
+    CronActivationId, CronSchedule, DeploymentId, ErrorCode, OperationClass, PlatformError,
+    QueueConsumerId, QueueId, RequestId, ResourceId, ResourceState, SecretBytes, SecretString,
+    WorkerId,
 };
 use open_compute_storage::{
-    DeploymentRecord, DeploymentState, DurableObjectRepository, IdempotencyReservation,
-    LOADER_SCHEMA_VERSION, NewDeployment, NewDeploymentBinding, NewQueueProducerBinding,
-    PlatformStorage, QueueAvailability, QueueRepository, QueueState, ResourceRepository,
-    StoredDeploymentSecret, WorkerRepository,
+    CRON_PARSER_VERSION, CronDeclarationMode, DeploymentRecord, DeploymentState,
+    DurableObjectRepository, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig,
+    NewCronDeclaration, NewDeployment, NewDeploymentBinding, NewQueueConsumerDeclaration,
+    NewQueueProducerBinding, PlatformStorage, QueueAvailability, QueueConsumerConfig,
+    QueueRepository, QueueState, ResourceRepository, StoredDeploymentSecret, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -38,6 +45,9 @@ const MAX_SECRETS: usize = 64;
 const MAX_SECRET_BYTES: usize = 16 * 1024;
 const MAX_SECRET_TOTAL_BYTES: usize = 64 * 1024;
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_QUEUE_CONSUMER_CONCURRENCY: u32 = 32;
+const MAX_QUEUE_CONSUMERS_PER_DEPLOYMENT: usize = 64;
+const MAX_CRONS_PER_DEPLOYMENT: usize = 64;
 
 type PreparedBindings = (
     Vec<BindingDescriptorV1>,
@@ -62,6 +72,23 @@ pub struct DeploymentBindingInput {
     /// Capability-version-one product configuration.
     #[serde(default)]
     pub config: CanonicalBindingConfig,
+}
+
+/// Immutable Queue push-consumer declaration supplied with a deployment.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueueConsumerInput {
+    /// Existing ready source Queue identity.
+    pub queue: QueueId,
+    /// Optional named `WorkerEntrypoint` export.
+    #[serde(default)]
+    pub entrypoint: Option<String>,
+    /// Delivery and retry policy.
+    #[serde(flatten)]
+    pub config: QueueConsumerConfig,
+    /// Optional ready dead-letter Queue in the same account.
+    #[serde(default)]
+    pub dead_letter_queue: Option<QueueId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -119,6 +146,30 @@ pub trait RuntimeValidator: Send + Sync + 'static {
     }
 }
 
+/// Cross-database product handoff invoked after validation and before active routing changes.
+pub trait ProductPromotionCoordinator: Send + Sync + 'static {
+    /// Stage, drain, promote, and activate Queue/Cron targets without overlapping generations.
+    fn promote(
+        &self,
+        request: ProductPromotionRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>>;
+}
+
+/// Immutable authority needed by the Queue/Cron promotion coordinator.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProductPromotionRequest {
+    /// Owning account.
+    pub account_id: AccountId,
+    /// Worker whose active deployment changes.
+    pub worker_id: WorkerId,
+    /// Validated ready target deployment.
+    pub deployment_id: DeploymentId,
+    /// Audit request identity.
+    pub request_id: RequestId,
+    /// Control-plane wall time.
+    pub now_ms: i64,
+}
+
 impl<F, Fut> RuntimeValidator for F
 where
     F: Fn(ValidationCandidate) -> Fut + Send + Sync + 'static,
@@ -153,6 +204,10 @@ pub struct CreateDeploymentRequest {
     pub secrets: BTreeMap<String, SecretString>,
     /// Immutable resource bindings keyed by tenant environment name.
     pub bindings: BTreeMap<String, DeploymentBindingInput>,
+    /// Immutable Queue push-consumer declarations.
+    pub queue_consumers: Vec<QueueConsumerInput>,
+    /// Omitted inherits the current Cron set; present replaces it, including an empty set.
+    pub crons: Option<Vec<String>>,
     /// Immutable limits profile.
     pub limits: serde_json::Value,
     /// Promote only after runtime validation succeeds.
@@ -276,6 +331,8 @@ pub struct DeploymentController<'a> {
     artifacts: ArtifactStore,
     validator: Arc<dyn RuntimeValidator>,
     bundle_limits: BundleLimits,
+    max_queue_consumer_concurrency: u32,
+    product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
 }
 
 impl std::fmt::Debug for DeploymentController<'_> {
@@ -301,7 +358,23 @@ impl<'a> DeploymentController<'a> {
             artifacts,
             validator,
             bundle_limits,
+            max_queue_consumer_concurrency: DEFAULT_MAX_QUEUE_CONSUMER_CONCURRENCY,
+            product_promoter: None,
         }
+    }
+
+    /// Apply the validated operator-local Queue consumer concurrency ceiling.
+    #[must_use]
+    pub fn with_queue_consumer_limit(mut self, maximum: u32) -> Self {
+        self.max_queue_consumer_concurrency = maximum.max(1);
+        self
+    }
+
+    /// Attach the single-process Queue/Cron cross-database promotion owner.
+    #[must_use]
+    pub fn with_product_promoter(mut self, promoter: Arc<dyn ProductPromotionCoordinator>) -> Self {
+        self.product_promoter = Some(promoter);
+        self
     }
 
     /// Execute upload, immutable DB transaction, runtime validation, and optional promotion.
@@ -316,6 +389,7 @@ impl<'a> DeploymentController<'a> {
         validate_secret_set(&request.secrets, &canonical_vars)?;
         validate_binding_set(&request.bindings, &canonical_vars, &request.secrets)?;
         validate_injection_module_collisions(bundle.manifest(), &request.bindings)?;
+        validate_product_counts(&request)?;
         let repo = WorkerRepository::new(self.storage.db());
         // Authentication/account scoping happens before reserving a key, so a
         // nonexistent target cannot strand a running idempotency row.
@@ -418,6 +492,8 @@ impl<'a> DeploymentController<'a> {
             stored_queue_bindings,
             durable_object_classes,
         ) = self.prepare_bindings(request)?;
+        let queue_consumers = self.prepare_queue_consumers(request)?;
+        let cron = prepare_cron_config(request)?;
         let descriptor = WorkerCodeDescriptorV1::new_with_queue_bindings(
             request.account_id,
             request.worker_id,
@@ -442,7 +518,7 @@ impl<'a> DeploymentController<'a> {
                 "ArtifactStore returned a different immutable artifact",
             ));
         }
-        let mut deployment = repo.insert_staging_deployment_with_all_bindings_and_limit(
+        let mut deployment = repo.insert_staging_deployment_with_products_and_limit(
             &NewDeployment {
                 id: deployment_id,
                 account_id: request.account_id,
@@ -462,6 +538,8 @@ impl<'a> DeploymentController<'a> {
             },
             &stored_bindings,
             &stored_queue_bindings,
+            &queue_consumers,
+            Some(&cron),
             self.storage.hardening().max_deployments_per_worker,
         )?;
         repo.begin_validation(deployment_id)?;
@@ -508,6 +586,26 @@ impl<'a> DeploymentController<'a> {
                 ));
             }
         }
+        for consumer in &queue_consumers {
+            if let Some(entrypoint) = &consumer.entrypoint
+                && let Err(error) = self
+                    .validator
+                    .validate_entrypoint(candidate.clone(), entrypoint.clone())
+                    .await
+            {
+                let code = stable_validation_code(&error);
+                repo.mark_rejected(
+                    deployment_id,
+                    DeploymentState::Validating,
+                    code,
+                    request.now_ms,
+                )?;
+                return Err(PlatformError::new(
+                    code,
+                    "real workerd validation rejected a Queue consumer entrypoint",
+                ));
+            }
+        }
         repo.mark_ready(deployment_id, request.now_ms)?;
         deployment.state = DeploymentState::Ready;
         deployment.ready_at_ms = Some(request.now_ms);
@@ -520,15 +618,32 @@ impl<'a> DeploymentController<'a> {
                         .await?;
                 }
             }
-            repo.promote_checked(
-                request.account_id,
-                request.worker_id,
-                deployment_id,
-                None,
-                Some(worker.route_generation),
-                request.request_id,
-                request.now_ms,
-            )?;
+            if let Some(promoter) = &self.product_promoter {
+                promoter
+                    .promote(ProductPromotionRequest {
+                        account_id: request.account_id,
+                        worker_id: request.worker_id,
+                        deployment_id,
+                        request_id: request.request_id,
+                        now_ms: request.now_ms,
+                    })
+                    .await?;
+            } else if !queue_consumers.is_empty() || request.crons.is_some() {
+                return Err(PlatformError::new(
+                    ErrorCode::QueueConsumerProjectionPending,
+                    "Queue/Cron promotion coordinator is unavailable",
+                ));
+            } else {
+                repo.promote_checked(
+                    request.account_id,
+                    request.worker_id,
+                    deployment_id,
+                    None,
+                    Some(worker.route_generation),
+                    request.request_id,
+                    request.now_ms,
+                )?;
+            }
         }
         let result = CreateDeploymentResult {
             deployment,
@@ -817,6 +932,14 @@ fn request_fingerprint(
     frame(
         &mut canonical,
         &serde_json::to_vec(&request.bindings).map_err(|_| invariant())?,
+    )?;
+    frame(
+        &mut canonical,
+        &serde_json::to_vec(&request.queue_consumers).map_err(|_| invariant())?,
+    )?;
+    frame(
+        &mut canonical,
+        &serde_json::to_vec(&request.crons).map_err(|_| invariant())?,
     )?;
     frame(
         &mut canonical,
