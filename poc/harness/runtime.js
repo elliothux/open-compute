@@ -11,7 +11,7 @@ const { spawnSync } = require("node:child_process");
 
 const G0_ROOT = path.resolve(__dirname, "..");
 const LOCK_PATH = path.join(G0_ROOT, "workerd.lock");
-const CACHE_ROOT = path.join(G0_ROOT, ".runtime-cache");
+const CACHE_ROOT = path.resolve(G0_ROOT, "../.temp/runtime-cache");
 
 function readLock() {
   return JSON.parse(fs.readFileSync(LOCK_PATH, "utf8"));

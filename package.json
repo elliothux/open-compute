@@ -18,8 +18,8 @@
   "scripts": {
     "oc": "bun packages/toolchain/src/bin.ts",
     "build": "bun run --filter @open-compute/toolchain build && bun run --filter @open-compute/runtime build",
-    "typecheck": "bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit",
-    "test:js": "node --test 'runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs'",
+    "typecheck": "bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit",
+    "test:js": "node --test 'runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs'",
     "check:generated": "bun run --filter @open-compute/runtime check:generated"
   },
   "devDependencies": {

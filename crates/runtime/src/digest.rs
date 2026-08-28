@@ -142,15 +142,19 @@ pub(crate) fn load_assets(
 /// Compute a deterministic SHA-256 over the packaged runtime template and system Workers.
 pub fn runtime_assets_sha256(assets_dir: &Path) -> Result<String, PlatformError> {
     let (template, workers, _) = load_assets(assets_dir)?;
+    Ok(asset_bytes_sha256(&template, &workers))
+}
+
+fn asset_bytes_sha256(template: &[u8], workers: &[(String, Vec<u8>)]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"open-compute/runtime-assets/v1\0");
-    put_bytes(&mut hasher, &template);
+    put_bytes(&mut hasher, template);
     put_u64(&mut hasher, workers.len() as u64);
     for (name, bytes) in workers {
         put_bytes(&mut hasher, name.as_bytes());
-        put_bytes(&mut hasher, &bytes);
+        put_bytes(&mut hasher, bytes);
     }
-    Ok(hex::encode(hasher.finalize()))
+    hex::encode(hasher.finalize())
 }
 
 pub(crate) fn render_config(template: &str, token: &SecretString) -> Result<String, PlatformError> {
@@ -257,6 +261,14 @@ pub(crate) fn digest_for_with_tokens_and_policy(
 ) -> Result<(String, String, WorkerFiles), PlatformError> {
     let _ = lock;
     let (template, workers, _) = load_assets(assets_dir)?;
+    if let Some(expected) = runtime.expected_assets_sha256
+        && asset_bytes_sha256(&template, &workers) != expected
+    {
+        return Err(PlatformError::new(
+            ErrorCode::RuntimeInvalid,
+            "runtime compiler inputs do not match the embedded payload",
+        ));
+    }
     let template_str = std::str::from_utf8(&template).map_err(|_| {
         PlatformError::new(
             ErrorCode::ConfigCompileFailed,

@@ -1,0 +1,2 @@
+# Keep tool caches inside the repository's one ignored temporary tree.
+cache-dir = ".temp/ruff-cache"

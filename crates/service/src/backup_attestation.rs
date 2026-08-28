@@ -53,9 +53,9 @@ pub async fn backup_attest_restore_smoke(
         ));
     }
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
-    assert_runtime_quiescent(loaded, &data_dir)?;
+    assert_runtime_quiescent(&data_dir)?;
     let manifest = verified_snapshot(loaded, snapshot_id).await?;
-    let current_release = platform_capabilities(loaded)?.release;
+    let current_release = platform_capabilities(&loaded.config)?.release;
     let (_, identity) = inspect_control_db(
         &data_dir.control_db_path(),
         loaded.config.storage.sqlite_busy_timeout_ms,

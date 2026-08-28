@@ -35,7 +35,7 @@ pub async fn upgrade_check(
     snapshot_id: &str,
 ) -> Result<UpgradeResult, PlatformError> {
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
-    assert_runtime_quiescent(loaded, &data_dir)?;
+    assert_runtime_quiescent(&data_dir)?;
     let manifest = verified_snapshot(loaded, snapshot_id).await?;
     let now_ms = unix_ms();
     let before = inspect_offline_schema(
@@ -75,7 +75,7 @@ pub async fn upgrade_apply(
     snapshot_id: &str,
 ) -> Result<UpgradeResult, PlatformError> {
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
-    assert_runtime_quiescent(loaded, &data_dir)?;
+    assert_runtime_quiescent(&data_dir)?;
     let manifest = verified_snapshot(loaded, snapshot_id).await?;
     let now_ms = unix_ms();
     let before = inspect_offline_schema(

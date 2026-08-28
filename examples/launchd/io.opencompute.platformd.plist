@@ -6,7 +6,7 @@
   <string>io.opencompute.platformd</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/open-compute/bin/platformd</string>
+    <string>/opt/open-compute/platformd</string>
     <string>--config</string>
     <string>/usr/local/etc/open-compute/config.toml</string>
     <string>run</string>

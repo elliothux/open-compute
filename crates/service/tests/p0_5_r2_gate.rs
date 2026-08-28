@@ -144,7 +144,7 @@ async fn p0_5_real_r2_facade_matrix() {
         WorkerdSupervisorOptions {
             runtime,
             compiler,
-            config: runtime_config(workerd, lock, root.join("runtime")),
+            config: runtime_config(),
             clock: Arc::new(SystemClock),
             jitter: Arc::new(OsJitter),
             redactor: Redactor::new(),
@@ -748,11 +748,8 @@ fn storage_config(root: &Path) -> StorageConfig {
     }
 }
 
-fn runtime_config(binary: PathBuf, lock: PathBuf, assets: PathBuf) -> RuntimeConfig {
+fn runtime_config() -> RuntimeConfig {
     let mut config = PlatformConfig::default().runtime;
-    config.binary = binary;
-    config.lock_file = lock;
-    config.assets_dir = assets;
     config.startup_timeout_ms = 20_000;
     config.shutdown_grace_ms = 1_000;
     config.kill_timeout_ms = 2_000;

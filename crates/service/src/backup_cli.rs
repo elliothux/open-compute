@@ -14,7 +14,7 @@ use open_compute_core::{
     ErrorCode, PlatformError, PlatformSnapshotManifestV1, ResourceState,
     SnapshotImmutableReferenceV1, StartupId,
 };
-use open_compute_runtime::{assert_no_live_orphan, load_runtime_lock};
+use open_compute_runtime::{assert_no_live_orphan, embedded_runtime_lock};
 use open_compute_storage::{
     ControlDb, DataDir, PreparePlatformSnapshotRequest, R2BucketRepository, RestoreStagingCleanup,
     cleanup_restore_staging, cleanup_stale_snapshot_staging, estimate_platform_snapshot_bytes,
@@ -110,9 +110,9 @@ pub async fn backup_create(
 ) -> Result<BackupCreateResult, PlatformError> {
     let started = Instant::now();
     validate_label(label)?;
-    let capabilities = platform_capabilities(loaded)?;
+    let capabilities = platform_capabilities(&loaded.config)?;
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
-    assert_runtime_quiescent(loaded, &data_dir)?;
+    assert_runtime_quiescent(&data_dir)?;
     let grace_deadline = incomplete_snapshot_deadline(loaded)?;
     cleanup_stale_snapshot_staging(&data_dir, grace_deadline)?;
     let key = inspect_master_key(&loaded.config.storage)?;
@@ -271,7 +271,7 @@ pub async fn backup_delete(
     snapshot_id: &str,
 ) -> Result<BackupInspectResult, PlatformError> {
     let _data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
-    assert_runtime_quiescent(loaded, &_data_dir)?;
+    assert_runtime_quiescent(&_data_dir)?;
     let key = inspect_master_key(&loaded.config.storage)?;
     let (_, identity) = inspect_control_db(
         &loaded.config.storage.data_dir.join("control.sqlite"),
@@ -294,7 +294,7 @@ pub async fn backup_cleanup_incomplete(
     loaded: &LoadedConfig,
 ) -> Result<BackupCleanupResult, PlatformError> {
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage)?;
-    assert_runtime_quiescent(loaded, &data_dir)?;
+    assert_runtime_quiescent(&data_dir)?;
     let (_, identity) = inspect_control_db(
         &data_dir.control_db_path(),
         loaded.config.storage.sqlite_busy_timeout_ms,
@@ -347,7 +347,7 @@ pub async fn backup_restore(
     let client = connect_snapshot_client(loaded)?;
     let objects = SnapshotObjectStore::discover(client, snapshot_id).await?;
     let manifest = load_manifest(loaded, &objects, snapshot_id, &key).await?;
-    let current_release = platform_capabilities(loaded)?.release;
+    let current_release = platform_capabilities(&loaded.config)?.release;
     if manifest.source_release != current_release {
         return Err(PlatformError::new(
             ErrorCode::ReleaseUnsupported,
@@ -431,11 +431,8 @@ pub(crate) async fn verified_snapshot(
     Ok(manifest)
 }
 
-pub(crate) fn assert_runtime_quiescent(
-    loaded: &LoadedConfig,
-    data_dir: &DataDir,
-) -> Result<(), PlatformError> {
-    let (lock, _) = load_runtime_lock(&loaded.config.runtime.lock_file)?;
+pub(crate) fn assert_runtime_quiescent(data_dir: &DataDir) -> Result<(), PlatformError> {
+    let (lock, _) = embedded_runtime_lock()?;
     let (_, target) = lock.current_target()?;
     assert_no_live_orphan(
         &data_dir.runtime_dir().join("child.lease"),

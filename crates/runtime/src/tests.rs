@@ -8,7 +8,6 @@ use crate::digest::{
     BINDING_TOKEN_PLACEHOLDER, DigestInputs, PlatformReleaseMeta, config_input_digest, digest_for,
     load_assets, render_config, render_config_with_tokens, validate_token,
 };
-use crate::fetch::{PackageReleaseRequest, install_official_release, package_release_bundle};
 use crate::fsutil::{
     FILE_MODE, clear_publish_hook, set_publish_hook, set_test_max_asset_entries,
     set_test_max_asset_files, write_atomic_new,
@@ -21,8 +20,6 @@ use crate::process::{
     set_wait_fail_hook, wait_pid_gone, wait_reaped,
 };
 use crate::verify::{clear_hash_cache, verify_runtime_binary};
-use flate2::Compression;
-use flate2::write::GzEncoder;
 use open_compute_core::{ErrorCode, ReadinessReason, Redactor, SecretString};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -1597,131 +1594,6 @@ async fn real_compile_succeeds_when_env_set() {
 }
 
 #[test]
-fn install_rejects_hash_mismatch_and_existing_dest() {
-    let dir = TempDir::new().unwrap();
-    let payload = b"not-a-real-binary";
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(payload).unwrap();
-    let gz = encoder.finish().unwrap();
-    let lock = RuntimeLock::parse(
-        lock_json(&sha256_bytes(payload), "")
-            .replace(
-                "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
-                &sha256_bytes(&gz),
-            )
-            .as_bytes(),
-    );
-    if let Ok(lock) = lock {
-        let dest = dir.path().join("rel");
-        let err = install_official_release(&lock, &dest, false, Some(b"wrong"));
-        assert!(err.is_err());
-        fs::create_dir(&dest).unwrap();
-        assert!(install_official_release(&lock, &dest, false, Some(&gz)).is_err());
-    }
-}
-
-#[test]
-fn install_and_package_reject_failure_matrix_without_downloading() {
-    fn release_lock(binary: &[u8], archive: &[u8]) -> RuntimeLock {
-        let json = lock_json(&sha256_bytes(binary), "").replace(
-            "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
-            &sha256_bytes(archive),
-        );
-        RuntimeLock::parse(json.as_bytes()).unwrap()
-    }
-
-    let dir = TempDir::new().unwrap();
-    let valid_script = version_script(None);
-    let valid_gz = gzip_bytes(valid_script.as_bytes());
-    let valid_lock = release_lock(valid_script.as_bytes(), &valid_gz);
-    assert_eq!(
-        install_official_release(&valid_lock, Path::new("relative"), false, Some(&valid_gz))
-            .unwrap_err()
-            .code(),
-        ErrorCode::PathInvalid
-    );
-    assert_eq!(
-        install_official_release(&valid_lock, &dir.path().join("no-archive"), false, None)
-            .unwrap_err()
-            .code(),
-        ErrorCode::RuntimeInvalid
-    );
-
-    let corrupt_gz = b"not a gzip stream";
-    let corrupt_lock = release_lock(valid_script.as_bytes(), corrupt_gz);
-    assert!(
-        install_official_release(
-            &corrupt_lock,
-            &dir.path().join("corrupt-gzip"),
-            false,
-            Some(corrupt_gz)
-        )
-        .is_err()
-    );
-
-    let wrong_binary_lock = release_lock(b"different", &valid_gz);
-    assert!(
-        install_official_release(
-            &wrong_binary_lock,
-            &dir.path().join("wrong-binary"),
-            false,
-            Some(&valid_gz)
-        )
-        .is_err()
-    );
-
-    for (name, script) in [
-        ("nonzero", "#!/bin/sh\nexit 7\n"),
-        ("version-mismatch", "#!/bin/sh\necho 'workerd other'\n"),
-        ("not-executable", "not an executable"),
-    ] {
-        let gz = gzip_bytes(script.as_bytes());
-        let lock = release_lock(script.as_bytes(), &gz);
-        assert!(
-            install_official_release(&lock, &dir.path().join(name), false, Some(&gz)).is_err(),
-            "installer unexpectedly accepted {name}"
-        );
-    }
-
-    let platformd = dir.path().join("platformd");
-    let assets = dir.path().join("assets");
-    let license = dir.path().join("LICENSE");
-    let default_config = dir.path().join("default.toml");
-    let runbooks = dir.path().join("runbooks");
-    let destination = dir.path().join("bundle");
-    let mut request = PackageReleaseRequest {
-        lock: &valid_lock,
-        dest_dir: &destination,
-        platformd: &platformd,
-        assets_dir: &assets,
-        license_file: &license,
-        default_config: &default_config,
-        runbooks_dir: &runbooks,
-        release_json: b"{}",
-        download: false,
-        archive_bytes: Some(&valid_gz),
-    };
-    assert!(format!("{request:?}").contains("PackageReleaseRequest"));
-    request.dest_dir = Path::new("relative");
-    assert!(package_release_bundle(&request).is_err());
-    request.dest_dir = &destination;
-    request.platformd = Path::new("relative");
-    assert!(package_release_bundle(&request).is_err());
-    request.platformd = &platformd;
-    request.assets_dir = Path::new("relative");
-    assert!(package_release_bundle(&request).is_err());
-    request.assets_dir = &assets;
-    request.license_file = Path::new("relative");
-    assert!(package_release_bundle(&request).is_err());
-    request.license_file = &license;
-    request.default_config = Path::new("relative");
-    assert!(package_release_bundle(&request).is_err());
-    request.default_config = &default_config;
-    request.runbooks_dir = Path::new("relative");
-    assert!(package_release_bundle(&request).is_err());
-}
-
-#[test]
 fn compiled_config_accessors_and_corruption_matrix() {
     fn make(dir: &Path, name: &str) -> CompiledConfig {
         CompiledConfig::from_bytes_for_test(&dir.join(name), &"ab".repeat(32), b"compiled").unwrap()
@@ -1805,178 +1677,6 @@ fn packaged_lock_matches_g0_pin() {
         assert_eq!(target.archive_sha256, archive);
         assert_eq!(target.binary_sha256, binary);
     }
-}
-
-fn gzip_bytes(payload: &[u8]) -> Vec<u8> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(payload).unwrap();
-    encoder.finish().unwrap()
-}
-
-fn write_package_assets(dir: &Path, lock_json: &str) {
-    fs::write(dir.join("workerd.lock.json"), lock_json).unwrap();
-    fs::write(dir.join("config.capnp"), b"const config = ();\n").unwrap();
-    fs::create_dir(dir.join("system-workers")).unwrap();
-    fs::write(dir.join("system-workers/host.js"), b"export default {};\n").unwrap();
-}
-
-fn write_package_runbooks(dir: &Path) {
-    fs::create_dir(dir).unwrap();
-    for name in [
-        "install-and-first-start.md",
-        "backup-and-retention.md",
-        "fresh-host-restore.md",
-        "upgrade-and-rollback.md",
-        "disk-pressure.md",
-        "sqlite-corruption.md",
-        "s3-outage.md",
-        "workerd-crash-loop.md",
-        "master-key-loss-and-recovery.md",
-        "scheduler-recovery.md",
-        "collect-support-bundle.md",
-    ] {
-        fs::write(dir.join(name), format!("# {name}\n")).unwrap();
-    }
-}
-
-fn no_partial_bundles(parent: &Path) {
-    let leftovers: Vec<_> = fs::read_dir(parent)
-        .unwrap()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().contains(".partial-bundle"))
-        .collect();
-    assert!(leftovers.is_empty(), "staging leaked {leftovers:?}");
-}
-
-#[test]
-fn package_release_is_atomic_and_rejects_bad_inputs() {
-    let dir = TempDir::new().unwrap();
-    let payload = version_script(None);
-    let gz = gzip_bytes(payload.as_bytes());
-    let mut lock_txt = lock_json(&sha256_bytes(payload.as_bytes()), "");
-    lock_txt = lock_txt.replace(
-        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
-        &sha256_bytes(&gz),
-    );
-    let lock = RuntimeLock::parse(lock_txt.as_bytes()).unwrap();
-    let assets = dir.path().join("assets");
-    fs::create_dir(&assets).unwrap();
-    write_package_assets(&assets, &lock_txt);
-    let platformd = dir.path().join("platformd");
-    write_exec(&platformd, "#!/bin/sh\necho platformd\n");
-    let license = dir.path().join("LICENSE");
-    fs::write(&license, b"Apache-2.0\n").unwrap();
-    let default_config = dir.path().join("default.toml");
-    fs::write(
-        &default_config,
-        b"[server]\npublic_bind = \"127.0.0.1:1\"\n",
-    )
-    .unwrap();
-    let runbooks = dir.path().join("runbooks");
-    write_package_runbooks(&runbooks);
-
-    let dest = dir.path().join("rel dest");
-    package_release_bundle(&PackageReleaseRequest {
-        lock: &lock,
-        dest_dir: &dest,
-        platformd: &platformd,
-        assets_dir: &assets,
-        license_file: &license,
-        default_config: &default_config,
-        runbooks_dir: &runbooks,
-        release_json: b"{}",
-        download: false,
-        archive_bytes: Some(&gz),
-    })
-    .unwrap();
-    assert!(dest.join("bin/workerd").is_file());
-    assert!(dest.join("bin/platformd").is_file());
-    assert!(dest.join("runtime/config.capnp").is_file());
-    let mut top_level: Vec<_> = fs::read_dir(&dest)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .collect();
-    top_level.sort();
-    assert_eq!(
-        top_level,
-        ["bin", "docs", "licenses", "runtime", "share"].map(std::ffi::OsString::from)
-    );
-    assert!(dest.join("share/release.json").is_file());
-    assert!(dest.join("docs/runbooks/fresh-host-restore.md").is_file());
-    assert!(!dest.join(".workerd-inst").exists());
-    no_partial_bundles(dir.path());
-
-    let marker = b"keep-me";
-    let existing = dir.path().join("already");
-    fs::write(&existing, marker).unwrap();
-    let err = package_release_bundle(&PackageReleaseRequest {
-        lock: &lock,
-        dest_dir: &existing,
-        platformd: &platformd,
-        assets_dir: &assets,
-        license_file: &license,
-        default_config: &default_config,
-        runbooks_dir: &runbooks,
-        release_json: b"{}",
-        download: false,
-        archive_bytes: Some(&gz),
-    })
-    .unwrap_err();
-    assert_eq!(err.code(), ErrorCode::PathInvalid);
-    assert_eq!(fs::read(&existing).unwrap(), marker);
-
-    let bad_hash = package_release_bundle(&PackageReleaseRequest {
-        lock: &lock,
-        dest_dir: &dir.path().join("bad-hash"),
-        platformd: &platformd,
-        assets_dir: &assets,
-        license_file: &license,
-        default_config: &default_config,
-        runbooks_dir: &runbooks,
-        release_json: b"{}",
-        download: false,
-        archive_bytes: Some(b"not-the-archive"),
-    });
-    assert!(bad_hash.is_err());
-    assert!(!dir.path().join("bad-hash").exists());
-    no_partial_bundles(dir.path());
-
-    let missing_capnp = dir.path().join("assets-missing");
-    fs::create_dir(&missing_capnp).unwrap();
-    fs::write(missing_capnp.join("workerd.lock.json"), &lock_txt).unwrap();
-    let late = package_release_bundle(&PackageReleaseRequest {
-        lock: &lock,
-        dest_dir: &dir.path().join("late-asset"),
-        platformd: &platformd,
-        assets_dir: &missing_capnp,
-        license_file: &license,
-        default_config: &default_config,
-        runbooks_dir: &runbooks,
-        release_json: b"{}",
-        download: false,
-        archive_bytes: Some(&gz),
-    });
-    assert!(late.is_err());
-    assert!(!dir.path().join("late-asset").exists());
-    no_partial_bundles(dir.path());
-
-    let link = dir.path().join("linked-platformd");
-    symlink(&platformd, &link).unwrap();
-    let sym = package_release_bundle(&PackageReleaseRequest {
-        lock: &lock,
-        dest_dir: &dir.path().join("from-symlink"),
-        platformd: &link,
-        assets_dir: &assets,
-        license_file: &license,
-        default_config: &default_config,
-        runbooks_dir: &runbooks,
-        release_json: b"{}",
-        download: false,
-        archive_bytes: Some(&gz),
-    });
-    assert!(sym.is_err());
-    assert!(!dir.path().join("from-symlink").exists());
-    no_partial_bundles(dir.path());
 }
 
 fn outside_mode(path: &Path) -> u32 {
@@ -2063,37 +1763,6 @@ fn write_atomic_new_destination_appears_race_preserves_winner() {
             .iter()
             .all(|n| !n.to_string_lossy().contains("partial")),
         "temp file must be removed: {leftovers:?}"
-    );
-}
-
-#[test]
-fn install_release_destination_appears_race_preserves_bytes() {
-    let dir = TempDir::new().unwrap();
-    let payload = version_script(None);
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(payload.as_bytes()).unwrap();
-    let gz = encoder.finish().unwrap();
-    let json = lock_json(&sha256_bytes(payload.as_bytes()), "").replace(
-        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
-        &sha256_bytes(&gz),
-    );
-    let lock = RuntimeLock::parse(json.as_bytes()).unwrap();
-    let dest = dir.path().join("rel");
-    set_publish_hook({
-        let dest = dest.clone();
-        move |path| {
-            if path == dest {
-                fs::create_dir(&dest).unwrap();
-                fs::write(dest.join("keep-me"), b"concurrent-winner").unwrap();
-            }
-        }
-    });
-    let err = install_official_release(&lock, &dest, false, Some(&gz)).unwrap_err();
-    clear_publish_hook();
-    assert_eq!(err.code(), ErrorCode::PathInvalid);
-    assert_eq!(
-        fs::read(dest.join("keep-me")).unwrap(),
-        b"concurrent-winner"
     );
 }
 
@@ -2643,16 +2312,7 @@ async fn symlink_ancestor_rejected_for_all_external_paths() {
         assert_outside_untouched(&fx);
 
         let fx = ancestor_fixture(relative, "rel");
-        let payload = version_script(None);
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(payload.as_bytes()).unwrap();
-        let gz = encoder.finish().unwrap();
-        let json = lock_json(&sha256_bytes(payload.as_bytes()), "").replace(
-            "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
-            &sha256_bytes(&gz),
-        );
-        let lock = RuntimeLock::parse(json.as_bytes()).unwrap();
-        let err = install_official_release(&lock, &fx.linked_leaf, false, Some(&gz)).unwrap_err();
+        let err = crate::materialize_embedded_runtime(&fx.linked_leaf).unwrap_err();
         assert_eq!(err.code(), ErrorCode::PathInvalid);
         assert_outside_untouched(&fx);
     }

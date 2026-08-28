@@ -3,19 +3,14 @@
 use crate::capabilities::platform_release_metadata;
 use crate::config_load::LoadedConfig;
 use crate::metrics::MetricsRegistry;
+#[path = "doctor_runtime.rs"]
+mod runtime;
 #[path = "doctor_workflow.rs"]
 mod workflow;
 use open_compute_artifacts::{
-    ArtifactCache, S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
-    sample_cache_integrity,
+    ArtifactCache, S3ArtifactClient, resolve_s3_credentials, sample_cache_integrity,
 };
-use open_compute_core::ids::{PlatformId, StartupId};
-use open_compute_core::{ErrorCode, PlatformError, Redactor, ResourceAvailability, SystemClock};
-use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
-    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
-    verify_runtime_binary,
-};
+use open_compute_core::{ErrorCode, PlatformError, ResourceAvailability};
 use open_compute_storage::{
     inspect_control_db, inspect_data_root, inspect_durable_object_storage, inspect_master_key,
     inspect_p23_cross_database, inspect_resources, inspect_scheduler_db, read_operation_receipt,
@@ -23,8 +18,7 @@ use open_compute_storage::{
 use serde::Serialize;
 use std::io::Write;
 
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Doctor intensity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -612,34 +606,13 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         ));
     }
 
-    let verified_runtime = match verify_runtime_binary(
-        &loaded.config.runtime.lock_file,
-        &loaded.config.runtime.binary,
-        Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
-        &Redactor::new(),
-    )
-    .await
-    {
-        Ok(rt) => {
-            let ver = rt.version_output().to_owned();
-            checks.push(ok(
-                "runtime_binary",
-                "workerd binary hash and version match the lock",
-                Some(bound_value(&ver, 32)),
-            ));
-            Some(rt)
-        }
-        Err(err) => {
-            checks.push(failed("runtime_binary", err.code(), err.message(), None));
-            None
-        }
-    };
+    let runtime_version = runtime::inspect(&mut checks, loaded);
 
-    match (inspect.as_ref(), db_ok.as_ref(), verified_runtime.as_ref()) {
-        (Some(root), Some(identity), Some(runtime)) => match inspect_durable_object_storage(
+    match (inspect.as_ref(), db_ok.as_ref(), runtime_version.as_ref()) {
+        (Some(root), Some(identity), Some(version)) => match inspect_durable_object_storage(
             &root.root,
             &identity.platform_id.to_string(),
-            runtime.version_output(),
+            version,
         ) {
             Ok(_) => checks.push(ok(
                 "do_storage",
@@ -683,10 +656,13 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         }
     }
 
-    if mode == DoctorMode::Full && hold_local {
-        run_full_extras(
+    if mode == DoctorMode::Full
+        && let Some(root) = inspect.as_ref().filter(|root| root.holds_inspect_lock())
+    {
+        runtime::run_full_extras(
             &mut checks,
             loaded,
+            root,
             s3_client.as_ref(),
             db_ok.as_ref().map(|i| i.platform_id),
         )
@@ -765,208 +741,6 @@ fn operation_receipt_check(loaded: &LoadedConfig, name: &'static str) -> DoctorC
                 .map(|value| value.to_string()),
         ),
         None => warning(check_name, "operation receipt is invalid", None),
-    }
-}
-
-async fn run_full_extras(
-    checks: &mut Vec<DoctorCheck>,
-    loaded: &LoadedConfig,
-    client: Option<&S3ArtifactClient>,
-    platform_id: Option<PlatformId>,
-) {
-    match (client, platform_id) {
-        (Some(client), Some(platform_id)) => {
-            match preflight_s3(client, platform_id, StartupId::generate()).await {
-                Ok(_) => checks.push(ok("s3_canary", "s3 preflight canary succeeded", None)),
-                Err(err) => checks.push(failed("s3_canary", err.code(), err.message(), None)),
-            }
-            match preflight_r2(client, platform_id, StartupId::generate()).await {
-                Ok(outcome) => checks.push(ok(
-                    "r2_canary",
-                    "R2 provider capability preflight succeeded",
-                    Some(if outcome.multi_delete {
-                        "multi_delete".to_owned()
-                    } else {
-                        "single_delete_fallback".to_owned()
-                    }),
-                )),
-                Err(err) => checks.push(failed("r2_canary", err.code(), err.message(), None)),
-            }
-        }
-        _ => checks.push(skipped(
-            "s3_canary",
-            "s3 canary requires connectivity and stored identity",
-        )),
-    }
-    if client.is_none() || platform_id.is_none() {
-        checks.push(skipped(
-            "r2_canary",
-            "R2 canary requires connectivity and stored identity",
-        ));
-    }
-
-    let runtime = verify_runtime_binary(
-        &loaded.config.runtime.lock_file,
-        &loaded.config.runtime.binary,
-        Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
-        &Redactor::new(),
-    )
-    .await;
-    let Ok(runtime) = runtime else {
-        checks.push(skipped(
-            "runtime_cycle",
-            "runtime binary verification is a prerequisite",
-        ));
-        return;
-    };
-    let data_runtime = loaded.config.storage.data_dir.join("runtime");
-    if !data_runtime.is_dir() || !loaded.config.runtime.assets_dir.is_dir() {
-        checks.push(skipped(
-            "runtime_cycle",
-            "runtime data and assets directories are required",
-        ));
-        return;
-    }
-    let compiler = StaticConfigCompiler::new(
-        runtime.clone(),
-        loaded.config.runtime.lock_file.clone(),
-        loaded.config.runtime.assets_dir.clone(),
-        data_runtime,
-        PlatformReleaseMeta {
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-        },
-        Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
-        Redactor::new(),
-    )
-    .with_durable_objects_config(loaded.config.durable_objects.clone());
-    let Ok(runtime_source) = tokio::net::TcpListener::bind("127.0.0.1:0").await else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeUnavailable,
-            "temporary runtime-source listener could not be bound",
-            None,
-        ));
-        return;
-    };
-    let Ok(runtime_source_addr) = runtime_source.local_addr() else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeUnavailable,
-            "temporary runtime-source listener address is unavailable",
-            None,
-        ));
-        return;
-    };
-    let Ok(binding_backend) = tokio::net::TcpListener::bind("127.0.0.1:0").await else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeUnavailable,
-            "temporary binding-backend listener could not be bound",
-            None,
-        ));
-        return;
-    };
-    let Ok(binding_backend_addr) = binding_backend.local_addr() else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeUnavailable,
-            "temporary binding-backend listener address is unavailable",
-            None,
-        ));
-        return;
-    };
-    let runtime_external =
-        match ExternalServiceAddress::loopback("runtime-source", runtime_source_addr) {
-            Ok(external) => external,
-            Err(err) => {
-                checks.push(failed("runtime_cycle", err.code(), err.message(), None));
-                return;
-            }
-        };
-    let binding_external =
-        match ExternalServiceAddress::loopback("binding-backend", binding_backend_addr) {
-            Ok(external) => external,
-            Err(err) => {
-                checks.push(failed("runtime_cycle", err.code(), err.message(), None));
-                return;
-            }
-        };
-    let Some(platform_id) = platform_id else {
-        checks.push(skipped(
-            "runtime_cycle",
-            "temporary runtime requires stored platform identity",
-        ));
-        return;
-    };
-    let do_storage = match inspect_durable_object_storage(
-        &loaded.config.storage.data_dir,
-        &platform_id.to_string(),
-        runtime.version_output(),
-    ) {
-        Ok(path) => path,
-        Err(error) => {
-            checks.push(failed("runtime_cycle", error.code(), error.message(), None));
-            return;
-        }
-    };
-    let directory = match DirectoryServicePath::local("do-storage", &do_storage) {
-        Ok(directory) => directory,
-        Err(error) => {
-            checks.push(failed("runtime_cycle", error.code(), error.message(), None));
-            return;
-        }
-    };
-    let supervisor = WorkerdSupervisor::new_with_services_and_auth(
-        WorkerdSupervisorOptions {
-            runtime,
-            compiler,
-            config: loaded.config.runtime.clone(),
-            clock: Arc::new(SystemClock),
-            jitter: Arc::new(OsJitter),
-            redactor: Redactor::new(),
-            lease_path: None,
-        },
-        vec![runtime_external, binding_external],
-        vec![directory],
-        Vec::new(),
-    );
-    supervisor.start();
-    let deadline = tokio::time::Instant::now()
-        + Duration::from_millis(loaded.config.runtime.startup_timeout_ms);
-    let mut rx = supervisor.subscribe();
-    let mut ready = false;
-    loop {
-        if rx.borrow().state == SupervisorState::Running {
-            ready = true;
-            break;
-        }
-        if tokio::time::Instant::now() > deadline {
-            break;
-        }
-        tokio::select! {
-            changed = rx.changed() => {
-                if changed.is_err() {
-                    break;
-                }
-            }
-            _ = tokio::time::sleep(Duration::from_millis(50)) => {}
-        }
-    }
-    supervisor.begin_drain();
-    supervisor.shutdown().await;
-    if ready {
-        checks.push(ok(
-            "runtime_cycle",
-            "temporary workerd compile start probe stop succeeded",
-            None,
-        ));
-    } else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeExitedBeforeReady,
-            "temporary workerd did not become ready",
-            None,
-        ));
     }
 }
 

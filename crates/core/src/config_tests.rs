@@ -28,14 +28,6 @@ fn documented_defaults_validate() {
     assert!(config.s3.verify_tls);
     assert!(config.s3.force_path_style);
     assert_eq!(
-        config.runtime.lock_file,
-        PathBuf::from("/opt/open-compute/runtime/workerd.lock.json")
-    );
-    assert_eq!(
-        config.runtime.assets_dir,
-        PathBuf::from("/opt/open-compute/runtime")
-    );
-    assert_eq!(
         config.storage.data_lock_path(),
         PathBuf::from("/var/lib/open-compute/platform.lock")
     );
@@ -76,7 +68,6 @@ access_key_id_env = "S3_ACCESS_KEY_ID"
 secret_access_key_env = "S3_SECRET_ACCESS_KEY"
 
 [runtime]
-binary = "/opt/open-compute/bin/workerd"
 startup_timeout_ms = 20000
 shutdown_grace_ms = 10000
 
@@ -93,9 +84,6 @@ fn relative_and_parent_paths_are_rejected() {
     let cases = [
         "[storage]\ndata_dir = \"relative/data\"\n",
         "[storage]\nmaster_key_file = \"./master.key\"\n",
-        "[runtime]\nbinary = \"workerd\"\n",
-        "[runtime]\nlock_file = \"/tmp/../lock\"\n",
-        "[runtime]\nassets_dir = \"assets\"\n",
         "[s3]\naccess_key_id_file = \"creds\"\naccess_key_id_env = \"S3_ACCESS_KEY_ID\"\n",
     ];
     for toml in cases {
@@ -111,6 +99,16 @@ fn bootstrap_config_path_must_be_absolute() {
     assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
     let err = validate_bootstrap_config_path(Path::new("/etc/../tmp/x.toml")).unwrap_err();
     assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
+}
+
+#[test]
+fn external_runtime_configuration_is_not_supported() {
+    for field in ["binary", "lock_file", "assets_dir"] {
+        for value in ["/opt/external-runtime", "relative"] {
+            let error = parse_err(&format!("[runtime]\n{field} = {value:?}\n"));
+            assert_eq!(error.code(), ErrorCode::ConfigParseFailed);
+        }
+    }
 }
 
 #[test]

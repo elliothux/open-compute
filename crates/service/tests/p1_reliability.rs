@@ -44,8 +44,8 @@ fn p1_local_runners_and_runbooks_are_complete_and_safe() {
         "scheduler-recovery.md",
         "collect-support-bundle.md",
     ] {
-        let source =
-            fs::read_to_string(root.join("docs/runbooks").join(runbook)).expect("P1 runbook");
+        let source = fs::read_to_string(root.join("docs/references/runbooks").join(runbook))
+            .expect("P1 runbook");
         for section in [
             "触发信号",
             "影响面",
@@ -62,7 +62,7 @@ fn p1_local_runners_and_runbooks_are_complete_and_safe() {
         assert!(!source.contains('~'), "{runbook}");
         assert!(!source.contains("rm -rf"), "{runbook}");
     }
-    let fuzz_owners = fs::read_to_string(root.join("docs/p1-fuzz-ownership.md"))
+    let fuzz_owners = fs::read_to_string(root.join("docs/references/p1-fuzz-ownership.md"))
         .expect("P1 fuzz ownership document");
     for owner in [
         "canonical bundle",
@@ -80,9 +80,12 @@ fn p1_local_runners_and_runbooks_are_complete_and_safe() {
         assert!(fuzz_owners.contains(owner), "missing fuzz owner {owner}");
     }
 
-    let package =
-        fs::read_to_string(root.join("scripts/package-release.sh")).expect("release launcher");
-    assert!(package.contains("git -C \"$root\" rev-parse --verify HEAD"));
-    assert!(package.contains("status --porcelain --untracked-files=all"));
-    assert!(package.contains("OPEN_COMPUTE_GIT_REVISION=\"$revision\""));
+    let launcher = fs::read_to_string(root.join("scripts/package-release.sh")).unwrap();
+    assert!(launcher.contains("exec bun"));
+    let package = fs::read_to_string(root.join("scripts/package-release.ts")).unwrap();
+    assert!(package.contains("[\"rev-parse\", \"--verify\", \"HEAD\"]"));
+    assert!(package.contains("[\"status\", \"--porcelain\", \"--untracked-files=all\"]"));
+    assert!(package.contains("OPEN_COMPUTE_GIT_REVISION: revision"));
+    assert!(package.contains("OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE: pin.archive"));
+    assert!(package.contains("await link(temporary, destination)"));
 }

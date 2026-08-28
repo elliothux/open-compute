@@ -31,12 +31,13 @@ command -v cargo >/dev/null 2>&1 || fail "cargo is required"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required"
 command -v rclone >/dev/null 2>&1 || fail "rclone with 'serve s3' support is required"
 
-workerd=${OPEN_COMPUTE_DEV_WORKERD:-"$root/poc/.runtime-cache/v1.20260826.1/workerd"}
-case "$workerd" in
+archive=${OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE:-}
+case "$archive" in
   /*) ;;
-  *) fail "OPEN_COMPUTE_DEV_WORKERD must be an absolute path" ;;
+  *) fail "set OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE to an absolute pinned .gz archive" ;;
 esac
-[ -f "$workerd" ] || fail "pinned workerd is missing at $workerd"
+[ -f "$archive" ] || fail "the pinned build archive is missing"
+export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE="$archive"
 
 umask 077
 mkdir -p "$s3_root/open-compute" "$platform_data"
@@ -70,9 +71,6 @@ secret_access_key_env = "S3_SECRET_ACCESS_KEY"
 prefix = "system/"
 
 [runtime]
-binary = "$workerd"
-lock_file = "$root/runtime/workerd.lock.json"
-assets_dir = "$root/runtime"
 startup_timeout_ms = 20000
 shutdown_grace_ms = 10000
 EOF

@@ -184,7 +184,7 @@ impl Drop for Evidence {
             && let Some(temp) = self.0.take()
         {
             let path = temp.keep();
-            let failed = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.p2-4-run/failed");
+            let failed = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.temp/p2-4-run/failed");
             std::fs::create_dir_all(&failed).unwrap();
             let destination = failed.join(format!("workflow-saga-{}", RequestId::generate()));
             std::fs::rename(&path, &destination).unwrap();

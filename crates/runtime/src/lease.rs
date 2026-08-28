@@ -428,7 +428,7 @@ fn linux_exe_digest(pid: i32) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn macos_txt_path(pid: i32) -> Option<std::path::PathBuf> {
-    let out = Command::new("lsof")
+    let out = Command::new("/usr/sbin/lsof")
         .args(["-p", &pid.to_string(), "-a", "-d", "txt", "-Fn"])
         .stdin(Stdio::null())
         .output()

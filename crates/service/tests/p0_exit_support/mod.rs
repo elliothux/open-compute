@@ -269,7 +269,7 @@ impl GateStack {
             WorkerdSupervisorOptions {
                 runtime,
                 compiler,
-                config: runtime_config(workerd, lock, assets),
+                config: runtime_config(),
                 clock: Arc::new(SystemClock),
                 jitter: Arc::new(OsJitter),
                 redactor: Redactor::new(),
@@ -677,11 +677,8 @@ pub(super) fn d1_config() -> D1Config {
     }
 }
 
-fn runtime_config(binary: PathBuf, lock: PathBuf, assets: PathBuf) -> RuntimeConfig {
+fn runtime_config() -> RuntimeConfig {
     let mut config = PlatformConfig::default().runtime;
-    config.binary = binary;
-    config.lock_file = lock;
-    config.assets_dir = assets;
     config.startup_timeout_ms = 20_000;
     config.shutdown_grace_ms = 1_000;
     config.kill_timeout_ms = 2_000;

@@ -35,5 +35,7 @@ bun run test:js
 包括没有产品绑定的 Worker。内部模块统一使用保留的 `__open_compute__/` 命名空间。
 
 此实现按 day1 切换，不保留历史 JS、旧摘要格式或旧模块路径的兼容分支。
-生产启动只消费已生成的 JS 和 Cap'n Proto，不调用 Bun、Node 或编译器。
+Rust 构建将已生成的 JS、Cap'n Proto、正式 lock 和目标平台的官方 gzip 内嵌进可执行文件。
+必须显式设置 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE`；不搜索缓存或下载。
+生产启动只离线物化这些内嵌字节，不调用 Bun、Node、TypeScript 或 Rolldown。
 CI 会检查严格类型、生成产物一致性和行为测试；真实 workerd Gate 仍是运行时验收依据。

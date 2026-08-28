@@ -7,9 +7,9 @@ const { spawn } = require("node:child_process");
 
 const G0_BIN = path.resolve(__dirname, "..", "g0");
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
-const RESULTS_REL = "docs/g0-results.md";
+const RESULTS_REL = "docs/implemented/g0-results.md";
 const LOCK_REL = "poc/workerd.lock";
-const REPORT_WRITE_FAIL = "failed to write docs/g0-results.md";
+const REPORT_WRITE_FAIL = "failed to write docs/implemented/g0-results.md";
 
 const SUITES = ["bootstrap", "loader", "binding", "durable-object", "recovery"];
 const ROUND_SEEDS = [1194329607, 1194329608, 1194329609];

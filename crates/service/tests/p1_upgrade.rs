@@ -40,7 +40,6 @@ struct ConfigInput<'a> {
     access_key: &'a Path,
     secret_key: &'a Path,
     endpoint: &'a str,
-    workerd: &'a Path,
     public_port: u16,
 }
 
@@ -58,7 +57,6 @@ fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
 }
 
 fn write_config(input: &ConfigInput<'_>) -> PathBuf {
-    let root = workspace();
     let path = input.root.join(format!("{}.toml", input.name));
     fs::write(
         &path,
@@ -89,9 +87,6 @@ connect_timeout_ms = 500
 request_timeout_ms = 3000
 
 [runtime]
-binary = "{workerd}"
-lock_file = "{lock}"
-assets_dir = "{assets}"
 startup_timeout_ms = 10000
 shutdown_grace_ms = 3000
 kill_timeout_ms = 1000
@@ -113,9 +108,6 @@ max_series = 1024
             endpoint = input.endpoint,
             access_key = input.access_key.display(),
             secret_key = input.secret_key.display(),
-            workerd = input.workerd.display(),
-            lock = root.join("runtime/workerd.lock.json").display(),
-            assets = root.join("runtime").display(),
         ),
     )
     .expect("write config");
@@ -552,7 +544,7 @@ async fn upgrade_gate() {
         0o600,
     );
     let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map_or_else(
-        || workspace().join("poc/.runtime-cache/v1.20260826.1/workerd"),
+        || workspace().join(".temp/runtime-cache/v1.20260826.1/workerd"),
         PathBuf::from,
     );
     assert!(workerd.is_file(), "stock workerd is required");
@@ -567,7 +559,6 @@ async fn upgrade_gate() {
         access_key: &access_key,
         secret_key: &secret_key,
         endpoint: &mock.endpoint,
-        workerd: &workerd,
         public_port,
     });
     let loaded = load_platform_config(&source_config).expect("source config");
@@ -594,7 +585,7 @@ async fn upgrade_gate() {
     ));
 
     let key = inspect_master_key(&loaded.config.storage).expect("master key");
-    let mut source_release = platform_capabilities(&loaded)
+    let mut source_release = platform_capabilities(&loaded.config)
         .expect("capabilities")
         .release;
     source_release.control_schema_version = 7;
@@ -798,7 +789,6 @@ async fn upgrade_gate() {
         access_key: &access_key,
         secret_key: &secret_key,
         endpoint: &mock.endpoint,
-        workerd: &workerd,
         public_port: free_port(),
     });
     let refused = Command::new(env!("CARGO_BIN_EXE_platformd"))

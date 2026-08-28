@@ -50,7 +50,7 @@ impl Harness {
             .parent()
             .unwrap()
             .to_path_buf();
-        let runs = root.join(".p2-4-run");
+        let runs = root.join(".temp/p2-4-run");
         std::fs::create_dir_all(&runs).unwrap();
         let temp = tempfile::Builder::new()
             .prefix("workflow-")
@@ -181,9 +181,6 @@ request_timeout_ms = 3000
                 runtime,
                 compiler,
                 config: RuntimeConfig {
-                    binary: workerd,
-                    lock_file: lock,
-                    assets_dir: root.join("runtime"),
                     startup_timeout_ms: 20000,
                     shutdown_grace_ms: 500,
                     drain_timeout_ms: 100,

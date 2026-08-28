@@ -28,6 +28,7 @@ pub mod r2_backend;
 pub mod r2_http;
 mod r2_maintenance;
 mod r2_protocol;
+mod resources;
 pub mod run;
 pub mod runtime_bridge;
 pub mod scheduler;

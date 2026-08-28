@@ -3,7 +3,7 @@
 use crate::auth::{bearer_matches, resolve_admin_auth};
 use crate::cli::{
     BackupCommand, Cli, Command, ConfigCommand, SchedulerCommand, UpgradeCommand, execute,
-    execute_with_test_binary, load_checked, parse_from,
+    load_checked, parse_from,
 };
 use crate::config_load::{MAX_CONFIG_BYTES, load_platform_config};
 use crate::doctor::{CheckStatus, DoctorMode, doctor_report};
@@ -75,73 +75,10 @@ async fn fake_cron_custom_event(
     Json(responses.cron.lock().unwrap().clone())
 }
 
-fn host_target() -> &'static str {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => "darwin-arm64",
-        ("macos", "x86_64") => "darwin-x64",
-        ("linux", "x86_64") => "linux-x64",
-        ("linux", "aarch64") => "linux-arm64",
-        other => panic!("unsupported {other:?}"),
-    }
-}
-
-fn host_archive() -> &'static str {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => "workerd-darwin-arm64.gz",
-        ("macos", "x86_64") => "workerd-darwin-64.gz",
-        ("linux", "x86_64") => "workerd-linux-64.gz",
-        ("linux", "aarch64") => "workerd-linux-arm64.gz",
-        other => panic!("unsupported {other:?}"),
-    }
-}
-
-fn write_stub_workerd(bin: &Path, lock: &Path) {
-    fs::write(
-        bin,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-26'; exit 0; fi\nexit 1\n",
-    )
-    .unwrap();
-    let mut perms = fs::metadata(bin).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(bin, perms).unwrap();
-    let sha = hex::encode(sha2::Sha256::digest(fs::read(bin).unwrap()));
-    let target = host_target();
-    let archive = host_archive();
-    fs::write(
-        lock,
-        format!(
-            r#"{{
-  "schemaVersion": 1,
-  "release": "v1.20260826.1",
-  "expectedVersionOutput": "workerd 2026-08-26",
-  "hostCompatibilityDate": "2026-08-22",
-  "processFlags": ["--experimental"],
-  "hostCompatibilityFlags": ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
-  "targets": {{
-    "{target}": {{
-      "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}",
-      "archiveSha256": "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
-      "binarySha256": "{sha}"
-    }}
-  }}
-}}"#
-        ),
-    )
-    .unwrap();
-}
-
 fn write_config(dir: &Path, extra: &str) -> PathBuf {
     let data = dir.join("data");
     let key = dir.join("master.key");
-    let bin = dir.join("workerd");
-    let lock = dir.join("workerd.lock.json");
-    let assets = dir.join("assets");
     fs::create_dir_all(&data).unwrap();
-    fs::create_dir_all(&assets).unwrap();
-    if !extra.contains("[runtime]") {
-        write_stub_workerd(&bin, &lock);
-    }
     let s3 = if extra.contains("[s3]") {
         String::new()
     } else {
@@ -157,21 +94,6 @@ prefix = "system/"
 "#
         .to_string()
     };
-    let runtime = if extra.contains("[runtime]") {
-        String::new()
-    } else {
-        format!(
-            r#"
-[runtime]
-binary = "{}"
-lock_file = "{}"
-assets_dir = "{}"
-"#,
-            bin.display(),
-            lock.display(),
-            assets.display()
-        )
-    };
     let toml = format!(
         r#"
 [server]
@@ -182,7 +104,6 @@ admin_bind = "127.0.0.1:0"
 data_dir = "{}"
 master_key_file = "{}"
 {s3}
-{runtime}
 [cache]
 max_bytes = 1048576
 high_watermark_ratio = 0.9
@@ -421,34 +342,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
             .contains("CONFIG_PATH_INVALID")
     );
 
-    let package_without_source = parse_from([
-        "platformd",
-        "package-release",
-        "--dest",
-        "/tmp/open-compute-unused-release",
-        "--lock",
-        "/tmp/lock",
-        "--assets",
-        "/tmp/assets",
-        "--license",
-        "/tmp/license",
-        "--default-config",
-        "/tmp/config",
-        "--runbooks",
-        "/tmp/runbooks",
-    ])
-    .unwrap();
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    assert_ne!(
-        execute(package_without_source, &mut stdout, &mut stderr).await,
-        std::process::ExitCode::SUCCESS
-    );
-    assert!(
-        String::from_utf8(stderr)
-            .unwrap()
-            .contains("RUNTIME_INVALID")
-    );
+    assert!(parse_from(["platformd", "package-release"]).is_err());
 
     for json in [false, true] {
         let mut args = vec![
@@ -472,144 +366,6 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
             "DOCTOR"
         }));
     }
-
-    let missing_archive = parse_from([
-        "platformd",
-        "package-release",
-        "--dest",
-        dir.path().join("release").to_str().unwrap(),
-        "--lock",
-        dir.path().join("workerd.lock.json").to_str().unwrap(),
-        "--assets",
-        dir.path().join("assets").to_str().unwrap(),
-        "--license",
-        dir.path().join("missing-license").to_str().unwrap(),
-        "--default-config",
-        path.to_str().unwrap(),
-        "--runbooks",
-        dir.path().to_str().unwrap(),
-        "--archive",
-        dir.path().join("missing-archive.gz").to_str().unwrap(),
-    ])
-    .unwrap();
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    assert_ne!(
-        execute(missing_archive, &mut stdout, &mut stderr).await,
-        std::process::ExitCode::SUCCESS
-    );
-    assert!(String::from_utf8(stderr).unwrap().contains("PATH_INVALID"));
-
-    let package_root = dir.path().join("package-input");
-    fs::create_dir(&package_root).unwrap();
-    let package_binary = package_root.join("workerd");
-    let package_lock = package_root.join("workerd.lock.json");
-    write_stub_workerd(&package_binary, &package_lock);
-    let archive = Proc::new("/usr/bin/gzip")
-        .args(["-c", package_binary.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(archive.status.success());
-    let archive_path = package_root.join("workerd.gz");
-    fs::write(&archive_path, &archive.stdout).unwrap();
-    let archive_hash = hex::encode(sha2::Sha256::digest(&archive.stdout));
-    let lock_text = fs::read_to_string(&package_lock).unwrap().replace(
-        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
-        &archive_hash,
-    );
-    fs::write(&package_lock, &lock_text).unwrap();
-    let assets = package_root.join("assets");
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
-        .to_path_buf();
-    fs::create_dir(&assets).unwrap();
-    fs::create_dir(assets.join("system-workers")).unwrap();
-    fs::copy(&package_lock, assets.join("workerd.lock.json")).unwrap();
-    fs::copy(
-        workspace.join("runtime/config.capnp"),
-        assets.join("config.capnp"),
-    )
-    .unwrap();
-    let sources = workspace.join("runtime/system-workers");
-    let mut pending = vec![PathBuf::new()];
-    while let Some(relative) = pending.pop() {
-        for entry in fs::read_dir(sources.join(&relative)).unwrap() {
-            let entry = entry.unwrap();
-            let relative = relative.join(entry.file_name());
-            let output = assets.join("system-workers").join(&relative);
-            let file_type = entry.file_type().unwrap();
-            if file_type.is_dir() {
-                fs::create_dir(&output).unwrap();
-                pending.push(relative);
-            } else {
-                assert!(
-                    file_type.is_file(),
-                    "runtime fixture must not contain links"
-                );
-                fs::copy(entry.path(), output).unwrap();
-            }
-        }
-    }
-    let license = package_root.join("LICENSE");
-    fs::write(&license, b"test license").unwrap();
-    let package_config = package_root.join("package-config.toml");
-    let package_config_text = fs::read_to_string(&path)
-        .unwrap()
-        .replace(
-            loaded.config.runtime.binary.to_str().unwrap(),
-            package_binary.to_str().unwrap(),
-        )
-        .replace(
-            loaded.config.runtime.lock_file.to_str().unwrap(),
-            package_lock.to_str().unwrap(),
-        )
-        .replace(
-            loaded.config.runtime.assets_dir.to_str().unwrap(),
-            assets.to_str().unwrap(),
-        );
-    fs::write(&package_config, package_config_text).unwrap();
-    let destination = dir.path().join("release-bundle");
-    let package = parse_from([
-        "platformd",
-        "--config",
-        package_config.to_str().unwrap(),
-        "package-release",
-        "--dest",
-        destination.to_str().unwrap(),
-        "--lock",
-        package_lock.to_str().unwrap(),
-        "--assets",
-        assets.to_str().unwrap(),
-        "--license",
-        license.to_str().unwrap(),
-        "--default-config",
-        path.to_str().unwrap(),
-        "--runbooks",
-        workspace.join("docs/runbooks").to_str().unwrap(),
-        "--archive",
-        archive_path.to_str().unwrap(),
-    ])
-    .unwrap();
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    let code = execute_with_test_binary(package, &mut stdout, &mut stderr, &package_binary).await;
-    assert_eq!(
-        code,
-        std::process::ExitCode::SUCCESS,
-        "{}",
-        String::from_utf8_lossy(&stderr)
-    );
-    assert!(stderr.is_empty());
-    assert!(String::from_utf8(stdout).unwrap().contains("RELEASE_OK"));
-    assert!(destination.join("bin/workerd").is_file());
-    assert!(destination.join("share/release.json").is_file());
-    assert!(
-        destination
-            .join("docs/runbooks/install-and-first-start.md")
-            .is_file()
-    );
 
     struct RejectWrites;
     impl Write for RejectWrites {
@@ -2306,14 +2062,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     let (dir, path, _mock) = initialized_doctor_fixture().await;
     let mut loaded = load_platform_config(&path).unwrap();
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
-        .to_path_buf();
-    loaded.config.runtime.lock_file = workspace.join("runtime/workerd.lock.json");
-    loaded.config.runtime.assets_dir = workspace.join("runtime");
-    let capabilities = crate::capabilities::platform_capabilities(&loaded).unwrap();
+    let capabilities = crate::capabilities::platform_capabilities(&loaded.config).unwrap();
     assert!(capabilities.validate());
     assert_eq!(
         capabilities.products["durable_objects"].basic_websocket,
@@ -4195,36 +3944,15 @@ request_timeout_ms = 2000
 }
 
 #[tokio::test]
-async fn full_doctor_real_workerd_when_env_set() {
-    let Some(bin) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD") else {
-        eprintln!("OPEN_COMPUTE_TEST_WORKERD unset; full doctor real-runtime test not executed");
-        return;
-    };
-    let bin = PathBuf::from(bin);
-    assert!(bin.is_absolute());
+async fn full_doctor_uses_embedded_workerd() {
     let (dir, _path, mock) = initialized_doctor_fixture().await;
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
-        .to_path_buf();
-    let lock = workspace.join("runtime/workerd.lock.json");
-    let assets = workspace.join("runtime");
-    let extra = format!(
-        r#"
+    let extra = r#"
 [runtime]
-binary = "{}"
-lock_file = "{}"
-assets_dir = "{}"
 startup_timeout_ms = 20000
 shutdown_grace_ms = 5000
 drain_timeout_ms = 5000
 kill_timeout_ms = 2000
-"#,
-        bin.display(),
-        lock.display(),
-        assets.display()
-    );
+"#;
     let ak = dir.path().join("ak");
     let sk = dir.path().join("sk");
     write_mode(&ak, "AKIAEXAMPLEKEYID01", 0o600);
@@ -4314,15 +4042,16 @@ async fn doctor_reports_limits_space_and_full_prerequisite_failures() {
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert_eq!(check(&report, "free_space").status, CheckStatus::Warning);
 
-    fs::remove_dir_all(&loaded.config.runtime.assets_dir).unwrap();
-    let report = doctor_report(&loaded, DoctorMode::Full).await;
-    assert_eq!(check(&report, "runtime_cycle").status, CheckStatus::Skipped);
-
-    fs::create_dir_all(&loaded.config.runtime.assets_dir).unwrap();
-    fs::write(&loaded.config.runtime.binary, b"tampered").unwrap();
+    let package = open_compute_runtime::materialize_embedded_runtime(
+        &loaded.config.storage.data_dir.join("runtime"),
+    )
+    .unwrap();
+    let asset = package.assets_dir().join("config.capnp");
+    fs::set_permissions(&asset, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&asset, b"tampered").unwrap();
     let report = doctor_report(&loaded, DoctorMode::Full).await;
     assert_eq!(check(&report, "runtime_binary").status, CheckStatus::Failed);
-    assert_eq!(check(&report, "runtime_cycle").status, CheckStatus::Skipped);
+    assert_eq!(check(&report, "runtime_cycle").status, CheckStatus::Failed);
     let _ = dir;
 }
 
@@ -4330,7 +4059,6 @@ async fn doctor_reports_limits_space_and_full_prerequisite_failures() {
 async fn full_doctor_reports_s3_canary_failure_without_leaking_objects() {
     let (dir, path, mock) = initialized_doctor_fixture().await;
     let loaded = load_platform_config(&path).unwrap();
-    fs::remove_dir_all(&loaded.config.runtime.assets_dir).unwrap();
     mock.set_fault(open_compute_artifacts::Fault::Permission);
     let report = doctor_report(&loaded, DoctorMode::Full).await;
     assert_eq!(
@@ -4368,8 +4096,14 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
         ErrorCode::PathInvalid
     );
 
-    let original_runtime = fs::read(&base.config.runtime.binary).unwrap();
-    fs::write(&base.config.runtime.binary, b"tampered").unwrap();
+    let package = open_compute_runtime::materialize_embedded_runtime(
+        &base.config.storage.data_dir.join("runtime"),
+    )
+    .unwrap();
+    let asset = package.assets_dir().join("config.capnp");
+    let original_runtime = fs::read(&asset).unwrap();
+    fs::set_permissions(&asset, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&asset, b"tampered").unwrap();
     assert_eq!(
         run_platform_with(base.clone(), RunOptions::default())
             .await
@@ -4377,12 +4111,8 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
             .code(),
         ErrorCode::RuntimeInvalid
     );
-    fs::write(&base.config.runtime.binary, original_runtime).unwrap();
-    let mut permissions = fs::metadata(&base.config.runtime.binary)
-        .unwrap()
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&base.config.runtime.binary, permissions).unwrap();
+    fs::write(&asset, original_runtime).unwrap();
+    fs::set_permissions(&asset, fs::Permissions::from_mode(0o400)).unwrap();
 
     let mut loaded = base.clone();
     loaded.config.s3.access_key_id_env = Some(format!(
@@ -4451,19 +4181,8 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
 
 #[tokio::test]
 async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
-    let Some(binary) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD") else {
-        return;
-    };
     let (_dir, path, mock) = initialized_doctor_fixture().await;
     let mut loaded = load_platform_config(&path).unwrap();
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
-        .to_path_buf();
-    loaded.config.runtime.binary = PathBuf::from(binary);
-    loaded.config.runtime.lock_file = workspace.join("runtime/workerd.lock.json");
-    loaded.config.runtime.assets_dir = workspace.join("runtime");
     loaded.config.runtime.startup_timeout_ms = 60_000;
     loaded.config.runtime.shutdown_grace_ms = 1_000;
     loaded.config.runtime.kill_timeout_ms = 2_000;
@@ -4655,19 +4374,8 @@ async fn kv_maintenance_gc_skip_checkpoint_and_corruption_isolation() {
 
 #[tokio::test]
 async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
-    let Some(binary) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD") else {
-        return;
-    };
     let (_dir, path, mock) = initialized_doctor_fixture().await;
     let mut loaded = load_platform_config(&path).unwrap();
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
-        .to_path_buf();
-    loaded.config.runtime.binary = PathBuf::from(binary);
-    loaded.config.runtime.lock_file = workspace.join("runtime/workerd.lock.json");
-    loaded.config.runtime.assets_dir = workspace.join("runtime");
     loaded.config.runtime.startup_timeout_ms = 60_000;
     loaded.config.runtime.shutdown_grace_ms = 1_000;
     loaded.config.runtime.kill_timeout_ms = 2_000;

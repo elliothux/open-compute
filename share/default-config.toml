@@ -36,9 +36,6 @@ prefix = "system/"
 r2_prefix = "tenant/r2/"
 
 [runtime]
-binary = "/opt/open-compute/bin/workerd"
-lock_file = "/opt/open-compute/runtime/workerd.lock.json"
-assets_dir = "/opt/open-compute/runtime"
 startup_timeout_ms = 20000
 shutdown_grace_ms = 10000
 

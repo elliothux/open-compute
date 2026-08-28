@@ -31,23 +31,6 @@ fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("fixture mode");
 }
 
-fn write_runtime(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
-    let binary = root.join("workerd");
-    write_mode(
-        &binary,
-        b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-26'; exit 0; fi\nexit 1\n",
-        0o755,
-    );
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace")
-        .to_path_buf();
-    let lock = workspace.join("runtime/workerd.lock.json");
-    let assets = workspace.join("runtime");
-    (binary, lock, assets)
-}
-
 struct ConfigInputs<'a> {
     root: &'a Path,
     name: &'a str,
@@ -56,9 +39,6 @@ struct ConfigInputs<'a> {
     access_key: &'a Path,
     secret_key: &'a Path,
     endpoint: &'a str,
-    binary: &'a Path,
-    lock: &'a Path,
-    assets: &'a Path,
     prefix: &'a str,
 }
 
@@ -90,9 +70,6 @@ connect_timeout_ms = 500
 request_timeout_ms = 2000
 
 [runtime]
-binary = "{binary}"
-lock_file = "{lock}"
-assets_dir = "{assets}"
 
 [cache]
 max_bytes = 1048576
@@ -111,9 +88,6 @@ max_series = 1024
             access_key = input.access_key.display(),
             secret_key = input.secret_key.display(),
             prefix = input.prefix,
-            binary = input.binary.display(),
-            lock = input.lock.display(),
-            assets = input.assets.display(),
         ),
     )
     .expect("config");
@@ -183,7 +157,6 @@ async fn snapshot_restore_gate() {
     let temp = TempDir::new().expect("temp");
     let root = fs::canonicalize(temp.path()).expect("canonical temp");
     let mock = MockS3::spawn("open-compute").await;
-    let (binary, lock, assets) = write_runtime(&root);
     let access_key = root.join("s3-access-key");
     let secret_key = root.join("s3-secret-key");
     write_mode(&access_key, b"AKIAEXAMPLEKEYID01", 0o600);
@@ -203,9 +176,6 @@ async fn snapshot_restore_gate() {
         access_key: &access_key,
         secret_key: &secret_key,
         endpoint: &mock.endpoint,
-        binary: &binary,
-        lock: &lock,
-        assets: &assets,
         prefix: "system/",
     });
     let source_loaded = load_platform_config(&source_config).expect("source config");
@@ -573,9 +543,6 @@ async fn snapshot_restore_gate() {
         access_key: &access_key,
         secret_key: &secret_key,
         endpoint: &mock.endpoint,
-        binary: &binary,
-        lock: &lock,
-        assets: &assets,
         prefix: "system/",
     });
     let wrong_loaded = load_platform_config(&wrong_config).expect("wrong-key config");
@@ -604,9 +571,6 @@ async fn snapshot_restore_gate() {
         access_key: &access_key,
         secret_key: &secret_key,
         endpoint: &mock.endpoint,
-        binary: &binary,
-        lock: &lock,
-        assets: &assets,
         prefix: "system/",
     });
     let restore_loaded = load_platform_config(&restore_config).expect("restore config");
@@ -773,9 +737,6 @@ async fn snapshot_restore_gate() {
         access_key: &access_key,
         secret_key: &secret_key,
         endpoint: &mock.endpoint,
-        binary: &binary,
-        lock: &lock,
-        assets: &assets,
         prefix: "system/",
     });
     let cli_restore = run_cli_json(
@@ -828,9 +789,6 @@ async fn snapshot_restore_gate() {
         access_key: &access_key,
         secret_key: &secret_key,
         endpoint: &mock.endpoint,
-        binary: &binary,
-        lock: &lock,
-        assets: &assets,
         prefix: "system/",
     });
     let failed_restore = RestoreTarget::acquire(&cleanup_target).expect("failed restore target");

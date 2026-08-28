@@ -18,9 +18,6 @@ const DEFAULT_S3_REGION: &str = "auto";
 const DEFAULT_S3_BUCKET: &str = "open-compute";
 const DEFAULT_S3_PREFIX: &str = "system/";
 const DEFAULT_S3_R2_PREFIX: &str = "tenant/r2/";
-const DEFAULT_RUNTIME_BINARY: &str = "/opt/open-compute/bin/workerd";
-const DEFAULT_RUNTIME_LOCK_FILE: &str = "/opt/open-compute/runtime/workerd.lock.json";
-const DEFAULT_RUNTIME_ASSETS: &str = "/opt/open-compute/runtime";
 const DATA_LOCK_FILE_NAME: &str = "platform.lock";
 
 /// Top-level platform configuration.
@@ -33,7 +30,7 @@ pub struct PlatformConfig {
     pub storage: StorageConfig,
     /// Object storage authority.
     pub s3: S3Config,
-    /// workerd binary and supervisor budgets.
+    /// Embedded workerd supervisor budgets.
     pub runtime: RuntimeConfig,
     /// Local artifact cache.
     pub cache: CacheConfig,
@@ -449,16 +446,10 @@ impl S3Config {
     }
 }
 
-/// workerd binary, lock, assets, and supervisor budgets.
+/// Supervisor budgets for the mandatory embedded workerd runtime.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct RuntimeConfig {
-    /// Absolute workerd binary path.
-    pub binary: PathBuf,
-    /// Absolute packaged workerd release manifest.
-    pub lock_file: PathBuf,
-    /// Absolute static assets directory.
-    pub assets_dir: PathBuf,
     /// Startup timeout in milliseconds.
     pub startup_timeout_ms: u64,
     /// SIGTERM grace period in milliseconds.
@@ -480,9 +471,6 @@ pub struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            binary: PathBuf::from(DEFAULT_RUNTIME_BINARY),
-            lock_file: PathBuf::from(DEFAULT_RUNTIME_LOCK_FILE),
-            assets_dir: PathBuf::from(DEFAULT_RUNTIME_ASSETS),
             startup_timeout_ms: 20_000,
             shutdown_grace_ms: 10_000,
             drain_timeout_ms: 15_000,
@@ -497,9 +485,6 @@ impl Default for RuntimeConfig {
 
 impl RuntimeConfig {
     fn validate(&self) -> Result<(), PlatformError> {
-        require_absolute(&self.binary, "runtime.binary")?;
-        require_absolute(&self.lock_file, "runtime.lock_file")?;
-        require_absolute(&self.assets_dir, "runtime.assets_dir")?;
         require_nonzero(self.startup_timeout_ms, "runtime.startup_timeout_ms")?;
         require_nonzero(self.shutdown_grace_ms, "runtime.shutdown_grace_ms")?;
         require_nonzero(self.drain_timeout_ms, "runtime.drain_timeout_ms")?;

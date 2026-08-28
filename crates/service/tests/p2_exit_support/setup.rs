@@ -32,10 +32,10 @@ pub(super) struct Fixture {
 
 pub(super) async fn prepare() -> Fixture {
     let root = repo_root();
-    std::fs::create_dir_all(root.join(".p2-exit-run")).unwrap();
+    std::fs::create_dir_all(root.join(".temp/p2-exit-run")).unwrap();
     let temp = tempfile::Builder::new()
         .prefix("chain-")
-        .tempdir_in(root.join(".p2-exit-run"))
+        .tempdir_in(root.join(".temp/p2-exit-run"))
         .unwrap();
     let evidence = Evidence(Some(temp));
     let data = evidence.0.as_ref().unwrap().path().join("data");

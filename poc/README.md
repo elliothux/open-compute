@@ -11,7 +11,7 @@ abort/delete), and **G0.8** (three-run regression and results report).
 ## Host
 
 Darwin arm64. The harness is Node.js standard library. The official Cloudflare
-`workerd` Darwin arm64 artifact is downloaded into `poc/.runtime-cache/` and
+`workerd` Darwin arm64 artifact is downloaded into `.temp/runtime-cache/` and
 SHA-256 verified before every start.
 
 Pinned release: `v1.20260826.1` (`workerd 2026-08-26`).
@@ -125,9 +125,9 @@ with:
 G0_RECOVERY_SEED=1194329607 ./poc/g0 test recovery
 ```
 
-After the verdict is calculated, the runner writes `docs/g0-results.md` from
+After the verdict is calculated, the runner writes `docs/implemented/g0-results.md` from
 that run's validated evidence (temp sibling + rename). The aggregate JSON
-includes relative `resultsFile: "docs/g0-results.md"`.
+includes relative `resultsFile: "docs/implemented/g0-results.md"`.
 
 Exit status: Go and Conditional Go exit 0. No-Go, including a failure to write
 the results report, exits nonzero.
@@ -135,7 +135,7 @@ the results report, exits nonzero.
 Current evidence-derived verdict is Conditional Go: every hard matrix case
 (L01-L08, B01-B03, D01-D09, R01) passed in all three rounds, and the only
 allowlisted non-pass is loader `D-abort` (abortEvents 0 -> 0 each round). See
-[G0 results](../docs/g0-results.md). Standalone `./poc/g0 test loader` still
+[G0 results](../docs/implemented/g0-results.md). Standalone `./poc/g0 test loader` still
 fails closed on `D-abort` and exits 1 (24 passed / 1 failed / 0 not-run).
 
 ## Gate status
@@ -150,9 +150,9 @@ fails closed on `D-abort` and exits 1 (24 passed / 1 failed / 0 not-run).
 | G0.5 native DO facets | PASS (`./poc/g0 test durable-object`) |
 | G0.6 crash/restart persistence | PASS (`./poc/g0 test recovery`, 17 passed / 0 failed / 0 not-run) |
 | G0.7 deployment/facet lifecycle | PASS (`./poc/g0 test recovery`, native abort preserves storage; native delete alone resets it) |
-| G0.8 full regression | Conditional Go (`./poc/g0 test all`; see [results](../docs/g0-results.md)) |
+| G0.8 full regression | Conditional Go (`./poc/g0 test all`; see [results](../docs/implemented/g0-results.md)) |
 
 ## Failure artifacts
 
-Successful runs delete only their own temp directory under `g0/.run/`. Failed
-runs keep diagnostics in `g0/.run/failed/<run-id>/`.
+Successful runs delete only their own temp directory under `.temp/g0-run/`. Failed
+runs keep diagnostics in `.temp/g0-run/failed/<run-id>/`.

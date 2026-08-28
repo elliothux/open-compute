@@ -20,7 +20,6 @@ fn workspace() -> PathBuf {
 }
 
 fn config(temp: &TempDir) -> PathBuf {
-    let root = workspace();
     let path = temp.path().join("platform.toml");
     fs::write(
         &path,
@@ -44,9 +43,6 @@ prefix = "system/"
 r2_prefix = "tenant/r2/"
 
 [runtime]
-binary = "{binary}"
-lock_file = "{lock}"
-assets_dir = "{assets}"
 
 [metrics]
 enabled = true
@@ -55,9 +51,6 @@ max_series = 1024
 "#,
             data = temp.path().join("data").display(),
             key = temp.path().join("recovery.key").display(),
-            binary = temp.path().join("workerd").display(),
-            lock = root.join("runtime/workerd.lock.json").display(),
-            assets = root.join("runtime").display(),
         ),
     )
     .expect("write config");
@@ -205,8 +198,8 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
         products["durable_objects"]["hibernatable_websocket"],
         "unsupported"
     );
-    let deviations =
-        fs::read_to_string(workspace().join("docs/p1-deviations.md")).expect("deviations document");
+    let deviations = fs::read_to_string(workspace().join("docs/references/p1-deviations.md"))
+        .expect("deviations document");
     for product in products.values() {
         if let Some(ids) = product.get("deviations").and_then(Value::as_array) {
             for id in ids {

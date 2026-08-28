@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const { G0_ROOT, verifyBinary } = require("./runtime");
 const { G0Client, waitForHealth } = require("./http");
 
-const RUN_ROOT = path.join(G0_ROOT, ".run");
+const RUN_ROOT = path.resolve(G0_ROOT, "../.temp/g0-run");
 const WORKERD_DIR = path.join(G0_ROOT, "workerd");
 const FAILED_ROOT = path.join(RUN_ROOT, "failed");
 

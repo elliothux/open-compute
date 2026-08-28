@@ -2,7 +2,7 @@
 # Run the P1 forward-only schema resume and release-package contract Gates.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/poc/.runtime-cache/v1.20260826.1/workerd"}
+workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/.temp/runtime-cache/v1.20260826.1/workerd"}
 if [ ! -f "$workerd" ]; then
   echo "OPEN_COMPUTE_TEST_WORKERD is missing; the P1 upgrade Gate refuses to skip" >&2
   exit 1

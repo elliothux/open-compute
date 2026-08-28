@@ -3,7 +3,6 @@
 use super::*;
 use open_compute_core::{HardeningConfig, PlatformConfig, StorageConfig};
 use open_compute_service::capabilities::platform_capabilities;
-use open_compute_service::config_load::LoadedConfig;
 use open_compute_storage::{
     PlatformStorage, PreparePlatformSnapshotRequest, RestoreTarget, inspect_master_key,
     prepare_platform_snapshot, sign_snapshot_manifest, verify_snapshot_manifest_mac,
@@ -124,15 +123,9 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .unwrap()
         .parent()
         .unwrap();
-    let mut platform = PlatformConfig::from_toml_str("").unwrap();
-    platform.runtime.lock_file = workspace.join("runtime/workerd.lock.json");
-    platform.runtime.assets_dir = workspace.join("runtime");
-    let release = platform_capabilities(&LoadedConfig {
-        path: workspace.join("share/default-config.toml"),
-        config: platform,
-    })
-    .unwrap()
-    .release;
+    let release = platform_capabilities(&PlatformConfig::default())
+        .unwrap()
+        .release;
     let snapshot_id = RequestId::generate().to_string();
     let prefix = format!(
         "system/snapshots/v1/{}/{snapshot_id}/objects/",
@@ -168,7 +161,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     );
     let fresh = tempfile::Builder::new()
         .prefix("workflow-restored-")
-        .tempdir_in(workspace.join(".p2-4-run"))
+        .tempdir_in(workspace.join(".temp/p2-4-run"))
         .unwrap();
     let data = fresh.path().join("fresh-host");
     let restore = RestoreTarget::acquire(&data).unwrap();

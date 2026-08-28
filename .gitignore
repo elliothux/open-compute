@@ -2,7 +2,6 @@
 /debug/
 /target/
 /test/fuzz/target/
-/.cargo-home/
 **/*.rs.bk
 *.pdb
 *.profraw
@@ -12,18 +11,9 @@ node_modules/
 /packages/*/dist/
 *.tsbuildinfo
 
-# Mutation testing output.
-**/mutants.out*/
-
-# Repository-local development state.
+# Repository-local temporary/cache output and persistent development state.
+/.temp/
 /.data/
 
 # Local source checkouts used only as implementation references.
 /references/
-
-# G0 workerd spike: official binary cache and successful-run temp artifacts.
-# Keep source, fixtures, tests, lockfiles, and retained failure evidence.
-/poc/.runtime-cache/
-/poc/.run/*
-
-.ruff_cache/

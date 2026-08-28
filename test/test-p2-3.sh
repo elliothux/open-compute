@@ -12,7 +12,7 @@ esac
 if [ -z "$workerd" ]; then
   case "$(uname -s)-$(uname -m)" in
     Darwin-arm64|Darwin-x86_64|Linux-x86_64|Linux-aarch64|Linux-arm64)
-      workerd="$root/poc/.runtime-cache/v1.20260826.1/workerd" ;;
+      workerd="$root/.temp/runtime-cache/v1.20260826.1/workerd" ;;
     *) workerd="" ;;
   esac
 fi

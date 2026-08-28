@@ -27,6 +27,12 @@ url.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
+[build-dependencies]
+flate2.workspace = true
+hex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
 [dev-dependencies]
 hex.workspace = true
 open-compute-core = { path = "../core", features = ["test-support"] }

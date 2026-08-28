@@ -1,24 +1,26 @@
 //! Pinned workerd supply chain, binary verification, static config cache, and supervisor.
 //!
-//! This crate never downloads workerd during production verification or compile.
-//! Operator-only archive installation is an explicit API.
+//! The executable always contains the verified runtime payload; startup never downloads.
 
 #![deny(missing_docs)]
 
 pub mod compile;
-pub mod fetch;
+mod embedded;
 mod lease;
 pub mod lock;
 pub mod process;
 pub mod supervisor;
-pub mod verify;
+mod verify;
 
 mod digest;
 mod fsutil;
 
 pub use compile::{CompileRequest, CompiledConfig, PlatformReleaseMeta, compile_static_config};
 pub use digest::runtime_assets_sha256;
-pub use fetch::{PackageReleaseRequest, install_official_release, package_release_bundle};
+pub use embedded::{
+    RuntimePackage, embedded_payload_sha256, embedded_runtime_assets_sha256, embedded_runtime_lock,
+    inspect_embedded_runtime, materialize_embedded_runtime,
+};
 pub use lease::assert_no_live_orphan;
 #[cfg(any(test, feature = "test-support"))]
 pub use lease::{recover_orphan_for_test, set_lease_write_fail, set_start_key_hook};
@@ -33,9 +35,9 @@ pub use supervisor::{
     WorkerdSupervisor, WorkerdSupervisorOptions, generate_internal_token,
     probe_ready_with_raw_token, serve_argv, token_fingerprint,
 };
-pub use verify::{
-    VerifiedRuntime, verify_runtime_binary, verify_runtime_binary_with_staging_lease,
-};
+pub use verify::VerifiedRuntime;
+#[cfg(any(test, feature = "test-support"))]
+pub use verify::verify_runtime_binary;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use supervisor::{

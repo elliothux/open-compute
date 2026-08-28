@@ -35,14 +35,6 @@ impl Drop for ChildGuard {
     }
 }
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace")
-        .to_path_buf()
-}
-
 fn unused_addr() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral listener");
     listener.local_addr().expect("listener address")
@@ -57,7 +49,6 @@ fn write_config(
     root: &Path,
     data_dir: &Path,
     mock: &MockS3,
-    workerd: &Path,
     public: SocketAddr,
     admin: SocketAddr,
 ) -> PathBuf {
@@ -69,7 +60,6 @@ fn write_config(
         b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         0o600,
     );
-    let workspace = repo_root();
     let config = root.join("platform.toml");
     fs::write(
         &config,
@@ -99,9 +89,6 @@ connect_timeout_ms = 500
 request_timeout_ms = 2000
 
 [runtime]
-binary = "{workerd}"
-lock_file = "{lock}"
-assets_dir = "{assets}"
 startup_timeout_ms = 20000
 shutdown_grace_ms = 2000
 kill_timeout_ms = 1000
@@ -119,9 +106,6 @@ max_series = 1024
             endpoint = mock.endpoint,
             access_key = access_key.display(),
             secret_key = secret_key.display(),
-            workerd = workerd.display(),
-            lock = workspace.join("runtime/workerd.lock.json").display(),
-            assets = workspace.join("runtime").display(),
         ),
     )
     .expect("config");
@@ -208,7 +192,7 @@ async fn p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly() {
     let mock = MockS3::spawn("open-compute").await;
     let public = unused_addr();
     let admin = unused_addr();
-    let config = write_config(&root, &data_dir, &mock, &workerd, public, admin);
+    let config = write_config(&root, &data_dir, &mock, public, admin);
     let process_log = root.join("platformd.log");
     let loaded = load_platform_config(&config).expect("load config");
     drop(

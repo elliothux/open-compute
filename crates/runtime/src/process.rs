@@ -376,7 +376,7 @@ fn executable_user(path: &Path) -> Result<Option<i32>, PlatformError> {
     if !path.exists() {
         return Ok(None);
     }
-    let output = std::process::Command::new("lsof")
+    let output = std::process::Command::new("/usr/sbin/lsof")
         .args(["-nP", "-d", "txt", "-Fn"])
         .stdin(Stdio::null())
         .output()

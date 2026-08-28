@@ -21,7 +21,6 @@ pub(crate) const MAX_ASSETS_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
 pub(crate) const MAX_ASSET_FILES: usize = 4096;
 pub(crate) const MAX_ASSET_ENTRIES: usize = 8192;
 pub(crate) const MAX_WALK_DEPTH: usize = 8;
-pub(crate) const MAX_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 
 fn path_invalid(msg: &'static str) -> PlatformError {
     PlatformError::new(ErrorCode::PathInvalid, msg)

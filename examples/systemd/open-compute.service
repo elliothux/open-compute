@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=open-compute
 Group=open-compute
-ExecStart=/opt/open-compute/bin/platformd --config /etc/open-compute/config.toml run
+ExecStart=/opt/open-compute/platformd --config /etc/open-compute/config.toml run
 WorkingDirectory=/var/lib/open-compute
 # Restart on process death / liveness failure. Readiness (503) must not restart the unit.
 Restart=on-failure

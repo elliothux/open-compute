@@ -246,7 +246,7 @@ async fn p0_3_real_binding_matrix() {
         WorkerdSupervisorOptions {
             runtime,
             compiler,
-            config: runtime_config(workerd, lock, root.join("runtime")),
+            config: runtime_config(),
             clock: Arc::new(SystemClock),
             jitter: Arc::new(OsJitter),
             redactor: Redactor::new(),
@@ -838,11 +838,8 @@ async fn wait_pid_change(supervisor: &WorkerdSupervisor, previous: i32, timeout:
     }
 }
 
-fn runtime_config(binary: PathBuf, lock: PathBuf, assets: PathBuf) -> RuntimeConfig {
+fn runtime_config() -> RuntimeConfig {
     RuntimeConfig {
-        binary,
-        lock_file: lock,
-        assets_dir: assets,
         startup_timeout_ms: 20_000,
         shutdown_grace_ms: 500,
         drain_timeout_ms: 100,

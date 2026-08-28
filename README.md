@@ -2,10 +2,12 @@
 
 本地 Cloudflare Workers 兼容平台（`platformd` + pinned `workerd`）。
 
-P0.1 提供单进程宿主基础，P0.2 提供无产品 binding 的 module Worker
-create/deploy/validate/promote/rollback/route/fetch、immutable vars/secrets、public-only egress、
-retention/delete 与 artifact GC。一个 `platformd` 进程拥有配置、数据、S3 artifact、HTTP
-control/data plane 和 pinned upstream `workerd` child；启动过程永不下载 runtime。
+唯一发行物是一个按 OS/CPU 构建的 `platformd`：内嵌正式 pinned workerd 压缩包、
+Cap'n Proto、生成的系统 Worker、默认配置、许可证和运维手册。没有外部 runtime 模式、
+安装目录资源查找或启动时下载。进程边界仍是一个 platformd 管理一个 workerd child。
+
+Worker、KV、R2、D1、Durable Objects、Queues、Cron 和 Workflows 的具体支持面与限制以
+`platformd capabilities --json` 为准。部署步骤见 [单二进制分发与部署](docs/references/single-binary.md)。
 
 ## Workspace
 
@@ -24,12 +26,16 @@ control/data plane 和 pinned upstream `workerd` child；启动过程永不下�
 | `test/` | Repository test/Gate launchers, coverage, load/soak, fixtures, and fuzz |
 | `scripts/` | Local development and release packaging launchers |
 
+未完成的实施与验收方案放在 `docs/`；已完成阶段的设计与结果见
+[docs/implemented](docs/implemented/README.md)，持续维护的 API、测试、部署及运维资料见
+[docs/references](docs/references/README.md)。归档不代表对当前工作树重新执行了验收。
+
 ## Prerequisites
 
 - Rust 1.98.0 (workspace toolchain and MSRV)
 - Bun 1.3.14, Node.js 24, and locked workspace dependencies for TypeScript development/tests (not daemon startup)
 - macOS or Linux
-- Official pinned `workerd` matching `runtime/workerd.lock.json` (G0 pin `v1.20260826.1`)
+- 构建时：与目标平台及 `runtime/workerd.lock.json` 匹配的官方 `.gz`，通过绝对路径 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 显式提供（pin `v1.20260826.1`）
 - `rclone` with `serve s3` support for local development
 - Local S3-compatible endpoint for real runs (the Gate hosts its own fake S3; protocol is still AWS SDK SigV4)
 
@@ -38,10 +44,12 @@ control/data plane 和 pinned upstream `workerd` child；启动过程永不下�
 `--config` must be an absolute file. Secrets only via `env:` / `file:` / documented `OPEN_COMPUTE_*` and S3 env/file refs. See `share/default-config.toml`.
 
 ```sh
-platformd --config /abs/config.toml config check
-platformd --config /abs/config.toml doctor
-platformd --config /abs/config.toml doctor --full
-platformd --config /abs/config.toml run
+platformd config init --data-dir /abs/data > /abs/new-config.toml
+# 编辑 S3 endpoint/bucket，提供配置引用的凭据；文件不可覆盖已有配置。
+platformd --config /abs/new-config.toml config check
+platformd --config /abs/new-config.toml run
+# 首次成功运行并停机后，才可执行依赖已有数据库/身份的完整诊断。
+platformd --config /abs/new-config.toml doctor --full
 ```
 
 ## Dev / test
@@ -52,6 +60,7 @@ Worker 的 TypeScript 用法见 [工具链说明](packages/toolchain/README.md)�
 本地开发直接运行：
 
 ```sh
+export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/workerd-darwin-arm64.gz
 ./scripts/dev.sh
 ```
 
@@ -66,10 +75,9 @@ Worker 的 TypeScript 用法见 [工具链说明](packages/toolchain/README.md)�
 └── rclone-s3.log
 ```
 
-停止 `platformd` 时脚本同时停止 rclone，但保留上述数据供下次启动复用。默认使用正式 lock
-匹配的 `poc/.runtime-cache/v1.20260826.1/workerd`；也可通过绝对路径
-`OPEN_COMPUTE_DEV_WORKERD` 指定已有的 verified binary。首次 `./scripts/dev.sh` 完成数据目录初始化后，
-开发环境检查可运行：
+停止 `platformd` 时脚本同时停止 rclone，但保留上述数据供下次启动复用。
+开发构建也必须内嵌正式 archive，不支持 `OPEN_COMPUTE_DEV_WORKERD`。
+首次启动完成数据目录初始化后，开发环境检查可运行：
 
 ```sh
 ./scripts/dev.sh config check
@@ -78,7 +86,7 @@ Worker 的 TypeScript 用法见 [工具链说明](packages/toolchain/README.md)�
 
 测试与 Gate 仍使用测试进程内的 SigV4 S3 provider。开发、审查和修复期间只跑一轮相关 Gate；
 实现收尾、源码冻结后才跑最终三轮验收和完整 coverage。单轮命令与旧入口限制见
-[Gate 验证节奏](docs/testing.md)。下面列出完整检查和最终 Gate 入口，不是每次中间改动都要重跑的清单：
+[Gate 验证节奏](docs/references/testing.md)。下面列出完整检查和最终 Gate 入口，不是每次中间改动都要重跑的清单：
 
 ```sh
 cargo fmt --all --check
@@ -89,10 +97,10 @@ RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
 cargo metadata --no-deps --format-version 1
 ./test/check-boundaries.sh
 ./poc/g0 test bootstrap
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./test/test-p0-1.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./test/test-p0-2.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./test/test-p0-8.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./test/test-p0-exit.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd" ./test/test-p0-1.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd" ./test/test-p0-2.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd" ./test/test-p0-8.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd" ./test/test-p0-exit.sh
 ```
 
 Rust 覆盖率使用
@@ -108,7 +116,7 @@ HTML、LCOV 和 JSON summary；workspace 生产 Rust 行覆盖率低于 90.00% �
 
 这些 Gate 在 pinned binary 缺失或 hash 与 lock 不一致时都会直接失败，不会 skip。
 `test/test-p0-2.sh` 在三个 fresh test process 中运行真实 `workerd`、SQLite 和 SigV4 S3 test
-provider。支持面与明确偏差见 [`docs/p0-2-api-matrix.md`](docs/p0-2-api-matrix.md)。
+provider。支持面与明确偏差见 [`docs/implemented/p0-2-api-matrix.md`](docs/implemented/p0-2-api-matrix.md)。
 `test/test-p0-8.sh` 在三个 fresh process 中运行 scheduler/alarm matrix，随后递归执行
 P0.7-P0.2 regression Gate。
 `test/test-p0-exit.sh` 在三个 fresh process 中运行单一 Worker 的 KV、R2、D1、DO、alarm、
@@ -118,24 +126,19 @@ Linux release CI 另以 `test/test-p0-2-egress-linux.sh` 创建短期受控 dual
 public IPv4/IPv6/DNS allow 与 redirect/DNS-to-private deny；该脚本会要求显式 sudo 授权并在退出时
 清理地址和 hosts 项。
 
-## Release layout (offline start)
+## 单文件发布
 
-```
-open-compute/
-├── bin/platformd
-├── bin/workerd
-├── runtime/workerd.lock.json
-├── runtime/config.capnp
-├── runtime/system-workers/
-├── licenses/
-└── share/default-config.toml
-```
-
-Package (fetch/verify official archive **only** at packaging time; refuses checksum/version mismatch and overwrite):
+在干净源码上生成宿主平台的一个可执行文件；目标文件必须不存在：
 
 ```sh
-./scripts/package-release.sh --dest /abs/open-compute-release --download
+./scripts/package-release.sh --dest /abs/releases/platformd --archive /abs/pinned-workerd.gz
+# 仅在显式允许下载时，使用 --download 替代 --archive。
 ```
+
+运行端只需要这个文件、用户配置/凭据、可写 data-dir 和 S3 authority。
+不需要 Rust、Bun、Node、TypeScript 或相邻资源目录。运行时会在
+`data/runtime/packages/<payload-sha256>/` 物化校验过的 workerd 和系统资源；
+这不是“运行时磁盘上也只有一个文件”。详情见 [分发契约](docs/references/single-binary.md)。
 
 ## Operations
 
@@ -150,7 +153,7 @@ Never embed credentials in units/images; use env or file refs from config.
 - One `platformd` per data dir (`DATA_DIR_IN_USE`).
 - Internal workerd token is not on argv/env/logs/status/metrics.
 - `/health/live` is liveness only; `/health/ready` is admission and must not restart the process.
-- P0.2 不向 tenant 暴露 KV/D1/R2/DO/Queue 等产品 binding，也不提供 multi-node HA。
+- tenant 仅能访问部署中明确声明的产品 binding；平台不提供 multi-node HA。
 - tenant outbound 仅为 HTTP(S) fetch，并由 pinned workerd 的 `Network(allow=["public"])`
   拒绝 private/local/metadata 网络目标。
 - Next-start orphan recovery uses a secret-free child lease (PID + start identity + binary digest) and will not signal a reused PID.

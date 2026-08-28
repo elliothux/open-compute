@@ -7,7 +7,7 @@ use open_compute_artifacts::{
     ArtifactCache, ArtifactRef, ArtifactStore, MapEnv, MockS3, S3ArtifactClient,
     resolve_s3_credentials_with,
 };
-use open_compute_core::{CacheConfig, PlatformConfig, S3Config, StartupId};
+use open_compute_core::{CacheConfig, S3Config, StartupId};
 use open_compute_runtime::{RuntimeLock, load_runtime_lock, recover_orphan_for_test};
 use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 use sha2::{Digest, Sha256};
@@ -95,7 +95,6 @@ async fn p0_1_process_gate_three_rounds() {
     let workerd = required_workerd();
     let repo = repo_root();
     let lock_path = repo.join("runtime/workerd.lock.json");
-    let assets = repo.join("runtime");
     let (lock, _) = load_runtime_lock(&lock_path).expect("lock");
     verify_workerd(&lock, &workerd);
     let staging_before = staging_directories();
@@ -104,7 +103,7 @@ async fn p0_1_process_gate_three_rounds() {
     let mut completed = 0u32;
     for round in 1..=ROUNDS {
         eprintln!("P0.1 gate round {round}/{ROUNDS}");
-        run_round(round, &repo, &workerd, &lock_path, &assets, &s3, &lock).await;
+        run_round(round, &s3, &lock).await;
         completed += 1;
     }
     assert_eq!(completed, ROUNDS, "exactly three rounds must complete");
@@ -128,12 +127,11 @@ async fn round_drop_recovers_orphan_without_platform_handle() {
     let workerd = required_workerd();
     let repo = repo_root();
     let lock_path = repo.join("runtime/workerd.lock.json");
-    let assets = repo.join("runtime");
     let (lock, _) = load_runtime_lock(&lock_path).expect("lock");
     verify_workerd(&lock, &workerd);
     let staging_before = staging_directories();
     let s3 = MockS3::spawn("open-compute").await;
-    let mut round = setup_round(90, &repo, &workerd, &lock_path, &assets, &s3, &lock);
+    let mut round = setup_round(90, &s3, &lock);
     let bin = env!("CARGO_BIN_EXE_platformd");
     let env_id = "OC_S3_ID_90";
     let env_secret = "OC_S3_SECRET_90";
@@ -178,16 +176,8 @@ async fn round_drop_recovers_orphan_without_platform_handle() {
     drop(s3);
 }
 
-async fn run_round(
-    n: u32,
-    repo: &Path,
-    workerd: &Path,
-    lock_path: &Path,
-    assets: &Path,
-    s3: &MockS3,
-    lock: &RuntimeLock,
-) {
-    let mut round = setup_round(n, repo, workerd, lock_path, assets, s3, lock);
+async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
+    let mut round = setup_round(n, s3, lock);
     let bin = env!("CARGO_BIN_EXE_platformd");
     let env_id = format!("OC_S3_ID_{n}");
     let env_secret = format!("OC_S3_SECRET_{n}");
@@ -371,15 +361,7 @@ async fn run_round(
     );
 }
 
-fn setup_round(
-    n: u32,
-    repo: &Path,
-    workerd: &Path,
-    lock_path: &Path,
-    assets: &Path,
-    s3: &MockS3,
-    lock: &RuntimeLock,
-) -> Round {
+fn setup_round(n: u32, s3: &MockS3, lock: &RuntimeLock) -> Round {
     let dir = TempDir::new().unwrap();
     let data = dir.path().join("data");
     fs::create_dir_all(&data).unwrap();
@@ -415,9 +397,6 @@ request_timeout_ms = 4000
 max_retries = 1
 retry_backoff_ms = 50
 [runtime]
-binary = "{workerd}"
-lock_file = "{lock}"
-assets_dir = "{assets}"
 startup_timeout_ms = 20000
 shutdown_grace_ms = 400
 drain_timeout_ms = 50
@@ -433,14 +412,10 @@ max_artifact_bytes = 65536
             data = data.display(),
             key = key.display(),
             endpoint = s3.endpoint,
-            workerd = workerd.display(),
-            lock = lock_path.display(),
-            assets = assets.display(),
             restart_budget = GATE_RESTART_BUDGET,
         ),
     )
     .unwrap();
-    let _ = (repo, PlatformConfig::from_toml_str);
     Round {
         stderr: dir.path().join("stderr.log"),
         runtime_digest: lock
@@ -712,7 +687,9 @@ fn partial_startup_crashes(
         env_secret,
         "runtime-config",
         |r, pid| {
-            wait_runtime_config(&r.data, 20);
+            // This observes the complete first-start pipeline, including embedded payload
+            // materialization, rather than only the bounded workerd compile subprocess.
+            wait_runtime_config(&r.data, PLATFORM_READY_TIMEOUT_SECS);
             assert_pre_ready(pid, "runtime-config");
         },
     );
@@ -1283,7 +1260,7 @@ fn read_lossy(path: &Path) -> String {
 }
 
 fn retain_failure(round: &Round) {
-    let dest = repo_root().join(".p0-1-run/failed").join(format!(
+    let dest = repo_root().join(".temp/p0-1-run/failed").join(format!(
         "{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

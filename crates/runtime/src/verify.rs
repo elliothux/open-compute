@@ -35,6 +35,7 @@ pub struct VerifiedRuntime {
     lock: RuntimeLock,
     lock_bytes: Vec<u8>,
     file: File,
+    pub(crate) expected_assets_sha256: Option<&'static str>,
     staging_lease_path: Option<PathBuf>,
 }
 
@@ -48,6 +49,7 @@ impl Clone for VerifiedRuntime {
             lock: self.lock.clone(),
             lock_bytes: self.lock_bytes.clone(),
             file: self.file.try_clone().expect("dup verified executable fd"),
+            expected_assets_sha256: self.expected_assets_sha256,
             staging_lease_path: self.staging_lease_path.clone(),
         }
     }
@@ -72,6 +74,7 @@ impl PartialEq for VerifiedRuntime {
             && self.version_output == other.version_output
             && self.lock == other.lock
             && self.lock_bytes == other.lock_bytes
+            && self.expected_assets_sha256 == other.expected_assets_sha256
             && self.staging_lease_path == other.staging_lease_path
     }
 }
@@ -167,38 +170,27 @@ impl VerifiedRuntime {
 /// Verify `binary` against the lock file at `lock_path` and execute `workerd --version`.
 ///
 /// Never downloads, never inspects `PATH`, and never follows a symlink.
+#[cfg(any(test, feature = "test-support"))]
 pub async fn verify_runtime_binary(
     lock_path: &Path,
     binary: &Path,
     deadline: Duration,
     redactor: &Redactor,
 ) -> Result<VerifiedRuntime, PlatformError> {
-    verify_runtime_binary_inner(lock_path, binary, deadline, redactor, None).await
+    let (_, bytes) = crate::lock::load_runtime_lock(lock_path)?;
+    verify_runtime_binary_inner(&bytes, binary, deadline, redactor, None, None).await
 }
 
-/// Verify workerd while journaling macOS executable staging beside `lease_path`.
-///
-/// Any formally identified orphan or interrupted staging copy is recovered
-/// before the version probe creates a new staging image.
-pub async fn verify_runtime_binary_with_staging_lease(
-    lock_path: &Path,
-    binary: &Path,
-    deadline: Duration,
-    redactor: &Redactor,
-    lease_path: &Path,
-) -> Result<VerifiedRuntime, PlatformError> {
-    verify_runtime_binary_inner(lock_path, binary, deadline, redactor, Some(lease_path)).await
-}
-
-async fn verify_runtime_binary_inner(
-    lock_path: &Path,
+pub(crate) async fn verify_runtime_binary_inner(
+    lock_bytes: &[u8],
     binary: &Path,
     deadline: Duration,
     redactor: &Redactor,
     staging_lease_path: Option<&Path>,
+    expected_assets_sha256: Option<&'static str>,
 ) -> Result<VerifiedRuntime, PlatformError> {
     require_absolute(binary)?;
-    let (lock, lock_bytes) = crate::lock::load_runtime_lock(lock_path)?;
+    let lock = RuntimeLock::parse(lock_bytes)?;
     let (target_name, target) = lock.current_target()?;
     let expected = parse_sha256_hex(&target.binary_sha256)?;
 
@@ -301,8 +293,9 @@ async fn verify_runtime_binary_inner(
         binary_sha256,
         version_output: trimmed.to_owned(),
         lock,
-        lock_bytes,
+        lock_bytes: lock_bytes.to_vec(),
         file,
+        expected_assets_sha256,
         staging_lease_path: staging_lease_path.map(Path::to_path_buf),
     })
 }

@@ -39,9 +39,6 @@ struct PlatformConfigInput<'a> {
     data_dir: &'a std::path::Path,
     master_key: &'a std::path::Path,
     mock: &'a MockS3,
-    workerd: &'a std::path::Path,
-    lock: &'a std::path::Path,
-    assets: &'a std::path::Path,
 }
 
 fn write_platform_config(input: &PlatformConfigInput<'_>) -> PathBuf {
@@ -79,9 +76,6 @@ connect_timeout_ms = 500
 request_timeout_ms = 5000
 
 [runtime]
-binary = "{workerd}"
-lock_file = "{lock}"
-assets_dir = "{assets}"
 
 [cache]
 max_bytes = 67108864
@@ -99,9 +93,6 @@ max_series = 1024
             endpoint = input.mock.endpoint,
             access_key = access_key.display(),
             secret_key = secret_key.display(),
-            workerd = input.workerd.display(),
-            lock = input.lock.display(),
-            assets = input.assets.display(),
         ),
     )
     .unwrap();
@@ -515,9 +506,6 @@ async fn p0_real_combined_exit_matrix_inner() {
         data_dir: &data_root,
         master_key: &recovery_key,
         mock: &mock,
-        workerd: &workerd,
-        lock: &lock,
-        assets: &assets,
     });
     let source_loaded = load_platform_config(&source_platform_config).unwrap();
     let full_snapshot = backup_create(&source_loaded, "p0-combined-fixture")
@@ -541,9 +529,6 @@ async fn p0_real_combined_exit_matrix_inner() {
         data_dir: &restored_root,
         master_key: &recovery_key,
         mock: &mock,
-        workerd: &workerd,
-        lock: &lock,
-        assets: &assets,
     });
     let restored_loaded = load_platform_config(&restore_platform_config).unwrap();
     let restored = backup_restore(&restored_loaded, &full_snapshot.snapshot_id)

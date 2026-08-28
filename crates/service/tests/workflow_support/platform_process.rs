@@ -86,7 +86,7 @@ pub(crate) fn spawn(config: &Path, log: &Path) -> Process {
     let parsed =
         open_compute_core::PlatformConfig::from_toml_str(&fs::read_to_string(config).unwrap())
             .unwrap();
-    let (lock, _) = open_compute_runtime::load_runtime_lock(&parsed.runtime.lock_file).unwrap();
+    let (lock, _) = open_compute_runtime::embedded_runtime_lock().unwrap();
     let digest = lock.current_target().unwrap().1.binary_sha256.clone();
     let output = fs::OpenOptions::new()
         .create(true)
@@ -144,11 +144,6 @@ pub(crate) fn config(
     public: SocketAddr,
     admin: SocketAddr,
 ) -> PathBuf {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
     let key = root.join("access-key");
     let secret = root.join("secret-key");
     fs::write(&key, "AKIAEXAMPLEKEYID01").unwrap();
@@ -177,9 +172,6 @@ access_key_id_file = "{}"
 secret_access_key_file = "{}"
 max_retries = 1
 [runtime]
-binary = "{}"
-lock_file = "{}"
-assets_dir = "{}"
 startup_timeout_ms = 20000
 shutdown_grace_ms = 500
 [workflows]
@@ -192,9 +184,6 @@ recovery_backoff_ms = 100
             data.join("keys/master.key").display(),
             key.display(),
             secret.display(),
-            PathBuf::from(std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").unwrap()).display(),
-            workspace.join("runtime/workerd.lock.json").display(),
-            workspace.join("runtime").display()
         ),
     )
     .unwrap();

@@ -75,7 +75,7 @@ pub struct ReleaseMigrationV1 {
     pub sha256: String,
 }
 
-/// Machine-readable compatibility metadata installed as `release.json`.
+/// Machine-readable release metadata derived from the executable's embedded inputs.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformReleaseMetadataV1 {

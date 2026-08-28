@@ -36,7 +36,6 @@ use open_compute_core::{
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
     PlatformReleaseMeta, StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions,
-    verify_runtime_binary_with_staging_lease,
 };
 use open_compute_storage::{
     DurableObjectRepository, PlatformStorage, SchedulerStore, WorkerRepository,
@@ -127,7 +126,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     fail_after(&opts, FailAfterDummy::Config, &metrics, StartStage::Config)?;
     metrics.inc_start(StartResult::Success, StartStage::Config);
     if let (Ok(capabilities), Ok(release_metadata)) = (
-        platform_capabilities(&loaded),
+        platform_capabilities(&loaded.config),
         platform_release_metadata(&loaded),
     ) {
         metrics.set_release_identity(
@@ -286,14 +285,24 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
 
     let mut redactor = Redactor::new();
     let runtime_lease_path = storage.data_dir().runtime_dir().join("child.lease");
-    let runtime = match verify_runtime_binary_with_staging_lease(
-        &loaded.config.runtime.lock_file,
-        &loaded.config.runtime.binary,
-        Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
-        &redactor,
-        &runtime_lease_path,
-    )
+    let runtime_dir = storage.data_dir().runtime_dir();
+    let package = tokio::task::spawn_blocking(move || {
+        open_compute_runtime::materialize_embedded_runtime(&runtime_dir)
+    })
     .await
+    .map_err(|_| {
+        PlatformError::new(
+            ErrorCode::RuntimeInvalid,
+            "embedded runtime materialization task failed",
+        )
+    })??;
+    let runtime = match package
+        .verify(
+            Duration::from_millis(loaded.config.runtime.startup_timeout_ms),
+            &redactor,
+            &runtime_lease_path,
+        )
+        .await
     {
         Ok(rt) => rt,
         Err(err) => {
@@ -445,8 +454,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     })?;
     let compiler = StaticConfigCompiler::new(
         runtime.clone(),
-        loaded.config.runtime.lock_file.clone(),
-        loaded.config.runtime.assets_dir.clone(),
+        package.lock_path(),
+        package.assets_dir(),
         storage.data_dir().runtime_dir(),
         PlatformReleaseMeta {
             version: env!("CARGO_PKG_VERSION").to_owned(),

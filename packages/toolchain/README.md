@@ -57,7 +57,7 @@ bun run --filter @open-compute/toolchain build
 
 P0.2 integration test 增加了真实 TS CLI → 管理 HTTP → SQLite/S3 → stock workerd 的用例，
 包括动态 import、变量/密钥注入、更新，以及类型错误不创建新部署。该用例需要本机 Bun 与已安装
-的锁定依赖；可用 `OPEN_COMPUTE_TEST_BUN` 指定 Bun 路径。开发时按 `docs/testing.md` 只跑一轮。
+的锁定依赖；可用 `OPEN_COMPUTE_TEST_BUN` 指定 Bun 路径。开发时按 `docs/references/testing.md` 只跑一轮。
 
 runtime 系统源码与工具链使用同一套锁定的 TS7 / Rolldown。类型检查和工具链测试不能替代
 系统资产切换后的最终三轮 Gate。

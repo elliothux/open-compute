@@ -5,7 +5,7 @@ use crate::backup_cli::{
     backup_delete, backup_inspect, backup_list, backup_restore, backup_retention_plan,
     write_result,
 };
-use crate::capabilities::{platform_capabilities, platform_release_metadata, write_capabilities};
+use crate::capabilities::{platform_capabilities, write_capabilities};
 use crate::config_load::{LoadedConfig, load_platform_config};
 use crate::doctor::{DoctorMode, doctor_report};
 use crate::exit::{ExitClass, emit_failure, exit_class_for};
@@ -14,8 +14,7 @@ use crate::run::run_platform;
 use crate::support_bundle::create_support_bundle;
 use crate::upgrade_cli::{upgrade_apply, upgrade_check};
 use clap::{Parser, Subcommand};
-use open_compute_core::{ErrorCode, PlatformError};
-use open_compute_runtime::{PackageReleaseRequest, load_runtime_lock, package_release_bundle};
+use open_compute_core::{ErrorCode, PlatformConfig, PlatformError};
 use open_compute_storage::DataDir;
 use std::future::Future;
 use std::io::Write;
@@ -93,38 +92,24 @@ pub enum Command {
         #[command(subcommand)]
         command: SchedulerCommand,
     },
-    /// Fetch/verify the official pinned workerd archive and write a release layout.
-    PackageRelease {
-        /// Absolute destination directory. Must not already exist.
-        #[arg(long)]
-        dest: PathBuf,
-        /// Absolute `workerd.lock.json`.
-        #[arg(long)]
-        lock: PathBuf,
-        /// Absolute packaged runtime assets directory.
-        #[arg(long)]
-        assets: PathBuf,
-        /// Absolute license file copied into `licenses/`.
-        #[arg(long)]
-        license: PathBuf,
-        /// Absolute default config copied into `share/`.
-        #[arg(long)]
-        default_config: PathBuf,
-        /// Absolute P1 operator runbook directory copied into `docs/runbooks/`.
-        #[arg(long)]
-        runbooks: PathBuf,
-        /// Download the official archive over HTTPS at packaging time.
-        #[arg(long)]
-        download: bool,
-        /// Optional local official archive bytes (still hash-verified).
-        #[arg(long)]
-        archive: Option<PathBuf>,
+    /// Print the licenses included in this executable.
+    Licenses,
+    /// List or print an embedded operator runbook.
+    Docs {
+        /// Runbook name from the list, without the .md suffix.
+        name: Option<String>,
     },
 }
 
 /// `platformd config` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
+    /// Write a complete starter TOML to stdout, without initializing files or secrets.
+    Init {
+        /// Absolute data directory to put in the generated configuration.
+        #[arg(long)]
+        data_dir: PathBuf,
+    },
     /// Static parse and validation only.
     Check {
         /// Emit versioned JSON.
@@ -281,44 +266,18 @@ pub fn execute<'a>(
     stdout: &'a mut impl Write,
     stderr: &'a mut impl Write,
 ) -> std::pin::Pin<Box<dyn Future<Output = ExitCode> + 'a>> {
-    Box::pin(execute_with_package_binary(cli, stdout, stderr, None))
-}
-
-#[cfg(test)]
-pub(crate) fn execute_with_test_binary<'a>(
-    cli: Cli,
-    stdout: &'a mut impl Write,
-    stderr: &'a mut impl Write,
-    platformd: &'a Path,
-) -> std::pin::Pin<Box<dyn Future<Output = ExitCode> + 'a>> {
-    Box::pin(execute_with_package_binary(
-        cli,
-        stdout,
-        stderr,
-        Some(platformd),
-    ))
-}
-
-async fn execute_with_package_binary(
-    cli: Cli,
-    stdout: &mut impl Write,
-    stderr: &mut impl Write,
-    platformd: Option<&Path>,
-) -> ExitCode {
-    match Box::pin(run(cli, stdout, platformd)).await {
-        Ok(code) => code,
-        Err(err) => {
-            let _ = emit_failure(&err, stderr);
-            ExitCode::from(exit_class_for(err.code()).code())
+    Box::pin(async move {
+        match Box::pin(run(cli, stdout)).await {
+            Ok(code) => code,
+            Err(err) => {
+                let _ = emit_failure(&err, stderr);
+                ExitCode::from(exit_class_for(err.code()).code())
+            }
         }
-    }
+    })
 }
 
-async fn run(
-    cli: Cli,
-    stdout: &mut impl Write,
-    package_binary: Option<&Path>,
-) -> Result<ExitCode, PlatformError> {
+async fn run(cli: Cli, stdout: &mut impl Write) -> Result<ExitCode, PlatformError> {
     if matches!(
         &cli.command,
         Command::Worker {
@@ -328,63 +287,30 @@ async fn run(
         crate::worker_cli::encode_bundle(std::io::stdin().lock(), stdout)?;
         return Ok(ExitCode::from(ExitClass::Ok.code()));
     }
-    if let Command::PackageRelease {
-        dest,
-        lock,
-        assets,
-        license,
-        default_config,
-        runbooks,
-        download,
-        archive,
-    } = cli.command
-    {
-        if !download && archive.is_none() {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "package-release requires --download or --archive",
-            ));
+    match &cli.command {
+        Command::Config {
+            command: ConfigCommand::Init { data_dir },
+        } => {
+            crate::resources::write_config(data_dir, stdout)?;
+            return Ok(ExitCode::SUCCESS);
         }
-        let (parsed, _) = load_runtime_lock(&lock)?;
-        let mut loaded = load_platform_config(&default_config)?;
-        loaded.config.runtime.lock_file = lock.clone();
-        loaded.config.runtime.assets_dir = assets.clone();
-        let release_json =
-            serde_json::to_vec(&platform_release_metadata(&loaded)?).map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::ReleaseUnsupported,
-                    "release metadata serialization failed",
-                )
-            })?;
-        let archive_bytes = match archive {
-            Some(path) => Some(std::fs::read(&path).map_err(|_| {
-                PlatformError::new(ErrorCode::PathInvalid, "failed to read local archive")
-            })?),
-            None => None,
-        };
-        let platformd = match package_binary {
-            Some(path) => path.to_path_buf(),
-            None => std::env::current_exe().map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::PathInvalid,
-                    "failed to resolve the running platformd binary",
-                )
-            })?,
-        };
-        package_release_bundle(&PackageReleaseRequest {
-            lock: &parsed,
-            dest_dir: &dest,
-            platformd: &platformd,
-            assets_dir: &assets,
-            license_file: &license,
-            default_config: &default_config,
-            runbooks_dir: &runbooks,
-            release_json: &release_json,
-            download,
-            archive_bytes: archive_bytes.as_deref(),
-        })?;
-        writeln!(stdout, "RELEASE_OK {}", dest.display()).map_err(|_| io_failed())?;
-        return Ok(ExitCode::from(ExitClass::Ok.code()));
+        Command::Licenses => {
+            crate::resources::write_licenses(stdout)?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Docs { name } => {
+            crate::resources::write_docs(name.as_deref(), stdout)?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Command::Capabilities { json } => {
+            let config = match cli.config.as_deref() {
+                Some(path) => load_platform_config(path)?.config,
+                None => PlatformConfig::default(),
+            };
+            write_capabilities(&platform_capabilities(&config)?, stdout, *json)?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        _ => {}
     }
     let config_path = cli.config.as_deref().ok_or_else(|| {
         PlatformError::new(
@@ -416,12 +342,6 @@ async fn run(
             } else {
                 Ok(ExitCode::from(ExitClass::Ok.code()))
             }
-        }
-        Command::Capabilities { json } => {
-            let loaded = load_platform_config(config_path)?;
-            let capabilities = platform_capabilities(&loaded)?;
-            write_capabilities(&capabilities, stdout, json)?;
-            Ok(ExitCode::from(ExitClass::Ok.code()))
         }
         Command::Backup { command } => {
             let loaded = load_platform_config(config_path)?;
@@ -567,7 +487,13 @@ async fn run(
                 .map_err(|_| io_failed())?;
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
-        Command::PackageRelease { .. } | Command::Worker { .. } => {
+        Command::Worker { .. }
+        | Command::Licenses
+        | Command::Docs { .. }
+        | Command::Capabilities { .. }
+        | Command::Config {
+            command: ConfigCommand::Init { .. },
+        } => {
             unreachable!("handled before config load")
         }
     }

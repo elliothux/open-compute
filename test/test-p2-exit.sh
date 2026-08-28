@@ -2,7 +2,7 @@
 # Full HTTP/Queue/Workflow/product chain, with actual platformd crash and recovery.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/poc/.runtime-cache/v1.20260826.1/workerd"}
+workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/.temp/runtime-cache/v1.20260826.1/workerd"}
 rounds=${OPEN_COMPUTE_GATE_ROUNDS:-3}
 case "$rounds" in
   1|2|3) ;;

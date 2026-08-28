@@ -15,7 +15,7 @@ use open_compute_runtime::supervisor::{
     release_blocking_spawn, serve_argv, set_reader_fail_point, set_spawn_fail_point,
     take_owner_wait_count, token_fingerprint,
 };
-use open_compute_runtime::verify::verify_runtime_binary;
+use open_compute_runtime::verify_runtime_binary;
 use rustix::process::{Pid, test_kill_process};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -103,9 +103,6 @@ async fn verified(dir: &Path) -> open_compute_runtime::VerifiedRuntime {
 
 fn small_cfg() -> RuntimeConfig {
     RuntimeConfig {
-        binary: PathBuf::from("/tmp/workerd"),
-        lock_file: PathBuf::from("/tmp/workerd.lock.json"),
-        assets_dir: PathBuf::from("/tmp/runtime"),
         startup_timeout_ms: 5_000,
         shutdown_grace_ms: 200,
         drain_timeout_ms: 10,

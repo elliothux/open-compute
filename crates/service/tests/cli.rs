@@ -13,7 +13,9 @@ fn help_subcommands() {
         vec!["--help"],
         vec!["config", "check", "--help"],
         vec!["doctor", "--help"],
-        vec!["package-release", "--help"],
+        vec!["config", "init", "--help"],
+        vec!["docs", "--help"],
+        vec!["licenses", "--help"],
         vec!["worker", "bundle", "--help"],
     ] {
         let out = Command::new(bin).args(&args).output().expect("run");
@@ -112,9 +114,6 @@ access_key_id_env = "S3_ACCESS_KEY_ID"
 secret_access_key_env = "S3_SECRET_ACCESS_KEY"
 prefix = "system/"
 [runtime]
-binary = "/opt/open-compute/bin/workerd"
-lock_file = "/opt/open-compute/runtime/workerd.lock.json"
-assets_dir = "/opt/open-compute/runtime"
 "#,
             data = data.display(),
             key = dir.path().join("master.key").display(),

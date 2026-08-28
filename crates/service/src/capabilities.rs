@@ -3,11 +3,11 @@
 use crate::config_load::LoadedConfig;
 use open_compute_core::{
     CacheConfig, CapabilityStatus, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig,
-    KvConfig, PlatformCapabilitiesV1, PlatformError, PlatformReleaseIdentityV1,
+    KvConfig, PlatformCapabilitiesV1, PlatformConfig, PlatformError, PlatformReleaseIdentityV1,
     PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config, ReleaseMigrationV1,
     RuntimeCapabilityV1, SchedulerConfig, WorkersConfig,
 };
-use open_compute_runtime::{load_runtime_lock, runtime_assets_sha256};
+use open_compute_runtime::{embedded_runtime_assets_sha256, embedded_runtime_lock};
 use open_compute_storage::{
     D1_DATABASE_SCHEMA_VERSION, KV_SCHEMA_VERSION, QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES,
     QUEUE_MAX_DELAY_SECONDS, QUEUE_MAX_MESSAGE_BYTES, current_scheduler_schema_version, migrations,
@@ -36,19 +36,17 @@ struct SnapshotPolicyV1<'a> {
     d1: &'a D1Config,
     durable_objects: &'a DurableObjectsConfig,
     scheduler: &'a SchedulerConfig,
-    // Preserve signed pre-Workflow policy fingerprints when the new policy is at its default.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    workflows: Option<&'a open_compute_core::WorkflowsConfig>,
+    workflows: &'a open_compute_core::WorkflowsConfig,
     cache: &'a CacheConfig,
 }
 
-/// Build the complete production capability registry from formal files and constants.
+/// Build the complete production capability registry from embedded release inputs.
 pub fn platform_capabilities(
-    loaded: &LoadedConfig,
+    config: &PlatformConfig,
 ) -> Result<PlatformCapabilitiesV1, PlatformError> {
-    let (runtime_lock, lock_bytes) = load_runtime_lock(&loaded.config.runtime.lock_file)?;
-    let lock_sha256 = hex::encode(Sha256::digest(&lock_bytes));
-    let assets_sha256 = runtime_assets_sha256(&loaded.config.runtime.assets_dir)?;
+    let (runtime_lock, lock_bytes) = embedded_runtime_lock()?;
+    let lock_sha256 = hex::encode(Sha256::digest(lock_bytes));
+    let assets_sha256 = embedded_runtime_assets_sha256().to_owned();
     let compatibility_policy_sha256 = compatibility_policy_sha256();
     let release = PlatformReleaseIdentityV1 {
         schema_version: 1,
@@ -73,7 +71,7 @@ pub fn platform_capabilities(
         compatibility_policy_sha256,
     };
     let products = product_registry();
-    let limits = limit_registry(loaded);
+    let limits = limit_registry(config);
     let capabilities = PlatformCapabilitiesV1 {
         schema_version: 1,
         release,
@@ -103,7 +101,7 @@ pub fn platform_capabilities(
 pub fn platform_release_metadata(
     loaded: &LoadedConfig,
 ) -> Result<PlatformReleaseMetadataV1, PlatformError> {
-    let release = platform_capabilities(loaded)?.release;
+    let release = platform_capabilities(&loaded.config)?.release;
     let migrations = migrations::migration_registry()
         .into_iter()
         .map(|(version, name, digest)| {
@@ -168,8 +166,7 @@ pub fn platform_config_policy_sha256(loaded: &LoadedConfig) -> Result<String, Pl
         d1: &config.d1,
         durable_objects: &config.durable_objects,
         scheduler: &config.scheduler,
-        workflows: (config.workflows != open_compute_core::WorkflowsConfig::default())
-            .then_some(&config.workflows),
+        workflows: &config.workflows,
         cache: &config.cache,
     })
     .map_err(|_| capability_invalid())?;
@@ -328,8 +325,7 @@ fn unsupported() -> ProductCapabilityV1 {
     }
 }
 
-fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
-    let config = &loaded.config;
+fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
     let alarm = config
         .scheduler
         .pool(open_compute_core::SchedulerKind::Alarm);

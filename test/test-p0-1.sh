@@ -8,7 +8,7 @@ workerd=${OPEN_COMPUTE_TEST_WORKERD:-}
 if [ -z "$workerd" ]; then
   case "$(uname -s)-$(uname -m)" in
     Darwin-arm64|Darwin-x86_64|Linux-x86_64|Linux-aarch64|Linux-arm64)
-      rel="v1.20260826.1"; cache="$root/poc/.runtime-cache/$rel/workerd" ;;
+      rel="v1.20260826.1"; cache="$root/.temp/runtime-cache/$rel/workerd" ;;
     *) cache="" ;;
   esac
   if [ -n "$cache" ] && [ -f "$cache" ]; then
