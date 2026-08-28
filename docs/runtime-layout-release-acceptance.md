@@ -5,8 +5,9 @@
 
 ## 待验证
 
-- [ ] 在 CI 配置的 Linux/macOS 宿主上，从无 dist 的检出执行显式构建、静态检查、workspace、
-  coverage 和最终三轮 Gate，记录实际 CPU/架构、源码、工具链、输入摘要及目标次数。
+- [ ] 在 CI 配置的 Linux/macOS 宿主上，从无 dist 的检出执行显式构建、静态检查、coverage
+  和统一最终 workspace Gate（完整一轮、时序用例三轮），记录实际 CPU/架构、源码、工具链、
+  输入摘要、逐轮用例与目标次数；规则见[测试节奏](references/testing.md)。
 - [ ] 获得明确授权后，运行 Linux 受控 dual-stack/DNS/redirect egress 夹具；记录 loopback、
   hosts 和进程清理结果，不以 macOS 的普通 egress 测试代替。
 - [ ] 对需要发行的目标逐一授权打包，使用唯一 [正式 pin](../packages/runtime/workerd.lock.json)，

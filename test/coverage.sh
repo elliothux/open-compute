@@ -11,6 +11,11 @@ minimum_lines=90.00
 workerd=${OPEN_COMPUTE_TEST_WORKERD:-}
 cargo_bin=${CARGO:-cargo}
 
+if [ "${OPEN_COMPUTE_GATE_ROUNDS:-1}" != 1 ]; then
+  echo "coverage runs exactly once; final timing rounds require uninstrumented executables" >&2
+  exit 1
+fi
+
 if ! "$cargo_bin" llvm-cov --version >/dev/null 2>&1; then
   echo "cargo-llvm-cov is required; install it with 'brew install cargo-llvm-cov' or 'cargo install cargo-llvm-cov --locked'" >&2
   exit 1

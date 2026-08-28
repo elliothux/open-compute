@@ -133,6 +133,8 @@
 已于 2026-08-29 完成本机实现与验收，见 [Runtime 包与测试流程整理](implemented/runtime-and-test-layout.md)
 和[实测记录](implemented/runtime-and-test-layout-results.md)：workspace 690 个用例、90.16% 行覆盖率，
 最终 23 目标各三轮全部通过。跨平台与正式发行资格另见[活动验收计划](runtime-layout-release-acceptance.md)。
+以上是当次运行记录；后续[按用例分轮改造](implemented/test-repetition.md)已完成本机验收，采用完整一轮、时序补两轮，
+现行验收规则以[测试节奏](references/testing.md)为准，不改写上述历史结果。
 
 - [x] 将 `runtime/` 移至 `packages/runtime/`，生成目录改为 `dist/` 并取消 Git 跟踪；
   同步源码、配置、正式 pin、Rust 内嵌/manifest 消费者、workspace、CI 和发行构建路径。
@@ -153,11 +155,12 @@ Secrets 可按各自领域独立清理。每项都应同步修改生产调用方
 - [ ] 将保留旧行为的断言改为当前模型的成功、失败、安全、完整性和恢复测试。
   测试曾经通过不是保留旧实现的理由，也不能通过删除必要断言降低验收强度。
 - [ ] 开发期间按 [测试节奏](references/testing.md) 运行相关单轮检查；完成实现与审查、源码冻结后，
-  再执行 [AGENTS.md](../AGENTS.md) 要求的完整验收、相关三轮真实 workerd Gate 和覆盖率检查。
+  先执行 [AGENTS.md](../AGENTS.md) 要求的静态检查与一次 coverage，再统一执行完整 workspace
+  一轮及登记时序用例的两轮追加，保留真实 workerd 路径和逐项执行证据。
 - [ ] 修改 TypeScript 时通过严格类型检查、行为测试、构建和生成资产一致性检查；
   不手改 `packages/runtime/dist/` 生成产物。
 - [ ] 完成记录写明实际修改范围、源码基线、执行的检查、结果与剩余项。
-  未运行、缺少环境、只有源码修改或只有单轮通过，都不能标为最终验收完成。
+  未运行、缺少环境、只有源码修改或未满足对应逐用例轮数，都不能标为最终验收完成。
 
 本次文档/策略变更仅需 `git diff --check` 与路径、来源和状态核对，不重跑 Rust 或 runtime Gate。
 本清单不授权清空现有数据库、删除失败证据、下载 runtime、发布或执行需要提权的命令。

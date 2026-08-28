@@ -68,8 +68,6 @@ jobs:
         run: cargo fmt --all --check
       - name: clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: tests
-        run: ./test/gate.py --workspace --jobs 2
       - name: no-default-features
         run: cargo check --workspace --no-default-features
       - name: metadata
@@ -111,6 +109,9 @@ jobs:
         run: ./test/coverage.sh --jobs 2
 
   integration:
+    # The final runner owns the ordinary workspace pass and timing repetitions.
+    # Coverage has its own instrumented pass, never final acceptance evidence.
+    needs: [msrv, lint-test, coverage]
     strategy:
       fail-fast: false
       matrix:
@@ -137,12 +138,12 @@ jobs:
         run: bun scripts/prepare-workerd.ts --dest "$RUNNER_TEMP/open-compute-build-runtime" --download >> "$GITHUB_ENV"
       - name: Package one pinned offline executable
         run: ./scripts/package-release.sh --dest "$RUNNER_TEMP/platformd" --archive "$OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE"
-      - name: Final independent product Gates (macOS)
+      - name: Final workspace once and product timing cases three times (macOS)
         if: runner.os == 'macOS'
-        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" ./test/gate.py all --jobs 2
-      - name: Final product and controlled egress Gates (Linux, explicit privilege authorization)
+        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" ./test/gate.py --workspace --jobs 2
+      - name: Final workspace and controlled egress (Linux, explicit privilege authorization)
         if: runner.os == 'Linux'
-        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh all --jobs 2
+        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh --workspace --jobs 2
       - uses: actions/upload-artifact@v4
         if: always()
         with:

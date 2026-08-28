@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select product Gates once, build once, then run isolated fresh test processes."""
+"""Build once; run every selected case once, then repeat only audited timing cases."""
 
 import argparse
 from collections import namedtuple
@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import resource
 import subprocess
 import sys
@@ -17,11 +18,18 @@ import tempfile
 import time
 import uuid
 
+# This CLI imports repository-local policy; do not create disposable source-tree
+# bytecode (or change the frozen input set) while discovering/running tests.
+sys.dont_write_bytecode = True
+from gate_cases import ONCE, TIMING, validate_registry
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_JOBS = min(4, os.cpu_count() or 1)
-Target = namedtuple('Target', 'package_id name kind cwd exclusive')
+Target = namedtuple('Target', 'package_id name kind cwd exclusive cases', defaults=[None])
 # Only these targets have been audited for independent TempDir/SQLite/S3/port-0 state.
 # p0_1 scans global executable staging, so it is an exclusive barrier.
+# P2.5's 16 concurrent MiB results exhausted shared kernel socket buffers in a
+# parallel measurement. Keep the workload intact and isolate its test process.
 TARGETS = {
     'p0-1': ('open-compute-service', 'p0_1_gate', True),
     'p0-2': ('open-compute-service', 'p0_2_runtime_gate', False),
@@ -42,8 +50,9 @@ TARGETS = {
     'p2-4-hard': ('open-compute-service', 'p2_4_workflow_hard_gate', False),
     'p2-4-product': ('open-compute-service', 'p2_4_workflow_product_gate', False),
     'p2-5-hard': ('open-compute-service', 'p2_5_workflow_hard_gate', False),
-    'p2-5-product': ('open-compute-service', 'p2_5_workflow_product_gate', False),
     'p2-exit': ('open-compute-service', 'p2_exit_gate', False),
+    # Finish independent work together before the remaining exclusive barriers.
+    'p2-5-product': ('open-compute-service', 'p2_5_workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),
     'single-binary': ('open-compute-service', 'single_binary', True),
 }
@@ -76,6 +85,44 @@ def rounds_from_env():
     return int(value)
 
 
+def round_plan(targets, rounds):
+    """A full first pass owns coverage; later fresh processes own timing samples."""
+    result = [targets]
+    timing = {name: target._replace(cases=tuple(sorted(TIMING[name])))
+              for name, target in targets.items() if TIMING.get(name)}
+    if rounds == 3 and timing:
+        result.extend([timing, timing])
+    return result
+
+
+def plan_summary(plans):
+    return [{'round': number, 'targets': {name: target.cases for name, target in targets.items()}}
+            for number, targets in enumerate(plans, 1)]
+
+
+def discovered_cases(log):
+    """Parse libtest discovery, including empty workspace binary harnesses."""
+    raw = Path(log).read_text()
+    cases = re.findall(r'^([^\s]+): test$', raw, re.MULTILINE)
+    summary = re.findall(r'^(\d+) tests?, (\d+) benchmarks?$', raw, re.MULTILINE)
+    if (len(summary) != 1 or tuple(map(int, summary[0])) != (len(cases), 0)
+            or len(cases) != len(set(cases))):
+        raise ValueError(f'invalid or unsupported libtest inventory: {log}')
+    return tuple(sorted(cases))
+
+
+def verify_case_inventory(targets, prepared):
+    """Do not turn a renamed, new, or filtered-out test into successful acceptance."""
+    inventories = {item['target']: discovered_cases(item['log']) for item in prepared}
+    for name in targets.keys() & TARGETS.keys():
+        expected = set(ONCE.get(name, ())) | set(TIMING.get(name, ()))
+        actual = set(inventories[name])
+        if expected != actual:
+            raise ValueError(f'{name}: case registry mismatch; missing={sorted(expected - actual)}; '
+                             f'unregistered={sorted(actual - expected)}')
+    return {name: target._replace(cases=inventories[name]) for name, target in targets.items()}
+
+
 def resolve_targets(selected, workspace):
     """Use Cargo's workspace inventory; unaudited targets remain exclusive."""
     metadata = json.loads(subprocess.check_output(
@@ -103,8 +150,13 @@ def resolve_targets(selected, workspace):
                 (package['name'], kind if kind == 'lib' else target['name']) not in independent))
             if workspace or label in selected:
                 found[label] = Target(package['id'], target['name'], kind,
-                                      str(Path(package['manifest_path']).parent), exclusive)
+                                      str(Path(package['manifest_path']).parent), exclusive,
+                                      tuple(sorted(ONCE.get(label, ()) + TIMING.get(label, ())))
+                                      if label in TARGETS else None)
     if workspace:
+        missing = TARGETS.keys() - found.keys()
+        if missing:
+            raise ValueError(f'Cargo workspace is missing registered Gate targets: {sorted(missing)}')
         # CLI first loads the actual platformd executable before timed runtime probes.
         # Runtime's tight process-fault windows require an exclusive slot even though
         # its hooks/staging are private; the other libraries have passed together.
@@ -221,6 +273,8 @@ def execute_target(name, executable, directory, target, *, list_only=False):
             # Native harness loading can trigger slow host executable assessment. Finish
             # discovery before any product timeout starts; never prewarm product state.
             arguments = ['--list'] if list_only else ['--test-threads=1', '--nocapture']
+            if not list_only and target.cases:
+                arguments += ['--exact', *target.cases]
             process = subprocess.run([executable, *arguments], cwd=cwd, env=env,
                                      stdout=output, stderr=subprocess.STDOUT,
                                      timeout=600 if list_only else None)
@@ -241,6 +295,16 @@ def execute_target(name, executable, directory, target, *, list_only=False):
         result['error'] = 'test left temporary files behind; retained beside its output log'
     # Do not print process output: tests can deliberately emit canaries on failure.
     raw = (directory / 'output.log').read_bytes()
+    if not list_only and process.returncode == 0 and target.cases is not None:
+        summary = re.findall(
+            rb'^test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored; '
+            rb'(\d+) measured; (\d+) filtered out;', raw, re.MULTILINE)
+        if not summary or tuple(map(int, summary[-1][:4])) != (len(target.cases), 0, 0, 0):
+            result['exit_code'] = 1
+            result['error'] = 'libtest did not pass every planned case, or ignored/measured cases were present'
+        else:
+            result['cases_passed'] = int(summary[-1][0])
+        result['cases'] = target.cases
     if process.returncode == 0 and any(canary in raw for canary in [
         b'AKIAEXAMPLEKEYID01', b'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
         b'OPEN_COMPUTE_TEST_WORKERD_TOKEN', b'x-open-compute-generation-token',
@@ -291,24 +355,34 @@ def run_round(targets, artifacts, directory, jobs, execute=execute_target):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('targets', nargs='*', help='Gate targets/groups; use --list to inspect the plan')
-    parser.add_argument('--workspace', action='store_true', help='all Cargo test executables, exactly one round')
+    parser.add_argument('--workspace', action='store_true',
+                        help='all Cargo test executables once; final mode repeats only product timing cases')
     parser.add_argument('--jobs', type=int, default=DEFAULT_JOBS,
                         help='audited independent processes (default: min(4, CPU count))')
     parser.add_argument('--list', action='store_true', help='validate and print the exact plan without building or running')
     args = parser.parse_args()
     rounds = rounds_from_env()
-    if args.workspace and (args.targets or rounds != 1):
-        raise ValueError('--workspace requires one round and cannot be combined with Gate targets')
+    validate_registry(TARGETS)
+    if args.workspace and args.targets:
+        raise ValueError('--workspace cannot be combined with Gate targets')
+    flags = ' '.join(os.environ.get(name, '') for name in [
+        'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', '__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS'])
+    if rounds == 3 and (os.environ.get('CARGO_LLVM_COV') or 'instrument-coverage' in flags):
+        raise ValueError('final timing rounds require uninstrumented executables; coverage runs once')
     if not args.workspace and not args.targets:
         raise ValueError('select Gate targets or --workspace')
     if not 1 <= args.jobs <= (os.cpu_count() or 1):
         raise ValueError('--jobs must be between 1 and the host CPU count')
     selected = selection(args.targets)
     targets = resolve_targets(selected, args.workspace)
+    plans = round_plan(targets, rounds)
     plan = {'rounds': rounds, 'jobs': args.jobs, 'workspace': args.workspace, 'targets': list(targets),
+            'purpose': 'final' if rounds == 3 else 'development',
+            'repetition_policy': 'complete-once-timing-three', 'round_plan': plan_summary(plans),
             'exclusive': [name for name, target in targets.items() if target.exclusive],
             'preparation_processes': len(targets),
-            'test_processes': len(targets) * rounds}
+            'test_processes': sum(len(planned) for planned in plans),
+            'inventory_verified': False}
     if args.list:
         print(json.dumps(plan, indent=2))
         return 0
@@ -339,15 +413,20 @@ def main():
                                  'processes_executed': len(prepared), 'targets': prepared}
         if len(prepared) != len(targets) or any(result['exit_code'] for result in prepared):
             raise RuntimeError('test harness preparation failed; no product tests started')
-        for number in range(1, rounds + 1):
+        targets = verify_case_inventory(targets, prepared)
+        plans = round_plan(targets, rounds)
+        report['round_plan'] = plan_summary(plans)
+        report['inventory_verified'] = True
+        report['test_cases'] = sum(len(target.cases) for planned in plans for target in planned.values())
+        for number, planned in enumerate(plans, 1):
             if source_identity() != source or verify_inputs(probe_version=False) != inputs:
                 raise RuntimeError('source or verified inputs changed during the Gate')
-            print(f'Gate round {number}/{rounds}; jobs={args.jobs}; targets={len(targets)}', flush=True)
+            print(f'Gate round {number}/{len(plans)}; jobs={args.jobs}; targets={len(planned)}', flush=True)
             round_start = time.monotonic()
-            results = run_round(targets, artifacts, directory / f'round-{number}', args.jobs)
+            results = run_round(planned, artifacts, directory / f'round-{number}', args.jobs)
             report['results'].append({'round': number, 'seconds': time.monotonic() - round_start,
                                       'targets': results})
-            if len(results) != len(targets) or any(result['exit_code'] for result in results):
+            if len(results) != len(planned) or any(result['exit_code'] for result in results):
                 raise RuntimeError('Gate failed; no retries or subsequent rounds')
         if source_identity() != source or verify_inputs(probe_version=False) != inputs:
             raise RuntimeError('source or verified inputs changed during the Gate')
@@ -359,6 +438,8 @@ def main():
         cpu_end = resource.getrusage(resource.RUSAGE_CHILDREN)
         report['child_cpu_seconds'] = cpu_end.ru_utime + cpu_end.ru_stime - cpu_start.ru_utime - cpu_start.ru_stime
         report['test_processes_executed'] = sum(len(r['targets']) for r in report['results'])
+        report['test_cases_passed'] = sum(result.get('cases_passed', 0)
+                                          for r in report['results'] for result in r['targets'])
         if report['status'] != 'passed':
             failed = ROOT / '.temp/gate-run/failed'
             failed.mkdir(exist_ok=True)

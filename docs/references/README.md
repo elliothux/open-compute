@@ -7,7 +7,7 @@
 
 | 文档 | 用途 |
 | --- | --- |
-| [测试节奏](testing.md) | 默认单轮、显式三轮、并行/独占调度、覆盖率与证据归属；[本机实测](../implemented/runtime-and-test-layout-results.md) |
+| [测试节奏](testing.md) | 默认完整一轮；最终完整一轮 + 时序补两轮，用例清单校验、并行/独占与覆盖率；[原布局实测](../implemented/runtime-and-test-layout-results.md) |
 | [能力偏差](p1-deviations.md) | 当前 capability deviation ID 与实际支持边界 |
 | [Fuzz 所有权](p1-fuzz-ownership.md) | 各类输入的测试归属和回归要求 |
 | [单二进制分发与部署](single-binary.md) | 构建输入、离线启动、资源物化和发行契约 |

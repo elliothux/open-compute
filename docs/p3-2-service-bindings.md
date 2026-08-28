@@ -486,8 +486,10 @@ loopback/InvocationRegistry 与 supervisor 组合在 `service`，子进程桥接
 OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py p3-assets p3-services
 ```
 
-开发/修复每次只跑相关目标一轮；全部修复并完成 build/generated、JS、workspace、静态
-检查与 90% coverage 后再做最终三轮。每轮每个原生目标一次、一次构建、失败停止；JS/
+开发/修复每次只跑相关目标一轮；全部修复并完成 build/generated、JS、静态
+检查与 90% coverage 后统一最终验收：完整 workspace 一轮，登记的时序用例补两轮。
+固定类型/权限/序列化矩阵一轮；并发、在途取消、生命周期等三轮，分类必须与原生 discovery
+吻合。每轮每个选中的原生目标至多一次、一次构建、失败停止；JS/
 浏览器测试和库检查不塞进每轮递归。新目标只有通过独立 TMPDIR/SQLite/S3/端口/generation
 隔离审查后才并发。不恢复旧 `/poc` 或旧 `test-p*.sh`。
 

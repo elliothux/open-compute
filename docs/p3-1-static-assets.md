@@ -461,7 +461,8 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py p3-assets
 ```
 
 开发只执行相关目标一轮。源码冻结后，按 testing reference 完成 build/generated、JS、
-Rust 静态检查、workspace 与 coverage（保持 90% 门槛），最后显式三轮。一次构建、目标去重，
+Rust 静态检查与 coverage（保持 90% 门槛），最后统一验收：完整 workspace 一轮、登记的时序
+用例补两轮。新增 Gate 同时登记完整用例及重复归属；固定协议/路径矩阵不机械重复。一次构建、目标去重，
 新增目标经隔离审查后才并行；不递归调用旧 `test-p*.sh`，不要求重跑已退役 POC。
 真实浏览器/框架测试单独接入同一证据清单，不能因 Rust Gate 通过就标为已运行。
 
