@@ -16,7 +16,7 @@ async fn workflow_do_mutation_fails_closed_after_native_output_gate_probe() {
             .expect("Workflow Gate requires verified stock workerd"),
     );
     open_compute_runtime::verify_runtime_binary(
-        &root.join("runtime/workerd.lock.json"),
+        &root.join("packages/runtime/workerd.lock.json"),
         &binary,
         Duration::from_secs(10),
         &open_compute_core::Redactor::new(),

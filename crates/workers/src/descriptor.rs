@@ -15,7 +15,7 @@ pub const GLOBAL_OUTBOUND_POLICY_VERSION: u32 = 1;
 /// Namespace reserved for all platform-owned loaded-isolate modules.
 pub const SYSTEM_MODULE_PREFIX: &str = "__open_compute__/";
 const SYSTEM_WORKER_MANIFEST: &[u8] =
-    include_bytes!("../../../runtime/system-workers/manifest.json");
+    include_bytes!("../../../packages/runtime/dist/manifest.json");
 /// Earliest compatibility date accepted by the pinned P1 policy.
 pub const COMPATIBILITY_DATE_MIN: &str = "2022-01-01";
 /// Latest compatibility date accepted by the pinned P1 policy.

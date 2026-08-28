@@ -1,6 +1,7 @@
 use super::*;
 use crate::pipeline::{DeploymentBindingInput, validate_binding_set};
 use serde_json::json;
+use sha2::Digest;
 
 #[test]
 fn every_deployment_binds_the_complete_system_source_identity() {
@@ -73,13 +74,22 @@ fn generated_source_manifest_matches_every_system_worker() {
             }
         }
     }
-    let root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/system-workers");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/runtime/dist");
     let mut found = BTreeMap::new();
     sources(&root, &root, &mut found);
     assert!(!found.is_empty());
     let manifest: serde_json::Value = serde_json::from_slice(SYSTEM_WORKER_MANIFEST).unwrap();
-    assert_eq!(manifest, json!({"schemaVersion": 1, "sources": found}));
+    assert_eq!(manifest["schemaVersion"], 1);
+    assert_eq!(manifest["sources"], json!(found));
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for (name, expected) in manifest["inputs"].as_object().unwrap() {
+        let bytes = std::fs::read(repo.join(name)).unwrap();
+        assert_eq!(
+            expected,
+            &json!(hex::encode(Sha256::digest(bytes))),
+            "{name}"
+        );
+    }
 }
 
 #[test]

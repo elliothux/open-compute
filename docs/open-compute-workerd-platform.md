@@ -311,7 +311,7 @@ type DispatchEnvelope = {
 
 ### 5.4 Service Binding 与资源路由的组合
 
-在 `runtime/src/services/` 实现受限的原生 `WorkerEntrypoint`/Fetcher 能力，Rust authority
+在 `packages/runtime/src/services/` 实现受限的原生 `WorkerEntrypoint`/Fetcher 能力，Rust authority
 负责绑定验证、目标解析、pin 和删除约束，WorkerLoader 负责加载目标。不得绕公网域名或使用
 自建 JSON RPC 代替 workerd 原生 RPC。支持自绑定和惰性加载，不能在组装 env 时递归展开依赖图。
 
@@ -1673,7 +1673,7 @@ PPR/Cache Components 按 vinext 的既有实现验收，不补齐其 README 已�
 
 能力按领域组织：构建接入在 `packages/toolchain`，部署/目标解析在 `crates/workers`，schema
 在 `crates/storage`，字节与校验在 `crates/artifacts`，入口组合在 `crates/service`，资源和服务
-调用分别进入 `runtime/src/assets/`、`runtime/src/services/`。缓存/图片按实际所有权划分，不能
+调用分别进入 `packages/runtime/src/assets/`、`packages/runtime/src/services/`。缓存/图片按实际所有权划分，不能
 把框架业务分支或测试条件堆入 loader host；生成 JS 由构建更新，不手改。
 
 ### P3 Exit Gate

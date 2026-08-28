@@ -117,7 +117,7 @@ request_timeout_ms = 3000
             .parent()
             .unwrap()
             .to_path_buf();
-        let lock = root.join("runtime/workerd.lock.json");
+        let lock = root.join("packages/runtime/workerd.lock.json");
         let runtime =
             verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
                 .await
@@ -157,7 +157,7 @@ request_timeout_ms = 3000
         let compiler = StaticConfigCompiler::new(
             runtime.clone(),
             lock.clone(),
-            root.join("runtime"),
+            root.join("packages/runtime"),
             storage.data_dir().runtime_dir(),
             PlatformReleaseMeta {
                 version: "workflow-gate".into(),

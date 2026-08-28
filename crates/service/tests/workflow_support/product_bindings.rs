@@ -37,8 +37,8 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
             .unwrap()
             .into(),
-        root.join("runtime/workerd.lock.json"),
-        root.join("runtime"),
+        root.join("packages/runtime/workerd.lock.json"),
+        root.join("packages/runtime"),
         "workflow-products",
     )
     .await;

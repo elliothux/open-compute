@@ -81,6 +81,14 @@ trivially_copy_pass_by_ref = "deny"
 uninlined_format_args = "deny"
 unnecessary_wraps = "deny"
 
+# Keep verified archive expansion and hashing fast in development and tests.
+# Workspace code and debug/overflow checks retain the standard dev settings.
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
 [profile.release]
 lto = true
 codegen-units = 1

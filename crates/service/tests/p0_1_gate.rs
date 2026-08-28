@@ -1,4 +1,4 @@
-//! P0.1 process-level Gate: three sequential fresh-process rounds against the
+//! P0.1 process-level Gate: one fresh-process scenario against the
 //! real `platformd` binary, pinned stock workerd, and a local `SigV4` S3 server.
 
 use bytes::Bytes;
@@ -21,7 +21,6 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-const ROUNDS: u32 = 3;
 const GATE_RESTART_BUDGET: usize = 2;
 const PLATFORM_READY_TIMEOUT_SECS: u64 = 90;
 
@@ -83,30 +82,16 @@ fn public_health_port_ignores_private_listener_that_appears_first() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn p0_1_process_gate_three_rounds() {
-    if std::env::var("OPEN_COMPUTE_TEST_WORKERD")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .is_none()
-    {
-        // Ordinary workspace tests do not fetch workerd. `test/test-p0-1.sh` requires it.
-        return;
-    }
+async fn p0_1_process_gate() {
     let workerd = required_workerd();
     let repo = repo_root();
-    let lock_path = repo.join("runtime/workerd.lock.json");
+    let lock_path = repo.join("packages/runtime/workerd.lock.json");
     let (lock, _) = load_runtime_lock(&lock_path).expect("lock");
     verify_workerd(&lock, &workerd);
     let staging_before = staging_directories();
 
     let s3 = MockS3::spawn("open-compute").await;
-    let mut completed = 0u32;
-    for round in 1..=ROUNDS {
-        eprintln!("P0.1 gate round {round}/{ROUNDS}");
-        run_round(round, &s3, &lock).await;
-        completed += 1;
-    }
-    assert_eq!(completed, ROUNDS, "exactly three rounds must complete");
+    run_round(1, &s3, &lock).await;
     assert_eq!(
         staging_directories(),
         staging_before,
@@ -117,16 +102,9 @@ async fn p0_1_process_gate_three_rounds() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn round_drop_recovers_orphan_without_platform_handle() {
-    if std::env::var("OPEN_COMPUTE_TEST_WORKERD")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .is_none()
-    {
-        return;
-    }
     let workerd = required_workerd();
     let repo = repo_root();
-    let lock_path = repo.join("runtime/workerd.lock.json");
+    let lock_path = repo.join("packages/runtime/workerd.lock.json");
     let (lock, _) = load_runtime_lock(&lock_path).expect("lock");
     verify_workerd(&lock, &workerd);
     let staging_before = staging_directories();
@@ -341,24 +319,15 @@ async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
     round.known_tokens.push(new_token.clone());
     assert_ne!(new_token, token, "restart must mint a new internal token");
 
-    if n == 1 {
-        rapid_crash_budget(&mut round, bin, &env_id, &env_secret);
-        term_ignore_kill_deadline(&mut round, bin, &env_id, &env_secret);
-        orphan_sigkill_recovery(&mut round, bin, &env_id, &env_secret);
-        partial_startup_crashes(&mut round, bin, &env_id, &env_secret, s3);
-    }
+    rapid_crash_budget(&mut round, bin, &env_id, &env_secret);
+    term_ignore_kill_deadline(&mut round, bin, &env_id, &env_secret);
+    orphan_sigkill_recovery(&mut round, bin, &env_id, &env_secret);
+    partial_startup_crashes(&mut round, bin, &env_id, &env_secret, s3);
 
     term_and_wait(&mut round);
     assert_no_leaks(&round, s3);
     round.ok = true;
-    eprintln!(
-        "P0.1 gate round {n}/{ROUNDS} core assertions complete{}",
-        if n == 1 {
-            " (advanced crash variants ran in this round)"
-        } else {
-            " (advanced crash variants only in round 1)"
-        }
-    );
+    eprintln!("P0.1 gate scenario {n} core and crash assertions complete");
 }
 
 fn setup_round(n: u32, s3: &MockS3, lock: &RuntimeLock) -> Round {

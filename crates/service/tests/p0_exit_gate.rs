@@ -118,13 +118,13 @@ fn p0_real_combined_exit_matrix() {
 }
 
 async fn p0_real_combined_exit_matrix_inner() {
-    let Some(workerd) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map(PathBuf::from) else {
-        return;
-    };
+    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+        .map(PathBuf::from)
+        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     reset_capacity_samples();
     let root = repo_root();
-    let lock = root.join("runtime/workerd.lock.json");
-    let assets = root.join("runtime");
+    let lock = root.join("packages/runtime/workerd.lock.json");
+    let assets = root.join("packages/runtime");
     let temp = tempfile::tempdir().unwrap();
     let data_root = temp.path().join("data");
     let config = storage_config(&data_root);

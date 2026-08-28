@@ -54,8 +54,8 @@ pub(super) async fn prepare() -> Fixture {
         std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
             .unwrap()
             .into(),
-        root.join("runtime/workerd.lock.json"),
-        root.join("runtime"),
+        root.join("packages/runtime/workerd.lock.json"),
+        root.join("packages/runtime"),
         "p2-exit",
     )
     .await;

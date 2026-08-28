@@ -297,11 +297,7 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
         .join("runtime/packages")
         .join(embedded_payload_sha256());
     assert!(package.join("workerd").is_file());
-    assert!(
-        package
-            .join("runtime/system-workers/manifest.json")
-            .is_file()
-    );
+    assert!(package.join("runtime/dist/manifest.json").is_file());
     let modified = fs::metadata(package.join("workerd"))
         .unwrap()
         .modified()

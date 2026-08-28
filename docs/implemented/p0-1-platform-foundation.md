@@ -3,7 +3,7 @@
 > 状态：已实现；按既有 [P0.1 回归记录](./p0-5-r2.md)归档，本次未重跑验收。
 >
 > 前置 Gate：G0 已于 2026-08-23 得到 **Conditional Go**。完整证据见
-> [G0 results](./g0-results.md)，测试入口和 fixture 见 [`../poc/`](../../poc/README.md)。
+> [G0 results](./g0-results.md)，测试入口和 fixture 见 [`../poc/`](runtime-and-test-layout.md#poc-删除与断言归属)。
 >
 > 本文只定义 P0.1。Worker 管理、部署、路由和请求执行由
 > [P0.2：Workers Runtime](./p0-2-workers-runtime.md) 实现。
@@ -202,7 +202,7 @@ lock 文件是 release artifact 的一部分，至少包含：
 }
 ```
 
-完整值由 [`../poc/workerd.lock`](../../poc/workerd.lock) 迁入正式格式。构建/release job 下载官方
+完整值由 [`../poc/workerd.lock`](runtime-and-test-layout.md#poc-删除与断言归属) 迁入正式格式。构建/release job 下载官方
 artifact、验证 archive 和 binary hash 后再打包。生产启动 **不得** 自动联网下载或静默选择
 另一个 workerd。
 
@@ -921,8 +921,8 @@ interface，而不是读取文件或解析日志。
 ## 21. 参考资料
 
 - [G0 results](./g0-results.md)
-- [G0 POC README](../../poc/README.md)
-- [G0 workerd lock](../../poc/workerd.lock)
+- [G0 POC README](runtime-and-test-layout.md#poc-删除与断言归属)
+- [G0 workerd lock](runtime-and-test-layout.md#poc-删除与断言归属)
 - [总体方案](../open-compute-workerd-platform.md)
 - [workerd configuration schema](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp)
 - [workerd repository](https://github.com/cloudflare/workerd)

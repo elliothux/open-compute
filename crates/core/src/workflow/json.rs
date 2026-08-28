@@ -188,7 +188,7 @@ mod tests {
             expected: String,
         }
         let fixtures: Vec<Fixture> = serde_json::from_str(include_str!(
-            "../../../../runtime/tests/fixtures/workflow-json.json"
+            "../../../../packages/runtime/tests/fixtures/workflow-json.json"
         ))
         .unwrap();
         for fixture in fixtures {

@@ -1,167 +1,134 @@
 # Gate 验证节奏
 
-实现、审查或修复尚未完成时，每次迭代只跑一轮相关 Gate。不要每改一处就启动三轮 Gate、递归历史
-aggregate 或完整 coverage。先用定向单测和单轮真实运行时测试确认改动，再继续实现或修复。
+开发、审查、修复时，每次迭代只跑相关目标一轮。源码冻结后先完成完整检查与 coverage，
+最后显式执行相关目标三轮。失败停止，不自动重试；coverage 不代替未插桩的进程验收。
 
-实现与审查收尾、源码冻结后，才进入最终验收：先完成 AGENTS.md 要求的完整检查和 coverage，
-最后执行相关三轮 Gate。完整检查、构建和 coverage 不随 Gate 轮数重复。
-最终验收失败且需要改代码时，先回到单轮反馈；修复完成后再补受影响的最终验证。
-仅改文档或策略不需要重跑已经完成的 Rust/Gate 检查，只做文档核对与 `git diff --check`。
+## 显式准备输入
 
-单轮减少重复执行，不减少用例、断言、真实进程或持久化路径；缺少 runtime、checksum 不匹配、
-未允许的失败都仍然失败。coverage 门槛保持 90.00%。已完成的 POC 上游能力探测不再是日常或
-最终验收的必跑项；历史 `D-abort` 结论仍约束设计，不能把客户端断开视为保证取消执行。
+```sh
+bun install --frozen-lockfile --ignore-scripts
+bun run build
+bun run check:generated
+bun run test:js
+export RUSTFLAGS='-D warnings'
+export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/pinned/workerd-platform.gz
+export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
+```
 
-## 已确定的流程改造
+唯一正式 pin 是 `packages/runtime/workerd.lock.json`。`packages/runtime/dist/` 不提交 Git；
+每个 CI job 及干净检出都必须先构建。Rust 校验 archive、binary、生成模块、完整清单及
+源码/工具配置摘要，拒绝过期资产。生产启动离线，不依赖 JS 工具链。
+输入准备工具 `bun scripts/prepare-workerd.ts --dest /abs/new-dir --archive /abs/pinned.gz`
+只接受显式来源并拒绝覆盖；`--download`、发布打包和特权网络夹具需要单独授权。
 
-[Runtime 包与测试流程整理](../runtime-and-test-layout.md) 定义目录和入口的目标状态。
-本文件下面的命令描述当前实现；文档和 AGENTS.md 的规则已更新，但固定三轮、默认三轮及递归
-入口还没有全部改造，不能把目标接口当成已生效的脚本行为。
+## 一个调度入口
 
-| 阶段 | 执行要求 |
+调度器仅依赖 Python 3.11+ 标准库；CI 显式选择 Python 3.12。
+
+```sh
+./test/gate.py p0-2
+./test/gate.py p0-2 p2-3 --jobs 2
+./test/gate.py p2-4 p2-5 --list
+OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py all --jobs 2
+```
+
+`OPEN_COMPUTE_GATE_ROUNDS` 只接受 `1`（默认）或 `3`；非法值在构建、网络夹具变更或运行前失败。
+`--list` 输出实际目标和测试进程数，不构建、不执行。旧 `test-p*.sh` 递归入口已删除，
+仅保留需要授权和清理的 Linux egress wrapper。
+
+| 选择 | 实际目标 |
 | --- | --- |
-| 开发、审查、修复 | 相关 Gate 目标各一轮；没有相关输入变化，不换个入口重复运行；不跑完整 coverage |
-| 实现完成后的静态与覆盖率检查 | 各项完整检查、构建和 coverage 按所需配置执行一次 |
-| 最后一步验收 | 冻结源码上，相关产品 Gate 各三轮独立进程；不再重复静态检查和 coverage |
+| `p0-1` … `p0-8`、`p0-exit` | 对应 service 集成测试；P0.1 本体只有一轮 |
+| `p1-conformance`、`p1-security`、`p1-crash`、`p1-upgrade`、`p1-snapshot` | 对应 P1 集成测试 |
+| `p1-8` | P0.7 基本 WebSocket 与 P1 capability；hibernation 仍不支持 |
+| `p2-1`、`p2-2`、`p2-exit` | 对应 scheduler、queue producer、产品链集成测试 |
+| `p2-3` | P0.2 同一 Worker/Queue/Cron 矩阵，不再重复调度 |
+| `p2-4` | Workflow hard 与 product 两个目标 |
+| `p2-5` | durable Workflow hard/product，以及唯一的 P2.4 product snapshot/recovery 目标 |
+| `runtime`、`single-binary` | supervisor、单文件离线首启/重启/损坏路径 |
+| `p0`、`p1`、`p2`、`all` | 对应集合；多个选择取并集，每轮每个目标一次 |
 
-改造后的日常入口默认单轮，显式 `OPEN_COMPUTE_GATE_ROUNDS=3` 才执行最终三轮，只接受 `1` 或
-`3`。轮数由一个顶层入口控制，测试本体只执行一轮，子 Gate 不调用其他 Gate。同一目标每轮
-一次，首轮失败后停止后续轮次并保留现场，禁止自动重试到通过。
+调度器一次 `cargo test --no-run --all-features`，根据 Cargo JSON 的精确 executable 路径运行测试，
+不搜索可能过期的哈希文件；后续各轮不再调用 Cargo，也不重建 JS。正确 keyed 的 `target/`、
+`node_modules/`、正式 immutable 输入可复用，不清缓存、不下载。库单测、类型检查与 coverage
+由下面的完整检查负责，不能塞回 Gate 循环。load/soak/fuzz 和正式打包保留独立显式入口。
 
-去重按实际 target 和断言覆盖进行，不按脚本名称判断：`test-p0-2.sh` 与 `test-p2-3.sh` 当前
-都执行完整的 `p0_2_runtime_gate`，应统一调度或按领域拆分。已有 P0/P1/P2 递归链、P0.1 内部
-三轮循环和 coverage 中的隐式多轮都属于待清理项。上游一次性探测、重复回归和废弃模型断言
-删除；仍有价值且没有等价覆盖的 POC 产品测试与其 harness、fixtures 迁入 `test/`。
+构建后先对每个原生测试宿主执行一次有界 `--list`（最多 600 秒），全部成功后才进入用例阶段。
+这会执行测试框架的发现功能，但不执行用例、不启动 workerd、不创建产品状态；其耗时及
+`preparation_processes` 单列。它隔离冷宿主加载/系统可执行文件评估与业务超时，三轮之间不再
+重复。真实运行时验证、readiness、事务、崩溃与恢复的超时和 fresh-process 要求均不改变。
 
-优先去掉重复构建/typecheck、无效 sleep、重复 runtime 准备和非必要的串行等待。复用正确
-输入对应的只读资产与编译缓存；可变业务状态、进程生命周期、故障隔离及恢复场景不能共享或
-跳过。只在证明隔离后提高并发，长 soak/load/fuzz 不作为每次开发迭代的前置条件。
+## 多核与隔离
 
-## 测试目录
+`--jobs N` 只并发经过隔离审查的**测试进程**；默认 `min(4, CPU 数)`，进程内保留 `--test-threads=1`。
+业务数据库、generation token、临时目录、S3 fixture/prefix 和端口均由各目标独立拥有；
+每目标每轮提供独立 `TMPDIR`，端口由系统分配。P0.1 的全局 staging 断言、supervisor 和
+single-binary 使用独占屏障。不能把全局状态测试直接改成多线程。
+临时目录使用较短的 `.temp/gate-tmp/<随机名>/`，避免报告目录中的长目标名称超过 Unix socket
+路径长度上限；退出后非空目录移入该目标的诊断目录并拒绝覆盖，成功返回但留有文件也算失败。
+并行失败后不再提交目标，已开始的目标完成自己的清理；不启动下一轮。
 
-仓库内的工具缓存、临时运行目录和保留的失败证据统一放在根目录 `.temp/<用途>/`：
-例如 `.temp/ruff-cache/`、`.temp/runtime-cache/`、`.temp/g0-run/`、
-`.temp/p0-1-run/`、`.temp/p2-4-run/`、`.temp/p2-exit-run/` 和 `.temp/single-binary-run/`。
-只使用 `.gitignore` 的 `/.temp/` 规则，不再逐项添加 ignore；配置工具的输出路径，
-不要依赖旧目录或自动迁移回退。历史报告保留当时路径，不因目录迁移改写既往结果。
-Rust 构建与覆盖率报告仍在 `target/`；持久化 `.data/`、依赖 `node_modules/` 不属于临时运行目录。
+串行/并行对比必须使用相同源码、输入、目标及构建配置，分别记录编译和执行耗时，不能用
+串行冷编译与并行热缓存混算提速。基准对比是明确的测量活动，不冒充最终三轮验收。
+并发结果仍受 CPU/内存、磁盘和系统负载影响，不承诺固定提速比例。
 
-仓库级测试工具统一放在根目录 `test/`：
+开发/test profile 仅对 `sha2` 和 `miniz_oxide` 依赖使用 `opt-level=3`，降低每个独立数据目录
+首次物化时的完整解压/摘要校验成本。workspace 源码仍未优化，debug 断言、溢出检查和 release
+配置不变；不缓存或绕过完整性检查。实测及其测量口径见 [性能记录](../implemented/runtime-and-test-layout-results.md)。
 
-| 路径 | 用途 |
-| --- | --- |
-| `test/test-*.sh` | P0/P1/P2 Gate 入口 |
-| `test/check-boundaries.sh`、`test/coverage.sh` | 依赖边界检查与覆盖率 |
-| `test/load-p1.sh`、`test/soak-p1.sh` | 压测与持续运行测试 |
-| `test/p0-2-egress-fixture.py` | Linux egress 网络夹具 |
-| `test/fuzz-p1.sh`、`test/fuzz/` | fuzz 启动脚本、独立 Cargo package 与种子 corpus |
+`--workspace` 通过 Cargo metadata 枚举全部启用的 test harness，使用
+`cargo test --workspace --all-targets --all-features --no-run` 一次构建，再逐一执行；
+拒绝缺少或未计划的 executable。它与普通 Cargo workspace 测试的目标集合相同，保留 package
+工作目录（supervisor 的相对诊断输出使用本轮目标目录，避免清空环境的夹具写入源码树）；
+不接受 Gate 选择或三轮。core/storage/artifacts/workers/service 五个库的故障钩子均
+为进程私有，staging/数据库归属独立 TMPDIR，已经并发验证。runtime 库的 1–2 秒进程故障
+窗口在并行实测中失败，因此保留独占，不放宽时限。CLI 先独占执行，使实际 platformd 的首次
+加载不与定时 runtime probe 重叠；新增未审查目标保守独占。无需安装额外 Rust 测试运行器。
 
-fuzz harness 是测试程序，`test/fuzz/corpus/` 中的输入样本才是 fixture。fuzz package 保持独立
-workspace，不随根目录 `cargo test --workspace` 自动运行；入口为 `./test/fuzz-p1.sh --seconds 60`。
-
-crate 内的单元测试和 `crates/**/tests` 保持原位；当前 `runtime/tests/` 随包迁至
-`packages/runtime/tests/`，存续的 POC 仓库级测试与 fixtures 迁至 `test/`，不复制已有 crate
-测试。目录迁移尚未实施，目标布局见上述整理方案；`poc/` 不再作为长期维护的测试层。
-`scripts/` 仅保留本地开发和发布打包入口。历史 `docs/*results.md` 保留当时执行的命令和结果；其中
-原 `scripts/` 下的测试入口现已迁入 `test/`，这些记录不代表迁移后重新执行了验收。
-
-## 开发与修复：单轮
-
-所有 Rust 构建（包括默认/无默认 feature 和测试）都必须提供当前目标平台的正式 archive。
-它只作为编译期输入，不能以独立 binary 代替，也不会在运行时查找。
-底层 workerd Gate 另外使用已存在的 verified binary；禁止测试隐式下载：
+## 完整检查（不随轮次重复）
 
 ```sh
-export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/pinned-workerd.gz
-export OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd"
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+./test/gate.py --workspace
+RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
+cargo +1.98.0 check --workspace --all-targets
+cargo metadata --no-deps --format-version 1
+./test/check-boundaries.sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
+./test/check-production.py
+./test/coverage.sh
 ```
 
-P2.2、P2.3、P2.4、P2.5 和 P2 Exit 脚本支持 `OPEN_COMPUTE_GATE_ROUNDS`。只运行当前改动相关的入口，例如 Workflow：
+production 检查只构建无 test-support 的普通开发二进制并扫描测试标记，不调用发行包装。
+coverage 的清理限于自身 workspace 插桩产物，Rust 行覆盖率门槛仍为 **90.00%**。
+coverage 使用 cargo-llvm-cov `show-env --sh` 的外部运行器接口和相同 workspace 调度器，
+产物放在 `target/llvm-cov-target/`，每进程 profile 名包含 PID/模块身份。supervisor 夹具的环境
+由生产 spawn 清空，其默认 profile 留在本轮 `.temp/gate-run/` 诊断目录；不向生产环境透传变量，
+夹具仍按原有测试源码规则排除，生产模块的插桩与计数不变。
+`./test/coverage.sh --jobs 1` 可串行诊断，不清理普通 `target/debug/` 缓存。
+真实运行时测试缺少 workerd 即失败，不允许静默 `return` 成为通过证据。
 
-```sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-4.sh
-```
+## 日志与保留证据
 
-Durable Workflow 与完整 HTTP → Queue → Consumer → Workflow → KV/D1/R2/DO 链路分别使用：
+调度报告位于 `.temp/gate-run/<run-id>/report.json`，包括源码/输入/测试可执行文件摘要、
+revision、工具链、目标集合、轮数、并发度、一次构建耗时、每目标耗时、总墙钟和子进程 CPU 时间。
+源码冻结包含所有仓库代码、配置、测试及 `docs/references/`（内嵌 runbooks 与 conformance
+输入），不包含没有代码消费者的 `docs/` 规划和 `docs/implemented/` 历史记录；并行编写规划
+不会中止测试。报告声明此范围；代码、维护参考文档、正式 pin 或资产变化仍会失败。
+报告另列测试宿主准备阶段和实际准备进程数，不把发现进程算成已执行的业务用例。
+`test_processes_executed` 统计顶层测试进程，场景内 restart/crash 的子进程仍由各测试拥有。
+失败整次保留在 `failed/<run-id>/`；已运行、失败和未运行目标不混淆。终端不回显失败测试的
+原始输出；日志供本地诊断，生成报告不包含 secret 或环境变量转储。
 
-```sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-5.sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-exit.sh
-```
+所有仓库内临时文件及失败现场留在 `.temp/<purpose>/`；Rust 产物仍在 `target/`，依赖在
+`node_modules/`，业务持久状态在 `.data/`。不删除历史 `.temp/` 证据。
 
-P2.5 包含真实 Hard/Product、扩展 snapshot/restore、Workflow authority 和 JS parity 测试。
-P2 Exit 包含实际 platformd SIGKILL 链路及独立的 Queue/Workflow authority crash 矩阵；不递归运行
-历史 aggregate。失败证据分别保留在相关 ignored run 目录的 `failed/` 下，不能删除后重写通过结果。
-P2 Exit 的进程配置复用资源准备阶段的 KV/R2/D1 policy，避免把冻结配额变化当成重启恢复；版本
-切换仅推进 Workflow current version，不绕过 DO 的 active Worker deployment 校验。
+POC 一次性上游探测已退役；删除分类与保留回归见 [迁移记录](../implemented/runtime-and-test-layout.md)。
+`docs/implemented/g0-results.md` 保留原始字节，`D-abort` 仍是已接受限制：不能把客户端断开
+当作保证取消执行。产品 Gate 保留上传取消、流中断、事务/响应失败及 crash/recovery 断言。
 
-Queue producer 或 Queue consumer/Cron 分别使用：
-
-```sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-2.sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-3.sh
-```
-
-这些是可选的相关入口，不是每次迭代都要依次执行的清单。P2.2 单轮模式不会递归启动 P2.1/P1/P0/G0；
-P2.3、P2.4 仍会执行各自脚本中的附加检查。
-
-旧 P0/P1 shell aggregate 没有统一单轮开关，不要给它们加上未读取的环境变量后便声称“只跑一轮”。
-P0.2 至 P0.8 和 P0 Exit 可直接调用相关 integration test，避免外层三轮及递归，例如：
-
-```sh
-cargo test -p open-compute-service --all-features \
-  --test p0_2_runtime_gate -- --test-threads=1
-```
-
-P0.2 同时验证 Worker TS CLI 的编译、部署、请求和类型错误拒绝路径，需要本机 Bun 与已经安装
-的根 workspace 锁定依赖。可用 `OPEN_COMPUTE_TEST_BUN` 指定 Bun 路径；测试不会下载工具链。
-JS/TS 开发检查使用 `bun run typecheck` 和 `bun run test:js`；修改系统源码后执行 `bun run build`，
-再用 `bun run check:generated` 核对当前生成 JS 与源码清单。当前生成目录还是受跟踪的
-`runtime/system-workers/`；迁包后改为不进入 Git 的 `packages/runtime/dist/`，CI 必须先构建
-再检查完整性与可复现性，所有消费 runtime 资产的 Rust job 都需要该前置构建。不能仅改 ignore
-而继续依赖 Git 中已有产物；迁移时一起消除根流程与包脚本的重复类型检查。
-
-P0.1 的三轮循环写在测试内部，当前没有单轮参数；它保留为最终进程验收入口。开发时先运行所改
-process/supervisor 模块的定向测试，明确完整单轮 Gate 尚不可用，不把单测结果冒充 Gate 通过。
-正式改造时移出测试内部的轮数循环，保留一轮的完整断言，让顶层入口承担最终三轮重复。
-现存 `poc/g0` 是待删除的历史调查入口，不再要求重跑；旧 P2.1 等脚本仍可能间接调用它，
-不能因为旧递归关系而将已退役的调查重新列为验收要求。
-
-## 单文件发行定向测试
-
-```sh
-cargo test -p open-compute-runtime --all-features --lib embedded:: -- --test-threads=1
-cargo test -p open-compute-service --all-features --test single_binary -- --test-threads=1
-```
-
-第二项将程序复制到隔离目录，清空 PATH/环境，验证内嵌资源独立工作和真实进程生命周期。
-设置 `OPEN_COMPUTE_TEST_PLATFORMD=/abs/platformd` 可检查一个已授权构建的正式发行文件。
-准备输入和发布脚本是显式运维操作，不能在 Gate 缺少输入时自动调用下载或打包。
-
-## 源码冻结：最终验收
-
-P2.4 最终三轮入口为：
-
-```sh
-OPEN_COMPUTE_GATE_ROUNDS=3 ./test/test-p2-4.sh
-```
-
-P2.5 和 P2 Exit 使用相同轮数规则：
-
-```sh
-OPEN_COMPUTE_GATE_ROUNDS=3 ./test/test-p2-5.sh
-OPEN_COMPUTE_GATE_ROUNDS=3 ./test/test-p2-exit.sh
-```
-
-以上是按改动选择的最终入口示例，不是每次开发迭代都执行的清单。执行三轮之前，先完成
-AGENTS.md 的 format、clippy、workspace tests、no-default-features、MSRV、metadata、
-dependency boundaries 与 coverage 检查。完整检查各执行一次，coverage 的插桩运行不替代
-未插桩的最终进程验收。统一入口改造后，coverage 只运行一轮所需测试，不再隐式执行多轮。
-
-其余产品 Gate 按实际覆盖选择，避免将已被其他入口执行的相同目标再次运行；现有入口仍有内部
-三轮或递归时，应明确记录实际次数，不能把重复执行包装成额外覆盖。统一入口改造完成后，
-每个所需目标恰好三轮，不再因入口嵌套增加次数。
-
-`docs/implemented/g0-results.md` 保留已经完成的调查结果；POC 退役不要求重新生成它，也不手改历史报告。
-不要把开发阶段一轮通过写成三轮 aggregate 通过，也不要改写历史结果里的实际轮数。报告应标明
-源码基线、实际轮数、通过/失败/未运行和接受的限制；保留失败现场。
+Linux 受控 egress 仍需显式 `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`，执行
+`OPEN_COMPUTE_GATE_ROUNDS=3 ./test/test-p0-2-egress-linux.sh`；它变更 loopback 与 `/etc/hosts`，
+不能在未授权宿主上运行。正式发行文件需另行授权构建，再以 `OPEN_COMPUTE_TEST_PLATFORMD`
+传给 `single-binary`，本地未包装的二进制测试不能声称正式发布已通过。

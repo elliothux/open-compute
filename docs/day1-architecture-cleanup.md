@@ -3,7 +3,7 @@
 记录日期：2026-08-28。
 
 状态：已确认需要清理，尚未完成整体验收。本文件记录代码审查结果、清理边界和验收要求，
-不代表清理已经实施。本次只更新文档与策略，不实施下列代码重构。
+不代表清理已经实施。各项以其单独记录的实施与验收状态为准。
 记录依据包括当前未提交工作树；实施前应重新核对源码，避免覆盖其他改动。
 
 ## 清理边界
@@ -34,9 +34,9 @@
 
 ### 1. 统一 Workflow 执行模型
 
-证据：[Loader 分流](../runtime/src/loader/bindings.ts)、[模块装配](../runtime/src/loader/modules.ts)、
+证据：[Loader 分流](../packages/runtime/src/loader/bindings.ts)、[模块装配](../packages/runtime/src/loader/modules.ts)、
 [调度器](../crates/service/src/scheduler/workflow.rs)、[后端路由](../crates/service/src/workflow_backend.rs)。
-`runtime/src/workflows/` 仍有 facade、runner、JSON codec 的两套实现；
+`packages/runtime/src/workflows/` 仍有 facade、runner、JSON codec 的两套实现；
 `/internal/workflows/v1/runs/` 与 `/internal/workflows/v2/runs/` 同时存在。
 
 - [ ] 将当前已支持的 durable Workflow 能力作为唯一实现，移除旧 V1 引擎、模块、transport、
@@ -82,7 +82,7 @@
 证据：[Binding backend](../crates/service/src/binding_backend.rs) 根据 Content-Type 在 `dispatch`
 与 `dispatch_frame` 之间分流；`KvBindingExecutor` 同时保留文本 `get/put/delete` 与 `KvCommand`。
 [SQLite backend](../crates/service/src/kv_backend.rs) 还有反向适配，
-[runtime transport](../runtime/src/kv/transport.ts) 暴露 `echoStream`。
+[runtime transport](../packages/runtime/src/kv/transport.ts) 暴露 `echoStream`。
 
 - [ ] 保留一套当前内部协议和执行接口，删除旧 JSON 请求分流、文本 executor 兼容默认实现、
   双向适配及不再需要的协议常量。
@@ -130,17 +130,18 @@
 
 ### 8. Runtime 包与测试流程收敛
 
-方案见 [Runtime 包与测试流程整理](runtime-and-test-layout.md)。文档及测试原则已更新，
-以下目录、构建链和测试入口的代码改造尚未实施，不将本条记录视为清理完成。
+已于 2026-08-29 完成本机实现与验收，见 [Runtime 包与测试流程整理](implemented/runtime-and-test-layout.md)
+和[实测记录](implemented/runtime-and-test-layout-results.md)：workspace 690 个用例、90.16% 行覆盖率，
+最终 23 目标各三轮全部通过。跨平台与正式发行资格另见[活动验收计划](runtime-layout-release-acceptance.md)。
 
-- [ ] 将 `runtime/` 移至 `packages/runtime/`，生成目录改为 `dist/` 并取消 Git 跟踪；
+- [x] 将 `runtime/` 移至 `packages/runtime/`，生成目录改为 `dist/` 并取消 Git 跟踪；
   同步源码、配置、正式 pin、Rust 内嵌/manifest 消费者、workspace、CI 和发行构建路径。
-- [ ] 从不含 `dist/` 的干净检出构建并验证可复现资产，生产启动继续离线且不依赖 JS 工具链。
-- [ ] 删除已完成的 POC 上游能力探测、旧原型断言、重复测试及其孤立依赖；将仍需维护的产品
+- [x] 从不含 `dist/` 的干净源码快照构建并验证可复现资产，生产启动继续离线且不依赖 JS 工具链。
+- [x] 删除已完成的 POC 上游能力探测、旧原型断言、重复测试及其孤立依赖；将仍需维护的产品
   回归与所需 harness、fixtures 统一移入 `test/`，保留当前安全、完整性和恢复覆盖。
-- [ ] 移除独立 POC pin、旧 G0 入口及相关必跑依赖；保留历史报告、已知限制和既有失败证据。
-- [ ] Gate 默认一轮，最终显式三轮；消除内部固定三轮、递归调用和重复 target，每轮各目标一次。
-- [ ] 减少重复构建、类型检查、初始化和无效等待；完整检查与 coverage 不随 Gate 轮次重复，
+- [x] 移除独立 POC pin、旧 G0 入口及相关必跑依赖；保留历史报告、已知限制和既有失败证据。
+- [x] Gate 默认一轮，最终显式三轮；消除内部固定三轮、递归调用和重复 target，每轮各目标一次。
+- [x] 减少重复构建、类型检查、初始化和无效等待；完整检查与 coverage 不随 Gate 轮次重复，
   记录实际执行次数与耗时，coverage 门槛仍为 90.00%。
 
 ## 执行与验收
@@ -154,7 +155,7 @@ Secrets 可按各自领域独立清理。每项都应同步修改生产调用方
 - [ ] 开发期间按 [测试节奏](references/testing.md) 运行相关单轮检查；完成实现与审查、源码冻结后，
   再执行 [AGENTS.md](../AGENTS.md) 要求的完整验收、相关三轮真实 workerd Gate 和覆盖率检查。
 - [ ] 修改 TypeScript 时通过严格类型检查、行为测试、构建和生成资产一致性检查；
-  不手改 `runtime/system-workers/` 生成产物。
+  不手改 `packages/runtime/dist/` 生成产物。
 - [ ] 完成记录写明实际修改范围、源码基线、执行的检查、结果与剩余项。
   未运行、缺少环境、只有源码修改或只有单轮通过，都不能标为最终验收完成。
 

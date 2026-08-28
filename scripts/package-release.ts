@@ -18,6 +18,7 @@ try {
   const target = { "darwin-arm64": "aarch64-apple-darwin", "darwin-x64": "x86_64-apple-darwin",
     "linux-arm64": "aarch64-unknown-linux-gnu", "linux-x64": "x86_64-unknown-linux-gnu" }[pin.target];
   if (!target) throw new Error("unsupported native Cargo target");
+  command("bun", ["run", "build"]);
   command("bun", ["run", "check:generated"]);
   command("cargo", ["build", "--locked", "--release", "--target", target, "-p", "open-compute-service", "--bin", "platformd"], {
     ...process.env,

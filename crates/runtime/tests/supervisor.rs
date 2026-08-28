@@ -594,20 +594,18 @@ async fn timestamps_use_deterministic_clock() {
 
 #[tokio::test]
 async fn real_workerd_control_probe_term_kill() {
-    let Some(path) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD") else {
-        eprintln!("OPEN_COMPUTE_TEST_WORKERD unset; real workerd supervisor test not executed");
-        return;
-    };
+    let path = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     let path = PathBuf::from(path);
     assert!(
         path.is_absolute(),
         "OPEN_COMPUTE_TEST_WORKERD must be absolute"
     );
     let lock_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/workerd.lock.json");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/runtime/workerd.lock.json");
     let lock_path = lock_path.canonicalize().unwrap();
     let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../runtime")
+        .join("../../packages/runtime")
         .canonicalize()
         .unwrap();
     let runtime =

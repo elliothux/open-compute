@@ -85,7 +85,7 @@ request_p95=$(/usr/bin/sed -n 's/.*"p95_ms":\([0-9.][0-9.]*\).*/\1/p' "$capacity
 request_p99=$(/usr/bin/sed -n 's/.*"p99_ms":\([0-9.][0-9.]*\).*/\1/p' "$capacity_log" | /usr/bin/sort -nr | /usr/bin/awk 'NR == 1 { print; exit }')
 finish=$(/bin/date +%s)
 revision=$(git rev-parse HEAD)
-workerd_lock_sha256=$(/usr/bin/shasum -a 256 "$root/runtime/workerd.lock.json" | /usr/bin/awk '{print $1}')
+workerd_lock_sha256=$(/usr/bin/shasum -a 256 "$root/packages/runtime/workerd.lock.json" | /usr/bin/awk '{print $1}')
 config_sha256=$(/usr/bin/shasum -a 256 "$root/share/default-config.toml" | /usr/bin/awk '{print $1}')
 host=$(/usr/bin/uname -srm | /usr/bin/tr -c 'A-Za-z0-9_.-' '_')
 result="$result_dir/result.json"

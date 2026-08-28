@@ -23,12 +23,14 @@ TS 源码、Bun、Node、Rolldown、用户 bundle、数据库、master key、S3 
 
 ```sh
 export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/workerd-darwin-arm64.gz
+bun run build
 bun run check:generated
 cargo build --locked --release -p open-compute-service --bin platformd
 ```
 
 Cargo build script 检查目标、压缩包与解压二进制的 SHA-256、大小上限、生成 manifest
-和文件集合，再把同一批已验证字节编入程序。没有构建输入时直接报错，不搜索 PATH/缓存。
+、文件集合及源码/锁文件摘要，再把同一批已验证字节编入程序。
+检出目录使用 `packages/runtime/`，离线物化仍使用内部 `runtime/`；`dist/` 必须显式构建。没有构建输入时直接报错，不搜索 PATH/缓存。
 
 正式发布在干净 checkout 中显式执行：
 
@@ -66,7 +68,7 @@ S3 是平台 authority 的一部分，仍需用户预置；单文件不是内嵌
 platformd（用户下载的唯一文件）
   └─ data/runtime/packages/<payload-sha256>/
        ├─ workerd
-       └─ runtime/{workerd.lock.json,config.capnp,system-workers/...}
+       └─ runtime/{workerd.lock.json,config.capnp,dist/...}
 ```
 
 必须先取得 data-dir 排他锁，才能物化、清理中断的私有 staging、编译与启动。

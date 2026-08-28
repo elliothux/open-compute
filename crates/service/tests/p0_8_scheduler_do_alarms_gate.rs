@@ -43,11 +43,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p0_8_real_scheduler_alarm_matrix() {
-    let Some(workerd) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map(PathBuf::from) else {
-        return;
-    };
+    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+        .map(PathBuf::from)
+        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     let root = repo_root();
-    let lock = root.join("runtime/workerd.lock.json");
+    let lock = root.join("packages/runtime/workerd.lock.json");
     let temp = tempfile::tempdir().unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
@@ -118,7 +118,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     let compiler = StaticConfigCompiler::new(
         runtime.clone(),
         lock.clone(),
-        root.join("runtime"),
+        root.join("packages/runtime"),
         storage.data_dir().runtime_dir(),
         PlatformReleaseMeta {
             version: "p0.8-gate".to_owned(),

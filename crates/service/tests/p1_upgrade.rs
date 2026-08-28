@@ -43,14 +43,6 @@ struct ConfigInput<'a> {
     public_port: u16,
 }
 
-fn workspace() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace")
-        .to_path_buf()
-}
-
 fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
     fs::write(path, bytes).expect("write fixture");
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("fixture mode");
@@ -543,10 +535,9 @@ async fn upgrade_gate() {
         b"upgrade-example-secret-key-material-0001",
         0o600,
     );
-    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map_or_else(
-        || workspace().join(".temp/runtime-cache/v1.20260826.1/workerd"),
-        PathBuf::from,
-    );
+    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+        .map(PathBuf::from)
+        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     assert!(workerd.is_file(), "stock workerd is required");
     let source_data = root.join("source-data");
     fs::create_dir(&source_data).expect("source data");

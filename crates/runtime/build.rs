@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("cargo:rerun-if-changed={}", archive_path.display());
     let archive = read_bounded(&archive_path, MAX_ARCHIVE)?;
-    let lock_bytes = tracked(&root.join("runtime/workerd.lock.json"))?;
+    let lock_bytes = tracked(&root.join("packages/runtime/workerd.lock.json"))?;
     let lock: serde_json::Value = serde_json::from_slice(&lock_bytes)?;
     let selected = &lock["targets"][target];
     let archive_hash = hex::encode(Sha256::digest(&archive));
@@ -61,10 +61,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     assets.insert("runtime/workerd.lock.json".to_owned(), lock_bytes);
     assets.insert(
         "runtime/config.capnp".to_owned(),
-        tracked(&root.join("runtime/config.capnp"))?,
+        tracked(&root.join("packages/runtime/config.capnp"))?,
     );
-    collect(&root, "runtime/system-workers", &mut assets)?;
-    verify_manifest(&assets)?;
+    collect(&root.join("packages"), "runtime/dist", &mut assets)?;
+    verify_manifest(&root, &assets)?;
 
     let mut digest = Sha256::new();
     digest.update(b"open-compute/embedded-runtime/v1\0");
@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     put(&mut assets_digest, &assets["runtime/config.capnp"]);
     let workers: Vec<_> = assets
         .iter()
-        .filter(|(path, _)| path.starts_with("runtime/system-workers/"))
+        .filter(|(path, _)| path.starts_with("runtime/dist/"))
         .collect();
     assets_digest.update((workers.len() as u64).to_be_bytes());
     for (name, bytes) in workers {
@@ -142,6 +142,9 @@ fn collect(
     assets: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed={}", root.join(relative).display());
+    if !fs::symlink_metadata(root.join(relative))?.is_dir() {
+        return Err("runtime asset/source directory must be a regular directory".into());
+    }
     for entry in fs::read_dir(root.join(relative))? {
         let entry = entry?;
         let name = entry
@@ -161,9 +164,40 @@ fn collect(
     Ok(())
 }
 
-fn verify_manifest(assets: &BTreeMap<String, Vec<u8>>) -> Result<(), Box<dyn Error>> {
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&assets["runtime/system-workers/manifest.json"])?;
+fn verify_manifest(root: &Path, assets: &BTreeMap<String, Vec<u8>>) -> Result<(), Box<dyn Error>> {
+    let manifest: serde_json::Value = serde_json::from_slice(
+        assets
+            .get("runtime/dist/manifest.json")
+            .ok_or("runtime assets are missing; run bun run build before Cargo")?,
+    )?;
+    let mut inputs = BTreeMap::new();
+    collect(root, "packages/runtime/src", &mut inputs)?;
+    for name in [
+        "bun.lock",
+        "package.json",
+        "tsconfig.json",
+        "packages/runtime/build.ts",
+        "packages/runtime/package.json",
+        "packages/runtime/tsconfig.json",
+        "packages/runtime/tsconfig.build.json",
+    ] {
+        inputs.insert(name.to_owned(), tracked(&root.join(name))?);
+    }
+    let expected_inputs = manifest["inputs"]
+        .as_object()
+        .ok_or("missing runtime build inputs")?;
+    if inputs.len() != expected_inputs.len()
+        || inputs.iter().any(|(name, bytes)| {
+            expected_inputs
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                != Some(hex::encode(Sha256::digest(bytes)).as_str())
+        })
+    {
+        return Err(
+            "runtime assets are stale for the current sources/toolchain; run bun run build".into(),
+        );
+    }
     let sources = manifest["sources"]
         .as_object()
         .ok_or("invalid runtime manifest")?;
@@ -172,12 +206,10 @@ fn verify_manifest(assets: &BTreeMap<String, Vec<u8>>) -> Result<(), Box<dyn Err
     }
     for (name, expected) in sources {
         let bytes = assets
-            .get(&format!("runtime/system-workers/{name}"))
+            .get(&format!("runtime/dist/{name}"))
             .ok_or("runtime manifest source is missing")?;
         if expected.as_str() != Some(&hex::encode(Sha256::digest(bytes))) {
-            return Err(
-                "generated runtime does not match its manifest; run bun run build:runtime".into(),
-            );
+            return Err("generated runtime does not match its manifest; run bun run build".into());
         }
     }
     Ok(())

@@ -103,7 +103,7 @@ pub(crate) fn load_assets(
     let config_path = assets_dir.join("config.capnp");
     reject_symlink_escape(assets_dir, &config_path)?;
     let template = read_regular_nofollow(&config_path)?;
-    let workers_dir = assets_dir.join("system-workers");
+    let workers_dir = assets_dir.join("dist");
     reject_symlink_escape(assets_dir, &workers_dir)?;
     let files = list_files_sorted(&workers_dir)?;
     let mut workers = Vec::new();

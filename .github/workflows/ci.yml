@@ -22,6 +22,8 @@ jobs:
           bun-version: 1.3.14
       - name: Install locked build tooling
         run: bun install --frozen-lockfile --ignore-scripts
+      - name: Build untracked runtime and toolchain assets from this checkout
+        run: bun run build
       - name: Prepare explicitly pinned embedded build input
         run: bun scripts/prepare-workerd.ts --dest "$RUNNER_TEMP/open-compute-build-runtime" --download >> "$GITHUB_ENV"
       - name: MSRV 1.98 check
@@ -35,6 +37,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
@@ -53,10 +58,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Strict TypeScript and generated runtime assets
         run: |
-          bun run typecheck
+          bun run build
           bun run check:generated
           bun run test:js
-          bun run --filter @open-compute/toolchain build
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
       - name: Prepare explicitly pinned embedded build input
         run: bun scripts/prepare-workerd.ts --dest "$RUNNER_TEMP/open-compute-build-runtime" --download >> "$GITHUB_ENV"
       - name: fmt
@@ -64,11 +69,13 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: tests
-        run: cargo test --workspace --all-targets --all-features -- --test-threads=1
+        run: ./test/gate.py --workspace --jobs 2
       - name: no-default-features
         run: cargo check --workspace --no-default-features
       - name: metadata
         run: cargo metadata --no-deps --format-version 1
+      - name: Production feature and artifact hygiene
+        run: ./test/check-production.py
       - name: dependency boundaries
         run: chmod +x test/check-boundaries.sh && ./test/check-boundaries.sh
 
@@ -76,6 +83,9 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
@@ -93,10 +103,12 @@ jobs:
         with:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build untracked runtime and toolchain assets from this checkout
+        run: bun run build
       - name: Prepare explicitly pinned embedded build input
         run: bun scripts/prepare-workerd.ts --dest "$RUNNER_TEMP/open-compute-build-runtime" --download >> "$GITHUB_ENV"
       - name: Enforce 90 percent Rust line coverage
-        run: ./test/coverage.sh
+        run: ./test/coverage.sh --jobs 2
 
   integration:
     strategy:
@@ -106,6 +118,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
@@ -122,17 +137,14 @@ jobs:
         run: bun scripts/prepare-workerd.ts --dest "$RUNNER_TEMP/open-compute-build-runtime" --download >> "$GITHUB_ENV"
       - name: Package one pinned offline executable
         run: ./scripts/package-release.sh --dest "$RUNNER_TEMP/platformd" --archive "$OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE"
-      - name: Standalone executable first-start, restart, and corruption Gate
-        run: OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" cargo test -p open-compute-service --test single_binary --all-features -- --test-threads=1
-      - name: P0.1 three-round process Gate
-        run: |
-          ./test/test-p0-1.sh
-      - name: P0.2 three-round Worker Gate (macOS)
+      - name: Final independent product Gates (macOS)
         if: runner.os == 'macOS'
-        run: |
-          ./test/test-p0-2.sh
-      - name: P0.2 three-round Worker and controlled egress Gate (Linux)
+        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" ./test/gate.py all --jobs 2
+      - name: Final product and controlled egress Gates (Linux, explicit privilege authorization)
         if: runner.os == 'Linux'
-        run: |
-          OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
-            ./test/test-p0-2-egress-linux.sh
+        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh all --jobs 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate-evidence-${{ matrix.os }}
+          path: .temp/gate-run/

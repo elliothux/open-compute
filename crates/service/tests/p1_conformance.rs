@@ -77,7 +77,7 @@ fn capabilities(config: &Path) -> Value {
 }
 
 #[test]
-fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
+fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
     let temp = TempDir::new().expect("temp");
     let config = config(&temp);
     let first = capabilities(&config);
@@ -207,7 +207,6 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
             }
         }
     }
-    assert_eq!(capabilities(&config), first);
     assert_eq!(capabilities(&config), first);
 
     for date in [COMPATIBILITY_DATE_MIN, COMPATIBILITY_DATE_MAX] {

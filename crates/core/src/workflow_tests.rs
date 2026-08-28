@@ -110,7 +110,7 @@ fn workflow_limits_and_heartbeat_boundaries() {
 #[test]
 fn workflow_duration_shared_javascript_fixtures() {
     let fixtures: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../runtime/tests/fixtures/workflow-duration.json"
+        "../../../packages/runtime/tests/fixtures/workflow-duration.json"
     ))
     .unwrap();
     for fixture in fixtures.as_array().unwrap() {

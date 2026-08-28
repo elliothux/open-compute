@@ -3,6 +3,8 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "$#" -eq 0 ]; then set -- p0-2; fi
+"$root/test/gate.py" "$@" --list >/dev/null
 port=38080
 public_ipv4=93.184.216.34
 public_ipv6=2606:4700:4700::1111
@@ -70,4 +72,4 @@ export OPEN_COMPUTE_EGRESS_PUBLIC_IPV6_URL="http://[$public_ipv6]:$port/ipv6"
 export OPEN_COMPUTE_EGRESS_PUBLIC_HOSTNAME_URL="http://p0-2-public.test:$port/dns"
 export OPEN_COMPUTE_EGRESS_REDIRECT_PRIVATE_URL="http://$public_ipv4:$port/redirect-private"
 export OPEN_COMPUTE_EGRESS_PRIVATE_HOSTNAME_URL="http://p0-2-private.test:$port/private"
-"$root/test/test-p0-2.sh"
+"$root/test/gate.py" "$@"

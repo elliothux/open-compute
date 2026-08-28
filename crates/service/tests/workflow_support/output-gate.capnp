@@ -6,8 +6,8 @@ const config :Workerd.Config = (
       compatibilityFlags = ["rpc"],
       modules = [
         (name = "probe.js", esModule = embed "output-gate.js"),
-        (name = "workflow-facade.js", esModule = embed "../../../../runtime/system-workers/workflows/facade.js"),
-        (name = "json.js", esModule = embed "../../../../runtime/system-workers/workflows/json.js"),
+        (name = "workflow-facade.js", esModule = embed "../../../../packages/runtime/dist/workflows/facade.js"),
+        (name = "json.js", esModule = embed "../../../../packages/runtime/dist/workflows/json.js"),
       ],
       bindings = [
         (name = "PROBES", durableObjectNamespace = "Caller"),

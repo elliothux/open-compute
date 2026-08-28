@@ -136,13 +136,12 @@ printf '%s' '{payload}'
 
 fn copy_formal_assets(dest: &Path) {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../runtime")
+        .join("../../packages/runtime")
         .canonicalize()
         .expect("formal assets path");
-    fs::create_dir_all(dest.join("system-workers")).expect("workers dir");
+    fs::create_dir_all(dest.join("dist")).expect("workers dir");
     fs::copy(src.join("config.capnp"), dest.join("config.capnp")).expect("config");
-    for path in crate::fsutil::list_files_sorted(&src.join("system-workers")).expect("worker files")
-    {
+    for path in crate::fsutil::list_files_sorted(&src.join("dist")).expect("worker files") {
         let relative = path.strip_prefix(&src).expect("asset path");
         let output = dest.join(relative);
         fs::create_dir_all(output.parent().expect("asset parent")).expect("asset directory");
@@ -501,19 +500,15 @@ fn digest_assets_tokens_and_supervisor_auth_are_fail_closed() {
         ErrorCode::PathInvalid
     );
     let dir = TempDir::new().unwrap();
-    fs::create_dir(dir.path().join("system-workers")).unwrap();
+    fs::create_dir(dir.path().join("dist")).unwrap();
     fs::write(dir.path().join("config.capnp"), b"template").unwrap();
     assert_eq!(
         load_assets(dir.path()).unwrap_err().code(),
         ErrorCode::ConfigCompileFailed
     );
-    fs::write(
-        dir.path().join("system-workers/worker.js"),
-        b"export default {}",
-    )
-    .unwrap();
+    fs::write(dir.path().join("dist/worker.js"), b"export default {}").unwrap();
     let (_, workers, config_path) = load_assets(dir.path()).unwrap();
-    assert_eq!(workers[0].0, "system-workers/worker.js");
+    assert_eq!(workers[0].0, "dist/worker.js");
     assert_eq!(config_path, dir.path().join("config.capnp"));
 
     let valid = SecretString::new(TOKEN);
@@ -890,15 +885,13 @@ async fn compile_swap_after_hash_executes_original_not_replacement() {
 }
 
 #[tokio::test]
-async fn real_pinned_binary_accepted_when_env_set() {
-    let Some(path) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD") else {
-        eprintln!("OPEN_COMPUTE_TEST_WORKERD unset; real workerd test not executed");
-        return;
-    };
+async fn real_pinned_binary_is_accepted() {
+    let path = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     let path = PathBuf::from(path);
     assert!(path.is_absolute());
     let lock_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/workerd.lock.json");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/runtime/workerd.lock.json");
     let verified = verify_runtime_binary(
         &lock_path.canonicalize().unwrap(),
         &path,
@@ -960,14 +953,10 @@ async fn supervisor_construction_debug_and_default_wiring_are_secret_safe() {
 #[test]
 fn asset_walk_bounds_zero_length_file_fanout() {
     let dir = TempDir::new().unwrap();
-    fs::create_dir(dir.path().join("system-workers")).unwrap();
+    fs::create_dir(dir.path().join("dist")).unwrap();
     fs::write(dir.path().join("config.capnp"), b"template").unwrap();
     for i in 0..3 {
-        fs::write(
-            dir.path().join("system-workers").join(format!("w{i}.js")),
-            b"",
-        )
-        .unwrap();
+        fs::write(dir.path().join("dist").join(format!("w{i}.js")), b"").unwrap();
     }
     set_test_max_asset_files(Some(2));
     let err = load_assets(dir.path()).unwrap_err();
@@ -975,21 +964,21 @@ fn asset_walk_bounds_zero_length_file_fanout() {
     assert_eq!(err.code(), ErrorCode::PathInvalid);
 
     let dir = TempDir::new().unwrap();
-    fs::create_dir(dir.path().join("system-workers")).unwrap();
+    fs::create_dir(dir.path().join("dist")).unwrap();
     fs::write(dir.path().join("config.capnp"), b"template").unwrap();
-    fs::create_dir(dir.path().join("system-workers").join("a")).unwrap();
-    fs::create_dir(dir.path().join("system-workers").join("b")).unwrap();
+    fs::create_dir(dir.path().join("dist").join("a")).unwrap();
+    fs::create_dir(dir.path().join("dist").join("b")).unwrap();
     set_test_max_asset_entries(Some(1));
     let err = load_assets(dir.path()).unwrap_err();
     set_test_max_asset_entries(None);
     assert_eq!(err.code(), ErrorCode::PathInvalid);
 
     let dir = TempDir::new().unwrap();
-    fs::create_dir(dir.path().join("system-workers")).unwrap();
+    fs::create_dir(dir.path().join("dist")).unwrap();
     fs::write(dir.path().join("config.capnp"), b"template").unwrap();
     for i in 0..9 {
         fs::write(
-            dir.path().join("system-workers").join(format!("w{i}.js")),
+            dir.path().join("dist").join(format!("w{i}.js")),
             vec![b'x'; 1024 * 1024],
         )
         .unwrap();
@@ -1069,11 +1058,11 @@ fn input_digest_changes_with_any_input() {
     copy_formal_assets(dir.path());
 
     fs::write(
-        dir.path().join("system-workers/gateway/ingress.js"),
-        fs::read(dir.path().join("system-workers/gateway/ingress.js")).unwrap(),
+        dir.path().join("dist/gateway/ingress.js"),
+        fs::read(dir.path().join("dist/gateway/ingress.js")).unwrap(),
     )
     .unwrap();
-    let extra = dir.path().join("system-workers/extra.js");
+    let extra = dir.path().join("dist/extra.js");
     fs::write(
         &extra,
         b"export default {fetch(){return new Response('x')}}",
@@ -1542,13 +1531,11 @@ async fn corrupt_sidecar_fails_closed() {
 
 #[tokio::test]
 async fn real_compile_succeeds_when_env_set() {
-    let Some(path) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD") else {
-        eprintln!("OPEN_COMPUTE_TEST_WORKERD unset; real workerd test not executed");
-        return;
-    };
+    let path = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     let binary = PathBuf::from(path);
     let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../runtime")
+        .join("../../packages/runtime")
         .canonicalize()
         .unwrap();
     let lock_path = assets.join("workerd.lock.json");
@@ -1639,8 +1626,9 @@ fn compiled_config_accessors_and_corruption_matrix() {
 }
 
 #[test]
-fn packaged_lock_matches_g0_pin() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/workerd.lock.json");
+fn packaged_lock_matches_formal_release_pin() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/runtime/workerd.lock.json");
     let (lock, _) = load_runtime_lock(&path.canonicalize().unwrap()).unwrap();
     assert_eq!(lock.release, "v1.20260826.1");
     assert_eq!(lock.expected_version_output, VERSION);

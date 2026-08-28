@@ -31,7 +31,7 @@ function string(value: unknown): string {
 }
 
 export async function loadPin() {
-  const bytes = await readFile(join(repository, "runtime/workerd.lock.json"));
+  const bytes = await readFile(join(repository, "packages/runtime/workerd.lock.json"));
   const lock = record(JSON.parse(bytes.toString("utf8")) as unknown);
   const target = hostTarget();
   const entry = record(record(lock.targets)[target]);

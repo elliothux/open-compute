@@ -6,7 +6,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 report_dir="$root/target/llvm-cov"
 # Dedicated tests and explicit test-support fixtures are not production Rust.
 # Production modules must never be placed behind one of these filename rules.
-ignore_filename_regex='/rustlib/src/rust/|/tests/|/src/tests\.rs$|/src/.*_tests\.rs$|/src/mock_s3\.rs$|/src/bin/supervisor_fixture\.rs$'
+ignore_filename_regex='/rustlib/src/rust/|/tests?/|/src/tests\.rs$|/src/.*_tests\.rs$|/src/mock_s3\.rs$|/src/bin/supervisor_fixture\.rs$'
 minimum_lines=90.00
 workerd=${OPEN_COMPUTE_TEST_WORKERD:-}
 cargo_bin=${CARGO:-cargo}
@@ -16,13 +16,6 @@ if ! "$cargo_bin" llvm-cov --version >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ -z "$workerd" ]; then
-  case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64|Darwin-x86_64|Linux-x86_64|Linux-aarch64|Linux-arm64)
-      workerd="$root/.temp/runtime-cache/v1.20260826.1/workerd" ;;
-    *) workerd="" ;;
-  esac
-fi
 if [ -z "$workerd" ] || [ ! -f "$workerd" ]; then
   echo "OPEN_COMPUTE_TEST_WORKERD is missing; coverage requires the real P0 Gates" >&2
   exit 1
@@ -34,14 +27,14 @@ esac
 export OPEN_COMPUTE_TEST_WORKERD="$workerd"
 
 cd "$root"
+# Use cargo-llvm-cov's external-runner contract in its own existing build cache.
+# Profile names include process/module identity, so parallel processes cannot collide.
+./test/gate.py --workspace --list "$@" >/dev/null
+export CARGO_TARGET_DIR="$root/target/llvm-cov-target"
+coverage_env=$("$cargo_bin" llvm-cov show-env --sh)
+eval "$coverage_env"
 "$cargo_bin" llvm-cov clean --workspace
-"$cargo_bin" llvm-cov \
-  --workspace \
-  --all-targets \
-  --all-features \
-  --no-report \
-  -- \
-  --test-threads=1
+./test/gate.py --workspace "$@"
 
 mkdir -p "$report_dir"
 "$cargo_bin" llvm-cov report --ignore-filename-regex "$ignore_filename_regex" --lcov --output-path "$report_dir/lcov.info"

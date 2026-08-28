@@ -19,9 +19,8 @@ Worker、KV、R2、D1、Durable Objects、Queues、Cron 和 Workflows 的具体�
 | `crates/runtime` | workerd lock/verify/compile/supervisor |
 | `crates/workers` | WorkerBundle、deployment pipeline、RuntimeSource、dispatch pins |
 | `crates/service` | `platformd` CLI、health、control/data plane、workerd bridge |
-| `runtime/` | Formal `workerd.lock.json`, Cap'n Proto, system workers |
+| `packages/runtime/` | Formal `workerd.lock.json`, Cap'n Proto, system workers |
 | `packages/toolchain` | Rolldown + TS7 Worker build/run/deploy CLI |
-| `poc/` | G0 evidence only; not the production implementation |
 | `examples/` | Container, systemd, launchd, TypeScript Worker |
 | `test/` | Repository test/Gate launchers, coverage, load/soak, fixtures, and fuzz |
 | `scripts/` | Local development and release packaging launchers |
@@ -34,8 +33,9 @@ Worker、KV、R2、D1、Durable Objects、Queues、Cron 和 Workflows 的具体�
 
 - Rust 1.98.0 (workspace toolchain and MSRV)
 - Bun 1.3.14, Node.js 24, and locked workspace dependencies for TypeScript development/tests (not daemon startup)
+- Python 3.11+ for the test scheduler
 - macOS or Linux
-- 构建时：与目标平台及 `runtime/workerd.lock.json` 匹配的官方 `.gz`，通过绝对路径 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 显式提供（pin `v1.20260826.1`）
+- 构建时：与目标平台及 `packages/runtime/workerd.lock.json` 匹配的官方 `.gz`，通过绝对路径 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 显式提供（pin `v1.20260826.1`）
 - `rclone` with `serve s3` support for local development
 - Local S3-compatible endpoint for real runs (the Gate hosts its own fake S3; protocol is still AWS SDK SigV4)
 
@@ -55,12 +55,13 @@ platformd --config /abs/new-config.toml doctor --full
 ## Dev / test
 
 Worker 的 TypeScript 用法见 [工具链说明](packages/toolchain/README.md)；
-系统 Worker 源码按领域组织，见 [runtime 目录](runtime/README.md)。
+系统 Worker 源码按领域组织，见 [runtime 目录](packages/runtime/README.md)。
 
 本地开发直接运行：
 
 ```sh
 export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/workerd-darwin-arm64.gz
+bun run build
 ./scripts/dev.sh
 ```
 
@@ -85,22 +86,26 @@ export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/workerd-darwin-arm64.gz
 ```
 
 测试与 Gate 仍使用测试进程内的 SigV4 S3 provider。开发、审查和修复期间只跑一轮相关 Gate；
-实现收尾、源码冻结后才跑最终三轮验收和完整 coverage。单轮命令与旧入口限制见
+实现收尾、源码冻结后才跑最终三轮验收和完整 coverage。单轮命令与并发隔离规则见
 [Gate 验证节奏](docs/references/testing.md)。下面列出完整检查和最终 Gate 入口，不是每次中间改动都要重跑的清单：
 
 ```sh
+export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
+export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/pinned/workerd-platform.gz
+export RUSTFLAGS='-D warnings'
+bun install --frozen-lockfile --ignore-scripts
+bun run build
+bun run check:generated
+bun run test:js
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets --all-features -- --test-threads=1
+./test/gate.py --workspace
 ./test/coverage.sh
 RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
 cargo metadata --no-deps --format-version 1
 ./test/check-boundaries.sh
-./poc/g0 test bootstrap
-OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd" ./test/test-p0-1.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd" ./test/test-p0-2.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd" ./test/test-p0-8.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/.temp/runtime-cache/v1.20260826.1/workerd" ./test/test-p0-exit.sh
+./test/check-production.py
+OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py all --jobs 2
 ```
 
 Rust 覆盖率使用
@@ -110,18 +115,15 @@ Rust 覆盖率使用
 `--all-targets --all-features --test-threads=1` 口径，要求提供与正式 lock 匹配的 pinned
 `workerd`，并执行真实 P0.1-P0.8 Rust Gate 路径。脚本在 `target/llvm-cov/` 生成终端摘要、
 HTML、LCOV 和 JSON summary；workspace 生产 Rust 行覆盖率低于 90.00% 时失败。独立的
-`tests/**`、`src/tests.rs`、`src/**/*_tests.rs`、`src/mock_s3.rs` 和测试 supervisor fixture
-不计入分母，生产代码不得放入这些排除路径。覆盖率运行不执行
-`poc/g0` JavaScript 黑盒测试，也不替代下方三个 fresh-process rounds 的 P0 验收。
+`test/**`、`tests/**`、`src/tests.rs`、`src/**/*_tests.rs`、`src/mock_s3.rs` 和测试 supervisor fixture
+不计入分母，生产代码不得放入这些排除路径。coverage 每个测试本体只执行一次，
+不替代最后的三轮独立进程验收。G0 一次性探测已移除，历史证据保留在 `docs/implemented/`。
 
-这些 Gate 在 pinned binary 缺失或 hash 与 lock 不一致时都会直接失败，不会 skip。
-`test/test-p0-2.sh` 在三个 fresh test process 中运行真实 `workerd`、SQLite 和 SigV4 S3 test
-provider。支持面与明确偏差见 [`docs/implemented/p0-2-api-matrix.md`](docs/implemented/p0-2-api-matrix.md)。
-`test/test-p0-8.sh` 在三个 fresh process 中运行 scheduler/alarm matrix，随后递归执行
-P0.7-P0.2 regression Gate。
-`test/test-p0-exit.sh` 在三个 fresh process 中运行单一 Worker 的 KV、R2、D1、DO、alarm、
-WebSocket、backup/restore、promotion/rollback、restart、corruption 与 S3 fault 综合矩阵，随后执行
-P0.8-P0.2 和 P0.1 的全部 regression Gate。
+`./test/gate.py p0-2 p2-3 --jobs 2` 默认单轮，并将两个名字指向的同一 Worker/Queue/Cron
+矩阵只执行一次。`p0`、`p1`、`p2`、`all` 选择对应目标集合，不递归调用其他 Gate。
+所有消费运行时资产的命令必须先显式 `bun run build`；`packages/runtime/dist/` 不提交 Git。
+缺少 binary/archive、摘要不符或资产过期直接失败，不跳过、不下载。
+
 Linux release CI 另以 `test/test-p0-2-egress-linux.sh` 创建短期受控 dual-stack 网络夹具，补齐
 public IPv4/IPv6/DNS allow 与 redirect/DNS-to-private deny；该脚本会要求显式 sudo 授权并在退出时
 清理地址和 hosts 项。

@@ -4,7 +4,8 @@
 >
 > 前置依赖：[P0.1：Platform Foundation](./p0-1-platform-foundation.md)
 >
-> 验证基线：[G0 results](./g0-results.md) 与 [`../poc/`](../../poc/README.md)
+> 历史 POC 源码已退役，相关链接指向当前删除/覆盖记录。
+> 验证基线：[G0 results](./g0-results.md) 与 [`../poc/`](runtime-and-test-layout.md#poc-删除与断言归属)
 >
 > 本文只实现 Workers 的第一条完整数据路径。真实 KV、R2、D1、Durable Object binding 从
 > P0.3 开始接入；本阶段只保留无 binding Worker、vars、secrets 和一个测试专用 fake adapter。
@@ -1373,10 +1374,10 @@ P0.3 不得：修改 ready deployment binding、把 display name当 physical ID�
 ## 25. 参考资料
 
 - [G0 results](./g0-results.md)
-- [G0 POC README](../../poc/README.md)
-- [G0 loader host](../../poc/workerd/loader-host.js)
-- [G0 code assembly](../../poc/workerd/code.js)
-- [G0 registry](../../poc/workerd/registry.js)
+- [G0 POC README](runtime-and-test-layout.md#poc-删除与断言归属)
+- [G0 loader host](runtime-and-test-layout.md#poc-删除与断言归属)
+- [G0 code assembly](runtime-and-test-layout.md#poc-删除与断言归属)
+- [G0 registry](runtime-and-test-layout.md#poc-删除与断言归属)
 - [总体方案](../open-compute-workerd-platform.md)
 - [P0.1 Platform Foundation](./p0-1-platform-foundation.md)
 - [Cloudflare Dynamic Workers API](https://developers.cloudflare.com/dynamic-workers/api-reference/)

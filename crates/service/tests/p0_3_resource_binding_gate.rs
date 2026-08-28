@@ -162,12 +162,12 @@ impl FakeExecutor {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p0_3_real_binding_matrix() {
-    let Some(workerd) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map(PathBuf::from) else {
-        return;
-    };
+    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+        .map(PathBuf::from)
+        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     let root = repo_root();
-    let lock = root.join("runtime/workerd.lock.json");
-    let assets = root.join("runtime");
+    let lock = root.join("packages/runtime/workerd.lock.json");
+    let assets = root.join("packages/runtime");
     let temp = tempfile::tempdir().unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)

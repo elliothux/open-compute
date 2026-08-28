@@ -14,17 +14,7 @@ fn workspace() -> PathBuf {
 #[test]
 fn p1_local_runners_and_runbooks_are_complete_and_safe() {
     let root = workspace();
-    for script in [
-        "test-p1.sh",
-        "test-p1-conformance.sh",
-        "test-p1-security.sh",
-        "test-p1-crash.sh",
-        "test-p1-upgrade.sh",
-        "test-p1-8.sh",
-        "soak-p1.sh",
-        "load-p1.sh",
-        "fuzz-p1.sh",
-    ] {
+    for script in ["soak-p1.sh", "load-p1.sh", "fuzz-p1.sh"] {
         let source = fs::read_to_string(root.join("test").join(script)).expect("P1 runner");
         assert!(source.starts_with("#!/bin/sh\n"), "{script}");
         assert!(source.contains("set -eu"), "{script}");

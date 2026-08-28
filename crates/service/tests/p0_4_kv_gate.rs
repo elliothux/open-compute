@@ -38,12 +38,12 @@ use std::time::{Duration, Instant};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p0_4_real_kv_matrix() {
-    let Some(workerd) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map(PathBuf::from) else {
-        return;
-    };
+    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+        .map(PathBuf::from)
+        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     let root = repo_root();
-    let lock = root.join("runtime/workerd.lock.json");
-    let assets = root.join("runtime");
+    let lock = root.join("packages/runtime/workerd.lock.json");
+    let assets = root.join("packages/runtime");
     let temp = tempfile::tempdir().unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
@@ -246,6 +246,13 @@ async fn p0_4_real_kv_matrix() {
     assert_eq!(deleted.body, "deleted");
     let missing = dispatch(&transport, account, worker.id, &deployment, "/missing", "").await;
     assert_eq!(missing.body, "null");
+    // Content-Length completion can reach the client before the blocking stream
+    // producer drops its pin. Await its existing drain notification, not a sleep.
+    for resource in [primary, secondary] {
+        pins.fence_and_wait(resource, Duration::from_secs(1))
+            .await
+            .expect("completed KV operations must release their pins before shutdown");
+    }
     assert_eq!(pins.count(primary), 0);
     assert_eq!(pins.count(secondary), 0);
     let write_staging = storage.data_dir().root().join("kv/.staging-write");
