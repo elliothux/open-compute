@@ -341,6 +341,26 @@ pub enum ErrorCode {
     WorkflowVersionNotReady,
     /// Workflow binding identity, descriptor, or lifecycle generation is stale.
     WorkflowBindingStale,
+    /// Caller and frozen Workflow execution capabilities disagree.
+    WorkflowCapabilityMismatch,
+    /// The current instance state cannot accept the requested lifecycle transition.
+    WorkflowInstanceStateConflict,
+    /// An instance already has an unfinished cross-database operation.
+    WorkflowInstanceBusy,
+    /// Expired history is awaiting proven cleanup before identity can be reused.
+    WorkflowInstanceCleanupPending,
+    /// Event type is outside the supported bounded ASCII alphabet.
+    WorkflowEventTypeInvalid,
+    /// An instance's bounded durable event inbox cannot admit another event.
+    WorkflowEventQueueFull,
+    /// A callback attempt reached its authoritative deadline.
+    WorkflowStepTimeout,
+    /// No additional business retry is available after the last failed attempt.
+    WorkflowStepRetriesExhausted,
+    /// The callback explicitly reported a native non-retryable failure.
+    WorkflowNonRetryable,
+    /// An event wait reached its deadline without an eligible committed event.
+    WorkflowEventTimeout,
     /// External Workflow instance identity violates the capability validator.
     WorkflowInstanceIdInvalid,
     /// This definition already reserved the external instance identity.
@@ -359,9 +379,11 @@ pub enum ErrorCode {
     WorkflowStepLimitExceeded,
     /// Workflow retry, timeout, or rollback overload is unsupported.
     WorkflowStepConfigUnsupported,
+    /// Workflow duration or absolute timestamp is outside the supported grammar or range.
+    WorkflowDurationInvalid,
     /// Workflow has concurrent or unawaited steps.
     WorkflowParallelStepUnsupported,
-    /// Workflow method is outside capability V1.
+    /// Workflow method is outside the selected caller or execution capability.
     WorkflowMethodUnsupported,
     /// Replay descriptor or completed frontier differs from durable history.
     WorkflowNonDeterministic,
@@ -555,6 +577,16 @@ impl ErrorCode {
             Self::WorkflowNotReady => "WORKFLOW_NOT_READY",
             Self::WorkflowVersionNotReady => "WORKFLOW_VERSION_NOT_READY",
             Self::WorkflowBindingStale => "WORKFLOW_BINDING_STALE",
+            Self::WorkflowCapabilityMismatch => "WORKFLOW_CAPABILITY_MISMATCH",
+            Self::WorkflowInstanceStateConflict => "WORKFLOW_INSTANCE_STATE_CONFLICT",
+            Self::WorkflowInstanceBusy => "WORKFLOW_INSTANCE_BUSY",
+            Self::WorkflowInstanceCleanupPending => "WORKFLOW_INSTANCE_CLEANUP_PENDING",
+            Self::WorkflowEventTypeInvalid => "WORKFLOW_EVENT_TYPE_INVALID",
+            Self::WorkflowEventQueueFull => "WORKFLOW_EVENT_QUEUE_FULL",
+            Self::WorkflowStepTimeout => "WORKFLOW_STEP_TIMEOUT",
+            Self::WorkflowStepRetriesExhausted => "WORKFLOW_STEP_RETRIES_EXHAUSTED",
+            Self::WorkflowNonRetryable => "WORKFLOW_NON_RETRYABLE",
+            Self::WorkflowEventTimeout => "WORKFLOW_EVENT_TIMEOUT",
             Self::WorkflowInstanceIdInvalid => "WORKFLOW_INSTANCE_ID_INVALID",
             Self::WorkflowInstanceAlreadyExists => "WORKFLOW_INSTANCE_ALREADY_EXISTS",
             Self::WorkflowInstanceNotFound => "WORKFLOW_INSTANCE_NOT_FOUND",
@@ -564,6 +596,7 @@ impl ErrorCode {
             Self::WorkflowStateQuotaExceeded => "WORKFLOW_STATE_QUOTA_EXCEEDED",
             Self::WorkflowStepLimitExceeded => "WORKFLOW_STEP_LIMIT_EXCEEDED",
             Self::WorkflowStepConfigUnsupported => "WORKFLOW_STEP_CONFIG_UNSUPPORTED",
+            Self::WorkflowDurationInvalid => "WORKFLOW_DURATION_INVALID",
             Self::WorkflowParallelStepUnsupported => "WORKFLOW_PARALLEL_STEP_UNSUPPORTED",
             Self::WorkflowMethodUnsupported => "WORKFLOW_METHOD_UNSUPPORTED",
             Self::WorkflowNonDeterministic => "WORKFLOW_NON_DETERMINISTIC",

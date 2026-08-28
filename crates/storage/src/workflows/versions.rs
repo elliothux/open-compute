@@ -66,9 +66,13 @@ impl WorkflowRepository<'_> {
         definition: WorkflowId,
         deployment: DeploymentId,
         class_name: &str,
+        capability_version: u32,
         now_ms: i64,
     ) -> Result<WorkflowVersion, PlatformError> {
         let bytes = class_name.as_bytes();
+        if !matches!(capability_version, 1 | 2) {
+            return Err(error(ErrorCode::WorkflowCapabilityMismatch));
+        }
         if bytes.is_empty()
             || bytes.len() > 128
             || class_name.starts_with("__")
@@ -98,14 +102,14 @@ impl WorkflowRepository<'_> {
             let mut target = WorkflowTarget { account_id: account, definition_id: definition,
                 definition_name: definition_row.name, version_id: WorkflowVersionId::generate(),
                 worker_id: deployment.0, deployment_id: deployment.1, worker_code_sha256: deployment.2,
-                class_name: class_name.into(), loader_schema_version: deployment.3, capability_version: 1,
+                class_name: class_name.into(), loader_schema_version: deployment.3, capability_version: i64::from(capability_version),
                 descriptor_sha256: [0;32] };
             target.descriptor_sha256 = version_digest(&target)?;
             tx.execute("INSERT INTO workflow_versions(id,definition_id,version_number,state,worker_id,deployment_id,
                 class_name,worker_code_sha256,loader_schema_version,capability_version,descriptor_sha256,created_at_ms)
-                VALUES(?1,?2,?3,'staging',?4,?5,?6,?7,?8,1,?9,?10)", params![target.version_id.to_string(),
+                VALUES(?1,?2,?3,'staging',?4,?5,?6,?7,?8,?9,?10,?11)", params![target.version_id.to_string(),
                 definition.to_string(),version_number,target.worker_id.to_string(),target.deployment_id.to_string(),
-                class_name,target.worker_code_sha256.as_slice(),target.loader_schema_version,target.descriptor_sha256.as_slice(),now_ms]).map_err(sql_error)?;
+                class_name,target.worker_code_sha256.as_slice(),target.loader_schema_version,capability_version,target.descriptor_sha256.as_slice(),now_ms]).map_err(sql_error)?;
             tx.execute("UPDATE workflow_versions SET state='validating' WHERE id=?1",[target.version_id.to_string()]).map_err(sql_error)?;
             Ok(WorkflowVersion { target, version_number, state: DeploymentState::Validating,
                 created_at_ms: now_ms, rejection_code: None })

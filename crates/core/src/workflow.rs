@@ -1,10 +1,27 @@
-//! Workflow capability V1 validation, private fences, and local capacity policy.
+//! Workflow validation, private fences, local capacity, and frozen execution policy.
 
 use crate::{ErrorCode, PlatformError, WorkflowInstanceId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod json;
 pub use json::{canonical_json, decode_json};
+mod event;
+pub use event::{WORKFLOW_EVENT_ENVELOPE_MAX_BYTES, WorkflowEventEnvelope};
+mod descriptor;
+mod duration;
+mod policy;
+pub use descriptor::{
+    WORKFLOW_V2_DEPENDENCY_BYTES, WORKFLOW_V2_EVENT_BYTES, WORKFLOW_V2_INSTANCE_BYTES,
+    WORKFLOW_V2_STEP_BYTES, WorkflowDurableConfig, WorkflowStepDeclaration, WorkflowStepDescriptor,
+    WorkflowStepKind, validate_workflow_event_type,
+};
+pub use duration::{
+    WORKFLOW_MAX_DURATION_MS, WORKFLOW_MAX_SAFE_INTEGER, duration_ms, timestamp_ms,
+};
+pub use policy::{
+    WORKFLOW_DRAIN_MARGIN_MS, WORKFLOW_MAX_ATTEMPT_MS, WORKFLOW_MAX_RETRY_DELAY_MS,
+    WorkflowBackoff, WorkflowRetention, WorkflowRetryPolicy, WorkflowStepConfig,
+};
 
 /// Maximum canonical input, step output, or final output bytes.
 pub const WORKFLOW_JSON_MAX_BYTES: usize = 1024 * 1024;
@@ -39,6 +56,18 @@ pub struct WorkflowsConfig {
     pub recovery_backoff_ms: u64,
     /// Reservation age before an uncommitted creation may be released.
     pub creation_grace_ms: u64,
+    /// Maximum callbacks granted in one immutable V2 batch, from one through sixteen.
+    #[serde(skip_serializing_if = "default_parallel_steps")]
+    pub max_parallel_steps: u32,
+    /// Maximum unconsumed V2 events admitted for one instance.
+    #[serde(skip_serializing_if = "default_buffered_events")]
+    pub max_buffered_events: u32,
+    /// Maximum logical inbox bytes, including event metadata.
+    #[serde(skip_serializing_if = "default_event_bytes")]
+    pub max_event_bytes: u64,
+    /// Retention defaults adopted only when a new V2 instance omits an override.
+    #[serde(skip_serializing_if = "default_retention")]
+    pub default_retention: WorkflowRetention,
 }
 
 impl Default for WorkflowsConfig {
@@ -56,6 +85,10 @@ impl Default for WorkflowsConfig {
             dispatch_timeout_ms: 300000,
             recovery_backoff_ms: 1000,
             creation_grace_ms: 60000,
+            max_parallel_steps: 4,
+            max_buffered_events: 128,
+            max_event_bytes: 8 * 1024 * 1024,
+            default_retention: WorkflowRetention::default(),
         }
     }
 }
@@ -63,6 +96,7 @@ impl Default for WorkflowsConfig {
 impl WorkflowsConfig {
     /// Reject inconsistent lease timing and unsafe or empty local budgets.
     pub fn validate(&self) -> Result<(), PlatformError> {
+        self.default_retention.validate()?;
         if self.max_in_flight_requests == 0
             || self.max_in_flight_requests > 512
             || self.max_steps == 0
@@ -86,11 +120,32 @@ impl WorkflowsConfig {
             || self.recovery_backoff_ms > 60000
             || self.creation_grace_ms == 0
             || self.creation_grace_ms > 300000
+            || !(1..=16).contains(&self.max_parallel_steps)
+            || !(1..=128).contains(&self.max_buffered_events)
+            || !(1..=8 * 1024 * 1024).contains(&self.max_event_bytes)
         {
             return Err(error(ErrorCode::LimitInvalid));
         }
         Ok(())
     }
+}
+
+// Serde's skip predicate borrows the field; omitting defaults preserves old snapshot fingerprints.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn default_parallel_steps(value: &u32) -> bool {
+    *value == 4
+}
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn default_buffered_events(value: &u32) -> bool {
+    *value == 128
+}
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn default_event_bytes(value: &u64) -> bool {
+    *value == 8 * 1024 * 1024
+}
+
+fn default_retention(value: &WorkflowRetention) -> bool {
+    *value == WorkflowRetention::default()
 }
 
 /// A 256-bit private run, step, or creation fence. Debug never exposes its bytes.
@@ -195,6 +250,20 @@ pub fn terminal_error_code(value: &str) -> Result<ErrorCode, PlatformError> {
     .into_iter()
     .find(|code| code.as_str() == value)
     .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))
+}
+
+/// Decode the capability-two permanent failure vocabulary without broadening V1 history.
+/// Transport Unknown, stale fences, and lifecycle conflicts are never settled business outcomes.
+pub fn terminal_error_code_v2(value: &str) -> Result<ErrorCode, PlatformError> {
+    match value {
+        "WORKFLOW_STEP_TIMEOUT" => Ok(ErrorCode::WorkflowStepTimeout),
+        "WORKFLOW_STEP_RETRIES_EXHAUSTED" => Ok(ErrorCode::WorkflowStepRetriesExhausted),
+        "WORKFLOW_NON_RETRYABLE" => Ok(ErrorCode::WorkflowNonRetryable),
+        "WORKFLOW_EVENT_TIMEOUT" => Ok(ErrorCode::WorkflowEventTimeout),
+        "WORKFLOW_DURATION_INVALID" => Ok(ErrorCode::WorkflowDurationInvalid),
+        "WORKFLOW_EVENT_TYPE_INVALID" => Ok(ErrorCode::WorkflowEventTypeInvalid),
+        _ => terminal_error_code(value),
+    }
 }
 
 #[cfg(test)]

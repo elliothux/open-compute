@@ -60,7 +60,7 @@ impl WorkerdTransport {
     pub async fn probe_workflow(&self, target: &DispatchTarget) -> Result<(), PlatformError> {
         let (reply, _): (serde_json::Value, _) = tokio::time::timeout(
             Duration::from_secs(10),
-            self.custom_event_request("/internal/validate-workflow", target, &(), 1024),
+            self.custom_event_request("/internal/validate-workflow", target, &(), 1024, None),
         )
         .await
         .map_err(|_| runtime_unavailable())??;
@@ -84,6 +84,7 @@ impl WorkerdTransport {
                 target,
                 request,
                 2 * 1024 * 1024 + 8192,
+                None,
             ),
         )
         .await

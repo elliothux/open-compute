@@ -18,11 +18,24 @@ coverage。最终验收失败且需要改代码时，先回到单轮反馈；修
 export OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd"
 ```
 
-P2.2、P2.3、P2.4 脚本支持 `OPEN_COMPUTE_GATE_ROUNDS`。只运行当前改动相关的入口，例如 Workflow：
+P2.2、P2.3、P2.4、P2.5 和 P2 Exit 脚本支持 `OPEN_COMPUTE_GATE_ROUNDS`。只运行当前改动相关的入口，例如 Workflow：
 
 ```sh
 OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-4.sh
 ```
+
+Durable Workflow 与完整 HTTP → Queue → Consumer → Workflow → KV/D1/R2/DO 链路分别使用：
+
+```sh
+OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-5.sh
+OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-exit.sh
+```
+
+P2.5 包含真实 Hard/Product、扩展 snapshot/restore、Workflow authority 和 JS parity 测试。
+P2 Exit 包含实际 platformd SIGKILL 链路及独立的 Queue/Workflow authority crash 矩阵；不递归运行
+历史 aggregate。失败证据分别保留在相关 ignored run 目录的 `failed/` 下，不能删除后重写通过结果。
+P2 Exit 的进程配置复用资源准备阶段的 KV/R2/D1 policy，避免把冻结配额变化当成重启恢复；版本
+切换仅推进 Workflow current version，不绕过 DO 的 active Worker deployment 校验。
 
 Queue producer 或 Queue consumer/Cron 分别使用：
 
@@ -53,6 +66,13 @@ P2.4 最终三轮入口为：
 
 ```sh
 OPEN_COMPUTE_GATE_ROUNDS=3 ./scripts/test-p2-4.sh
+```
+
+P2.5 和 P2 Exit 使用相同轮数规则：
+
+```sh
+OPEN_COMPUTE_GATE_ROUNDS=3 ./scripts/test-p2-5.sh
+OPEN_COMPUTE_GATE_ROUNDS=3 ./scripts/test-p2-exit.sh
 ```
 
 再按改动范围执行相关历史 Gate 和 AGENTS.md 的 format、clippy、workspace tests、

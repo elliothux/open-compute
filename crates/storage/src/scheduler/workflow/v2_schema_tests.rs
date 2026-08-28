@@ -1,0 +1,569 @@
+//! Direct SQL guard/accounting regressions. These do not stand in for product driver tests.
+
+use super::*;
+use open_compute_core::workflow::{
+    WorkflowStepDeclaration, WorkflowStepDescriptor, WorkflowStepKind,
+};
+use serde_json::{Value, json};
+
+#[path = "durable_history_tests.rs"]
+mod durable_history_tests;
+#[path = "durable_protocol_tests.rs"]
+mod durable_protocol_tests;
+
+#[test]
+fn durable_operation_rejection_requires_a_non_null_code_on_insert_update_and_inspection() {
+    let (_temp, store, identity) = setup_v2();
+    let operation = open_compute_core::WorkflowOperationId::generate();
+    let conn = store.lock().unwrap();
+    let insert="INSERT INTO workflow_operation_progress(instance_id,operation_id,operation_sequence,creation_nonce,
+        expected_generation,target_generation,kind,outcome,error_code,decided_at_ms) VALUES(?1,?2,1,?3,1,2,'restart','rejected',?4,1)";
+    for code in [None, Some("unexpected")] {
+        assert!(
+            conn.execute(
+                insert,
+                params![
+                    identity.instance_id.to_string(),
+                    operation.to_string(),
+                    identity.creation_nonce.as_bytes().as_slice(),
+                    code
+                ]
+            )
+            .is_err()
+        );
+    }
+    conn.execute(
+        insert,
+        params![
+            identity.instance_id.to_string(),
+            operation.to_string(),
+            identity.creation_nonce.as_bytes().as_slice(),
+            "WORKFLOW_STATE_QUOTA_EXCEEDED"
+        ],
+    )
+    .unwrap();
+    assert!(
+        conn.execute(
+            "UPDATE workflow_operation_progress SET operation_sequence=2,error_code=NULL",
+            []
+        )
+        .is_err()
+    );
+    verify_operation_progress(&conn).unwrap();
+    // A corrupted pre-008 NULL decision must fail snapshot/recovery inspection too.
+    conn.execute_batch(
+        "DROP TRIGGER workflow_progress_rejection_update_guard;
+        UPDATE workflow_operation_progress SET operation_sequence=2,error_code=NULL;",
+    )
+    .unwrap();
+    assert_eq!(
+        verify_operation_progress(&conn).unwrap_err().code(),
+        ErrorCode::WorkflowInvariantViolation
+    );
+    drop(conn);
+    assert_eq!(
+        crate::inspect_scheduler_db(&_temp.path().join("scheduler.sqlite"), 5000, 2)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowInvariantViolation
+    );
+}
+
+#[test]
+fn durable_ready_admission_rotates_accounts_and_reserves_every_fourth_selection_for_new_work() {
+    let (_temp, store, template) = setup_v2();
+    let limits = WorkflowsConfig::default();
+    // Remove pre-existing ready fixtures from admission without manufacturing V2 history.
+    for id in store.workflow_instance_ids(None, 10).unwrap() {
+        let instance = store.workflow_instance(id).unwrap().unwrap();
+        let run = store
+            .claim_workflow(&instance.identity, 1, &limits)
+            .unwrap()
+            .unwrap();
+        let completion = WorkflowCompletion::Errored {
+            code: ErrorCode::WorkflowExecutionFailed,
+        };
+        if instance.durable.is_some() {
+            store
+                .finish_workflow_v2(&run.fence, &completion, 2, &limits)
+                .unwrap();
+        } else {
+            store
+                .finish_workflow(&run.fence, &completion, 2, &limits)
+                .unwrap();
+        }
+    }
+    let mut accounts = [AccountId::generate(), AccountId::generate()];
+    accounts.sort_by_key(ToString::to_string);
+    let mut ready = Vec::new();
+    for recovered in [true, false] {
+        for account in accounts {
+            let mut identity = template.clone();
+            identity.instance_id = WorkflowInstanceId::generate();
+            identity.external_instance_id = identity.instance_id.to_string();
+            identity.target.account_id = account;
+            identity.target.descriptor_sha256 =
+                crate::workflows::helpers::version_digest(&identity.target).unwrap();
+            store
+                .insert_workflow(&identity, "null", Some(&Default::default()), &limits)
+                .unwrap();
+            if recovered {
+                let run = store
+                    .claim_workflow(&identity, 3, &limits)
+                    .unwrap()
+                    .unwrap();
+                let step = descriptor(0, WorkflowStepKind::Sleep, json!({"duration":1}));
+                store
+                    .register_workflow_wait_v2(&run.fence, &step, 4, &limits)
+                    .unwrap();
+                store.yield_workflow_v2(&run.fence, 4).unwrap();
+            }
+            ready.push((identity.instance_id, account, recovered));
+        }
+    }
+    store.maintain_workflow_due_v2(5, &limits, 32).unwrap();
+    let mut cursor = WorkflowClaimCursor::default();
+    let mut selected = Vec::new();
+    for _ in 0..8 {
+        let id = store.due_workflows(5, 1, &mut cursor).unwrap()[0];
+        selected.push(*ready.iter().find(|row| row.0 == id).unwrap());
+    }
+    assert_eq!(
+        selected.iter().map(|row| row.2).collect::<Vec<_>>(),
+        [true, true, true, false, true, true, true, false]
+    );
+    assert_eq!(
+        selected.iter().take(4).map(|row| row.1).collect::<Vec<_>>(),
+        [accounts[0], accounts[1], accounts[0], accounts[1]]
+    );
+    // Cursor loss starts from durable work; it neither invents nor removes a ready row.
+    assert_eq!(
+        store.due_workflows(5, 1, &mut Default::default()).unwrap()[0],
+        selected[0].0
+    );
+    let plan = store
+        .lock()
+        .unwrap()
+        .prepare(&format!("EXPLAIN QUERY PLAN {}", durable_due::DUE_STEPS))
+        .unwrap()
+        .query_map(params![5, 32], |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+        .join("\n");
+    for index in [
+        "workflow_steps_wait_due",
+        "workflow_steps_retry_due",
+        "workflow_steps_pending_timeout",
+    ] {
+        assert!(plan.contains(index), "{plan}");
+    }
+    assert!(!plan.contains("SCAN s\n"), "{plan}");
+}
+
+fn setup_v2() -> (tempfile::TempDir, SchedulerStore, WorkflowInstanceIdentity) {
+    let (temp, store, mut identity, _) = setup();
+    identity.instance_id = WorkflowInstanceId::generate();
+    identity.external_instance_id = "durable".into();
+    identity.target.capability_version = 2;
+    identity.target.descriptor_sha256 =
+        crate::workflows::helpers::version_digest(&identity.target).unwrap();
+    store
+        .insert_workflow(
+            &identity,
+            "{}",
+            Some(&open_compute_core::workflow::WorkflowRetention {
+                success_retention_ms: 3_600_000,
+                error_retention_ms: 3_600_000,
+            }),
+            &WorkflowsConfig::default(),
+        )
+        .unwrap();
+    (temp, store, identity)
+}
+
+fn base_bytes(identity: &WorkflowInstanceIdentity) -> usize {
+    open_compute_core::workflow::WORKFLOW_V2_INSTANCE_BYTES
+        + 2
+        + identity.target.definition_name.len()
+        + identity.external_instance_id.len()
+        + identity.target.class_name.len()
+}
+
+fn activate(conn: &Connection, id: WorkflowInstanceId) {
+    conn.execute("UPDATE workflow_instances SET state='running',next_run_at_ms=NULL,run_token=?2,run_claimed_at_ms=0,
+        run_lease_until_ms=1000,has_activated=1 WHERE id=?1",params![id.to_string(),&[0x11_u8;32][..]]).unwrap();
+}
+
+fn descriptor(ordinal: u32, kind: WorkflowStepKind, config: Value) -> WorkflowStepDescriptor {
+    WorkflowStepDeclaration {
+        ordinal,
+        kind,
+        name: "step".into(),
+        name_count: ordinal + 1,
+        config,
+        dependencies: if ordinal == 0 {
+            vec![]
+        } else {
+            vec![ordinal - 1]
+        },
+        batch_first_ordinal: ordinal,
+        batch_size: 1,
+    }
+    .resolve()
+    .unwrap()
+}
+
+fn register(
+    conn: &Connection,
+    id: WorkflowInstanceId,
+    step: &WorkflowStepDescriptor,
+    now_ms: i64,
+    due: Option<i64>,
+    ceiling: Option<i64>,
+) {
+    let config = step.config.canonical_json().unwrap();
+    let config_hash: [u8; 32] = Sha256::digest(config.as_bytes()).into();
+    conn.execute("INSERT INTO workflow_steps(instance_id,instance_generation,ordinal,name,name_count,kind,config_json,descriptor_sha256,
+        state,attempt,started_at_ms,updated_at_ms,config_sha256,batch_first_ordinal,batch_size,dependency_count,due_at_ms,event_buffer_ceiling)
+        VALUES(?1,1,?2,?3,?4,?5,?6,?7,?8,0,?9,?9,?10,?11,?12,?13,?14,?15)",params![id.to_string(),step.ordinal,step.name,step.name_count,
+            step.config.kind().as_str(),config.as_bytes(),step.sha256().unwrap().as_slice(),if step.config.kind()==WorkflowStepKind::Do {"pending"} else {"waiting"},
+            now_ms,config_hash.as_slice(),step.batch_first_ordinal,step.batch_size,step.dependencies.len(),due,ceiling]).unwrap();
+    for parent in &step.dependencies {
+        conn.execute(
+            "INSERT INTO workflow_step_dependencies VALUES(?1,1,?2,?3)",
+            params![id.to_string(), step.ordinal, parent],
+        )
+        .unwrap();
+    }
+}
+
+fn operation(
+    conn: &Connection,
+    identity: &WorkflowInstanceIdentity,
+    kind: &str,
+    now_ms: i64,
+) -> open_compute_core::WorkflowOperationId {
+    let id = open_compute_core::WorkflowOperationId::generate();
+    conn.execute(
+        "INSERT INTO workflow_mutation_context VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        params![
+            identity.instance_id.to_string(),
+            id.to_string(),
+            identity.creation_nonce.as_bytes().as_slice(),
+            identity.instance_generation,
+            identity.instance_generation + i64::from(kind == "restart"),
+            kind,
+            now_ms
+        ],
+    )
+    .unwrap();
+    id
+}
+
+#[test]
+fn v2_do_result_is_immutable_and_restart_purge_need_exact_scoped_context() {
+    let (_temp, store, mut identity) = setup_v2();
+    let queued = store
+        .workflow_instance(identity.instance_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(queued.state, WorkflowState::Queued);
+    assert_eq!(
+        queued
+            .durable
+            .as_ref()
+            .unwrap()
+            .retention
+            .success_retention_ms,
+        3_600_000
+    );
+    assert_eq!(queued.durable.as_ref().unwrap().next_event_seq, 1);
+    let mut conn = store.lock().unwrap();
+    let id = identity.instance_id;
+    let step = descriptor(0, WorkflowStepKind::Do, json!({"timeout":10}));
+    {
+        let tx = conn.transaction().unwrap();
+        activate(&tx, id);
+        register(&tx, id, &step, 1, None, None);
+        tx.execute("UPDATE workflow_steps SET state='running',attempt=1,attempt_started_at_ms=1,attempt_deadline_at_ms=11,
+            run_token=?2,step_token=?3 WHERE instance_id=?1",params![id.to_string(),&[0x11_u8;32][..],&[0x22_u8;32][..]]).unwrap();
+        assert!(tx.execute("UPDATE workflow_steps SET state='complete',output_json=X'37',completed_at_ms=11,updated_at_ms=11,
+            run_token=NULL,step_token=NULL WHERE instance_id=?1",[id.to_string()]).is_err());
+        tx.execute("UPDATE workflow_steps SET state='complete',output_json=X'37',completed_at_ms=10,updated_at_ms=10,
+            run_token=NULL,step_token=NULL WHERE instance_id=?1",[id.to_string()]).unwrap();
+        assert!(
+            tx.execute(
+                "UPDATE workflow_steps SET output_json=X'38' WHERE instance_id=?1",
+                [id.to_string()]
+            )
+            .is_err()
+        );
+        tx.execute("UPDATE workflow_instances SET state='complete',output_json=X'37',state_bytes=state_bytes+1,
+            run_token=NULL,run_claimed_at_ms=NULL,run_lease_until_ms=NULL,terminal_at_ms=10,expires_at_ms=3600010,updated_at_ms=10 WHERE id=?1",
+            [id.to_string()]).unwrap();
+        let bytes: usize = tx
+            .query_row(
+                "SELECT state_bytes FROM workflow_instances WHERE id=?1",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            bytes,
+            base_bytes(&identity) + step.state_bytes().unwrap() + 2
+        );
+        assert!(
+            tx.execute(
+                "DELETE FROM workflow_steps WHERE instance_id=?1",
+                [id.to_string()]
+            )
+            .is_err()
+        );
+        assert!(
+            tx.execute(
+                "DELETE FROM workflow_instances WHERE id=?1",
+                [id.to_string()]
+            )
+            .is_err()
+        );
+        tx.commit().unwrap();
+    }
+    drop(conn);
+    let completed = store.workflow_instance(id).unwrap().unwrap();
+    assert_eq!(completed.state, WorkflowState::Complete);
+    assert_eq!(completed.durable.as_ref().unwrap().registered_step_count, 1);
+    assert_eq!(completed.durable.as_ref().unwrap().settled_step_count, 1);
+    assert_eq!(
+        completed.durable.as_ref().unwrap().expires_at_ms,
+        Some(3_600_010)
+    );
+    let mut conn = store.lock().unwrap();
+    {
+        let tx = conn.transaction().unwrap();
+        let op = operation(&tx, &identity, "restart", 12);
+        assert!(
+            tx.execute(
+                "DELETE FROM workflow_mutation_context WHERE operation_id=?1",
+                [op.to_string()]
+            )
+            .is_err()
+        );
+        tx.execute(
+            "DELETE FROM workflow_steps WHERE instance_id=?1",
+            [id.to_string()],
+        )
+        .unwrap();
+        tx.execute("UPDATE workflow_instances SET instance_generation=2,last_restart_operation_id=?2,state='queued',next_run_at_ms=12,
+            has_activated=0,output_json=NULL,state_bytes=?3,terminal_at_ms=NULL,expires_at_ms=NULL,updated_at_ms=12 WHERE id=?1",
+            params![id.to_string(),op.to_string(),base_bytes(&identity)]).unwrap();
+        tx.execute(
+            "DELETE FROM workflow_mutation_context WHERE operation_id=?1",
+            [op.to_string()],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    identity.instance_generation = 2;
+    conn.execute("UPDATE workflow_instances SET state='terminated',next_run_at_ms=NULL,terminal_at_ms=20,expires_at_ms=3600020,updated_at_ms=20 WHERE id=?1",[id.to_string()]).unwrap();
+    drop(conn);
+    let terminated = store.workflow_instance(id).unwrap().unwrap();
+    assert_eq!(terminated.state, WorkflowState::Terminated);
+    assert!(terminated.state.is_terminal());
+    assert_eq!(terminated.identity.instance_generation, 2);
+    assert!(
+        terminated
+            .durable
+            .as_ref()
+            .unwrap()
+            .last_restart_operation_id
+            .is_some()
+    );
+    let mut conn = store.lock().unwrap();
+    let op;
+    {
+        let tx = conn.transaction().unwrap();
+        assert!(
+            tx.execute(
+                "INSERT INTO workflow_mutation_context VALUES(?1,?2,?3,2,2,'purge',3600019)",
+                params![
+                    id.to_string(),
+                    open_compute_core::WorkflowOperationId::generate().to_string(),
+                    identity.creation_nonce.as_bytes().as_slice()
+                ]
+            )
+            .is_err()
+        );
+        op = operation(&tx, &identity, "purge", 3600020);
+        tx.execute(
+            "DELETE FROM workflow_instances WHERE id=?1",
+            [id.to_string()],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO workflow_gc_receipts VALUES(?1,?2,?3,2,3600020)",
+            params![
+                op.to_string(),
+                id.to_string(),
+                identity.creation_nonce.as_bytes().as_slice()
+            ],
+        )
+        .unwrap();
+        tx.execute(
+            "DELETE FROM workflow_mutation_context WHERE operation_id=?1",
+            [op.to_string()],
+        )
+        .unwrap();
+        assert!(
+            tx.execute(
+                "DELETE FROM workflow_gc_receipts WHERE operation_id=?1",
+                [op.to_string()]
+            )
+            .is_err()
+        );
+        tx.commit().unwrap();
+    }
+    {
+        let tx = conn.transaction().unwrap();
+        tx.execute("INSERT INTO workflow_mutation_context VALUES(?1,?2,?3,2,2,'acknowledge_purge',3600021)",
+            params![id.to_string(),op.to_string(),identity.creation_nonce.as_bytes().as_slice()]).unwrap();
+        tx.execute(
+            "DELETE FROM workflow_gc_receipts WHERE operation_id=?1",
+            [op.to_string()],
+        )
+        .unwrap();
+        tx.execute(
+            "DELETE FROM workflow_mutation_context WHERE operation_id=?1",
+            [op.to_string()],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+}
+
+#[test]
+fn v2_buffered_event_precedes_zero_timeout_but_equal_deadline_new_event_is_not_consumed() {
+    let (_temp, store, identity) = setup_v2();
+    let mut conn = store.lock().unwrap();
+    let id = identity.instance_id;
+    let tx = conn.transaction().unwrap();
+    activate(&tx, id);
+    tx.execute(
+        "INSERT INTO workflow_events VALUES(?1,1,1,'approved',X'37',1,41)",
+        [id.to_string()],
+    )
+    .unwrap();
+    let first = descriptor(
+        0,
+        WorkflowStepKind::WaitEvent,
+        json!({"type":"approved","timeout":0}),
+    );
+    register(&tx, id, &first, 1, Some(1), Some(1));
+    let envelope = json!({"type":"approved","payload":7,"timestampMs":1}).to_string();
+    tx.execute("UPDATE workflow_steps SET state='complete',due_at_ms=NULL,output_json=?2,consumed_event_seq=1,completed_at_ms=1 WHERE instance_id=?1",
+        params![id.to_string(),envelope.as_bytes()]).unwrap();
+    tx.execute(
+        "DELETE FROM workflow_events WHERE instance_id=?1 AND event_seq=1",
+        [id.to_string()],
+    )
+    .unwrap();
+    let second = descriptor(
+        1,
+        WorkflowStepKind::WaitEvent,
+        json!({"type":"approved","timeout":0}),
+    );
+    register(&tx, id, &second, 2, Some(2), Some(1));
+    tx.execute(
+        "INSERT INTO workflow_events VALUES(?1,1,2,'approved',X'38',2,41)",
+        [id.to_string()],
+    )
+    .unwrap();
+    let late = json!({"type":"approved","payload":8,"timestampMs":2}).to_string();
+    assert!(tx.execute("UPDATE workflow_steps SET state='complete',due_at_ms=NULL,output_json=?2,consumed_event_seq=2,
+        completed_at_ms=2 WHERE instance_id=?1 AND ordinal=1",params![id.to_string(),late.as_bytes()]).is_err());
+    tx.execute("UPDATE workflow_steps SET state='failed',due_at_ms=NULL,error_code='WORKFLOW_EVENT_TIMEOUT',error_json=?2,
+        completed_at_ms=2 WHERE instance_id=?1 AND ordinal=1",params![id.to_string(),failure_json().as_bytes()]).unwrap();
+    assert!(
+        tx.execute(
+            "DELETE FROM workflow_events WHERE instance_id=?1 AND event_seq=2",
+            [id.to_string()]
+        )
+        .is_err()
+    );
+    let (registered,settled,complete,events,event_bytes,bytes):(u32,u32,u32,u32,u32,usize)=tx.query_row(
+        "SELECT registered_step_count,settled_step_count,completed_step_count,event_count,event_bytes,state_bytes FROM workflow_instances WHERE id=?1",
+        [id.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).unwrap();
+    assert_eq!(
+        (registered, settled, complete, events, event_bytes),
+        (2, 2, 1, 1, 41)
+    );
+    assert_eq!(
+        bytes,
+        base_bytes(&identity)
+            + first.state_bytes().unwrap()
+            + second.state_bytes().unwrap()
+            + envelope.len()
+            + failure_json().len()
+            + 41
+    );
+    tx.commit().unwrap();
+    drop(conn);
+    let steps = store.workflow_steps(id, None, 10).unwrap();
+    assert_eq!(
+        steps[1].error_code.as_deref(),
+        Some("WORKFLOW_EVENT_TIMEOUT")
+    );
+    let record = store.workflow_instance(id).unwrap().unwrap();
+    let metadata = record.durable.unwrap();
+    assert_eq!(
+        (
+            metadata.event_count,
+            metadata.event_bytes,
+            metadata.next_event_seq
+        ),
+        (1, 41, 3)
+    );
+    assert_eq!(
+        (metadata.registered_step_count, metadata.settled_step_count),
+        (2, 2)
+    );
+}
+
+#[test]
+fn v2_paused_instance_is_readable_without_an_activation_lease() {
+    let (_temp, store, identity) = setup_v2();
+    store
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE workflow_instances SET state='paused',next_run_at_ms=NULL,
+        updated_at_ms=1 WHERE id=?1",
+            [identity.instance_id.to_string()],
+        )
+        .unwrap();
+    let record = store
+        .workflow_instance(identity.instance_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(record.state, WorkflowState::Paused);
+    assert!(!record.state.is_terminal());
+    assert!(record.run_token.is_none());
+    assert_eq!(record.durable.unwrap().expires_at_ms, None);
+    let inspection = store
+        .inspect_workflow_instances(
+            identity.target.account_id,
+            identity.target.definition_id,
+            None,
+            10,
+            2,
+        )
+        .unwrap();
+    assert_eq!(
+        inspection
+            .iter()
+            .find(|row| row.id == identity.instance_id)
+            .unwrap()
+            .status,
+        WorkflowState::Paused
+    );
+}

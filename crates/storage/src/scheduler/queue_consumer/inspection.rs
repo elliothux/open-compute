@@ -3,6 +3,28 @@
 use super::*;
 
 impl SchedulerStore {
+    /// Read the immutable dispatch epoch of an exact consumer generation.
+    /// HTTP route revisions do not replace an already persisted consumer epoch.
+    pub fn queue_consumer_execution_generation(
+        &self,
+        consumer_id: QueueConsumerId,
+        consumer_generation: u64,
+    ) -> Result<Option<u64>, PlatformError> {
+        let value: Option<i64> = self.lock()?.query_row(
+            "SELECT execution_generation FROM queue_consumer_state WHERE consumer_id=?1 AND consumer_generation=?2",
+            params![consumer_id.to_string(), as_i64(consumer_generation)?],
+            |row| row.get(0),
+        ).optional().map_err(map_sql_error)?;
+        value
+            .map(|value| {
+                u64::try_from(value)
+                    .ok()
+                    .filter(|value| *value > 0)
+                    .ok_or_else(consumer_invariant)
+            })
+            .transpose()
+    }
+
     /// Queue consumer workload facts for pool admission and wake coordination.
     pub fn queue_consumer_workload_summary(
         &self,

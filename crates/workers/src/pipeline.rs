@@ -68,12 +68,28 @@ pub struct DeploymentBindingInput {
     pub kind: BindingKind,
     /// Existing ready resource identity. Display names are never accepted.
     pub id: ResourceId,
+    /// Immutable adapter capability; only Workflow currently supports version two.
+    #[serde(
+        default = "legacy_binding_capability",
+        skip_serializing_if = "is_legacy_binding_capability"
+    )]
+    pub capability_version: u32,
     /// Method capability set; defaults to read/write for product compatibility.
     #[serde(default)]
     pub permissions: CanonicalPermissions,
     /// Capability-version-one product configuration.
     #[serde(default)]
     pub config: CanonicalBindingConfig,
+}
+
+const fn legacy_binding_capability() -> u32 {
+    1
+}
+
+// Serde's skip predicate receives a shared field reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_legacy_binding_capability(version: &u32) -> bool {
+    *version == 1
 }
 
 /// Immutable Queue push-consumer declaration supplied with a deployment.

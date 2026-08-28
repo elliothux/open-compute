@@ -592,6 +592,10 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
         || request
             .uri()
             .path()
+            .starts_with("/internal/workflows/v2/runs/")
+        || request
+            .uri()
+            .path()
             .starts_with("/internal/bindings/v1/workflow/")
     {
         return match &state.workflow {

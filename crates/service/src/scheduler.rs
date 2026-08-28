@@ -55,6 +55,7 @@ pub struct SchedulerService {
     config: SchedulerConfig,
     workflows: open_compute_core::WorkflowsConfig,
     workflow_reconcile_cursor: Mutex<open_compute_workers::WorkflowReconcileCursor>,
+    workflow_claim_cursor: Arc<Mutex<open_compute_storage::scheduler::WorkflowClaimCursor>>,
     workflow_infra_failures: AtomicUsize,
     workflow_version_cursor: Mutex<Option<open_compute_core::WorkflowVersionId>>,
     workflow_artifact_cursor: Mutex<Option<open_compute_core::WorkflowInstanceId>>,
@@ -251,6 +252,7 @@ impl SchedulerService {
             workflow_reconcile_cursor: Mutex::new(
                 open_compute_workers::WorkflowReconcileCursor::default(),
             ),
+            workflow_claim_cursor: Arc::new(Mutex::new(Default::default())),
             workflow_infra_failures: AtomicUsize::new(0),
             workflow_version_cursor: Mutex::new(None),
             workflow_artifact_cursor: Mutex::new(None),

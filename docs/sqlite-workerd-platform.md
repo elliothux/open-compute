@@ -1352,18 +1352,33 @@ terminal/referrer、crash matrix、工作包与 Exit Gate 见
 
 ### P2.5：Workflow durable waiting
 
+基于已通过的 P2.3/P2.4，显式增加 Workflow capability V2；旧 instance/version/binding 保留 P2.4
+语义，不隐式增加 retry 或自动删除历史。继续使用一个 platformd、一个 pinned workerd 子进程，以及
+control/scheduler 两个 SQLite authority，不新增 Redis 或独立 Workflow 服务。
+
 按依赖逐项增加：
 
-1. step retry/backoff；
-2. `step.sleep`；
-3. `step.sleepUntil`；
-4. `step.waitForEvent`；
-5. `sendEvent` 和 timeout；
-6. pause/resume/terminate/restart；
-7. retention；
-8. parallel step。
+1. Runtime Hard Gate：suspension 资源释放、可信 timeout、system-isolate token 隔离；
+2. Capability V2、control 013/014 与 scheduler 006/007/008 forward migration、replay identity；
+3. 公共 durable yield/wake/recovery 与 activation budget；
+4. step retry/backoff、per-attempt timeout、NonRetryableError；
+5. `step.sleep` / `step.sleepUntil`；
+6. `step.waitForEvent` / `sendEvent`、event-before-wait、FIFO 与 timeout 原子裁决；
+7. pause/resume/terminate、保持 frozen target 的 restart saga；
+8. retention、typed referrer 保留/释放、跨库清理和 instance ID 重用；
+9. 有界同步 fan-out 的 parallel `step.do`；
+10. Aggregate Gate 与完整 P2 黑盒链路。
 
-parallel step 最后实现，避免在顺序 replay 和 fencing 尚未稳定前扩大状态空间。
+Waiting/paused 不占 run lease 或执行槽位；V2 terminal 在 retention 内继续保留 artifact 引用，支持
+原版本 restart。Parallel 最后实现，限整体 join 的 do batch，不开放并行 sleep/event 或任意 Promise DAG。
+P2.4 已验证的 DO output-gate 限制继续保留：DO 内 Workflow mutation fail closed，只读 get/status 可用。
+
+详细的 capability/API、SQLite migration、wait/retry/event 状态机、restart/retention saga、parallel
+边界、工作包、crash matrix 与 Exit Gate 见
+[P2.5：Workflow Durable Waiting 详细设计](./p2-5-workflow-durable-waiting.md)。
+
+2026-08-28 已完成 P2.5 Conditional Go 与 P2 Exit 三轮验收；Rust 行覆盖率为 90.16%。
+实际支持面、逐轮结果和保留限制见 [P2.5 / P2 Exit 验证记录](./p2-5-gate-results.md)。
 
 ### P2 Exit Gate
 

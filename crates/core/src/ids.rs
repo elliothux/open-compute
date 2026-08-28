@@ -1,4 +1,4 @@
-//! Canonical lowercase UUID version 7 identifiers.
+//! Canonical lowercase UUID identifiers; system RPC operations also accept `UUIDv4`.
 
 use crate::error::{ErrorCode, PlatformError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -8,7 +8,10 @@ use uuid::Uuid;
 
 macro_rules! typed_id {
     ($name:ident, $label:literal) => {
-        #[doc = concat!("Canonical lowercase UUIDv7 ", $label, " identifier.")]
+        typed_id!($name, $label, "UUIDv7", validate_uuidv7);
+    };
+    ($name:ident, $label:literal, $versions:literal, $validate:ident) => {
+        #[doc = concat!("Canonical lowercase ", $versions, " ", $label, " identifier.")]
         #[derive(Clone, Copy, Eq, PartialEq, Hash)]
         pub struct $name(Uuid);
 
@@ -32,9 +35,9 @@ macro_rules! typed_id {
                 Self(Uuid::now_v7())
             }
 
-            /// Wrap an already-validated UUID version 7.
+            /// Validate and wrap a UUID of the version accepted by this identifier.
             pub fn from_uuid(uuid: Uuid) -> Result<Self, PlatformError> {
-                validate_uuidv7(uuid)?;
+                $validate(uuid)?;
                 Ok(Self(uuid))
             }
 
@@ -69,7 +72,8 @@ macro_rules! typed_id {
             type Err = PlatformError;
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
-                parse_canonical_uuidv7(s).map(Self)
+                let uuid = parse_canonical_uuid(s)?;
+                Self::from_uuid(uuid)
             }
         }
     };
@@ -91,6 +95,12 @@ typed_id!(CronActivationId, "Cron activation");
 typed_id!(WorkflowId, "Workflow definition");
 typed_id!(WorkflowVersionId, "Workflow version");
 typed_id!(WorkflowInstanceId, "Workflow instance");
+typed_id!(
+    WorkflowOperationId,
+    "Workflow restart or purge operation",
+    "UUIDv4/UUIDv7",
+    validate_operation_uuid
+);
 typed_id!(CronRunId, "Cron logical run");
 
 fn canonical(uuid: Uuid) -> String {
@@ -109,7 +119,20 @@ fn validate_uuidv7(uuid: Uuid) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn parse_canonical_uuidv7(s: &str) -> Result<Uuid, PlatformError> {
+fn validate_operation_uuid(uuid: Uuid) -> Result<(), PlatformError> {
+    if !matches!(
+        uuid.get_version(),
+        Some(uuid::Version::Random | uuid::Version::SortRand)
+    ) {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "expected canonical UUIDv4 or UUIDv7 operation",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_canonical_uuid(s: &str) -> Result<Uuid, PlatformError> {
     if s.chars().any(|c| c.is_ascii_uppercase()) {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
@@ -128,7 +151,6 @@ fn parse_canonical_uuidv7(s: &str) -> Result<Uuid, PlatformError> {
             "UUID must be canonical 8-4-4-4-12 lowercase form",
         ));
     }
-    validate_uuidv7(uuid)?;
     Ok(uuid)
 }
 

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 2,
+  "instanceFixedBytes": 256,
+  "stepFixedBytes": 160,
+  "dependencyBytes": 16,
+  "eventFixedBytes": 32,
+  "eventEnvelopeMaxBytes": 1024
+}

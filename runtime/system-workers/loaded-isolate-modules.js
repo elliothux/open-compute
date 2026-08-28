@@ -6,14 +6,17 @@ import doIdCodecSource from "do-id-codec-source";
 import doAlarmShimSource from "do-alarm-shim-source";
 import queueFacadeSource from "queue-facade-source";
 import workflowRunnerSource from "workflow-runner-source";
+import workflowRunnerV2Source from "workflow-runner-v2-source";
 import workflowJsonSource from "workflow-json-source";
+import workflowJsonV2Source from "workflow-json-v2-source";
 import workflowFacadeSource from "workflow-facade-source";
+import workflowFacadeV2Source from "workflow-facade-v2-source";
 import {
   DO_ALARM_SHIM_MODULE,
   D1_FACADE_MODULE,
   DO_FACADE_MODULE,
   DO_ID_CODEC_MODULE,
-  LOADED_ISOLATE_RESERVED_MODULES,
+  LOADED_ISOLATE_RESERVED_MODULES as LEGACY_RESERVED_MODULES,
   LOADED_ISOLATE_WRAPPER_MODULE,
   QUEUE_FACADE_MODULE,
   R2_FACADE_MODULE,
@@ -21,6 +24,11 @@ import {
   WORKFLOW_FACADE_MODULE,
   generateBindingWrapper as generateWorkflowBindingWrapper,
 } from "./loaded-isolate-wrapper-generator-v2.js";
+import {
+  LOADED_ISOLATE_RESERVED_MODULES,
+  WORKFLOW_V2_FACADE_MODULE,
+  generateBindingWrapper as generateDurableWorkflowWrapper,
+} from "./loaded-isolate-wrapper-generator-v3.js";
 import { generateBindingWrapper } from "./loaded-isolate-wrapper-generator.js";
 import { bindingError } from "./loader-host.js";
 
@@ -51,7 +59,8 @@ function moduleValue(module) {
   }
 }
 
-export function modulesFor(snapshot, validation, entrypointName, durableObject = false, workflow = false) {
+export function modulesFor(snapshot, validation, entrypointName, durableObject = false, workflow = false, workflowCapability = 1) {
+  if (![1, 2].includes(workflowCapability)) throw bindingError("WORKFLOW_CAPABILITY_MISMATCH");
   const modules = {};
   for (const module of snapshot.modules) modules[module.name] = moduleValue(module);
   const r2Bindings = (snapshot.bindings || [])
@@ -69,7 +78,13 @@ export function modulesFor(snapshot, validation, entrypointName, durableObject =
   const workflowBindings = (snapshot.bindings || [])
     .filter((binding) => binding.kind === "workflow" && binding.capabilityVersion === 1)
     .map((binding) => binding.name);
-  for (const reserved of LOADED_ISOLATE_RESERVED_MODULES) {
+  const workflowV2Bindings = (snapshot.bindings || [])
+    .filter((binding) => binding.kind === "workflow" && binding.capabilityVersion === 2)
+    .map((binding) => binding.name);
+  if ((snapshot.bindings || []).some(binding => binding.kind === "workflow"
+      && ![1, 2].includes(binding.capabilityVersion))) throw bindingError("WORKFLOW_CAPABILITY_MISMATCH");
+  const durableWorkflow = (workflow && workflowCapability === 2) || workflowV2Bindings.length > 0;
+  for (const reserved of durableWorkflow ? LOADED_ISOLATE_RESERVED_MODULES : LEGACY_RESERVED_MODULES) {
     if (Object.prototype.hasOwnProperty.call(modules, reserved)) {
       throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
     }
@@ -82,14 +97,18 @@ export function modulesFor(snapshot, validation, entrypointName, durableObject =
   }
   if (queueBindings.length) modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
   if (workflowBindings.length) modules[WORKFLOW_FACADE_MODULE] = { js: workflowFacadeSource };
-  if (workflow || workflowBindings.length) {
-    modules[WORKFLOW_JSON_MODULE] = { js: workflowJsonSource };
+  if (workflowV2Bindings.length) modules[WORKFLOW_V2_FACADE_MODULE] = { js: workflowFacadeV2Source };
+  if (workflow || workflowBindings.length || workflowV2Bindings.length) {
+    modules[WORKFLOW_JSON_MODULE] = { js: workflow && workflowCapability === 2 ? workflowJsonV2Source : workflowJsonSource };
   }
   if (entrypointName && durableObject) {
     modules[DO_ALARM_SHIM_MODULE] = { js: doAlarmShimSource };
   }
+  const generate = durableWorkflow
+    ? generateDurableWorkflowWrapper
+    : workflow || workflowBindings.length ? generateWorkflowBindingWrapper : generateBindingWrapper;
   modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
-    js: (workflow || workflowBindings.length ? generateWorkflowBindingWrapper : generateBindingWrapper)(
+    js: generate(
       snapshot.mainModule,
       r2Bindings,
       d1Bindings,
@@ -99,7 +118,8 @@ export function modulesFor(snapshot, validation, entrypointName, durableObject =
       queueBindings,
       workflow,
       workflowBindings,
-      workflowRunnerSource,
+      workflowCapability === 2 ? workflowRunnerV2Source : workflowRunnerSource,
+      workflowV2Bindings,
     ),
   };
   let mainModule = LOADED_ISOLATE_WRAPPER_MODULE;

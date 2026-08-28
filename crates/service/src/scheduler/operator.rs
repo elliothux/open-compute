@@ -165,7 +165,10 @@ impl SchedulerService {
                     consumer_generation: record.consumer_generation,
                     deployment_id: record.deployment_id,
                     worker_id: record.worker_id,
-                    execution_generation,
+                    execution_generation: self
+                        .store
+                        .queue_consumer_execution_generation(record.id, record.consumer_generation)?
+                        .unwrap_or(execution_generation),
                     entrypoint: declaration.entrypoint,
                     config: declaration.config,
                     dead_letter_queue: declaration
@@ -284,7 +287,10 @@ impl SchedulerService {
                     account_id: activation.account_id,
                     worker_id: activation.worker_id,
                     deployment_id: activation.deployment_id,
-                    execution_generation,
+                    execution_generation: self
+                        .store
+                        .cron_execution_generation(activation.id, activation.activation_generation)?
+                        .unwrap_or(execution_generation),
                     activation_generation: activation.activation_generation,
                     expression: activation.expression,
                     expression_sha256: activation.expression_sha256,

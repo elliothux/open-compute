@@ -4,7 +4,7 @@ use open_compute_core::{
     DeploymentId, DurableObjectId, ErrorCode, PlatformError, ResourceId, WorkloadSummary,
 };
 use rand::TryRngCore as _;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -30,9 +30,11 @@ mod wake;
 mod workflow;
 
 pub use workflow::{
-    ClaimedWorkflowRun, WorkflowCompletion, WorkflowDatabaseInspection, WorkflowFailure,
-    WorkflowInspection, WorkflowInstanceInspection, WorkflowInstanceRecord, WorkflowState,
-    WorkflowStepGrant, WorkflowStepIdentity, WorkflowStepInspection, inspect_workflow_databases,
+    ClaimedWorkflowRun, WorkflowClaimCursor, WorkflowCompletion, WorkflowDatabaseInspection,
+    WorkflowFailure, WorkflowInspection, WorkflowInstanceAction, WorkflowInstanceInspection,
+    WorkflowInstanceRecord, WorkflowState, WorkflowStepAttempt, WorkflowStepGrant,
+    WorkflowStepIdentity, WorkflowStepInspection, WorkflowStepOutcome, WorkflowV2StepGrant,
+    WorkflowV2StepResult, inspect_workflow_databases,
 };
 
 pub use cron::{
@@ -75,6 +77,15 @@ pub fn scheduler_migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
         .collect()
 }
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SchedulerMigrationFault {
+    BeforeExecution,
+    AfterWorkflowRebuild,
+    BeforeMigrationRow,
+    AfterCommit,
+}
 
 /// One authoritative alarm projection submitted by the object-local shim.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -200,13 +211,21 @@ impl SchedulerStore {
             connection: Mutex::new(connection),
             wake: Arc::new(SchedulerWakeSignal::default()),
         };
-        store.migrate(now_ms)?;
+        store.migrate(
+            now_ms,
+            #[cfg(test)]
+            None,
+        )?;
         store.quick_check()?;
         store.recover_expired(now_ms, 10_000)?;
         Ok(store)
     }
 
-    fn migrate(&self, now_ms: i64) -> Result<(), PlatformError> {
+    fn migrate(
+        &self,
+        now_ms: i64,
+        #[cfg(test)] fault: Option<SchedulerMigrationFault>,
+    ) -> Result<(), PlatformError> {
         validate_registry(SCHEDULER_MIGRATIONS)?;
         let mut connection = self.lock()?;
         let mut version: i64 = connection
@@ -218,6 +237,10 @@ impl SchedulerStore {
                 "scheduler database schema is newer than this binary",
             ));
         }
+        if version > 0 {
+            // Check old authority before any forward DDL, not only after it has committed.
+            verify_applied(&connection, version)?;
+        }
         for migration in SCHEDULER_MIGRATIONS {
             if migration.version <= version {
                 continue;
@@ -225,7 +248,33 @@ impl SchedulerStore {
             let tx = connection
                 .transaction_with_behavior(TransactionBehavior::Exclusive)
                 .map_err(map_sql_error)?;
+            #[cfg(test)]
+            if fault == Some(SchedulerMigrationFault::BeforeExecution) {
+                return Err(corrupt());
+            }
+            if migration.version == 6 {
+                workflow::verify_legacy_histories(&tx)?;
+                #[cfg(test)]
+                if fault == Some(SchedulerMigrationFault::AfterWorkflowRebuild) {
+                    let (before_restore, _) = migration
+                        .sql
+                        .split_once("INSERT INTO workflow_instances(")
+                        .ok_or_else(corrupt)?;
+                    tx.execute_batch(before_restore).map_err(map_sql_error)?;
+                    return Err(corrupt());
+                }
+            }
             tx.execute_batch(migration.sql).map_err(map_sql_error)?;
+            if migration.version == 6 {
+                workflow::verify_legacy_histories(&tx)?;
+            }
+            if migration.version >= 7 {
+                workflow::verify_operation_progress(&tx)?;
+            }
+            #[cfg(test)]
+            if fault == Some(SchedulerMigrationFault::BeforeMigrationRow) {
+                return Err(corrupt());
+            }
             if migration.version == 1 {
                 tx.execute(
                     "INSERT INTO scheduler_meta
@@ -259,20 +308,14 @@ impl SchedulerStore {
             tx.pragma_update(None, "user_version", migration.version)
                 .map_err(map_sql_error)?;
             tx.commit().map_err(map_sql_error)?;
+            #[cfg(test)]
+            if fault == Some(SchedulerMigrationFault::AfterCommit) {
+                return Err(corrupt());
+            }
             version = migration.version;
         }
-        let marker: Option<(i64, String)> = connection
-            .query_row(
-                "SELECT schema_version, data_format FROM scheduler_meta WHERE singleton = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(map_sql_error)?;
-        if marker != Some((SCHEMA_VERSION, DATA_FORMAT.to_owned())) {
-            return Err(corrupt());
-        }
         verify_applied(&connection, version)?;
+        workflow::verify_operation_progress(&connection)?;
         Ok(())
     }
 

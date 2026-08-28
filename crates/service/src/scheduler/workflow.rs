@@ -7,9 +7,19 @@ use open_compute_storage::WorkflowRepository;
 use open_compute_storage::scheduler::{ClaimedWorkflowRun, WorkflowCompletion};
 use open_compute_workers::WorkflowController;
 
+#[path = "workflow_v2.rs"]
+mod v2;
+
 impl SchedulerService {
     /// Resume a bounded validation page; transport Unknown leaves its durable target unchanged.
     pub async fn reconcile_workflow_versions(&self, limit: u32) -> Result<(), PlatformError> {
+        // Runtime probes are deferred while startup or quarantine prevents
+        // dispatch. Durable catalog/saga reconciliation remains available; no
+        // validating version becomes ready and no infrastructure failure is
+        // charged for a probe that could not start.
+        if self.transport.ensure_workflow_admission().is_err() {
+            return Ok(());
+        }
         let versions = {
             let mut cursor = self
                 .workflow_version_cursor
@@ -53,7 +63,12 @@ impl SchedulerService {
                 route_generation: record.identity.instance_generation,
                 request_id: RequestId::generate(),
             };
-            if let Err(error) = self.transport.probe_workflow(&target).await {
+            let probe = if frozen.capability_version == 2 {
+                self.transport.probe_workflow_v2(frozen).await
+            } else {
+                self.transport.probe_workflow(&target).await
+            };
+            if let Err(error) = probe {
                 if matches!(
                     error.code(),
                     ErrorCode::ArtifactIntegrityError
@@ -82,12 +97,21 @@ impl SchedulerService {
         let storage = self.storage.clone();
         let store = self.store.clone();
         let config = self.workflows.clone();
+        let transport = self.transport.clone();
+        let cursor = self.workflow_claim_cursor.clone();
         let now_ms = self.observed_wall_time_ms();
         tokio::task::spawn_blocking(move || {
+            transport.ensure_workflow_admission()?;
+            let mut cursor = cursor.lock().map_err(|_| scheduler_task_failed())?;
             let controller = WorkflowController::new(&storage, &store, &config);
             let mut runs = Vec::new();
             for _ in 0..batch.min(32) {
-                let Some(run) = controller.claim(now_ms)? else {
+                // A quarantined invocation may still own runtime resources. Do not consume
+                // fresh leases until the supervised child has rotated its generation.
+                if !runs.is_empty() && transport.ensure_workflow_admission().is_err() {
+                    break;
+                }
+                let Some(run) = controller.claim(now_ms, &mut cursor)? else {
                     break;
                 };
                 runs.push(run);
@@ -108,6 +132,10 @@ impl SchedulerService {
             .reconcile(&mut cursor, limit.min(1000), self.observed_wall_time_ms());
         if let Some(metrics) = &self.metrics {
             metrics.workflow_reconcile(result.is_ok());
+            if let Ok(operations) = WorkflowRepository::new(self.storage.db()).inspect_operations()
+            {
+                metrics.workflow_operations(&operations, self.observed_wall_time_ms());
+            }
             if let (Ok(summary), Ok(workload)) = (
                 self.store.inspect_workflows(self.observed_wall_time_ms()),
                 self.store
@@ -125,6 +153,10 @@ impl SchedulerService {
     }
 
     pub(crate) async fn dispatch_workflow_run(self: Arc<Self>, run: ClaimedWorkflowRun) {
+        if run.target.capability_version == 2 {
+            self.dispatch_workflow_run_v2(run).await;
+            return;
+        }
         let mut observation = self.metrics.as_ref().map(MetricsRegistry::workflow_run);
         let target = DispatchTarget {
             account_id: run.target.account_id,

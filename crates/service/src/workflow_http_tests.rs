@@ -7,6 +7,33 @@ use open_compute_storage::{NewDeployment, WorkerRepository};
 use std::sync::Mutex;
 use tower::ServiceExt as _;
 
+#[test]
+fn version_capability_defaults_to_legacy_and_requires_an_explicit_integer() {
+    let mut body = serde_json::json!({"deploymentId":DeploymentId::generate(),"className":"Flow"});
+    assert_eq!(
+        serde_json::from_value::<VersionBody>(body.clone())
+            .unwrap()
+            .capability_version,
+        1
+    );
+    body["capabilityVersion"] = serde_json::json!(2);
+    assert_eq!(
+        serde_json::from_value::<VersionBody>(body.clone())
+            .unwrap()
+            .capability_version,
+        2
+    );
+    for value in [
+        serde_json::Value::Null,
+        serde_json::json!("2"),
+        serde_json::json!(2.5),
+        serde_json::json!(true),
+    ] {
+        body["capabilityVersion"] = value;
+        assert!(serde_json::from_value::<VersionBody>(body.clone()).is_err());
+    }
+}
+
 pub(crate) struct Fixture {
     pub(crate) _temp: tempfile::TempDir,
     pub(crate) storage: Arc<PlatformStorage>,
@@ -66,7 +93,12 @@ pub(crate) fn fixture() -> Fixture {
     workers.mark_ready(deployment, 1).unwrap();
     let transport =
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
-    let api = WorkflowApiState::new(storage.clone(), scheduler.clone(), transport.clone());
+    let api = WorkflowApiState::new(
+        storage.clone(),
+        scheduler.clone(),
+        transport.clone(),
+        Default::default(),
+    );
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
     let service = Arc::new(
@@ -223,8 +255,12 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
         .create(
             f.account,
             definition,
+            1,
             Some("instance"),
-            "{\"private\":\"payload-marker\"}",
+            open_compute_workers::WorkflowCreateInput {
+                payload_json: "{\"private\":\"payload-marker\"}",
+                retention: None,
+            },
             now_ms(),
         )
         .unwrap();
@@ -261,7 +297,10 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
     assert!(view.is_valid(), "{view:?}");
     assert_eq!(view.inspected_instances, 1);
     assert!(!view.sampled);
-    let run = controller.claim(now_ms()).unwrap().unwrap();
+    let run = controller
+        .claim(now_ms(), &mut Default::default())
+        .unwrap()
+        .unwrap();
     f.scheduler
         .finish_workflow(
             &run.fence,
@@ -406,5 +445,204 @@ async fn workflow_operator_rejects_untrusted_scope_pagination_and_bodies() {
         .await
         .0,
         StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn workflow_admin_modifiers_share_generation_retention_and_event_authority() {
+    use open_compute_core::WorkflowsConfig;
+    use open_compute_storage::WorkflowRefState;
+    use open_compute_workers::{WorkflowController, WorkflowCreateInput};
+    use serde_json::{Value, json};
+    let f = fixture();
+    let repo = WorkflowRepository::new(f.storage.db());
+    let definition = repo
+        .create_definition(f.account, "admin-durable", 0)
+        .unwrap();
+    let version = repo
+        .stage_version(f.account, definition.id, f.deployment, "Flow", 2, 1)
+        .unwrap();
+    repo.finish_version(f.account, version.target.version_id, true, 2)
+        .unwrap();
+    let limits = WorkflowsConfig::default();
+    let controller = WorkflowController::new(&f.storage, &f.scheduler, &limits);
+    controller
+        .create(
+            f.account,
+            definition.id,
+            2,
+            Some("stable-name"),
+            WorkflowCreateInput {
+                payload_json: "\"admin-private-input\"",
+                retention: None,
+            },
+            now_ms(),
+        )
+        .unwrap();
+    let identity = repo
+        .find_instance(definition.id, "stable-name")
+        .unwrap()
+        .identity;
+    let instance = format!(
+        "{}/{}/instances/{}",
+        f.collection(),
+        definition.id,
+        identity.instance_id
+    );
+    let (status, metadata) = f.request("GET", &instance, Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{metadata}");
+    assert_eq!(metadata["capabilityVersion"], 2);
+    assert_eq!(metadata["durable"]["eventCount"], 0);
+    for forbidden in [
+        "admin-private-input",
+        "inputJson",
+        "outputJson",
+        "runToken",
+        "creationNonce",
+    ] {
+        assert!(!metadata.to_string().contains(forbidden), "{metadata}");
+    }
+    for action in ["pause", "pause"] {
+        assert_eq!(
+            f.request("POST", &format!("{instance}/{action}"), json!({}))
+                .await
+                .0,
+            StatusCode::OK
+        );
+    }
+    assert_eq!(
+        f.request("GET", &instance, Value::Null).await.1["status"],
+        "paused"
+    );
+    assert_eq!(
+        f.request(
+            "POST",
+            &format!("{instance}/events"),
+            json!({"type":"approval","payload":"admin-private-event"})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let metadata = f.request("GET", &instance, Value::Null).await.1;
+    assert_eq!(metadata["durable"]["eventCount"], 1);
+    assert!(!metadata.to_string().contains("admin-private-event"));
+    assert_eq!(
+        f.request("POST", &format!("{instance}/resume"), json!({}))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.request("POST", &format!("{instance}/resume"), json!({}))
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    for (suffix, body, status) in [
+        (
+            "pause",
+            json!({"instanceGeneration":2}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "restart",
+            json!({"operationId":RequestId::generate()}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "events",
+            json!({"type":"bad type","payload":null}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "events",
+            json!({"type":"ok","payload":"x".repeat(1024*1024)}),
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+        ("unknown", json!({}), StatusCode::BAD_REQUEST),
+    ] {
+        let response = f
+            .request("POST", &format!("{instance}/{suffix}"), body)
+            .await;
+        assert_eq!(response.0, status, "{response:?}");
+    }
+    let alien = instance.replace(&f.account.to_string(), &AccountId::generate().to_string());
+    assert_eq!(
+        f.request("GET", &alien, Value::Null).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        f.request("POST", &format!("{alien}/terminate"), json!({}))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let unauthorized = f
+        .router
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("{instance}/terminate"))
+                .body(axum::body::Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        f.request("POST", &format!("{instance}/terminate"), json!({}))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let metadata = f.request("GET", &instance, Value::Null).await.1;
+    assert_eq!(metadata["status"], "terminated");
+    assert!(metadata["durable"]["expiresAtMs"].as_i64().unwrap() > now_ms());
+    assert_eq!(
+        repo.reservation(identity.instance_id)
+            .unwrap()
+            .unwrap()
+            .state,
+        WorkflowRefState::Retained
+    );
+    assert_eq!(
+        f.request(
+            "POST",
+            &format!("{instance}/events"),
+            json!({"type":"approval"})
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        f.request("POST", &format!("{instance}/restart"), json!({}))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let metadata = f.request("GET", &instance, Value::Null).await.1;
+    assert_eq!(metadata["generation"], 2);
+    assert_eq!(metadata["versionId"], version.target.version_id.to_string());
+    assert_eq!(metadata["durable"]["eventCount"], 0);
+    assert_eq!(metadata["status"], "queued");
+    f.storage.begin_draining();
+    for (suffix, body) in [
+        ("pause", json!({})),
+        ("restart", json!({})),
+        ("events", json!({"type":"approval"})),
+    ] {
+        assert_eq!(
+            f.request("POST", &format!("{instance}/{suffix}"), body)
+                .await
+                .0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+    assert_eq!(
+        f.request("GET", &instance, Value::Null).await.0,
+        StatusCode::OK
     );
 }

@@ -107,7 +107,11 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
         "workflows",
     ] {
         assert_eq!(products[name]["status"], "supported", "{name}");
-        assert!(products[name]["capability_version"].is_number(), "{name}");
+        assert_eq!(
+            products[name]["capability_version"],
+            if name == "workflows" { 2 } else { 1 },
+            "{name}"
+        );
     }
     {
         let name = "websocket_hibernation";
@@ -172,7 +176,21 @@ fn p1_capabilities_are_complete_and_identical_across_three_fresh_processes() {
         ("cron", vec!["scheduled", "noRetry"]),
         (
             "workflows",
-            vec!["create", "get", "id", "status", "step.do"],
+            vec![
+                "create",
+                "get",
+                "id",
+                "status",
+                "step.do",
+                "step.sleep",
+                "step.sleepUntil",
+                "step.waitForEvent",
+                "sendEvent",
+                "pause",
+                "resume",
+                "terminate",
+                "restart",
+            ],
         ),
     ]);
     for (product, methods) in expected_methods {

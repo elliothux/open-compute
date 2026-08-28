@@ -16,6 +16,12 @@
 /opt/open-compute/bin/platformd --config /etc/open-compute/recovery.toml doctor --full --json
 ```
 
+包含 Workflow V2 的 snapshot 必须同时保留 control/scheduler authority、restart/purge intent、
+operation progress 和 GC receipt。waiting/paused 的原始 deadline、inbox 及冻结 retention 不重算。
+恢复后先让 exact-release reconciler 完成合法中间态，再验证原版本 replay、暂停状态、事件和 due work；
+不得单独复制一边数据库或通过删除 operation row 使诊断变绿。这些状态已通过 P2.5 的三轮 snapshot
+回归，见 [验证记录](../p2-5-gate-results.md)；每次正式发布仍需对应源码、pin 和 schema 的验收。
+
 预期是 sibling staging 全量验证后一次原子安装。非空 target、wrong key/release/S3、path、hash、schema 或 marker 错误都是停止条件；不得使用 force 或覆盖旧目录。失败时 target 保持为空，目标父目录保留 bounded `restore-failure` receipt 和同一 UUIDv7 的 object staging。确认不再需要诊断字节后，只允许精确清理该 receipt 报告的 ID：
 
 ```bash

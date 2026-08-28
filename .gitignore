@@ -26,3 +26,5 @@
 
 # Workflow Gate process artifacts, including retained failed/ diagnostics.
 /.p2-4-run/*
+/.p2-5-run/*
+/.p2-exit-run/*

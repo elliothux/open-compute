@@ -104,10 +104,17 @@ pub(super) const VERSION_SELECT: &str = "SELECT f.account_id,f.id,f.name,v.id,v.
     JOIN workflow_definitions f ON f.id=v.definition_id";
 
 pub(crate) fn version_digest(target: &WorkflowTarget) -> Result<[u8; 32], PlatformError> {
+    if !matches!(target.capability_version, 1 | 2) {
+        return Err(invariant());
+    }
     // Display name can change; it is copied only when an instance is created.
-    let descriptor = serde_json::json!({"accountId":target.account_id,"definitionId":target.definition_id,
+    let mut descriptor = serde_json::json!({"accountId":target.account_id,"definitionId":target.definition_id,
         "versionId":target.version_id,"workerId":target.worker_id,"deploymentId":target.deployment_id,
         "workerCodeSha256":hex::encode(target.worker_code_sha256),"className":target.class_name,
         "loaderSchemaVersion":target.loader_schema_version,"capabilityVersion":target.capability_version});
+    // Never change the historical V1 encoding. V2 has an explicit descriptor revision.
+    if target.capability_version == 2 {
+        descriptor["schemaVersion"] = serde_json::json!(2);
+    }
     Ok(Sha256::digest(serde_json::to_vec(&descriptor).map_err(|_| invariant())?).into())
 }

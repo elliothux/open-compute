@@ -50,6 +50,7 @@ async fn production_workflow_binding_frozen_versions_replay_and_terminal_history
         harness.storage.clone(),
         store.clone(),
         harness.transport.clone(),
+        Default::default(),
     );
     let first_target = harness.deploy(FLOW, "Flow").await;
     let first = api
@@ -58,6 +59,7 @@ async fn production_workflow_binding_frozen_versions_replay_and_terminal_history
             definition.id,
             first_target.deployment_id,
             "Flow".into(),
+            1,
         )
         .await
         .unwrap();
@@ -69,6 +71,7 @@ async fn production_workflow_binding_frozen_versions_replay_and_terminal_history
             BTreeMap::from([(
                 "FLOW".into(),
                 DeploymentBindingInput {
+                    capability_version: 1,
                     kind: BindingKind::Workflow,
                     id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                     permissions: CanonicalPermissions::default(),
@@ -108,6 +111,7 @@ async fn production_workflow_binding_frozen_versions_replay_and_terminal_history
             definition.id,
             first_target.deployment_id,
             "Missing".into(),
+            1,
         )
         .await
         .unwrap();
@@ -133,6 +137,7 @@ async fn production_workflow_binding_frozen_versions_replay_and_terminal_history
             definition.id,
             second_target.deployment_id,
             "Flow".into(),
+            1,
         )
         .await
         .unwrap();
@@ -324,12 +329,19 @@ async fn production_workflow_binding_frozen_versions_replay_and_terminal_history
         .create(
             account,
             definition.id,
+            1,
             Some("lost-response"),
-            "{\"value\":13}",
+            open_compute_workers::WorkflowCreateInput {
+                payload_json: "{\"value\":13}",
+                retention: None,
+            },
             now(),
         )
         .unwrap();
-    let run = controller.claim(now()).unwrap().unwrap();
+    let run = controller
+        .claim(now(), &mut Default::default())
+        .unwrap()
+        .unwrap();
     let envelope = WorkflowRunRequest {
         fence: run.fence.clone(),
         external_instance_id: run.external_instance_id.clone(),
@@ -367,7 +379,10 @@ async fn production_workflow_binding_frozen_versions_replay_and_terminal_history
         now() + i64::try_from(config.lease_ms + config.recovery_backoff_ms + 1).unwrap();
     store.recover_workflows(recovered_at, &config, 32).unwrap();
     let replay = controller
-        .claim(recovered_at + i64::try_from(config.recovery_backoff_ms).unwrap())
+        .claim(
+            recovered_at + i64::try_from(config.recovery_backoff_ms).unwrap(),
+            &mut Default::default(),
+        )
         .unwrap()
         .unwrap();
     assert_ne!(replay.fence.run_token, run.fence.run_token);
@@ -584,6 +599,9 @@ fn start_backend(
 
 #[path = "workflow_support/snapshot_restore.rs"]
 mod snapshot_restore;
+
+#[path = "workflow_support/platform_process.rs"]
+mod platform_process;
 
 #[path = "workflow_support/process_crash.rs"]
 mod process_crash;

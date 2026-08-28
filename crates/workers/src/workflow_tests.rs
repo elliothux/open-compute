@@ -7,6 +7,8 @@ use open_compute_storage::{NewDeployment, WorkerRepository};
 
 #[path = "workflow_crash_tests.rs"]
 mod crash_matrix;
+#[path = "workflow_lifecycle_tests.rs"]
+mod durable_lifecycle;
 
 fn fixture() -> (
     tempfile::TempDir,
@@ -57,7 +59,7 @@ fn fixture() -> (
     let workflows = WorkflowRepository::new(storage.db());
     let definition = workflows.create_definition(account, "flow", 2).unwrap();
     let version = workflows
-        .stage_version(account, definition.id, deployment, "Flow", 3)
+        .stage_version(account, definition.id, deployment, "Flow", 1, 3)
         .unwrap();
     workflows
         .finish_version(account, version.target.version_id, true, 4)
@@ -73,29 +75,57 @@ fn workflow_create_status_duplicate_and_terminal_release_saga() {
     let controller = WorkflowController::new(&storage, &scheduler, &config);
     assert_eq!(
         controller
-            .status(account, definition, "missing")
+            .status(account, definition, WorkflowInstanceId::generate(), 1, 0)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowInstanceNotFound
     );
-    let id = controller
-        .create(account, definition, Some("order"), "{}", 10)
+    let identity = controller
+        .create(
+            account,
+            definition,
+            1,
+            Some("order"),
+            WorkflowCreateInput {
+                payload_json: "{}",
+                retention: None,
+            },
+            10,
+        )
         .unwrap();
+    let id = &identity.external_instance_id;
     assert_eq!(id, "order");
     assert!(matches!(
-        controller.status(account, definition, &id).unwrap(),
+        controller
+            .status(account, definition, identity.instance_id, 1, 0)
+            .unwrap(),
         WorkflowStatus::Queued
     ));
     assert_eq!(
         controller
-            .create(account, definition, Some("order"), "{}", 11)
+            .create(
+                account,
+                definition,
+                1,
+                Some("order"),
+                WorkflowCreateInput {
+                    payload_json: "{}",
+                    retention: None
+                },
+                11
+            )
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowInstanceAlreadyExists
     );
-    let run = controller.claim(12).unwrap().unwrap();
+    let run = controller
+        .claim(12, &mut Default::default())
+        .unwrap()
+        .unwrap();
     assert!(matches!(
-        controller.status(account, definition, &id).unwrap(),
+        controller
+            .status(account, definition, identity.instance_id, 1, 0)
+            .unwrap(),
         WorkflowStatus::Running
     ));
     let step = WorkflowStepIdentity {
@@ -125,16 +155,16 @@ fn workflow_create_status_duplicate_and_terminal_release_saga() {
         )
         .unwrap();
     let repository = WorkflowRepository::new(storage.db());
-    let reservation = repository.find_instance(definition, &id).unwrap();
+    let reservation = repository.find_instance(definition, id).unwrap();
     assert_eq!(reservation.state, WorkflowRefState::Live);
     assert!(
-        matches!(controller.status(account,definition,&id).unwrap(),WorkflowStatus::Complete {output} if output.as_f64()==Some(42.0))
+        matches!(controller.status(account,definition,identity.instance_id,1, 0).unwrap(),WorkflowStatus::Complete {output} if output.as_f64()==Some(42.0))
     );
     controller
         .reconcile(&mut WorkflowReconcileCursor::default(), 10, 16)
         .unwrap();
     assert_eq!(
-        repository.find_instance(definition, &id).unwrap().state,
+        repository.find_instance(definition, id).unwrap().state,
         WorkflowRefState::Released
     );
     assert!(
@@ -142,9 +172,18 @@ fn workflow_create_status_duplicate_and_terminal_release_saga() {
             .instance_referrers_intact(&reservation.identity)
             .unwrap()
     );
-    assert!(controller.claim(17).unwrap().is_none());
-    let wire =
-        serde_json::to_string(&controller.status(account, definition, &id).unwrap()).unwrap();
+    assert!(
+        controller
+            .claim(17, &mut Default::default())
+            .unwrap()
+            .is_none()
+    );
+    let wire = serde_json::to_string(
+        &controller
+            .status(account, definition, identity.instance_id, 1, 0)
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(wire, r#"{"status":"complete","output":42.0}"#);
 }
 
@@ -156,15 +195,20 @@ fn workflow_reconcile_creation_crashes_and_bounded_grace() {
     let repository = WorkflowRepository::new(storage.db());
     let controller = WorkflowController::new(&storage, &scheduler, &config);
     let absent = repository
-        .reserve_instance(account, definition, Some("aborted"), &config, 10)
+        .reserve_instance(account, definition, Some("aborted"), 1, &config, 10)
         .unwrap();
     let durable = repository
-        .reserve_instance(account, definition, Some("durable"), &config, 10)
+        .reserve_instance(account, definition, Some("durable"), 1, &config, 10)
         .unwrap();
     scheduler
-        .insert_workflow(&durable.identity, "null", &config)
+        .insert_workflow(&durable.identity, "null", None, &config)
         .unwrap();
-    assert!(controller.claim(11).unwrap().is_none());
+    assert!(
+        controller
+            .claim(11, &mut Default::default())
+            .unwrap()
+            .is_none()
+    );
     controller
         .reconcile(&mut WorkflowReconcileCursor::default(), 10, 11)
         .unwrap();
@@ -184,8 +228,16 @@ fn workflow_reconcile_creation_crashes_and_bounded_grace() {
             .state,
         WorkflowRefState::Creating
     );
-    assert!(controller.claim(12).unwrap().is_none());
-    let run = controller.claim(1011).unwrap().unwrap();
+    assert!(
+        controller
+            .claim(12, &mut Default::default())
+            .unwrap()
+            .is_none()
+    );
+    let run = controller
+        .claim(1011, &mut Default::default())
+        .unwrap()
+        .unwrap();
     assert_eq!(run.fence.instance_id, durable.identity.instance_id);
     controller
         .reconcile(&mut WorkflowReconcileCursor::default(), 10, 60_010)
@@ -210,10 +262,10 @@ fn workflow_orphan_scheduler_authority_is_fenced_without_guessing_history() {
     let config = WorkflowsConfig::default();
     let repository = WorkflowRepository::new(storage.db());
     let reservation = repository
-        .reserve_instance(account, definition, None, &config, 10)
+        .reserve_instance(account, definition, None, 1, &config, 10)
         .unwrap();
     scheduler
-        .insert_workflow(&reservation.identity, "null", &config)
+        .insert_workflow(&reservation.identity, "null", None, &config)
         .unwrap();
     // Explicit test-only cross-database fault: remove an unfinalized control reservation.
     repository.abandon_creation(&reservation.identity).unwrap();
@@ -233,7 +285,10 @@ fn workflow_orphan_scheduler_authority_is_fenced_without_guessing_history() {
         ResourceAvailability::Unavailable
     );
     assert_eq!(
-        controller.claim(12).unwrap_err().code(),
+        controller
+            .claim(12, &mut Default::default())
+            .unwrap_err()
+            .code(),
         ErrorCode::WorkflowInvariantViolation
     );
     assert_eq!(
@@ -254,7 +309,17 @@ fn workflow_draining_and_invalid_payload_fail_before_reservation() {
     let controller = WorkflowController::new(&storage, &scheduler, &config);
     assert_eq!(
         controller
-            .create(account, definition, Some("bad"), "[", 10)
+            .create(
+                account,
+                definition,
+                1,
+                Some("bad"),
+                WorkflowCreateInput {
+                    payload_json: "[",
+                    retention: None
+                },
+                10
+            )
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowSerializationUnsupported
@@ -262,7 +327,17 @@ fn workflow_draining_and_invalid_payload_fail_before_reservation() {
     storage.begin_draining();
     assert_eq!(
         controller
-            .create(account, definition, Some("draining"), "null", 10)
+            .create(
+                account,
+                definition,
+                1,
+                Some("draining"),
+                WorkflowCreateInput {
+                    payload_json: "null",
+                    retention: None
+                },
+                10
+            )
             .unwrap_err()
             .code(),
         ErrorCode::PlatformUnavailable
@@ -288,7 +363,7 @@ fn workflow_readonly_diagnostics_and_claim_reject_corrupt_retained_accounting() 
     let config = WorkflowsConfig::default();
     let repository = WorkflowRepository::new(storage.db());
     let reservation = repository
-        .reserve_instance(account, definition, Some("retained"), &config, 10)
+        .reserve_instance(account, definition, Some("retained"), 1, &config, 10)
         .unwrap();
     let inspect = || {
         open_compute_storage::scheduler::inspect_workflow_databases(
@@ -302,7 +377,7 @@ fn workflow_readonly_diagnostics_and_claim_reject_corrupt_retained_accounting() 
     assert_eq!(inspect().pending_creations, 1);
     assert!(inspect().is_valid());
     scheduler
-        .insert_workflow(&reservation.identity, "null", &config)
+        .insert_workflow(&reservation.identity, "null", None, &config)
         .unwrap();
     assert_eq!(inspect().pending_creations, 1);
     repository
@@ -322,7 +397,7 @@ fn workflow_readonly_diagnostics_and_claim_reject_corrupt_retained_accounting() 
     );
     connection
         .execute_batch(
-            "DROP TRIGGER workflow_instance_count_guard;
+            "DROP TRIGGER workflow_v1_instance_count_guard;
         UPDATE workflow_instances SET state_bytes=state_bytes+1;",
         )
         .unwrap();
@@ -331,7 +406,10 @@ fn workflow_readonly_diagnostics_and_claim_reject_corrupt_retained_accounting() 
     assert!(!view.is_valid());
     let controller = WorkflowController::new(&storage, &scheduler, &config);
     assert_eq!(
-        controller.claim(12).unwrap_err().code(),
+        controller
+            .claim(12, &mut Default::default())
+            .unwrap_err()
+            .code(),
         ErrorCode::WorkflowInvariantViolation
     );
     assert_eq!(
@@ -358,8 +436,12 @@ fn workflow_history_prevents_empty_scheduler_replacement() {
         .create(
             storage.identity().default_account_id,
             definition,
+            1,
             Some("retained"),
-            "null",
+            WorkflowCreateInput {
+                payload_json: "null",
+                retention: None,
+            },
             10,
         )
         .unwrap();

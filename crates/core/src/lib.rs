@@ -46,7 +46,7 @@ pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus}
 pub use ids::{
     AccountId, BindingId, CronActivationId, CronRunId, DeploymentId, PlatformId, QueueBatchId,
     QueueConsumerId, QueueId, QueueMessageId, RequestId, ResourceId, StartupId, WorkerId,
-    WorkflowId, WorkflowInstanceId, WorkflowVersionId,
+    WorkflowId, WorkflowInstanceId, WorkflowOperationId, WorkflowVersionId,
 };
 pub use redact::Redactor;
 pub use release_identity::{

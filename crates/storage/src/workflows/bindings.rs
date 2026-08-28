@@ -6,7 +6,7 @@ impl WorkflowBindingDescriptor {
         let name = self.name.as_bytes();
         if self.kind != open_compute_core::BindingKind::Workflow
             || self.schema_version != 1
-            || self.capability_version != 1
+            || !matches!(self.capability_version, 1 | 2)
             || self.definition_lifecycle_generation < 1
             || name.is_empty()
             || name.len() > 64
@@ -31,6 +31,7 @@ impl WorkflowRepository<'_> {
         deployment: DeploymentId,
         name: &str,
         definition: WorkflowId,
+        capability_version: u32,
         now_ms: i64,
     ) -> Result<WorkflowBindingRecord, PlatformError> {
         let definition = self.definition(account, definition)?;
@@ -46,7 +47,7 @@ impl WorkflowRepository<'_> {
             name: name.into(),
             definition_id: definition.id,
             definition_lifecycle_generation: definition.lifecycle_generation,
-            capability_version: 1,
+            capability_version,
         };
         Ok(WorkflowBindingRecord {
             descriptor_sha256: descriptor.sha256()?,
@@ -112,10 +113,10 @@ pub(crate) fn read_workflow_bindings(
         .map_err(sql_error)
 }
 
-const BINDING_SELECT: &str =
+pub(super) const BINDING_SELECT: &str =
     "SELECT b.id,b.deployment_id,b.name,b.definition_id,b.definition_lifecycle_generation,
     b.capability_version,b.descriptor_sha256,b.created_at_ms FROM workflow_bindings b";
-fn binding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowBindingRecord> {
+pub(super) fn binding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowBindingRecord> {
     Ok(WorkflowBindingRecord {
         descriptor: WorkflowBindingDescriptor {
             kind: open_compute_core::BindingKind::Workflow,

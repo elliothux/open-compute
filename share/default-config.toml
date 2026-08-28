@@ -168,3 +168,10 @@ heartbeat_ms = 20000
 dispatch_timeout_ms = 300000
 recovery_backoff_ms = 1000
 creation_grace_ms = 60000
+max_parallel_steps = 4
+max_buffered_events = 128
+max_event_bytes = 8388608
+
+[workflows.default_retention]
+successRetentionMs = 604800000
+errorRetentionMs = 2592000000

@@ -9,4 +9,4 @@
 /opt/open-compute/bin/platformd --config /etc/open-compute/platform.toml backup list --json
 ```
 
-不得直接编辑 SQLite、WAL、SHM、migration 表。允许的 mutation 是从最近已验证整机 snapshot 做 fresh-host restore；只有 control 可验证且没有 Queue、Cron activation 或 Workflow instance history 的 alarm-only 目录，才能使用 `scheduler recover-corrupt --backup-name scheduler-corrupt-20260826` 重建 projection，详见 [Scheduler 恢复](./scheduler-recovery.md)。预期是损坏文件保持隔离且 authority 不被自愈改写。停止条件是没有 committed snapshot、master key 或同一 S3 authority；此时立即保全文件。回滚是回到恢复前的只读 evidence。验证是 doctor full、P0 smoke、schema checksum和一次重启。
+不得直接编辑 SQLite、WAL、SHM、migration 表。允许的 mutation 是从最近已验证整机 snapshot 做 fresh-host restore；只有 control 可验证且没有 Queue、Cron activation、Workflow history/operation 或 V2 version 的 alarm-only 目录，才能使用 `scheduler recover-corrupt --backup-name scheduler-corrupt-20260826` 重建 projection。V2 catalog 也会阻止重建，因为损坏文件可能仍持有 purge receipt，详见 [Scheduler 恢复](./scheduler-recovery.md)。预期是损坏文件保持隔离且 authority 不被自愈改写。停止条件是没有 committed snapshot、master key 或同一 S3 authority；此时立即保全文件。回滚是回到恢复前的只读 evidence。验证是 doctor full、P0 smoke、schema checksum和一次重启。

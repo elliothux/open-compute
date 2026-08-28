@@ -476,6 +476,7 @@ pub(super) fn deployment_request(
         resources.insert(
             name.to_owned(),
             DeploymentBindingInput {
+                capability_version: 1,
                 kind,
                 id,
                 permissions: CanonicalPermissions::default(),
@@ -651,14 +652,14 @@ pub(super) fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn kv_config() -> KvConfig {
+pub(super) fn kv_config() -> KvConfig {
     KvConfig {
         namespace_quota_bytes: 256 * 1024 * 1024,
         ..KvConfig::default()
     }
 }
 
-fn r2_config() -> R2Config {
+pub(super) fn r2_config() -> R2Config {
     R2Config {
         max_object_bytes: 8 * 1024 * 1024,
         max_staging_bytes: 16 * 1024 * 1024,
@@ -667,7 +668,7 @@ fn r2_config() -> R2Config {
     }
 }
 
-fn d1_config() -> D1Config {
+pub(super) fn d1_config() -> D1Config {
     D1Config {
         database_quota_bytes: 256 * 1024 * 1024,
         query_timeout_ms: 5_000,

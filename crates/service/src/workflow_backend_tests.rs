@@ -13,18 +13,28 @@ fn ready(f: &Fixture) -> (WorkflowId, WorkflowBindingRecord) {
         .create_definition(f.account, "backend", 0)
         .unwrap();
     let version = repository
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
+        .stage_version(f.account, definition.id, f.deployment, "Flow", 1, 1)
         .unwrap();
     repository
         .finish_version(f.account, version.target.version_id, true, 2)
         .unwrap();
+    (definition.id, ready_binding(f, definition.id, 1))
+}
+
+fn ready_binding(f: &Fixture, definition: WorkflowId, capability: u32) -> WorkflowBindingRecord {
+    let repository = WorkflowRepository::new(f.storage.db());
     let workers = WorkerRepository::new(f.storage.db());
     let (worker, _) = workers
-        .create_worker(f.account, "caller", RequestId::generate(), 0)
+        .create_worker(
+            f.account,
+            &format!("caller-{capability}"),
+            RequestId::generate(),
+            0,
+        )
         .unwrap();
     let deployment = DeploymentId::generate();
     let binding = repository
-        .prepare_binding(f.account, deployment, "FLOW", definition.id, 3)
+        .prepare_binding(f.account, deployment, "FLOW", definition, capability, 3)
         .unwrap();
     workers
         .insert_staging_deployment_with_products_and_limit(
@@ -54,7 +64,7 @@ fn ready(f: &Fixture) -> (WorkflowId, WorkflowBindingRecord) {
         .unwrap();
     workers.begin_validation(deployment).unwrap();
     workers.mark_ready(deployment, 4).unwrap();
-    (definition.id, binding)
+    binding
 }
 
 fn caller(binding: &WorkflowBindingRecord) -> HeaderMap {
@@ -86,6 +96,153 @@ fn body(fence: &WorkflowFence, fields: Value) -> Value {
             .clone(),
     );
     Value::Object(body)
+}
+
+#[test]
+fn durable_caller_uses_uuid_scope_and_does_not_upgrade_legacy_execution() {
+    let f = fixture();
+    let (definition, legacy) = ready(&f);
+    let durable = ready_binding(&f, definition, 2);
+    let service = WorkflowBindingService::new(
+        f.storage.clone(),
+        f.scheduler.clone(),
+        WorkflowsConfig::default(),
+    )
+    .unwrap();
+    let path = |binding: &WorkflowBindingRecord, operation: &str| {
+        format!(
+            "/internal/bindings/v1/workflow/{}/{operation}",
+            binding.descriptor.binding_id
+        )
+    };
+    service
+        .execute(
+            &path(&legacy, "create"),
+            &caller(&legacy),
+            json!({"id":"original","payloadJson":"null"}),
+            10,
+        )
+        .unwrap();
+    let repository = WorkflowRepository::new(f.storage.db());
+    let identity = repository
+        .find_instance(definition, "original")
+        .unwrap()
+        .identity;
+    let handle = service
+        .execute(
+            &path(&durable, "get"),
+            &caller(&durable),
+            json!({"id":"original"}),
+            11,
+        )
+        .unwrap();
+    assert_eq!(
+        handle,
+        json!({"id":"original","instanceId":identity.instance_id})
+    );
+    assert_eq!(
+        service
+            .execute(
+                &path(&durable, "status"),
+                &caller(&durable),
+                json!({"instanceId":identity.instance_id}),
+                11
+            )
+            .unwrap(),
+        json!({"status":"queued"})
+    );
+    for body in [
+        json!({"id":"original"}),
+        json!({"instanceId":identity.instance_id,"id":"original"}),
+    ] {
+        assert_eq!(
+            service
+                .execute(&path(&durable, "status"), &caller(&durable), body, 11)
+                .unwrap_err()
+                .code(),
+            ErrorCode::WorkflowSerializationUnsupported
+        );
+    }
+    assert_eq!(
+        service
+            .execute(
+                &path(&legacy, "status"),
+                &caller(&legacy),
+                json!({"instanceId":identity.instance_id}),
+                11
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowSerializationUnsupported
+    );
+    assert_eq!(
+        service
+            .execute(
+                &path(&durable, "status"),
+                &caller(&durable),
+                json!({"instanceId":WorkflowInstanceId::generate()}),
+                11
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowInstanceNotFound
+    );
+    assert_eq!(
+        service
+            .execute(
+                &path(&durable, "create"),
+                &caller(&durable),
+                json!({"id":"mismatch","payloadJson":"null"}),
+                11
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowCapabilityMismatch
+    );
+    assert!(repository.find_instance(definition, "mismatch").is_err());
+    let mut do_headers = caller(&durable);
+    do_headers.insert(
+        "x-open-compute-workflow-do-context",
+        HeaderValue::from_static("1"),
+    );
+    for method in [
+        "create",
+        "send-event",
+        "pause",
+        "resume",
+        "terminate",
+        "restart",
+    ] {
+        assert_eq!(
+            service
+                .execute(&path(&durable, method), &do_headers, json!({}), 11)
+                .unwrap_err()
+                .code(),
+            ErrorCode::WorkflowDoOutputGateUnsupported
+        );
+    }
+    assert_eq!(
+        service
+            .execute(
+                &path(&durable, "status"),
+                &do_headers,
+                json!({"instanceId":identity.instance_id}),
+                11
+            )
+            .unwrap()["status"],
+        "queued"
+    );
+    // A definition scope is independent of caller capability and cannot be selected in the body.
+    let foreign = repository
+        .create_definition(f.account, "foreign", 12)
+        .unwrap();
+    assert_eq!(
+        WorkflowController::new(&f.storage, &f.scheduler, &WorkflowsConfig::default())
+            .status(f.account, foreign.id, identity.instance_id, 2, 0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowInstanceNotFound
+    );
 }
 
 #[test]
@@ -202,7 +359,10 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
         ErrorCode::WorkflowBindingStale
     );
     let controller = WorkflowController::new(&f.storage, &f.scheduler, &config);
-    let run = controller.claim(12).unwrap().unwrap();
+    let run = controller
+        .claim(12, &mut Default::default())
+        .unwrap()
+        .unwrap();
     let step = body(
         &run.fence,
         json!({"ordinal":0,"name":"lookup","nameCount":1,"configJson":"null"}),
@@ -373,8 +533,12 @@ async fn workflow_private_http_is_bounded_and_rechecks_startup_generation() {
     for (code, status) in [
         (ErrorCode::WorkflowRuntimeUnavailable, 503),
         (ErrorCode::WorkflowStateQuotaExceeded, 429),
+        (ErrorCode::WorkflowEventQueueFull, 429),
         (ErrorCode::WorkflowInstanceNotFound, 404),
         (ErrorCode::WorkflowRunStale, 409),
+        (ErrorCode::WorkflowInstanceBusy, 409),
+        (ErrorCode::WorkflowInstanceStateConflict, 409),
+        (ErrorCode::WorkflowInstanceCleanupPending, 409),
         (ErrorCode::WorkflowResultTooLarge, 413),
         (ErrorCode::WorkflowSerializationUnsupported, 422),
     ] {
@@ -407,13 +571,60 @@ fn workflow_metric_guards_count_all_outcomes_without_sensitive_labels() {
             errored: 4,
             state_bytes: 100,
             expired_runs: 1,
+            waiting: 5,
+            paused: 6,
+            terminated: 7,
+            retained: 8,
+            buffered_events: 2,
+            inbox_bytes: 64,
+            consumed_events: 3,
+            sleeping_steps: 2,
+            event_waits: 1,
+            retry_waits: 4,
+            retried_steps: 3,
+            exhausted_steps: 1,
+            step_timeouts: 1,
+            event_timeouts: 2,
+            gc_receipts: 1,
         },
         0.5,
     );
+    f.metrics.workflow_operations(
+        &open_compute_storage::WorkflowOperationInspection {
+            pending_restarts: 1,
+            pending_purges: 2,
+            oldest_operation_at_ms: Some(1000),
+        },
+        2500,
+    );
+    for failure in [
+        None,
+        Some(ErrorCode::WorkflowEventQueueFull),
+        Some(ErrorCode::WorkflowInstanceBusy),
+    ] {
+        f.metrics.workflow_event(failure);
+    }
+    for operation in ["pause", "resume", "terminate", "restart", "private-label"] {
+        f.metrics.workflow_lifecycle(operation, true);
+        f.metrics.workflow_lifecycle(operation, false);
+    }
     let output = f
         .metrics
         .render(&crate::health::HealthCoordinator::new().snapshot());
     assert!(output.contains("open_compute_workflow_in_flight 0"));
     assert!(output.contains("open_compute_workflow_runs_total{outcome=\"unknown\"} 1"));
     assert!(output.contains("open_compute_workflow_instance_status{status=\"complete\"} 3"));
+    for line in [
+        "open_compute_workflow_instance_status{status=\"paused\"} 6",
+        "open_compute_workflow_instance_status{status=\"running\"} 2",
+        "open_compute_workflow_waiting_steps{reason=\"retry\"} 4",
+        "open_compute_workflow_pending_operations{phase=\"purge_receipt\"} 1",
+        "open_compute_workflow_event_intake_total{outcome=\"full\"} 1",
+        "open_compute_workflow_lifecycle_total{operation=\"restart\",outcome=\"error\"} 1",
+        "open_compute_workflow_operation_age_seconds 1.5",
+        "open_compute_workflow_consumed_events 3",
+    ] {
+        assert!(output.contains(line), "missing {line}");
+    }
+    assert!(!output.contains("private-label"));
 }

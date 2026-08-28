@@ -1,0 +1,331 @@
+//! Capability V2 replay identity, resolved wait policy, and logical byte accounting.
+
+use super::{
+    WORKFLOW_MAX_DURATION_MS, WORKFLOW_MAX_SAFE_INTEGER, WorkflowStepConfig, duration_ms, error,
+    timestamp_ms,
+};
+use crate::{ErrorCode, PlatformError};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
+
+/// Fixed instance metadata charge defined by `share/workflow-accounting-v2.json`.
+pub const WORKFLOW_V2_INSTANCE_BYTES: usize = 256;
+/// Fixed step metadata charge, excluding variable name/config/result bytes.
+pub const WORKFLOW_V2_STEP_BYTES: usize = 160;
+/// Logical bytes per immutable predecessor edge.
+pub const WORKFLOW_V2_DEPENDENCY_BYTES: usize = 16;
+/// Fixed inbox metadata charge, excluding type and canonical payload bytes.
+pub const WORKFLOW_V2_EVENT_BYTES: usize = 32;
+
+/// Durable API operation kind, independent of the caller's display name.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowStepKind {
+    /// Retried business callback.
+    Do,
+    /// Relative durable sleep.
+    Sleep,
+    /// Absolute durable sleep.
+    SleepUntil,
+    /// FIFO event wait with a durable timeout.
+    WaitEvent,
+}
+
+impl WorkflowStepKind {
+    /// Stable SQL/wire spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Do => "do",
+            Self::Sleep => "sleep",
+            Self::SleepUntil => "sleep_until",
+            Self::WaitEvent => "wait_event",
+        }
+    }
+}
+
+/// Fully resolved configuration. Variant identity prevents mismatched kind/config pairs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkflowDurableConfig {
+    /// Immutable callback retry and timeout policy.
+    Do(WorkflowStepConfig),
+    /// Normalized relative milliseconds.
+    Sleep(u64),
+    /// Absolute safe integral Unix milliseconds, including past timestamps.
+    SleepUntil(i64),
+    /// Event type and normalized timeout; neither comes from runtime cache state.
+    WaitEvent {
+        /// Exact ASCII event type, compared case-sensitively.
+        event_type: String,
+        /// Timeout in milliseconds, including zero.
+        timeout_ms: u64,
+    },
+}
+
+impl WorkflowDurableConfig {
+    /// Normalize one public config object; missing defaults are resolved only here.
+    pub fn resolve(kind: WorkflowStepKind, value: &Value) -> Result<Self, PlatformError> {
+        let resolved = match kind {
+            WorkflowStepKind::Do => Self::Do(WorkflowStepConfig::resolve(value)?),
+            WorkflowStepKind::Sleep => {
+                fields(value, &["duration"])?;
+                Self::Sleep(duration_ms(
+                    required(value, "duration")?,
+                    WORKFLOW_MAX_DURATION_MS,
+                )?)
+            }
+            WorkflowStepKind::SleepUntil => {
+                fields(value, &["timestamp"])?;
+                Self::SleepUntil(timestamp_ms(required(value, "timestamp")?)?)
+            }
+            WorkflowStepKind::WaitEvent => {
+                fields(value, &["type", "timeout"])?;
+                Self::WaitEvent {
+                    event_type: required(value, "type")?
+                        .as_str()
+                        .ok_or_else(|| error(ErrorCode::WorkflowEventTypeInvalid))?
+                        .into(),
+                    timeout_ms: value.get("timeout").map_or(Ok(86_400_000), |value| {
+                        duration_ms(value, WORKFLOW_MAX_DURATION_MS)
+                    })?,
+                }
+            }
+        };
+        resolved.validate()?;
+        Ok(resolved)
+    }
+
+    /// Decode stored resolved bytes, rejecting missing fields, noncanonical encodings, and corruption.
+    /// This deliberately does not apply the public defaults again on replay.
+    pub fn from_canonical(kind: WorkflowStepKind, encoded: &str) -> Result<Self, PlatformError> {
+        let decode = || {
+            if encoded.len() > 4096 {
+                return Err(unsupported());
+            }
+            let value: Value = serde_json::from_str(encoded).map_err(|_| unsupported())?;
+            let config = match kind {
+                WorkflowStepKind::Do => {
+                    Self::Do(serde_json::from_value(value).map_err(|_| unsupported())?)
+                }
+                WorkflowStepKind::Sleep => {
+                    fields(&value, &["durationMs"])?;
+                    Self::Sleep(
+                        required(&value, "durationMs")?
+                            .as_u64()
+                            .ok_or_else(unsupported)?,
+                    )
+                }
+                WorkflowStepKind::SleepUntil => {
+                    fields(&value, &["timestampMs"])?;
+                    Self::SleepUntil(
+                        required(&value, "timestampMs")?
+                            .as_i64()
+                            .ok_or_else(unsupported)?,
+                    )
+                }
+                WorkflowStepKind::WaitEvent => {
+                    fields(&value, &["type", "timeoutMs"])?;
+                    Self::WaitEvent {
+                        event_type: required(&value, "type")?
+                            .as_str()
+                            .ok_or_else(unsupported)?
+                            .into(),
+                        timeout_ms: required(&value, "timeoutMs")?
+                            .as_u64()
+                            .ok_or_else(unsupported)?,
+                    }
+                }
+            };
+            if config.canonical_json()? != encoded {
+                return Err(unsupported());
+            }
+            Ok(config)
+        };
+        decode().map_err(|_| error(ErrorCode::WorkflowInvariantViolation))
+    }
+
+    /// Validate a structured stored policy without changing its values.
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        match self {
+            Self::Do(config) => config.validate(),
+            Self::Sleep(duration) if *duration <= WORKFLOW_MAX_DURATION_MS => Ok(()),
+            Self::SleepUntil(timestamp)
+                if timestamp.unsigned_abs() <= WORKFLOW_MAX_SAFE_INTEGER =>
+            {
+                Ok(())
+            }
+            Self::WaitEvent {
+                event_type,
+                timeout_ms,
+            } if *timeout_ms <= WORKFLOW_MAX_DURATION_MS => {
+                validate_workflow_event_type(event_type)
+            }
+            _ => Err(error(ErrorCode::WorkflowDurationInvalid)),
+        }
+    }
+
+    /// Operation kind implied by this validated configuration.
+    #[must_use]
+    pub const fn kind(&self) -> WorkflowStepKind {
+        match self {
+            Self::Do(_) => WorkflowStepKind::Do,
+            Self::Sleep(_) => WorkflowStepKind::Sleep,
+            Self::SleepUntil(_) => WorkflowStepKind::SleepUntil,
+            Self::WaitEvent { .. } => WorkflowStepKind::WaitEvent,
+        }
+    }
+
+    /// Canonical resolved bytes persisted and compared during replay.
+    pub fn canonical_json(&self) -> Result<String, PlatformError> {
+        self.validate()?;
+        let value = match self {
+            Self::Do(config) => serde_json::to_value(config).map_err(|_| unsupported())?,
+            Self::Sleep(duration) => json!({"durationMs":duration}),
+            Self::SleepUntil(timestamp) => json!({"timestampMs":timestamp}),
+            Self::WaitEvent {
+                event_type,
+                timeout_ms,
+            } => json!({"type":event_type,"timeoutMs":timeout_ms}),
+        };
+        let encoded = value.to_string();
+        if encoded.len() > 4096 {
+            return Err(unsupported());
+        }
+        Ok(encoded)
+    }
+}
+
+/// Strict private wire declaration before duration/default normalization.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkflowStepDeclaration {
+    /// Zero-based API call order.
+    pub ordinal: u32,
+    /// Declared API operation.
+    pub kind: WorkflowStepKind,
+    /// UTF-8 display identity, bounded in bytes.
+    pub name: String,
+    /// One-based occurrence count for this kind and name.
+    pub name_count: u32,
+    /// Raw supported options, normalized at admission.
+    pub config: Value,
+    /// Ordered settled frontier from the preceding batch.
+    pub dependencies: Vec<u32>,
+    /// First ordinal in this synchronous batch.
+    pub batch_first_ordinal: u32,
+    /// Complete batch membership count, never inferred from completion order.
+    pub batch_size: u32,
+}
+
+impl WorkflowStepDeclaration {
+    /// Resolve the supported policy and validate the complete replay declaration.
+    pub fn resolve(self) -> Result<WorkflowStepDescriptor, PlatformError> {
+        let descriptor = WorkflowStepDescriptor {
+            ordinal: self.ordinal,
+            name: self.name,
+            name_count: self.name_count,
+            config: WorkflowDurableConfig::resolve(self.kind, &self.config)?,
+            dependencies: self.dependencies,
+            batch_first_ordinal: self.batch_first_ordinal,
+            batch_size: self.batch_size,
+        };
+        descriptor.validate()?;
+        Ok(descriptor)
+    }
+}
+
+/// Canonical capability V2 replay identity, including immutable batch and dependency shape.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowStepDescriptor {
+    /// Zero-based API call order.
+    pub ordinal: u32,
+    /// UTF-8 display identity.
+    pub name: String,
+    /// One-based occurrence count for this kind and name.
+    pub name_count: u32,
+    /// Fully resolved frozen configuration.
+    pub config: WorkflowDurableConfig,
+    /// Ordered predecessor ordinals; backend also compares the actual previous batch.
+    pub dependencies: Vec<u32>,
+    /// Immutable first batch ordinal.
+    pub batch_first_ordinal: u32,
+    /// Immutable complete batch size.
+    pub batch_size: u32,
+}
+
+impl WorkflowStepDescriptor {
+    /// Validate bounded names, ordinals, contiguous predecessor shape, and frozen policy.
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        self.config.validate()?;
+        if self.ordinal >= 1024 {
+            return Err(error(ErrorCode::WorkflowStepLimitExceeded));
+        }
+        if self.name.is_empty() || self.name.len() > 256 || self.name_count == 0 {
+            return Err(error(ErrorCode::WorkflowSerializationUnsupported));
+        }
+        if !(1..=16).contains(&self.batch_size)
+            || self.batch_first_ordinal > self.ordinal
+            || self
+                .batch_first_ordinal
+                .checked_add(self.batch_size)
+                .is_none_or(|end| self.ordinal >= end || end > 1024)
+            || (self.config.kind() != WorkflowStepKind::Do && self.batch_size != 1)
+            || self.dependencies.len() > 16
+            || self
+                .dependencies
+                .windows(2)
+                .any(|pair| pair[0].checked_add(1) != Some(pair[1]))
+            || (self.batch_first_ordinal == 0 && !self.dependencies.is_empty())
+            || (self.batch_first_ordinal > 0
+                && self.dependencies.last() != Some(&(self.batch_first_ordinal - 1)))
+        {
+            return Err(error(ErrorCode::WorkflowParallelStepUnsupported));
+        }
+        Ok(())
+    }
+
+    /// Digest the full normalized descriptor, never only the display name or config hash.
+    pub fn sha256(&self) -> Result<[u8; 32], PlatformError> {
+        self.validate()?;
+        let config: Value =
+            serde_json::from_str(&self.config.canonical_json()?).map_err(|_| unsupported())?;
+        let descriptor = json!({"capabilityVersion":2,"ordinal":self.ordinal,"kind":self.config.kind(),"name":self.name,
+            "nameCount":self.name_count,"config":config,"dependencies":self.dependencies,
+            "batchFirstOrdinal":self.batch_first_ordinal,"batchSize":self.batch_size});
+        Ok(Sha256::digest(descriptor.to_string().as_bytes()).into())
+    }
+
+    /// Exact retained descriptor/edge bytes, excluding later result and error bytes.
+    pub fn state_bytes(&self) -> Result<usize, PlatformError> {
+        self.validate()?;
+        Ok(WORKFLOW_V2_STEP_BYTES
+            + self.name.len()
+            + self.config.canonical_json()?.len()
+            + WORKFLOW_V2_DEPENDENCY_BYTES * self.dependencies.len())
+    }
+}
+
+/// Validate the supported event alphabet without normalizing case or truncating input.
+pub fn validate_workflow_event_type(value: &str) -> Result<(), PlatformError> {
+    super::validate_workflow_instance_id(value)
+        .map_err(|_| error(ErrorCode::WorkflowEventTypeInvalid))
+}
+
+fn unsupported() -> PlatformError {
+    error(ErrorCode::WorkflowStepConfigUnsupported)
+}
+fn fields(value: &Value, expected: &[&str]) -> Result<(), PlatformError> {
+    let object = value.as_object().ok_or_else(unsupported)?;
+    if object.keys().any(|key| !expected.contains(&key.as_str())) {
+        return Err(unsupported());
+    }
+    Ok(())
+}
+fn required<'a>(value: &'a Value, key: &str) -> Result<&'a Value, PlatformError> {
+    value.get(key).ok_or_else(unsupported)
+}
+
+#[cfg(test)]
+#[path = "descriptor_tests.rs"]
+mod tests;

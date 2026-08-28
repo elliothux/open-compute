@@ -8,31 +8,85 @@ use std::time::UNIX_EPOCH;
 
 include!(concat!(env!("OUT_DIR"), "/migration_hashes.rs"));
 
-const MIGRATION_001_SQL: &str = include_str!("../migrations/001_init.sql");
-const MIGRATION_002_SQL: &str = include_str!("../migrations/002_workers_runtime.sql");
-const MIGRATION_003_SQL: &str = include_str!("../migrations/003_resource_bindings.sql");
-const MIGRATION_004_SQL: &str = include_str!("../migrations/004_kv.sql");
-const MIGRATION_005_SQL: &str = include_str!("../migrations/005_r2.sql");
-const MIGRATION_006_SQL: &str = include_str!("../migrations/006_d1.sql");
-const MIGRATION_007_SQL: &str = include_str!("../migrations/007_durable_objects.sql");
-const MIGRATION_008_SQL: &str = include_str!("../migrations/008_p1_format_freeze.sql");
-const MIGRATION_009_SQL: &str = include_str!("../migrations/009_queues.sql");
-const MIGRATION_010_SQL: &str = include_str!("../migrations/010_queue_consumers.sql");
-const MIGRATION_011_SQL: &str = include_str!("../migrations/011_cron_triggers.sql");
-const MIGRATION_012_SQL: &str = include_str!("../migrations/012_workflows.sql");
-const CURRENT_VERSION: i64 = 12;
-const MIGRATION_001_NAME: &str = "001_init";
-const MIGRATION_002_NAME: &str = "002_workers_runtime";
-const MIGRATION_003_NAME: &str = "003_resource_bindings";
-const MIGRATION_004_NAME: &str = "004_kv";
-const MIGRATION_005_NAME: &str = "005_r2";
-const MIGRATION_006_NAME: &str = "006_d1";
-const MIGRATION_007_NAME: &str = "007_durable_objects";
-const MIGRATION_008_NAME: &str = "008_p1_format_freeze";
-const MIGRATION_009_NAME: &str = "009_queues";
-const MIGRATION_010_NAME: &str = "010_queue_consumers";
-const MIGRATION_011_NAME: &str = "011_cron_triggers";
-const MIGRATION_012_NAME: &str = "012_workflows";
+struct ControlMigration {
+    name: &'static str,
+    sql: &'static str,
+    checksum: &'static [u8; 32],
+}
+
+const MIGRATIONS: &[ControlMigration] = &[
+    ControlMigration {
+        name: "001_init",
+        sql: include_str!("../migrations/001_init.sql"),
+        checksum: &MIGRATION_001_SHA256,
+    },
+    ControlMigration {
+        name: "002_workers_runtime",
+        sql: include_str!("../migrations/002_workers_runtime.sql"),
+        checksum: &MIGRATION_002_SHA256,
+    },
+    ControlMigration {
+        name: "003_resource_bindings",
+        sql: include_str!("../migrations/003_resource_bindings.sql"),
+        checksum: &MIGRATION_003_SHA256,
+    },
+    ControlMigration {
+        name: "004_kv",
+        sql: include_str!("../migrations/004_kv.sql"),
+        checksum: &MIGRATION_004_SHA256,
+    },
+    ControlMigration {
+        name: "005_r2",
+        sql: include_str!("../migrations/005_r2.sql"),
+        checksum: &MIGRATION_005_SHA256,
+    },
+    ControlMigration {
+        name: "006_d1",
+        sql: include_str!("../migrations/006_d1.sql"),
+        checksum: &MIGRATION_006_SHA256,
+    },
+    ControlMigration {
+        name: "007_durable_objects",
+        sql: include_str!("../migrations/007_durable_objects.sql"),
+        checksum: &MIGRATION_007_SHA256,
+    },
+    ControlMigration {
+        name: "008_p1_format_freeze",
+        sql: include_str!("../migrations/008_p1_format_freeze.sql"),
+        checksum: &MIGRATION_008_SHA256,
+    },
+    ControlMigration {
+        name: "009_queues",
+        sql: include_str!("../migrations/009_queues.sql"),
+        checksum: &MIGRATION_009_SHA256,
+    },
+    ControlMigration {
+        name: "010_queue_consumers",
+        sql: include_str!("../migrations/010_queue_consumers.sql"),
+        checksum: &MIGRATION_010_SHA256,
+    },
+    ControlMigration {
+        name: "011_cron_triggers",
+        sql: include_str!("../migrations/011_cron_triggers.sql"),
+        checksum: &MIGRATION_011_SHA256,
+    },
+    ControlMigration {
+        name: "012_workflows",
+        sql: include_str!("../migrations/012_workflows.sql"),
+        checksum: &MIGRATION_012_SHA256,
+    },
+    ControlMigration {
+        name: "013_workflow_durable_waiting",
+        sql: include_str!("../migrations/013_workflow_durable_waiting.sql"),
+        checksum: &MIGRATION_013_SHA256,
+    },
+    ControlMigration {
+        name: "014_workflow_operation_sequence",
+        sql: include_str!("../migrations/014_workflow_operation_sequence.sql"),
+        checksum: &MIGRATION_014_SHA256,
+    },
+];
+const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Test-only deterministic fault injection points.
@@ -41,8 +95,10 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum MigrationFault {
     /// Fail after `BEGIN EXCLUSIVE` and before SQL execution.
     BeforeExecution,
-    /// Fail after the first DDL statement.
+    /// Fail after migration DDL execution, before invariant checks.
     DuringDdl,
+    /// Fail after rebuilding the Workflow tables, before restoring their saved rows.
+    AfterWorkflowRebuild,
     /// Fail after SQL/invariants and before the migration row write.
     BeforeMigrationRow,
     /// Fail immediately after a successful commit.
@@ -72,146 +128,18 @@ fn apply_inner(
 ) -> Result<(), PlatformError> {
     verify_schema_consistency(db)?;
     let user_version = db.user_version()?;
-    if user_version < 1 {
+    for (index, migration) in MIGRATIONS.iter().enumerate() {
+        let version = (index + 1) as i64;
+        if version <= user_version {
+            continue;
+        }
         apply_one(
             db,
             clock,
-            1,
-            MIGRATION_001_NAME,
-            MIGRATION_001_SQL,
-            &MIGRATION_001_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 2 {
-        apply_one(
-            db,
-            clock,
-            2,
-            MIGRATION_002_NAME,
-            MIGRATION_002_SQL,
-            &MIGRATION_002_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 3 {
-        apply_one(
-            db,
-            clock,
-            3,
-            MIGRATION_003_NAME,
-            MIGRATION_003_SQL,
-            &MIGRATION_003_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 4 {
-        apply_one(
-            db,
-            clock,
-            4,
-            MIGRATION_004_NAME,
-            MIGRATION_004_SQL,
-            &MIGRATION_004_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 5 {
-        apply_one(
-            db,
-            clock,
-            5,
-            MIGRATION_005_NAME,
-            MIGRATION_005_SQL,
-            &MIGRATION_005_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 6 {
-        apply_one(
-            db,
-            clock,
-            6,
-            MIGRATION_006_NAME,
-            MIGRATION_006_SQL,
-            &MIGRATION_006_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 7 {
-        apply_one(
-            db,
-            clock,
-            7,
-            MIGRATION_007_NAME,
-            MIGRATION_007_SQL,
-            &MIGRATION_007_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 8 {
-        apply_one(
-            db,
-            clock,
-            8,
-            MIGRATION_008_NAME,
-            MIGRATION_008_SQL,
-            &MIGRATION_008_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 9 {
-        apply_one(
-            db,
-            clock,
-            9,
-            MIGRATION_009_NAME,
-            MIGRATION_009_SQL,
-            &MIGRATION_009_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 10 {
-        apply_one(
-            db,
-            clock,
-            10,
-            MIGRATION_010_NAME,
-            MIGRATION_010_SQL,
-            &MIGRATION_010_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 11 {
-        apply_one(
-            db,
-            clock,
-            11,
-            MIGRATION_011_NAME,
-            MIGRATION_011_SQL,
-            &MIGRATION_011_SHA256,
-            #[cfg(any(test, feature = "test-support"))]
-            fault,
-        )?;
-    }
-    if db.user_version()? < 12 {
-        apply_one(
-            db,
-            clock,
-            12,
-            MIGRATION_012_NAME,
-            MIGRATION_012_SQL,
-            &MIGRATION_012_SHA256,
+            version,
+            migration.name,
+            migration.sql,
+            migration.checksum,
             #[cfg(any(test, feature = "test-support"))]
             fault,
         )?;
@@ -333,28 +261,23 @@ fn read_applied_rows(db: &ControlDb) -> Result<Vec<(i64, Vec<u8>)>, PlatformErro
 }
 
 pub(crate) fn expected_checksum(version: i64) -> Result<&'static [u8], PlatformError> {
-    match version {
-        1 => Ok(&MIGRATION_001_SHA256),
-        2 => Ok(&MIGRATION_002_SHA256),
-        3 => Ok(&MIGRATION_003_SHA256),
-        4 => Ok(&MIGRATION_004_SHA256),
-        5 => Ok(&MIGRATION_005_SHA256),
-        6 => Ok(&MIGRATION_006_SHA256),
-        7 => Ok(&MIGRATION_007_SHA256),
-        8 => Ok(&MIGRATION_008_SHA256),
-        9 => Ok(&MIGRATION_009_SHA256),
-        10 => Ok(&MIGRATION_010_SHA256),
-        11 => Ok(&MIGRATION_011_SHA256),
-        12 => Ok(&MIGRATION_012_SHA256),
-        v if v > CURRENT_VERSION => Err(PlatformError::new(
+    if version > CURRENT_VERSION {
+        return Err(PlatformError::new(
             ErrorCode::SchemaTooNew,
             "on-disk schema is newer than this binary",
-        )),
-        _ => Err(PlatformError::new(
-            ErrorCode::MigrationFailed,
-            "unknown applied migration version",
-        )),
+        ));
     }
+    usize::try_from(version)
+        .ok()
+        .and_then(|value| value.checked_sub(1))
+        .and_then(|index| MIGRATIONS.get(index))
+        .map(|migration| migration.checksum.as_slice())
+        .ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "unknown applied migration version",
+            )
+        })
 }
 
 fn apply_one(
@@ -377,6 +300,20 @@ fn apply_one(
         }
         // `execute_batch` is required because migrations may contain triggers,
         // whose bodies contain semicolons that are not statement boundaries.
+        if version == 13 {
+            crate::workflows::integrity::verify_catalog(tx).map_err(|_| {
+                PlatformError::new(ErrorCode::MigrationFailed, "Workflow migration history is invalid")
+            })?;
+            #[cfg(any(test, feature = "test-support"))]
+            if fault == Some(MigrationFault::AfterWorkflowRebuild) {
+                let (before_restore, _) = sql.split_once("INSERT INTO workflow_versions SELECT")
+                    .ok_or_else(|| PlatformError::new(ErrorCode::MigrationFailed, "migration restore boundary missing"))?;
+                tx.execute_batch(before_restore).map_err(|_| {
+                    PlatformError::new(ErrorCode::MigrationFailed, "migration rebuild failed")
+                })?;
+                return Err(PlatformError::new(ErrorCode::MigrationFailed, "injected fault before Workflow restore"));
+            }
+        }
         tx.execute_batch(sql).map_err(|_| {
             PlatformError::new(ErrorCode::MigrationFailed, "migration SQL failed")
         })?;
@@ -472,6 +409,21 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
             "workflow_referrers",
             "workflow_instance_referrers",
         ]);
+    }
+    if version >= 13 {
+        tables.push("workflow_instance_operations");
+        crate::workflows::integrity::verify_catalog(tx).map_err(|_| {
+            PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "Workflow migration invariant failed",
+            )
+        })?;
+        crate::workflows::operations::verify_operations(tx).map_err(|_| {
+            PlatformError::new(
+                ErrorCode::MigrationFailed,
+                "Workflow operation invariant failed",
+            )
+        })?;
     }
     for table in tables {
         let sql: String = tx
@@ -668,20 +620,11 @@ pub fn migration_011_checksum() -> &'static [u8; 32] {
 /// Ordered production migration identities and checksums.
 #[must_use]
 pub fn migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
-    vec![
-        (1, MIGRATION_001_NAME, MIGRATION_001_SHA256),
-        (2, MIGRATION_002_NAME, MIGRATION_002_SHA256),
-        (3, MIGRATION_003_NAME, MIGRATION_003_SHA256),
-        (4, MIGRATION_004_NAME, MIGRATION_004_SHA256),
-        (5, MIGRATION_005_NAME, MIGRATION_005_SHA256),
-        (6, MIGRATION_006_NAME, MIGRATION_006_SHA256),
-        (7, MIGRATION_007_NAME, MIGRATION_007_SHA256),
-        (8, MIGRATION_008_NAME, MIGRATION_008_SHA256),
-        (9, MIGRATION_009_NAME, MIGRATION_009_SHA256),
-        (10, MIGRATION_010_NAME, MIGRATION_010_SHA256),
-        (11, MIGRATION_011_NAME, MIGRATION_011_SHA256),
-        (12, MIGRATION_012_NAME, MIGRATION_012_SHA256),
-    ]
+    MIGRATIONS
+        .iter()
+        .enumerate()
+        .map(|(index, migration)| ((index + 1) as i64, migration.name, *migration.checksum))
+        .collect()
 }
 
 /// Read-only schema inspection used by doctor.

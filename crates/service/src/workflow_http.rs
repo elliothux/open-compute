@@ -19,12 +19,15 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
+mod instances;
+
 /// Workflow control composition; tenant create/status remains on the private binding backend.
 #[derive(Clone, Debug)]
 pub struct WorkflowApiState {
     storage: Arc<PlatformStorage>,
     scheduler: Arc<SchedulerStore>,
     transport: WorkerdTransport,
+    limits: open_compute_core::WorkflowsConfig,
 }
 
 impl WorkflowApiState {
@@ -34,11 +37,13 @@ impl WorkflowApiState {
         storage: Arc<PlatformStorage>,
         scheduler: Arc<SchedulerStore>,
         transport: WorkerdTransport,
+        limits: open_compute_core::WorkflowsConfig,
     ) -> Self {
         Self {
             storage,
             scheduler,
             transport,
+            limits,
         }
     }
 
@@ -49,6 +54,7 @@ impl WorkflowApiState {
         definition: WorkflowId,
         deployment: DeploymentId,
         class_name: String,
+        capability_version: u32,
     ) -> Result<WorkflowVersion, PlatformError> {
         let storage = self.storage.clone();
         let version = tokio::task::spawn_blocking(move || {
@@ -58,6 +64,7 @@ impl WorkflowApiState {
                 definition,
                 deployment,
                 &class_name,
+                capability_version,
                 now_ms(),
             )
         })
@@ -82,7 +89,17 @@ pub(crate) async fn validate_version(
         route_generation: version.version_number,
         request_id: RequestId::generate(),
     };
-    let accepted = match transport.probe_workflow(&target).await {
+    let probe = match version.target.capability_version {
+        1 => transport.probe_workflow(&target).await,
+        2 => transport.probe_workflow_v2(&version.target).await,
+        _ => {
+            return Err(PlatformError::new(
+                ErrorCode::WorkflowCapabilityMismatch,
+                "Workflow capability is unsupported",
+            ));
+        }
+    };
+    let accepted = match probe {
         Ok(()) => true,
         Err(error)
             if matches!(
@@ -111,6 +128,7 @@ pub(crate) async fn validate_version(
 /// Account-scoped catalog and bounded operator history; no payload/SQL mutation endpoints.
 pub fn control_router() -> Router<HttpState> {
     Router::new()
+        .merge(instances::routes())
         .route(
             "/v1/accounts/{account}/workflows",
             post(create_definition).get(list_definitions),
@@ -148,6 +166,12 @@ struct NameBody {
 struct VersionBody {
     deployment_id: DeploymentId,
     class_name: String,
+    #[serde(default = "legacy_capability")]
+    capability_version: u32,
+}
+
+const fn legacy_capability() -> u32 {
+    1
 }
 
 async fn create_definition(
@@ -164,7 +188,7 @@ async fn create_definition(
         Ok(value) => value,
         Err(error) => return failure(&error, id),
     };
-    let body: NameBody = match read_json(request).await {
+    let body: NameBody = match read_json(request, 16 * 1024).await {
         Ok(value) => value,
         Err(error) => return failure(&error, id),
     };
@@ -240,7 +264,7 @@ async fn rename_definition(
         Ok(value) => value,
         Err(error) => return failure(&error, id),
     };
-    let body: NameBody = match read_json(request).await {
+    let body: NameBody = match read_json(request, 16 * 1024).await {
         Ok(value) => value,
         Err(error) => return failure(&error, id),
     };
@@ -303,12 +327,18 @@ async fn create_version(
         Ok(value) => value,
         Err(error) => return failure(&error, id),
     };
-    let body: VersionBody = match read_json(request).await {
+    let body: VersionBody = match read_json(request, 16 * 1024).await {
         Ok(value) => value,
         Err(error) => return failure(&error, id),
     };
     match api
-        .create_version(account, definition, body.deployment_id, body.class_name)
+        .create_version(
+            account,
+            definition,
+            body.deployment_id,
+            body.class_name,
+            body.capability_version,
+        )
         .await
     {
         Ok(version) => {
@@ -410,15 +440,12 @@ async fn list_steps(
     };
     response(
         tokio::task::spawn_blocking(move || {
-            let record = api
-                .scheduler
-                .workflow_instance(instance)?
-                .ok_or_else(|| error(ErrorCode::WorkflowInstanceNotFound))?;
-            if record.identity.target.account_id != account
-                || record.identity.target.definition_id != definition
-            {
-                return Err(error(ErrorCode::WorkflowInstanceNotFound));
-            }
+            open_compute_workers::WorkflowController::new(
+                &api.storage,
+                &api.scheduler,
+                &api.limits,
+            )
+            .inspect(account, definition, instance, now_ms())?;
             api.scheduler.workflow_steps(instance, after, limit)
         })
         .await,
@@ -434,10 +461,23 @@ async fn inspect_pool(State(state): State<HttpState>, request: Request) -> Respo
         Err(error) => return failure(&error, id),
     };
     response(
-        tokio::task::spawn_blocking(move || api.scheduler.inspect_workflows(now_ms())).await,
+        tokio::task::spawn_blocking(move || {
+            Ok(PoolInspection {
+                scheduler: api.scheduler.inspect_workflows(now_ms())?,
+                operations: WorkflowRepository::new(api.storage.db()).inspect_operations()?,
+            })
+        })
+        .await,
         id,
         StatusCode::OK,
     )
+}
+
+#[derive(Serialize)]
+struct PoolInspection {
+    #[serde(flatten)]
+    scheduler: open_compute_storage::scheduler::WorkflowInspection,
+    operations: open_compute_storage::WorkflowOperationInspection,
 }
 
 async fn reconcile(State(state): State<HttpState>, request: Request) -> Response {
@@ -500,10 +540,13 @@ fn page<T: std::str::FromStr>(request: &Request) -> Result<(Option<T>, u32), Pla
     Ok((after, limit))
 }
 
-async fn read_json<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, PlatformError> {
+async fn read_json<T: for<'de> Deserialize<'de>>(
+    request: Request,
+    limit: usize,
+) -> Result<T, PlatformError> {
     let bytes = tokio::time::timeout(
         Duration::from_secs(30),
-        to_bytes(request.into_body(), 16 * 1024),
+        to_bytes(request.into_body(), limit),
     )
     .await
     .map_err(|_| error(ErrorCode::LimitInvalid))?
@@ -547,11 +590,21 @@ fn failure(error: &PlatformError, id: RequestId) -> Response {
         ErrorCode::WorkflowReferenced
         | ErrorCode::WorkflowNameConflict
         | ErrorCode::WorkflowNotReady
-        | ErrorCode::WorkflowVersionNotReady => StatusCode::CONFLICT,
-        ErrorCode::ConfigInvalid | ErrorCode::LimitInvalid => StatusCode::BAD_REQUEST,
-        ErrorCode::QuotaExceeded | ErrorCode::WorkflowStateQuotaExceeded => {
-            StatusCode::TOO_MANY_REQUESTS
-        }
+        | ErrorCode::WorkflowVersionNotReady
+        | ErrorCode::WorkflowInstanceStateConflict
+        | ErrorCode::WorkflowInstanceBusy
+        | ErrorCode::WorkflowInstanceCleanupPending
+        | ErrorCode::WorkflowRunStale => StatusCode::CONFLICT,
+        ErrorCode::ConfigInvalid
+        | ErrorCode::LimitInvalid
+        | ErrorCode::WorkflowMethodUnsupported
+        | ErrorCode::WorkflowCapabilityMismatch
+        | ErrorCode::WorkflowEventTypeInvalid => StatusCode::BAD_REQUEST,
+        ErrorCode::WorkflowPayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        ErrorCode::WorkflowSerializationUnsupported => StatusCode::UNPROCESSABLE_ENTITY,
+        ErrorCode::QuotaExceeded
+        | ErrorCode::WorkflowStateQuotaExceeded
+        | ErrorCode::WorkflowEventQueueFull => StatusCode::TOO_MANY_REQUESTS,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     };
     let mut response = (

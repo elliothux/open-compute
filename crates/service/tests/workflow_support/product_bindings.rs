@@ -103,6 +103,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         bindings.insert(
             binding.into(),
             DeploymentBindingInput {
+                capability_version: 1,
                 kind,
                 id: id.as_str().unwrap().parse().unwrap(),
                 permissions: Default::default(),
@@ -126,6 +127,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     bindings.insert(
         "QUEUE".into(),
         DeploymentBindingInput {
+            capability_version: 1,
             kind: BindingKind::QueueProducer,
             id: ResourceId::from_uuid(queue.queue.id.as_uuid()).unwrap(),
             permissions: Default::default(),
@@ -182,22 +184,34 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     let definition = WorkflowRepository::new(storage.db())
         .create_definition(account, "workflow-products", now())
         .unwrap();
-    WorkflowApiState::new(storage.clone(), scheduler.clone(), stack.transport.clone())
-        .create_version(account, definition.id, deployment.id, "Flow".into())
-        .await
-        .unwrap();
+    WorkflowApiState::new(
+        storage.clone(),
+        scheduler.clone(),
+        stack.transport.clone(),
+        Default::default(),
+    )
+    .create_version(account, definition.id, deployment.id, "Flow".into(), 1)
+    .await
+    .unwrap();
     let config = WorkflowsConfig::default();
     let workflow = WorkflowController::new(&storage, &scheduler, &config);
     workflow
         .create(
             account,
             definition.id,
+            1,
             Some("products-instance"),
-            "null",
+            open_compute_workers::WorkflowCreateInput {
+                payload_json: "null",
+                retention: None,
+            },
             now(),
         )
         .unwrap();
-    let run = workflow.claim(now()).unwrap().unwrap();
+    let run = workflow
+        .claim(now(), &mut Default::default())
+        .unwrap()
+        .unwrap();
     let target = DispatchTarget {
         account_id: account,
         worker_id: worker.id,
@@ -236,7 +250,10 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     );
     let expired = now() + i64::try_from(config.lease_ms + 1).unwrap();
     scheduler.recover_workflows(expired, &config, 32).unwrap();
-    let replay = workflow.claim(expired + 1000).unwrap().unwrap();
+    let replay = workflow
+        .claim(expired + 1000, &mut Default::default())
+        .unwrap()
+        .unwrap();
     let envelope = WorkflowRunRequest {
         fence: replay.fence.clone(),
         external_instance_id: replay.external_instance_id,
@@ -279,12 +296,19 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .create(
             account,
             definition.id,
+            1,
             Some("external-effect"),
-            "{\"crashBeforeCommit\":true}",
+            open_compute_workers::WorkflowCreateInput {
+                payload_json: "{\"crashBeforeCommit\":true}",
+                retention: None,
+            },
             now(),
         )
         .unwrap();
-    let interrupted = workflow.claim(now()).unwrap().unwrap();
+    let interrupted = workflow
+        .claim(now(), &mut Default::default())
+        .unwrap()
+        .unwrap();
     let request = WorkflowRunRequest {
         fence: interrupted.fence.clone(),
         external_instance_id: interrupted.external_instance_id,
@@ -339,7 +363,10 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     p0_exit_support::wait_pid_change(&stack.supervisor, pid, Duration::from_secs(30)).await;
     let expired = now() + i64::try_from(config.lease_ms + 1).unwrap();
     scheduler.recover_workflows(expired, &config, 32).unwrap();
-    let retry = workflow.claim(expired + 1000).unwrap().unwrap();
+    let retry = workflow
+        .claim(expired + 1000, &mut Default::default())
+        .unwrap()
+        .unwrap();
     let request = WorkflowRunRequest {
         fence: retry.fence.clone(),
         external_instance_id: retry.external_instance_id,
@@ -374,8 +401,12 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             .create(
                 account,
                 definition.id,
+                1,
                 Some(&format!("backlog-{index}")),
-                "{\"backlog\":true}",
+                open_compute_workers::WorkflowCreateInput {
+                    payload_json: "{\"backlog\":true}",
+                    retention: None,
+                },
                 now(),
             )
             .unwrap();

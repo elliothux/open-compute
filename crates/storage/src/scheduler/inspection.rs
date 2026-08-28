@@ -226,6 +226,7 @@ pub fn inspect_scheduler_db(
         return Err(corrupt());
     }
     verify_applied(&connection, schema_version)?;
+    workflow::verify_operation_progress(&connection)?;
     let journal_mode: String = connection
         .pragma_query_value(None, "journal_mode", |row| row.get(0))
         .map_err(map_sql_error)?;

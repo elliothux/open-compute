@@ -155,8 +155,15 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
             harness.storage.clone(),
             store.clone(),
             harness.transport.clone(),
+            Default::default(),
         )
-        .create_version(account, definition.id, target.deployment_id, "Flow".into())
+        .create_version(
+            account,
+            definition.id,
+            target.deployment_id,
+            "Flow".into(),
+            1,
+        )
         .await
         .unwrap();
         assert_eq!(version.state, DeploymentState::Ready);
@@ -178,16 +185,24 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                     .create(
                         account,
                         definition.id,
+                        1,
                         None,
-                        if operation == "failure" {
-                            "{\"fail\":true}"
-                        } else {
-                            "null"
+                        open_compute_workers::WorkflowCreateInput {
+                            payload_json: if operation == "failure" {
+                                "{\"fail\":true}"
+                            } else {
+                                "null"
+                            },
+                            retention: None,
                         },
                         now(),
                     )
+                    .unwrap()
+                    .external_instance_id;
+                let run = controller
+                    .claim(now(), &mut Default::default())
+                    .unwrap()
                     .unwrap();
-                let run = controller.claim(now()).unwrap().unwrap();
                 assert_eq!(run.external_instance_id, id);
                 let result = harness
                     .transport
@@ -219,7 +234,12 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                         steps.first().map(|step| step.state.as_str()),
                         expected_state
                     );
-                    assert!(controller.claim(now()).unwrap().is_none());
+                    assert!(
+                        controller
+                            .claim(now(), &mut Default::default())
+                            .unwrap()
+                            .is_none()
+                    );
                     store
                         .verify_workflow_history(run.fence.instance_id)
                         .unwrap();
@@ -228,7 +248,10 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                     let expired_at = record.run_lease_until_ms.unwrap();
                     assert_eq!(store.recover_workflows(expired_at, &config, 32).unwrap(), 1);
                     let replay = WorkflowController::new(&harness.storage, &store, &config)
-                        .claim(expired_at + i64::try_from(config.recovery_backoff_ms).unwrap())
+                        .claim(
+                            expired_at + i64::try_from(config.recovery_backoff_ms).unwrap(),
+                            &mut Default::default(),
+                        )
                         .unwrap()
                         .unwrap();
                     assert_ne!(replay.fence.run_token, run.fence.run_token);
@@ -335,6 +358,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 BTreeMap::from([(
                     "FLOW".into(),
                     DeploymentBindingInput {
+                        capability_version: 1,
                         kind: BindingKind::Workflow,
                         id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                         permissions: CanonicalPermissions::default(),

@@ -10,18 +10,31 @@ pub enum WorkflowState {
     Queued,
     /// A random, unexpired lease owns activation.
     Running,
+    /// No activation is leased while a durable deadline or event is pending.
+    Waiting,
+    /// Explicitly paused; wall-clock deadlines continue to pass.
+    Paused,
     /// All steps and final output committed.
     Complete,
     /// A known permanent failure committed.
     Errored,
+    /// Explicitly terminated and logically fenced, with retained history.
+    Terminated,
 }
 
 impl WorkflowState {
-    /// Whether this instance can never execute again in capability V1.
+    /// Whether this execution is terminal; only an explicit V2 restart can make it runnable again.
     #[must_use]
     pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Complete | Self::Errored)
+        matches!(self, Self::Complete | Self::Errored | Self::Terminated)
     }
+}
+
+/// Disposable admission position. Losing it never loses work from the durable ready index.
+#[derive(Clone, Debug, Default)]
+pub struct WorkflowClaimCursor {
+    pub(super) account: Option<open_compute_core::AccountId>,
+    pub(super) recovered_streak: u8,
 }
 
 /// Persisted sanitized exception record, never raw tenant exception text.
@@ -72,6 +85,38 @@ pub struct WorkflowInstanceRecord {
     pub terminal_at_ms: Option<i64>,
     /// Last durable scheduler mutation.
     pub updated_at_ms: i64,
+    /// Capability-two scheduling, accounting and lifecycle authority; absent for V1 history.
+    pub durable: Option<WorkflowDurableState>,
+}
+
+/// Persisted capability-two metadata, with no payloads or private run/creation tokens.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDurableState {
+    /// The active run must drain before transitioning to paused.
+    pub pause_requested: bool,
+    /// The active run must drain before releasing its lease.
+    pub yield_requested: bool,
+    /// Earliest unfinished attempt, retry or wait deadline.
+    pub next_wake_at_ms: Option<i64>,
+    /// Number of immutable descriptors in this generation.
+    pub registered_step_count: u32,
+    /// Number of complete or failed descriptors; cancelled descriptors are not settled.
+    pub settled_step_count: u32,
+    /// Policy frozen when the instance was created.
+    pub retention: open_compute_core::workflow::WorkflowRetention,
+    /// Terminal expiry, never extended by reads.
+    pub expires_at_ms: Option<i64>,
+    /// Exact operation whose restart committed this execution generation.
+    pub last_restart_operation_id: Option<open_compute_core::WorkflowOperationId>,
+    /// Number of unconsumed inbox events.
+    pub event_count: u32,
+    /// Logical bytes retained in the inbox, including event metadata.
+    pub event_bytes: u64,
+    /// Next monotonic FIFO sequence; consumption does not reuse previous numbers.
+    pub next_event_seq: i64,
+    /// Whether this instance has previously been admitted, used for recovery fairness.
+    pub has_activated: bool,
 }
 
 impl std::fmt::Debug for WorkflowInstanceRecord {
@@ -195,14 +240,44 @@ pub struct WorkflowInspection {
     pub queued: u64,
     /// Currently leased instances.
     pub running: u64,
-    /// Durable successes retained indefinitely in capability V1.
+    /// Durable successes, including retained V2 history.
     pub complete: u64,
-    /// Durable known failures retained indefinitely in capability V1.
+    /// Durable known failures, including retained V2 history.
     pub errored: u64,
     /// Persisted logical state bytes across all accounts.
     pub state_bytes: u64,
     /// Expired runs awaiting bounded recovery.
     pub expired_runs: u64,
+    /// Durable waits without an activation lease.
+    pub waiting: u64,
+    /// Explicitly paused instances, still charged to nonterminal quota.
+    pub paused: u64,
+    /// Explicitly terminated instances.
+    pub terminated: u64,
+    /// Terminal V2 histories pending retention expiry or purge.
+    pub retained: u64,
+    /// Unconsumed events across retained generations.
+    pub buffered_events: u64,
+    /// Inbox logical bytes, excluding already-consumed payloads.
+    pub inbox_bytes: u64,
+    /// Consumed events in the retained generations, reset by restart/purge.
+    pub consumed_events: u64,
+    /// Unfinished durable sleep descriptors, including paused waits.
+    pub sleeping_steps: u64,
+    /// Unfinished event waits, including paused waits.
+    pub event_waits: u64,
+    /// Descriptors waiting for a business retry, including paused instances.
+    pub retry_waits: u64,
+    /// Completed descriptors that needed more than one business attempt.
+    pub retried_steps: u64,
+    /// Descriptors with an exhausted retry policy in retained history.
+    pub exhausted_steps: u64,
+    /// Retained settled attempt-timeout failures.
+    pub step_timeouts: u64,
+    /// Retained settled event-timeout failures.
+    pub event_timeouts: u64,
+    /// Durable purge receipts not yet acknowledged and swept.
+    pub gc_receipts: u64,
 }
 
 /// Bounded operator metadata; never includes input, output, nonce, or claim tokens.
@@ -237,6 +312,11 @@ pub struct WorkflowInstanceInspection {
     pub terminal_at_ms: Option<i64>,
     /// Sanitized terminal category.
     pub error_code: Option<String>,
+    /// Frozen execution capability; V1 history is never implicitly upgraded.
+    pub capability_version: u32,
+    /// Persisted waiting, retention and inbox metadata; absent for V1 history.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub durable: Option<WorkflowDurableState>,
 }
 
 /// Authenticated operator step metadata, excluding outputs and private token material.
@@ -257,4 +337,16 @@ pub struct WorkflowStepInspection {
     pub output_bytes: u64,
     /// Low-cardinality failure category, without raw exception text.
     pub error_code: Option<String>,
+    /// Durable operation kind, excluding its configuration and payload.
+    pub kind: String,
+    /// One-based business attempt, or zero before the first callback grant.
+    pub attempt: u32,
+    /// Frozen current-attempt deadline, if a business attempt exists.
+    pub attempt_deadline_at_ms: Option<i64>,
+    /// Original absolute retry, sleep or event deadline.
+    pub due_at_ms: Option<i64>,
+    /// First ordinal of the immutable V2 batch; absent for V1 history.
+    pub batch_first_ordinal: Option<u32>,
+    /// Immutable V2 batch size; absent for V1 history.
+    pub batch_size: Option<u32>,
 }

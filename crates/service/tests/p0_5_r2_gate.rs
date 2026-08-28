@@ -442,6 +442,7 @@ fn request(
     bindings.insert(
         "BUCKET".to_owned(),
         DeploymentBindingInput {
+            capability_version: 1,
             kind: BindingKind::R2Bucket,
             id: resource,
             permissions: CanonicalPermissions::default(),
@@ -451,6 +452,7 @@ fn request(
     bindings.insert(
         "BUCKET_ALIAS".to_owned(),
         DeploymentBindingInput {
+            capability_version: 1,
             kind: BindingKind::R2Bucket,
             id: resource,
             permissions: CanonicalPermissions::default(),

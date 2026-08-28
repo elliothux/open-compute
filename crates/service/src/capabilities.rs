@@ -144,7 +144,7 @@ pub fn platform_release_metadata(
             ("snapshots".to_owned(), vec![1]),
         ]),
         workerd_local_disk_gate_result: "p0.7-stock-workerd".to_owned(),
-        conformance_result: "go-p2.4-workflow-core-v1".to_owned(),
+        conformance_result: "p2.5-workflow-durable-v2".to_owned(),
         websocket_hibernation_result: "no-go:p1.8-unsupported".to_owned(),
     };
     if !metadata.validate() {
@@ -282,13 +282,26 @@ fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
         "cron".to_owned(),
         supported(&["scheduled", "noRetry"], &["OC-CRON-001"]),
     );
-    products.insert(
-        "workflows".to_owned(),
-        supported(
-            &["create", "get", "id", "status", "step.do"],
-            &["OC-WORKFLOW-001", "OC-WORKFLOW-002"],
-        ),
+    let mut workflows = supported(
+        &[
+            "create",
+            "get",
+            "id",
+            "status",
+            "step.do",
+            "step.sleep",
+            "step.sleepUntil",
+            "step.waitForEvent",
+            "sendEvent",
+            "pause",
+            "resume",
+            "terminate",
+            "restart",
+        ],
+        &["OC-WORKFLOW-001", "OC-WORKFLOW-002", "OC-WORKFLOW-003"],
     );
+    workflows.capability_version = Some(2);
+    products.insert("workflows".to_owned(), workflows);
     products.insert("websocket_hibernation".to_owned(), unsupported());
     products
 }
@@ -363,6 +376,42 @@ fn limit_registry(loaded: &LoadedConfig) -> BTreeMap<String, u64> {
         (
             "workflows.dispatch_timeout_ms".to_owned(),
             config.workflows.dispatch_timeout_ms,
+        ),
+        (
+            "workflows.max_parallel_steps".to_owned(),
+            u64::from(config.workflows.max_parallel_steps),
+        ),
+        (
+            "workflows.max_buffered_events".to_owned(),
+            u64::from(config.workflows.max_buffered_events),
+        ),
+        (
+            "workflows.max_event_bytes".to_owned(),
+            config.workflows.max_event_bytes,
+        ),
+        (
+            "workflows.default_success_retention_ms".to_owned(),
+            config.workflows.default_retention.success_retention_ms,
+        ),
+        (
+            "workflows.default_error_retention_ms".to_owned(),
+            config.workflows.default_retention.error_retention_ms,
+        ),
+        (
+            "workflows.max_attempt_ms".to_owned(),
+            config
+                .workflows
+                .dispatch_timeout_ms
+                .saturating_sub(open_compute_core::workflow::WORKFLOW_DRAIN_MARGIN_MS)
+                .min(open_compute_core::workflow::WORKFLOW_MAX_ATTEMPT_MS),
+        ),
+        (
+            "workflows.max_retry_delay_ms".to_owned(),
+            open_compute_core::workflow::WORKFLOW_MAX_RETRY_DELAY_MS,
+        ),
+        (
+            "workflows.max_duration_ms".to_owned(),
+            open_compute_core::workflow::WORKFLOW_MAX_DURATION_MS,
         ),
         (
             "scheduler.pools.workflow.max_in_flight".to_owned(),

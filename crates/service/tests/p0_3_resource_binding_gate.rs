@@ -656,6 +656,7 @@ fn deployment_request(
         bindings.insert(
             "KV".to_owned(),
             DeploymentBindingInput {
+                capability_version: 1,
                 kind: BindingKind::KvNamespace,
                 id: resource_id,
                 permissions,

@@ -1,7 +1,10 @@
 //! Bounded read-only cross-database Workflow diagnostics.
 
 use super::*;
-use crate::{ControlDb, WorkflowRefState, WorkflowRepository};
+use crate::{
+    ControlDb, WorkflowOperation, WorkflowOperationKind, WorkflowOperationResult, WorkflowRefState,
+    WorkflowRepository,
+};
 use serde::Serialize;
 
 /// Secret-free sampled authority and retained history facts.
@@ -18,6 +21,16 @@ pub struct WorkflowDatabaseInspection {
     pub pending_creations: u64,
     /// Durable terminal instances awaiting control reference release.
     pub pending_releases: u64,
+    /// Restart intents awaiting their exact scheduler/control convergence.
+    pub pending_restarts: u64,
+    /// Purge intents that still own the old external identity and artifact references.
+    pub pending_purges: u64,
+    /// Proven deletions whose control side is already absent, ready for receipt sweeping.
+    pub pending_receipt_sweeps: u64,
+    /// Terminal capability-two instances with healthy retained references.
+    pub retained_instances: u64,
+    /// Invalid operation results, deletion receipts or escaped transaction contexts.
+    pub operation_mismatches: u64,
     /// Number of sampled scheduler histories.
     pub inspected_instances: u64,
     /// A full page was returned; operators must not interpret this as exhaustive validation.
@@ -31,6 +44,7 @@ impl WorkflowDatabaseInspection {
         self.identity_mismatches == 0
             && self.referrer_mismatches == 0
             && self.history_mismatches == 0
+            && self.operation_mismatches == 0
     }
 }
 
@@ -63,23 +77,50 @@ pub fn inspect_workflow_databases(
     let repository = WorkflowRepository::new(&control);
     let reservations = repository.live_reservations(None, limit)?;
     let ids = scheduler.workflow_instance_ids(None, limit)?;
+    let receipts = scheduler.workflow_gc_receipts(None, limit)?;
     let mut result = WorkflowDatabaseInspection {
-        sampled: reservations.len() == limit as usize || ids.len() == limit as usize,
+        sampled: reservations.len() == limit as usize
+            || ids.len() == limit as usize
+            || receipts.len() == limit as usize,
         ..WorkflowDatabaseInspection::default()
     };
+    match durable_progress::sample_operation_progress(&*scheduler.lock()?, limit) {
+        Ok(sampled) => result.sampled |= sampled,
+        Err(failure) if failure.code() == ErrorCode::WorkflowInvariantViolation => {
+            result.operation_mismatches += 1;
+        }
+        Err(failure) => return Err(failure),
+    }
     for reservation in reservations {
         let identity = &reservation.identity;
-        match scheduler.workflow_instance(identity.instance_id)? {
-            Some(instance) if instance.identity != *identity => result.identity_mismatches += 1,
-            Some(instance) if instance.state.is_terminal() => result.pending_releases += 1,
-            Some(_) | None if reservation.state == WorkflowRefState::Creating => {
-                result.pending_creations += 1;
+        let instance = scheduler.workflow_instance(identity.instance_id)?;
+        if let Some(operation) = repository.instance_operation(identity.instance_id)? {
+            match operation.kind() {
+                WorkflowOperationKind::Restart => result.pending_restarts += 1,
+                WorkflowOperationKind::Purge => result.pending_purges += 1,
             }
-            Some(_) if reservation.state != WorkflowRefState::Live => {
+            if !operation_matches(&scheduler, &operation, instance.as_ref())? {
                 result.identity_mismatches += 1;
             }
-            Some(_) => {}
-            None => result.identity_mismatches += 1,
+        } else {
+            match instance {
+                Some(instance) if instance.identity != *identity => result.identity_mismatches += 1,
+                Some(instance) if instance.state.is_terminal() => {
+                    if reservation.state == WorkflowRefState::Retained {
+                        result.retained_instances += 1;
+                    } else {
+                        result.pending_releases += 1;
+                    }
+                }
+                Some(_) | None if reservation.state == WorkflowRefState::Creating => {
+                    result.pending_creations += 1;
+                }
+                Some(_) if reservation.state != WorkflowRefState::Live => {
+                    result.identity_mismatches += 1;
+                }
+                Some(_) => {}
+                None => result.identity_mismatches += 1,
+            }
         }
         if !repository.instance_referrers_intact(identity)? {
             result.referrer_mismatches += 1;
@@ -89,15 +130,21 @@ pub fn inspect_workflow_databases(
         let instance = scheduler
             .workflow_instance(id)?
             .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
-        match repository.reservation(id)? {
-            Some(reservation)
-                if reservation.identity == instance.identity
-                    && (instance.state.is_terminal()
-                        || matches!(
-                            reservation.state,
-                            WorkflowRefState::Creating | WorkflowRefState::Live
-                        )) => {}
-            _ => result.identity_mismatches += 1,
+        if let Some(operation) = repository.instance_operation(id)? {
+            if !operation_matches(&scheduler, &operation, Some(&instance))? {
+                result.identity_mismatches += 1;
+            }
+        } else {
+            match repository.reservation(id)? {
+                Some(reservation)
+                    if reservation.identity == instance.identity
+                        && (instance.state.is_terminal()
+                            || matches!(
+                                reservation.state,
+                                WorkflowRefState::Creating | WorkflowRefState::Live
+                            )) => {}
+                _ => result.identity_mismatches += 1,
+            }
         }
         match scheduler.verify_workflow_history(id) {
             Ok(()) => {}
@@ -108,5 +155,32 @@ pub fn inspect_workflow_databases(
         }
         result.inspected_instances += 1;
     }
+    for receipt in receipts {
+        match repository.acknowledge_workflow_gc(&receipt) {
+            Ok(_) => result.pending_receipt_sweeps += 1,
+            Err(failure) if failure.code() == ErrorCode::WorkflowInstanceBusy => {}
+            Err(failure) => return Err(failure),
+        }
+    }
     Ok(result)
+}
+
+fn operation_matches(
+    scheduler: &SchedulerStore,
+    operation: &WorkflowOperation,
+    instance: Option<&WorkflowInstanceRecord>,
+) -> Result<bool, PlatformError> {
+    match scheduler.workflow_operation_result(operation)? {
+        Some(WorkflowOperationResult::Applied(_)) => {
+            if operation.kind() == WorkflowOperationKind::Purge {
+                return Ok(instance.is_none());
+            }
+            let mut expected = operation.identity().clone();
+            expected.instance_generation = operation.target_generation();
+            Ok(instance.is_some_and(|instance| instance.identity == expected))
+        }
+        None | Some(WorkflowOperationResult::Rejected(_)) => {
+            Ok(instance.is_some_and(|instance| instance.identity == *operation.identity()))
+        }
+    }
 }

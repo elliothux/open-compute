@@ -1,6 +1,8 @@
 //! Compile-time-only Workflow series; no tenant identity or exception labels.
 
 use super::{Inner, MetricsRegistry, write_help};
+use open_compute_core::ErrorCode;
+use open_compute_storage::WorkflowOperationInspection;
 use open_compute_storage::scheduler::WorkflowInspection;
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -16,10 +18,15 @@ pub(super) struct WorkflowMetrics {
     replay: [u64; 2],
     stale: [u64; 2],
     reconcile: [u64; 2],
-    statuses: [u64; 4],
+    summary: WorkflowInspection,
+    operations: WorkflowOperationInspection,
+    operation_age_seconds: f64,
+    event_intake: [u64; 3],
+    lifecycle: [[u64; 2]; 4],
     in_flight: u64,
     lag_seconds: f64,
-    state_bytes: u64,
+    suspended_runs: u64,
+    suspended_seconds: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -42,11 +49,14 @@ impl WorkflowOutcome {
 pub(crate) struct WorkflowRunGuard {
     metrics: Arc<MetricsRegistry>,
     started: Instant,
-    outcome: WorkflowOutcome,
+    outcome: Option<WorkflowOutcome>,
 }
 impl WorkflowRunGuard {
     pub(crate) fn finish(&mut self, outcome: WorkflowOutcome) {
-        self.outcome = outcome;
+        self.outcome = Some(outcome);
+    }
+    pub(crate) fn suspended(&mut self) {
+        self.outcome = None;
     }
 }
 impl Drop for WorkflowRunGuard {
@@ -54,9 +64,13 @@ impl Drop for WorkflowRunGuard {
         if let Ok(mut inner) = self.metrics.inner.lock() {
             let metrics = &mut inner.workflow;
             metrics.in_flight = metrics.in_flight.saturating_sub(1);
-            metrics.runs[self.outcome.index()] =
-                metrics.runs[self.outcome.index()].saturating_add(1);
-            metrics.run_seconds[self.outcome.index()] = self.started.elapsed().as_secs_f64();
+            if let Some(outcome) = self.outcome {
+                metrics.runs[outcome.index()] = metrics.runs[outcome.index()].saturating_add(1);
+                metrics.run_seconds[outcome.index()] = self.started.elapsed().as_secs_f64();
+            } else {
+                metrics.suspended_runs = metrics.suspended_runs.saturating_add(1);
+                metrics.suspended_seconds = self.started.elapsed().as_secs_f64();
+            }
         }
     }
 }
@@ -69,7 +83,7 @@ impl MetricsRegistry {
         WorkflowRunGuard {
             metrics: self.clone(),
             started: Instant::now(),
-            outcome: WorkflowOutcome::Unknown,
+            outcome: Some(WorkflowOutcome::Unknown),
         }
     }
     pub(crate) fn workflow_created(&self, outcome: WorkflowOutcome) {
@@ -105,14 +119,40 @@ impl MetricsRegistry {
     }
     pub(crate) fn workflow_summary(&self, summary: &WorkflowInspection, lag_seconds: f64) {
         if let Ok(mut inner) = self.inner.lock() {
-            inner.workflow.statuses = [
-                summary.queued,
-                summary.running,
-                summary.complete,
-                summary.errored,
-            ];
-            inner.workflow.state_bytes = summary.state_bytes;
+            inner.workflow.summary = summary.clone();
             inner.workflow.lag_seconds = lag_seconds;
+        }
+    }
+    pub(crate) fn workflow_operations(&self, summary: &WorkflowOperationInspection, now_ms: i64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.workflow.operations = summary.clone();
+            inner.workflow.operation_age_seconds = summary
+                .oldest_operation_at_ms
+                .map_or(0.0, |at| now_ms.saturating_sub(at).max(0) as f64 / 1000.0);
+        }
+    }
+    pub(crate) fn workflow_event(&self, failure: Option<ErrorCode>) {
+        let index = match failure {
+            None => 0,
+            Some(ErrorCode::WorkflowEventQueueFull) => 1,
+            Some(_) => 2,
+        };
+        if let Ok(mut inner) = self.inner.lock() {
+            let count = &mut inner.workflow.event_intake[index];
+            *count = count.saturating_add(1);
+        }
+    }
+    pub(crate) fn workflow_lifecycle(&self, operation: &str, success: bool) {
+        let index = match operation {
+            "pause" => 0,
+            "resume" => 1,
+            "terminate" => 2,
+            "restart" => 3,
+            _ => return,
+        };
+        if let Ok(mut inner) = self.inner.lock() {
+            let count = &mut inner.workflow.lifecycle[index][usize::from(!success)];
+            *count = count.saturating_add(1);
         }
     }
 }
@@ -143,6 +183,18 @@ pub(super) fn write_workflow_metrics(out: &mut String, inner: &Inner) {
             writeln!(out, "{name}{{outcome=\"{label}\"}} {}", values[index]).ok();
         }
     }
+    writeln!(
+        out,
+        "open_compute_workflow_runs_total{{outcome=\"suspended\"}} {}",
+        metrics.suspended_runs
+    )
+    .ok();
+    writeln!(
+        out,
+        "open_compute_workflow_run_seconds{{outcome=\"suspended\"}} {}",
+        metrics.suspended_seconds
+    )
+    .ok();
     for (name, label, labels, counts) in [
         (
             "open_compute_workflow_replay_steps_total",
@@ -179,14 +231,19 @@ pub(super) fn write_workflow_metrics(out: &mut String, inner: &Inner) {
         "gauge",
         "Retained Workflow instances by state",
     );
-    for (index, status) in ["queued", "running", "complete", "errored"]
-        .iter()
-        .enumerate()
-    {
+    let summary = &metrics.summary;
+    for (status, count) in [
+        ("queued", summary.queued),
+        ("running", summary.running),
+        ("waiting", summary.waiting),
+        ("paused", summary.paused),
+        ("complete", summary.complete),
+        ("errored", summary.errored),
+        ("terminated", summary.terminated),
+    ] {
         writeln!(
             out,
-            "open_compute_workflow_instance_status{{status=\"{status}\"}} {}",
-            metrics.statuses[index]
+            "open_compute_workflow_instance_status{{status=\"{status}\"}} {count}"
         )
         .ok();
     }
@@ -198,10 +255,108 @@ pub(super) fn write_workflow_metrics(out: &mut String, inner: &Inner) {
         ),
         (
             "open_compute_workflow_state_bytes",
-            metrics.state_bytes as f64,
+            summary.state_bytes as f64,
+        ),
+        (
+            "open_compute_workflow_retained_instances",
+            summary.retained as f64,
+        ),
+        (
+            "open_compute_workflow_inbox_bytes",
+            summary.inbox_bytes as f64,
+        ),
+        (
+            "open_compute_workflow_buffered_events",
+            summary.buffered_events as f64,
+        ),
+        (
+            "open_compute_workflow_consumed_events",
+            summary.consumed_events as f64,
+        ),
+        (
+            "open_compute_workflow_operation_age_seconds",
+            metrics.operation_age_seconds,
         ),
     ] {
         write_help(out, name, "gauge", "Workflow bounded workload gauge");
         writeln!(out, "{name} {value}").ok();
+    }
+    for (name, label, values) in [
+        (
+            "open_compute_workflow_waiting_steps",
+            "reason",
+            [
+                ("sleep", summary.sleeping_steps),
+                ("event", summary.event_waits),
+                ("retry", summary.retry_waits),
+            ]
+            .as_slice(),
+        ),
+        (
+            "open_compute_workflow_retry_results",
+            "outcome",
+            [
+                ("complete", summary.retried_steps),
+                ("exhausted", summary.exhausted_steps),
+            ]
+            .as_slice(),
+        ),
+        (
+            "open_compute_workflow_timeout_results",
+            "kind",
+            [
+                ("step", summary.step_timeouts),
+                ("event", summary.event_timeouts),
+            ]
+            .as_slice(),
+        ),
+        (
+            "open_compute_workflow_pending_operations",
+            "phase",
+            [
+                ("restart_intent", metrics.operations.pending_restarts),
+                ("purge_intent", metrics.operations.pending_purges),
+                ("purge_receipt", summary.gc_receipts),
+            ]
+            .as_slice(),
+        ),
+    ] {
+        write_help(
+            out,
+            name,
+            "gauge",
+            "Workflow retained authority facts; restart and purge may reduce these gauges",
+        );
+        for (value, count) in values {
+            writeln!(out, "{name}{{{label}=\"{value}\"}} {count}").ok();
+        }
+    }
+    write_help(
+        out,
+        "open_compute_workflow_event_intake_total",
+        "counter",
+        "Workflow event intake outcomes observed by this process",
+    );
+    for (index, outcome) in ["accepted", "full", "error"].iter().enumerate() {
+        writeln!(
+            out,
+            "open_compute_workflow_event_intake_total{{outcome=\"{outcome}\"}} {}",
+            metrics.event_intake[index]
+        )
+        .ok();
+    }
+    write_help(
+        out,
+        "open_compute_workflow_lifecycle_total",
+        "counter",
+        "Workflow lifecycle outcomes observed by this process",
+    );
+    for (index, operation) in ["pause", "resume", "terminate", "restart"]
+        .iter()
+        .enumerate()
+    {
+        for (result, outcome) in ["success", "error"].iter().enumerate() {
+            writeln!(out,"open_compute_workflow_lifecycle_total{{operation=\"{operation}\",outcome=\"{outcome}\"}} {}",metrics.lifecycle[index][result]).ok();
+        }
     }
 }

@@ -27,6 +27,9 @@ impl SchedulerStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let instance = running(&tx, fence, now_ms)?;
+        if instance.identity.target.capability_version != 1 {
+            return Err(error(ErrorCode::WorkflowCapabilityMismatch));
+        }
         let result = claim(&tx, fence, identity, &instance, now_ms, limits);
         match result {
             Ok(grant) => {
@@ -59,6 +62,9 @@ impl SchedulerStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let instance = running(&tx, fence, now_ms)?;
+        if instance.identity.target.capability_version != 1 {
+            return Err(error(ErrorCode::WorkflowCapabilityMismatch));
+        }
         verify_step(&tx, fence, ordinal, step_token)?;
         let output =
             open_compute_core::workflow::canonical_json(output, ErrorCode::WorkflowResultTooLarge)
@@ -107,6 +113,9 @@ impl SchedulerStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let instance = running(&tx, fence, now_ms)?;
+        if instance.identity.target.capability_version != 1 {
+            return Err(error(ErrorCode::WorkflowCapabilityMismatch));
+        }
         verify_step(&tx, fence, ordinal, step_token)?;
         if let Err(err) = capacity(
             &tx,

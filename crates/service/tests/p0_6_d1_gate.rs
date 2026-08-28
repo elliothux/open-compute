@@ -395,6 +395,7 @@ fn deployment_request(
         bindings.insert(
             name.to_owned(),
             DeploymentBindingInput {
+                capability_version: 1,
                 kind: BindingKind::D1Database,
                 id: database,
                 permissions: CanonicalPermissions::default(),
@@ -406,6 +407,7 @@ fn deployment_request(
         bindings.insert(
             "BUCKET".to_owned(),
             DeploymentBindingInput {
+                capability_version: 1,
                 kind: BindingKind::R2Bucket,
                 id: bucket,
                 permissions: CanonicalPermissions::default(),

@@ -7,6 +7,8 @@ mod migration;
 
 #[path = "atomicity_tests.rs"]
 mod atomicity_tests;
+#[path = "operation_tests.rs"]
+mod operation_tests;
 
 fn setup() -> (tempfile::TempDir, PlatformStorage, DeploymentId) {
     let tmp = tempfile::tempdir().unwrap();
@@ -60,7 +62,7 @@ fn ready(storage: &PlatformStorage, deployment: DeploymentId) -> WorkflowDefinit
     let repo = WorkflowRepository::new(storage.db());
     let definition = repo.create_definition(account, "orders", 0).unwrap();
     let version = repo
-        .stage_version(account, definition.id, deployment, "Orders", 1)
+        .stage_version(account, definition.id, deployment, "Orders", 1, 1)
         .unwrap();
     repo.finish_version(account, version.target.version_id, true, 2)
         .unwrap();
@@ -92,7 +94,7 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
         ErrorCode::WorkflowNotFound
     );
     assert_eq!(
-        repo.stage_version(account, definition.id, deployment, "__reserved", 1)
+        repo.stage_version(account, definition.id, deployment, "__reserved", 1, 1)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowVersionNotReady
@@ -102,16 +104,17 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
             account,
             definition.id,
             Some("first"),
+            1,
             &WorkflowsConfig::default(),
             3,
         )
         .unwrap();
     repo.rename(account, definition.id, "renamed", 4).unwrap();
     let version2 = repo
-        .stage_version(account, definition.id, deployment, "Second", 5)
+        .stage_version(account, definition.id, deployment, "Second", 1, 5)
         .unwrap();
     let version3 = repo
-        .stage_version(account, definition.id, deployment, "Third", 6)
+        .stage_version(account, definition.id, deployment, "Third", 1, 6)
         .unwrap();
     repo.finish_version(account, version3.target.version_id, true, 7)
         .unwrap();
@@ -122,6 +125,7 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
             account,
             definition.id,
             Some("second"),
+            1,
             &WorkflowsConfig::default(),
             9,
         )
@@ -186,7 +190,7 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
         ..Default::default()
     };
     let reservation = repo
-        .reserve_instance(account, definition.id, Some("one"), &limits, 3)
+        .reserve_instance(account, definition.id, Some("one"), 1, &limits, 3)
         .unwrap();
     let id = &reservation.identity;
     assert_eq!(
@@ -194,13 +198,13 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
         *id
     );
     assert_eq!(
-        repo.reserve_instance(account, definition.id, Some("one"), &limits, 3)
+        repo.reserve_instance(account, definition.id, Some("one"), 1, &limits, 3)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowInstanceAlreadyExists
     );
     assert_eq!(
-        repo.reserve_instance(account, definition.id, Some("two"), &limits, 3)
+        repo.reserve_instance(account, definition.id, Some("two"), 1, &limits, 3)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowStateQuotaExceeded
@@ -243,7 +247,7 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
     );
     assert!(repo.abandon_creation(id).unwrap());
     let second = repo
-        .reserve_instance(account, definition.id, Some("one"), &limits, 4)
+        .reserve_instance(account, definition.id, Some("one"), 1, &limits, 4)
         .unwrap();
     repo.finalize_instance(&second.identity, 5).unwrap();
     repo.finalize_instance(&second.identity, 5).unwrap();
@@ -254,9 +258,16 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
     assert!(repo.live_reservations(None, 10).unwrap().is_empty());
     repo.mark_unavailable(account, definition.id, 7).unwrap();
     assert_eq!(
-        repo.reserve_instance(account, definition.id, None, &WorkflowsConfig::default(), 8)
-            .unwrap_err()
-            .code(),
+        repo.reserve_instance(
+            account,
+            definition.id,
+            None,
+            1,
+            &WorkflowsConfig::default(),
+            8
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::WorkflowNotReady
     );
 }
@@ -274,10 +285,10 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
         .worker_id;
     let caller = staging(&storage, worker);
     let binding = repo
-        .prepare_binding(account, caller, "ORDERS", definition.id, 1)
+        .prepare_binding(account, caller, "ORDERS", definition.id, 1, 1)
         .unwrap();
     assert!(
-        repo.prepare_binding(account, caller, "__PRIVATE", definition.id, 1)
+        repo.prepare_binding(account, caller, "__PRIVATE", definition.id, 1, 1)
             .is_err()
     );
     storage
@@ -368,7 +379,7 @@ fn workflow_rejection_does_not_replace_current_version_or_enable_unvalidated_def
     let account = storage.identity().default_account_id;
     let definition = repo.create_definition(account, "bad", 0).unwrap();
     let version = repo
-        .stage_version(account, definition.id, deployment, "Missing", 1)
+        .stage_version(account, definition.id, deployment, "Missing", 1, 1)
         .unwrap();
     assert_eq!(
         repo.delete(account, definition.id, 1).unwrap_err().code(),
@@ -377,9 +388,16 @@ fn workflow_rejection_does_not_replace_current_version_or_enable_unvalidated_def
     repo.finish_version(account, version.target.version_id, false, 2)
         .unwrap();
     assert_eq!(
-        repo.reserve_instance(account, definition.id, None, &WorkflowsConfig::default(), 3)
-            .unwrap_err()
-            .code(),
+        repo.reserve_instance(
+            account,
+            definition.id,
+            None,
+            1,
+            &WorkflowsConfig::default(),
+            3
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::WorkflowNotReady
     );
     assert!(

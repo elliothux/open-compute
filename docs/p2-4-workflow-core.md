@@ -1248,3 +1248,8 @@ create返回后instance可能不存在、non-determinism错误复用result。
 
 P2.4通过后，P2.5按依赖顺序扩展同一状态机：先step retry/backoff，再sleep/sleepUntil，再event，
 随后instance modifier与retention，最后parallel step。不得在P2.4 Gate未稳定时一次性加入所有等待状态。
+
+P2.4 的实际实现结论见 [Gate 结果](./p2-4-gate-results.md)。后续已在
+[P2.5：Workflow Durable Waiting 详细设计](./p2-5-workflow-durable-waiting.md) 中细化：先验证
+system-isolate controller 的 suspension/timeout，再实现 capability V2 与公共 yield/wake；其后按上述
+顺序逐项接入。P2.4 V1 history、failure latch、descriptor/hash 和 DO output-gate 限制不隐式改写。

@@ -10,7 +10,7 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
     let account = storage.identity().default_account_id;
     let limits = WorkflowsConfig::default();
     let original = repository
-        .reserve_instance(account, definition.id, Some("old"), &limits, 10)
+        .reserve_instance(account, definition.id, Some("old"), 1, &limits, 10)
         .unwrap();
     repository
         .finalize_instance(&original.identity, 11)
@@ -20,7 +20,7 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
     workers.begin_validation(replacement).unwrap();
     workers.mark_ready(replacement, 12).unwrap();
     let version = repository
-        .stage_version(account, definition.id, replacement, "Replacement", 13)
+        .stage_version(account, definition.id, replacement, "Replacement", 1, 13)
         .unwrap();
     storage.db().with_read(|connection| {
         connection.execute_batch("CREATE TEMP TRIGGER reject_workflow_promotion AFTER UPDATE ON workflow_definitions
@@ -67,7 +67,7 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
         .finish_version(account, version.target.version_id, true, 15)
         .unwrap();
     let next = repository
-        .reserve_instance(account, definition.id, Some("new"), &limits, 16)
+        .reserve_instance(account, definition.id, Some("new"), 1, &limits, 16)
         .unwrap();
     assert_eq!(next.identity.target.deployment_id, replacement);
     assert_eq!(next.identity.target.version_id, version.target.version_id);
@@ -111,7 +111,7 @@ fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_release()
     );
     assert!(
         repository
-            .reserve_instance(account, definition.id, Some("atomic"), &limits, 10)
+            .reserve_instance(account, definition.id, Some("atomic"), 1, &limits, 10)
             .is_err()
     );
     assert_eq!(
@@ -141,7 +141,7 @@ fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_release()
         .unwrap();
     inject("DROP TRIGGER reject_workflow_reservation;");
     let reservation = repository
-        .reserve_instance(account, definition.id, Some("atomic"), &limits, 10)
+        .reserve_instance(account, definition.id, Some("atomic"), 1, &limits, 10)
         .unwrap();
     inject(
         "CREATE TEMP TRIGGER reject_workflow_finalize AFTER UPDATE ON workflow_instance_referrers

@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse as _, Response};
 use open_compute_core::{
     BindingId, DeploymentId, ErrorCode, OperationClass, PlatformError, SchedulerClock as _,
-    WorkflowFence, WorkflowToken, WorkflowsConfig,
+    WorkflowFence, WorkflowInstanceId, WorkflowToken, WorkflowsConfig,
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::scheduler::{WorkflowFailure, WorkflowStepIdentity};
@@ -20,6 +20,9 @@ use std::time::Duration;
 
 const MAX_BODY: usize = 2 * 1024 * 1024 + 8192;
 const TIMEOUT: Duration = Duration::from_secs(30);
+
+#[path = "workflow_backend/v2.rs"]
+mod v2;
 
 /// Bounded private Workflow data plane composed with platform-owned authorities.
 #[derive(Clone, Debug)]
@@ -110,6 +113,9 @@ impl WorkflowBindingService {
         if let Some(operation) = path.strip_prefix("/internal/workflows/v1/runs/") {
             return self.run(operation, body, now_ms);
         }
+        if let Some(operation) = path.strip_prefix("/internal/workflows/v2/runs/") {
+            return self.run_v2(operation, body, now_ms);
+        }
         let tail = path
             .strip_prefix("/internal/bindings/v1/workflow/")
             .ok_or_else(|| failure(ErrorCode::WorkflowMethodUnsupported))?;
@@ -136,18 +142,40 @@ impl WorkflowBindingService {
         let repository = WorkflowRepository::new(self.storage.db());
         let (account, binding) = repository.authorize_binding(binding, deployment, &expected)?;
         let definition = binding.descriptor.definition_id;
+        let capability = binding.descriptor.capability_version;
         let controller = WorkflowController::new(&self.storage, &self.scheduler, &self.config);
+        if matches!(
+            operation,
+            "create" | "send-event" | "pause" | "resume" | "terminate" | "restart"
+        ) && header(headers, "x-open-compute-workflow-do-context")? != "0"
+        {
+            return Err(failure(ErrorCode::WorkflowDoOutputGateUnsupported));
+        }
         match operation {
             "create" => {
-                if header(headers, "x-open-compute-workflow-do-context")? != "0" {
-                    return Err(failure(ErrorCode::WorkflowDoOutputGateUnsupported));
+                if capability == 1 && body.get("retention").is_some() {
+                    return Err(failure(ErrorCode::WorkflowMethodUnsupported));
                 }
                 let request: CreateRequest = decode(body)?;
+                let retention = request
+                    .retention
+                    .as_ref()
+                    .map(|value| {
+                        open_compute_core::workflow::WorkflowRetention::resolve(
+                            value,
+                            &self.config.default_retention,
+                        )
+                    })
+                    .transpose()?;
                 let result = controller.create(
                     account,
                     definition,
+                    capability,
                     request.id.as_deref(),
-                    &request.payload_json,
+                    open_compute_workers::WorkflowCreateInput {
+                        payload_json: &request.payload_json,
+                        retention: retention.as_ref(),
+                    },
                     now_ms,
                 );
                 if let Some(metrics) = &self.metrics {
@@ -157,32 +185,89 @@ impl WorkflowBindingService {
                         WorkflowOutcome::Error
                     });
                 }
-                let id = result?;
-                Ok(serde_json::json!({"id":id}))
+                let identity = result?;
+                if capability == 2 {
+                    Ok(
+                        serde_json::json!({"id":identity.external_instance_id,"instanceId":identity.instance_id}),
+                    )
+                } else {
+                    Ok(serde_json::json!({"id":identity.external_instance_id}))
+                }
             }
             "get" | "status" => {
-                let request: InstanceRequest = decode(body)?;
-                let status = controller.status(account, definition, &request.id)?;
+                let (id, external) = if operation == "get" || capability == 1 {
+                    let request: InstanceRequest = decode(body)?;
+                    let reservation = repository.find_instance(definition, &request.id)?;
+                    (reservation.identity.instance_id, Some(request.id))
+                } else {
+                    let request: HandleRequest = decode(body)?;
+                    (request.instance_id, None)
+                };
+                let status = controller.status(account, definition, id, capability, now_ms)?;
                 if operation == "get" {
-                    Ok(serde_json::json!({"id":request.id}))
+                    if capability == 2 {
+                        Ok(serde_json::json!({"id":external,"instanceId":id}))
+                    } else {
+                        Ok(serde_json::json!({"id":external}))
+                    }
                 } else {
                     serde_json::to_value(status)
                         .map_err(|_| failure(ErrorCode::WorkflowInvariantViolation))
                 }
+            }
+            "restart" if capability == 2 => {
+                let request: v2::RestartRequest = decode(body)?;
+                let result = controller.restart(
+                    account,
+                    definition,
+                    request.instance_id,
+                    request.operation_id,
+                    now_ms,
+                );
+                if let Some(metrics) = &self.metrics {
+                    metrics.workflow_lifecycle("restart", result.is_ok());
+                }
+                result?;
+                Ok(serde_json::json!({"ok":true}))
+            }
+            "pause" | "resume" | "terminate" if capability == 2 => {
+                use open_compute_storage::scheduler::WorkflowInstanceAction;
+                let request: HandleRequest = decode(body)?;
+                let action = match operation {
+                    "pause" => WorkflowInstanceAction::Pause,
+                    "resume" => WorkflowInstanceAction::Resume,
+                    _ => WorkflowInstanceAction::Terminate,
+                };
+                let result =
+                    controller.modify(account, definition, request.instance_id, action, now_ms);
+                if let Some(metrics) = &self.metrics {
+                    metrics.workflow_lifecycle(operation, result.is_ok());
+                }
+                result?;
+                Ok(serde_json::json!({"ok":true}))
+            }
+            "send-event" if capability == 2 => {
+                let request: v2::EventRequest = decode(body)?;
+                let result = controller.send_event(
+                    account,
+                    definition,
+                    request.instance_id,
+                    &request.event_type,
+                    &request.payload_json,
+                    now_ms,
+                );
+                if let Some(metrics) = &self.metrics {
+                    metrics.workflow_event(result.as_ref().err().map(PlatformError::code));
+                }
+                result?;
+                Ok(serde_json::json!({"ok":true}))
             }
             _ => Err(failure(ErrorCode::WorkflowMethodUnsupported)),
         }
     }
 
     fn run(&self, operation: &str, body: Value, now_ms: i64) -> Result<Value, PlatformError> {
-        let Value::Object(mut fields) = body else {
-            return Err(failure(ErrorCode::WorkflowRunStale));
-        };
-        let fence: WorkflowFence = decode(
-            serde_json::json!({"instanceId":fields.remove("instanceId"),
-            "instanceGeneration":fields.remove("instanceGeneration"),"runToken":fields.remove("runToken")}),
-        )?;
-        let body = Value::Object(fields);
+        let (fence, body) = run_fence(body)?;
         // Growth is admitted before the transaction, while terminal cleanup uses its reserved error budget.
         let _admission = self.storage.reserve_mutation(
             OperationClass::Scheduler,
@@ -291,11 +376,26 @@ impl WorkflowBindingService {
 struct CreateRequest {
     id: Option<String>,
     payload_json: String,
+    retention: Option<Value>,
+}
+
+fn run_fence(body: Value) -> Result<(WorkflowFence, Value), PlatformError> {
+    let Value::Object(mut fields) = body else {
+        return Err(failure(ErrorCode::WorkflowRunStale));
+    };
+    let fence = decode(serde_json::json!({"instanceId":fields.remove("instanceId"),
+        "instanceGeneration":fields.remove("instanceGeneration"),"runToken":fields.remove("runToken")}))?;
+    Ok((fence, Value::Object(fields)))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InstanceRequest {
     id: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HandleRequest {
+    instance_id: WorkflowInstanceId,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -333,12 +433,15 @@ pub(crate) fn response_error(code: ErrorCode) -> Response {
         | ErrorCode::StoragePressure
         | ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::WorkflowInstanceAlreadyExists
+        | ErrorCode::WorkflowInstanceStateConflict
+        | ErrorCode::WorkflowInstanceBusy
+        | ErrorCode::WorkflowInstanceCleanupPending
         | ErrorCode::WorkflowRunStale
         | ErrorCode::WorkflowStepStale => StatusCode::CONFLICT,
         ErrorCode::WorkflowNotFound | ErrorCode::WorkflowInstanceNotFound => StatusCode::NOT_FOUND,
-        ErrorCode::WorkflowStateQuotaExceeded | ErrorCode::WorkflowStepLimitExceeded => {
-            StatusCode::TOO_MANY_REQUESTS
-        }
+        ErrorCode::WorkflowStateQuotaExceeded
+        | ErrorCode::WorkflowStepLimitExceeded
+        | ErrorCode::WorkflowEventQueueFull => StatusCode::TOO_MANY_REQUESTS,
         ErrorCode::WorkflowPayloadTooLarge | ErrorCode::WorkflowResultTooLarge => {
             StatusCode::PAYLOAD_TOO_LARGE
         }

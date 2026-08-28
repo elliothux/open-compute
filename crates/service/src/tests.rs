@@ -2345,7 +2345,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     assert_eq!(
         capabilities.products["workflows"].deviations,
-        vec!["OC-WORKFLOW-001", "OC-WORKFLOW-002"]
+        vec!["OC-WORKFLOW-001", "OC-WORKFLOW-002", "OC-WORKFLOW-003"]
     );
     assert_eq!(
         capabilities.products["websocket_hibernation"].status,
@@ -4717,3 +4717,5 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     assert!(response.contains("\"supervisor\""), "{response}");
     assert_eq!(mock.object_count(), 0);
 }
+#[path = "p2_3_route_epoch_tests.rs"]
+mod p2_3_route_epoch_tests;

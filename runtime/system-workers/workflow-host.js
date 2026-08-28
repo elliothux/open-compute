@@ -1,5 +1,6 @@
 import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import { PROFILE, bindingError, currentStartupGeneration, doPolicy, modulesFor, resolveSnapshot, tenantEnv } from "./loader-host.js";
+import { WorkflowRunControllerV2, finishWorkflowRun, closeWorkflowRun } from "./workflow-controller-v2.js";
 
 export class WorkflowBindingTransport extends WorkerEntrypoint {
   async #request(operation, body) {
@@ -115,7 +116,7 @@ class WorkflowRunController extends RpcTarget {
   failure(body) { return this.#commit("failure", body); }
 }
 
-export async function handleWorkflow(request, env, ctx, validation) {
+export async function handleWorkflow(request, env, ctx, validation, capability = 1) {
   try {
     // Consume the private request before entering RPC, including validation's
     // null body. An unread body can retain the reused HTTP/1 connection.
@@ -128,10 +129,15 @@ export async function handleWorkflow(request, env, ctx, validation) {
         || loaderKey.split("/").length !== 3) throw new Error("invalid envelope");
     const snapshot = await resolveSnapshot(env, { loaderKey, expected }, validation, true,
       request.headers.get("x-open-compute-internal-token"));
-    const built = modulesFor(snapshot, false, className, false, true);
+    if (capability === 2 && !/^[0-9a-f]{64}$/.test(body?.versionDescriptorSha256)) {
+      throw new Error("invalid version descriptor");
+    }
+    const built = modulesFor(snapshot, false, className, false, true, capability);
     const deploymentId = loaderKey.split("/")[2];
     let cold = false;
-    const loaded = env.LOADER.get(`workflow/${validation}/${loaderKey}/${expected}/${className}`, () => {
+    const key = capability === 1 ? `workflow/${validation}/${loaderKey}/${expected}/${className}`
+      : `workflow-v2/${validation}/${loaderKey}/${expected}/${className}/${body.versionDescriptorSha256}`;
+    const loaded = env.LOADER.get(key, () => {
       cold = true;
       return {
         compatibilityDate: snapshot.compatibilityDate,
@@ -145,17 +151,23 @@ export async function handleWorkflow(request, env, ctx, validation) {
     const target = loaded.getEntrypoint("__OpenComputeWorkflow");
     if (!await target.validate()) return new Response(null, { status: 422 });
     if (validation) return Response.json({ valid: true });
-    const backend = new WorkflowRunController(env, {
+    const Controller = capability === 2 ? WorkflowRunControllerV2 : WorkflowRunController;
+    const backend = new Controller(env, {
       instanceId: body.instanceId, instanceGeneration: body.instanceGeneration, runToken: body.runToken,
-    });
+    }, body.activationBudgetMs);
     try {
       const result = await target.execute({
         externalInstanceId: body.externalInstanceId, definitionName: body.definitionName,
         createdAtMs: body.createdAtMs, payloadJson: body.payloadJson,
       }, backend);
+      if (capability === 2) {
+        return Response.json({ ...await backend[finishWorkflowRun](result),
+          loaderOutcome: cold ? "cold" : "warm" });
+      }
       return Response.json({ ...result, loaderOutcome: cold ? "cold" : "warm" });
     } finally {
-      backend[Symbol.dispose]();
+      if (capability === 2) backend[closeWorkflowRun]();
+      else backend[Symbol.dispose]();
     }
   } catch (error) {
     if (error?.stableCode === "ARTIFACT_INTEGRITY_ERROR"

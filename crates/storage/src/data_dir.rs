@@ -408,6 +408,7 @@ impl DataDir {
             (9, "queues"),
             (11, "cron_activations"),
             (12, "workflow_instance_referrers"),
+            (13, "workflow_instance_operations"),
         ] {
             if schema >= since {
                 let retained: bool = control.with_read(|connection| {
@@ -425,6 +426,27 @@ impl DataDir {
                         "scheduler retains product authority; full snapshot restore is required",
                     ));
                 }
+            }
+        }
+        if schema >= 13 {
+            // A purge can already have released its control reservation while its scheduler
+            // receipt still awaits acknowledgement. Immutable V2 versions are never deleted,
+            // so this catalog evidence also fences recovery when the corrupt file cannot
+            // reliably prove whether such receipts or operation watermarks remain.
+            let durable_workflow: bool = control.with_read(|connection| {
+                connection
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM workflow_versions WHERE capability_version=2)",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| recovery_failed())
+            })?;
+            if durable_workflow {
+                return Err(PlatformError::new(
+                    open_compute_core::ErrorCode::SchedulerUnavailable,
+                    "scheduler may retain durable Workflow authority; full snapshot restore is required",
+                ));
             }
         }
         Ok(())

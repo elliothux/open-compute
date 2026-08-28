@@ -11,6 +11,9 @@ use std::time::Duration;
 const CHILD: &str = "workflows::tests::crash_matrix::workflow_crash_child";
 const MARKER: &str = "WORKFLOW_CRASH_BOUNDARY";
 
+#[path = "workflow_durable_crash_tests.rs"]
+mod durable;
+
 fn storage_config(root: &Path) -> StorageConfig {
     StorageConfig {
         data_dir: root.to_owned(),
@@ -41,8 +44,12 @@ fn workflow_disk_pressure_refuses_create_before_identity_reservation() {
             .create(
                 storage.identity().default_account_id,
                 definition,
+                1,
                 Some("pressure"),
-                "null",
+                WorkflowCreateInput {
+                    payload_json: "null",
+                    retention: None
+                },
                 10
             )
             .unwrap_err()
@@ -97,13 +104,14 @@ fn workflow_crash_child() {
             storage.identity().default_account_id,
             definition,
             Some("durable-id"),
+            1,
             &limits,
             10,
         )
         .unwrap();
     checkpoint(&cut, "reserved");
     scheduler
-        .insert_workflow(&reservation.identity, "null", &limits)
+        .insert_workflow(&reservation.identity, "null", None, &limits)
         .unwrap();
     checkpoint(&cut, "inserted");
     repository
@@ -111,7 +119,7 @@ fn workflow_crash_child() {
         .unwrap();
     checkpoint(&cut, "finalized");
     let run = WorkflowController::new(&storage, &scheduler, &limits)
-        .claim(12)
+        .claim(12, &mut Default::default())
         .unwrap()
         .unwrap();
     checkpoint(&cut, "run-claimed");
@@ -216,42 +224,7 @@ fn workflow_sigkill_create_run_step_and_release_boundaries() {
         let _evidence = Evidence(Some(temp));
         drop(scheduler);
         drop(storage);
-        let stderr = std::fs::File::create(root.join("crash-child.stderr")).unwrap();
-        let mut child = ChildGuard(
-            Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", CHILD, "--nocapture", "--test-threads=1"])
-                .env("OPEN_COMPUTE_WORKFLOW_CRASH_DATA", &root)
-                .env("OPEN_COMPUTE_WORKFLOW_CRASH_POINT", cut)
-                .env(
-                    "OPEN_COMPUTE_WORKFLOW_CRASH_DEFINITION",
-                    definition.to_string(),
-                )
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(stderr)
-                .spawn()
-                .unwrap(),
-        );
-        let stdout = child.0.stdout.take().unwrap();
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        let reader = std::thread::spawn(move || {
-            let reached = std::io::BufReader::new(stdout)
-                .lines()
-                .any(|line| line.is_ok_and(|line| line.contains(MARKER)));
-            let _ = sender.send(reached);
-        });
-        let reached = receiver.recv_timeout(Duration::from_secs(30));
-        // Kill through the owned process handle and reap even if the checkpoint failed.
-        if child.0.try_wait().unwrap().is_none() {
-            child.0.kill().unwrap();
-        }
-        let status = child.0.wait().unwrap();
-        reader.join().unwrap();
-        assert!(
-            matches!(reached, Ok(true)),
-            "checkpoint {cut}: {reached:?}; {status}"
-        );
-        assert_eq!(status.signal(), Some(9), "{cut}");
+        kill_at_boundary(&root, definition, cut, CHILD);
 
         let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
         let scheduler = SchedulerStore::open(&root.join("scheduler.sqlite"), 5000, 120000).unwrap();
@@ -295,7 +268,17 @@ fn workflow_sigkill_create_run_step_and_release_boundaries() {
                 ErrorCode::WorkflowInstanceNotFound
             );
             controller
-                .create(account, definition, Some("durable-id"), "null", 120000)
+                .create(
+                    account,
+                    definition,
+                    1,
+                    Some("durable-id"),
+                    WorkflowCreateInput {
+                        payload_json: "null",
+                        retention: None,
+                    },
+                    120000,
+                )
                 .unwrap();
         }
         controller
@@ -311,15 +294,33 @@ fn workflow_sigkill_create_run_step_and_release_boundaries() {
         );
         assert_eq!(
             controller
-                .create(account, definition, Some("durable-id"), "null", 120000)
+                .create(
+                    account,
+                    definition,
+                    1,
+                    Some("durable-id"),
+                    WorkflowCreateInput {
+                        payload_json: "null",
+                        retention: None
+                    },
+                    120000
+                )
                 .unwrap_err()
                 .code(),
             ErrorCode::WorkflowInstanceAlreadyExists
         );
         if matches!(cut, "terminal" | "released") {
-            assert!(controller.claim(121001).unwrap().is_none());
+            assert!(
+                controller
+                    .claim(121001, &mut Default::default())
+                    .unwrap()
+                    .is_none()
+            );
         } else {
-            let run = controller.claim(121001).unwrap().unwrap();
+            let run = controller
+                .claim(121001, &mut Default::default())
+                .unwrap()
+                .unwrap();
             let grant = scheduler
                 .claim_workflow_step(&run.fence, &step(), 121002, &limits)
                 .unwrap();
@@ -378,6 +379,50 @@ fn workflow_sigkill_create_run_step_and_release_boundaries() {
                 .state,
             WorkflowRefState::Released
         );
-        assert!(controller.claim(200000).unwrap().is_none());
+        assert!(
+            controller
+                .claim(200000, &mut Default::default())
+                .unwrap()
+                .is_none()
+        );
     }
+}
+
+fn kill_at_boundary(root: &Path, definition: WorkflowId, cut: &str, child_test: &str) {
+    let stderr = std::fs::File::create(root.join("crash-child.stderr")).unwrap();
+    let mut child = ChildGuard(
+        Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", child_test, "--nocapture", "--test-threads=1"])
+            .env("OPEN_COMPUTE_WORKFLOW_CRASH_DATA", root)
+            .env("OPEN_COMPUTE_WORKFLOW_CRASH_POINT", cut)
+            .env(
+                "OPEN_COMPUTE_WORKFLOW_CRASH_DEFINITION",
+                definition.to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(stderr)
+            .spawn()
+            .unwrap(),
+    );
+    let stdout = child.0.stdout.take().unwrap();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let reader = std::thread::spawn(move || {
+        let reached = std::io::BufReader::new(stdout)
+            .lines()
+            .any(|line| line.is_ok_and(|line| line.contains(MARKER)));
+        let _ = sender.send(reached);
+    });
+    let reached = receiver.recv_timeout(Duration::from_secs(30));
+    // Kill through the owned process handle and reap even if the checkpoint failed.
+    if child.0.try_wait().unwrap().is_none() {
+        child.0.kill().unwrap();
+    }
+    let status = child.0.wait().unwrap();
+    reader.join().unwrap();
+    assert!(
+        matches!(reached, Ok(true)),
+        "checkpoint {cut}: {reached:?}; {status}"
+    );
+    assert_eq!(status.signal(), Some(9), "{cut}");
 }

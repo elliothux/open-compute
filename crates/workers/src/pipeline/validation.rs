@@ -42,7 +42,15 @@ pub(crate) fn validate_binding_set(
             "deployment contains too many bindings",
         ));
     }
-    for name in bindings.keys() {
+    for (name, binding) in bindings {
+        if binding.capability_version != 1
+            && !(binding.kind == BindingKind::Workflow && binding.capability_version == 2)
+        {
+            return Err(PlatformError::new(
+                ErrorCode::BindingCapabilityUnsupported,
+                "binding capability is unsupported for this product",
+            ));
+        }
         validate_env_name(name)?;
         if name.len() > 64 || vars.contains_key(name) || secrets.contains_key(name) {
             return Err(PlatformError::new(
@@ -58,13 +66,16 @@ pub(crate) fn validate_injection_module_collisions(
     manifest: &WorkerBundleManifest,
     bindings: &BTreeMap<String, DeploymentBindingInput>,
 ) -> Result<(), PlatformError> {
+    let durable_workflow = bindings
+        .values()
+        .any(|binding| binding.kind == BindingKind::Workflow && binding.capability_version == 2);
     if manifest.modules.iter().any(|module| {
         matches!(
             module.name.as_str(),
             crate::descriptor::WORKFLOW_FACADE_MODULE_NAME
                 | crate::descriptor::WORKFLOW_JSON_MODULE_NAME
                 | crate::descriptor::WORKFLOW_RUNNER_MODULE_NAME
-        )
+        ) || (durable_workflow && module.name == crate::descriptor::WORKFLOW_V2_FACADE_MODULE_NAME)
     }) {
         return Err(PlatformError::new(
             ErrorCode::BundleInvalid,

@@ -8,6 +8,8 @@ const INTERNAL_PATHS = new Set([
   "/internal/scheduled",
   "/internal/workflow",
   "/internal/validate-workflow",
+  "/internal/workflow-v2",
+  "/internal/validate-workflow-v2",
 ]);
 const DO_ADMIN_PATH = "/internal/do-delete";
 const DO_ALARM_PATHS = new Set(["/internal/do-alarm", "/internal/do-alarm-repair"]);

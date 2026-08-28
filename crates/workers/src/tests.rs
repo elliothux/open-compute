@@ -806,6 +806,7 @@ fn r2_injection_sources_are_descriptor_bound_and_reserved_modules_fail_closed() 
     let bindings = BTreeMap::from([(
         "BUCKET".to_owned(),
         DeploymentBindingInput {
+            capability_version: 1,
             id: binding.resource_id,
             kind: open_compute_core::BindingKind::R2Bucket,
             permissions: open_compute_core::CanonicalPermissions::default(),

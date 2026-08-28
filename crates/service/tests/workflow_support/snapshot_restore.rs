@@ -11,6 +11,9 @@ use open_compute_storage::{
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 
+#[path = "durable_snapshot.rs"]
+mod durable;
+
 fn storage_config(data: &Path) -> StorageConfig {
     StorageConfig {
         data_dir: data.to_owned(),
@@ -44,26 +47,36 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         original.storage.clone(),
         store.clone(),
         original.transport.clone(),
+        Default::default(),
     )
-    .create_version(account, definition.id, target.deployment_id, "Flow".into())
+    .create_version(
+        account,
+        definition.id,
+        target.deployment_id,
+        "Flow".into(),
+        1,
+    )
     .await
     .unwrap();
     let controller = WorkflowController::new(&original.storage, &store, &config);
-    let external_id = controller
+    let identity = controller
         .create(
             account,
             definition.id,
+            1,
             Some("snapshot-instance"),
-            "{\"value\":42}",
+            open_compute_workers::WorkflowCreateInput {
+                payload_json: "{\"value\":42}",
+                retention: None,
+            },
             now(),
         )
         .unwrap();
-    assert_eq!(external_id, "snapshot-instance");
-    let identity = WorkflowRepository::new(original.storage.db())
-        .find_instance(definition.id, &external_id)
+    assert_eq!(identity.external_instance_id, "snapshot-instance");
+    let run = controller
+        .claim(now(), &mut Default::default())
         .unwrap()
-        .identity;
-    let run = controller.claim(now()).unwrap().unwrap();
+        .unwrap();
     let request = WorkflowRunRequest {
         fence: run.fence.clone(),
         external_instance_id: run.external_instance_id,
@@ -87,6 +100,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
             .completed_step_count,
         1
     );
+    let durable = durable::prepare(&original.storage, &store, &config, target.deployment_id);
     // Lose only the terminal observation: no callback result is lost. Maintenance stops
     // all producers/runtime I/O before the two standalone database copies are prepared.
     original.quiesce().await;
@@ -144,8 +158,14 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     .unwrap();
     sign_snapshot_manifest(&mut snapshot.manifest, &key).unwrap();
     verify_snapshot_manifest_mac(&snapshot.manifest, &key).unwrap();
-    assert_eq!(snapshot.manifest.source_schemas["control"], 12);
-    assert_eq!(snapshot.manifest.source_schemas["scheduler"], 5);
+    assert_eq!(
+        snapshot.manifest.source_schemas["control"],
+        u32::try_from(open_compute_storage::migrations::current_schema_version()).unwrap()
+    );
+    assert_eq!(
+        snapshot.manifest.source_schemas["scheduler"],
+        u32::try_from(open_compute_storage::current_scheduler_schema_version()).unwrap()
+    );
     let fresh = tempfile::Builder::new()
         .prefix("workflow-restored-")
         .tempdir_in(workspace.join(".p2-4-run"))
@@ -178,11 +198,21 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .unwrap();
     let restored_controller = WorkflowController::new(&restored_storage, &restored_store, &config);
     let expired_at = now() + i64::try_from(config.lease_ms + 1).unwrap();
+    durable::verify(
+        &restored_storage,
+        &restored_store,
+        &config,
+        &durable,
+        expired_at,
+    );
     restored_controller
         .reconcile(&mut WorkflowReconcileCursor::default(), 32, expired_at)
         .unwrap();
     let replay = restored_controller
-        .claim(expired_at + i64::try_from(config.recovery_backoff_ms).unwrap())
+        .claim(
+            expired_at + i64::try_from(config.recovery_backoff_ms).unwrap(),
+            &mut Default::default(),
+        )
         .unwrap()
         .unwrap();
     assert_ne!(replay.fence.run_token, run.fence.run_token);
@@ -246,7 +276,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .unwrap();
     assert!(matches!(
         restored_controller
-            .status(account, definition.id, "snapshot-instance")
+            .status(account, definition.id, identity.instance_id, 1, 0)
             .unwrap(),
         open_compute_workers::WorkflowStatus::Complete { .. }
     ));

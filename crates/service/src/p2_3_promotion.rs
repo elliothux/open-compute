@@ -130,7 +130,9 @@ impl P23PromotionCoordinator {
                 .ensure_queue_consumer_projection(&queue_projection(
                     &record,
                     declaration,
-                    execution_generation,
+                    self.scheduler
+                        .queue_consumer_execution_generation(record.id, record.consumer_generation)?
+                        .unwrap_or(execution_generation),
                     request.now_ms,
                 ))?;
             match record.state {
@@ -236,7 +238,10 @@ impl P23PromotionCoordinator {
                     account_id: activation.account_id,
                     worker_id: activation.worker_id,
                     deployment_id: activation.deployment_id,
-                    execution_generation,
+                    execution_generation: self
+                        .scheduler
+                        .cron_execution_generation(activation.id, activation.activation_generation)?
+                        .unwrap_or(execution_generation),
                     activation_generation: activation.activation_generation,
                     expression: activation.expression.clone(),
                     expression_sha256: activation.expression_sha256,

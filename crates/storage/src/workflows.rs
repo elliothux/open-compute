@@ -11,10 +11,16 @@ use sha2::{Digest as _, Sha256};
 pub(crate) mod bindings;
 pub(crate) mod helpers;
 mod instances;
+pub(crate) mod integrity;
 mod model;
+pub(crate) mod operations;
 mod versions;
 use helpers::*;
 pub use model::*;
+pub use operations::{
+    WorkflowAppliedOperation, WorkflowGcAcknowledgement, WorkflowGcReceipt, WorkflowOperation,
+    WorkflowOperationKind, WorkflowOperationResult, WorkflowRejectedOperation,
+};
 
 #[cfg(test)]
 #[path = "workflows/workflow_tests.rs"]

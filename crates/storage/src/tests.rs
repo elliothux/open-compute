@@ -2167,7 +2167,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 12);
+    assert_eq!(crate::migrations::current_schema_version(), 14);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2188,7 +2188,9 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert!(crate::migrations::expected_checksum(7).is_ok());
     assert!(crate::migrations::expected_checksum(8).is_ok());
     assert_eq!(
-        crate::migrations::expected_checksum(13).unwrap_err().code(),
+        crate::migrations::expected_checksum(crate::migrations::current_schema_version() + 1)
+            .unwrap_err()
+            .code(),
         ErrorCode::SchemaTooNew
     );
     assert_eq!(
@@ -3003,7 +3005,8 @@ fn downgrade_control_to_v8(path: &Path) {
     }
     control
         .execute_batch(
-            "DROP TABLE workflow_instance_referrers;
+            "DROP TABLE workflow_instance_operations;
+             DROP TABLE workflow_instance_referrers;
              DROP TABLE workflow_referrers;
              DROP TABLE workflow_bindings;
              DROP TABLE workflow_versions;
@@ -3213,7 +3216,10 @@ fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
     let before = crate::inspect_offline_schema(&data_dir, 5_000, 1).unwrap();
     assert_eq!(before.control, 8);
     let after = crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap();
-    assert_eq!(after.control, 12);
+    assert_eq!(
+        i64::from(after.control),
+        crate::migrations::current_schema_version()
+    );
     assert_eq!(
         crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap(),
         after
@@ -3506,7 +3512,10 @@ fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
     drop(reader);
     drop(scheduler);
     let inspection = crate::inspect_scheduler_db(&scheduler_path, 5_000, 61_000).unwrap();
-    assert_eq!(inspection.schema_version, 5);
+    assert_eq!(
+        inspection.schema_version,
+        crate::current_scheduler_schema_version()
+    );
     assert_eq!(inspection.queue.queues, 1);
     assert_eq!(inspection.queue.backlog_messages, 0);
     assert_eq!(inspection.queue.counter_mismatches, 0);

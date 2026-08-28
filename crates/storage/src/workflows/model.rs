@@ -55,7 +55,7 @@ pub struct WorkflowTarget {
     pub class_name: String,
     /// Frozen loader schema.
     pub loader_schema_version: i64,
-    /// Workflow capability, currently one.
+    /// Frozen execution capability: one for legacy history, two for durable waiting.
     pub capability_version: i64,
     /// Canonical frozen version descriptor digest.
     pub descriptor_sha256: [u8; 32],
@@ -118,6 +118,10 @@ pub enum WorkflowRefState {
     Creating,
     /// Both authorities committed; instance may execute.
     Live,
+    /// Terminal V2 history still pins its immutable deployment until proven purge.
+    Retained,
+    /// A durable restart intent owns the active quota and blocks dispatch.
+    Restarting,
     /// Terminal scheduler state observed; release is pending.
     Releasing,
     /// Terminal history retained without an execution artifact pin.
@@ -150,4 +154,16 @@ pub struct WorkflowReservation {
     pub state: WorkflowRefState,
     /// Last control-state mutation.
     pub updated_at_ms: i64,
+}
+
+/// Low-cardinality operation facts, with no identities, payloads or private nonce material.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowOperationInspection {
+    /// Prepared restart intents not yet finalized or definitively cancelled.
+    pub pending_restarts: u64,
+    /// Prepared purge intents not yet finalized or definitively cancelled.
+    pub pending_purges: u64,
+    /// Creation time of the oldest unfinished operation, if any.
+    pub oldest_operation_at_ms: Option<i64>,
 }

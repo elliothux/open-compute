@@ -61,3 +61,30 @@ fn all_id_kinds_round_trip() {
         assert_eq!(s, s.to_ascii_lowercase());
     }
 }
+
+#[test]
+fn workflow_operations_accept_system_random_uuid_without_relaxing_resource_ids() {
+    let wire = "550e8400-e29b-41d4-a716-446655440000";
+    let operation: WorkflowOperationId = serde_json::from_value(serde_json::json!(wire)).unwrap();
+    assert_eq!(operation.to_string(), wire);
+    assert_eq!(
+        WorkflowOperationId::from_uuid(operation.as_uuid()).unwrap(),
+        operation
+    );
+    assert!(WorkflowInstanceId::from_str(wire).is_err());
+    for invalid in [
+        wire.to_uppercase(),
+        wire.replace('-', ""),
+        Uuid::nil().to_string(),
+    ] {
+        assert!(WorkflowOperationId::from_str(&invalid).is_err());
+    }
+    let generated = WorkflowOperationId::generate();
+    assert_eq!(
+        generated
+            .to_string()
+            .parse::<WorkflowOperationId>()
+            .unwrap(),
+        generated
+    );
+}

@@ -447,7 +447,7 @@ impl SchedulerService {
                                     &self.global_in_flight,
                                     &self.alarm_in_flight,
                                     &self.queue_in_flight,
-                                    &self.workflow_in_flight,
+                                    &self.cron_in_flight,
                                     &self.workflow_in_flight,
                                 );
                                 for run in runs {
@@ -651,10 +651,14 @@ impl SchedulerService {
                 )
                 .await;
         }
+        let workflow_summary = self
+            .store
+            .workflow_workload_summary(self.observed_wall_time_ms())?;
         if workflow.enabled
             && !self.is_paused()
             && !self.workflow_paused.load(Ordering::Acquire)
             && self.workflow_pool_state() != SchedulerPoolState::CircuitOpen
+            && (workflow_summary.ready > 0 || workflow_summary.expired > 0)
         {
             let runs = self
                 .claim_workflows(

@@ -9,6 +9,7 @@ export {
   QueueTransport,
   R2Transport,
   WorkflowBindingTransport,
+  WorkflowBindingTransportV2,
 } from "./loader-host.js";
 
 const TOKEN_HEADER = "x-open-compute-binding-token";

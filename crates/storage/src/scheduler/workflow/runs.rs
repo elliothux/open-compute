@@ -13,29 +13,54 @@ impl SchedulerStore {
         Ok(())
     }
 
-    /// Return only bounded due identities, in admission order, for control-reference validation.
+    /// Page one ready account in round-robin order, checking fresh work after at most three recoveries.
+    /// The cursor is process-local; all eligibility remains in the durable ready index.
     pub fn due_workflows(
         &self,
         now_ms: i64,
         limit: u32,
+        cursor: &mut WorkflowClaimCursor,
     ) -> Result<Vec<WorkflowInstanceId>, PlatformError> {
         bounded(limit)?;
         let conn = self.lock()?;
-        let mut statement = conn
-            .prepare(
-                "SELECT id FROM workflow_instances WHERE state='queued' AND next_run_at_ms<=?1
-            ORDER BY next_run_at_ms,created_at_ms,id LIMIT ?2",
-            )
-            .map_err(sql_error)?;
-        statement
-            .query_map(params![now_ms, limit], |row| {
-                row.get::<_, String>(0)?
-                    .parse()
-                    .map_err(|_| rusqlite::Error::InvalidQuery)
-            })
-            .map_err(sql_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sql_error)
+        let preferred = cursor.recovered_streak < 3;
+        for recovered in [preferred, !preferred] {
+            for after in [
+                cursor.account.map_or_else(String::new, |id| id.to_string()),
+                String::new(),
+            ] {
+                let account: Option<String> = conn.query_row(
+                    "SELECT account_id FROM workflow_instances WHERE state='queued' AND has_activated=?1
+                    AND account_id>?2 AND next_run_at_ms<=?3 ORDER BY account_id LIMIT 1",
+                    params![recovered,after,now_ms], |row| row.get(0),
+                ).optional().map_err(sql_error)?;
+                let Some(account) = account else {
+                    continue;
+                };
+                let mut statement = conn.prepare("SELECT id FROM workflow_instances
+                    WHERE state='queued' AND has_activated=?1 AND account_id=?2 AND next_run_at_ms<=?3
+                    ORDER BY next_run_at_ms,created_at_ms,id LIMIT ?4").map_err(sql_error)?;
+                let ids = statement
+                    .query_map(params![recovered, account, now_ms, limit], |row| {
+                        parse(row, 0)
+                    })
+                    .map_err(sql_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sql_error)?;
+                cursor.account = Some(
+                    account
+                        .parse()
+                        .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?,
+                );
+                cursor.recovered_streak = if recovered {
+                    cursor.recovered_streak.saturating_add(1).min(3)
+                } else {
+                    0
+                };
+                return Ok(ids);
+            }
+        }
+        Ok(Vec::new())
     }
 
     /// Claim only the exact identity whose live control references the caller has validated.
@@ -67,7 +92,8 @@ impl SchedulerStore {
         }
         let run_token = token()?;
         tx.execute("UPDATE workflow_instances SET state='running',run_token=?2,run_claimed_at_ms=?3,run_lease_until_ms=?4,
-            next_run_at_ms=NULL,updated_at_ms=?3 WHERE id=?1 AND state='queued'",params![identity.instance_id.to_string(),
+            next_run_at_ms=NULL,updated_at_ms=?3,has_activated=CASE WHEN capability_version=2 THEN 1 ELSE 0 END
+            WHERE id=?1 AND state='queued'",params![identity.instance_id.to_string(),
             run_token.as_bytes().as_slice(),now_ms,deadline(now_ms,limits.lease_ms)?]).map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
         Ok(Some(ClaimedWorkflowRun {
@@ -109,7 +135,7 @@ impl SchedulerStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let expired = {
-            let mut statement = tx.prepare("SELECT id,instance_generation,run_token FROM workflow_instances
+            let mut statement = tx.prepare("SELECT id,instance_generation,run_token,capability_version FROM workflow_instances
                 WHERE state='running' AND run_lease_until_ms<=?1 ORDER BY run_lease_until_ms,id LIMIT ?2").map_err(sql_error)?;
             statement
                 .query_map(params![now_ms, limit], |row| {
@@ -117,17 +143,34 @@ impl SchedulerStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, Vec<u8>>(2)?,
+                        row.get::<_, i64>(3)?,
                     ))
                 })
                 .map_err(sql_error)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(sql_error)?
         };
-        for (id, generation, token) in &expired {
+        for (id, generation, token, capability) in &expired {
             // Reset step ownership before the parent: the schema verifies the expired parent token.
             tx.execute("UPDATE workflow_steps SET state='pending',run_token=NULL,step_token=NULL,updated_at_ms=?4
                 WHERE instance_id=?1 AND instance_generation=?2 AND state='running' AND run_token=?3",
                 params![id,generation,token,now_ms]).map_err(sql_error)?;
+            if *capability == 2 {
+                let instance = tx
+                    .query_row(
+                        &format!("{INSTANCE_SELECT} WHERE id=?1"),
+                        [id],
+                        instance_row,
+                    )
+                    .map_err(sql_error)?;
+                durable_runs::release(
+                    &tx,
+                    &instance,
+                    deadline(now_ms, limits.recovery_backoff_ms)?,
+                    now_ms,
+                )?;
+                continue;
+            }
             let changed = tx.execute("UPDATE workflow_instances SET state='queued',run_token=NULL,run_claimed_at_ms=NULL,
                 run_lease_until_ms=NULL,next_run_at_ms=?4,updated_at_ms=?5
                 WHERE id=?1 AND instance_generation=?2 AND state='running' AND run_token=?3 AND run_lease_until_ms<=?5",
@@ -158,6 +201,9 @@ impl SchedulerStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let record = running(&tx, fence, now_ms)?;
+        if record.identity.target.capability_version != 1 {
+            return Err(error(ErrorCode::WorkflowCapabilityMismatch));
+        }
         let result = match completion {
             WorkflowCompletion::Errored { code } => Err(terminal_code(*code)?),
             WorkflowCompletion::Complete {

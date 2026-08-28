@@ -122,3 +122,115 @@ fn workflow_generation_transaction_rejects_unbound_and_retired_tokens() {
     );
     assert!(!called.load(Ordering::SeqCst));
 }
+
+#[tokio::test]
+async fn workflow_v2_invalid_results_quarantine_all_transport_clones_until_rotation() {
+    use open_compute_storage::WorkflowTarget;
+    use serde_json::json;
+    use std::sync::atomic::AtomicUsize;
+    let received = Arc::new(AtomicUsize::new(0));
+    let result = Arc::new(Mutex::new(
+        json!({"result":{"outcome":"errored","finalOrdinal":1,
+        "errorCode":"WORKFLOW_NON_RETRYABLE"},"loaderOutcome":"warm","drainIncomplete":false}),
+    ));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = Router::new().route(
+        "/internal/workflow-v2",
+        post({
+            let received = received.clone();
+            let result = result.clone();
+            move |request: Request| {
+                let received = received.clone();
+                let result = result.clone();
+                async move {
+                    to_bytes(request.into_body(), 8192).await.unwrap();
+                    received.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(result.lock().unwrap().clone())
+                }
+            }
+        }),
+    );
+    let (shutdown, receiver) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = receiver.await;
+            })
+            .await
+            .unwrap();
+    });
+    let auth = GenerationAuthRegistry::new();
+    auth.activate_for_test(SecretString::new("00".repeat(32)));
+    let mut transport = WorkerdTransport::new(auth.clone(), Arc::new(Mutex::new(None)));
+    // A compiled credential is not readiness. Refusal before dispatch must not
+    // quarantine the generation that is about to become available.
+    assert_eq!(
+        transport.ensure_workflow_admission().unwrap_err().code(),
+        ErrorCode::WorkflowRuntimeUnavailable
+    );
+    transport.test_endpoint = Some(port);
+    transport.ensure_workflow_admission().unwrap();
+    let target = target();
+    let version = WorkflowTarget {
+        account_id: target.account_id,
+        definition_id: open_compute_core::WorkflowId::generate(),
+        definition_name: "flow".into(),
+        version_id: open_compute_core::WorkflowVersionId::generate(),
+        worker_id: target.worker_id,
+        deployment_id: target.deployment_id,
+        worker_code_sha256: [0x11; 32],
+        class_name: "Flow".into(),
+        loader_schema_version: 1,
+        capability_version: 2,
+        descriptor_sha256: [0x22; 32],
+    };
+    let request = WorkflowRunRequest {
+        fence: WorkflowFence {
+            instance_id: WorkflowInstanceId::generate(),
+            instance_generation: 1,
+            run_token: WorkflowToken::from_bytes([3; 32]),
+        },
+        external_instance_id: "external".into(),
+        definition_name: "flow".into(),
+        created_at_ms: 0,
+        payload_json: "null".into(),
+    };
+    transport
+        .dispatch_workflow_v2(&version, &request, Duration::from_secs(1))
+        .await
+        .unwrap();
+    let invalid = [
+        json!({"outcome":"errored","finalOrdinal":1,"errorCode":"private exception text"}),
+        json!({"outcome":"errored","finalOrdinal":1,"errorCode":"WORKFLOW_RUNTIME_UNAVAILABLE"}),
+        json!({"outcome":"complete","finalOrdinal":1025,"outputJson":"null"}),
+        json!({"outcome":"complete","finalOrdinal":1,"outputJson":"x".repeat(1024*1024+1)}),
+        json!({"outcome":"unknown","finalOrdinal":1}),
+    ];
+    for (index, bad) in invalid.into_iter().enumerate() {
+        auth.activate_for_test(SecretString::new(format!("{:064x}", index + 1)));
+        result.lock().unwrap()["result"] = bad;
+        let before = received.load(Ordering::SeqCst);
+        assert_eq!(
+            transport
+                .dispatch_workflow_v2(&version, &request, Duration::from_secs(1))
+                .await
+                .unwrap_err()
+                .code(),
+            ErrorCode::WorkflowRuntimeUnavailable
+        );
+        assert_eq!(received.load(Ordering::SeqCst), before + 1);
+        assert_eq!(
+            transport
+                .clone()
+                .dispatch_workflow_v2(&version, &request, Duration::from_secs(1))
+                .await
+                .unwrap_err()
+                .code(),
+            ErrorCode::WorkflowRuntimeUnavailable
+        );
+        assert_eq!(received.load(Ordering::SeqCst), before + 1);
+    }
+    shutdown.send(()).unwrap();
+    server.await.unwrap();
+}

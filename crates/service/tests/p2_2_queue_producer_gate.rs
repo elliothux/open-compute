@@ -437,6 +437,7 @@ fn deployment_request(
         bindings.insert(
             "EVENTS".to_owned(),
             DeploymentBindingInput {
+                capability_version: 1,
                 kind: BindingKind::QueueProducer,
                 id: ResourceId::from_uuid(queue_id.as_uuid()).unwrap(),
                 permissions: CanonicalPermissions::default(),

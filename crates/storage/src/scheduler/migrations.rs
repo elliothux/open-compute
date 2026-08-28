@@ -17,6 +17,12 @@ const MIGRATION_002_SQL: &str = include_str!("../../scheduler-migrations/002_que
 const MIGRATION_003_SQL: &str = include_str!("../../scheduler-migrations/003_queue_consumer.sql");
 const MIGRATION_004_SQL: &str = include_str!("../../scheduler-migrations/004_cron.sql");
 const MIGRATION_005_SQL: &str = include_str!("../../scheduler-migrations/005_workflow_core.sql");
+const MIGRATION_006_SQL: &str =
+    include_str!("../../scheduler-migrations/006_workflow_durable_waiting.sql");
+const MIGRATION_007_SQL: &str =
+    include_str!("../../scheduler-migrations/007_workflow_operation_progress.sql");
+const MIGRATION_008_SQL: &str =
+    include_str!("../../scheduler-migrations/008_workflow_due_admission.sql");
 
 pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[
     SchedulerMigration {
@@ -49,6 +55,24 @@ pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[
         sql: MIGRATION_005_SQL,
         checksum: &crate::migrations::SCHEDULER_MIGRATION_005_SHA256,
     },
+    SchedulerMigration {
+        version: 6,
+        name: "006_workflow_durable_waiting",
+        sql: MIGRATION_006_SQL,
+        checksum: &crate::migrations::SCHEDULER_MIGRATION_006_SHA256,
+    },
+    SchedulerMigration {
+        version: 7,
+        name: "007_workflow_operation_progress",
+        sql: MIGRATION_007_SQL,
+        checksum: &crate::migrations::SCHEDULER_MIGRATION_007_SHA256,
+    },
+    SchedulerMigration {
+        version: 8,
+        name: "008_workflow_due_admission",
+        sql: MIGRATION_008_SQL,
+        checksum: &crate::migrations::SCHEDULER_MIGRATION_008_SHA256,
+    },
 ];
 
 pub(super) fn validate_registry(migrations: &[SchedulerMigration]) -> Result<(), PlatformError> {
@@ -72,6 +96,17 @@ pub(super) fn verify_applied(
     schema_version: i64,
 ) -> Result<(), PlatformError> {
     validate_registry(SCHEDULER_MIGRATIONS)?;
+    let marker: Option<(i64, String)> = connection
+        .query_row(
+            "SELECT schema_version,data_format FROM scheduler_meta WHERE singleton=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| super::corrupt())?;
+    if marker != Some((schema_version, super::DATA_FORMAT.to_owned())) {
+        return Err(super::corrupt());
+    }
     let Some(applied_count) = usize::try_from(schema_version).ok() else {
         return Err(super::corrupt());
     };

@@ -49,7 +49,7 @@ pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, Sched
 pub(crate) use workflow::WorkflowOutcome;
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 517;
+pub const REQUIRED_SERIES: u64 = 548;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 

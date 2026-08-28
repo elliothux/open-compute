@@ -562,6 +562,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             storage.clone(),
             scheduler.clone(),
             transport.clone(),
+            loaded.config.workflows.clone(),
         )
     });
     if let Some(api) = &queue_api {

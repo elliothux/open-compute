@@ -1,108 +1,12 @@
 //! Actual platformd SIGKILL after a durable step, followed by orphan recovery and replay.
 
+pub(super) use super::platform_process::Evidence;
+use super::platform_process::{Client, address, config, ready, spawn, tenant_json};
 use super::*;
 use open_compute_storage::WorkerRepository;
 use std::fs;
-use std::net::SocketAddr;
-use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::time::Instant;
-
-type Client =
-    hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>;
-
-async fn response(
-    client: &Client,
-    address: SocketAddr,
-    path: &str,
-    method: &str,
-) -> Result<axum::http::Response<hyper::body::Incoming>, ()> {
-    let request = Request::builder()
-        .method(method)
-        .uri(format!("http://{address}{path}"))
-        .header("host", "workflow.example")
-        .header("content-type", "application/json")
-        .body(Body::from("{}"))
-        .unwrap();
-    tokio::time::timeout(Duration::from_secs(3), client.request(request))
-        .await
-        .map_err(|_| ())?
-        .map_err(|_| ())
-}
-
-async fn tenant_json(client: &Client, address: SocketAddr, path: &str) -> serde_json::Value {
-    let response = response(client, address, path, "POST").await.unwrap();
-    assert_eq!(response.status(), 200);
-    let bytes = to_bytes(Body::new(response.into_body()), 65536)
-        .await
-        .unwrap();
-    serde_json::from_slice(&bytes).unwrap()
-}
-
-struct Process(Child);
-impl Drop for Process {
-    fn drop(&mut self) {
-        if self.0.try_wait().unwrap().is_none() {
-            let _ = self.0.kill();
-        }
-        let _ = self.0.wait();
-    }
-}
-pub(super) struct Evidence(pub(super) Option<tempfile::TempDir>);
-impl Drop for Evidence {
-    fn drop(&mut self) {
-        if std::thread::panicking()
-            && let Some(temp) = self.0.take()
-        {
-            let path = temp.keep();
-            let failed = path.parent().unwrap().join("failed");
-            let _ = fs::create_dir_all(&failed);
-            let _ = fs::rename(&path, failed.join(path.file_name().unwrap()));
-        }
-    }
-}
-
-fn address() -> SocketAddr {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-}
-
-fn spawn(config: &Path, log: &Path) -> Process {
-    let output = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(log)
-        .unwrap();
-    Process(
-        Command::new(env!("CARGO_BIN_EXE_platformd"))
-            .args(["run", "--config"])
-            .arg(config)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(output)
-            .spawn()
-            .unwrap(),
-    )
-}
-
-async fn ready(client: &Client, admin: SocketAddr, child: &mut Process) {
-    let deadline = Instant::now() + Duration::from_secs(45);
-    loop {
-        assert!(child.0.try_wait().unwrap().is_none());
-        if response(client, admin, "/health/ready", "GET")
-            .await
-            .is_ok_and(|r| r.status() == 200)
-        {
-            return;
-        }
-        assert!(Instant::now() < deadline, "process readiness timed out");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback() {
@@ -124,8 +28,15 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
         harness.storage.clone(),
         store.clone(),
         harness.transport.clone(),
+        Default::default(),
     )
-    .create_version(account, definition.id, target.deployment_id, "Flow".into())
+    .create_version(
+        account,
+        definition.id,
+        target.deployment_id,
+        "Flow".into(),
+        1,
+    )
     .await
     .unwrap();
     let caller = harness
@@ -135,6 +46,7 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
             BTreeMap::from([(
                 "FLOW".into(),
                 DeploymentBindingInput {
+                    capability_version: 1,
                     kind: BindingKind::Workflow,
                     id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                     permissions: CanonicalPermissions::default(),
@@ -259,71 +171,6 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
     assert_eq!(reopened.inspect_workflows(now()).unwrap().running, 0);
     drop(reopened);
     assert!(!fs::read_to_string(&log).unwrap().contains(&committed));
-}
-
-fn config(
-    root: &Path,
-    data: &Path,
-    endpoint: &str,
-    public: SocketAddr,
-    admin: SocketAddr,
-) -> PathBuf {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
-    let key = root.join("access-key");
-    let secret = root.join("secret-key");
-    fs::write(&key, "AKIAEXAMPLEKEYID01").unwrap();
-    fs::write(&secret, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY").unwrap();
-    for path in [&key, &secret] {
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    let config = root.join("process.toml");
-    fs::write(
-        &config,
-        format!(
-            r#"
-[server]
-public_bind = "{public}"
-admin_bind = "{admin}"
-[storage]
-data_dir = "{}"
-master_key_file = "{}"
-[s3]
-endpoint = "{endpoint}"
-region = "us-east-1"
-bucket = "open-compute"
-prefix = "system/"
-force_path_style = true
-access_key_id_file = "{}"
-secret_access_key_file = "{}"
-max_retries = 1
-[runtime]
-binary = "{}"
-lock_file = "{}"
-assets_dir = "{}"
-startup_timeout_ms = 20000
-shutdown_grace_ms = 500
-[workflows]
-lease_ms = 6000
-heartbeat_ms = 1000
-dispatch_timeout_ms = 30000
-recovery_backoff_ms = 100
-"#,
-            data.display(),
-            data.join("keys/master.key").display(),
-            key.display(),
-            secret.display(),
-            PathBuf::from(std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").unwrap()).display(),
-            workspace.join("runtime/workerd.lock.json").display(),
-            workspace.join("runtime").display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&config, fs::Permissions::from_mode(0o600)).unwrap();
-    config
 }
 
 const SOURCE: &str = r#"

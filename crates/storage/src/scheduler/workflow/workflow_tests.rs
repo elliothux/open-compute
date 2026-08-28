@@ -3,6 +3,8 @@ use open_compute_core::{AccountId, DeploymentId, WorkerId, WorkflowId, WorkflowV
 
 #[path = "atomicity_tests.rs"]
 mod atomicity_tests;
+#[path = "v2_schema_tests.rs"]
+mod v2_schema_tests;
 
 fn setup() -> (
     tempfile::TempDir,
@@ -42,7 +44,7 @@ fn setup() -> (
         ..WorkflowsConfig::default()
     };
     store
-        .insert_workflow(&identity, r#"{"z":1,"a":2}"#, &limits)
+        .insert_workflow(&identity, r#"{"z":1,"a":2}"#, None, &limits)
         .unwrap();
     (tmp, store, identity, limits)
 }
@@ -76,9 +78,12 @@ fn grant(
 fn workflow_commit_replay_restart_and_terminal_are_durable() {
     let (tmp, store, id, limits) = setup();
     store
-        .insert_workflow(&id, r#"{"a":2,"z":1}"#, &limits)
+        .insert_workflow(&id, r#"{"a":2,"z":1}"#, None, &limits)
         .unwrap();
-    assert_eq!(store.due_workflows(0, 10).unwrap(), vec![id.instance_id]);
+    assert_eq!(
+        store.due_workflows(0, 10, &mut Default::default()).unwrap(),
+        vec![id.instance_id]
+    );
     let run = store.claim_workflow(&id, 0, &limits).unwrap().unwrap();
     assert!(store.claim_workflow(&id, 0, &limits).unwrap().is_none());
     let descriptor = step(0, "fetch", 1);
@@ -326,7 +331,7 @@ fn workflow_capacity_serialization_and_instance_identity_fail_closed() {
     let (_tmp, store, id, limits) = setup();
     assert_eq!(
         store
-            .insert_workflow(&id, "null", &limits)
+            .insert_workflow(&id, "null", None, &limits)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowInvariantViolation
@@ -365,14 +370,18 @@ fn workflow_capacity_serialization_and_instance_identity_fail_closed() {
     };
     assert_eq!(
         store
-            .insert_workflow(&id2, "null", &constrained)
+            .insert_workflow(&id2, "null", None, &constrained)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowStateQuotaExceeded
     );
     assert_eq!(store.workflow_instance_ids(None, 100).unwrap().len(), 1);
     assert!(store.workflow_instance_ids(None, 0).is_err());
-    assert!(store.due_workflows(0, 1001).is_err());
+    assert!(
+        store
+            .due_workflows(0, 1001, &mut Default::default())
+            .is_err()
+    );
 }
 
 #[test]

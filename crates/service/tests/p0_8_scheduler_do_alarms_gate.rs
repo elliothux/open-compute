@@ -858,6 +858,7 @@ fn deployment_request(
     bindings.insert(
         "ALARM".to_owned(),
         DeploymentBindingInput {
+            capability_version: 1,
             kind: BindingKind::DoNamespace,
             id: namespace,
             permissions: CanonicalPermissions::default(),

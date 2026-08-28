@@ -172,7 +172,8 @@ fn downgrade_control_to_seven(path: &Path) {
     }
     connection
         .execute_batch(
-            "DROP TABLE workflow_instance_referrers;
+            "DROP TABLE workflow_instance_operations;
+             DROP TABLE workflow_instance_referrers;
              DROP TABLE workflow_referrers;
              DROP TABLE workflow_bindings;
              DROP TABLE workflow_versions;
@@ -220,7 +221,13 @@ fn downgrade_scheduler_to_one(path: &Path) {
     }
     connection
         .execute_batch(
-            "DROP TABLE workflow_steps;
+            "DROP VIEW workflow_v2_accounting;
+             DROP TABLE workflow_operation_progress;
+             DROP TABLE workflow_step_dependencies;
+             DROP TABLE workflow_events;
+             DROP TABLE workflow_mutation_context;
+             DROP TABLE workflow_gc_receipts;
+             DROP TABLE workflow_steps;
              DROP TABLE workflow_instances;
              DROP TABLE cron_runs;
              DROP TABLE cron_schedules;
@@ -637,7 +644,7 @@ async fn upgrade_gate() {
             check["before"]["control"].as_u64(),
             check["target"]["control"].as_u64()
         ),
-        (Some(7), Some(12))
+        (Some(7), Some(14))
     );
 
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).expect("offline");
@@ -677,7 +684,7 @@ async fn upgrade_gate() {
             applied["before"]["control"].as_u64(),
             applied["target"]["control"].as_u64()
         ),
-        (Some(8), Some(12))
+        (Some(8), Some(14))
     );
 
     let doctor = doctor_report(&loaded, DoctorMode::Full).await;
