@@ -83,7 +83,7 @@ P0.7 已落到 production runtime、central authority、loaded-isolate facade �
   static workerd config；
 - control API、delete/recreate generation fence、startup reconciliation、storage marker、health/metrics 和
   runtime composition 已接通；
-- `./scripts/test-p0-7.sh` 已连续三轮 fresh process 验证 P0.7，并递归跑通 P0.6 至 P0.2；
+- `./test/test-p0-7.sh` 已连续三轮 fresh process 验证 P0.7，并递归跑通 P0.6 至 P0.2；
 - `./poc/g0 test all` 的三轮 aggregate verdict 为 `Conditional Go`，唯一条件仍是既有、精确 allowlist
   `loader:D-abort`；
 - workspace format、Clippy、unit/integration、no-default-features、Rust 1.98 MSRV、metadata、dependency
@@ -829,7 +829,7 @@ runtime/system-workers/do-router.js
 runtime/system-workers/do-facade.js
 runtime/system-workers/do-id-codec.js
 runtime/system-workers/loaded-isolate-wrapper-generator.js
-scripts/test-p0-7.sh
+test/test-p0-7.sh
 ```
 
 文件名可以随现有 crate ownership 调整，但必须维持三条边界：

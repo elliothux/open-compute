@@ -45,7 +45,7 @@ printf '%s\n' \
   "127.0.0.1 p0-2-private.test # open-compute-p0-2-egress" |
   sudo tee -a /etc/hosts >/dev/null
 
-python3 "$root/scripts/p0-2-egress-fixture.py" &
+python3 "$root/test/p0-2-egress-fixture.py" &
 fixture_pid=$!
 python3 - "$public_ipv4" "$public_ipv6" "$port" <<'PY'
 import socket, sys, time
@@ -70,4 +70,4 @@ export OPEN_COMPUTE_EGRESS_PUBLIC_IPV6_URL="http://[$public_ipv6]:$port/ipv6"
 export OPEN_COMPUTE_EGRESS_PUBLIC_HOSTNAME_URL="http://p0-2-public.test:$port/dns"
 export OPEN_COMPUTE_EGRESS_REDIRECT_PRIVATE_URL="http://$public_ipv4:$port/redirect-private"
 export OPEN_COMPUTE_EGRESS_PRIVATE_HOSTNAME_URL="http://p0-2-private.test:$port/private"
-"$root/scripts/test-p0-2.sh"
+"$root/test/test-p0-2.sh"

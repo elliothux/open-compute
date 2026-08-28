@@ -8,8 +8,8 @@ publish = false
 [workspace]
 
 [dependencies]
-open-compute-core = { path = "../crates/core" }
-open-compute-workers = { path = "../crates/workers" }
+open-compute-core = { path = "../../crates/core" }
+open-compute-workers = { path = "../../crates/workers" }
 serde_json = "1.0.145"
 
 [[bin]]

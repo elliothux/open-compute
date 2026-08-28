@@ -1,7 +1,7 @@
 # Rust and Cargo output.
 /debug/
 /target/
-/fuzz/target/
+/test/fuzz/target/
 /.cargo-home/
 **/*.rs.bk
 *.pdb
@@ -21,10 +21,4 @@
 /poc/.runtime-cache/
 /poc/.run/*
 
-# Successful P0.1 run artifacts. Retain failure evidence under failed/.
-/.p0-1-run/*
-
-# Workflow Gate process artifacts, including retained failed/ diagnostics.
-/.p2-4-run/*
-/.p2-5-run/*
-/.p2-exit-run/*
+.ruff_cache/

@@ -21,8 +21,8 @@ P0.3 的 resource lifecycle 管理文件，以 custom JSRPC binding 向 Dynamic 
 - `crates/service/src/kv_backend.rs`、`kv_http.rs`、`binding_backend.rs`：control plane、真实执行器与
   bounded private frame/stream protocol；
 - `runtime/system-workers/loader-host.js`：tenant `KVNamespace` adapter；
-- `crates/service/tests/p0_4_kv_gate.rs`、`scripts/test-p0-4.sh`：stock-workerd Gate 和 P0.3/P0.2 回归；
-- fresh `./scripts/coverage.sh` 已通过 90.00% 门槛，实际 Rust line coverage 为 90.06%。
+- `crates/service/tests/p0_4_kv_gate.rs`、`test/test-p0-4.sh`：stock-workerd Gate 和 P0.3/P0.2 回归；
+- fresh `./test/coverage.sh` 已通过 90.00% 门槛，实际 Rust line coverage 为 90.06%。
 
 `binding_backend.rs` 保留完整 private protocol authentication/frame/stream/error matrix，`kv_http.rs`
 保留 backup/restore 的 durable orchestration，`engine.rs` 保留 namespace schema/transaction/blob invariant；
@@ -1255,8 +1255,8 @@ restore rebind 均有确定结果。
 - `cargo fmt --all --check`、workspace clippy（`-D warnings`）、no-default-features、Rust 1.98 MSRV、
   metadata、dependency boundaries、`git diff --check` 全部通过；
 - `cargo test --workspace --all-targets --all-features -- --test-threads=1` 全部通过；
-- `./scripts/test-p0-4.sh`：P0.4、P0.3、P0.2 各三轮 fresh process 全部通过；
-- `./scripts/coverage.sh` 从 clean coverage state 运行全部测试和真实 P0.1–P0.4 Gate，
+- `./test/test-p0-4.sh`：P0.4、P0.3、P0.2 各三轮 fresh process 全部通过；
+- `./test/coverage.sh` 从 clean coverage state 运行全部测试和真实 P0.1–P0.4 Gate，
   `22166 / 24612` production Rust lines covered，90.06%。
 
 ## 23. 参考资料

@@ -12,7 +12,7 @@
 
 - This file applies to the entire repository. Do not add nested `AGENTS.md` files.
 - Treat this repository as the source of truth for `open-compute`; do not edit the parent Lynx OS project unless the user explicitly includes it in scope.
-- `crates/**`, `runtime/**`, and `share/**` are production sources and assets; `scripts/**` and `examples/**` are operator/release surfaces. `poc/**` is disposable G0 black-box evidence, not a production implementation or reusable product layer.
+- `crates/**`, `runtime/**`, and `share/**` are production sources and assets; `test/**` contains repository-level test/Gate scripts, fixtures, and fuzz tooling; `scripts/**` and `examples/**` are operator/release surfaces. Keep crate-local tests beside their owning code. `poc/**` is disposable G0 black-box evidence, not a production implementation or reusable product layer.
 - `docs/g0-results.md` is generated atomically by `./poc/g0 test all`; do not hand-edit it.
 - Do not edit generated build output under `target/**`, runtime caches under `poc/.runtime-cache/**`, successful-run artifacts, coverage output, or `*.profraw` files.
 
@@ -24,15 +24,15 @@
 - No-default-features check: `RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features`
 - MSRV check: `cargo +1.98.0 check --workspace --all-targets`
 - Metadata: `cargo metadata --no-deps --format-version 1`
-- Dependency boundaries: `./scripts/check-boundaries.sh`
+- Dependency boundaries: `./test/check-boundaries.sh`
 - Coverage setup (macOS): `brew install cargo-llvm-cov`
 - Coverage setup (portable): `cargo install cargo-llvm-cov --locked`
-- Coverage run (from the repository root): `./scripts/coverage.sh`
+- Coverage run (from the repository root): `./test/coverage.sh`
 - Coverage reports: `target/llvm-cov/html/index.html`, `target/llvm-cov/lcov.info`, and `target/llvm-cov/summary.json`
 - Development Gate: one relevant round per iteration; commands and legacy runner limits are documented in `docs/testing.md`.
 - Final G0 stock-workerd regression: `./poc/g0 test all`
-- Final P0.1 process Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-1.sh`
-- Final P0.2 Worker Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./scripts/test-p0-2.sh`
+- Final P0.1 process Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./test/test-p0-1.sh`
+- Final P0.2 Worker Gate: `OPEN_COMPUTE_TEST_WORKERD=/abs/path/to/workerd ./test/test-p0-2.sh`
 
 ## Architecture and Ownership
 
@@ -44,7 +44,7 @@
   - `runtime`: workerd pinning, verification, config compilation, process ownership, and supervision;
   - `workers`: immutable bundles/deployments, routing pins, and runtime-source snapshots;
   - `service`: CLI and composition of the production control/data planes.
-- Enforce the dependency direction checked by `scripts/check-boundaries.sh`: `core`, `storage`, `artifacts`, and `runtime` remain lower-level siblings; `workers` may build on `core`, `storage`, and `artifacts` but not `runtime`; `service` is the composition root.
+- Enforce the dependency direction checked by `test/check-boundaries.sh`: `core`, `storage`, `artifacts`, and `runtime` remain lower-level siblings; `workers` may build on `core`, `storage`, and `artifacts` but not `runtime`; `service` is the composition root.
 - Default to the direct architecture this repository should have now. Preserve compatibility or legacy paths only when required by an API/protocol contract, persisted data, the current workerd pin, or a release boundary.
 - Keep transport handlers thin. Validate and route at HTTP/CLI boundaries; put storage, deployment, artifact, and supervisor workflows in their owning crates.
 - Normalize and validate data once at the authority boundary, then pass structured values forward. Do not repair persisted or untrusted values during reads or presentation.
@@ -112,7 +112,7 @@
 - A missing or checksum-mismatched workerd binary is a test failure, not a reason to skip. Use `OPEN_COMPUTE_TEST_WORKERD` to select an already available verified binary.
 - `./poc/g0 test all` runs three fresh-process rounds and regenerates `docs/g0-results.md`. Standalone loader currently exits nonzero for the documented `D-abort`; aggregate acceptance must remain fail-closed and match the exact allowlisted observation.
 - Preserve failure diagnostics under the ignored run directories' `failed/` subtrees, sanitize generated reports, and check that tests leave no workerd process, listener, temp file, or secret behind.
-- `scripts/test-p0-2-egress-linux.sh` is Linux-only and mutates loopback addresses plus `/etc/hosts` through `sudo`; run it only with explicit user authorization and `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`.
+- `test/test-p0-2-egress-linux.sh` is Linux-only and mutates loopback addresses plus `/etc/hosts` through `sudo`; run it only with explicit user authorization and `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`.
 
 ## Release and Operations
 
@@ -123,7 +123,7 @@
 
 ## Verification and Git
 
-- After implementation and review/fix work are complete, remove dead code and run final acceptance: format, clippy, the workspace test suite, no-default-features check, metadata, dependency-boundary check, and `./scripts/coverage.sh`. Workspace Rust line coverage must remain at or above 90.00%; never lower the threshold. Coverage includes real-runtime P0 tests but does not replace the relevant final three-round P0/G0 Gate for runtime, process, persistence, Worker, routing, egress, packaging, or security changes. Do not repeat this full acceptance loop for each intermediate edit.
+- After implementation and review/fix work are complete, remove dead code and run final acceptance: format, clippy, the workspace test suite, no-default-features check, metadata, dependency-boundary check, and `./test/coverage.sh`. Workspace Rust line coverage must remain at or above 90.00%; never lower the threshold. Coverage includes real-runtime P0 tests but does not replace the relevant final three-round P0/G0 Gate for runtime, process, persistence, Worker, routing, egress, packaging, or security changes. Do not repeat this full acceptance loop for each intermediate edit.
 - Documentation-only and policy-only edits do not require Rust checks; run `git diff --check` and verify commands, paths, and generated-file claims against the repository.
 - If a required check cannot run, report the exact reason and the next best evidence. Never report a command as passing before it exits successfully.
 - Keep diffs focused and preserve unrelated user changes. Do not rewrite Git history, delete retained failure evidence, or clean the workspace unless explicitly requested.

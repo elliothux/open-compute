@@ -20,7 +20,8 @@ control/data plane 和 pinned upstream `workerd` child；启动过程永不下�
 | `runtime/` | Formal `workerd.lock.json`, Cap'n Proto, system workers |
 | `poc/` | G0 evidence only; not the production implementation |
 | `examples/` | Container, systemd, launchd |
-| `scripts/` | Thin operator/CI launchers |
+| `test/` | Repository test/Gate launchers, coverage, load/soak, fixtures, and fuzz |
+| `scripts/` | Local development and release packaging launchers |
 
 ## Prerequisites
 
@@ -78,21 +79,21 @@ platformd --config /abs/config.toml run
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets --all-features -- --test-threads=1
-./scripts/coverage.sh
+./test/coverage.sh
 RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
 cargo metadata --no-deps --format-version 1
-./scripts/check-boundaries.sh
+./test/check-boundaries.sh
 ./poc/g0 test bootstrap
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./scripts/test-p0-1.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./scripts/test-p0-2.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./scripts/test-p0-8.sh
-OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./scripts/test-p0-exit.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./test/test-p0-1.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./test/test-p0-2.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./test/test-p0-8.sh
+OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" ./test/test-p0-exit.sh
 ```
 
 Rust 覆盖率使用
 [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)；macOS 可运行
 `brew install cargo-llvm-cov`，其他环境可运行
-`cargo install cargo-llvm-cov --locked`。`./scripts/coverage.sh` 使用
+`cargo install cargo-llvm-cov --locked`。`./test/coverage.sh` 使用
 `--all-targets --all-features --test-threads=1` 口径，要求提供与正式 lock 匹配的 pinned
 `workerd`，并执行真实 P0.1-P0.8 Rust Gate 路径。脚本在 `target/llvm-cov/` 生成终端摘要、
 HTML、LCOV 和 JSON summary；workspace 生产 Rust 行覆盖率低于 90.00% 时失败。独立的
@@ -101,14 +102,14 @@ HTML、LCOV 和 JSON summary；workspace 生产 Rust 行覆盖率低于 90.00% �
 `poc/g0` JavaScript 黑盒测试，也不替代下方三个 fresh-process rounds 的 P0 验收。
 
 这些 Gate 在 pinned binary 缺失或 hash 与 lock 不一致时都会直接失败，不会 skip。
-`scripts/test-p0-2.sh` 在三个 fresh test process 中运行真实 `workerd`、SQLite 和 SigV4 S3 test
+`test/test-p0-2.sh` 在三个 fresh test process 中运行真实 `workerd`、SQLite 和 SigV4 S3 test
 provider。支持面与明确偏差见 [`docs/p0-2-api-matrix.md`](docs/p0-2-api-matrix.md)。
-`scripts/test-p0-8.sh` 在三个 fresh process 中运行 scheduler/alarm matrix，随后递归执行
+`test/test-p0-8.sh` 在三个 fresh process 中运行 scheduler/alarm matrix，随后递归执行
 P0.7-P0.2 regression Gate。
-`scripts/test-p0-exit.sh` 在三个 fresh process 中运行单一 Worker 的 KV、R2、D1、DO、alarm、
+`test/test-p0-exit.sh` 在三个 fresh process 中运行单一 Worker 的 KV、R2、D1、DO、alarm、
 WebSocket、backup/restore、promotion/rollback、restart、corruption 与 S3 fault 综合矩阵，随后执行
 P0.8-P0.2 和 P0.1 的全部 regression Gate。
-Linux release CI 另以 `scripts/test-p0-2-egress-linux.sh` 创建短期受控 dual-stack 网络夹具，补齐
+Linux release CI 另以 `test/test-p0-2-egress-linux.sh` 创建短期受控 dual-stack 网络夹具，补齐
 public IPv4/IPv6/DNS allow 与 redirect/DNS-to-private deny；该脚本会要求显式 sudo 授权并在退出时
 清理地址和 hosts 项。
 

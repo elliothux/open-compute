@@ -39,6 +39,6 @@ if strings "$root/target/debug/platformd" |
 fi
 
 if [ "$rounds" -eq 3 ]; then
-  ./scripts/test-p2-1.sh
+  ./test/test-p2-1.sh
 fi
 printf 'P2.2 aggregate PASS (%s round(s))\n' "$rounds"

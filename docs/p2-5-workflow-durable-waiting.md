@@ -1032,7 +1032,7 @@ terminate/restart 与迟到 sibling、quota/并发上限、Promise intrinsics；
 
 ### P2.5.9 Aggregate 与 P2 Exit
 
-新增 `p2_5_workflow_product_gate`、`scripts/test-p2-5.sh`、机器可核对的 Gate 结果模板。
+新增 `p2_5_workflow_product_gate`、`test/test-p2-5.sh`、机器可核对的 Gate 结果模板。
 覆盖完整 HTTP -> Queue -> Consumer -> Workflow -> KV/D1/R2/DO 路径；此路径可以由普通 Queue consumer
 create Workflow，Workflow 调用 DO，不要求 DO 反向 create/sendEvent，以免绕过已接受 output-gate 限制。
 
@@ -1071,10 +1071,10 @@ create Workflow，Workflow 调用 DO，不要求 DO 反向 create/sendEvent，�
 
 ```sh
 OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" \
-  OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-5.sh
+  OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-5.sh
 
 OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd" \
-  OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-exit.sh
+  OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-exit.sh
 ```
 
 Runtime 使用现有校验过的 binary，不自动下载。Unit/property tests 覆盖纯 state/config/JSON，storage
@@ -1109,7 +1109,7 @@ P2.5 最终报告单独记录 Go / Conditional Go / No-Go、真实 pin/schema、
 
 - 本文对应的 production 实现、forward migrations、config/types/runtime assets；
 - Hard/Product Gate、duration/JSON parity、migration/clock/crash/race fixtures；
-- `scripts/test-p2-5.sh`、`scripts/test-p2-exit.sh` 及 `docs/p2-5-gate-results.md`（实际验收后生成/填写）；
+- `test/test-p2-5.sh`、`test/test-p2-exit.sh` 及 `docs/p2-5-gate-results.md`（实际验收后生成/填写）；
 - 总方案、API 兼容性、operator/config/snapshot/testing 文档同步；
 - 明确说明默认本地限制：JSON only、60 秒 step timeout、暂停不冻结 deadline、restart 保留原版本、
   V2 retention 保留代码引用、有界 batch parallel、DO 内 Workflow mutation 暂不支持。

@@ -31,9 +31,9 @@ KV 数据引擎仍属于 P0.4。
 
 已验证证据：
 
-- `./scripts/test-p0-3.sh`：RB-01 至 RB-18 连续三轮 fresh-process 全部通过，并继续跑通三轮 P0.2
+- `./test/test-p0-3.sh`：RB-01 至 RB-18 连续三轮 fresh-process 全部通过，并继续跑通三轮 P0.2
   regression Gate；
-- `./scripts/coverage.sh`：workspace 全目标、全 feature 测试通过，Rust 行覆盖率 90.04%，不低于
+- `./test/coverage.sh`：workspace 全目标、全 feature 测试通过，Rust 行覆盖率 90.04%，不低于
   90.00% 门槛；
 - format、Clippy、no-default-features、Rust 1.98 MSRV、metadata、dependency boundary 与 diff
   whitespace 检查通过。

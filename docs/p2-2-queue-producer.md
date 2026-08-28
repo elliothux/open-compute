@@ -1376,7 +1376,7 @@ P2.2 只有全部满足才可进入 Queue consumer：
 建议新增入口：
 
 ```bash
-./scripts/test-p2-2.sh
+./test/test-p2-2.sh
 ```
 
 保持当前本地-only验证方式，不增加 CI、Codecov、远端上传或自动部署。

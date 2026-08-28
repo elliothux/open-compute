@@ -5,7 +5,7 @@
 > 前置基线：P1.0 至 P1.7 已由用户确认在当前 checkout 全部跑通；P1.8 维持既有
 > WebSocket hibernation No-Go 结论，不阻塞 P2。
 >
-> 验证证据：`./scripts/test-p2-1.sh` 聚合 Gate 通过；`./scripts/coverage.sh` 通过，
+> 验证证据：`./test/test-p2-1.sh` 聚合 Gate 通过；`./test/coverage.sh` 通过，
 > workspace Rust line coverage 为 90.07%。G0 维持既有精确 `D-abort` allowlist 下的
 > Conditional Go，未扩大接受范围。
 >
@@ -835,7 +835,7 @@ P2.1 只有满足以下条件才可进入 P2.2：
 建议新增入口：
 
 ```bash
-./scripts/test-p2-1.sh
+./test/test-p2-1.sh
 ```
 
 该脚本负责 P2.1 fresh-process 三轮、P0.8 至 P0.2 regression、P1 aggregate 所需本地验证以及 G0。

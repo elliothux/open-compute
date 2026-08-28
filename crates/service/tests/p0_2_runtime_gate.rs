@@ -49,7 +49,7 @@ use tower::ServiceExt;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     let Some(workerd) = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD").map(PathBuf::from) else {
-        // scripts/test-p0-2.sh makes this mandatory; ordinary cargo test stays offline.
+        // test/test-p0-2.sh makes this mandatory; ordinary cargo test stays offline.
         return;
     };
     let root = repo_root();

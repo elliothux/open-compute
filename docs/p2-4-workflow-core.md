@@ -1172,7 +1172,7 @@ Authenticated inspect返回：
 
 ## 20. 测试矩阵
 
-开发、审查与修复期间每次只跑一轮相关 Gate：`OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-4.sh`。
+开发、审查与修复期间每次只跑一轮相关 Gate：`OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-4.sh`。
 实现收尾、源码冻结后才运行最终三轮及相关 aggregate/coverage；若还需改代码，先回到单轮反馈，
 不要在中间迭代重复整条历史回归链。具体命令和证据口径见 [Gate 验证节奏](./testing.md)。
 

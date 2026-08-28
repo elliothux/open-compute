@@ -2,7 +2,7 @@
 
 This matrix is scoped to the pinned `workerd v1.20260826.1` release and the
 platform policy in `runtime/config.capnp`. It is not a claim of full Cloudflare
-Workers compatibility. `scripts/test-p0-2.sh` executes the cited real-workerd
+Workers compatibility. `test/test-p0-2.sh` executes the cited real-workerd
 conformance gate in three fresh test processes.
 
 | Surface | Status | Real-test evidence / boundary |
@@ -15,7 +15,7 @@ conformance gate in three fresh test processes.
 | Default and named module entrypoints | supported | Default and `WorkerEntrypoint` dispatch pass; unknown exports return `ENTRYPOINT_NOT_FOUND`. Route creation and promotion probe named exports without invoking tenant `fetch()`. |
 | `nodejs_compat` | supported when explicitly requested | A deployment with only the `nodejs_compat` flag imports `node:buffer` and executes `Buffer` in real workerd. No Node flag is injected by default. |
 | WebSocket client API | supported with documented deviation | The gate proves the constructor is present. Connections remain subject to the same public-only network policy; WebSocket server/listener management is not provided by P0.2. |
-| Outbound HTTP(S) `fetch()` | supported with documented deviation | Tenant global outbound is a fetch-only gateway backed by `Network(allow=["public"])`. The ordinary real gate rejects private/local/metadata and alternate-address forms. `scripts/test-p0-2-egress-linux.sh` additionally provides controlled public IPv4/IPv6/DNS success plus DNS-to-private and redirect-to-private rejection; CI runs it on Linux, while a local macOS run does not claim that Linux-only evidence. |
+| Outbound HTTP(S) `fetch()` | supported with documented deviation | Tenant global outbound is a fetch-only gateway backed by `Network(allow=["public"])`. The ordinary real gate rejects private/local/metadata and alternate-address forms. `test/test-p0-2-egress-linux.sh` additionally provides controlled public IPv4/IPv6/DNS success plus DNS-to-private and redirect-to-private rejection; CI runs it on Linux, while a local macOS run does not claim that Linux-only evidence. |
 | Client-disconnect abort signal | supported with documented deviation | Platformd drops the proxy stream and does not replay. P0.2 does not promise that tenant `request.signal.aborted` becomes true, matching the accepted G0 `D-abort` limitation. |
 | Service Worker syntax | unsupported | `WorkerBundleV1` requires an ES-module main module and rejects other main-module types with `BUNDLE_INVALID`. |
 | Raw TCP `connect()` and Unix sockets | unsupported | The scoped outbound gateway exposes only `fetch()`; non-HTTP schemes fail deterministically and the underlying network policy denies local/Unix targets. |

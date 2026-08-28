@@ -87,7 +87,7 @@ row_token
 
 验证结果：
 
-- `./scripts/test-p0-8.sh` 已连续三轮 fresh process通过 P0.8 stock-workerd Gate，并递归跑通
+- `./test/test-p0-8.sh` 已连续三轮 fresh process通过 P0.8 stock-workerd Gate，并递归跑通
   P0.7 至 P0.2 的全部三轮 regression Gate；
 - P0.8 Gate 覆盖 constructor/class field/fetch/RPC proxy、number/Date/invalid input、past due、
   overwrite/delete/token fence、async transaction commit/rollback/coalesce、`transactionSync()` fail closed、
@@ -728,7 +728,7 @@ offline recovery 会把主库、WAL、SHM 一起隔离到 `data/diagnostics/sche
 - stock workerd三轮；
 - P0.2-P0.7 regression；
 - combined Worker/DO/alarm fixture。
-- `scripts/test-p0-exit.sh` 进一步以单一 deployment 同时绑定 KV、R2、D1 和两个 DO namespace，
+- `test/test-p0-exit.sh` 进一步以单一 deployment 同时绑定 KV、R2、D1 和两个 DO namespace，
   覆盖 backup/restore 重绑、basic WebSocket、workerd SIGKILL、platform owner restart、S3 fault 与
   单 D1 corruption isolation；platform restart 后 pending alarm 是第一个 tenant event，禁止依赖普通
   fetch 预热 loader/binding generation。
@@ -811,7 +811,7 @@ crates/service/src/alarm_index.rs
 runtime/system-workers/do-alarm-shim.js
 runtime/system-workers/do-alarm-transport.js
 runtime/system-workers/do-host.js
-scripts/test-p0-8.sh
+test/test-p0-8.sh
 ```
 
 ownership 原则：

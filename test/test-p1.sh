@@ -3,13 +3,13 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
-./scripts/test-p1-conformance.sh
-./scripts/test-p1-security.sh
-./scripts/test-p1-crash.sh
-./scripts/test-p1-upgrade.sh
-./scripts/test-p1-8.sh
+./test/test-p1-conformance.sh
+./test/test-p1-security.sh
+./test/test-p1-crash.sh
+./test/test-p1-upgrade.sh
+./test/test-p1-8.sh
 cargo test -p open-compute-service --features test-support \
   --test p1_reliability -- --test-threads=1
-./scripts/load-p1.sh --profile mixed --iterations 3
-./scripts/test-p0-exit.sh
+./test/load-p1.sh --profile mixed --iterations 3
+./test/test-p0-exit.sh
 printf 'P1 aggregate PASS\n'

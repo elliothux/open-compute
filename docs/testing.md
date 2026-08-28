@@ -10,6 +10,25 @@ coverage。最终验收失败且需要改代码时，先回到单轮反馈；修
 单轮减少重复执行，不减少用例、断言、真实进程或持久化路径；缺少 runtime、checksum 不匹配、
 未允许的失败都仍然失败。coverage 门槛保持 90.00%，G0 的精确 `D-abort` allowlist 不变。
 
+## 测试目录
+
+仓库级测试工具统一放在根目录 `test/`：
+
+| 路径 | 用途 |
+| --- | --- |
+| `test/test-*.sh` | P0/P1/P2 Gate 入口 |
+| `test/check-boundaries.sh`、`test/coverage.sh` | 依赖边界检查与覆盖率 |
+| `test/load-p1.sh`、`test/soak-p1.sh` | 压测与持续运行测试 |
+| `test/p0-2-egress-fixture.py` | Linux egress 网络夹具 |
+| `test/fuzz-p1.sh`、`test/fuzz/` | fuzz 启动脚本、独立 Cargo package 与种子 corpus |
+
+fuzz harness 是测试程序，`test/fuzz/corpus/` 中的输入样本才是 fixture。fuzz package 保持独立
+workspace，不随根目录 `cargo test --workspace` 自动运行；入口为 `./test/fuzz-p1.sh --seconds 60`。
+
+crate 内的单元测试、`crates/**/tests` 和 `runtime/tests/` 保持原位；`poc/` 保留 G0 黑盒证据。
+`scripts/` 仅保留本地开发和发布打包入口。历史 `docs/*results.md` 保留当时执行的命令和结果；其中
+原 `scripts/` 下的测试入口现已迁入 `test/`，这些记录不代表迁移后重新执行了验收。
+
 ## 开发与修复：单轮
 
 先选择已经存在且校验通过的 workerd，不能为测试隐式下载：
@@ -21,14 +40,14 @@ export OPEN_COMPUTE_TEST_WORKERD="$PWD/poc/.runtime-cache/v1.20260826.1/workerd"
 P2.2、P2.3、P2.4、P2.5 和 P2 Exit 脚本支持 `OPEN_COMPUTE_GATE_ROUNDS`。只运行当前改动相关的入口，例如 Workflow：
 
 ```sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-4.sh
+OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-4.sh
 ```
 
 Durable Workflow 与完整 HTTP → Queue → Consumer → Workflow → KV/D1/R2/DO 链路分别使用：
 
 ```sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-5.sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-exit.sh
+OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-5.sh
+OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-exit.sh
 ```
 
 P2.5 包含真实 Hard/Product、扩展 snapshot/restore、Workflow authority 和 JS parity 测试。
@@ -40,8 +59,8 @@ P2 Exit 的进程配置复用资源准备阶段的 KV/R2/D1 policy，避免把�
 Queue producer 或 Queue consumer/Cron 分别使用：
 
 ```sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-2.sh
-OPEN_COMPUTE_GATE_ROUNDS=1 ./scripts/test-p2-3.sh
+OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-2.sh
+OPEN_COMPUTE_GATE_ROUNDS=1 ./test/test-p2-3.sh
 ```
 
 这些是可选的相关入口，不是每次迭代都要依次执行的清单。P2.2 单轮模式不会递归启动 P2.1/P1/P0/G0；
@@ -65,14 +84,14 @@ standalone loader 的既定 `D-abort` 仍退出非零，不能把它记为普通
 P2.4 最终三轮入口为：
 
 ```sh
-OPEN_COMPUTE_GATE_ROUNDS=3 ./scripts/test-p2-4.sh
+OPEN_COMPUTE_GATE_ROUNDS=3 ./test/test-p2-4.sh
 ```
 
 P2.5 和 P2 Exit 使用相同轮数规则：
 
 ```sh
-OPEN_COMPUTE_GATE_ROUNDS=3 ./scripts/test-p2-5.sh
-OPEN_COMPUTE_GATE_ROUNDS=3 ./scripts/test-p2-exit.sh
+OPEN_COMPUTE_GATE_ROUNDS=3 ./test/test-p2-5.sh
+OPEN_COMPUTE_GATE_ROUNDS=3 ./test/test-p2-exit.sh
 ```
 
 再按改动范围执行相关历史 Gate 和 AGENTS.md 的 format、clippy、workspace tests、

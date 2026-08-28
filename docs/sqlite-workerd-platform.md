@@ -1238,7 +1238,7 @@ lease、row/claim token、repair、at-least-once delivery、六次 retry 和 fai
 ### P0 Exit Gate
 
 > 验证状态（2026-08-26）：已由 `crates/service/tests/p0_exit_gate.rs` 的单一真实
-> pinned-workerd fixture 覆盖，并通过 `scripts/test-p0-exit.sh` 三轮 fresh-process 综合矩阵；
+> pinned-workerd fixture 覆盖，并通过 `test/test-p0-exit.sh` 三轮 fresh-process 综合矩阵；
 > 该入口随后递归执行 P0.8-P0.2 与 P0.1 全部 regression Gate。
 
 一个 fixture Worker 必须能同时使用：

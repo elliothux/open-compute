@@ -46,7 +46,7 @@ if LC_ALL=C grep -aE \
 fi
 cargo test -p open-compute-service --all-features \
   p1_capability_release_support_bundle_and_metrics_contract_is_bounded -- --test-threads=1
-./scripts/fuzz-p1.sh --seconds 10
+./test/fuzz-p1.sh --seconds 10
 
 cargo build --release -p open-compute-service --bin platformd
 if LC_ALL=C grep -aE \

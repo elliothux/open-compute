@@ -15,4 +15,4 @@ if [ "$seconds" -gt 3600 ]; then
   exit 2
 fi
 cd "$root"
-cargo run --offline --manifest-path fuzz/Cargo.toml --release -- --seconds "$seconds"
+cargo run --offline --manifest-path test/fuzz/Cargo.toml --release -- --seconds "$seconds"

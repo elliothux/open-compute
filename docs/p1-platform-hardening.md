@@ -252,7 +252,7 @@ crates/service/tests/fixtures/p1-conformance/
 └── adversarial-values.mjs
 
 crates/service/tests/p1_conformance.rs
-scripts/test-p1-conformance.sh
+test/test-p1-conformance.sh
 ```
 
 runner 必须：
@@ -272,7 +272,7 @@ runner 必须：
 - P0 API matrix 与 capability output 不存在无 owner 的 `partial` 或 `unknown`；
 - 每个偏差都能从 capability output 链接到本地 deviation 文档；
 - workerd lock、facade source 或 migration digest 改变会使 conformance cache 失效；
-- `scripts/test-p1-conformance.sh` fresh-process 三轮一致通过。
+- `test/test-p1-conformance.sh` fresh-process 三轮一致通过。
 
 ## 3. P1.1：Quota、磁盘保护与 Offline Operation Gate
 
@@ -804,7 +804,7 @@ authority、文件路径、SQLite、S3 key、workerd config 或内部 dispatch �
 | migration/release metadata parser | checksum/schema/future version fail closed |
 | scheduler/DO internal envelope | token/generation/type 不能由 tenant payload 伪造 |
 
-短 deterministic property tests 进入普通 Rust suite。长 fuzz target 放在独立 `fuzz/`，固定 toolchain、seed、
+短 deterministic property tests 进入普通 Rust suite。长 fuzz target 放在独立 `test/fuzz/`，固定 toolchain、seed、
 corpus 和最大内存；release rehearsal 在本地运行固定时长。任何 crash/hang/oom input 先缩减，再进入
 `tests/regressions/`，不能只留在某台机器的 fuzz corpus。
 
@@ -872,12 +872,12 @@ envelope，并证明达到饱和时平台通过 backpressure 降级，而不是�
 ### 8.1 本地 runner
 
 ```text
-scripts/test-p1.sh                 # deterministic quick aggregate
-scripts/test-p1-crash.sh           # bounded crash matrix
-scripts/test-p1-upgrade.sh         # N -> N+1 + restore rollback
-scripts/soak-p1.sh --duration 1h   # developer rehearsal
-scripts/soak-p1.sh --duration 24h  # release Gate
-scripts/load-p1.sh --profile mixed
+test/test-p1.sh                 # deterministic quick aggregate
+test/test-p1-crash.sh           # bounded crash matrix
+test/test-p1-upgrade.sh         # N -> N+1 + restore rollback
+test/soak-p1.sh --duration 1h   # developer rehearsal
+test/soak-p1.sh --duration 24h  # release Gate
+test/load-p1.sh --profile mixed
 ```
 
 这些脚本只在本地运行，不引入 CI、Codecov、上传或远程 threshold gate。默认使用 fresh temp data-dir、
@@ -1208,7 +1208,7 @@ crates/service/tests/
 ├── p1_reliability.rs
 └── fixtures/...
 
-scripts/
+test/
 ├── test-p1.sh
 ├── test-p1-conformance.sh
 ├── test-p1-crash.sh

@@ -33,6 +33,6 @@ if strings "$root/target/debug/platformd" |
   exit 1
 fi
 
-./scripts/test-p1.sh
+./test/test-p1.sh
 ./poc/g0 test all
 printf 'P2.1 aggregate PASS\n'
