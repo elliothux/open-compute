@@ -1626,6 +1626,8 @@ HTTP -> Queue -> Consumer -> Workflow
 
 ### P3.1：框架构建产物与 Static Assets
 
+详细实施与 Gate 见 [P3.1：框架产物导入与 Static Assets](p3-1-static-assets.md)。
+
 沿用 vinext/Vite 的 RSC、SSR、client 多环境构建，不用普通 Worker 单入口打包替代框架编译。
 TS7 检查本项目维护的 TypeScript；构建、模块/资源校验成功后才允许部署。产物导入必须保存
 入口、模块图、静态资源、路由配置与所需 bindings，保持 server-only 与 client 输出隔离。
@@ -1638,6 +1640,9 @@ TS7 检查本项目维护的 TypeScript；构建、模块/资源校验成功后�
 上传中断、摘要损坏、缺失资源、部署切换和跨账户读取拒绝。这只是中间里程碑，不是全量验收。
 
 ### P3.2：Service Binding、Node API 与流式执行
+
+Service Binding 的实施顺序、原生 RPC 与生命周期 Gate 见
+[P3.2：Service Binding 与原生 Worker 调用](p3-2-service-bindings.md)；该子方案不代替完整 Node API 验收。
 
 实现默认/具名入口、跨 Worker 和自绑定的原生 fetch/RPC，目标按 authority 解析并固定单次调用。
 与 assets 路由复用正确入口；不为 `WORKER_SELF_REFERENCE` 或特定框架名称写专用生产分支。
