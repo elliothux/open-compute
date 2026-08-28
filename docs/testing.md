@@ -74,6 +74,11 @@ cargo test -p open-compute-service --all-features \
   --test p0_2_runtime_gate -- --test-threads=1
 ```
 
+P0.2 同时验证 Worker TS CLI 的编译、部署、请求和类型错误拒绝路径，需要本机 Bun 与已经安装
+的根 workspace 锁定依赖。可用 `OPEN_COMPUTE_TEST_BUN` 指定 Bun 路径；测试不会下载工具链。
+JS/TS 开发检查使用 `bun run typecheck` 和 `bun run test:js`；修改系统源码后执行 `bun run build`，
+再用 `bun run check:generated` 核对提交的 JS 与源码清单。CI 使用锁定依赖执行相同检查。
+
 P0.1 的三轮循环写在测试内部，当前没有单轮参数；它保留为最终进程验收入口。开发时先运行所改
 process/supervisor 模块的定向测试，不修改循环或断言来伪造单轮结果。G0 可按改动选择
 `./poc/g0 test bootstrap`、`loader`、`binding`、`durable-object` 或 `recovery` 做单次诊断；

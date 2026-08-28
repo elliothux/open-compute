@@ -26,12 +26,9 @@ pub use bundle::{
 pub use d1::D1ResourceDriver;
 pub use descriptor::{
     BindingDescriptorV1, COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN,
-    COMPATIBILITY_FLAGS_ALLOWED, D1_FACADE_MODULE_NAME, DO_ALARM_SHIM_MODULE_NAME,
-    DO_FACADE_MODULE_NAME, DO_ID_CODEC_MODULE_NAME, GLOBAL_OUTBOUND_POLICY_VERSION,
-    LOADED_ISOLATE_WRAPPER_MODULE_NAME, LoadedIsolateInjectionV1, QUEUE_FACADE_MODULE_NAME,
-    QueueProducerBindingDescriptorV1, R2_FACADE_MODULE_NAME, SecretDescriptor,
-    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, loader_key, parse_loader_key,
-    validate_compatibility, validate_env_name,
+    COMPATIBILITY_FLAGS_ALLOWED, GLOBAL_OUTBOUND_POLICY_VERSION, QueueProducerBindingDescriptorV1,
+    SYSTEM_MODULE_PREFIX, SecretDescriptor, WorkerCodeDescriptorV1, canonicalize_vars,
+    ciphertext_sha256, loader_key, parse_loader_key, validate_compatibility, validate_env_name,
 };
 pub use durable_objects::DurableObjectResourceDriver;
 pub use kv::KvResourceDriver;

@@ -808,9 +808,9 @@ crates/storage/scheduler-migrations/001_scheduler.sql
 crates/storage/src/scheduler.rs
 crates/service/src/scheduler.rs
 crates/service/src/alarm_index.rs
-runtime/system-workers/do-alarm-shim.js
+runtime/system-workers/durable-objects/alarm-shim.js
 runtime/system-workers/do-alarm-transport.js
-runtime/system-workers/do-host.js
+runtime/system-workers/durable-objects/host.js
 test/test-p0-8.sh
 ```
 

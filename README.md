@@ -18,14 +18,16 @@ control/data plane 和 pinned upstream `workerd` child；启动过程永不下�
 | `crates/workers` | WorkerBundle、deployment pipeline、RuntimeSource、dispatch pins |
 | `crates/service` | `platformd` CLI、health、control/data plane、workerd bridge |
 | `runtime/` | Formal `workerd.lock.json`, Cap'n Proto, system workers |
+| `packages/toolchain` | Rolldown + TS7 Worker build/run/deploy CLI |
 | `poc/` | G0 evidence only; not the production implementation |
-| `examples/` | Container, systemd, launchd |
+| `examples/` | Container, systemd, launchd, TypeScript Worker |
 | `test/` | Repository test/Gate launchers, coverage, load/soak, fixtures, and fuzz |
 | `scripts/` | Local development and release packaging launchers |
 
 ## Prerequisites
 
 - Rust 1.98.0 (workspace toolchain and MSRV)
+- Bun 1.3.14, Node.js 24, and locked workspace dependencies for TypeScript development/tests (not daemon startup)
 - macOS or Linux
 - Official pinned `workerd` matching `runtime/workerd.lock.json` (G0 pin `v1.20260826.1`)
 - `rclone` with `serve s3` support for local development
@@ -43,6 +45,9 @@ platformd --config /abs/config.toml run
 ```
 
 ## Dev / test
+
+Worker 的 TypeScript 用法见 [工具链说明](packages/toolchain/README.md)；
+系统 Worker 源码按领域组织，见 [runtime 目录](runtime/README.md)。
 
 本地开发直接运行：
 

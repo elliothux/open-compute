@@ -1,0 +1,17 @@
+{
+  "name": "@open-compute/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build.ts",
+    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tsconfig.build.json --noEmit",
+    "test": "node --test 'tests/**/*.test.mjs'",
+    "check:generated": "bun build.ts --check"
+  },
+  "devDependencies": {
+    "rolldown": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:"
+  }
+}

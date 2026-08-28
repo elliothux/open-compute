@@ -28,6 +28,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.10.0
+      - name: Install locked TypeScript tooling
+        run: bun install --frozen-lockfile --ignore-scripts
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
@@ -36,6 +44,12 @@ jobs:
         with:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Strict TypeScript and generated runtime assets
+        run: |
+          bun run typecheck
+          bun run check:generated
+          bun run test:js
+          bun run --filter @open-compute/toolchain build
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
@@ -53,6 +67,14 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.10.0
+      - name: Install locked TypeScript tooling
+        run: bun install --frozen-lockfile --ignore-scripts
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
@@ -79,6 +101,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.10.0
+      - name: Install locked TypeScript tooling
+        run: bun install --frozen-lockfile --ignore-scripts
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0

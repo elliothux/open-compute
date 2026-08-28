@@ -8,7 +8,7 @@ if [ ! -f "$workerd" ]; then
   exit 1
 fi
 if rg -q 'acceptWebSocket|getWebSockets|serializeAttachment|deserializeAttachment' \
-  "$root/runtime/system-workers/do-facade.js" "$root/runtime/system-workers/do-host.js"; then
+  "$root/runtime/system-workers/durable-objects/facade.js" "$root/runtime/system-workers/durable-objects/host.js"; then
   echo "P1.8 facade unexpectedly exposes an unverified hibernation method" >&2
   exit 1
 fi

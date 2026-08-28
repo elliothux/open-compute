@@ -73,6 +73,15 @@
 - Keep default features empty unless a production capability requires otherwise, and preserve `--no-default-features` builds.
 - Commit intentional `Cargo.lock` changes, but never hand-edit the lockfile.
 
+## TypeScript and JavaScript Sources
+
+- Organize runtime TypeScript sources and behavioral tests by domain: gateway, loader, KV, D1, R2, Queues, Durable Objects, and Workflows. Keep each domain's protocol types beside its implementation; reserve shared binding types for capabilities actually used across domains. Preserve the source directory structure in generated assets instead of flattening filenames.
+- All maintained functional JavaScript-family code must be TypeScript (`.ts` or `.tsx`) and pass the pinned TypeScript 7 compiler in strict mode. This includes system Workers, developer tools, build scripts, and functional examples. JavaScript is allowed only in tests, fixtures, mocks, disposable G0 evidence, and reproducibly generated runtime/build artifacts; never hand-edit generated JavaScript or hide functional source in an excluded path.
+- Manage JavaScript-family packages in the root Bun workspace with one committed `bun.lock`. Use the root dependency catalog for shared versions and `workspace:*` for local packages. Use Bun as the package manager; do not introduce npm, pnpm, or Yarn lockfiles.
+- Rolldown owns TypeScript/JSX transformation and project bundling; TypeScript 7 owns type checking. Both must succeed before a new compiled Worker is admitted for deployment. Compilation and dependency installation belong to developer/build tooling, never the production request path or daemon startup.
+- Do not use `any`, `@ts-nocheck`, `@ts-ignore`, unchecked double assertions, ambient catch-all modules, or relaxed compiler flags to make migration/type checks pass. Model private protocols and product APIs explicitly; use `unknown` plus validation at untrusted boundaries. Type declarations must not advertise unsupported platform capabilities or expose internal credentials.
+- Generated runtime JavaScript must be reproducible from the checked-in TypeScript and pinned toolchain, and checked against source in CI. Production startup remains offline and consumes the built runtime assets without Bun, Node.js, or a TypeScript compiler.
+
 ## Runtime and Supply Chain
 
 - Production startup is offline. It must never fetch, auto-upgrade, or search `PATH` for `workerd`.

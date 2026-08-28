@@ -1,0 +1,8 @@
+{
+  "name": "@open-compute/example-hello-worker",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:"
+  }
+}

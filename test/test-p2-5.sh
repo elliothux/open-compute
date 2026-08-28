@@ -30,6 +30,6 @@ while [ "$round" -le "$rounds" ]; do
 done
 cargo test -p open-compute-core -p open-compute-storage -p open-compute-workers \
   -p open-compute-service --lib --all-features workflow -- --test-threads=1
-node --test runtime/tests/workflow-json.test.mjs runtime/tests/workflow-duration.test.mjs \
-  runtime/tests/workflow-binding-v2.test.mjs
+node --test runtime/tests/workflows/json.test.mjs runtime/tests/workflows/duration.test.mjs \
+  runtime/tests/workflows/binding-v2.test.mjs
 printf 'P2.5 durable Workflow Gate PASS (%s fresh-process round(s))\n' "$rounds"

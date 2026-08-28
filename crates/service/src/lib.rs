@@ -35,6 +35,7 @@ pub mod scheduler_http;
 mod snapshot_pins;
 pub mod support_bundle;
 pub mod upgrade_cli;
+mod worker_cli;
 pub mod workers_http;
 pub mod workflow_backend;
 pub mod workflow_http;

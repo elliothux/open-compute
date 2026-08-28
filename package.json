@@ -1,0 +1,29 @@
+{
+  "name": "open-compute",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "runtime",
+    "packages/*",
+    "examples/*",
+    "poc"
+  ],
+  "catalog": {
+    "rolldown": "1.2.6",
+    "typescript": "7.0.2",
+    "@types/node": "24.13.3",
+    "@cloudflare/workers-types": "5.20260826.1"
+  },
+  "scripts": {
+    "oc": "bun packages/toolchain/src/bin.ts",
+    "build": "bun run --filter @open-compute/toolchain build && bun run --filter @open-compute/runtime build",
+    "typecheck": "bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit",
+    "test:js": "node --test 'runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs'",
+    "check:generated": "bun run --filter @open-compute/runtime check:generated"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:"
+  }
+}

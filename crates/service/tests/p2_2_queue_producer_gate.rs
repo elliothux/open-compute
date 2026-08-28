@@ -359,7 +359,7 @@ async fn p2_2_real_queue_producer_matrix() {
     assert_eq!(retired.purged_messages, 0);
 
     assert!(
-        include_str!("../../../runtime/system-workers/queue-facade.js")
+        include_str!("../../../runtime/system-workers/queues/facade.js")
             .contains("QUEUE_DO_OUTPUT_GATE_UNSUPPORTED")
     );
     let diagnostics = format!("{:?}", supervisor.last_diagnostics());

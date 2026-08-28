@@ -480,7 +480,7 @@ fn request(
 
 fn object_source() -> &'static str {
     r#"import { WorkerEntrypoint } from "cloudflare:workers";
-import { R2Bucket as ImportableR2Bucket } from "./__open_compute_r2_facade__.js";
+import { R2Bucket as ImportableR2Bucket } from "./__open_compute__/r2/facade.js";
 
 function wrapped(bucket) {
   return bucket instanceof ImportableR2Bucket
@@ -507,10 +507,14 @@ export default {
     if (path === "/head") return new Response(await (await env.BUCKET.get("hello.txt")).text());
     if (path === "/fake-cancel") {
       let cancelled = false;
+      const unexpected = () => { throw new Error("unexpected R2 transport call"); };
       const bucket = new ImportableR2Bucket({
+        head: unexpected, put: unexpected, delete: unexpected, list: unexpected,
         async get() {
           return {
-            meta: { key: "fake", uploaded: 0, httpMetadata: {}, customMetadata: {} },
+            meta: { key: "fake", version: "fixture-version", size: 1,
+              etag: "0".repeat(32), httpEtag: `"${"0".repeat(32)}"`,
+              uploaded: 0, httpMetadata: {}, customMetadata: {}, storageClass: "Standard" },
             body: new ReadableStream({
               start(controller) { controller.enqueue(new Uint8Array([1])); },
               cancel() { cancelled = true; },

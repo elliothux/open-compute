@@ -1,8 +1,9 @@
 //! Subprocess CLI shape tests for `platformd`.
 
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 #[test]
@@ -13,12 +14,49 @@ fn help_subcommands() {
         vec!["config", "check", "--help"],
         vec!["doctor", "--help"],
         vec!["package-release", "--help"],
+        vec!["worker", "bundle", "--help"],
     ] {
         let out = Command::new(bin).args(&args).output().expect("run");
         assert!(out.status.success(), "{args:?} {:?}", out.status);
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(text.contains("Usage"));
     }
+}
+
+#[test]
+fn worker_bundle_reads_stdin_without_loading_platform_configuration() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_platformd"))
+        .args(["worker", "bundle"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            br#"{
+        "schemaVersion": 1,
+        "mainModule": "worker.js",
+        "modules": [{"name":"worker.js","type":"esModule","bytesBase64":"ZXhwb3J0IGRlZmF1bHQge307"}]
+    }"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let bundle = open_compute_workers::CanonicalBundle::parse(
+        output.stdout,
+        open_compute_workers::BundleLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(bundle.manifest().main_module, "worker.js");
+    assert!(output.stderr.is_empty());
 }
 
 #[test]

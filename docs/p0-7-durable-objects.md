@@ -824,11 +824,11 @@ crates/service/src/do_http.rs
 crates/service/src/binding_backend.rs
 crates/service/src/runtime_bridge.rs
 crates/service/src/metrics_do.rs
-runtime/system-workers/do-host.js
-runtime/system-workers/do-router.js
-runtime/system-workers/do-facade.js
-runtime/system-workers/do-id-codec.js
-runtime/system-workers/loaded-isolate-wrapper-generator.js
+runtime/system-workers/durable-objects/host.js
+runtime/system-workers/durable-objects/router.js
+runtime/system-workers/durable-objects/facade.js
+runtime/system-workers/durable-objects/id-codec.js
+runtime/system-workers/loader/wrappers/generator.js
 test/test-p0-7.sh
 ```
 

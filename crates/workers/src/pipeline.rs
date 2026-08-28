@@ -19,9 +19,7 @@ use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
 use crate::descriptor::{
-    BindingDescriptorV1, D1_FACADE_MODULE_NAME, DO_ALARM_SHIM_MODULE_NAME, DO_FACADE_MODULE_NAME,
-    DO_ID_CODEC_MODULE_NAME, LOADED_ISOLATE_WRAPPER_MODULE_NAME, QUEUE_FACADE_MODULE_NAME,
-    QueueProducerBindingDescriptorV1, R2_FACADE_MODULE_NAME, SecretDescriptor,
+    BindingDescriptorV1, QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX, SecretDescriptor,
     WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, validate_env_name,
 };
 use bytes::Bytes;
@@ -406,7 +404,7 @@ impl<'a> DeploymentController<'a> {
             canonicalize_vars(request.vars.clone(), MAX_VARS, MAX_ENV_BYTES)?;
         validate_secret_set(&request.secrets, &canonical_vars)?;
         validate_binding_set(&request.bindings, &canonical_vars, &request.secrets)?;
-        validate_injection_module_collisions(bundle.manifest(), &request.bindings)?;
+        validate_injection_module_collisions(bundle.manifest())?;
         validate_product_counts(&request)?;
         let repo = WorkerRepository::new(self.storage.db());
         // Authentication/account scoping happens before reserving a key, so a

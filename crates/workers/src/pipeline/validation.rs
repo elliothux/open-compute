@@ -64,51 +64,15 @@ pub(crate) fn validate_binding_set(
 
 pub(crate) fn validate_injection_module_collisions(
     manifest: &WorkerBundleManifest,
-    bindings: &BTreeMap<String, DeploymentBindingInput>,
 ) -> Result<(), PlatformError> {
-    let durable_workflow = bindings
-        .values()
-        .any(|binding| binding.kind == BindingKind::Workflow && binding.capability_version == 2);
-    if manifest.modules.iter().any(|module| {
-        matches!(
-            module.name.as_str(),
-            crate::descriptor::WORKFLOW_FACADE_MODULE_NAME
-                | crate::descriptor::WORKFLOW_JSON_MODULE_NAME
-                | crate::descriptor::WORKFLOW_RUNNER_MODULE_NAME
-        ) || (durable_workflow && module.name == crate::descriptor::WORKFLOW_V2_FACADE_MODULE_NAME)
-    }) {
+    if manifest
+        .modules
+        .iter()
+        .any(|module| module.name.starts_with(SYSTEM_MODULE_PREFIX))
+    {
         return Err(PlatformError::new(
             ErrorCode::BundleInvalid,
-            "tenant bundle collides with a reserved Workflow module",
-        ));
-    }
-    if !bindings.values().any(|binding| {
-        matches!(
-            binding.kind,
-            BindingKind::R2Bucket
-                | BindingKind::D1Database
-                | BindingKind::DoNamespace
-                | BindingKind::QueueProducer
-                | BindingKind::Workflow
-        )
-    }) {
-        return Ok(());
-    }
-    if manifest.modules.iter().any(|module| {
-        matches!(
-            module.name.as_str(),
-            R2_FACADE_MODULE_NAME
-                | D1_FACADE_MODULE_NAME
-                | DO_FACADE_MODULE_NAME
-                | DO_ID_CODEC_MODULE_NAME
-                | DO_ALARM_SHIM_MODULE_NAME
-                | QUEUE_FACADE_MODULE_NAME
-                | LOADED_ISOLATE_WRAPPER_MODULE_NAME
-        )
-    }) {
-        return Err(PlatformError::new(
-            ErrorCode::BundleInvalid,
-            "tenant bundle collides with a reserved loaded-isolate module",
+            "tenant bundle collides with a reserved system module",
         ));
     }
     Ok(())

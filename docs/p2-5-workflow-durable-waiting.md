@@ -146,7 +146,7 @@ open-compute 明确选择的本地契约，不声称与 CF 的所有内部行为
 这两个字段都必须经过 schema、descriptor digest、runtime-source 和 loader validation，而不是仅由
 facade 分支决定。V2 version 通过实际 V2 runner 的 class probe 后才能 ready。
 
-- 旧 version、binding、instance 保持 capability 1、原 descriptor/hash 和 P2.4 语义。
+- capability 1 与 capability 2 保持各自的执行契约；系统源码统一使用当前 TS 生成产物，不保留历史 descriptor/hash。
 - V1 仍是顺序 `do`、attempt=1、无 retry、无 retention；已 catch 的 step error 仍按原 failure latch 失败。
 - V2 支持本文能力；最终 step error 可被 catch，失败 step 也可成为合法 replay 历史。
 - `create` 要求 caller capability 与 definition 当前 version capability 一致；不一致返回
@@ -161,13 +161,14 @@ facade 分支决定。V2 version 通过实际 V2 runner 的 class probe 后才�
 
 ### 2.2 Wrapper 与 loader 身份
 
-当前 `loaded-isolate-wrapper-generator-v2.js` 属于 P2.4，不等于本文的 Workflow capability V2。
-实现时保留已有 wrapper/runner 输出；新增 generator revision 与 `workflow-runner-v2.js`，仅由已验证的
-capability 2 路径选择。不要通过修改旧 generator 使旧 WorkerCode digest 改变。
+系统源码按 day1 使用 `runtime/src/loader/wrappers/` 中的一套 TS wrapper。generator 只生成
+模块导入、已验证配置与导出；执行逻辑位于可严格检查的 runtime、DO、Workflow 模块。
+capability 1/2 分别选择对应 runner，不再选择历史 generator revision 或旧 JS 资产。
 
-V2 loader cache key 额外区分 execution capability 与 frozen version descriptor；同一 bundle/class
-不能因已缓存 V1 wrapper 而执行错 runner。V1 key 和无 Workflow binding 的 WorkerCode 测试保持不变。
-Binding 与 execution 分开校验；host 不接受 tenant 传入的 capability/version 作为 authority。
+每个 WorkerCode 都包含完整生成源码清单的摘要，包含无产品绑定的 Worker。
+内部模块使用保留的 `__open_compute__/` 命名空间，不允许租户 bundle 覆盖。
+Workflow loader cache key 区分 execution capability 与 frozen version descriptor；binding 与
+execution 分开校验，host 不接受 tenant 传入的 capability/version 作为 authority。
 
 冻结 Workflow version 不改变其他产品的调用契约。DO 仍执行 P0.7 的 active Worker deployment
 校验；已退役 Worker deployment 的 DO 调用返回 `DO_DEPLOYMENT_STALE`，不能通过 Workflow replay
@@ -782,7 +783,7 @@ generation，防止正在执行的旧请求越过 R2。Retain 结束后，新 cr
 external ID 一样，旧 handle 也只能得到 not found，不能向新实例发事件或 terminate。
 
 这个新 handle 不承载 raw run/step token，也不向 tenant 返回 creation nonce。V1 无自动 retention/ID
-重用，保留旧 facade；不能借增加 V2 来更改旧 deployment 的 wrapper bytes。
+重用；facade 与 wrapper 统一从当前 TS 构建，不承诺历史 deployment 的 wrapper bytes。
 RpcTarget 的资源生命期由当前 RPC/request 管理，不能跨请求永久缓存；需要长期保存的是 external ID，
 后续请求再 `get(id)`，不能序列化或持久化私有 handle。
 
@@ -894,8 +895,8 @@ supervisor 停止唯一 workerd 子进程。不得新增一个不受 supervisor 
 | `crates/service/src/workflow_backend.rs` | 严格 public/private wire decode、trusted scope、admission；不直接堆 SQL |
 | `crates/service/src/scheduler/workflow.rs` | dispatch、heartbeat、yield/terminal 分类、due/timeout composition |
 | `crates/service/src/runtime_bridge/workflow.rs` | V2 request/result protocol、frozen capability dispatch；保留 body-bearing no-pool 修复 |
-| `runtime/system-workers/workflow-host.js` | request-scoped run controller、instance-scoped handle、可信 timeout、私有 grant map |
-| `runtime/system-workers/workflow-runner-v2.js`（新） | token-free API、replay、batch barrier、control signal；不拥有 SQLite authority |
+| `runtime/system-workers/workflows/host.js` | request-scoped run controller、instance-scoped handle、可信 timeout、私有 grant map |
+| `runtime/system-workers/workflows/runner-v2.js`（新） | token-free API、replay、batch barrier、control signal；不拥有 SQLite authority |
 | `crates/service/src/doctor_workflow.rs` / metrics | 新状态/operations/inbox/due 的低基数诊断 |
 
 新增 private run protocol 使用 `/internal/workflows/v2/runs/`，包括 claim、claim-batch、success、failure、

@@ -436,8 +436,8 @@ fn deployment_request(
 
 fn matrix_source() -> &'static str {
     r#"import { WorkerEntrypoint } from "cloudflare:workers";
-import { D1Database as ImportableD1Database } from "./__open_compute_d1_facade__.js";
-import { R2Bucket as ImportableR2Bucket } from "./__open_compute_r2_facade__.js";
+import { D1Database as ImportableD1Database } from "./__open_compute__/d1/facade.js";
+import { R2Bucket as ImportableR2Bucket } from "./__open_compute__/r2/facade.js";
 
 const meta = () => ({
   served_by: "open-compute-local", served_by_primary: true, duration: 0,
@@ -598,7 +598,7 @@ export default {
 }
 
 fn function_source() -> &'static str {
-    r#"import { D1Database } from "./__open_compute_d1_facade__.js";
+    r#"import { D1Database } from "./__open_compute__/d1/facade.js";
 export default async function(request, env) {
   return new Response(`function:${env.DB instanceof D1Database && typeof env.DB.prepare === "function"}`);
 }"#
@@ -606,7 +606,7 @@ export default async function(request, env) {
 
 fn class_source() -> &'static str {
     r#"import { WorkerEntrypoint } from "cloudflare:workers";
-import { D1Database } from "./__open_compute_d1_facade__.js";
+import { D1Database } from "./__open_compute__/d1/facade.js";
 export default class extends WorkerEntrypoint {
   constructor(ctx, env) { super(ctx, env); this.wrapped = env.DB instanceof D1Database; }
   async fetch() { return new Response(`class:${this.wrapped}:${this.env.DB instanceof D1Database}`); }

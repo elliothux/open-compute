@@ -12,28 +12,10 @@ use std::str::FromStr;
 
 /// Version of the public-only outbound gateway policy in the descriptor.
 pub const GLOBAL_OUTBOUND_POLICY_VERSION: u32 = 1;
-/// Reserved dynamic module containing the tenant-local R2 facade.
-pub const R2_FACADE_MODULE_NAME: &str = "__open_compute_r2_facade__.js";
-/// Reserved dynamic module containing the tenant-local D1 facade.
-pub const D1_FACADE_MODULE_NAME: &str = "__open_compute_d1_facade__.js";
-/// Reserved dynamic module containing the tenant-local Durable Object facade.
-pub const DO_FACADE_MODULE_NAME: &str = "__open_compute_do_facade__.js";
-/// Reserved dynamic module containing the synchronous Durable Object ID codec.
-pub const DO_ID_CODEC_MODULE_NAME: &str = "__open_compute_do_id_codec__.js";
-/// Reserved dynamic module containing the object-local Durable Object alarm shim.
-pub const DO_ALARM_SHIM_MODULE_NAME: &str = "__open_compute_do_alarm_shim__.js";
-/// Reserved dynamic module containing the tenant-local Queue producer facade.
-pub const QUEUE_FACADE_MODULE_NAME: &str = "__open_compute_queue_facade__.js";
-/// Reserved dynamic module for the Workflow caller facade.
-pub const WORKFLOW_FACADE_MODULE_NAME: &str = "__open_compute_workflow_facade__.js";
-/// Reserved dynamic module for the capability-two Workflow caller facade.
-pub const WORKFLOW_V2_FACADE_MODULE_NAME: &str = "__open_compute_workflow_facade_v2__.js";
-/// Reserved dynamic module for the bounded Workflow JSON codec.
-pub const WORKFLOW_JSON_MODULE_NAME: &str = "__open_compute_workflow_json__.js";
-/// Reserved private Workflow runner module identity, never a tenant bundle module.
-pub const WORKFLOW_RUNNER_MODULE_NAME: &str = "__open_compute_workflow_runner__.js";
-/// Reserved deterministic main-module wrapper generated for local product facades.
-pub const LOADED_ISOLATE_WRAPPER_MODULE_NAME: &str = "__open_compute_loaded_isolate_wrapper__.js";
+/// Namespace reserved for all platform-owned loaded-isolate modules.
+pub const SYSTEM_MODULE_PREFIX: &str = "__open_compute__/";
+const SYSTEM_WORKER_MANIFEST: &[u8] =
+    include_bytes!("../../../runtime/system-workers/manifest.json");
 /// Earliest compatibility date accepted by the pinned P1 policy.
 pub const COMPATIBILITY_DATE_MIN: &str = "2022-01-01";
 /// Latest compatibility date accepted by the pinned P1 policy.
@@ -41,8 +23,8 @@ pub const COMPATIBILITY_DATE_MAX: &str = "2026-08-26";
 /// Compatibility flags accepted by the production descriptor validator.
 pub const COMPATIBILITY_FLAGS_ALLOWED: &[&str] = &["nodejs_compat", "rpc"];
 
-mod injection;
-pub use injection::LoadedIsolateInjectionV1;
+#[cfg(test)]
+mod source_tests;
 
 /// Secret identity included without plaintext.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -228,13 +210,11 @@ pub struct WorkerCodeDescriptorV1 {
     /// Canonically sorted immutable resource binding descriptors.
     pub binding_descriptors: Vec<BindingDescriptorV1>,
     /// Canonically sorted immutable Queue producer binding descriptors.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
-    /// Logical Workflow bindings, omitted for byte-identical pre-Workflow descriptors.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Canonically sorted immutable Workflow binding descriptors.
     pub workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
-    /// Exact loaded-isolate facade sources required by product bindings.
-    pub loaded_isolate_injection: Option<LoadedIsolateInjectionV1>,
+    /// SHA-256 of the complete generated system Worker source manifest.
+    pub system_worker_sources_sha256: String,
     /// Immutable limits profile document.
     pub limits: serde_json::Value,
     /// Public egress policy version.
@@ -369,11 +349,6 @@ impl WorkerCodeDescriptorV1 {
                 return Err(binding_invariant());
             }
         }
-        let loaded_isolate_injection = LoadedIsolateInjectionV1::for_bindings(
-            &binding_descriptors,
-            &queue_binding_descriptors,
-            &workflow_binding_descriptors,
-        );
         validate_limits(&limits)?;
         Ok(Self {
             schema_version: 1,
@@ -388,7 +363,7 @@ impl WorkerCodeDescriptorV1 {
             secret_revisions,
             binding_descriptors,
             queue_binding_descriptors,
-            loaded_isolate_injection,
+            system_worker_sources_sha256: hex::encode(Sha256::digest(SYSTEM_WORKER_MANIFEST)),
             workflow_binding_descriptors,
             limits,
             global_outbound_policy_version: GLOBAL_OUTBOUND_POLICY_VERSION,

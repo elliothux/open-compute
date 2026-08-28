@@ -39,6 +39,12 @@ pub struct Cli {
 pub enum Command {
     /// Start the platform process.
     Run,
+    /// Offline Worker build utilities; these do not require platform configuration.
+    Worker {
+        /// Worker subcommand.
+        #[command(subcommand)]
+        command: WorkerCommand,
+    },
     /// Configuration utilities.
     Config {
         /// Config subcommand.
@@ -125,6 +131,13 @@ pub enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+/// `platformd worker` developer-tool subcommands.
+#[derive(Debug, Subcommand)]
+pub enum WorkerCommand {
+    /// Read versioned build JSON on stdin and write a canonical binary bundle to stdout.
+    Bundle,
 }
 
 /// `platformd backup` subcommands.
@@ -306,6 +319,15 @@ async fn run(
     stdout: &mut impl Write,
     package_binary: Option<&Path>,
 ) -> Result<ExitCode, PlatformError> {
+    if matches!(
+        &cli.command,
+        Command::Worker {
+            command: WorkerCommand::Bundle
+        }
+    ) {
+        crate::worker_cli::encode_bundle(std::io::stdin().lock(), stdout)?;
+        return Ok(ExitCode::from(ExitClass::Ok.code()));
+    }
     if let Command::PackageRelease {
         dest,
         lock,
@@ -545,7 +567,9 @@ async fn run(
                 .map_err(|_| io_failed())?;
             Ok(ExitCode::from(ExitClass::Ok.code()))
         }
-        Command::PackageRelease { .. } => unreachable!("handled before config load"),
+        Command::PackageRelease { .. } | Command::Worker { .. } => {
+            unreachable!("handled before config load")
+        }
     }
 }
 

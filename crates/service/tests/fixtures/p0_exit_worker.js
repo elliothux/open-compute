@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
-import { D1Database } from "./__open_compute_d1_facade__.js";
-import { DurableObjectNamespace } from "./__open_compute_do_facade__.js";
-import { R2Bucket } from "./__open_compute_r2_facade__.js";
+import { D1Database } from "./__open_compute__/d1/facade.js";
+import { DurableObjectNamespace } from "./__open_compute__/durable-objects/facade.js";
+import { R2Bucket } from "./__open_compute__/r2/facade.js";
 import { checkWorkersSurface } from "./p1-conformance/workers.mjs";
 import { checkKvSurface } from "./p1-conformance/kv.mjs";
 import { checkR2Surface } from "./p1-conformance/r2.mjs";

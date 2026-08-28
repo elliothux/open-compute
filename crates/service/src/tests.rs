@@ -532,25 +532,25 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         assets.join("config.capnp"),
     )
     .unwrap();
-    for name in [
-        "ingress.js",
-        "loader-host.js",
-        "outbound-gateway.js",
-        "r2-facade.js",
-        "d1-facade.js",
-        "do-facade.js",
-        "do-id-codec.js",
-        "loaded-isolate-wrapper-generator.js",
-        "r2-transport.js",
-        "d1-transport.js",
-        "do-router.js",
-        "do-host.js",
-    ] {
-        fs::copy(
-            workspace.join("runtime/system-workers").join(name),
-            assets.join("system-workers").join(name),
-        )
-        .unwrap();
+    let sources = workspace.join("runtime/system-workers");
+    let mut pending = vec![PathBuf::new()];
+    while let Some(relative) = pending.pop() {
+        for entry in fs::read_dir(sources.join(&relative)).unwrap() {
+            let entry = entry.unwrap();
+            let relative = relative.join(entry.file_name());
+            let output = assets.join("system-workers").join(&relative);
+            let file_type = entry.file_type().unwrap();
+            if file_type.is_dir() {
+                fs::create_dir(&output).unwrap();
+                pending.push(relative);
+            } else {
+                assert!(
+                    file_type.is_file(),
+                    "runtime fixture must not contain links"
+                );
+                fs::copy(entry.path(), output).unwrap();
+            }
+        }
     }
     let license = package_root.join("LICENSE");
     fs::write(&license, b"test license").unwrap();

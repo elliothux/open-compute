@@ -25,7 +25,7 @@ fn p1_local_runners_and_runbooks_are_complete_and_safe() {
         "load-p1.sh",
         "fuzz-p1.sh",
     ] {
-        let source = fs::read_to_string(root.join("scripts").join(script)).expect("P1 runner");
+        let source = fs::read_to_string(root.join("test").join(script)).expect("P1 runner");
         assert!(source.starts_with("#!/bin/sh\n"), "{script}");
         assert!(source.contains("set -eu"), "{script}");
         assert!(!source.contains("curl "), "{script} must stay local");

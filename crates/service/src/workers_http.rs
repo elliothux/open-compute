@@ -3,12 +3,10 @@
 use crate::http::{HttpState, ProductErrorCode, authorize};
 use crate::metrics::DoFacetReloadReason;
 use crate::runtime_bridge::{DispatchTarget, WorkerdTransport};
-use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
 use bytes::Bytes;
 use http_body_util::BodyExt as _;
 use hyper::body::{Body as HttpBody, Frame, SizeHint};
@@ -40,6 +38,9 @@ use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
+
+mod control;
+pub use control::control_router;
 
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 pub(crate) const DEPLOYMENT_METADATA_HEADER: &str = "x-open-compute-deployment-metadata";
@@ -112,43 +113,6 @@ impl WorkerApiState {
     pub fn pins(&self) -> &DeploymentPins {
         &self.pins
     }
-}
-
-/// Router containing the stable P0.2 management surface.
-pub fn control_router() -> Router<HttpState> {
-    Router::new()
-        .route(
-            "/v1/accounts/{account_id}/workers",
-            post(create_worker).get(list_workers),
-        )
-        .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}",
-            get(get_worker).delete(delete_worker),
-        )
-        .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/deployments",
-            post(create_deployment).get(list_deployments),
-        )
-        .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/deployments/{deployment_id}",
-            get(get_deployment).delete(delete_deployment),
-        )
-        .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/promotions",
-            post(promote),
-        )
-        .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/rollbacks",
-            post(rollback),
-        )
-        .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/routes",
-            post(create_route).get(list_routes),
-        )
-        .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/routes/{route_id}",
-            delete(delete_route),
-        )
 }
 
 #[derive(Deserialize)]

@@ -7,6 +7,11 @@
 *.pdb
 *.profraw
 
+# Bun workspace dependencies and developer-tool build output.
+node_modules/
+/packages/*/dist/
+*.tsbuildinfo
+
 # Mutation testing output.
 **/mutants.out*/
 

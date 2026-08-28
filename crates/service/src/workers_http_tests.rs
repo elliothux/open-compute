@@ -69,6 +69,47 @@ request_timeout_ms = 1500
     (temp, mock, api, account)
 }
 
+#[tokio::test]
+async fn default_account_discovery_is_authenticated_and_uses_persisted_identity() {
+    use crate::{HealthCoordinator, MetricsRegistry};
+    use open_compute_core::MetricsConfig;
+    use tower::ServiceExt;
+
+    let (_temp, _s3, api, account) = worker_api_fixture().await;
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap()),
+        false,
+        Some(SecretString::new("account-admin")),
+    )
+    .with_worker_api(api);
+    let router = control_router().with_state(state);
+    for (token, expected_status) in [
+        (None, StatusCode::UNAUTHORIZED),
+        (Some("wrong"), StatusCode::UNAUTHORIZED),
+        (Some("account-admin"), StatusCode::OK),
+    ] {
+        let mut request = Request::builder().uri("/v1/account");
+        if let Some(token) = token {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        let response = router
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected_status);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        assert!(!String::from_utf8_lossy(&body).contains("account-admin"));
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        if expected_status == StatusCode::OK {
+            assert_eq!(value, serde_json::json!({ "accountId": account }));
+        } else {
+            assert!(!String::from_utf8_lossy(&body).contains(&account.to_string()));
+        }
+    }
+}
+
 #[test]
 fn host_and_route_validation_are_canonical_and_bounded() {
     assert_eq!(canonical_hostname("EXAMPLE.com.").unwrap(), "example.com");

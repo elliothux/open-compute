@@ -138,43 +138,18 @@ printf '%s' '{payload}'
 }
 
 fn copy_formal_assets(dest: &Path) {
-    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../runtime")
+        .canonicalize()
+        .expect("formal assets path");
     fs::create_dir_all(dest.join("system-workers")).expect("workers dir");
     fs::copy(src.join("config.capnp"), dest.join("config.capnp")).expect("config");
-    for name in [
-        "ingress.js",
-        "loader-host.js",
-        "outbound-gateway.js",
-        "r2-facade.js",
-        "d1-facade.js",
-        "do-facade.js",
-        "do-id-codec.js",
-        "do-alarm-shim.js",
-        "queue-facade.js",
-        "loaded-isolate-wrapper-generator.js",
-        "loaded-isolate-wrapper-generator-v2.js",
-        "loaded-isolate-wrapper-generator-v3.js",
-        "loaded-isolate-bindings.js",
-        "workflow-binding-v2.js",
-        "workflow-facade-v2.js",
-        "loaded-isolate-modules.js",
-        "workflow-host.js",
-        "workflow-controller-v2.js",
-        "workflow-runner-v2.js",
-        "workflow-runner.js",
-        "workflow-json.js",
-        "workflow-json-v2.js",
-        "workflow-facade.js",
-        "r2-transport.js",
-        "d1-transport.js",
-        "do-router.js",
-        "do-host.js",
-    ] {
-        fs::copy(
-            src.join("system-workers").join(name),
-            dest.join("system-workers").join(name),
-        )
-        .expect("worker");
+    for path in crate::fsutil::list_files_sorted(&src.join("system-workers")).expect("worker files")
+    {
+        let relative = path.strip_prefix(&src).expect("asset path");
+        let output = dest.join(relative);
+        fs::create_dir_all(output.parent().expect("asset parent")).expect("asset directory");
+        fs::copy(path, output).expect("worker");
     }
 }
 
@@ -1097,8 +1072,8 @@ fn input_digest_changes_with_any_input() {
     copy_formal_assets(dir.path());
 
     fs::write(
-        dir.path().join("system-workers/ingress.js"),
-        fs::read(dir.path().join("system-workers/ingress.js")).unwrap(),
+        dir.path().join("system-workers/gateway/ingress.js"),
+        fs::read(dir.path().join("system-workers/gateway/ingress.js")).unwrap(),
     )
     .unwrap();
     let extra = dir.path().join("system-workers/extra.js");

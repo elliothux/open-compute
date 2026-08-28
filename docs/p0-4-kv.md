@@ -20,7 +20,7 @@ P0.3 的 resource lifecycle 管理文件，以 custom JSRPC binding 向 Dynamic 
 - `crates/workers/src/kv.rs`：P0.3 resource lifecycle driver；
 - `crates/service/src/kv_backend.rs`、`kv_http.rs`、`binding_backend.rs`：control plane、真实执行器与
   bounded private frame/stream protocol；
-- `runtime/system-workers/loader-host.js`：tenant `KVNamespace` adapter；
+- `runtime/system-workers/loader/host.js`：tenant `KVNamespace` adapter；
 - `crates/service/tests/p0_4_kv_gate.rs`、`test/test-p0-4.sh`：stock-workerd Gate 和 P0.3/P0.2 回归；
 - fresh `./test/coverage.sh` 已通过 90.00% 门槛，实际 Rust line coverage 为 90.06%。
 
