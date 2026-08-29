@@ -55,6 +55,7 @@ export async function runCli(args: readonly string[]): Promise<void> {
   const effectiveProject = framework === undefined ? project : {
     ...project,
     ...(framework.assets === undefined ? {} : { assets: framework.assets }),
+    services: framework.services,
   };
   const main = entry ?? project.main;
   const binary = values.platformd ?? process.env.OPEN_COMPUTE_PLATFORMD;

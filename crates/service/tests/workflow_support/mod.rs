@@ -281,6 +281,7 @@ request_timeout_ms = 3000
                 vars: BTreeMap::from([("MODE".into(), serde_json::json!("frozen"))]),
                 secrets: BTreeMap::new(),
                 bindings,
+                services: BTreeMap::new(),
                 queue_consumers: Vec::new(),
                 crons: None,
                 limits: serde_json::json!({"profile":"default"}),

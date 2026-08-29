@@ -15,7 +15,8 @@ use crate::metrics::{
     KvLifecycleGuard, KvMaintenance, KvOperation, KvStagingGauge, MetricsRegistry,
     QueueMetricOperation, QueueReconcileOperation, R2Operation, R2ProviderError, R2StreamDirection,
     R2StreamGuard, REQUIRED_SERIES, ResourceOperation, RestartReason, S3Op, S3Result,
-    SchedulerClaimOutcome, SqliteOp, StartResult, StartStage, WebSocketCloseReason,
+    SchedulerClaimOutcome, ServiceMetricOperation, SqliteOp, StartResult, StartStage,
+    WebSocketCloseReason,
 };
 use crate::run::{
     FailAfter, RunOptions, gc_worker_artifacts, join_listener, join_runtime_source, listener_plan,
@@ -1277,9 +1278,26 @@ fn metrics_fixed_and_limits() {
     let reg =
         MetricsRegistry::new(&MetricsConfig::default(), "0.1.0", "workerd 2026-08-26").unwrap();
     reg.inc_start(StartResult::Success, StartStage::Config);
+    reg.observe_service_invocation(
+        ServiceMetricOperation::DefaultFetch,
+        true,
+        Duration::from_millis(7),
+    );
+    reg.set_service_invocation_counts(2, 3, 5);
     let text = reg.render(&PlatformStatus::starting());
     assert!(text.contains("platform_info"));
     assert!(text.contains("platform_ready"));
+    assert!(
+        text.contains(
+            "service_invocations_total{operation=\"default_fetch\",outcome=\"success\"} 1"
+        )
+    );
+    assert!(
+        text.contains("service_invocation_duration_seconds{operation=\"default_fetch\"} 0.007")
+    );
+    assert!(text.contains("service_invocation_roots 2"));
+    assert!(text.contains("service_invocation_operations 3"));
+    assert!(text.contains("service_capability_retentions 5"));
     let series = text
         .lines()
         .filter(|l| !l.starts_with('#') && !l.is_empty())
@@ -2494,6 +2512,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             vars: std::collections::BTreeMap::new(),
             secrets: std::collections::BTreeMap::new(),
             bindings: std::collections::BTreeMap::new(),
+            services: std::collections::BTreeMap::new(),
             queue_consumers: vec![QueueConsumerInput {
                 queue: queue_id,
                 entrypoint: None,

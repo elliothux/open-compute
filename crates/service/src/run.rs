@@ -21,6 +21,7 @@ use crate::r2_http::R2ApiState;
 use crate::r2_maintenance::R2Maintenance;
 use crate::runtime_bridge::{WorkerdTransport, bind_runtime_source, serve_runtime_source};
 use crate::scheduler::SchedulerService;
+use crate::service_invocations::ServiceInvocationRegistry;
 use crate::snapshot_pins::{SnapshotPins, load_snapshot_pins};
 use crate::workers_http::WorkerApiState;
 #[path = "run_p1.rs"]
@@ -693,6 +694,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         cache.clone(),
         deployment_pins.clone(),
     ));
+    let service_invocations = Arc::new(ServiceInvocationRegistry::new(
+        storage.clone(),
+        deployment_pins.clone(),
+    ));
+    let binding_service_invocations = service_invocations.clone();
     let binding_backend_task = tokio::spawn(async move {
         serve_binding_backend_with_assets(
             binding_backend_listener,
@@ -708,6 +714,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             binding_workflow_config,
             Some(scheduler_store),
             binding_assets,
+            binding_service_invocations,
             async move {
                 let _ = shutdown_binding.changed().await;
             },
@@ -773,21 +780,51 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let health_watch = health.clone();
     let metrics_watch = metrics.clone();
     let storage_watch = storage.clone();
+    let service_invocations_watch = service_invocations;
+    let deployment_pins_watch = deployment_pins.clone();
     tokio::spawn(async move {
         let mut running_pid = None;
+        let mut running_generation = None;
         loop {
             let snap = watch_rx.borrow().clone();
             metrics_watch.observe_supervisor(&snap);
             if snap.state == open_compute_runtime::SupervisorState::Running {
+                let next_generation = snap.startup_id.map(|value| value.to_string());
+                let child_changed = running_pid.is_some()
+                    && (running_pid != snap.pid || running_generation != next_generation);
                 if running_pid.is_some()
-                    && running_pid != snap.pid
+                    && child_changed
                     && DurableObjectRepository::new(&storage_watch)
                         .count_live_objects()
                         .is_ok_and(|count| count > 0)
                 {
                     metrics_watch.inc_do_facet_reload(DoFacetReloadReason::Restart);
                 }
+                if child_changed {
+                    if let Some(generation) = running_generation.as_deref() {
+                        service_invocations_watch.clear_generation(generation);
+                    }
+                    deployment_pins_watch.clear_generation_retentions();
+                    metrics_watch.set_service_invocation_counts(0, 0, 0);
+                }
                 running_pid = snap.pid;
+                running_generation = next_generation;
+            } else if running_pid.is_some()
+                && snap.pid.is_none()
+                && matches!(
+                    snap.state,
+                    open_compute_runtime::SupervisorState::Stopped
+                        | open_compute_runtime::SupervisorState::BackingOff
+                        | open_compute_runtime::SupervisorState::Failed
+                )
+            {
+                if let Some(generation) = running_generation.as_deref() {
+                    service_invocations_watch.clear_generation(generation);
+                }
+                deployment_pins_watch.clear_generation_retentions();
+                metrics_watch.set_service_invocation_counts(0, 0, 0);
+                running_pid = None;
+                running_generation = None;
             }
             if let Err(err) = health_watch.apply_supervisor(&snap) {
                 tracing::error!(

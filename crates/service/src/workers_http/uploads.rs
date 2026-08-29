@@ -55,6 +55,8 @@ struct FinalizeUploadBody {
     #[serde(default)]
     bindings: BTreeMap<String, DeploymentBindingInput>,
     #[serde(default)]
+    services: BTreeMap<String, DeploymentServiceInput>,
+    #[serde(default)]
     queue_consumers: Vec<QueueConsumerInput>,
     crons: Option<Vec<String>>,
     #[serde(default = "default_limits")]
@@ -415,6 +417,7 @@ async fn complete_reserved_finalize(
                 vars: metadata.vars,
                 secrets: metadata.secrets,
                 bindings: metadata.bindings,
+                services: metadata.services,
                 queue_consumers: metadata.queue_consumers,
                 crons: metadata.crons,
                 limits: metadata.limits,

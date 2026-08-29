@@ -10,6 +10,7 @@ export {
   OutboundGateway,
   QueueTransport,
   R2Transport,
+  ServiceTransport,
   WorkflowBindingTransport,
 } from "../loader/host.js";
 

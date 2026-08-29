@@ -478,6 +478,7 @@ fn request(
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings,
+        services: BTreeMap::new(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile":"default"}),

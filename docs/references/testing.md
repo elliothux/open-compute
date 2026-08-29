@@ -4,6 +4,10 @@
 最后执行**完整一轮 + 时序用例补两轮**。确定性用例总计一次，时序用例总计三次。
 失败停止，不自动重试；coverage 不代替未插桩的进程验收。
 
+该入口默认验收本地平台 contract/product，不以第三方框架测试定义支持面。P3.4 规划的应用
+qualification 和真实 Cloudflare differential 必须显式选择、独立报告；它们在 runner 落地前不是
+现有命令，也不能暗中加入普通 `--workspace`。
+
 ## 显式准备输入
 
 ```sh

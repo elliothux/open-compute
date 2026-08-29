@@ -3,6 +3,11 @@
 这里保存持续维护的接口说明、测试规则和操作指南。文件在此目录不表示相关功能尚未实现；
 未完成的工作计划位于 `docs/`，已完成的阶段设计和结果位于 [implemented](../implemented/README.md)。
 
+仓库的产品目标是一个可单机部署的 Cloudflare Workers Platform 兼容基础设施。公开能力以
+capability、deviation、固定 Cloudflare contract 和真实产品 Gate 为准；vinext 等框架只提供应用
+qualification。总体架构与完成标准见[平台总方案](../open-compute-workerd-platform.md)，契约目录、
+portable differential 和双 verdict 规则见[P3.4 方案](../p3-4-cloudflare-conformance.md)。
+
 ## 开发与接口
 
 | 文档 | 用途 |
@@ -14,6 +19,8 @@
 
 P0.2 的阶段性支持范围见归档的 [API 矩阵](../implemented/p0-2-api-matrix.md)；
 不要用该阶段“尚未接入产品绑定”的描述替代当前平台的 capability 输出。
+当前尚未生成 P3.4 规划的 `cloudflare-compatibility.md`；在机器可读 catalog 和实际证据落地前，
+不得手工维护一份看似完整的兼容矩阵。
 
 ## 运维手册
 

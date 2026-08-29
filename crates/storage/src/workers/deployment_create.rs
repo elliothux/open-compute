@@ -16,6 +16,8 @@ pub struct NewDeploymentProducts<'a> {
     pub queue_bindings: &'a [crate::NewQueueProducerBinding],
     /// Frozen Workflow caller bindings.
     pub workflow_bindings: &'a [crate::WorkflowBindingRecord],
+    /// Frozen cross-Worker Service declarations.
+    pub services: &'a [crate::NewDeploymentService],
     /// Queue push-consumer declarations.
     pub queue_consumers: &'a [crate::NewQueueConsumerDeclaration],
     /// Optional immutable Cron declaration set.
@@ -159,6 +161,12 @@ impl WorkerRepository<'_> {
                 input.id,
                 products.workflow_bindings,
             )?;
+            crate::services::insert_staging_services(
+                tx,
+                input.id,
+                products.services,
+                input.now_ms,
+            )?;
             audit(
                 tx,
                 input.account_id,
@@ -217,6 +225,7 @@ fn validate_deployment_shape(
                 || !products.bindings.is_empty()
                 || !products.queue_bindings.is_empty()
                 || !products.workflow_bindings.is_empty()
+                || !products.services.is_empty()
                 || !products.queue_consumers.is_empty()
                 || products.cron.is_some() =>
         {

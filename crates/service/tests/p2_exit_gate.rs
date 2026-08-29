@@ -40,6 +40,14 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         .open(&config)
         .unwrap();
     writeln!(file, "\n[scheduler]\nclaim_lease_ms=6000\ndispatch_timeout_ms=5000\nlease_guard_ms=1000\nshutdown_drain_ms=2000").unwrap();
+    // This Gate validates crash recovery, not the independent disk-pressure path.
+    // Keep it isolated from unrelated host-volume utilization while retaining a
+    // fail-closed stop-writes threshold inside the supported hard bounds.
+    writeln!(
+        file,
+        "\n[durable_objects]\ndisk_high_watermark_percent=98\ndisk_stop_writes_percent=99"
+    )
+    .unwrap();
     // Restart with the same product policy that froze resource authority during setup.
     for (section, policy) in [
         (

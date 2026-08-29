@@ -7,6 +7,10 @@
 对应 [阶段设计](implemented/p1-platform-hardening.md)已经归档。该记录同时明确：长时 soak 和
 发行演练未执行，不能把核心实现完成写成完整 release qualification 通过。
 
+本计划验收的是“单机发行物能否稳定安装、运行和恢复”，不是 Cloudflare API 行为对齐。后者由
+[P3.4 conformance](p3-4-cloudflare-conformance.md)及各产品 Gate 负责；release qualification 通过
+不能把未验证 contract 写成 supported，反之应用 workload 未运行也不否定发行形态。
+
 ## 剩余工作
 
 - [ ] 1 小时 developer mixed soak：在明确的源码、正式 workerd pin、配置和主机基线上，

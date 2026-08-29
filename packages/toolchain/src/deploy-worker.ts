@@ -22,6 +22,11 @@ export interface WorkerDeployment {
   readonly sha256?: string;
 }
 
+interface ResolvedService {
+  readonly targetWorkerId: string;
+  readonly entrypoint?: string;
+}
+
 function identifier(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 }
@@ -72,16 +77,6 @@ export async function deployProject(
     if (value === undefined || value.length === 0) throw new Error(`missing secret environment reference: ${reference.env}`);
     Object.defineProperty(secrets, name, { value, enumerable: true });
   }
-  // HTTP field values are ASCII. Escaping UTF-16 code units preserves JSON values,
-  // including astral characters, without putting credentials in URLs or artifacts.
-  const metadata = JSON.stringify({
-    ...(artifact === undefined ? {} : { mainModule: artifact.mainModule }),
-    compatibilityDate: project.compatibilityDate,
-    compatibilityFlags: project.compatibilityFlags, vars: project.vars, secrets,
-    bindings: project.bindings, promote: true,
-  }).replace(/[^\x20-\x7e]/g, value => `\\u${value.charCodeAt(0).toString(16).padStart(4, "0")}`);
-  if (metadata.length > 1024 * 1024) throw new Error("deployment metadata exceeds 1 MiB");
-
   const request = async (path: string, method = "GET", body?: RequestInit["body"],
     extraHeaders?: Record<string, string>, mutationKey?: string): Promise<unknown> => {
     const headers = new Headers(extraHeaders);
@@ -112,9 +107,15 @@ export async function deployProject(
   const listed = await request(collection);
   if (!record(listed) || !Array.isArray(listed.workers)) throw new Error("invalid Worker list response");
   const workers: readonly unknown[] = listed.workers;
+  const workersByName = new Map<string, string[]>();
   let workerId: string | undefined;
   for (const item of workers) {
     if (!record(item) || !identifier(item.id) || item.accountId !== account || typeof item.name !== "string") throw new Error("invalid Worker list entry");
+    if (item.deletedAtMs === null) {
+      const named = workersByName.get(item.name) ?? [];
+      named.push(item.id);
+      workersByName.set(item.name, named);
+    }
     if (item.name === project.name && item.deletedAtMs === null) {
       if (workerId !== undefined) throw new Error("ambiguous Worker name");
       workerId = item.id;
@@ -125,7 +126,33 @@ export async function deployProject(
     if (!record(created) || !record(created.worker) || !identifier(created.worker.id)
         || created.worker.accountId !== account || created.worker.name !== project.name) throw new Error("invalid Worker creation response");
     workerId = created.worker.id;
+    workersByName.set(project.name, [workerId]);
   }
+  const services: Record<string, ResolvedService> = {};
+  for (const [binding, declaration] of Object.entries(project.services)) {
+    const targets = workersByName.get(declaration.service) ?? [];
+    if (targets.length !== 1) {
+      throw new Error(targets.length === 0
+        ? `Service target Worker does not exist: ${declaration.service}`
+        : `Service target Worker name is ambiguous: ${declaration.service}`);
+    }
+    Object.defineProperty(services, binding, {
+      value: {
+        targetWorkerId: targets[0]!,
+        ...(declaration.entrypoint === undefined ? {} : { entrypoint: declaration.entrypoint }),
+      },
+      enumerable: true,
+    });
+  }
+  // HTTP field values are ASCII. Escaping UTF-16 code units preserves JSON values,
+  // including astral characters, without putting credentials in URLs or artifacts.
+  const metadata = JSON.stringify({
+    ...(artifact === undefined ? {} : { mainModule: artifact.mainModule }),
+    compatibilityDate: project.compatibilityDate,
+    compatibilityFlags: project.compatibilityFlags, vars: project.vars, secrets,
+    bindings: project.bindings, services, promote: true,
+  }).replace(/[^\x20-\x7e]/g, value => `\\u${value.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  if (metadata.length > 1024 * 1024) throw new Error("deployment metadata exceeds 1 MiB");
   let result: unknown;
   if (assets === undefined) {
     if (artifact === undefined) throw new Error("Worker deployment is missing its bundle");
@@ -133,7 +160,7 @@ export async function deployProject(
       "content-type": "application/octet-stream", "x-open-compute-deployment-metadata": metadata,
     });
   } else {
-    result = await deployAssets(request, collection, workerId, project, artifact, assets, secrets);
+    result = await deployAssets(request, collection, workerId, project, artifact, assets, secrets, services);
   }
   if (!record(result) || result.promoted !== true || !record(result.deployment)
       || !identifier(result.deployment.id) || result.deployment.state !== "ready"
@@ -168,6 +195,7 @@ async function deployAssets(
   artifact: WorkerArtifact | undefined,
   assets: ScannedAssets,
   secrets: Record<string, string>,
+  services: Record<string, ResolvedService>,
 ): Promise<unknown> {
   const createBody = JSON.stringify({
     contentKind: artifact === undefined ? "assets_only" : "worker",
@@ -226,6 +254,7 @@ async function deployAssets(
       vars: project.vars,
       secrets,
       bindings: project.bindings,
+      services,
       promote: true,
     }),
     { "content-type": "application/json" },

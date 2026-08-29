@@ -3,7 +3,7 @@
 use crate::assets::{AssetManifestV1, AssetRoutingConfigV1};
 use crate::bundle::{BundleLimits, CanonicalBundle, ModuleType};
 use crate::descriptor::{
-    BindingDescriptorV1, QueueProducerBindingDescriptorV1, SecretDescriptor,
+    BindingDescriptorV1, QueueProducerBindingDescriptorV1, SecretDescriptor, ServiceDescriptorV1,
     WorkerCodeDescriptorV1, ciphertext_sha256, parse_loader_key,
 };
 use base64::Engine as _;
@@ -108,6 +108,17 @@ pub struct RuntimeWorkflowBinding {
     pub descriptor_sha256: String,
 }
 
+/// Verified dynamic Service declaration supplied to the trusted loader host.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeServiceBinding {
+    /// Canonical immutable declaration.
+    #[serde(flatten)]
+    pub descriptor: ServiceDescriptorV1,
+    /// Independently verified descriptor digest.
+    pub descriptor_sha256: String,
+}
+
 /// Optional static-assets fetch capability exposed under one declared env name.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,6 +166,8 @@ pub struct RuntimeSnapshot {
     pub queue_bindings: Vec<RuntimeQueueBinding>,
     /// Verified Workflow caller bindings, carrying no execution or creation tokens.
     pub workflow_bindings: Vec<RuntimeWorkflowBinding>,
+    /// Verified lazy Service declarations.
+    pub services: Vec<RuntimeServiceBinding>,
     /// Optional deployment-scoped static-assets fetch capability.
     pub asset_binding: Option<RuntimeAssetBinding>,
     /// Optional verified static assets used by the trusted default HTTP router.
@@ -175,6 +188,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("binding_count", &self.bindings.len())
             .field("queue_binding_count", &self.queue_bindings.len())
             .field("workflow_binding_count", &self.workflow_bindings.len())
+            .field("service_count", &self.services.len())
             .field("asset_binding", &self.asset_binding.is_some())
             .finish_non_exhaustive()
     }
@@ -436,6 +450,24 @@ impl RuntimeSource {
                 descriptor_sha256: hex::encode(digest),
             });
         }
+        let mut service_descriptors = Vec::with_capacity(snapshot.services.len());
+        let mut runtime_services = Vec::with_capacity(snapshot.services.len());
+        for service in &snapshot.services {
+            let descriptor = ServiceDescriptorV1::new(
+                service.binding_name.clone(),
+                service.target_worker_id,
+                service.entrypoint.clone(),
+            )?;
+            let digest = descriptor.sha256()?;
+            if digest != service.descriptor_sha256 {
+                return Err(invariant());
+            }
+            service_descriptors.push(descriptor.clone());
+            runtime_services.push(RuntimeServiceBinding {
+                descriptor,
+                descriptor_sha256: hex::encode(digest),
+            });
+        }
         let descriptor = WorkerCodeDescriptorV1::new(
             account_id,
             worker_id,
@@ -453,6 +485,7 @@ impl RuntimeSource {
             binding_descriptors,
             queue_binding_descriptors,
             workflow_binding_descriptors,
+            service_descriptors,
             snapshot.deployment.limits.clone(),
             snapshot.deployment.loader_schema_version,
         )?;
@@ -511,6 +544,7 @@ impl RuntimeSource {
             bindings: runtime_bindings,
             queue_bindings: runtime_queue_bindings,
             workflow_bindings: runtime_workflow_bindings,
+            services: runtime_services,
             asset_binding,
             assets: assets.map(|(manifest, routing)| RuntimeAssets { manifest, routing }),
             limits: snapshot.deployment.limits,
@@ -542,6 +576,7 @@ impl RuntimeSource {
             modules: Vec<Module<'a>>,
             env: BTreeMap<&'a str, serde_json::Value>,
             bindings: Vec<BindingPayload<'a>>,
+            services: &'a [RuntimeServiceBinding],
             #[serde(skip_serializing_if = "Option::is_none")]
             asset_binding: Option<&'a RuntimeAssetBinding>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -635,6 +670,7 @@ impl RuntimeSource {
             modules,
             env,
             bindings,
+            services: &snapshot.services,
             asset_binding: snapshot.asset_binding.as_ref(),
             assets: snapshot.assets.as_ref(),
             limits: &snapshot.limits,

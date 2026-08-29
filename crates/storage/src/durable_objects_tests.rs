@@ -383,7 +383,13 @@ fn fenced_delete_authority_survives_worker_tombstone() {
         .begin_object_delete(fixture.account, fixture.namespace, object, 22)
         .unwrap();
     WorkerRepository::new(storage.db())
-        .delete_worker(fixture.account, fixture.worker, RequestId::generate(), 23)
+        .delete_worker(
+            fixture.account,
+            fixture.worker,
+            &[fixture.deployment],
+            RequestId::generate(),
+            23,
+        )
         .unwrap();
 
     let authority = repo
@@ -556,7 +562,7 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
         .unwrap()
         .0;
     workers
-        .delete_worker(account, deleted_worker.id, RequestId::generate(), 42)
+        .delete_worker(account, deleted_worker.id, &[], RequestId::generate(), 42)
         .unwrap();
     let unavailable_owner = reserve_resource(
         &storage,

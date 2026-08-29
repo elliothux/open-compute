@@ -34,6 +34,7 @@ pub mod run;
 pub mod runtime_bridge;
 pub mod scheduler;
 pub mod scheduler_http;
+pub mod service_invocations;
 mod snapshot_pins;
 mod sqlite_staging;
 pub mod support_bundle;

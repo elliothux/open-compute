@@ -12,10 +12,13 @@ import wrapperRuntimeSource from "wrapper-runtime-source";
 import doWrapperSource from "do-wrapper-source";
 import workflowWrapperSource from "workflow-wrapper-source";
 import assetFacadeSource from "assets-facade-source";
+import serviceFacadeSource from "service-facade-source";
+import serviceScopeSource from "service-scope-source";
 import {
   ASSET_FACADE_MODULE, D1_FACADE_MODULE, DO_ALARM_SHIM_MODULE, DO_FACADE_MODULE, DO_ID_CODEC_MODULE,
   DO_WRAPPER_MODULE, INTERNAL_MODULE_PREFIX, LOADED_ISOLATE_WRAPPER_MODULE,
-  QUEUE_FACADE_MODULE, R2_FACADE_MODULE, VALIDATION_MODULE, WORKFLOW_FACADE_MODULE,
+  QUEUE_FACADE_MODULE, R2_FACADE_MODULE, SERVICE_FACADE_MODULE, SERVICE_SCOPE_MODULE,
+  VALIDATION_MODULE, WORKFLOW_FACADE_MODULE,
   WORKFLOW_JSON_MODULE, WORKFLOW_RUNNER_MODULE, WORKFLOW_WRAPPER_MODULE,
   WRAPPER_RUNTIME_MODULE, generateBindingWrapper, generateValidationWrapper,
 } from "./wrappers/generator.js";
@@ -63,6 +66,7 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
     throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
   }
   modules[WRAPPER_RUNTIME_MODULE] = { js: wrapperRuntimeSource };
+  modules[SERVICE_SCOPE_MODULE] = { js: serviceScopeSource };
   if (has("r2_bucket")) modules[R2_FACADE_MODULE] = { js: r2FacadeSource };
   if (has("d1_database")) modules[D1_FACADE_MODULE] = { js: d1FacadeSource };
   if (has("do_namespace")) {
@@ -72,6 +76,7 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   if (has("queue_producer")) modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
   if (has("workflow")) modules[WORKFLOW_FACADE_MODULE] = { js: workflowFacadeSource };
   if (snapshot.assetBinding) modules[ASSET_FACADE_MODULE] = { js: assetFacadeSource };
+  modules[SERVICE_FACADE_MODULE] = { js: serviceFacadeSource };
   if (workflow || has("workflow")) modules[WORKFLOW_JSON_MODULE] = { js: workflowJsonSource };
   if (workflow) {
     modules[WORKFLOW_WRAPPER_MODULE] = { js: workflowWrapperSource };
@@ -83,7 +88,7 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   }
   modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
     js: generateBindingWrapper({
-      mainModule: snapshot.mainModule, bindings: snapshot.bindings,
+      mainModule: snapshot.mainModule, bindings: snapshot.bindings, services: snapshot.services,
       entrypointName, durableObject, workflow, assetBindingName: snapshot.assetBinding?.name,
     }),
   };

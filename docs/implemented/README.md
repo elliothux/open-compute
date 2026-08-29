@@ -43,7 +43,11 @@
 
 - [P1 剩余验收](../p1-release-acceptance.md)：仅追踪尚无完成证据的长时 soak 与发行演练，
   不把已完成的 P1 核心实现重新列为待实现。
-- [平台方案](../open-compute-workerd-platform.md)：Next.js/vinext 目标尚未完成平台验收。
+- [平台方案](../open-compute-workerd-platform.md)：单机 Cloudflare Workers Platform 兼容目标尚未完成
+  P3 conformance；vinext 只是独立应用 qualification，不定义平台完成状态。
+- [P3.1 Static Assets](../p3-1-static-assets.md)、[P3.2 Service Binding](../p3-2-service-bindings.md)、
+  [P3.3 Cache/Images](../p3-3-workers-cache-images.md)与
+  [P3.4 Cloudflare conformance](../p3-4-cloudflare-conformance.md)：仍在实施或资格验收，未归档。
 - [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 

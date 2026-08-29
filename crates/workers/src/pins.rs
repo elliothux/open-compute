@@ -78,10 +78,37 @@ impl DeploymentPins {
         Ok(())
     }
 
+    /// Release conservative background-work holds after the supervised workerd generation exits.
+    ///
+    /// Ordinary RAII pins remain intact because their Rust owners can outlive the child long
+    /// enough to drain already-buffered response bodies. Only the generation-scoped fallback
+    /// holds are cleared once process supervision has proved that tenant code can no longer run.
+    pub fn clear_generation_retentions(&self) {
+        let mut entries = self
+            .inner
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entries.retain(|_, entry| {
+            entry.retained_until_restart = false;
+            entry.count > 0 || entry.fenced
+        });
+        self.inner.changed.notify_waiters();
+    }
+
     /// Fence new pins and wait for current work to drain to zero.
     pub async fn fence_and_wait(
         &self,
         deployment_id: DeploymentId,
+        deadline: Duration,
+    ) -> Result<(), PlatformError> {
+        self.fence_many_and_wait(&[deployment_id], deadline).await
+    }
+
+    /// Atomically fence a Worker deployment set, then wait for every current pin to drain.
+    pub async fn fence_many_and_wait(
+        &self,
+        deployment_ids: &[DeploymentId],
         deadline: Duration,
     ) -> Result<(), PlatformError> {
         {
@@ -90,7 +117,9 @@ impl DeploymentPins {
                 .entries
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            entries.entry(deployment_id).or_default().fenced = true;
+            for deployment_id in deployment_ids {
+                entries.entry(*deployment_id).or_default().fenced = true;
+            }
         }
         let wait = async {
             loop {
@@ -100,8 +129,9 @@ impl DeploymentPins {
                     .entries
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .get(&deployment_id)
-                    .is_none_or(|entry| entry.count == 0 && !entry.retained_until_restart);
+                    .iter()
+                    .filter(|(id, _)| deployment_ids.contains(id))
+                    .all(|(_, entry)| entry.count == 0 && !entry.retained_until_restart);
                 if empty {
                     return;
                 }
@@ -111,7 +141,7 @@ impl DeploymentPins {
         tokio::time::timeout(deadline, wait).await.map_err(|_| {
             PlatformError::new(
                 ErrorCode::DeploymentReferenced,
-                "deployment still has in-flight requests",
+                "deployment set still has in-flight requests",
             )
         })
     }

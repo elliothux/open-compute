@@ -1,8 +1,14 @@
 # Worker TypeScript 工具链
 
-`oc` 在开发端用 TS7 严格检查项目，再用 Rolldown 编译和打包。产物由匹配版本的
-`platformd worker bundle` 编码，复用 Rust 的 canonical bundle 格式与大小限制。
-部署走已有的校验、持久化与激活接口；生产 `platformd` 启动和请求路径不调用 Bun、Node 或编译器。
+`oc` 是单机 Cloudflare Workers Platform 的开发与部署客户端。它在开发端用 TS7 严格检查普通
+Worker，再用 Rolldown 编译和打包；也可以导入已构建的框架产物，或部署 Static Assets-only
+项目。产物由匹配版本的 `platformd worker bundle` 编码，复用 Rust 的 canonical bundle 格式与
+大小限制。部署走统一的校验、持久化与激活接口；生产 `platformd` 启动和请求路径不调用 Bun、
+Node 或编译器。
+
+配置借用 Cloudflare/Wrangler 的常见字段和语义，但 `open-compute.json` 不是完整 `wrangler.jsonc`
+兼容层。parser 只接受本文列出的已实现字段，未知字段直接拒绝；平台未广告的 API 不能靠工具链
+配置变成可用。
 
 ## 本地运行
 
@@ -32,12 +38,19 @@ bun run oc build --config examples/hello-worker/open-compute.json \
 
 ## 项目配置
 
-`open-compute.json` 至少需要 `name`、`main` 和 `compatibilityDate`。
-`main` 与 `tsconfig`（默认 `tsconfig.json`）相对配置文件目录解析，不能逃逸到目录之外。
+`open-compute.json` 必须有 `name`、`compatibilityDate`，并选择一种内容形态：`main`、`assets`、
+`main + assets`，或 `frameworkOutput`。`frameworkOutput` 不能再和显式 `main`/`assets` 组合；
+Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不能要求 Worker-first。
+`main`、`frameworkOutput`、assets directory 与 `tsconfig`（默认 `tsconfig.json`）相对配置文件目录
+解析，不能逃逸到允许的项目/产物边界之外。
 默认平台地址为 `http://127.0.0.1:8787`；支持 `endpoint` / `--endpoint` 覆盖。
 默认账户由经过身份验证的 `GET /v1/account` 返回，也可用 `accountId` / `--account` 明确指定。
 
-其他字段是 `compatibilityFlags`、`vars`、`secrets` 和 `bindings`。
+其他字段是 `compatibilityFlags`、`vars`、`secrets`、`bindings`、`services` 和 `assets`。普通产品
+binding 使用 `{type, id, permissions?}`；Service Binding 使用
+`[{binding, service, entrypoint?}]`，部署时把同账户 Worker 名解析并冻结为目标 ID。Assets 支持
+`directory`、`binding`、`run_worker_first`、`html_handling`、`not_found_handling` 和
+`publish_source_maps`；精确支持值由 parser 与 Static Assets 文档共同约束。
 密钥配置只能引用环境变量，例如 `"secrets": {"TOKEN": {"env": "MY_TOKEN"}}`；
 只有 `run` / `deploy` 才读取其值，离线 bundle 不包含配置变量和密钥。
 管理令牌从 `OPEN_COMPUTE_ADMIN_TOKEN` 读取，或通过 `--token-env` 指定另一个变量名。
@@ -45,7 +58,8 @@ bun run oc build --config examples/hello-worker/open-compute.json \
 
 ESM 静态依赖、动态 import 的 chunks 和具名导出会保留；`node:` 导入需要显式启用
 `nodejs_compat`。工具链不提供 Node 运行环境、不填补未实现的产品 API，也不下载远程 import。
-运行时仍按平台当前的兼容性日期、能力与资源限制校验产物。
+运行时仍按平台当前的兼容性日期、capability/deviation 与资源限制校验产物。当前配置没有
+Cache/Images 字段；规划中的能力在实现、Gate 和 capability 广告完成前不得写进项目配置示例。
 
 ## 检查
 

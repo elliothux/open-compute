@@ -24,6 +24,8 @@ mod r2;
 mod resource;
 #[path = "metrics_scheduler.rs"]
 mod scheduler;
+#[path = "metrics_service.rs"]
+mod service;
 #[path = "metrics_workflow.rs"]
 mod workflow;
 use d1::write_d1_metrics;
@@ -46,10 +48,12 @@ pub use resource::{BindingBackendOperation, ResourceOperation};
 use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
 use scheduler::write_scheduler_metrics;
 pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
+pub(crate) use service::ServiceMetricOperation;
+use service::{service_operation_index, write_service_metrics};
 pub(crate) use workflow::WorkflowOutcome;
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 567;
+pub const REQUIRED_SERIES: u64 = 582;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -280,6 +284,11 @@ struct Inner {
     alarm_delivery: [u64; 42],
     alarm_repair: [u64; 6],
     alarm_lag_seconds: f64,
+    service_invocations: [u64; 8],
+    service_invocation_duration: [f64; 4],
+    service_roots: u64,
+    service_operations: u64,
+    service_retentions: u64,
     queue: queue::QueueMetrics,
     workflow: workflow::WorkflowMetrics,
     last_supervisor: Option<SupervisorState>,
@@ -392,6 +401,11 @@ impl MetricsRegistry {
                 alarm_delivery: [0; 42],
                 alarm_repair: [0; 6],
                 alarm_lag_seconds: 0.0,
+                service_invocations: [0; 8],
+                service_invocation_duration: [0.0; 4],
+                service_roots: 0,
+                service_operations: 0,
+                service_retentions: 0,
                 queue: queue::QueueMetrics::default(),
                 workflow: workflow::WorkflowMetrics::default(),
                 last_supervisor: None,
@@ -603,6 +617,33 @@ impl MetricsRegistry {
     pub fn inc_binding_protocol_error(&self) {
         let mut guard = self.lock();
         guard.binding_protocol_errors = guard.binding_protocol_errors.saturating_add(1);
+    }
+
+    /// Record one authenticated Service invocation without identifier-valued labels.
+    pub(crate) fn observe_service_invocation(
+        &self,
+        operation: ServiceMetricOperation,
+        success: bool,
+        duration: Duration,
+    ) {
+        let index = service_operation_index(operation);
+        let mut guard = self.lock();
+        guard.service_invocations[index * 2 + usize::from(success)] =
+            guard.service_invocations[index * 2 + usize::from(success)].saturating_add(1);
+        guard.service_invocation_duration[index] = duration.as_secs_f64();
+    }
+
+    /// Publish bounded process-local Service lifecycle gauges.
+    pub(crate) fn set_service_invocation_counts(
+        &self,
+        roots: usize,
+        operations: usize,
+        retentions: usize,
+    ) {
+        let mut guard = self.lock();
+        guard.service_roots = u64::try_from(roots).unwrap_or(u64::MAX);
+        guard.service_operations = u64::try_from(operations).unwrap_or(u64::MAX);
+        guard.service_retentions = u64::try_from(retentions).unwrap_or(u64::MAX);
     }
 
     pub(crate) fn observe_kv_operation(
@@ -825,6 +866,7 @@ impl MetricsRegistry {
         write_d1_metrics(&mut out, &g);
         write_do_metrics(&mut out, &g);
         write_scheduler_metrics(&mut out, &g);
+        write_service_metrics(&mut out, &g);
         write_queue_metrics(&mut out, &g);
         workflow::write_workflow_metrics(&mut out, &g);
         let _ = self.max_label;

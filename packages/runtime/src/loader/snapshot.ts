@@ -22,7 +22,7 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
       || (value.contentKind === "assets_only" && value.mainModule !== undefined)
       || typeof value.compatibilityDate !== "string"
       || !strings(value.compatibilityFlags) || !Array.isArray(value.modules)
-      || !record(value.env) || !Array.isArray(value.bindings)) invalid();
+      || !record(value.env) || !Array.isArray(value.bindings) || !Array.isArray(value.services)) invalid();
   if (value.assetBinding !== undefined
       && (!record(value.assetBinding) || typeof value.assetBinding.name !== "string")) invalid();
   if (value.assets !== undefined) {
@@ -60,5 +60,11 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
         break;
       default: invalid();
     }
+  }
+  for (const service of value.services as unknown[]) {
+    if (!record(service) || service.schemaVersion !== 1 || service.policyVersion !== 1
+        || typeof service.name !== "string" || typeof service.targetWorkerId !== "string"
+        || typeof service.descriptorSha256 !== "string"
+        || (service.entrypoint !== undefined && typeof service.entrypoint !== "string")) invalid();
   }
 }

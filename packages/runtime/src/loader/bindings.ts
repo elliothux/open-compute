@@ -59,5 +59,14 @@ export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext, deploy
       descriptorSha256: snapshot.workerCodeSha256,
     }) });
   }
+  for (const service of snapshot.services) {
+    if (Object.prototype.hasOwnProperty.call(env, service.name)) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    env[service.name] = ctx.exports.ServiceTransport({ props: Object.freeze({
+      deploymentId,
+      bindingName: service.name,
+      descriptorSha256: service.descriptorSha256,
+      ...(service.entrypoint === undefined ? {} : { entrypoint: service.entrypoint }),
+    }) });
+  }
   return env;
 }

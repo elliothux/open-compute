@@ -4,6 +4,9 @@ Open Compute 只有一种生产发行形式：按平台构建的单个 `platform
 不发布 Rust crate，不提供“外部 workerd”“外部资源目录”或自动下载模式。
 `runtime.binary`、`runtime.lock_file`、`runtime.assets_dir` 是未知配置项，启动前即拒绝。
 
+该发行物承载可单机部署的 Cloudflare Workers Platform 兼容基础设施；“单二进制”只描述交付
+和启动边界，不代表完整 Cloudflare API parity，也不取消外接 S3 与本地 SQLite data-dir。
+
 ## 内嵌内容
 
 - 当前目标平台正式 pin 对应的官方 workerd gzip；

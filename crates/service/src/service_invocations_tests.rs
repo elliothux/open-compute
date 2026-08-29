@@ -1,0 +1,434 @@
+use super::*;
+use open_compute_core::clock::SystemClock;
+use open_compute_core::config::StorageConfig;
+use open_compute_core::{AccountId, RequestId, WorkerId};
+use open_compute_storage::{
+    DeploymentContentKind, NewDeployment, NewDeploymentProducts, NewDeploymentService,
+    PlatformStorage, WorkerRepository,
+};
+use std::collections::BTreeMap;
+
+struct Fixture {
+    _temp: tempfile::TempDir,
+    storage: Arc<PlatformStorage>,
+    caller_deployment: DeploymentId,
+    target_deployment: DeploymentId,
+    caller_digest: [u8; 32],
+    target_digest: [u8; 32],
+}
+
+fn fixture() -> Fixture {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("data");
+    let storage = Arc::new(
+        PlatformStorage::bootstrap(
+            &StorageConfig {
+                data_dir: root.clone(),
+                master_key_file: root.join("keys/master.key"),
+                master_key_env: None,
+                sqlite_busy_timeout_ms: 5_000,
+                free_space_soft_bytes: 1_073_741_824,
+                free_space_hard_bytes: 268_435_456,
+            },
+            &SystemClock,
+        )
+        .unwrap(),
+    );
+    let account = storage.identity().default_account_id;
+    let request = RequestId::generate();
+    let repo = WorkerRepository::new(storage.db());
+    let caller = repo
+        .create_worker(account, "registry-caller", request, 1, 1_000)
+        .unwrap()
+        .0;
+    let target = repo
+        .create_worker(account, "registry-target", request, 2, 1_000)
+        .unwrap()
+        .0;
+    let target_digest = [4; 32];
+    let target_deployment = insert_ready(
+        repo,
+        account,
+        target.id,
+        [2; 32],
+        &[NewDeploymentService {
+            binding_name: "SELF".to_owned(),
+            target_worker_id: target.id,
+            entrypoint: None,
+            descriptor_sha256: target_digest,
+        }],
+        request,
+        3,
+    );
+    repo.promote(account, target.id, target_deployment, None, request, 5)
+        .unwrap();
+    let caller_digest = [7; 32];
+    let caller_deployment = insert_ready(
+        repo,
+        account,
+        caller.id,
+        [3; 32],
+        &[NewDeploymentService {
+            binding_name: "TARGET".to_owned(),
+            target_worker_id: target.id,
+            entrypoint: None,
+            descriptor_sha256: caller_digest,
+        }],
+        request,
+        6,
+    );
+    repo.promote(account, caller.id, caller_deployment, None, request, 8)
+        .unwrap();
+    Fixture {
+        _temp: temp,
+        storage,
+        caller_deployment,
+        target_deployment,
+        caller_digest,
+        target_digest,
+    }
+}
+
+fn insert_ready(
+    repo: WorkerRepository<'_>,
+    account: AccountId,
+    worker: WorkerId,
+    worker_digest: [u8; 32],
+    services: &[NewDeploymentService],
+    request: RequestId,
+    now_ms: i64,
+) -> DeploymentId {
+    let deployment = DeploymentId::generate();
+    repo.insert_staging_deployment(
+        &NewDeployment {
+            id: deployment,
+            account_id: account,
+            worker_id: worker,
+            content_kind: DeploymentContentKind::Worker,
+            artifact_sha256: Some(worker_digest),
+            artifact_size: Some(1),
+            artifact_schema_version: Some(1),
+            main_module: Some("index.js".to_owned()),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: vec!["rpc".to_owned()],
+            limits: serde_json::json!({"profile":"default"}),
+            worker_code_sha256: worker_digest,
+            vars: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            request_id: request,
+            now_ms,
+        },
+        &NewDeploymentProducts {
+            services,
+            ..NewDeploymentProducts::default()
+        },
+        1_000,
+    )
+    .unwrap();
+    repo.begin_validation(deployment).unwrap();
+    repo.mark_ready(deployment, now_ms + 1).unwrap();
+    deployment
+}
+
+fn resolve_request(
+    deployment: DeploymentId,
+    binding_name: &str,
+    digest: [u8; 32],
+    parent_frame: Option<String>,
+) -> ServiceResolveRequest {
+    ServiceResolveRequest {
+        caller_deployment_id: deployment,
+        binding_name: binding_name.to_owned(),
+        descriptor_sha256: hex::encode(digest),
+        parent_frame,
+        operation: ServiceOperation::Rpc,
+    }
+}
+
+#[test]
+fn returned_capability_holds_both_root_and_target_until_native_release() {
+    let fixture = fixture();
+    let pins = DeploymentPins::new();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
+    let admission = registry
+        .resolve(&resolve_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    assert_eq!(pins.count(fixture.caller_deployment), 1);
+    assert_eq!(pins.count(fixture.target_deployment), 1);
+    let retention = registry
+        .retain(&ServiceRetainRequest {
+            handle: admission.handle.clone(),
+            owner: RetentionOwner::Target,
+        })
+        .unwrap();
+    registry
+        .complete(&ServiceReleaseRequest {
+            handle: admission.handle,
+        })
+        .unwrap();
+    registry
+        .complete_root(&ServiceRootCompleteRequest {
+            frame: admission.caller_frame,
+        })
+        .unwrap();
+    assert_eq!(registry.counts(), (1, 0, 1));
+    let capability = registry
+        .begin_capability(&CapabilityBeginRequest {
+            retention: retention.clone(),
+            parent_frame: None,
+        })
+        .unwrap();
+    registry
+        .complete(&ServiceReleaseRequest {
+            handle: capability.handle,
+        })
+        .unwrap();
+    registry
+        .release(&ServiceReleaseRequest { handle: retention })
+        .unwrap();
+    assert_eq!(registry.counts(), (0, 0, 0));
+    assert_eq!(pins.count(fixture.caller_deployment), 0);
+    assert_eq!(pins.count(fixture.target_deployment), 0);
+}
+
+#[test]
+fn recursive_self_calls_share_one_depth_budget_and_reject_the_seventeenth_hop() {
+    let fixture = fixture();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, DeploymentPins::new());
+    let first = registry
+        .resolve(&resolve_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    let mut handles = vec![first.handle.clone()];
+    let mut parent = first.frame.clone();
+    for _ in 1..MAX_DEPTH {
+        let admission = registry
+            .resolve(&resolve_request(
+                fixture.target_deployment,
+                "SELF",
+                fixture.target_digest,
+                Some(parent),
+            ))
+            .unwrap();
+        parent = admission.frame;
+        handles.push(admission.handle);
+    }
+    assert_eq!(
+        registry
+            .resolve(&resolve_request(
+                fixture.target_deployment,
+                "SELF",
+                fixture.target_digest,
+                Some(parent),
+            ))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceLimitExceeded
+    );
+    for handle in handles.into_iter().rev() {
+        registry
+            .complete(&ServiceReleaseRequest { handle })
+            .unwrap();
+    }
+    registry
+        .complete_root(&ServiceRootCompleteRequest {
+            frame: first.caller_frame,
+        })
+        .unwrap();
+    assert_eq!(registry.counts(), (0, 0, 0));
+}
+
+#[test]
+fn sibling_concurrency_is_bounded_per_root_without_cross_root_interference() {
+    let fixture = fixture();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, DeploymentPins::new());
+    let first = registry
+        .resolve(&resolve_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    let mut handles = vec![first.handle.clone()];
+    for _ in 1..MAX_CONCURRENT_CALLS {
+        handles.push(
+            registry
+                .resolve(&resolve_request(
+                    fixture.target_deployment,
+                    "SELF",
+                    fixture.target_digest,
+                    Some(first.frame.clone()),
+                ))
+                .unwrap()
+                .handle,
+        );
+    }
+    assert_eq!(
+        registry
+            .resolve(&resolve_request(
+                fixture.target_deployment,
+                "SELF",
+                fixture.target_digest,
+                Some(first.frame),
+            ))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceLimitExceeded
+    );
+
+    let independent = registry
+        .resolve(&resolve_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    registry
+        .complete(&ServiceReleaseRequest {
+            handle: independent.handle,
+        })
+        .unwrap();
+    registry
+        .complete_root(&ServiceRootCompleteRequest {
+            frame: independent.caller_frame,
+        })
+        .unwrap();
+
+    for handle in handles.into_iter().rev() {
+        registry
+            .complete(&ServiceReleaseRequest { handle })
+            .unwrap();
+    }
+    registry
+        .complete_root(&ServiceRootCompleteRequest {
+            frame: first.caller_frame,
+        })
+        .unwrap();
+    assert_eq!(registry.counts(), (0, 0, 0));
+}
+
+#[test]
+fn sequential_calls_share_one_total_budget_even_after_each_operation_drains() {
+    let fixture = fixture();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, DeploymentPins::new());
+    let first = registry
+        .resolve(&resolve_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    registry
+        .complete(&ServiceReleaseRequest {
+            handle: first.handle.clone(),
+        })
+        .unwrap();
+    for _ in 1..MAX_TOTAL_CALLS {
+        let admission = registry
+            .resolve(&resolve_request(
+                fixture.caller_deployment,
+                "TARGET",
+                fixture.caller_digest,
+                Some(first.caller_frame.clone()),
+            ))
+            .unwrap();
+        registry
+            .complete(&ServiceReleaseRequest {
+                handle: admission.handle,
+            })
+            .unwrap();
+    }
+    assert_eq!(
+        registry
+            .resolve(&resolve_request(
+                fixture.caller_deployment,
+                "TARGET",
+                fixture.caller_digest,
+                Some(first.caller_frame.clone()),
+            ))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceLimitExceeded
+    );
+    registry
+        .complete_root(&ServiceRootCompleteRequest {
+            frame: first.caller_frame,
+        })
+        .unwrap();
+    assert_eq!(registry.counts(), (0, 0, 0));
+}
+
+#[test]
+fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
+    let fixture = fixture();
+    let pins = DeploymentPins::new();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
+    registry.activate_generation("generation-a");
+    let admission = registry
+        .resolve(&resolve_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    let retention = registry
+        .retain(&ServiceRetainRequest {
+            handle: admission.handle.clone(),
+            owner: RetentionOwner::Target,
+        })
+        .unwrap();
+    assert_eq!(registry.counts(), (1, 1, 1));
+
+    registry.clear_generation("generation-a");
+
+    assert_eq!(registry.counts(), (0, 0, 0));
+    assert_eq!(pins.count(fixture.caller_deployment), 0);
+    assert_eq!(pins.count(fixture.target_deployment), 0);
+    assert_eq!(
+        registry
+            .begin_capability(&CapabilityBeginRequest {
+                retention,
+                parent_frame: None,
+            })
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceBindingDenied
+    );
+
+    registry.activate_generation("generation-a");
+    let current = registry
+        .resolve(&resolve_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    registry.activate_generation("generation-b");
+    assert_eq!(registry.counts(), (0, 0, 0));
+    assert_eq!(pins.count(fixture.caller_deployment), 0);
+    assert_eq!(pins.count(fixture.target_deployment), 0);
+    registry.clear_generation("generation-a");
+    assert_eq!(registry.counts(), (0, 0, 0));
+    assert_eq!(
+        registry
+            .complete(&ServiceReleaseRequest {
+                handle: current.handle,
+            })
+            .unwrap(),
+        ()
+    );
+}

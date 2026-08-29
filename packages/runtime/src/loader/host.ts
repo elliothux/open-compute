@@ -8,80 +8,25 @@ export { tenantEnv } from "./bindings.js";
 export { WorkflowBindingTransport } from "../workflows/binding.js";
 import { makeR2TransportBase } from "../r2/transport.js";
 import { makeD1TransportBase } from "../d1/transport.js";
-import { assertSnapshot } from "./snapshot.js";
-import type { AssetBindingProps, BindingEnv, ResourceBindingProps } from "../bindings/protocol.js";
+import type {
+  AssetBindingProps, BindingEnv, ResourceBindingProps,
+} from "../bindings/protocol.js";
 import type { QueueBindingProps } from "../queues/protocol.js";
-import type { AlarmIdentity, AlarmProjection, DoPolicy, DoPolicyEnv, DoWireValue } from "../durable-objects/protocol.js";
-import type { DispatchEnvelope, LoaderEnv, RuntimeEnvelope, RuntimeModule, RuntimeSnapshot } from "./protocol.js";
+import type { AlarmIdentity, AlarmProjection, DoWireValue } from "../durable-objects/protocol.js";
+import type { DispatchEnvelope, LoaderEnv, RuntimeModule } from "./protocol.js";
+import {
+  assembleOnce, bindingError, BINDING_TOKEN_HEADER, currentStartupGeneration,
+  doPolicy, INTERNAL_HEADERS, PROFILE, resolveSnapshot, TOKEN_HEADER,
+} from "./shared.js";
+export {
+  bindingError, currentStartupGeneration, doPolicy, PROFILE, resolveSnapshot,
+} from "./shared.js";
+export { ServiceTransport } from "../services/transport.js";
 
-const SOURCE_PATH = "/internal/runtime/v1/deployments/resolve";
-const TOKEN_HEADER = "x-open-compute-internal-token";
-const BINDING_TOKEN_HEADER = "x-open-compute-binding-token";
 const MAX_QUEUE_MESSAGES = 100;
 const MAX_QUEUE_BODY_BYTES = 128 * 1024;
 const MAX_QUEUE_BATCH_BYTES = 256 * 1024;
-let startupGeneration: string | undefined;
-const assembling = new Map<string, Promise<WorkerLoaderWorkerCode>>();
 const seenHashes = new Map<string, string>();
-const INTERNAL_HEADERS = [
-  TOKEN_HEADER,
-  "x-open-compute-account-id",
-  "x-open-compute-worker-id",
-  "x-open-compute-deployment-id",
-  "x-open-compute-loader-key",
-  "x-open-compute-execution-started",
-  "x-open-compute-asset-representation-length",
-  "x-open-compute-worker-code-sha256",
-  "x-open-compute-entrypoint",
-  "x-open-compute-original-method",
-  "x-open-compute-original-url",
-  "x-open-compute-route-generation",
-  "x-open-compute-request-id",
-  "x-open-compute-binding-id",
-  "x-open-compute-binding-token",
-  "x-open-compute-descriptor-sha256",
-  "x-open-compute-namespace-resource-id",
-  "x-open-compute-object-id",
-  "x-open-compute-object-generation",
-  "x-open-compute-class-name",
-  "x-open-compute-asset-method",
-  "x-open-compute-asset-url",
-  "x-open-compute-do-method",
-  "x-open-compute-do-url",
-  "x-open-compute-do-operation",
-  "x-open-compute-startup-generation",
-  "forwarded",
-  "x-forwarded-for",
-  "x-forwarded-host",
-  "x-forwarded-proto",
-];
-
-export const PROFILE = Object.freeze({ cpuMs: 50, subRequests: 16 });
-
-function policyInteger(env: DoPolicyEnv, name: keyof DoPolicyEnv, maximum: number): number {
-  const value = Number(env[name]);
-  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
-    throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
-  }
-  return value;
-}
-
-export function doPolicy(env: DoPolicyEnv): Readonly<DoPolicy> {
-  return Object.freeze({
-    maxObjectNameBytes: policyInteger(env, "DO_MAX_OBJECT_NAME_BYTES", 1024),
-    maxRpcRequestBytes: policyInteger(env, "DO_MAX_RPC_REQUEST_BYTES", 16 * 1024 * 1024),
-    maxRpcResponseBytes: policyInteger(env, "DO_MAX_RPC_RESPONSE_BYTES", 16 * 1024 * 1024),
-    maxFetchBodyBytes: policyInteger(env, "DO_MAX_FETCH_BODY_BYTES", 64 * 1024 * 1024),
-    dispatchTimeoutMs: policyInteger(env, "DO_DISPATCH_TIMEOUT_MS", 5 * 60 * 1000),
-    maxInFlightDispatches: policyInteger(env, "DO_MAX_IN_FLIGHT_DISPATCHES", 4096),
-  });
-}
-
-export function currentStartupGeneration(seed?: string | null): string {
-  if (!startupGeneration) startupGeneration = seed || crypto.randomUUID();
-  if (seed && startupGeneration !== seed) throw bindingError("BINDING_PROTOCOL_ERROR");
-  return startupGeneration;
-}
 
 function stableError(code: string, status: number, requestId?: string | null): Response {
   return Response.json({
@@ -92,6 +37,17 @@ function stableError(code: string, status: number, requestId?: string | null): R
 
 function classify(error: unknown): [string, number] {
   const message = String(error instanceof Error ? error.message : error);
+  const service = [
+    ["SERVICE_BINDING_DENIED", 403],
+    ["SERVICE_TARGET_NOT_READY", 503],
+    ["SERVICE_UNAVAILABLE", 503],
+    ["SERVICE_ENTRYPOINT_NOT_FOUND", 404],
+    ["SERVICE_LIMIT_EXCEEDED", 429],
+    ["SERVICE_TIMEOUT", 504],
+  ] as const;
+  for (const [code, status] of service) {
+    if (message.includes(code)) return [code, status];
+  }
   if (/entrypoint|no such entrypoint|was not found/i.test(message)) {
     return ["ENTRYPOINT_NOT_FOUND", 404];
   }
@@ -126,51 +82,6 @@ function assertEnvelope(request: Request, validation: boolean, entrypointName: s
     routeGeneration,
     runtimeKey: `${validation ? "validate" : "runtime"}/${loaderKey}/${expected}/g/${routeGeneration}/${entrypointName || "default"}`,
   };
-}
-
-export async function resolveSnapshot(env: LoaderEnv, envelope: RuntimeEnvelope, validation: boolean, probe: boolean, internalToken: string | null): Promise<RuntimeSnapshot> {
-  if (internalToken === null) throw bindingError("BINDING_PROTOCOL_ERROR");
-  const response = await env.RUNTIME_SOURCE.fetch(`http://runtime-source${SOURCE_PATH}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      [TOKEN_HEADER]: internalToken,
-    },
-    body: JSON.stringify({
-      startupGeneration: currentStartupGeneration(internalToken),
-      key: envelope.loaderKey,
-      expectedWorkerCodeSha256: envelope.expected,
-      scope: validation ? (probe ? "probe" : "validation") : "runtime",
-    }),
-  });
-  if (!response.ok) {
-    const code = response.headers.get("x-open-compute-error-code") || "RUNTIME_INTERNAL";
-    throw bindingError(code);
-  }
-  const snapshot: unknown = await response.json();
-  assertSnapshot(snapshot);
-  if (snapshot.loaderKey !== envelope.loaderKey || snapshot.workerCodeSha256 !== envelope.expected) {
-    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
-  }
-  return snapshot;
-}
-
-function assembleOnce(key: string, build: () => Promise<WorkerLoaderWorkerCode>): Promise<WorkerLoaderWorkerCode> {
-  const current = assembling.get(key);
-  if (current) return current;
-  const pending = build().finally(() => {
-    if (assembling.get(key) === pending) assembling.delete(key);
-  });
-  assembling.set(key, pending);
-  return pending;
-}
-
-export function bindingError(code: string): Error & { stableCode: string } {
-  const error = Object.assign(new Error(code), { stableCode: code });
-  error.name = "Error";
-  error.stableCode = code;
-  error.stack = `Error: ${code}`;
-  return error;
 }
 
 export { KVNamespace } from "../kv/transport.js";

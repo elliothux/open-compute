@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open, opendir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CompiledModule, CompiledModuleType, CompiledWorker } from "../build-worker.ts";
-import type { WorkerProject } from "../project.ts";
+import type { WorkerProject, WorkerService } from "../project.ts";
 import { record } from "../project.ts";
 import type { AssetsProject } from "../assets/types.ts";
 
@@ -12,7 +12,7 @@ const MAX_MODULE_BYTES = 4 * 1024 * 1024;
 const MAX_TOTAL_MODULE_BYTES = 16 * 1024 * 1024;
 const GENERATED_BINDING_KEYS = [
   "vars", "define", "durable_objects", "kv_namespaces", "d1_databases", "r2_buckets",
-  "queues", "workflows", "services", "dispatch_namespaces", "ai", "vectorize",
+  "queues", "workflows", "dispatch_namespaces", "ai", "vectorize",
   "hyperdrive", "browser", "images", "mtls_certificates", "version_metadata", "unsafe",
 ] as const;
 
@@ -26,6 +26,7 @@ interface ModuleRule {
 export interface FrameworkOutput {
   readonly worker: CompiledWorker;
   readonly assets?: AssetsProject;
+  readonly services: Record<string, WorkerService>;
 }
 
 function within(root: string, value: string): boolean {
@@ -61,6 +62,33 @@ function onlyKeys(value: Record<string, unknown>, keys: readonly string[], label
 function string(value: unknown, label: string): string {
   if (typeof value !== "string" || !value || /[\0\r\n]/.test(value)) throw new Error(`${label} is invalid`);
   return value;
+}
+
+function serviceDeclarations(value: unknown): Record<string, WorkerService> {
+  const services: Record<string, WorkerService> = {};
+  if (value === undefined) return services;
+  if (!Array.isArray(value) || value.length > 64) {
+    throw new Error("generated framework services are invalid");
+  }
+  for (const item of value) {
+    if (!record(item)) throw new Error("generated framework service is invalid");
+    onlyKeys(item, ["binding", "service", "entrypoint"], "generated framework service");
+    const binding = string(item.binding, "generated framework service binding");
+    const service = string(item.service, "generated framework service target");
+    const entrypoint = item.entrypoint === undefined
+      ? undefined : string(item.entrypoint, "generated framework service entrypoint");
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(binding)
+        || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(service)
+        || (entrypoint !== undefined && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypoint))
+        || Object.hasOwn(services, binding)) {
+      throw new Error("generated framework service is invalid");
+    }
+    Object.defineProperty(services, binding, {
+      value: { service, ...(entrypoint === undefined ? {} : { entrypoint }) },
+      enumerable: true,
+    });
+  }
+  return services;
 }
 
 function outputPath(root: string, base: string, value: unknown, label: string): Promise<string> {
@@ -253,6 +281,15 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
   if (GENERATED_BINDING_KEYS.some(key => config[key] !== undefined)) {
     throw new Error("generated framework config declares bindings that open-compute cannot import yet");
   }
+  const services = { ...project.services };
+  for (const [binding, declaration] of Object.entries(serviceDeclarations(config.services))) {
+    const existing = services[binding];
+    if (existing !== undefined
+        && (existing.service !== declaration.service || existing.entrypoint !== declaration.entrypoint)) {
+      throw new Error("generated framework service conflicts with the project");
+    }
+    Object.defineProperty(services, binding, { value: declaration, enumerable: true });
+  }
   const outputRoot = await realpath(dirname(configPath));
   const main = await outputPath(projectRoot, outputRoot, config.main, "generated framework main");
   let assets: AssetsProject | undefined;
@@ -265,5 +302,5 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
     assets = routing(config.assets, relativeAssets.split(sep).join("/"));
   }
   const worker = await importModules(outputRoot, configPath, main, assetsDirectory, moduleRules(config.rules));
-  return { worker, ...(assets === undefined ? {} : { assets }) };
+  return { worker, ...(assets === undefined ? {} : { assets }), services };
 }

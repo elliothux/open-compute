@@ -51,6 +51,8 @@ TARGETS = {
     'workflow-recovery': ('open-compute-service', 'workflow_recovery_gate', False),
     'p2-exit': ('open-compute-service', 'p2_exit_gate', False),
     'p3-assets': ('open-compute-service', 'p3_assets_gate', False),
+    'p3-services-hard': ('open-compute-service', 'p3_services_hard', False),
+    'p3-services-product': ('open-compute-service', 'p3_services_product', False),
     # Finish independent work together before the remaining exclusive barriers.
     'workflow-product': ('open-compute-service', 'workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),
@@ -61,6 +63,7 @@ GROUPS = {
     'p1': [name for name in TARGETS if name.startswith('p1-')],
     'p2': [name for name in TARGETS if name.startswith('p2-') or name.startswith('workflow-')],
     'p3': [name for name in TARGETS if name.startswith('p3-')],
+    'p3-services': ['p3-services-hard', 'p3-services-product'],
     # Queue/Cron share the immutable loader matrix; selecting both never duplicates it.
     'p2-3': ['p0-2'],
     'p1-8': ['p0-7', 'p1-conformance'],

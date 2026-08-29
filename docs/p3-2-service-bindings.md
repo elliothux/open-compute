@@ -1,7 +1,11 @@
 # P3.2：Service Binding 与原生 Worker 调用
 
-状态：待实现的详细方案。2026-08-29。本文未运行新 Gate；WDL/Miniflare 的实现只能证明参考
-路径存在，不能证明 open-compute 的权限、调用预算和生命周期已成立。
+状态（2026-08-30）：平台核心实现为 **Conditional Go**。SB-0 至 SB-4 已落到当前
+Day1 schema、工具链、stock workerd 原生 RPC、调用预算、deployment pin、generation 回收与
+有界指标；`p3-services-hard` 和 `p3-services-product` 单轮开发 Gate 已通过。事件源实际调用矩阵、
+真实 workerd crash handle 回收，以及 P3.4 contract/portable differential 尚未完成，因此不能给最终
+Platform Go。选定 vinext workload 未固定，只表示 Application verdict 未评估，不是平台阻塞项。
+本文保持 active，不归档，也不把核心 Gate 通过写成 P3 conformance 已完成。
 
 本阶段让 Worker 通过声明的 binding 调用同账户其他 Worker 或自己，支持默认/命名入口的
 fetch 与原生 RPC。绑定冻结目标 Worker ID；每次新的 service 调用解析目标当前 active
@@ -10,7 +14,44 @@ deployment，再固定这次调用。整个数据调用留在现有 stock worker
 
 本文细化[总方案](open-compute-workerd-platform.md) P3.2 中的 Service Binding 部分。
 [Static Assets 方案](p3-1-static-assets.md)提供目标默认 HTTP 路由；P3.2 的完整 Node API
-清单和 P3.3 缓存/Images 仍需分别完成。Service Binding 通过不等于全部 vinext 已对齐。
+清单和 P3.3 缓存/Images 仍需分别完成。Service Binding 通过不等于 P3 平台或应用验收完成。
+
+## 实现与当前证据（2026-08-30）
+
+当前实现只有一套 Service Binding 路径：工具链把 Worker 名解析成明确的同账户 Worker ID，
+部署事务写入 `deployment_services` 和 descriptor digest；每个调用由 generation-authenticated
+loopback authority 重新校验声明、解析目标 active deployment、取得 pin，再把业务参数、
+Response/Stream/WebSocket 和 RPC capability 留在 stock workerd 原生 RPC 中。默认 object、
+function 与 `WorkerEntrypoint` fetch 共用目标自己的 env；默认/命名 RPC 只暴露受控公开成员。
+
+调用根共享固定预算：深度 16、总调用 128、并发 32、deadline 30 秒。返回的 stream、
+WebSocket、`waitUntil` 和 capability 分别以可观察的 drain/close/dispose 协议持有 deployment；
+普通完成不靠 TTL 或 GC 猜测。已确认 workerd generation 退出时，旧 frame/handle 与保守 pin
+统一失效；删除 Worker 会原子 fence 它的 deployment 集合并拒绝有效跨 Worker 引用。指标
+使用固定 operation/outcome 标签及 root/operation/retention gauges，不包含 Worker ID、方法名
+或路径；固定 metrics series 从 567 增至 582。
+
+当前可重复证据如下：
+
+| 证据 | 已验证内容 |
+| --- | --- |
+| `bun run build && bun run typecheck && bun run test:js` | 63 个 JS 测试；Service facade、默认 object/function env、动态 waitUntil、DO/Workflow root scope、工具链解析与生成资产 |
+| `cargo test -p open-compute-service --lib service_invocations::tests` | 5 个 registry 测试；返回 capability pin、深度/并发/总量预算、跨 root 隔离、generation 失效 |
+| `./test/gate.py p3-services` | hard/product 共 2 个 stock-workerd case；最近通过报告为 `.temp/gate-run/20260830T023135-01e16edc/report.json` |
+| `./test/coverage.sh` | 完整 workspace 单轮 Gate 通过，Rust line coverage 为 90.01%；报告为 `.temp/gate-run/20260830T030034-3820ad3e/report.json` 与 `target/llvm-cov/summary.json` |
+| `p3-services-hard` | primitive/结构化值、TypedArray、Date、Request/Response、Readable/WritableStream、WebSocket、函数 callback、RpcTarget、getter、pipeline、dup/dispose；WeakMap 明确拒绝 |
+| `p3-services-product` | 默认/命名 fetch 与 RPC、object-style 默认 fetch、Assets/Assets-only、业务异常、waitUntil、返回/嵌套 capability、callback、self 深度限制、b1 在途固定与后续 b2 动态解析、最终 drain |
+
+仍未完成的 qualification 项目：
+
+- P3.4 尚未提供固定 Service Binding contract catalog、portable fixture 与 Cloudflare differential，
+  因此当前产品 Gate 不能单独给最终 Platform Go。
+- Queue/Cron/DO/Workflow adapter 已统一建立 root scope，现有产品回归与 wrapper 单测可证明
+  非 Service 行为及 scope wiring；但这些事件源内“实际调用 Service”的独立 stock-workerd
+  产品矩阵尚未登记。真实 workerd crash 中的在途 Service handle 回收也只有生产 watcher 与
+  generation 单测证据，尚无独立进程 Gate。两项在补齐前都不能标成 S14/S15 完整验收。
+- vinext 应用产物、选定 workload 断言和浏览器输入尚未固定；不能自造 fixture 数量或用改框架/
+  关闭功能代替。该项只阻止对应 Application Go，不阻止通过独立 contract 证据给出 Platform verdict。
 
 ## 1. 基线、范围与优先风险
 
@@ -30,9 +71,10 @@ deployment，再固定这次调用。整个数据调用留在现有 stock worker
 pin 来自 [workerd.lock.json](../packages/runtime/workerd.lock.json)，当前为 `v1.20260826.1`。
 布局与验收按 [runtime 布局](implemented/runtime-and-test-layout.md)和[测试规范](references/testing.md)。
 
-vinext 沿用总方案的
+平台支持面以 Cloudflare Service Binding/RPC 官方契约、固定 workerd pin 与 P3.4 catalog 为准。
+可选 vinext qualification 沿用总方案的
 [`5d0b53088c689b75d63672eab6ff66434afa5b3b`](https://github.com/cloudflare/vinext/tree/5d0b53088c689b75d63672eab6ff66434afa5b3b)，
-完整输入和用例清单由 P3.0 固定；本阶段不更换版本、不关闭框架能力来绕过失败。
+完整输入和用例清单由独立 application manifest 固定；本阶段不更换版本、不关闭框架能力来绕过失败。
 
 ### 1.2 承诺与非目标
 
@@ -43,7 +85,8 @@ vinext 沿用总方案的
 - 默认/命名 `WorkerEntrypoint` 的公开 RPC 方法，参数/返回值使用原生 RPC。
 - 惰性加载、warm/cold 一致性、发布/回滚中的单调用固定、有限循环调用。
 - Request/Response 流、异常、`waitUntil`、WebSocket、RPC capability 的实际生命周期验证。
-- 当前 vinext 启用用例要求的 service API，不为 `WORKER_SELF_REFERENCE` 写特殊分支。
+- 可选应用 qualification 覆盖选定 vinext workload 实际使用的 service API，但不为
+  `WORKER_SELF_REFERENCE` 写特殊分支，也不扩大平台支持面。
 
 RPC 支持面必须按类型和操作记录。primitive/结构化值、函数 callback、`RpcTarget`、
 Readable/WritableStream、Request/Response、`dup()`/dispose、promise pipelining 和公开
@@ -291,8 +334,9 @@ complete 幂等，只能结束本 generation、本 controller 获得的 handle�
 ### 5.2 调用链预算
 
 沿用现有 CPU/subrequest 限制，再增加平台持有的调用链额度；两者不是同一件事。
-当前 loader profile 的 `cpuMs: 50, subRequests: 16` 不能未经测量就宣称足以运行 vinext。
-SB-0/P3.0 用真实产物确定普通产品 profile，调整后对所有相关应用一致生效。
+当前 loader profile 的 `cpuMs: 50, subRequests: 16` 不能未经测量就宣称适合任意应用。
+SB-0/P3.0 用 portable contract fixture 确定普通产品 profile；应用 qualification 可以暴露需要调整的
+预算，但调整后必须对同类 Worker 一致生效，不能只给 vinext 放宽。
 
 初始建议：深度 16、每 root 最多 128 次 service 调用、32 个并发子调用；HTTP/RPC 初始
 执行 deadline 30 秒。它们是待测默认值，不是 Cloudflare 精确限制。后台任务、长流和
@@ -419,16 +463,19 @@ drain、目标不可用、RPC release、WebSocket 数。metrics 不使用任意�
 
 | 顺序 | 工作包 | 依赖 | 退出条件 |
 | --- | --- | --- | --- |
-| SB-0 | 原生 RPC/上下文/存活期 Gate | 现有 runtime pin、P3.0 用例输入 | 明确 fetch/RPC 类型矩阵，证明链预算与 drain 机制；未证项明确阻塞 |
+| SB-0 | 原生 RPC/上下文/存活期 Gate | 现有 runtime pin、P3.0 平台契约输入 | 明确 fetch/RPC 类型矩阵，证明链预算与 drain 机制；未证项明确阻塞 |
 | SB-1 | schema/descriptor/声明导入 | SB-0 可行性结论 | IDs、same-account、self/cycle、命名冲突、事务与引用约束 |
 | SB-2 | authority 与共用加载器 | SB-1 | 每次 resolve+pin、暖缓存校验、lazy env、目标自己的配置 |
 | SB-3 | 原生 fetch/RPC 接入 | SB-2、Assets SA-3 | 四条路由正确，默认/命名/self/跨 Worker 和 streaming 正常 |
 | SB-4 | 根预算、pin、删除与恢复 | SB-0 选定协议、SB-3 | 所有返回形态和事件源下不提前释放、不泄漏；超时/崩溃安全 |
-| SB-5 | 框架与产品联合 Gate | SB-4、Assets SA-4/SA-5 | vinext 实际 self/service 用例，发布/回滚与现有产品回归 |
+| SB-5 | 产品 conformance qualification | SB-4、Assets SA-4/SA-5、P3.4 harness | portable contract、Cloudflare differential、事件源/crash 与现有产品回归 |
+| SB-A1 | 可选应用 qualification | SB-5、独立应用 baseline | 选定 vinext self/service workload 的正常 build/deploy/browser 与应用报告 |
 
 SB-0 可在资产上传工作同时推进，因为它不依赖完整 Assets；SB-3 的组合验收必须使用真正
 SA-3 路由。SA-4/SB-4 共同依赖的是 SB-0 产出的存活协议，不让两份方案互相等待“对方整阶段
 先完成”。不同工作包可以有中间结果，但 SB-0 失败不能跳过后称 SB-5 完成。
+当前 SB-0 至 SB-4 的实现早于正式 P3.4 catalog；已有 Gate 保留为核心证据，SB-5 负责把它们映射
+到 contract、补齐缺口并执行 differential，不能由既有 PASS 直接推导 Cloudflare conformance。
 
 ### 8.2 运行时与 authority 矩阵
 
@@ -453,18 +500,19 @@ SA-3 路由。SA-4/SB-4 共同依赖的是 SB-0 产出的存活协议，不让�
 
 S15 中的 Workflow service call 属于具体 step/attempt 的副作用，沿用至少一次执行风险；
 不能因底层叫 RPC 就承诺 exactly-once。DO 内部对 Service 的调用不自动改变已有其他产品的
-限制，例如已记录的 DO 内 Workflow mutation 不支持；若 vinext 基线需要该限制外能力，应
+限制，例如已记录的 DO 内 Workflow mutation 不支持；若 mapped supported contract 需要该限制外能力，应
 明确补齐或阻塞，不能用旁路 service 隐式突破已有安全策略。
 
-### 8.3 框架验收
+### 8.3 可选应用 qualification
 
-使用固定 vinext 的真实构建与原始启用断言。发现 self binding 后通过普通部署声明注入，
+使用固定 vinext 的真实构建与选定 workload 原始断言。发现 self binding 后通过普通部署声明注入，
 不改框架逻辑、不针对 fixture 名字分支。覆盖实际产生的 Server Actions/Flight/streaming
 请求、importable env 和服务间错误；用真实 target Worker 标记确认调用确实发生。
 
-只有实际列出的 test/project/mode 能计数。依赖 Node API、Workers Cache 或 Images 的失败
-转入对应 P3 工作项，但仍是总体交付的未完成项，不作为 Service 阶段“全部框架通过”的
-理由。当前没有完整 vinext 用例数量和平台通过率，结果文档不得填估计值。
+只有实际列出的 test/project/mode 能计数。依赖 Node API、Workers Cache 或 Images 的失败映射到
+对应 contract 或应用/upstream 分类，不作为 Service 平台阶段“全部框架通过”的理由。当前没有
+选定 workload 清单和应用通过率，结果文档不得填估计值。该 qualification 不参与 Platform Go
+分母。
 
 ### 8.4 文件归属与入口
 
@@ -495,7 +543,7 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py p3-assets p3-services
 
 结果保存 `.temp/gate-run/` 与正式结果文档，列出源码/lock/artifact/测试 executable 身份、
 逐项支持面、失败/未运行、限额、实际 pin drain 证据及应用测试映射。两个能力完成并不自动
-代表 P3.4 全量验收；完成后再归档 `docs/implemented/`。
+代表 P3.4 Cloudflare conformance；完成后再归档 `docs/implemented/`。
 
 ## 9. 关键选择与交付判断
 
@@ -508,6 +556,7 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py p3-assets p3-services
 | 有证据才 release pin | 防止删除仍被使用的部署；无法证明时返回 busy 而非冒险回收 |
 | 不做透明自动重试 | 保持副作用边界；调用方仍需业务幂等设计 |
 
-本阶段 Go 需要：声明/目标/入口/原生类型矩阵通过，单调用版本固定，权限与预算没有可绕开
-的暖缓存或 callback 路径，存活引用正常释放，删除/崩溃/恢复可靠，已映射的 vinext 用例有
-真实证据。若只能返回字符串但 native 生命周期没有证明，应记录为中间进展，不是完成。
+本阶段 Platform Go 需要：声明/目标/入口/原生类型矩阵通过，单调用版本固定，权限与预算没有可
+绕开的暖缓存或 callback 路径，存活引用正常释放，删除/崩溃/恢复可靠，所有 advertised contract
+有 portable fixture、Cloudflare differential 或明确 deviation 的真实证据。若只能返回字符串但
+native 生命周期没有证明，应记录为中间进展，不是完成。应用 workload 另给 Application verdict。

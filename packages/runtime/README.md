@@ -1,11 +1,15 @@
 # Runtime 源码组织
 
-`src/` 按领域组织，每个领域保留自己的实现与协议类型：
+这里是单机 Cloudflare Workers Platform 的受信任 workerd runtime 层。`src/` 按产品领域组织，
+每个领域保留自己的实现与协议类型；tenant Worker 只看部署声明生成的 facade，不接触内部
+authority、SQLite/S3 credential 或 loader 控制能力。
 
 | 目录 | 职责 |
 | --- | --- |
 | `gateway/` | 内部入口和租户出站网关 |
 | `loader/` | 部署快照、模块装配、绑定注入及 `wrappers/` |
+| `assets/` | Static Assets 路由、binding 与私有对象读取协议 |
+| `services/` | Service Binding facade、调用 scope、原生 RPC/fetch 与释放协议 |
 | `kv/` | KV 传输 |
 | `d1/` | D1 facade、二进制传输及协议 |
 | `r2/` | R2 facade、流式传输及协议 |
@@ -13,6 +17,10 @@
 | `durable-objects/` | DO host、路由、ID 编码、alarm shim 与协议 |
 | `workflows/` | Workflow host、执行控制器、runner、facade 与序列化 |
 | `bindings/` | 多个领域共同使用的绑定权限和后端能力类型 |
+
+新增 Cloudflare API 必须先进入平台 contract/capability，再沿通用 snapshot、binding facade 与可信
+transport 接入；不能根据 vinext、模块路径或 fixture 名称在 runtime 中增加框架专用分支。尚未
+实现的 Cache/Images 不在本目录表中，也不因方案文档存在而视为 runtime 能力。
 
 行为测试位于 `tests/<领域>/`。构建测试及共享测试加载器留在 `tests/`；
 Rust 与 JS 共用的序列化 fixture 继续位于 `tests/fixtures/`。

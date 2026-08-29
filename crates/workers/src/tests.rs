@@ -694,6 +694,7 @@ fn descriptor_binds_every_runtime_effective_input() {
         Vec::new(),
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         serde_json::json!({"profile": "default"}),
         1,
     )
@@ -836,6 +837,7 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             Vec::new(),
             vars,
             secrets,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -1158,6 +1160,7 @@ fn deployment_request(
         vars,
         secrets,
         bindings: BTreeMap::new(),
+        services: BTreeMap::new(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile": "default"}),
@@ -1178,6 +1181,15 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     let (worker, _) = repo
         .create_worker(account, "pipeline", RequestId::generate(), 1, 1_000_000)
         .unwrap();
+    let (target, _) = repo
+        .create_worker(
+            account,
+            "pipeline-target",
+            RequestId::generate(),
+            2,
+            1_000_000,
+        )
+        .unwrap();
     let mock = MockS3::spawn("open-compute").await;
     let validator: Arc<dyn RuntimeValidator> = Arc::new(AcceptAllValidator);
     let controller = DeploymentController::new(
@@ -1186,7 +1198,14 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
         validator,
         BundleLimits::default(),
     );
-    let request = deployment_request(account, worker.id, "deploy-key", "pipeline-secret-value");
+    let mut request = deployment_request(account, worker.id, "deploy-key", "pipeline-secret-value");
+    request.services.insert(
+        "CATALOG".to_owned(),
+        DeploymentServiceInput {
+            target_worker_id: target.id,
+            entrypoint: Some("CatalogApi".to_owned()),
+        },
+    );
     let first = controller.create_deployment(request.clone()).await.unwrap();
     let (deployment_id, descriptor_hash) = match first {
         CreateDeploymentOutcome::Applied(result) => {
@@ -1236,6 +1255,13 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     assert!(format!("{:?}", snapshot.modules[0]).contains("RuntimeModule"));
     assert_eq!(snapshot.modules.len(), 1);
     assert_eq!(snapshot.vars["MODE"], "production");
+    assert_eq!(snapshot.services.len(), 1);
+    assert_eq!(snapshot.services[0].descriptor.name, "CATALOG");
+    assert_eq!(snapshot.services[0].descriptor.target_worker_id, target.id);
+    assert_eq!(
+        snapshot.services[0].descriptor.entrypoint.as_deref(),
+        Some("CatalogApi")
+    );
     assert_eq!(
         snapshot.secrets["API_TOKEN"].expose(),
         "pipeline-secret-value"
@@ -1504,6 +1530,7 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
+        services: BTreeMap::new(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile": "default"}),

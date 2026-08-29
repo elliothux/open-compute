@@ -20,6 +20,7 @@ test("loads project-relative inputs and preserves JSON without reading secret va
     ...config, vars: { GREETING: "你好 🌍", nested: [null, true, { number: 42 }] },
     secrets: { TOKEN: { env: "ABSENT_PROJECT_SECRET" } },
     bindings: { DB: { type: "d1_database", id: "resource-id", permissions: { read: true, write: false } } },
+    services: [{ binding: "CATALOG", service: "catalog", entrypoint: "CatalogApi" }],
   });
   const result = await loadProject(filename);
   assert.equal(result.main, config.main);
@@ -29,6 +30,7 @@ test("loads project-relative inputs and preserves JSON without reading secret va
   assert.deepEqual(result.vars, { GREETING: "你好 🌍", nested: [null, true, { number: 42 }] });
   assert.deepEqual(result.secrets, { TOKEN: { env: "ABSENT_PROJECT_SECRET" } });
   assert.equal(result.bindings.DB.permissions.write, false);
+  assert.deepEqual(result.services, { CATALOG: { service: "catalog", entrypoint: "CatalogApi" } });
 });
 
 test("malformed config and plaintext secrets fail without echoing their contents", async t => {
@@ -40,6 +42,10 @@ test("malformed config and plaintext secrets fail without echoing their contents
     { bindings: { DB: { type: "unknown", id: "id" } } },
     { bindings: { DB: { type: "d1_database", id: "id", capabilityVersion: 3 } } },
     { bindings: { DB: { type: "d1_database", id: "id", permissions: { read: true } } } },
+    { services: {} },
+    { services: [{ binding: "1BAD", service: "catalog" }] },
+    { services: [{ binding: "SELF", service: "UPPERCASE" }] },
+    { services: [{ binding: "SELF", service: "hello", unknown: true }] },
   ]) {
     const filename = await fixture(t, { ...config, ...extra });
     await assert.rejects(loadProject(filename), error => {
@@ -80,7 +86,14 @@ test("loads Worker-plus-assets and assets-only project unions", async t => {
     ...config, vars: { ASSETS: true }, assets: { directory: "dist", binding: "ASSETS" },
   })), /conflicts/);
   await assert.rejects(loadProject(await fixture(t, {
+    ...config, vars: { SELF: true }, services: [{ binding: "SELF", service: "hello" }],
+  })), /conflicts/);
+  await assert.rejects(loadProject(await fixture(t, {
     name: "static", compatibilityDate: "2026-08-22", vars: { MODE: "x" }, assets: { directory: "dist" },
+  })), /assets-only/);
+  await assert.rejects(loadProject(await fixture(t, {
+    name: "static", compatibilityDate: "2026-08-22",
+    services: [{ binding: "SELF", service: "static" }], assets: { directory: "dist" },
   })), /assets-only/);
   await assert.rejects(loadProject(await fixture(t, {
     ...config, assets: { directory: "dist", runWorkerFirst: true },

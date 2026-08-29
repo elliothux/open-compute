@@ -1585,7 +1585,15 @@ fn p0_2_delete_referrer_recovery_and_worker_identity_are_fenced() {
             .any(|candidate| candidate.deployment_id == newest)
     );
 
-    repo.delete_worker(account, worker.id, request, 30).unwrap();
+    let expected = repo
+        .list_deployments(account, worker.id)
+        .unwrap()
+        .into_iter()
+        .filter(|deployment| deployment.deleted_at_ms.is_none())
+        .map(|deployment| deployment.id)
+        .collect::<Vec<_>>();
+    repo.delete_worker(account, worker.id, &expected, request, 30)
+        .unwrap();
     assert_eq!(
         repo.resolve_route(None, &format!("{}x", route.path_prefix))
             .unwrap_err()
@@ -2021,7 +2029,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 12);
+    assert_eq!(crate::migrations::current_schema_version(), 13);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2204,6 +2212,124 @@ fn insert_ready(
     repo.begin_validation(id).unwrap();
     repo.mark_ready(id, now + 1).unwrap();
     id
+}
+
+#[test]
+fn service_declarations_follow_active_targets_and_protect_worker_identity() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let request = open_compute_core::RequestId::generate();
+    let workers = WorkerRepository::new(storage.db());
+    let (caller, _) = workers
+        .create_worker(account, "service-caller", request, 1, 1_000_000)
+        .unwrap();
+    let (target, _) = workers
+        .create_worker(account, "service-target", request, 2, 1_000_000)
+        .unwrap();
+    let target_v1 = insert_ready(&workers, account, target.id, [1; 32], request, 3);
+    workers
+        .promote(account, target.id, target_v1, None, request, 5)
+        .unwrap();
+
+    let caller_deployment = DeploymentId::generate();
+    let descriptor = [7; 32];
+    let service = crate::NewDeploymentService {
+        binding_name: "CATALOG".to_owned(),
+        target_worker_id: target.id,
+        entrypoint: Some("CatalogApi".to_owned()),
+        descriptor_sha256: descriptor,
+    };
+    let self_service = crate::NewDeploymentService {
+        binding_name: "SELF".to_owned(),
+        target_worker_id: caller.id,
+        entrypoint: None,
+        descriptor_sha256: [6; 32],
+    };
+    let declarations = [service, self_service];
+    workers
+        .insert_staging_deployment(
+            &NewDeployment {
+                id: caller_deployment,
+                account_id: account,
+                worker_id: caller.id,
+                content_kind: crate::DeploymentContentKind::Worker,
+                artifact_sha256: Some([2; 32]),
+                artifact_size: Some(100),
+                artifact_schema_version: Some(1),
+                main_module: Some("index.js".to_owned()),
+                compatibility_date: "2026-08-22".to_owned(),
+                compatibility_flags: vec!["rpc".to_owned()],
+                limits: serde_json::json!({"profile":"default"}),
+                worker_code_sha256: [3; 32],
+                vars: BTreeMap::new(),
+                secrets: BTreeMap::new(),
+                request_id: request,
+                now_ms: 6,
+            },
+            &crate::NewDeploymentProducts {
+                services: &declarations,
+                ..crate::NewDeploymentProducts::default()
+            },
+            1_000_000,
+        )
+        .unwrap();
+    workers.begin_validation(caller_deployment).unwrap();
+    workers.mark_ready(caller_deployment, 7).unwrap();
+    workers
+        .promote(account, caller.id, caller_deployment, None, request, 8)
+        .unwrap();
+
+    let services = crate::ServiceRepository::new(storage.db());
+    let first = services
+        .resolve(caller_deployment, "CATALOG", &descriptor)
+        .unwrap();
+    assert_eq!(first.target_deployment_id, target_v1);
+    assert_eq!(first.service.entrypoint.as_deref(), Some("CatalogApi"));
+    assert_eq!(
+        services.inbound_referrers(account, target.id, 10).unwrap(),
+        vec![crate::ServiceReferrer {
+            caller_worker_id: caller.id,
+            caller_deployment_id: caller_deployment,
+            binding_name: "CATALOG".to_owned(),
+        }]
+    );
+    assert_eq!(
+        workers
+            .delete_worker(account, target.id, &[target_v1], request, 9)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceTargetReferenced
+    );
+
+    let target_v2 = insert_ready(&workers, account, target.id, [4; 32], request, 10);
+    workers
+        .promote(account, target.id, target_v2, Some(target_v1), request, 12)
+        .unwrap();
+    assert_eq!(
+        services
+            .resolve(caller_deployment, "CATALOG", &descriptor)
+            .unwrap()
+            .target_deployment_id,
+        target_v2
+    );
+    assert_eq!(
+        services
+            .resolve(caller_deployment, "CATALOG", &[8; 32])
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceBindingDenied
+    );
+    assert_eq!(
+        workers
+            .delete_worker(account, caller.id, &[], request, 13)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentReferenced
+    );
+    workers
+        .delete_worker(account, caller.id, &[caller_deployment], request, 14)
+        .unwrap();
 }
 
 #[test]
@@ -2677,7 +2803,15 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         );
     }
 
-    repo.delete_worker(account, worker.id, request, 41).unwrap();
+    let expected = repo
+        .list_deployments(account, worker.id)
+        .unwrap()
+        .into_iter()
+        .filter(|deployment| deployment.deleted_at_ms.is_none())
+        .map(|deployment| deployment.id)
+        .collect::<Vec<_>>();
+    repo.delete_worker(account, worker.id, &expected, request, 41)
+        .unwrap();
     assert_eq!(
         repo.deployment_snapshot(account, worker.id, ready, false)
             .unwrap_err()
@@ -2685,7 +2819,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         ErrorCode::WorkerDeleted
     );
     assert_eq!(
-        repo.delete_worker(account, worker.id, request, 42)
+        repo.delete_worker(account, worker.id, &[], request, 42)
             .unwrap_err()
             .code(),
         ErrorCode::WorkerDeleted

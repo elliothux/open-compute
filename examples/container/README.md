@@ -1,8 +1,11 @@
 # Container notes
 
-The build context contains one native Linux release file named `platformd`. Use the matching
-CPU architecture. The Ubuntu 24.04 base matches the CI Linux release builder; the upstream
-workerd binary requires glibc, so this image cannot use `scratch` or Alpine/musl.
+This image runs the single-machine Cloudflare Workers Platform-compatible deployment: one
+`platformd` supervises one verified stock workerd child, keeps structured authority in the mounted
+SQLite data directory, and uses the configured external S3-compatible provider for artifacts and
+objects. The build context contains one native Linux release file named `platformd`; use the matching
+CPU architecture. The Ubuntu 24.04 base matches the CI Linux release builder; upstream workerd
+requires glibc, so this image cannot use `scratch` or Alpine/musl.
 
 - Run as non-root (`USER 65532`). Pre-provision a data directory owned by that UID with mode 0700.
 - PID 1 is `platformd`; it owns and drains the workerd child. There is no shell or runtime sidecar.

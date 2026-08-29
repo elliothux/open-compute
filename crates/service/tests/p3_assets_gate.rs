@@ -21,6 +21,7 @@ use open_compute_service::asset_backend::AssetBindingService;
 use open_compute_service::runtime_bridge::{
     DispatchTarget, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
+use open_compute_service::service_invocations::ServiceInvocationRegistry;
 use open_compute_service::{
     SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_assets,
 };
@@ -104,19 +105,24 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     let binding_task = tokio::spawn({
         let storage = storage.clone();
         let auth = binding_auth.clone();
+        let pins = deployment_pins.clone();
         let asset_service = Arc::new(AssetBindingService::new(
             storage.clone(),
             artifacts.clone(),
             cache,
-            deployment_pins.clone(),
+            pins.clone(),
         ));
+        let service_invocations = Arc::new(ServiceInvocationRegistry::new(storage.clone(), pins));
         async move {
             serve_binding_backend_with_assets(
                 binding_listener,
                 storage.clone(),
                 auth,
                 ResourcePins::new(),
-                Arc::new(SqliteKvBindingExecutor::new(storage, Arc::new(SystemClock))),
+                Arc::new(SqliteKvBindingExecutor::new(
+                    storage.clone(),
+                    Arc::new(SystemClock),
+                )),
                 None,
                 None,
                 None,
@@ -125,6 +131,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
                 open_compute_core::WorkflowsConfig::default(),
                 None,
                 asset_service,
+                service_invocations,
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -576,6 +583,7 @@ fn deployment_request(
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
+        services: BTreeMap::new(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile":"default"}),

@@ -30,6 +30,14 @@ export interface RuntimeWorkflowBinding extends RuntimeBindingBase {
   kind: "workflow";
 }
 export type RuntimeBinding = RuntimeResourceBinding | RuntimeQueueBinding | RuntimeWorkflowBinding;
+export interface RuntimeServiceBinding {
+  schemaVersion: 1;
+  name: string;
+  targetWorkerId: string;
+  entrypoint?: string;
+  policyVersion: 1;
+  descriptorSha256: string;
+}
 export interface RuntimeModule {
   name: string;
   type: "esModule" | "commonJsModule" | "text" | "json" | "data" | "wasm";
@@ -48,6 +56,7 @@ export interface RuntimeSnapshot {
   modules: RuntimeModule[];
   env: Record<string, unknown>;
   bindings: RuntimeBinding[];
+  services: RuntimeServiceBinding[];
   assetBinding?: { name: string };
   assets?: RuntimeAssets;
   limits: unknown;

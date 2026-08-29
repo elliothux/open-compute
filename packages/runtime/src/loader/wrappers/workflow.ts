@@ -1,6 +1,9 @@
-import { withEnv, WorkerEntrypoint } from "cloudflare:workers";
+import { WorkerEntrypoint } from "cloudflare:workers";
 import type { WorkflowEventWire, WorkflowRunResult } from "../../workflows/execution-protocol.js";
-import type { Environment, EnvironmentWrapper } from "./runtime.js";
+import {
+  invokeEntrypoint, trackExecutionContext,
+  type Environment, type EnvironmentWrapper, type TrackedContext,
+} from "./runtime.js";
 
 /** Select the matching runner/controller contract without exposing either in tenant env. */
 export function createWorkflowEntrypoint<Controller>(
@@ -10,13 +13,17 @@ export function createWorkflowEntrypoint<Controller>(
   validate: (target: unknown) => boolean,
 ) {
   return class extends WorkerEntrypoint<Environment> {
+    #tracked: TrackedContext<ExecutionContext> | undefined;
+
     validate(): boolean { return validate(target); }
     execute(event: WorkflowEventWire, controller: Controller): Promise<WorkflowRunResult> {
       const wrapped = wrapEnv(this.env);
-      let pending: Promise<WorkflowRunResult> | undefined;
-      withEnv(wrapped, () => { pending = run(target, this.ctx, wrapped, event, controller); });
-      if (!pending) throw new Error("WORKFLOW_RUNTIME_UNAVAILABLE");
-      return pending;
+      const tracked = this.#tracked ??= trackExecutionContext(this.ctx);
+      const pending = invokeEntrypoint(this, () =>
+        run(target, this.ctx, wrapped, event, controller), [],
+      wrapped, tracked);
+      if (!(pending instanceof Promise)) throw new Error("WORKFLOW_RUNTIME_UNAVAILABLE");
+      return pending as Promise<WorkflowRunResult>;
     }
   };
 }

@@ -18,6 +18,7 @@ ONCE = {
     # Current snapshot validation is a fixed input/fault matrix.
     'p1-snapshot': ('p1_full_snapshot_retention_and_fresh_host_restore_are_fail_closed',),
     'p3-assets': ('p3_assets_real_runtime_routing_binding_immutability_and_lifecycle',),
+    'p3-services-hard': ('p3_services_native_rpc_type_pipeline_and_lifecycle_matrix',),
     # Every fault point still gets its own real child; SIGKILL follows a state marker.
     'p2-1': (
         'p2_1_fault_child',
@@ -69,6 +70,9 @@ TIMING = {
         'durable_execution::production_driver_replays_waits_retries_and_events_after_runtime_restart',
     ),
     'p2-exit': ('p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_sigkill',),
+    'p3-services-product': (
+        'p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix',
+    ),
     'runtime': (
         'argv_exact_stdin_fd3_and_auth_probe',
         'compile_failure_does_not_inherit_prior_exit',

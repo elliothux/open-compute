@@ -189,6 +189,8 @@ pub struct DeploymentSnapshot {
     pub queue_bindings: Vec<crate::QueueProducerBindingRecord>,
     /// Immutable Workflow caller bindings ordered by env name.
     pub workflow_bindings: Vec<crate::WorkflowBindingRecord>,
+    /// Immutable cross-Worker Service declarations ordered by env name.
+    pub services: Vec<crate::DeploymentServiceRecord>,
 }
 
 /// Route kind supported by P0.2.
@@ -726,6 +728,7 @@ impl<'a> WorkerRepository<'a> {
                     conn,
                     deployment_id,
                 )?,
+                services: crate::services::read_deployment_services_conn(conn, deployment_id)?,
             })
         })
     }
@@ -1032,16 +1035,67 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Atomically disable routes, clear active deployment, and tombstone a Worker.
+    /// Atomically verify a pre-fenced deployment set, disable routes, and tombstone a Worker.
     pub fn delete_worker(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
+        expected_deployments: &[DeploymentId],
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
+            let actual_deployments = {
+                let mut statement = tx
+                    .prepare(
+                        "SELECT id FROM worker_deployments
+                         WHERE worker_id = ?1 AND deleted_at_ms IS NULL ORDER BY id",
+                    )
+                    .map_err(|_| db_error())?;
+                let rows = statement
+                    .query_map([worker_id.to_string()], |row| row.get::<_, String>(0))
+                    .map_err(|_| db_error())?;
+                let mut values = Vec::new();
+                for row in rows {
+                    values.push(
+                        DeploymentId::from_str(&row.map_err(|_| db_error())?)
+                            .map_err(|_| invariant())?,
+                    );
+                }
+                values
+            };
+            let mut expected = expected_deployments.to_vec();
+            expected.sort_unstable_by_key(ToString::to_string);
+            expected.dedup();
+            if actual_deployments != expected {
+                return Err(PlatformError::new(
+                    ErrorCode::DeploymentReferenced,
+                    "Worker deployment set changed during deletion admission",
+                ));
+            }
+            let inbound: bool = tx
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM deployment_services s
+                        JOIN worker_deployments d ON d.id = s.deployment_id
+                        JOIN workers caller ON caller.id = d.worker_id
+                        WHERE s.target_worker_id = ?1
+                          AND caller.id != ?1
+                          AND caller.account_id = ?2
+                          AND caller.deleted_at_ms IS NULL
+                          AND d.state IN ('staging', 'validating', 'ready')
+                    )",
+                    params![worker_id.to_string(), account_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if inbound {
+                return Err(PlatformError::new(
+                    ErrorCode::ServiceTargetReferenced,
+                    "Worker is retained by another deployment Service declaration",
+                ));
+            }
             let generation = worker
                 .route_generation
                 .checked_add(1)
@@ -1477,6 +1531,11 @@ impl<'a> WorkerRepository<'a> {
                 ));
             }
             tx.execute(
+                "DELETE FROM deployment_services WHERE deployment_id = ?1",
+                [deployment_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
                 "DELETE FROM deployment_cron_declarations WHERE deployment_id = ?1",
                 [deployment_id.to_string()],
             )
@@ -1613,6 +1672,11 @@ impl<'a> WorkerRepository<'a> {
             };
             let mut recovered = 0_u32;
             for (deployment, _worker, account) in candidates {
+                tx.execute(
+                    "DELETE FROM deployment_services WHERE deployment_id = ?1",
+                    [&deployment],
+                )
+                .map_err(|_| db_error())?;
                 tx.execute(
                     "DELETE FROM deployment_cron_declarations WHERE deployment_id = ?1",
                     [&deployment],

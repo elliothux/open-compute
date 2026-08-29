@@ -54,6 +54,39 @@ pub(crate) fn validate_binding_set(
     Ok(())
 }
 
+pub(crate) fn validate_service_set(
+    services: &BTreeMap<String, DeploymentServiceInput>,
+    vars: &BTreeMap<String, serde_json::Value>,
+    secrets: &BTreeMap<String, SecretString>,
+    bindings: &BTreeMap<String, DeploymentBindingInput>,
+) -> Result<(), PlatformError> {
+    if services.len() > MAX_VARS {
+        return Err(PlatformError::new(
+            ErrorCode::ResourceLimitExceeded,
+            "deployment contains too many Service bindings",
+        ));
+    }
+    for (name, service) in services {
+        validate_env_name(name)?;
+        if name.len() > 64
+            || vars.contains_key(name)
+            || secrets.contains_key(name)
+            || bindings.contains_key(name)
+        {
+            return Err(PlatformError::new(
+                ErrorCode::BindingTypeMismatch,
+                "Service binding name conflicts with deployment env",
+            ));
+        }
+        ServiceDescriptorV1::new(
+            name.clone(),
+            service.target_worker_id,
+            service.entrypoint.clone(),
+        )?;
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_injection_module_collisions(
     manifest: &WorkerBundleManifest,
 ) -> Result<(), PlatformError> {
@@ -120,6 +153,10 @@ pub(super) fn request_fingerprint(
     frame(
         &mut canonical,
         &serde_json::to_vec(&request.bindings).map_err(|_| invariant())?,
+    )?;
+    frame(
+        &mut canonical,
+        &serde_json::to_vec(&request.services).map_err(|_| invariant())?,
     )?;
     frame(
         &mut canonical,

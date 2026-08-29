@@ -9,6 +9,8 @@ pub(super) struct PreparedBindings {
     pub(super) workflow_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
     pub(super) workflow_rows: Vec<open_compute_storage::WorkflowBindingRecord>,
     pub(super) durable_object_classes: Vec<String>,
+    pub(super) service_descriptors: Vec<ServiceDescriptorV1>,
+    pub(super) service_rows: Vec<NewDeploymentService>,
 }
 
 impl DeploymentController<'_> {
@@ -26,6 +28,8 @@ impl DeploymentController<'_> {
         let mut workflow_descriptors = Vec::new();
         let mut workflow_rows = Vec::new();
         let mut durable_object_classes = Vec::new();
+        let mut service_descriptors = Vec::with_capacity(request.services.len());
+        let mut service_rows = Vec::with_capacity(request.services.len());
         for (name, input) in &request.bindings {
             if input.kind == BindingKind::Workflow {
                 if input.permissions != CanonicalPermissions::default()
@@ -139,6 +143,28 @@ impl DeploymentController<'_> {
         }
         durable_object_classes.sort();
         durable_object_classes.dedup();
+        for (name, input) in &request.services {
+            WorkerRepository::new(self.storage.db())
+                .get_worker(request.account_id, input.target_worker_id)
+                .map_err(|_| {
+                    PlatformError::new(
+                        ErrorCode::ServiceBindingDenied,
+                        "Service target is outside the caller authority",
+                    )
+                })?;
+            let descriptor = ServiceDescriptorV1::new(
+                name.clone(),
+                input.target_worker_id,
+                input.entrypoint.clone(),
+            )?;
+            service_rows.push(NewDeploymentService {
+                binding_name: descriptor.name.clone(),
+                target_worker_id: descriptor.target_worker_id,
+                entrypoint: descriptor.entrypoint.clone(),
+                descriptor_sha256: descriptor.sha256()?,
+            });
+            service_descriptors.push(descriptor);
+        }
         Ok(PreparedBindings {
             descriptors,
             rows,
@@ -147,6 +173,8 @@ impl DeploymentController<'_> {
             durable_object_classes,
             workflow_descriptors,
             workflow_rows,
+            service_descriptors,
+            service_rows,
         })
     }
 }

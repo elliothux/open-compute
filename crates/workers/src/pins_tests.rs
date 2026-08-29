@@ -62,5 +62,7 @@ async fn unobservable_background_execution_is_retained_until_process_restart() {
     );
     pins.unfence(deployment);
     assert_eq!(pins.count(deployment), 1);
-    assert!(DeploymentPins::new().pin(deployment).is_ok());
+    pins.clear_generation_retentions();
+    assert_eq!(pins.count(deployment), 0);
+    assert!(pins.pin(deployment).is_ok());
 }

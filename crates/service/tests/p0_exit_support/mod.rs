@@ -232,7 +232,7 @@ impl GateStack {
                     None,
                     Some(r2),
                     Some(d1),
-                    DurableObjectsConfig::default(),
+                    durable_objects_config(),
                     open_compute_core::QueuesConfig::default(),
                     open_compute_core::WorkflowsConfig::default(),
                     Some(scheduler_store),
@@ -368,7 +368,7 @@ pub(super) fn admin_router(
                 storage,
                 pins,
                 stack.transport.clone(),
-                DurableObjectsConfig::default(),
+                durable_objects_config(),
                 Duration::from_secs(2),
             )
             .with_scheduler(Some(scheduler_store)),
@@ -507,6 +507,7 @@ pub(super) fn deployment_request(
         vars: BTreeMap::from([("RELEASE".to_owned(), serde_json::json!(release))]),
         secrets: BTreeMap::new(),
         bindings: resources,
+        services: BTreeMap::new(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile":"default"}),
@@ -640,6 +641,17 @@ pub(super) fn storage_config(root: &Path) -> StorageConfig {
         sqlite_busy_timeout_ms: 5_000,
         free_space_soft_bytes: 1_073_741_824,
         free_space_hard_bytes: 1,
+    }
+}
+
+pub(super) fn durable_objects_config() -> DurableObjectsConfig {
+    DurableObjectsConfig {
+        // Product Gates exercise the DO contract, not host-volume pressure.
+        // Retain a fail-closed threshold while isolating them from unrelated
+        // workspace utilization; dedicated storage tests own watermark policy.
+        disk_high_watermark_percent: 98,
+        disk_stop_writes_percent: 99,
+        ..DurableObjectsConfig::default()
     }
 }
 

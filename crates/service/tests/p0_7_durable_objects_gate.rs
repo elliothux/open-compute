@@ -12,7 +12,9 @@ use open_compute_artifacts::{
     ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::{PlatformConfig, RuntimeConfig, StorageConfig};
+use open_compute_core::config::{
+    DurableObjectsConfig, PlatformConfig, RuntimeConfig, StorageConfig,
+};
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DurableObjectId,
     Redactor, RequestId, ResourceId, WorkerId,
@@ -101,7 +103,7 @@ async fn p0_7_real_durable_objects_matrix() {
                 None,
                 None,
                 None,
-                open_compute_core::DurableObjectsConfig::default(),
+                durable_objects_config(),
                 open_compute_core::QueuesConfig::default(),
                 open_compute_core::WorkflowsConfig::default(),
                 None,
@@ -548,8 +550,15 @@ async fn p0_7_real_durable_objects_matrix() {
         .collect::<Vec<_>>();
     assert_eq!(alpha_generations, vec![1, 2]);
 
+    let expected = workers
+        .list_deployments(account, worker.id)
+        .unwrap()
+        .into_iter()
+        .filter(|deployment| deployment.deleted_at_ms.is_none())
+        .map(|deployment| deployment.id)
+        .collect::<Vec<_>>();
     workers
-        .delete_worker(account, worker.id, RequestId::generate(), 60)
+        .delete_worker(account, worker.id, &expected, RequestId::generate(), 60)
         .unwrap();
     let fenced_after_worker_delete = repository
         .begin_object_delete(account, counter, object_id, 61)
@@ -581,6 +590,14 @@ async fn p0_7_real_durable_objects_matrix() {
     source_task.await.unwrap().unwrap();
     binding_task.await.unwrap().unwrap();
     println!("P0.7 identity/fetch/RPC/SQL/parallel/promotion/rollback/restart/delete/purge PASS");
+}
+
+fn durable_objects_config() -> DurableObjectsConfig {
+    DurableObjectsConfig {
+        disk_high_watermark_percent: 98,
+        disk_stop_writes_percent: 99,
+        ..DurableObjectsConfig::default()
+    }
 }
 
 fn create_namespace(
@@ -680,6 +697,7 @@ fn deployment_request(
         vars,
         secrets: BTreeMap::new(),
         bindings,
+        services: BTreeMap::new(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile":"default"}),

@@ -2,7 +2,7 @@
 
 use crate::p0_exit_support::{
     GateStack, admin_json, admin_router, deploy, now_ms, open_scheduler, repo_root, storage_config,
-    stores,
+    stores, wait_pid_change,
 };
 use crate::platform_process::Evidence;
 use open_compute_artifacts::MockS3;
@@ -17,7 +17,7 @@ use open_compute_workers::{
     QueueController, ResourcePins,
 };
 use serde_json::json;
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 pub(super) struct Fixture {
     pub evidence: Evidence,
@@ -205,6 +205,7 @@ pub(super) async fn prepare() -> Fixture {
             vars: Default::default(),
             secrets: Default::default(),
             bindings: bound,
+            services: Default::default(),
             queue_consumers: if index == 1 {
                 vec![QueueConsumerInput {
                     queue,
@@ -236,7 +237,16 @@ pub(super) async fn prepare() -> Fixture {
             .create_version(account, definition, deployment.id, "Flow".into())
             .await
             .unwrap();
-            assert_eq!(version.state, open_compute_storage::DeploymentState::Ready);
+            if version.state != open_compute_storage::DeploymentState::Ready {
+                let failed_pid = stack.supervisor.snapshot().pid.unwrap();
+                stack.supervisor.report_unhealthy();
+                wait_pid_change(&stack.supervisor, failed_pid, Duration::from_secs(30)).await;
+                panic!(
+                    "workflow version {index} did not validate: {:?}; diagnostics={:?}",
+                    version.state,
+                    stack.supervisor.last_diagnostics(),
+                );
+            }
         }
         deployments.push(deployment.id);
     }

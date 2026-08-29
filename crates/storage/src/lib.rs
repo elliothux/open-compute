@@ -28,6 +28,7 @@ pub mod resources;
 mod restore_cleanup;
 pub mod scheduler;
 mod schema_inspection;
+pub mod services;
 mod snapshot_staging;
 pub mod workers;
 pub mod workflows;
@@ -135,6 +136,10 @@ pub use scheduler::{
     inspect_p23_cross_database, inspect_scheduler_db, scheduler_migration_registry,
 };
 pub use schema_inspection::{CurrentSchemaState, inspect_current_schema};
+pub use services::{
+    DeploymentServiceRecord, NewDeploymentService, ResolvedServiceTarget, ServiceReferrer,
+    ServiceRepository,
+};
 pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
 pub use workers::{
     DeploymentContentKind, DeploymentRecord, DeploymentReferrer, DeploymentSnapshot,

@@ -1,6 +1,9 @@
-# P1 compatibility deviations
+# Cloudflare compatibility deviations
 
 This file owns the stable deviation identifiers emitted by `platformd capabilities --json`.
+It records verified single-node differences, not a claim that unlisted Cloudflare behavior is supported.
+P3 conformance must audit every advertised capability against this registry; planned or unqualified APIs
+remain unadvertised or blocked rather than receiving speculative deviation IDs.
 
 - `OC-KV-001`: KV is single-node SQLite authority; it does not claim Cloudflare global replication or propagation timing.
 - `OC-R2-001`: R2 is backed by the configured S3 authority; a full platform snapshot records bucket identity but does not provide R2 point-in-time recovery.

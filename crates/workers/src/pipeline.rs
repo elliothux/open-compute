@@ -10,7 +10,7 @@ use binding_preparation::PreparedBindings;
 use validation::{invariant, request_fingerprint};
 pub(crate) use validation::{
     stable_validation_code, validate_binding_set, validate_idempotency_key,
-    validate_injection_module_collisions, validate_secret_set,
+    validate_injection_module_collisions, validate_secret_set, validate_service_set,
 };
 
 use products::{prepare_cron_config, validate_product_counts};
@@ -21,7 +21,8 @@ use crate::bundle::{
 };
 use crate::descriptor::{
     BindingDescriptorV1, QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX, SecretDescriptor,
-    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, validate_env_name,
+    ServiceDescriptorV1, WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256,
+    validate_env_name,
 };
 use bytes::Bytes;
 use futures::stream;
@@ -36,9 +37,9 @@ use open_compute_storage::{
     DeploymentObjectKind, DeploymentRecord, DeploymentState, DurableObjectRepository,
     IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration,
     NewDeployment, NewDeploymentAssets, NewDeploymentBinding, NewDeploymentObjectRef,
-    NewQueueConsumerDeclaration, NewQueueProducerBinding, PlatformStorage, QueueAvailability,
-    QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository,
-    StoredDeploymentSecret, WorkerRepository,
+    NewDeploymentService, NewQueueConsumerDeclaration, NewQueueProducerBinding, PlatformStorage,
+    QueueAvailability, QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState,
+    ResourceRepository, StoredDeploymentSecret, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -74,6 +75,17 @@ pub struct DeploymentBindingInput {
     /// Capability-version-one product configuration.
     #[serde(default)]
     pub config: CanonicalBindingConfig,
+}
+
+/// Control-plane declaration for one dynamic same-account Service binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentServiceInput {
+    /// Existing logical target Worker identity; names are resolved by tooling before deploy.
+    pub target_worker_id: WorkerId,
+    /// Optional named `WorkerEntrypoint` export.
+    #[serde(default)]
+    pub entrypoint: Option<String>,
 }
 
 /// Immutable Queue push-consumer declaration supplied with a deployment.
@@ -206,6 +218,8 @@ pub struct CreateDeploymentRequest {
     pub secrets: BTreeMap<String, SecretString>,
     /// Immutable resource bindings keyed by tenant environment name.
     pub bindings: BTreeMap<String, DeploymentBindingInput>,
+    /// Immutable Service declarations keyed by tenant environment name.
+    pub services: BTreeMap<String, DeploymentServiceInput>,
     /// Immutable Queue push-consumer declarations.
     pub queue_consumers: Vec<QueueConsumerInput>,
     /// Omitted inherits the current Cron set; present replaces it, including an empty set.
@@ -485,6 +499,12 @@ impl<'a> DeploymentController<'a> {
             canonicalize_vars(request.vars.clone(), MAX_VARS, MAX_ENV_BYTES)?;
         validate_secret_set(&request.secrets, &canonical_vars)?;
         validate_binding_set(&request.bindings, &canonical_vars, &request.secrets)?;
+        validate_service_set(
+            &request.services,
+            &canonical_vars,
+            &request.secrets,
+            &request.bindings,
+        )?;
         if let Some(bundle) = content.bundle() {
             validate_injection_module_collisions(bundle.manifest())?;
         }
@@ -611,6 +631,8 @@ impl<'a> DeploymentController<'a> {
             workflow_descriptors: workflow_binding_descriptors,
             workflow_rows: stored_workflow_bindings,
             durable_object_classes,
+            service_descriptors,
+            service_rows,
         } = self.prepare_bindings(request, deployment_id)?;
         let queue_consumers = self.prepare_queue_consumers(request)?;
         let cron = prepare_cron_config(request)?;
@@ -631,6 +653,7 @@ impl<'a> DeploymentController<'a> {
             binding_descriptors,
             queue_binding_descriptors,
             workflow_binding_descriptors,
+            service_descriptors,
             request.limits.clone(),
             u32::try_from(LOADER_SCHEMA_VERSION).map_err(|_| invariant())?,
         )?;
@@ -679,6 +702,7 @@ impl<'a> DeploymentController<'a> {
                 bindings: &stored_bindings,
                 queue_bindings: &stored_queue_bindings,
                 workflow_bindings: &stored_workflow_bindings,
+                services: &service_rows,
                 queue_consumers: &queue_consumers,
                 cron: (content.kind() == DeploymentContentKind::Worker).then_some(&cron),
             },

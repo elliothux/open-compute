@@ -3,7 +3,7 @@ import {
   prepareDurableObjectContext, repairDurableObjectAlarm,
 } from "../../durable-objects/alarm-shim.js";
 import type { AlarmIndexCapability } from "../../durable-objects/protocol.js";
-import { tenantConstructor, wrapInstance } from "./runtime.js";
+import { tenantConstructor, trackExecutionContext, wrapInstance } from "./runtime.js";
 import type { Environment, EnvironmentWrapper } from "./runtime.js";
 
 function alarmIndex(value: unknown): value is AlarmIndexCapability {
@@ -28,10 +28,15 @@ export function wrapDurableObject(target: unknown, wrapEnv: EnvironmentWrapper, 
       const index = env.__OPEN_COMPUTE_PRIVATE_ALARM_INDEX;
       if (!alarmIndex(index)) throw new Error("DO_ALARM_INDEX_UNAVAILABLE");
       const prepared = prepareDurableObjectContext(ctx, index);
+      const tracked = trackExecutionContext(prepared.context);
       super(prepared.context, wrapped);
+      if (Reflect.get(this, "ctx", this) === prepared.context
+          && !Reflect.set(this, "ctx", tracked.context, this)) {
+        throw new Error("invalid durable object context");
+      }
       states.set(this, prepared);
       activateDurableObjectAlarm(prepared);
-      return wrapInstance(this, wrapped);
+      return wrapInstance(this, wrapped, tracked);
     }
     async __openComputeAlarm(payload: unknown) {
       return dispatchDurableObjectAlarm(this, Reflect.get(Base.prototype, "alarm"), stateFor(this), payload);

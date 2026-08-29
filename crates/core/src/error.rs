@@ -89,6 +89,20 @@ pub enum ErrorCode {
     DeploymentActive,
     /// Deployment still has a live referrer or in-flight pin.
     DeploymentReferenced,
+    /// A Service binding declaration is missing, forged, or outside its account boundary.
+    ServiceBindingDenied,
+    /// The dynamically resolved target Worker has no callable active deployment.
+    ServiceTargetNotReady,
+    /// The resolved Service target cannot currently be reached.
+    ServiceUnavailable,
+    /// The selected named Service entrypoint is absent from the active deployment.
+    ServiceEntrypointNotFound,
+    /// One root Service invocation exhausted its depth, count, or concurrency budget.
+    ServiceLimitExceeded,
+    /// A Service invocation exceeded its bounded foreground deadline.
+    ServiceTimeout,
+    /// Another retained deployment still declares the Worker as a Service target.
+    ServiceTargetReferenced,
     /// Immutable deployment metadata no longer matches its descriptor.
     DeploymentInvariantViolation,
     /// Worker bundle framing, module metadata, or source is invalid.
@@ -473,6 +487,13 @@ impl ErrorCode {
             Self::DeploymentNotReady => "DEPLOYMENT_NOT_READY",
             Self::DeploymentActive => "DEPLOYMENT_ACTIVE",
             Self::DeploymentReferenced => "DEPLOYMENT_REFERENCED",
+            Self::ServiceBindingDenied => "SERVICE_BINDING_DENIED",
+            Self::ServiceTargetNotReady => "SERVICE_TARGET_NOT_READY",
+            Self::ServiceUnavailable => "SERVICE_UNAVAILABLE",
+            Self::ServiceEntrypointNotFound => "SERVICE_ENTRYPOINT_NOT_FOUND",
+            Self::ServiceLimitExceeded => "SERVICE_LIMIT_EXCEEDED",
+            Self::ServiceTimeout => "SERVICE_TIMEOUT",
+            Self::ServiceTargetReferenced => "SERVICE_TARGET_REFERENCED",
             Self::DeploymentInvariantViolation => "DEPLOYMENT_INVARIANT_VIOLATION",
             Self::BundleInvalid => "BUNDLE_INVALID",
             Self::BundleTooLarge => "BUNDLE_TOO_LARGE",

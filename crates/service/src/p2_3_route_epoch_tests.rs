@@ -86,6 +86,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
             vars: Default::default(),
             secrets: Default::default(),
             bindings: Default::default(),
+            services: Default::default(),
             queue_consumers: vec![QueueConsumerInput {
                 queue: queue.queue.id,
                 entrypoint: None,

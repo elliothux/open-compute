@@ -85,6 +85,73 @@ pub struct BindingDescriptorV1 {
     pub config: CanonicalBindingConfig,
 }
 
+/// Canonical immutable declaration for one dynamic cross-Worker Service binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ServiceDescriptorV1 {
+    /// Descriptor schema version.
+    pub schema_version: u32,
+    /// Tenant environment binding name.
+    pub name: String,
+    /// Frozen logical target Worker identity.
+    pub target_worker_id: WorkerId,
+    /// Optional named `WorkerEntrypoint` export.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
+    /// Invocation policy schema enforced by the trusted controller.
+    pub policy_version: u32,
+}
+
+impl ServiceDescriptorV1 {
+    /// Validate and build the first Service invocation policy.
+    pub fn new(
+        name: String,
+        target_worker_id: WorkerId,
+        entrypoint: Option<String>,
+    ) -> Result<Self, PlatformError> {
+        validate_env_name(&name)?;
+        if name.len() > 64 {
+            return Err(binding_invariant());
+        }
+        if entrypoint.as_deref().is_some_and(|value| {
+            value.is_empty()
+                || value.len() > 128
+                || !value
+                    .bytes()
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$'))
+                || value
+                    .bytes()
+                    .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'_' | b'$'))
+        }) {
+            return Err(PlatformError::new(
+                ErrorCode::ServiceEntrypointNotFound,
+                "Service entrypoint name is invalid",
+            ));
+        }
+        Ok(Self {
+            schema_version: 1,
+            name,
+            target_worker_id,
+            entrypoint,
+            policy_version: 1,
+        })
+    }
+
+    /// Canonical typed JSON bytes persisted and hashed at staging.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, PlatformError> {
+        if self.schema_version != 1 || self.policy_version != 1 {
+            return Err(binding_invariant());
+        }
+        serde_json::to_vec(self).map_err(|_| binding_invariant())
+    }
+
+    /// SHA-256 of canonical descriptor bytes.
+    pub fn sha256(&self) -> Result<[u8; 32], PlatformError> {
+        Ok(Sha256::digest(self.canonical_bytes()?).into())
+    }
+}
+
 impl BindingDescriptorV1 {
     /// Validate and build the P0.3 capability version implemented by the static registry.
     #[allow(clippy::too_many_arguments)]
@@ -240,6 +307,8 @@ pub struct WorkerCodeDescriptorV1 {
     pub queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
     /// Canonically sorted immutable Workflow binding descriptors.
     pub workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
+    /// Canonically sorted dynamic Service declarations.
+    pub service_descriptors: Vec<ServiceDescriptorV1>,
     /// SHA-256 of the complete generated system Worker source manifest.
     pub system_worker_sources_sha256: String,
     /// Immutable limits profile document.
@@ -266,6 +335,7 @@ impl WorkerCodeDescriptorV1 {
         mut binding_descriptors: Vec<BindingDescriptorV1>,
         mut queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
         mut workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
+        mut service_descriptors: Vec<ServiceDescriptorV1>,
         limits: serde_json::Value,
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
@@ -350,6 +420,17 @@ impl WorkerCodeDescriptorV1 {
                 return Err(binding_invariant());
             }
         }
+        service_descriptors.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+        for service in &service_descriptors {
+            service.canonical_bytes()?;
+            validate_env_name(&service.name)?;
+            if !env_names.insert(&service.name) {
+                return Err(PlatformError::new(
+                    ErrorCode::BindingTypeMismatch,
+                    "Service binding name conflicts with deployment env",
+                ));
+            }
+        }
         if let Some((manifest, routing)) = assets {
             manifest.validate()?;
             routing.validate()?;
@@ -368,6 +449,7 @@ impl WorkerCodeDescriptorV1 {
                 || !binding_descriptors.is_empty()
                 || !queue_binding_descriptors.is_empty()
                 || !workflow_binding_descriptors.is_empty()
+                || !service_descriptors.is_empty()
                 || matches!(
                     assets.map(|(_, routing)| &routing.run_worker_first),
                     Some(
@@ -418,6 +500,7 @@ impl WorkerCodeDescriptorV1 {
             queue_binding_descriptors,
             system_worker_sources_sha256: hex::encode(Sha256::digest(SYSTEM_WORKER_MANIFEST)),
             workflow_binding_descriptors,
+            service_descriptors,
             limits,
             global_outbound_policy_version: GLOBAL_OUTBOUND_POLICY_VERSION,
             loader_schema_version,

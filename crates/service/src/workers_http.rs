@@ -20,8 +20,8 @@ use open_compute_storage::{
 use open_compute_workers::{
     BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBindingInput,
     DeploymentBundle, DeploymentContent, DeploymentController, DeploymentPins,
-    ProductPromotionCoordinator, ProductPromotionRequest, QueueConsumerInput, RuntimeValidator,
-    StagedBundle,
+    DeploymentServiceInput, ProductPromotionCoordinator, ProductPromotionRequest,
+    QueueConsumerInput, RuntimeValidator, StagedBundle,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -234,24 +234,50 @@ async fn delete_worker(
         Err(error) => return error_response(error, request_id),
     };
     let scope = format!("worker.delete/{worker_id}");
-    let response = run_idempotent(
+    let canonical =
+        serde_json::to_vec(&serde_json::json!({ "workerId": worker_id })).unwrap_or_default();
+    let response = run_idempotent_async(
         api,
         account_id,
         &scope,
         &key,
-        worker_id.to_string().as_bytes(),
+        &canonical,
         request_id,
         None,
-        || {
-            WorkerRepository::new(api.storage.db()).delete_worker(
-                account_id,
-                worker_id,
-                request_id,
-                now_ms(),
-            )?;
+        || async {
+            let _admission = api.storage.reserve_mutation(64 * 1024)?;
+            let repo = WorkerRepository::new(api.storage.db());
+            let deployments = repo
+                .list_deployments(account_id, worker_id)?
+                .into_iter()
+                .filter(|deployment| deployment.deleted_at_ms.is_none())
+                .map(|deployment| deployment.id)
+                .collect::<Vec<_>>();
+            if let Err(error) = api
+                .pins
+                .fence_many_and_wait(&deployments, api.delete_drain_timeout)
+                .await
+            {
+                for deployment in &deployments {
+                    api.pins.unfence(*deployment);
+                }
+                return Err(error);
+            }
+            if let Err(error) =
+                repo.delete_worker(account_id, worker_id, &deployments, request_id, now_ms())
+            {
+                for deployment in &deployments {
+                    api.pins.unfence(*deployment);
+                }
+                return Err(error);
+            }
+            for deployment in deployments {
+                api.pins.retire_fence(deployment);
+            }
             Ok(serde_json::json!({ "workerId": worker_id, "state": "tombstoned" }))
         },
-    );
+    )
+    .await;
     idempotent_response(response, StatusCode::ACCEPTED, request_id)
 }
 
@@ -268,6 +294,8 @@ struct DeploymentMetadata {
     secrets: BTreeMap<String, SecretString>,
     #[serde(default)]
     bindings: BTreeMap<String, DeploymentBindingInput>,
+    #[serde(default)]
+    services: BTreeMap<String, DeploymentServiceInput>,
     #[serde(default)]
     queue_consumers: Vec<QueueConsumerInput>,
     crons: Option<Vec<String>>,
@@ -367,6 +395,7 @@ async fn create_deployment(
             vars: metadata.vars,
             secrets: metadata.secrets,
             bindings: metadata.bindings,
+            services: metadata.services,
             queue_consumers: metadata.queue_consumers,
             crons: metadata.crons,
             limits: metadata.limits,
@@ -1350,6 +1379,7 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         ErrorCode::DeploymentNotReady
         | ErrorCode::DeploymentActive
         | ErrorCode::DeploymentReferenced
+        | ErrorCode::ServiceTargetReferenced
         | ErrorCode::IdempotencyConflict
         | ErrorCode::AssetUploadIncomplete
         | ErrorCode::AssetUploadConflict => StatusCode::CONFLICT,

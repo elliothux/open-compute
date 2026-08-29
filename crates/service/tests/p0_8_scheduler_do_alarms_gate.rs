@@ -8,7 +8,9 @@ use open_compute_artifacts::{
     ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::{PlatformConfig, RuntimeConfig, StorageConfig};
+use open_compute_core::config::{
+    DurableObjectsConfig, PlatformConfig, RuntimeConfig, StorageConfig,
+};
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, MetricsConfig, RequestId,
     ResourceId, SchedulerConfig, SystemSchedulerClock, WorkerId,
@@ -104,7 +106,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
                 None,
                 None,
                 None,
-                PlatformConfig::default().durable_objects,
+                durable_objects_config(),
                 open_compute_core::QueuesConfig::default(),
                 open_compute_core::WorkflowsConfig::default(),
                 Some(scheduler),
@@ -793,6 +795,14 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     println!("P0.8 scheduler/alarm API/token/retry/repair/promotion/deleteAll PASS");
 }
 
+fn durable_objects_config() -> DurableObjectsConfig {
+    DurableObjectsConfig {
+        disk_high_watermark_percent: 98,
+        disk_stop_writes_percent: 99,
+        ..DurableObjectsConfig::default()
+    }
+}
+
 fn create_namespace(
     storage: &PlatformStorage,
     pins: ResourcePins,
@@ -883,6 +893,7 @@ fn deployment_request(
         vars,
         secrets: BTreeMap::new(),
         bindings,
+        services: BTreeMap::new(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile":"default"}),

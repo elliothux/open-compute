@@ -28,6 +28,7 @@ fn every_deployment_binds_the_complete_system_source_identity() {
         Vec::new(),
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         json!({"profile":"default"}),
         1,
     )

@@ -14,7 +14,8 @@ const ready = { promoted: true, deployment: { id: deployment, state: "ready", wo
 const project = {
   project: "/unused", main: "index.ts", tsconfig: "tsconfig.json", name: "hello",
   compatibilityDate: "2026-08-22", compatibilityFlags: [], vars: { GREETING: "你好 🌍" },
-  secrets: { TOKEN: { env: "WORKER_TOKEN" } }, bindings: {}, endpoint: "http://127.0.0.1:1",
+  secrets: { TOKEN: { env: "WORKER_TOKEN" } }, bindings: {},
+  services: { SELF: { service: "hello" } }, endpoint: "http://127.0.0.1:1",
 };
 
 async function platform(t, handler) {
@@ -61,6 +62,7 @@ test("uses the authoritative account and route and sends secrets only in authent
   const metadata = JSON.parse(sent.headers["x-open-compute-deployment-metadata"]);
   assert.deepEqual(metadata.vars, project.vars);
   assert.deepEqual(metadata.secrets, { TOKEN: options.env.WORKER_TOKEN });
+  assert.deepEqual(metadata.services, { SELF: { targetWorkerId: worker } });
   assert.equal(metadata.promote, true);
 });
 

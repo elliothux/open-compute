@@ -28,7 +28,7 @@ async function fixture(t) {
   await writeFile(join(root, "dist", "client", "assets", "app-abc.js"), "globalThis.client = true;");
   return {
     project: root, name: "framework", compatibilityDate: "2026-08-22",
-    compatibilityFlags: ["nodejs_compat"], frameworkOutput: ".wrangler/deploy/config.json",
+    compatibilityFlags: ["nodejs_compat"], services: {}, frameworkOutput: ".wrangler/deploy/config.json",
   };
 }
 
@@ -42,7 +42,7 @@ test("imports generated server modules and client assets without rebundling or f
   assert.deepEqual(output.assets.runWorkerFirst, ["/api/*"]);
 });
 
-test("rejects escaped outputs, links, metadata drift, and unsupported generated bindings", async t => {
+test("imports services but rejects escaped outputs, links, metadata drift, and unsupported generated bindings", async t => {
   const project = await fixture(t);
   await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify({
     name: "framework", main: "index.js", compatibility_date: "2026-08-21",
@@ -52,6 +52,13 @@ test("rejects escaped outputs, links, metadata drift, and unsupported generated 
   await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify({
     name: "framework", main: "index.js", compatibility_date: "2026-08-22",
     compatibility_flags: ["nodejs_compat"], services: [{ binding: "SELF", service: "x" }],
+  }));
+  const imported = await importFrameworkOutput(project);
+  assert.deepEqual(imported.services, { SELF: { service: "x" } });
+
+  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify({
+    name: "framework", main: "index.js", compatibility_date: "2026-08-22",
+    compatibility_flags: ["nodejs_compat"], kv_namespaces: [{ binding: "KV", id: "x" }],
   }));
   await assert.rejects(importFrameworkOutput(project), /declares bindings/);
 

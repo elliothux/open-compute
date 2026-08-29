@@ -12,3 +12,5 @@ declare module "wrapper-runtime-source" { const source: string; export default s
 declare module "do-wrapper-source" { const source: string; export default source; }
 declare module "workflow-wrapper-source" { const source: string; export default source; }
 declare module "assets-facade-source" { const source: string; export default source; }
+declare module "service-facade-source" { const source: string; export default source; }
+declare module "service-scope-source" { const source: string; export default source; }

@@ -2,7 +2,7 @@
 
 use crate::d1_backend::D1BindingService;
 use crate::kv_backend::{KvCommand, KvCommandResult, KvStreamPart};
-use crate::metrics::{AlarmMutation, DoOperation, MetricsRegistry};
+use crate::metrics::{AlarmMutation, DoOperation, MetricsRegistry, ServiceMetricOperation};
 use crate::queue_backend::QueueBindingService;
 use crate::r2_backend::R2BindingService;
 use axum::Router;
@@ -112,6 +112,7 @@ struct BackendState {
     queue: Option<Arc<QueueBindingService>>,
     workflow: Option<Arc<crate::workflow_backend::WorkflowBindingService>>,
     assets: Option<Arc<crate::asset_backend::AssetBindingService>>,
+    services: Option<Arc<crate::service_invocations::ServiceInvocationRegistry>>,
 }
 
 /// Bind the private binding backend to an ephemeral IPv4 loopback port.
@@ -157,6 +158,7 @@ pub async fn serve_binding_backend(
         workflow_config,
         scheduler,
         None,
+        None,
         shutdown,
     )
     .await
@@ -178,6 +180,7 @@ pub async fn serve_binding_backend_with_assets(
     workflow_config: open_compute_core::WorkflowsConfig,
     scheduler: Option<Arc<SchedulerStore>>,
     assets: Arc<crate::asset_backend::AssetBindingService>,
+    services: Arc<crate::service_invocations::ServiceInvocationRegistry>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     serve_binding_backend_inner(
@@ -194,6 +197,7 @@ pub async fn serve_binding_backend_with_assets(
         workflow_config,
         scheduler,
         Some(assets),
+        Some(services),
         shutdown,
     )
     .await
@@ -214,6 +218,7 @@ async fn serve_binding_backend_inner(
     workflow_config: open_compute_core::WorkflowsConfig,
     scheduler: Option<Arc<SchedulerStore>>,
     assets: Option<Arc<crate::asset_backend::AssetBindingService>>,
+    services: Option<Arc<crate::service_invocations::ServiceInvocationRegistry>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     let (global_streams, resource_streams) = executor.stream_limits();
@@ -257,6 +262,7 @@ async fn serve_binding_backend_inner(
         queue,
         workflow,
         assets,
+        services,
     };
     let router = Router::new().fallback(handle).with_state(state);
     axum::serve(listener, router.into_make_service())
@@ -300,9 +306,11 @@ struct AlarmRequest {
 
 async fn handle(State(state): State<BackendState>, request: Request) -> Response {
     let headers = request.headers();
-    let token = header_text(headers, TOKEN_HEADER).unwrap_or("");
-    let generation = header_text(headers, GENERATION_HEADER).unwrap_or("");
-    if !state.auth.authorize(token, generation) {
+    let token = header_text(headers, TOKEN_HEADER).unwrap_or("").to_owned();
+    let generation = header_text(headers, GENERATION_HEADER)
+        .unwrap_or("")
+        .to_owned();
+    if !state.auth.authorize(&token, &generation) {
         return StatusCode::NOT_FOUND.into_response();
     }
     if request.method() != Method::POST {
@@ -310,6 +318,22 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
             ErrorCode::BindingProtocolError,
             StatusCode::METHOD_NOT_ALLOWED,
         );
+    }
+    if request.uri().path().starts_with("/internal/services/v1/") {
+        return match &state.services {
+            Some(services) => {
+                handle_service_invocation(
+                    services,
+                    &state.auth,
+                    &token,
+                    &generation,
+                    state.metrics.as_deref(),
+                    request,
+                )
+                .await
+            }
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
     }
     if request.uri().path() == "/internal/assets/v1/fetch" {
         return match &state.assets {
@@ -500,6 +524,106 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
         Err(error) => return observe(platform_error(&error)),
     };
     observe(dispatch(state.clone(), binding, operation, request_id, request, pin).await)
+}
+
+async fn handle_service_invocation(
+    registry: &crate::service_invocations::ServiceInvocationRegistry,
+    auth: &GenerationAuthRegistry,
+    token: &str,
+    generation: &str,
+    metrics: Option<&MetricsRegistry>,
+    request: Request,
+) -> Response {
+    use crate::service_invocations::{
+        CapabilityBeginRequest, ServiceReleaseRequest, ServiceResolveRequest, ServiceRetainRequest,
+        ServiceRootCompleteRequest,
+    };
+    let path = request.uri().path().to_owned();
+    let Ok(bytes) = to_bytes(request.into_body(), 16 * 1024).await else {
+        return backend_error(ErrorCode::BindingProtocolError, StatusCode::BAD_REQUEST);
+    };
+    let started = Instant::now();
+    let mut metric_operation = None;
+    let response = auth.with_authorized(token, generation, || {
+        registry.activate_generation(generation);
+        match path.as_str() {
+            "/internal/services/v1/resolve" => {
+                serde_json::from_slice::<ServiceResolveRequest>(&bytes)
+                    .map_err(|_| protocol_error())
+                    .and_then(|value| {
+                        metric_operation = Some(match value.operation {
+                            crate::service_invocations::ServiceOperation::DefaultFetch => {
+                                ServiceMetricOperation::DefaultFetch
+                            }
+                            crate::service_invocations::ServiceOperation::NamedFetch => {
+                                ServiceMetricOperation::NamedFetch
+                            }
+                            crate::service_invocations::ServiceOperation::Rpc => {
+                                ServiceMetricOperation::Rpc
+                            }
+                        });
+                        registry.resolve(&value)
+                    })
+                    .and_then(|value| json_response(&value))
+            }
+            "/internal/services/v1/capabilities/begin" => {
+                metric_operation = Some(ServiceMetricOperation::Capability);
+                serde_json::from_slice::<CapabilityBeginRequest>(&bytes)
+                    .map_err(|_| protocol_error())
+                    .and_then(|value| registry.begin_capability(&value))
+                    .and_then(|value| json_response(&value))
+            }
+            "/internal/services/v1/retain" => {
+                serde_json::from_slice::<ServiceRetainRequest>(&bytes)
+                    .map_err(|_| protocol_error())
+                    .and_then(|value| registry.retain(&value))
+                    .and_then(|retention| {
+                        json_response(&serde_json::json!({ "retention": retention }))
+                    })
+            }
+            "/internal/services/v1/complete" => {
+                serde_json::from_slice::<ServiceReleaseRequest>(&bytes)
+                    .map_err(|_| protocol_error())
+                    .and_then(|value| registry.complete(&value))
+                    .and_then(|()| json_response(&serde_json::json!({ "ok": true })))
+            }
+            "/internal/services/v1/release" => {
+                serde_json::from_slice::<ServiceReleaseRequest>(&bytes)
+                    .map_err(|_| protocol_error())
+                    .and_then(|value| registry.release(&value))
+                    .and_then(|()| json_response(&serde_json::json!({ "ok": true })))
+            }
+            "/internal/services/v1/root/complete" => {
+                serde_json::from_slice::<ServiceRootCompleteRequest>(&bytes)
+                    .map_err(|_| protocol_error())
+                    .and_then(|value| registry.complete_root(&value))
+                    .and_then(|()| json_response(&serde_json::json!({ "ok": true })))
+            }
+            _ => Ok(StatusCode::NOT_FOUND.into_response()),
+        }
+    });
+    if let Some(metrics) = metrics {
+        let (roots, operations, retentions) = registry.counts();
+        metrics.set_service_invocation_counts(roots, operations, retentions);
+        if let (Some(operation), Some(result)) = (metric_operation, response.as_ref()) {
+            metrics.observe_service_invocation(operation, result.is_ok(), started.elapsed());
+        }
+    }
+    match response {
+        Some(Ok(response)) => response,
+        Some(Err(error)) => platform_error(&error),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+fn json_response(value: &impl serde::Serialize) -> Result<Response, PlatformError> {
+    let bytes = serde_json::to_vec(value).map_err(|_| {
+        PlatformError::new(
+            ErrorCode::Internal,
+            "private Service response serialization failed",
+        )
+    })?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], bytes).into_response())
 }
 
 async fn handle_alarm_index(state: BackendState, request: Request) -> Response {
@@ -882,6 +1006,8 @@ fn parse_json<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, PlatformE
 fn platform_error(error: &PlatformError) -> Response {
     let status = match error.code() {
         ErrorCode::BindingNotFound | ErrorCode::ResourceNotFound => StatusCode::NOT_FOUND,
+        ErrorCode::ServiceEntrypointNotFound => StatusCode::NOT_FOUND,
+        ErrorCode::ServiceBindingDenied => StatusCode::FORBIDDEN,
         ErrorCode::DoNamespaceNotFound => StatusCode::NOT_FOUND,
         ErrorCode::BindingPermissionDenied => StatusCode::FORBIDDEN,
         ErrorCode::BindingLimitExceeded
@@ -895,11 +1021,16 @@ fn platform_error(error: &PlatformError) -> Response {
         | ErrorCode::DoObjectDeleting
         | ErrorCode::DoDeploymentStale
         | ErrorCode::DoNamespaceNotEmpty => StatusCode::CONFLICT,
+        ErrorCode::ServiceTargetNotReady => StatusCode::CONFLICT,
         ErrorCode::ResourceUnavailable
         | ErrorCode::KvBusy
         | ErrorCode::KvStorageFull
         | ErrorCode::KvUnavailable
         | ErrorCode::KvResultUnknown => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::ServiceUnavailable | ErrorCode::ServiceTimeout => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        ErrorCode::ServiceLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
         ErrorCode::DoStorageUnavailable
         | ErrorCode::DoStorageLimit
         | ErrorCode::DoDispatchTimeout
