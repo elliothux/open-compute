@@ -93,6 +93,8 @@ CREATE TABLE control_idempotency (
   request_fingerprint BLOB NOT NULL CHECK(length(request_fingerprint) = 32),
   response_json BLOB,
   deployment_id TEXT REFERENCES worker_deployments(id),
+  resource_id TEXT REFERENCES resources(id) DEFERRABLE INITIALLY DEFERRED,
+  queue_id TEXT REFERENCES queues(id) DEFERRABLE INITIALLY DEFERRED,
   state TEXT NOT NULL CHECK(state IN ('running', 'complete', 'failed')),
   created_at_ms INTEGER NOT NULL,
   expires_at_ms INTEGER NOT NULL,

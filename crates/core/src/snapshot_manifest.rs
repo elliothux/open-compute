@@ -177,14 +177,8 @@ impl PlatformSnapshotManifestV1 {
                 != Some(self.source_release.control_schema_version)
             || self.source_schemas.get("scheduler").copied()
                 != Some(self.source_release.scheduler_schema_version)
-            || self.source_schemas.get("kv").copied()
-                < Some(self.source_release.kv_schema_version_min)
-            || self.source_schemas.get("kv").copied()
-                > Some(self.source_release.kv_schema_version_max)
-            || self.source_schemas.get("d1").copied()
-                < Some(self.source_release.d1_schema_version_min)
-            || self.source_schemas.get("d1").copied()
-                > Some(self.source_release.d1_schema_version_max)
+            || self.source_schemas.get("kv").copied() != Some(self.source_release.kv_schema_version)
+            || self.source_schemas.get("d1").copied() != Some(self.source_release.d1_schema_version)
         {
             return Err(snapshot_invalid());
         }

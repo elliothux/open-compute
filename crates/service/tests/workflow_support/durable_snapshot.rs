@@ -27,9 +27,9 @@ pub(super) fn prepare(
         .create_definition(account, "durable-snapshot", base)
         .unwrap();
     // The snapshot fixture exercises real storage APIs; class execution is covered by the
-    // stock-workerd V2 driver Gate, not by manufacturing callback results in this fixture.
+    // stock-workerd driver Gate, not by manufacturing callback results in this fixture.
     let version = repo
-        .stage_version(account, definition.id, deployment, "Flow", 2, base)
+        .stage_version(account, definition.id, deployment, "Flow", base)
         .unwrap();
     repo.finish_version(account, version.target.version_id, true, base)
         .unwrap();
@@ -49,7 +49,6 @@ pub(super) fn prepare(
             .create(
                 account,
                 definition.id,
-                2,
                 Some(mode),
                 open_compute_workers::WorkflowCreateInput {
                     payload_json: "{\"snapshot\":true}",
@@ -100,9 +99,9 @@ pub(super) fn prepare(
             .resolve()
             .unwrap();
             scheduler
-                .register_workflow_wait_v2(&run.fence, &step, base + 4, config)
+                .register_workflow_wait(&run.fence, &step, base + 4, config)
                 .unwrap();
-            scheduler.yield_workflow_v2(&run.fence, base + 5).unwrap();
+            scheduler.yield_workflow(&run.fence, base + 5).unwrap();
             if mode == "paused" {
                 controller
                     .modify(
@@ -119,7 +118,6 @@ pub(super) fn prepare(
                 .unwrap()
                 .unwrap()
                 .durable
-                .unwrap()
                 .next_wake_at_ms;
         } else {
             let purge = mode.starts_with("purge");
@@ -234,12 +232,9 @@ pub(super) fn verify(
                     WorkflowState::Waiting
                 }
             );
-            assert_eq!(
-                record.durable.as_ref().unwrap().next_wake_at_ms,
-                case.deadline
-            );
+            assert_eq!(record.durable.next_wake_at_ms, case.deadline);
             if case.mode == "inbox" {
-                assert_eq!(record.durable.as_ref().unwrap().event_count, 1);
+                assert_eq!(record.durable.event_count, 1);
                 controller
                     .send_event(
                         identity.target.account_id,
@@ -255,7 +250,7 @@ pub(super) fn verify(
                     .unwrap()
                     .unwrap();
                 assert_eq!(woken.state, WorkflowState::Queued);
-                assert_eq!(woken.durable.unwrap().event_count, 1);
+                assert_eq!(woken.durable.event_count, 1);
                 controller
                     .modify(
                         identity.target.account_id,

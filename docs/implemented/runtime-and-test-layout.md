@@ -68,7 +68,7 @@ promotion/rollback/delete 上下文，新恢复断言和 Worker fixture 已按�
 | `poc/harness/**`、`poc/workerd/**`、`poc/workerd.lock`、`poc/fixtures/**` | 仅服务上表退役实现；删除。存续恢复行为直接接入 P0.7，其唯一 fixture 位于 `test/runtime/fixtures/durable-objects/counter.js` |
 
 以上是覆盖所有权说明，不是一次新的测试通过报告。未改动旧开发 schema/Workflow 双引擎等
-独立 Day1 清理范围；它们仍由 [清理清单](../day1-architecture-cleanup.md) 跟踪。
+独立 Day1 清理范围；它们随后已由归档的 [清理记录](day1-architecture-cleanup.md) 完成。
 
 ## 性能测量与验收
 

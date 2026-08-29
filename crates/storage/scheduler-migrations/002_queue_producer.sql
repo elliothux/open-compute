@@ -42,6 +42,9 @@ CREATE TABLE queue_messages (
   claim_token          BLOB,
   claim_until_ms       INTEGER,
   claimed_at_ms        INTEGER,
+  claim_batch_id       TEXT,
+  consumer_id          TEXT,
+  consumer_generation  INTEGER,
   CHECK(body_bytes = length(body)),
   CHECK(available_at_ms >= enqueued_at_ms),
   CHECK(expires_at_ms > enqueued_at_ms),
@@ -88,12 +91,6 @@ BEGIN
       message_bytes = message_bytes + NEW.body_bytes,
       updated_at_ms = NEW.enqueued_at_ms
   WHERE queue_id = NEW.queue_id;
-END;
-
-CREATE TRIGGER queue_messages_update_guard
-BEFORE UPDATE ON queue_messages
-BEGIN
-  SELECT RAISE(ABORT, 'queue message mutation unsupported in producer capability');
 END;
 
 CREATE TRIGGER queue_messages_counter_delete

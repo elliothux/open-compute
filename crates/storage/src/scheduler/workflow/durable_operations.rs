@@ -33,10 +33,7 @@ impl SchedulerStore {
         if instance.identity != operation.identity || operation.sequence < 1 {
             return Err(error(ErrorCode::WorkflowRunStale));
         }
-        let metadata = instance
-            .durable
-            .as_ref()
-            .ok_or_else(|| error(ErrorCode::WorkflowMethodUnsupported))?;
+        let metadata = &instance.durable;
         inspection::verify_history_connection(&tx, operation.identity.instance_id)?;
         let rejection = match operation.kind {
             WorkflowOperationKind::Restart
@@ -160,5 +157,5 @@ fn restart_capacity(
     .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
     let current = i64::try_from(instance.state_bytes)
         .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
-    capacity_v2(conn, instance, base - current, 1 - reserved, limits)
+    capacity_change(conn, instance, base - current, 1 - reserved, limits)
 }

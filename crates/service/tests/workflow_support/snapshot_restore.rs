@@ -42,19 +42,13 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .create_definition(account, "snapshot-flow", now())
         .unwrap();
     let target = original.deploy(SOURCE, "Flow").await;
-    WorkflowApiState::new(
+    let version = WorkflowApiState::new(
         original.storage.clone(),
         store.clone(),
         original.transport.clone(),
         Default::default(),
     )
-    .create_version(
-        account,
-        definition.id,
-        target.deployment_id,
-        "Flow".into(),
-        1,
-    )
+    .create_version(account, definition.id, target.deployment_id, "Flow".into())
     .await
     .unwrap();
     let controller = WorkflowController::new(&original.storage, &store, &config);
@@ -62,7 +56,6 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .create(
             account,
             definition.id,
-            1,
             Some("snapshot-instance"),
             open_compute_workers::WorkflowCreateInput {
                 payload_json: "{\"value\":42}",
@@ -85,11 +78,15 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     };
     let result = original
         .transport
-        .dispatch_workflow(&target, &request, Duration::from_secs(30))
+        .dispatch_workflow(
+            &version.target,
+            &request,
+            Duration::from_millis(config.dispatch_timeout_ms),
+        )
         .await
         .unwrap();
-    let before: serde_json::Value =
-        serde_json::from_str(result.output_json.as_ref().unwrap()).unwrap();
+    let (_, before_output) = complete(result);
+    let before: serde_json::Value = serde_json::from_str(&before_output).unwrap();
     assert_eq!(before["callbacks"], 1);
     assert_eq!(
         store
@@ -161,7 +158,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     );
     let fresh = tempfile::Builder::new()
         .prefix("workflow-restored-")
-        .tempdir_in(workspace.join(".temp/p2-4-run"))
+        .tempdir_in(workspace.join(".temp/workflow-run"))
         .unwrap();
     let data = fresh.path().join("fresh-host");
     let restore = RestoreTarget::acquire(&data).unwrap();
@@ -241,20 +238,24 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     };
     let result = restored
         .transport
-        .dispatch_workflow(&target, &replay_request, Duration::from_secs(30))
+        .dispatch_workflow(
+            &version.target,
+            &replay_request,
+            Duration::from_millis(config.dispatch_timeout_ms),
+        )
         .await
         .unwrap();
     assert_eq!(result.loader_outcome, "cold");
-    let after: serde_json::Value =
-        serde_json::from_str(result.output_json.as_ref().unwrap()).unwrap();
+    let (final_ordinal, output_json) = complete(result);
+    let after: serde_json::Value = serde_json::from_str(&output_json).unwrap();
     assert_eq!(after["callbacks"], 0);
     assert_eq!(after["value"], before["value"]);
     restored_store
         .finish_workflow(
             &replay.fence,
             &WorkflowCompletion::Complete {
-                output_json: result.output_json.unwrap(),
-                final_ordinal: result.final_ordinal,
+                output_json,
+                final_ordinal,
             },
             expired_at + 1001,
             &config,
@@ -269,7 +270,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .unwrap();
     assert!(matches!(
         restored_controller
-            .status(account, definition.id, identity.instance_id, 1, 0)
+            .status(account, definition.id, identity.instance_id, 0)
             .unwrap(),
         open_compute_workers::WorkflowStatus::Complete { .. }
     ));

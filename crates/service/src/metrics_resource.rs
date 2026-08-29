@@ -39,8 +39,6 @@ pub enum BindingBackendOperation {
     Put,
     /// Delete.
     Delete,
-    /// Streaming echo used by the framework Gate.
-    Echo,
 }
 
 impl BindingBackendOperation {
@@ -49,7 +47,6 @@ impl BindingBackendOperation {
             Self::Get => "get",
             Self::Put => "put",
             Self::Delete => "delete",
-            Self::Echo => "echo",
         }
     }
 }
@@ -187,10 +184,9 @@ fn resource_operations() -> [ResourceOperation; 5] {
     ]
 }
 
-fn binding_operations() -> [BindingBackendOperation; 4] {
+fn binding_operations() -> [BindingBackendOperation; 3] {
     [
         BindingBackendOperation::Delete,
-        BindingBackendOperation::Echo,
         BindingBackendOperation::Get,
         BindingBackendOperation::Put,
     ]

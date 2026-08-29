@@ -110,13 +110,7 @@ impl WorkerdTransport {
             .await
             .map_err(|_| runtime_unavailable())?;
         if !response.status().is_success() {
-            if matches!(
-                path,
-                "/internal/workflow"
-                    | "/internal/validate-workflow"
-                    | "/internal/workflow-v2"
-                    | "/internal/validate-workflow-v2"
-            ) {
+            if matches!(path, "/internal/workflow" | "/internal/validate-workflow") {
                 let code = if response.status() == StatusCode::UNPROCESSABLE_ENTITY {
                     match response
                         .headers()

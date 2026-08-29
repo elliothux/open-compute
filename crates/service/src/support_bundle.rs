@@ -118,7 +118,6 @@ fn redacted_policy(loaded: &LoadedConfig) -> serde_json::Value {
             "public_bind": config.server.public_bind,
             "admin_bind": config.server.admin_bind,
             "admin_auth_configured": config.server.admin_auth.is_some(),
-            "trusted_proxy_count": config.server.trusted_proxies.len(),
         },
         "storage": {
             "data_dir": config.storage.data_dir,
@@ -211,11 +210,7 @@ fn operator_event_summary(loaded: &LoadedConfig) -> serde_json::Value {
 
 fn receipt_entries(loaded: &LoadedConfig) -> Result<Vec<(String, Vec<u8>)>, PlatformError> {
     let mut values = Vec::new();
-    for name in [
-        "last-snapshot.json",
-        "last-restore.json",
-        "last-upgrade.json",
-    ] {
+    for name in ["last-snapshot.json", "last-restore.json"] {
         let path = loaded.config.storage.data_dir.join("operations").join(name);
         let Ok(metadata) = std::fs::symlink_metadata(&path) else {
             continue;

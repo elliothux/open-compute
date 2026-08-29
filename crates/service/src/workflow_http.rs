@@ -1,7 +1,7 @@
 //! Authenticated Workflow definition/version lifecycle and secret-free inspection.
 
 use crate::http::{HttpState, ProductErrorCode, authorize};
-use crate::runtime_bridge::{DispatchTarget, WorkerdTransport};
+use crate::runtime_bridge::WorkerdTransport;
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -9,8 +9,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, OperationClass, PlatformError, RequestId,
-    SchedulerClock as _, SystemSchedulerClock, WorkflowId, WorkflowInstanceId,
+    AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, SchedulerClock as _,
+    SystemSchedulerClock, WorkflowId, WorkflowInstanceId,
 };
 use open_compute_storage::{
     DeploymentState, PlatformStorage, SchedulerStore, WorkflowRepository, WorkflowVersion,
@@ -54,17 +54,15 @@ impl WorkflowApiState {
         definition: WorkflowId,
         deployment: DeploymentId,
         class_name: String,
-        capability_version: u32,
     ) -> Result<WorkflowVersion, PlatformError> {
         let storage = self.storage.clone();
         let version = tokio::task::spawn_blocking(move || {
-            let _admission = storage.reserve_mutation(OperationClass::Scheduler, 64 * 1024)?;
+            let _admission = storage.reserve_mutation(64 * 1024)?;
             WorkflowRepository::new(storage.db()).stage_version(
                 account,
                 definition,
                 deployment,
                 &class_name,
-                capability_version,
                 now_ms(),
             )
         })
@@ -80,25 +78,7 @@ pub(crate) async fn validate_version(
     transport: &WorkerdTransport,
     version: WorkflowVersion,
 ) -> Result<WorkflowVersion, PlatformError> {
-    let target = DispatchTarget {
-        account_id: version.target.account_id,
-        worker_id: version.target.worker_id,
-        deployment_id: version.target.deployment_id,
-        worker_code_sha256: hex::encode(version.target.worker_code_sha256),
-        entrypoint: Some(version.target.class_name.clone()),
-        route_generation: version.version_number,
-        request_id: RequestId::generate(),
-    };
-    let probe = match version.target.capability_version {
-        1 => transport.probe_workflow(&target).await,
-        2 => transport.probe_workflow_v2(&version.target).await,
-        _ => {
-            return Err(PlatformError::new(
-                ErrorCode::WorkflowCapabilityMismatch,
-                "Workflow capability is unsupported",
-            ));
-        }
-    };
+    let probe = transport.probe_workflow(&version.target).await;
     let accepted = match probe {
         Ok(()) => true,
         Err(error)
@@ -166,12 +146,6 @@ struct NameBody {
 struct VersionBody {
     deployment_id: DeploymentId,
     class_name: String,
-    #[serde(default = "legacy_capability")]
-    capability_version: u32,
-}
-
-const fn legacy_capability() -> u32 {
-    1
 }
 
 async fn create_definition(
@@ -193,9 +167,7 @@ async fn create_definition(
         Err(error) => return failure(&error, id),
     };
     let result = tokio::task::spawn_blocking(move || {
-        let _admission = api
-            .storage
-            .reserve_mutation(OperationClass::Scheduler, 64 * 1024)?;
+        let _admission = api.storage.reserve_mutation(64 * 1024)?;
         WorkflowRepository::new(api.storage.db()).create_definition(account, &body.name, now_ms())
     })
     .await;
@@ -270,9 +242,7 @@ async fn rename_definition(
     };
     response(
         tokio::task::spawn_blocking(move || {
-            let _admission = api
-                .storage
-                .reserve_mutation(OperationClass::Scheduler, 64 * 1024)?;
+            let _admission = api.storage.reserve_mutation(64 * 1024)?;
             WorkflowRepository::new(api.storage.db()).rename(
                 account,
                 definition,
@@ -302,9 +272,7 @@ async fn delete_definition(
     };
     response(
         tokio::task::spawn_blocking(move || {
-            let _admission = api
-                .storage
-                .reserve_mutation(OperationClass::Scheduler, 64 * 1024)?;
+            let _admission = api.storage.reserve_mutation(64 * 1024)?;
             WorkflowRepository::new(api.storage.db()).delete(account, definition, now_ms())
         })
         .await,
@@ -332,13 +300,7 @@ async fn create_version(
         Err(error) => return failure(&error, id),
     };
     match api
-        .create_version(
-            account,
-            definition,
-            body.deployment_id,
-            body.class_name,
-            body.capability_version,
-        )
+        .create_version(account, definition, body.deployment_id, body.class_name)
         .await
     {
         Ok(version) => {

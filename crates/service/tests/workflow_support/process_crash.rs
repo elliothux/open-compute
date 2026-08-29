@@ -30,13 +30,7 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
         harness.transport.clone(),
         Default::default(),
     )
-    .create_version(
-        account,
-        definition.id,
-        target.deployment_id,
-        "Flow".into(),
-        1,
-    )
+    .create_version(account, definition.id, target.deployment_id, "Flow".into())
     .await
     .unwrap();
     let caller = harness
@@ -46,7 +40,6 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
             BTreeMap::from([(
                 "FLOW".into(),
                 DeploymentBindingInput {
-                    capability_version: 1,
                     kind: BindingKind::Workflow,
                     id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                     permissions: CanonicalPermissions::default(),
@@ -76,6 +69,7 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
             Some(caller.deployment_id),
             RequestId::generate(),
             now(),
+            1_000_000,
         )
         .unwrap();
     harness.quiesce().await;
@@ -95,7 +89,7 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
     let mut first = spawn(&config, &log);
     ready(&client, admin, &mut first).await;
     let create = tenant_json(&client, public, "/create/crash-instance").await;
-    assert_eq!(create["id"], "crash-instance");
+    assert_eq!(create["id"], "crash-instance", "{create}");
     let connection = rusqlite::Connection::open_with_flags(
         data.join("scheduler.sqlite"),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,

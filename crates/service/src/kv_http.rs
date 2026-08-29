@@ -11,8 +11,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, KvConfig, OperationClass, PlatformError, RequestId,
-    ResourceId, ResourceState,
+    AccountId, BindingKind, ErrorCode, KvConfig, PlatformError, RequestId, ResourceId,
+    ResourceState,
 };
 use open_compute_storage::{
     KvBackupState, KvEngine, KvNamespaceRepository, KvPaths, PlatformStorage,
@@ -53,6 +53,7 @@ pub struct KvApiState {
     artifacts: ArtifactStore,
     pins: ResourcePins,
     config: KvConfig,
+    max_resources_per_account: u32,
     delete_drain_timeout: Duration,
     snapshot_pins: Arc<SnapshotPins>,
 }
@@ -75,6 +76,7 @@ impl KvApiState {
         artifacts: ArtifactStore,
         pins: ResourcePins,
         config: KvConfig,
+        max_resources_per_account: u32,
         delete_drain_timeout: Duration,
     ) -> Self {
         Self {
@@ -82,6 +84,7 @@ impl KvApiState {
             artifacts,
             pins,
             config,
+            max_resources_per_account,
             delete_drain_timeout,
             snapshot_pins: Arc::new(SnapshotPins::empty()),
         }
@@ -253,7 +256,7 @@ async fn rename_namespace(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
-    let admission = match api.storage.reserve_mutation(OperationClass::Kv, 64 * 1024) {
+    let admission = match api.storage.reserve_mutation(64 * 1024) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
@@ -349,7 +352,7 @@ async fn create_backup(
     };
     let _admission = match api
         .storage
-        .reserve_mutation(OperationClass::Kv, api.config.namespace_quota_bytes)
+        .reserve_mutation(api.config.namespace_quota_bytes)
     {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
@@ -412,9 +415,7 @@ async fn create_backup(
         .join(format!("{backup_id}.sqlite"));
     let stage_for_backup = stage.clone();
     let prepared = tokio::task::spawn_blocking(move || {
-        if stage_for_backup.exists() {
-            std::fs::remove_file(&stage_for_backup).map_err(|_| internal())?;
-        }
+        crate::sqlite_staging::remove_sqlite_staging(&stage_for_backup);
         let paths = KvPaths::open(storage.data_dir().root())?;
         let database =
             paths.resolve_storage_key(&namespace.storage_key, account_id, resource_id)?;
@@ -426,13 +427,13 @@ async fn create_backup(
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
             drop(pin);
-            let _ = std::fs::remove_file(&stage);
+            crate::sqlite_staging::remove_sqlite_staging(&stage);
             fail_backup(&api.storage, &backup.id, error.code()).await;
             return error_response(error, request_id);
         }
         Err(_) => {
             drop(pin);
-            let _ = std::fs::remove_file(&stage);
+            crate::sqlite_staging::remove_sqlite_staging(&stage);
             fail_backup(&api.storage, &backup.id, ErrorCode::Internal).await;
             return error_response(internal(), request_id);
         }
@@ -493,7 +494,7 @@ async fn create_backup(
         Err(error) => Err(error),
     };
     drop(pin);
-    let _ = std::fs::remove_file(stage);
+    crate::sqlite_staging::remove_sqlite_staging(&stage);
     match response {
         Ok(backup) => {
             backup_metric.success();
@@ -590,10 +591,7 @@ async fn restore_namespace(
     else {
         return error_response(internal(), request_id);
     };
-    let _admission = match api
-        .storage
-        .reserve_mutation(OperationClass::Kv, size.saturating_mul(2).max(1))
-    {
+    let _admission = match api.storage.reserve_mutation(size.saturating_mul(2).max(1)) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
@@ -671,12 +669,12 @@ async fn restore_namespace(
         .download_kv_backup(&object_key, &hex::encode(digest), size, &mut file)
         .await
     {
-        let _ = std::fs::remove_file(&stage);
+        crate::sqlite_staging::remove_sqlite_staging(&stage);
         return error_response(error, request_id);
     }
     let synced = tokio::task::spawn_blocking(move || file.sync_all()).await;
     if !matches!(synced, Ok(Ok(()))) {
-        let _ = std::fs::remove_file(&stage);
+        crate::sqlite_staging::remove_sqlite_staging(&stage);
         return error_response(internal(), request_id);
     }
     let restore_key = format!(
@@ -694,13 +692,14 @@ async fn restore_namespace(
         idempotency_key: restore_key,
         request_id,
         quota_bytes: quota,
+        max_resources_per_account: api.max_resources_per_account,
     };
     let stage_for_restore = stage.clone();
     let restored = tokio::task::spawn_blocking(move || {
         restore_downloaded_namespace(&storage, &stage_for_restore, &operation)
     })
     .await;
-    let _ = std::fs::remove_file(stage);
+    crate::sqlite_staging::remove_sqlite_staging(&stage);
     match restored {
         Ok(Ok(CreateResourceOutcome::Applied(result))) => {
             restore_metric.success();
@@ -724,6 +723,7 @@ struct RestoreOperation {
     idempotency_key: String,
     request_id: RequestId,
     quota_bytes: u64,
+    max_resources_per_account: u32,
 }
 
 fn restore_downloaded_namespace(
@@ -741,19 +741,22 @@ fn restore_downloaded_namespace(
     canonical.extend_from_slice(&operation.quota_bytes.to_be_bytes());
     let fingerprint = storage.crypto().fingerprint_request(&canonical);
     let repository = ResourceRepository::new(storage.db());
-    let reservation = repository.reserve_create(&ReserveResourceCreate {
-        account_id: operation.account_id,
-        kind: BindingKind::KvNamespace,
-        name: &operation.new_name,
-        idempotency_key: &operation.idempotency_key,
-        fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-        request_fingerprint: &fingerprint,
-        resource_id: ResourceId::generate(),
-        driver_schema_version: open_compute_storage::KV_SCHEMA_VERSION,
-        request_id: operation.request_id,
-        now_ms: operation_now,
-        expires_at_ms: operation_now.saturating_add(24 * 60 * 60 * 1000),
-    })?;
+    let reservation = repository.reserve_create(
+        &ReserveResourceCreate {
+            account_id: operation.account_id,
+            kind: BindingKind::KvNamespace,
+            name: &operation.new_name,
+            idempotency_key: &operation.idempotency_key,
+            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+            request_fingerprint: &fingerprint,
+            resource_id: ResourceId::generate(),
+            driver_schema_version: open_compute_storage::KV_SCHEMA_VERSION,
+            request_id: operation.request_id,
+            now_ms: operation_now,
+            expires_at_ms: operation_now.saturating_add(24 * 60 * 60 * 1000),
+        },
+        operation.max_resources_per_account,
+    )?;
     let resource = match reservation {
         ResourceCreateReservation::Complete(response) => {
             return Ok(CreateResourceOutcome::Replay(response));

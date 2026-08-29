@@ -11,9 +11,9 @@ mod descriptor;
 mod duration;
 mod policy;
 pub use descriptor::{
-    WORKFLOW_V2_DEPENDENCY_BYTES, WORKFLOW_V2_EVENT_BYTES, WORKFLOW_V2_INSTANCE_BYTES,
-    WORKFLOW_V2_STEP_BYTES, WorkflowDurableConfig, WorkflowStepDeclaration, WorkflowStepDescriptor,
-    WorkflowStepKind, validate_workflow_event_type,
+    WORKFLOW_DEPENDENCY_BYTES, WORKFLOW_EVENT_BYTES, WORKFLOW_INSTANCE_BYTES, WORKFLOW_STEP_BYTES,
+    WorkflowDurableConfig, WorkflowStepDeclaration, WorkflowStepDescriptor, WorkflowStepKind,
+    validate_workflow_event_type,
 };
 pub use duration::{
     WORKFLOW_MAX_DURATION_MS, WORKFLOW_MAX_SAFE_INTEGER, duration_ms, timestamp_ms,
@@ -56,17 +56,13 @@ pub struct WorkflowsConfig {
     pub recovery_backoff_ms: u64,
     /// Reservation age before an uncommitted creation may be released.
     pub creation_grace_ms: u64,
-    /// Maximum callbacks granted in one immutable V2 batch, from one through sixteen.
-    #[serde(skip_serializing_if = "default_parallel_steps")]
+    /// Maximum callbacks granted in one immutable batch, from one through sixteen.
     pub max_parallel_steps: u32,
-    /// Maximum unconsumed V2 events admitted for one instance.
-    #[serde(skip_serializing_if = "default_buffered_events")]
+    /// Maximum unconsumed events admitted for one instance.
     pub max_buffered_events: u32,
     /// Maximum logical inbox bytes, including event metadata.
-    #[serde(skip_serializing_if = "default_event_bytes")]
     pub max_event_bytes: u64,
-    /// Retention defaults adopted only when a new V2 instance omits an override.
-    #[serde(skip_serializing_if = "default_retention")]
+    /// Retention defaults adopted only when a new instance omits an override.
     pub default_retention: WorkflowRetention,
 }
 
@@ -128,24 +124,6 @@ impl WorkflowsConfig {
         }
         Ok(())
     }
-}
-
-// Serde's skip predicate borrows the field; omitting defaults preserves old snapshot fingerprints.
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn default_parallel_steps(value: &u32) -> bool {
-    *value == 4
-}
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn default_buffered_events(value: &u32) -> bool {
-    *value == 128
-}
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn default_event_bytes(value: &u64) -> bool {
-    *value == 8 * 1024 * 1024
-}
-
-fn default_retention(value: &WorkflowRetention) -> bool {
-    *value == WorkflowRetention::default()
 }
 
 /// A 256-bit private run, step, or creation fence. Debug never exposes its bytes.
@@ -233,7 +211,8 @@ fn error(code: ErrorCode) -> PlatformError {
     PlatformError::new(code, "Workflow validation failed")
 }
 
-/// Decode only permanent Workflow failure categories emitted by the trusted dispatcher.
+/// Decode the permanent Workflow failure vocabulary emitted by the trusted dispatcher.
+/// Transport Unknown, stale fences, and lifecycle conflicts are never settled business outcomes.
 pub fn terminal_error_code(value: &str) -> Result<ErrorCode, PlatformError> {
     [
         ErrorCode::WorkflowExecutionFailed,
@@ -246,24 +225,16 @@ pub fn terminal_error_code(value: &str) -> Result<ErrorCode, PlatformError> {
         ErrorCode::WorkflowStateQuotaExceeded,
         ErrorCode::WorkflowStepLimitExceeded,
         ErrorCode::ArtifactIntegrityError,
+        ErrorCode::WorkflowStepTimeout,
+        ErrorCode::WorkflowStepRetriesExhausted,
+        ErrorCode::WorkflowNonRetryable,
+        ErrorCode::WorkflowEventTimeout,
+        ErrorCode::WorkflowDurationInvalid,
+        ErrorCode::WorkflowEventTypeInvalid,
     ]
     .into_iter()
     .find(|code| code.as_str() == value)
     .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))
-}
-
-/// Decode the capability-two permanent failure vocabulary without broadening V1 history.
-/// Transport Unknown, stale fences, and lifecycle conflicts are never settled business outcomes.
-pub fn terminal_error_code_v2(value: &str) -> Result<ErrorCode, PlatformError> {
-    match value {
-        "WORKFLOW_STEP_TIMEOUT" => Ok(ErrorCode::WorkflowStepTimeout),
-        "WORKFLOW_STEP_RETRIES_EXHAUSTED" => Ok(ErrorCode::WorkflowStepRetriesExhausted),
-        "WORKFLOW_NON_RETRYABLE" => Ok(ErrorCode::WorkflowNonRetryable),
-        "WORKFLOW_EVENT_TIMEOUT" => Ok(ErrorCode::WorkflowEventTimeout),
-        "WORKFLOW_DURATION_INVALID" => Ok(ErrorCode::WorkflowDurationInvalid),
-        "WORKFLOW_EVENT_TYPE_INVALID" => Ok(ErrorCode::WorkflowEventTypeInvalid),
-        _ => terminal_error_code(value),
-    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! Native scheduled custom-event adapter for durable Cron logical runs.
 
 use super::{SchedulerService, decode_pool_state, encode_pool_state, scheduler_task_failed};
-use crate::metrics::{CronRunOutcome, MetricsRegistry};
+use crate::metrics::{CronRunOutcome, MetricsRegistry, SchedulerClaimOutcome};
 use crate::runtime_bridge::{DispatchTarget, ScheduledDispatchRequest};
 use open_compute_core::{PlatformError, RequestId, SchedulerKind, SchedulerPoolState};
 use open_compute_storage::{
@@ -10,6 +10,7 @@ use open_compute_storage::{
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 impl SchedulerService {
     pub(crate) async fn claim_cron(
@@ -22,14 +23,30 @@ impl SchedulerService {
         let grace = self.config.cron_misfire_grace_ms;
         let history_limit = self.config.cron_history_limit;
         let history_retention = self.config.cron_history_retention_ms;
-        let (slots, runs) = tokio::task::spawn_blocking(move || {
+        let started = Instant::now();
+        let result = tokio::task::spawn_blocking(move || {
             let slots = store.project_due_cron_slots(now_ms, grace, batch)?;
             store.gc_cron_history(now_ms, history_retention, history_limit)?;
-            let runs = store.claim_cron_runs(now_ms, lease_ms, 250, batch)?;
-            Ok::<_, PlatformError>((slots, runs))
+            let (runs, recovered) = store.claim_cron_runs(now_ms, lease_ms, 250, batch)?;
+            Ok::<_, PlatformError>((slots, runs, recovered))
         })
         .await
-        .map_err(|_| scheduler_task_failed())??;
+        .map_err(|_| scheduler_task_failed())?;
+        if let Some(metrics) = &self.metrics {
+            metrics.observe_scheduler_claim_duration(SchedulerKind::Cron, started.elapsed());
+            metrics.inc_scheduler_claim(
+                SchedulerKind::Cron,
+                match &result {
+                    Ok((_, runs, _)) if runs.is_empty() => SchedulerClaimOutcome::Empty,
+                    Ok(_) => SchedulerClaimOutcome::Claimed,
+                    Err(_) => SchedulerClaimOutcome::Error,
+                },
+            );
+            if let Ok((_, _, recovered)) = &result {
+                metrics.inc_scheduler_claim_expired(SchedulerKind::Cron, *recovered);
+            }
+        }
+        let (slots, runs, _) = result?;
         if let Some(metrics) = &self.metrics {
             metrics.observe_cron_slots(slots);
         }

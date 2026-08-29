@@ -4,7 +4,6 @@ use crate::fsutil::{
     MAX_ASSETS_TOTAL_BYTES, hex_sha256, list_files_sorted, open_dir_nofollow,
     read_regular_nofollow, reject_symlink_escape,
 };
-use crate::lock::RuntimeLock;
 use crate::verify::VerifiedRuntime;
 use open_compute_core::{DurableObjectsConfig, ErrorCode, PlatformError, SecretString};
 use sha2::{Digest, Sha256};
@@ -157,18 +156,6 @@ fn asset_bytes_sha256(template: &[u8], workers: &[(String, Vec<u8>)]) -> String 
     hex::encode(hasher.finalize())
 }
 
-pub(crate) fn render_config(template: &str, token: &SecretString) -> Result<String, PlatformError> {
-    validate_token(token)?;
-    let count = template.matches(TOKEN_PLACEHOLDER).count();
-    if count != 1 {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigCompileFailed,
-            "config template must contain exactly one internal token placeholder",
-        ));
-    }
-    Ok(template.replace(TOKEN_PLACEHOLDER, token.expose()))
-}
-
 pub(crate) fn render_config_with_tokens(
     template: &str,
     token: &SecretString,
@@ -215,21 +202,6 @@ pub(crate) fn validate_token(token: &SecretString) -> Result<(), PlatformError> 
 #[cfg(test)]
 pub(crate) fn digest_for(
     assets_dir: &Path,
-    lock: &RuntimeLock,
-    lock_bytes: &[u8],
-    runtime: &VerifiedRuntime,
-    platform: &PlatformReleaseMeta,
-    token: &SecretString,
-) -> Result<(String, String, WorkerFiles), PlatformError> {
-    digest_for_with_tokens(
-        assets_dir, lock, lock_bytes, runtime, platform, token, token,
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn digest_for_with_tokens(
-    assets_dir: &Path,
-    lock: &RuntimeLock,
     lock_bytes: &[u8],
     runtime: &VerifiedRuntime,
     platform: &PlatformReleaseMeta,
@@ -238,7 +210,6 @@ pub(crate) fn digest_for_with_tokens(
 ) -> Result<(String, String, WorkerFiles), PlatformError> {
     digest_for_with_tokens_and_policy(
         assets_dir,
-        lock,
         lock_bytes,
         runtime,
         platform,
@@ -251,7 +222,6 @@ pub(crate) fn digest_for_with_tokens(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn digest_for_with_tokens_and_policy(
     assets_dir: &Path,
-    lock: &RuntimeLock,
     lock_bytes: &[u8],
     runtime: &VerifiedRuntime,
     platform: &PlatformReleaseMeta,
@@ -259,7 +229,6 @@ pub(crate) fn digest_for_with_tokens_and_policy(
     binding_token: &SecretString,
     durable_objects: &DurableObjectsConfig,
 ) -> Result<(String, String, WorkerFiles), PlatformError> {
-    let _ = lock;
     let (template, workers, _) = load_assets(assets_dir)?;
     if let Some(expected) = runtime.expected_assets_sha256
         && asset_bytes_sha256(&template, &workers) != expected
@@ -275,18 +244,7 @@ pub(crate) fn digest_for_with_tokens_and_policy(
             "config template is not UTF-8",
         )
     })?;
-    let rendered = if token.expose() == binding_token.expose() {
-        let once = render_config(template_str, token)?;
-        if once.matches(BINDING_TOKEN_PLACEHOLDER).count() != 1 {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigCompileFailed,
-                "config template must contain exactly one binding token placeholder",
-            ));
-        }
-        once.replace(BINDING_TOKEN_PLACEHOLDER, binding_token.expose())
-    } else {
-        render_config_with_tokens(template_str, token, binding_token)?
-    };
+    let rendered = render_config_with_tokens(template_str, token, binding_token)?;
     let rendered = render_do_policy(rendered, durable_objects)?;
     let digest = config_input_digest(&DigestInputs {
         config_template: &template,

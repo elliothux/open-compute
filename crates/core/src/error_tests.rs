@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn current_persisted_codes_round_trip_and_unknown_is_rejected() {
+    for code in [
+        ErrorCode::QuotaExceeded,
+        ErrorCode::AdmissionBusy,
+        ErrorCode::StoragePressure,
+        ErrorCode::PlatformUnavailable,
+        ErrorCode::QueueConfigPending,
+    ] {
+        assert_eq!(ErrorCode::from_stable_str(code.as_str()), Some(code));
+    }
+    assert_eq!(ErrorCode::from_stable_str("UNKNOWN"), None);
+    assert_eq!(ErrorCode::from_stable_str("quota_exceeded"), None);
+}
+
+#[test]
 fn public_error_exposes_only_code_and_static_operator_text() {
     const MESSAGE: &str = "master key fingerprint mismatch";
     let err = PlatformError::new(ErrorCode::MasterKeyMismatch, MESSAGE);
@@ -35,7 +50,7 @@ fn every_section_16_failure_has_a_stable_code() {
         ErrorCode::PlatformUnavailable,
         ErrorCode::SnapshotInvalid,
         ErrorCode::RestoreInvalid,
-        ErrorCode::UpgradeRequired,
+        ErrorCode::SchemaUnsupported,
         ErrorCode::ReleaseUnsupported,
         ErrorCode::SupportBundleInvalid,
         ErrorCode::DataDirInUse,
@@ -123,7 +138,6 @@ fn every_error_and_readiness_token_formats_stably() {
         ErrorCode::BindingCapabilityUnsupported,
         ErrorCode::BindingProtocolError,
         ErrorCode::BindingLimitExceeded,
-        ErrorCode::BindingResultUnknown,
         ErrorCode::KvKeyInvalid,
         ErrorCode::KvKeyTooLarge,
         ErrorCode::KvValueTooLarge,

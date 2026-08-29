@@ -9,8 +9,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use open_compute_artifacts::R2ObjectStore;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, OperationClass, PlatformError, R2Config, RequestId,
-    ResourceId, ResourceState,
+    AccountId, BindingKind, ErrorCode, PlatformError, R2Config, RequestId, ResourceId,
+    ResourceState,
 };
 use open_compute_storage::{
     PlatformStorage, R2_SCHEMA_VERSION, R2BucketRecord, R2BucketRepository, ReserveResourceCreate,
@@ -204,9 +204,7 @@ async fn create(
     key: String,
     request_id: RequestId,
 ) -> Result<CreateOutcome, PlatformError> {
-    let _admission = api
-        .storage
-        .reserve_mutation(OperationClass::R2, 64 * 1024)?;
+    let _admission = api.storage.reserve_mutation(64 * 1024)?;
     let fingerprint_input = serde_json::to_vec(&serde_json::json!({
         "v": 1,
         "accountId": account_id,
@@ -217,7 +215,7 @@ async fn create(
     .map_err(|_| internal())?;
     let fingerprint = api.storage.crypto().fingerprint_request(&fingerprint_input);
     let now = now_ms();
-    let reservation = ResourceRepository::new(api.storage.db()).reserve_create_with_limit(
+    let reservation = ResourceRepository::new(api.storage.db()).reserve_create(
         &ReserveResourceCreate {
             account_id,
             kind: BindingKind::R2Bucket,
@@ -332,7 +330,7 @@ async fn rename_bucket(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
-    let _admission = match api.storage.reserve_mutation(OperationClass::R2, 64 * 1024) {
+    let _admission = match api.storage.reserve_mutation(64 * 1024) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };

@@ -59,19 +59,22 @@ request_timeout_ms = 1000
     let resource_id = ResourceId::generate();
     let fingerprint = storage.crypto().fingerprint_request(b"r2-maintenance");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::R2Bucket,
-            name: "maintenance",
-            idempotency_key: "r2-maintenance",
-            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id,
-            driver_schema_version: open_compute_storage::R2_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 10_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::R2Bucket,
+                name: "maintenance",
+                idempotency_key: "r2-maintenance",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: open_compute_storage::R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 10_000,
+            },
+            1_000_000,
+        )
         .unwrap()
     else {
         panic!("expected reserved R2 resource")

@@ -15,7 +15,9 @@ use std::collections::HashSet;
 use std::io::{Read, Seek};
 use std::path::Path;
 use std::pin::pin;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 const META_SHA256: &str = "sha256";
 const KV_BACKUP_PREFIX: &str = "backups/kv/";
@@ -84,13 +86,57 @@ pub struct ArtifactCandidate {
 #[derive(Debug, Clone)]
 pub struct ArtifactStore {
     client: S3ArtifactClient,
+    deployment_gc_gate: Arc<RwLock<()>>,
+}
+
+/// Read-side reservation held from deployment upload through authority commit.
+pub struct ArtifactDeploymentReservation {
+    _guard: OwnedRwLockReadGuard<()>,
+}
+
+impl std::fmt::Debug for ArtifactDeploymentReservation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ArtifactDeploymentReservation")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Exclusive fence held from the final authority snapshot through remote deletion.
+pub struct ArtifactGcFence {
+    _guard: OwnedRwLockWriteGuard<()>,
+}
+
+impl std::fmt::Debug for ArtifactGcFence {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ArtifactGcFence")
+            .finish_non_exhaustive()
+    }
 }
 
 impl ArtifactStore {
     /// Wrap a configured production client.
     #[must_use]
     pub fn new(client: S3ArtifactClient) -> Self {
-        Self { client }
+        Self {
+            client,
+            deployment_gc_gate: Arc::new(RwLock::new(())),
+        }
+    }
+
+    /// Fence artifact GC while a deployment uploads and commits its authoritative reference.
+    pub async fn reserve_deployment_artifact(&self) -> ArtifactDeploymentReservation {
+        ArtifactDeploymentReservation {
+            _guard: self.deployment_gc_gate.clone().read_owned().await,
+        }
+    }
+
+    /// Fence new deployment uploads while GC takes its final reference snapshot and deletes.
+    pub async fn fence_deployment_gc(&self) -> ArtifactGcFence {
+        ArtifactGcFence {
+            _guard: self.deployment_gc_gate.clone().write_owned().await,
+        }
     }
 
     /// Construct a host-owned KV backup key below the configured system prefix.
@@ -881,6 +927,7 @@ impl ArtifactStore {
     /// Delete verified unreferenced remote candidates older than `grace_deadline`.
     pub async fn gc_unreferenced(
         &self,
+        _fence: &ArtifactGcFence,
         referenced: &HashSet<ArtifactRef>,
         grace_deadline: SystemTime,
     ) -> Result<u64, PlatformError> {

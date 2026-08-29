@@ -248,8 +248,8 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                         let index = checks.len() - 1;
                         checks[index] = failed(
                             "schema",
-                            ErrorCode::UpgradeRequired,
-                            "control schema requires an offline upgrade before serving",
+                            ErrorCode::SchemaUnsupported,
+                            "control schema does not match this implementation",
                             Some(version.to_string()),
                         );
                     }
@@ -555,11 +555,7 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         (Err(err), _) => checks.push(failed("master_key", err.code(), err.message(), None)),
     }
 
-    for receipt in [
-        "last-snapshot.json",
-        "last-restore.json",
-        "last-upgrade.json",
-    ] {
+    for receipt in ["last-snapshot.json", "last-restore.json"] {
         checks.push(operation_receipt_check(loaded, receipt));
     }
 
@@ -710,7 +706,6 @@ fn operation_receipt_check(loaded: &LoadedConfig, name: &'static str) -> DoctorC
     let check_name = match name {
         "last-snapshot.json" => "last_snapshot_receipt",
         "last-restore.json" => "last_restore_receipt",
-        "last-upgrade.json" => "last_upgrade_receipt",
         _ => "operation_receipt",
     };
     let metadata = match std::fs::symlink_metadata(&path) {

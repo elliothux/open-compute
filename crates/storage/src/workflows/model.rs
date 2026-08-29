@@ -55,7 +55,7 @@ pub struct WorkflowTarget {
     pub class_name: String,
     /// Frozen loader schema.
     pub loader_schema_version: i64,
-    /// Frozen execution capability: one for legacy history, two for durable waiting.
+    /// Frozen current execution capability, required to be one.
     pub capability_version: i64,
     /// Canonical frozen version descriptor digest.
     pub descriptor_sha256: [u8; 32],
@@ -118,7 +118,7 @@ pub enum WorkflowRefState {
     Creating,
     /// Both authorities committed; instance may execute.
     Live,
-    /// Terminal V2 history still pins its immutable deployment until proven purge.
+    /// Terminal history still pins its immutable deployment until proven purge.
     Retained,
     /// A durable restart intent owns the active quota and blocks dispatch.
     Restarting,

@@ -353,9 +353,21 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
         replayed_failure(br#"{"code":"WORKER_NOT_FOUND"}"#).code(),
         ErrorCode::WorkerNotFound
     );
+    for code in [
+        ErrorCode::QuotaExceeded,
+        ErrorCode::AdmissionBusy,
+        ErrorCode::StoragePressure,
+        ErrorCode::PlatformUnavailable,
+    ] {
+        let persisted = serde_json::to_vec(&serde_json::json!({ "code": code.as_str() })).unwrap();
+        assert_eq!(replayed_failure(&persisted).code(), code);
+    }
     assert_eq!(replayed_failure(b"invalid").code(), ErrorCode::Internal);
-    assert_eq!(error_code("UNKNOWN"), ErrorCode::Internal);
-    assert_eq!(error_code("ROUTE_NOT_FOUND"), ErrorCode::RouteNotFound);
+    assert_eq!(ErrorCode::from_stable_str("UNKNOWN"), None);
+    assert_eq!(
+        ErrorCode::from_stable_str("ROUTE_NOT_FOUND"),
+        Some(ErrorCode::RouteNotFound)
+    );
     assert_eq!(internal().code(), ErrorCode::Internal);
     assert_eq!(
         idempotency_ref_id(AccountId::generate(), "scope", "key").len(),
@@ -471,26 +483,36 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
     assert_eq!(first, second);
 
     let (worker, _) = repo
-        .create_worker(account, "ref-worker", RequestId::generate(), now_ms())
+        .create_worker(
+            account,
+            "ref-worker",
+            RequestId::generate(),
+            now_ms(),
+            1_000_000,
+        )
         .unwrap();
     let deployment = DeploymentId::generate();
-    repo.insert_staging_deployment(&NewDeployment {
-        id: deployment,
-        account_id: account,
-        worker_id: worker.id,
-        artifact_sha256: [7; 32],
-        artifact_size: 7,
-        artifact_schema_version: 1,
-        main_module: "index.js".to_owned(),
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
-        limits: serde_json::json!({}),
-        worker_code_sha256: [8; 32],
-        vars: BTreeMap::new(),
-        secrets: BTreeMap::new(),
-        request_id: RequestId::generate(),
-        now_ms: now_ms(),
-    })
+    repo.insert_staging_deployment(
+        &NewDeployment {
+            id: deployment,
+            account_id: account,
+            worker_id: worker.id,
+            artifact_sha256: [7; 32],
+            artifact_size: 7,
+            artifact_schema_version: 1,
+            main_module: "index.js".to_owned(),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: Vec::new(),
+            limits: serde_json::json!({}),
+            worker_code_sha256: [8; 32],
+            vars: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            request_id: RequestId::generate(),
+            now_ms: now_ms(),
+        },
+        &open_compute_storage::NewDeploymentProducts::default(),
+        1_000_000,
+    )
     .unwrap();
     let sync_ref = run_idempotent(
         &api,
@@ -585,23 +607,27 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
     }
 
     let delete_deployment = DeploymentId::generate();
-    repo.insert_staging_deployment(&NewDeployment {
-        id: delete_deployment,
-        account_id: account,
-        worker_id: worker.id,
-        artifact_sha256: [9; 32],
-        artifact_size: 9,
-        artifact_schema_version: 1,
-        main_module: "index.js".to_owned(),
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
-        limits: serde_json::json!({}),
-        worker_code_sha256: [10; 32],
-        vars: BTreeMap::new(),
-        secrets: BTreeMap::new(),
-        request_id: RequestId::generate(),
-        now_ms: now_ms(),
-    })
+    repo.insert_staging_deployment(
+        &NewDeployment {
+            id: delete_deployment,
+            account_id: account,
+            worker_id: worker.id,
+            artifact_sha256: [9; 32],
+            artifact_size: 9,
+            artifact_schema_version: 1,
+            main_module: "index.js".to_owned(),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: Vec::new(),
+            limits: serde_json::json!({}),
+            worker_code_sha256: [10; 32],
+            vars: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            request_id: RequestId::generate(),
+            now_ms: now_ms(),
+        },
+        &open_compute_storage::NewDeploymentProducts::default(),
+        1_000_000,
+    )
     .unwrap();
     repo.mark_rejected(
         delete_deployment,
@@ -686,4 +712,78 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
         .code(),
         ErrorCode::IdempotencyConflict
     );
+}
+
+#[tokio::test]
+async fn worker_and_route_failures_replay_after_storage_restart_without_mutation() {
+    let (temp, _mock, api, account) = worker_api_fixture().await;
+    let artifacts = api.artifacts.clone();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for (scope, key) in [
+        ("worker.create", "worker-quota"),
+        ("worker.route.create", "route-quota"),
+    ] {
+        let calls = calls.clone();
+        let error = run_idempotent(
+            &api,
+            account,
+            scope,
+            key,
+            b"quota-request",
+            RequestId::generate(),
+            None,
+            || {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err(PlatformError::new(
+                    ErrorCode::QuotaExceeded,
+                    "account quota was exceeded",
+                ))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::QuotaExceeded);
+        assert_eq!(
+            error_response(error, RequestId::generate()).status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    drop(api);
+    let storage = Arc::new(
+        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
+            .unwrap(),
+    );
+    let restarted = WorkerApiState::new(
+        storage,
+        artifacts,
+        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
+        DeploymentPins::new(),
+        BundleLimits::default(),
+        Duration::from_millis(10),
+    );
+    for (scope, key) in [
+        ("worker.create", "worker-quota"),
+        ("worker.route.create", "route-quota"),
+    ] {
+        let error = run_idempotent(
+            &restarted,
+            account,
+            scope,
+            key,
+            b"quota-request",
+            RequestId::generate(),
+            None,
+            || -> Result<serde_json::Value, PlatformError> {
+                panic!("replayed failure must not execute the mutation")
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::QuotaExceeded);
+        assert_eq!(
+            error_response(error, RequestId::generate()).status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
 }

@@ -1,4 +1,4 @@
-//! Private V2 step protocol and validated persisted step metadata.
+//! Private step protocol and validated persisted step metadata.
 
 use super::*;
 use open_compute_core::workflow::{
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Private callback grant; completed outputs are fetched separately to bound batch replies.
 #[derive(Debug, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub enum WorkflowV2StepGrant {
+pub enum WorkflowStepGrant {
     /// Execute this exact business attempt under its private token and remaining deadline.
     Run {
         /// Random step token, visible only to the system-isolate controller.
@@ -31,10 +31,10 @@ pub enum WorkflowV2StepGrant {
     Suspended,
 }
 
-/// Committed result of one V2 step, never an optimistic callback return.
+/// Committed result of one step, never an optimistic callback return.
 #[derive(Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub enum WorkflowV2StepResult {
+pub enum WorkflowStepResult {
     /// Canonical callback/event output, absent for sleep's void result.
     Complete {
         /// Retained JSON bytes; event payload depth is independent of its envelope.
@@ -50,7 +50,7 @@ pub enum WorkflowV2StepResult {
     Suspended,
 }
 
-impl std::fmt::Debug for WorkflowV2StepResult {
+impl std::fmt::Debug for WorkflowStepResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Complete { .. } => "Complete([REDACTED])",
@@ -135,7 +135,7 @@ pub(super) fn read_step(
         })
         .transpose()?;
     let failure: Option<Vec<u8>> = row.get("error_json").map_err(sql_error)?;
-    let code = failure_code(row, "error_code", 2).map_err(sql_error)?;
+    let code = failure_code(row, "error_code").map_err(sql_error)?;
     if failure
         .as_deref()
         .is_some_and(|value| value != failure_json().as_bytes())

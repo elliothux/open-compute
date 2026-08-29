@@ -64,9 +64,6 @@ CREATE TABLE queue_referrers (
   PRIMARY KEY(queue_id, referrer_kind, referrer_id)
 ) WITHOUT ROWID, STRICT;
 
-ALTER TABLE control_idempotency
-ADD COLUMN queue_id TEXT REFERENCES queues(id) DEFERRABLE INITIALLY DEFERRED;
-
 CREATE TRIGGER queues_identity_update_guard
 BEFORE UPDATE ON queues
 WHEN OLD.id != NEW.id OR OLD.account_id != NEW.account_id OR

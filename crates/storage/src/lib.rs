@@ -26,8 +26,8 @@ pub mod r2_staging;
 pub mod resources;
 mod restore_cleanup;
 pub mod scheduler;
+mod schema_inspection;
 mod snapshot_staging;
-pub mod upgrade;
 pub mod workers;
 pub mod workflows;
 pub use workflows::{
@@ -55,9 +55,11 @@ pub use d1::{
     D1Value,
 };
 pub use data_dir::{
-    DURABLE_OBJECT_DATA_FORMAT_VERSION, DURABLE_OBJECT_UNIQUE_KEY, DataDir, expected_directories,
-    future_resource_paths, inspect_durable_object_storage, read_operation_receipt,
+    DURABLE_OBJECT_DATA_FORMAT_VERSION, DURABLE_OBJECT_UNIQUE_KEY, DataDir,
+    inspect_durable_object_storage, read_operation_receipt,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use data_dir::{expected_directories, future_resource_paths};
 pub use disk_admission::DiskAdmission;
 pub use durable_objects::{
     AuthorizedDurableObjectDelete, AuthorizedDurableObjectDispatch, DO_NAMESPACE_SCHEMA_VERSION,
@@ -124,10 +126,8 @@ pub use scheduler::{
     SchedulerWakeFuture, SchedulerWakeSignal, current_scheduler_schema_version,
     inspect_p23_cross_database, inspect_scheduler_db, scheduler_migration_registry,
 };
+pub use schema_inspection::{CurrentSchemaState, inspect_current_schema};
 pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
-pub use upgrade::{
-    OfflineSchemaState, apply_offline_upgrade, inspect_offline_schema, inspect_owned_schema,
-};
 pub use workers::{
     DeploymentRecord, DeploymentReferrer, DeploymentSnapshot, DeploymentState,
     IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment, NewDeploymentProducts,
@@ -138,7 +138,7 @@ pub use workers::{
 use open_compute_core::clock::Clock;
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{
-    AdmissionReservation, AdmissionSnapshotV1, HardeningConfig, OperationClass, PlatformError,
+    AdmissionReservation, AdmissionSnapshotV1, HardeningConfig, PlatformError,
 };
 
 /// Fully bootstrapped P0.1 storage owner.
@@ -260,12 +260,8 @@ impl PlatformStorage {
     }
 
     /// Reserve conservative local bytes for one storage-growing operation.
-    pub fn reserve_mutation(
-        &self,
-        class: OperationClass,
-        bytes: u64,
-    ) -> Result<AdmissionReservation, PlatformError> {
-        self.admission.reserve(&self.data_dir, class, bytes)
+    pub fn reserve_mutation(&self, bytes: u64) -> Result<AdmissionReservation, PlatformError> {
+        self.admission.reserve(&self.data_dir, bytes)
     }
 
     /// Enter terminal draining mode and reject new storage-growing work.

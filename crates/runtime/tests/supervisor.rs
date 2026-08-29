@@ -196,15 +196,20 @@ async fn argv_exact_stdin_fd3_and_auth_probe() {
     fs::create_dir(&data).unwrap();
     let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
     let extra = serde_json::json!({"stdin_marker_path": stdin_path.display().to_string()});
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime: runtime.clone(),
-        compiler: compiler(data, "ready", Some(argv_path.clone()), extra),
-        config: small_cfg(),
-        clock,
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime: runtime.clone(),
+            compiler: compiler(data, "ready", Some(argv_path.clone()), extra),
+            config: small_cfg(),
+            clock,
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     assert_eq!(snap.reason, ReadinessReason::Ready);
@@ -245,15 +250,20 @@ async fn control_faults_reap_pid_and_pgid() {
         let mut cfg = small_cfg();
         cfg.startup_timeout_ms = 300;
         cfg.restart_budget = 1;
-        let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-            runtime,
-            compiler: compiler(data, mode, None, serde_json::json!({})),
-            config: cfg,
-            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-            jitter: Arc::new(SequenceJitter::new(vec![0])),
-            redactor: Redactor::new(),
-            lease_path: None,
-        });
+        let sup = WorkerdSupervisor::new(
+            WorkerdSupervisorOptions {
+                runtime,
+                compiler: compiler(data, mode, None, serde_json::json!({})),
+                config: cfg,
+                clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+                jitter: Arc::new(SequenceJitter::new(vec![0])),
+                redactor: Redactor::new(),
+                lease_path: None,
+            },
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         sup.start();
         let snap = wait_state(&sup, SupervisorState::Failed).await;
         if let Some(pid) = snap.pid {
@@ -274,15 +284,20 @@ async fn term_and_kill_and_descendant() {
     let extra = serde_json::json!({"child_pid_path": child_pid_path.display().to_string()});
     let mut cfg = small_cfg();
     cfg.shutdown_grace_ms = 150;
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "child", None, extra),
-        config: cfg,
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "child", None, extra),
+            config: cfg,
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     let pid = snap.pid.unwrap();
@@ -306,15 +321,20 @@ async fn ignore_term_then_kill() {
     let mut cfg = small_cfg();
     cfg.shutdown_grace_ms = 80;
     cfg.kill_timeout_ms = 200;
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "ignore_term", None, serde_json::json!({})),
-        config: cfg,
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "ignore_term", None, serde_json::json!({})),
+            config: cfg,
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     let pid = snap.pid.unwrap();
@@ -332,15 +352,20 @@ async fn logs_bounded_and_redacted() {
     redactor.register_str("/secret/token-path");
     let mut cfg = small_cfg();
     cfg.restart_budget = 1;
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "secret_logs", None, serde_json::json!({})),
-        config: cfg,
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor,
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "secret_logs", None, serde_json::json!({})),
+            config: cfg,
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor,
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     let token_in_config = snap.token_fingerprint.clone();
@@ -395,15 +420,20 @@ async fn reader_failure_reaches_diagnostics() {
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
     set_reader_fail_point();
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "ready", None, serde_json::json!({})),
-        config: small_cfg(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "ready", None, serde_json::json!({})),
+            config: small_cfg(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let _ = wait_state(&sup, SupervisorState::Running).await;
     sup.shutdown().await;
@@ -422,15 +452,20 @@ async fn unexpected_exit_backoff_and_budget() {
     cfg.restart_backoff_initial_ms = 5;
     cfg.restart_backoff_max_ms = 40;
     let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "early_exit", None, serde_json::json!({})),
-        config: cfg,
-        clock: clock.clone(),
-        jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "early_exit", None, serde_json::json!({})),
+            config: cfg,
+            clock: clock.clone(),
+            jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let mut fingerprints = Vec::new();
     let mut seen_backoff = 0u32;
@@ -470,29 +505,37 @@ async fn invalid_compile_does_not_retry() {
     let dir = TempDir::new().unwrap();
     let runtime = verified(dir.path()).await;
     let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: FnCompiler(|_t, _id| {
-            Box::pin(async {
-                Err(open_compute_core::PlatformError::new(
-                    ErrorCode::ConfigCompileFailed,
-                    "static config compilation failed",
-                ))
-            })
-                as Pin<
-                    Box<
-                        dyn Future<
-                                Output = Result<CompiledConfig, open_compute_core::PlatformError>,
-                            > + Send,
-                    >,
-                >
-        }),
-        config: small_cfg(),
-        clock: clock.clone(),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: FnCompiler(|_t, _id| {
+                Box::pin(async {
+                    Err(open_compute_core::PlatformError::new(
+                        ErrorCode::ConfigCompileFailed,
+                        "static config compilation failed",
+                    ))
+                })
+                    as Pin<
+                        Box<
+                            dyn Future<
+                                    Output = Result<
+                                        CompiledConfig,
+                                        open_compute_core::PlatformError,
+                                    >,
+                                > + Send,
+                        >,
+                    >
+            }),
+            config: small_cfg(),
+            clock: clock.clone(),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Failed).await;
     assert_eq!(snap.reason, ReadinessReason::ConfigInvalid);
@@ -509,15 +552,20 @@ async fn shutdown_does_not_consume_budget_and_is_idempotent() {
     let runtime = verified(dir.path()).await;
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "ready", None, serde_json::json!({})),
-        config: small_cfg(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "ready", None, serde_json::json!({})),
+            config: small_cfg(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     let pid = snap.pid.unwrap();
@@ -546,15 +594,20 @@ async fn drop_reaps_child() {
     fs::create_dir(&data).unwrap();
     let pid;
     {
-        let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-            runtime,
-            compiler: compiler(data, "ready", None, serde_json::json!({})),
-            config: small_cfg(),
-            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-            jitter: Arc::new(SequenceJitter::new(vec![0])),
-            redactor: Redactor::new(),
-            lease_path: None,
-        });
+        let sup = WorkerdSupervisor::new(
+            WorkerdSupervisorOptions {
+                runtime,
+                compiler: compiler(data, "ready", None, serde_json::json!({})),
+                config: small_cfg(),
+                clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+                jitter: Arc::new(SequenceJitter::new(vec![0])),
+                redactor: Redactor::new(),
+                lease_path: None,
+            },
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         sup.start();
         let snap = wait_state(&sup, SupervisorState::Running).await;
         pid = snap.pid.unwrap();
@@ -571,15 +624,20 @@ async fn timestamps_use_deterministic_clock() {
     let clock = Arc::new(DeterministicClock::new(
         UNIX_EPOCH + Duration::from_secs(42),
     ));
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "ready", None, serde_json::json!({})),
-        config: small_cfg(),
-        clock: clock.clone(),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "ready", None, serde_json::json!({})),
+            config: small_cfg(),
+            clock: clock.clone(),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     assert_eq!(
@@ -637,7 +695,7 @@ async fn real_workerd_control_probe_term_kill() {
     let runtime_source_addr = runtime_source.local_addr().unwrap();
     let binding_backend = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let binding_backend_addr = binding_backend.local_addr().unwrap();
-    let sup = WorkerdSupervisor::new_with_services_and_auth(
+    let sup = WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -672,15 +730,20 @@ async fn shutdown_before_start_acks_and_is_idempotent() {
     let runtime = verified(dir.path()).await;
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "ready", None, serde_json::json!({})),
-        config: small_cfg(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "ready", None, serde_json::json!({})),
+            config: small_cfg(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     tokio::time::timeout(Duration::from_secs(2), sup.shutdown())
         .await
         .expect("shutdown before start must acknowledge");
@@ -697,30 +760,38 @@ async fn shutdown_cancels_slow_compile_control_probe_and_backoff() {
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
 
-    let slow = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime: runtime.clone(),
-        compiler: FnCompiler(|_t, _id| {
-            Box::pin(async {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                Err(open_compute_core::PlatformError::new(
-                    ErrorCode::ConfigCompileFailed,
-                    "static config compilation failed",
-                ))
-            })
-                as Pin<
-                    Box<
-                        dyn Future<
-                                Output = Result<CompiledConfig, open_compute_core::PlatformError>,
-                            > + Send,
-                    >,
-                >
-        }),
-        config: small_cfg(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let slow = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime: runtime.clone(),
+            compiler: FnCompiler(|_t, _id| {
+                Box::pin(async {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    Err(open_compute_core::PlatformError::new(
+                        ErrorCode::ConfigCompileFailed,
+                        "static config compilation failed",
+                    ))
+                })
+                    as Pin<
+                        Box<
+                            dyn Future<
+                                    Output = Result<
+                                        CompiledConfig,
+                                        open_compute_core::PlatformError,
+                                    >,
+                                > + Send,
+                        >,
+                    >
+            }),
+            config: small_cfg(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     slow.start();
     tokio::time::sleep(Duration::from_millis(30)).await;
     tokio::time::timeout(Duration::from_secs(2), slow.shutdown())
@@ -732,15 +803,20 @@ async fn shutdown_cancels_slow_compile_control_probe_and_backoff() {
         fs::create_dir(&data).unwrap();
         let mut cfg = small_cfg();
         cfg.startup_timeout_ms = 30_000;
-        let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-            runtime: runtime.clone(),
-            compiler: compiler(data, mode, None, serde_json::json!({})),
-            config: cfg,
-            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-            jitter: Arc::new(SequenceJitter::new(vec![0])),
-            redactor: Redactor::new(),
-            lease_path: None,
-        });
+        let sup = WorkerdSupervisor::new(
+            WorkerdSupervisorOptions {
+                runtime: runtime.clone(),
+                compiler: compiler(data, mode, None, serde_json::json!({})),
+                config: cfg,
+                clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+                jitter: Arc::new(SequenceJitter::new(vec![0])),
+                redactor: Redactor::new(),
+                lease_path: None,
+            },
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         sup.start();
         tokio::time::sleep(Duration::from_millis(80)).await;
         let pid = last_spawned_pid();
@@ -758,15 +834,20 @@ async fn shutdown_cancels_slow_compile_control_probe_and_backoff() {
     cfg.restart_backoff_initial_ms = 60_000;
     cfg.restart_backoff_max_ms = 60_000;
     let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "early_exit", None, serde_json::json!({})),
-        config: cfg,
-        clock,
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "early_exit", None, serde_json::json!({})),
+            config: cfg,
+            clock,
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     wait_state(&sup, SupervisorState::BackingOff).await;
     tokio::time::timeout(Duration::from_secs(2), sup.shutdown())
@@ -784,15 +865,20 @@ async fn post_spawn_failures_reap_child() {
         set_spawn_fail_point(point);
         let mut cfg = small_cfg();
         cfg.restart_budget = 1;
-        let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-            runtime,
-            compiler: compiler(data, "ready", None, serde_json::json!({})),
-            config: cfg,
-            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-            jitter: Arc::new(SequenceJitter::new(vec![0])),
-            redactor: Redactor::new(),
-            lease_path: None,
-        });
+        let sup = WorkerdSupervisor::new(
+            WorkerdSupervisorOptions {
+                runtime,
+                compiler: compiler(data, "ready", None, serde_json::json!({})),
+                config: cfg,
+                clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+                jitter: Arc::new(SequenceJitter::new(vec![0])),
+                redactor: Redactor::new(),
+                lease_path: None,
+            },
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         sup.start();
         wait_state(&sup, SupervisorState::Failed).await;
         if let Some(pid) = last_spawned_pid() {
@@ -817,15 +903,20 @@ async fn drop_does_not_signal_or_double_wait_reaped_pid() {
     {
         let mut cfg = small_cfg();
         cfg.restart_budget = 1;
-        let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-            runtime,
-            compiler: compiler(data, "crash_after_ready", None, serde_json::json!({})),
-            config: cfg,
-            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-            jitter: Arc::new(SequenceJitter::new(vec![0])),
-            redactor: Redactor::new(),
-            lease_path: None,
-        });
+        let sup = WorkerdSupervisor::new(
+            WorkerdSupervisorOptions {
+                runtime,
+                compiler: compiler(data, "crash_after_ready", None, serde_json::json!({})),
+                config: cfg,
+                clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+                jitter: Arc::new(SequenceJitter::new(vec![0])),
+                redactor: Redactor::new(),
+                lease_path: None,
+            },
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         sup.start();
         let snap = wait_state(&sup, SupervisorState::Running).await;
         pid = snap.pid.unwrap();
@@ -856,15 +947,20 @@ async fn late_control_event_is_unhealthy_restart() {
         let mut cfg = small_cfg();
         cfg.restart_budget = 3;
         let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
-        let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-            runtime,
-            compiler: compiler(data, mode, None, serde_json::json!({})),
-            config: cfg,
-            clock: clock.clone(),
-            jitter: Arc::new(SequenceJitter::new(vec![0])),
-            redactor: Redactor::new(),
-            lease_path: None,
-        });
+        let sup = WorkerdSupervisor::new(
+            WorkerdSupervisorOptions {
+                runtime,
+                compiler: compiler(data, mode, None, serde_json::json!({})),
+                config: cfg,
+                clock: clock.clone(),
+                jitter: Arc::new(SequenceJitter::new(vec![0])),
+                redactor: Redactor::new(),
+                lease_path: None,
+            },
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         sup.start();
         let snap = wait_state(&sup, SupervisorState::Running).await;
         let pid = snap.pid.unwrap();
@@ -921,15 +1017,20 @@ async fn running_resets_consecutive_backoff() {
     cfg.restart_backoff_max_ms = 80;
     cfg.restart_budget = 8;
     let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler,
-        config: cfg,
-        clock: clock.clone(),
-        jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler,
+            config: cfg,
+            clock: clock.clone(),
+            jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     wait_state(&sup, SupervisorState::Running).await;
     let backoff = wait_state(&sup, SupervisorState::BackingOff).await;
@@ -962,15 +1063,20 @@ async fn shutdown_waits_for_held_blocking_spawn() {
     fs::create_dir(&data).unwrap();
     clear_blocking_spawn_hold();
     hold_blocking_spawn();
-    let sup = Arc::new(WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "ready", None, serde_json::json!({})),
-        config: small_cfg(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    }));
+    let sup = Arc::new(WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "ready", None, serde_json::json!({})),
+            config: small_cfg(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    ));
     sup.start();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while !blocking_spawn_is_waiting() {
@@ -1011,15 +1117,20 @@ async fn term_grace_then_kill_order() {
     cfg.shutdown_grace_ms = 250;
     cfg.kill_timeout_ms = 400;
     cfg.drain_timeout_ms = 10;
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime: runtime.clone(),
-        compiler: compiler(data.clone(), "ready", None, serde_json::json!({})),
-        config: cfg.clone(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime: runtime.clone(),
+            compiler: compiler(data.clone(), "ready", None, serde_json::json!({})),
+            config: cfg.clone(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     let pid = snap.pid.unwrap();
@@ -1052,15 +1163,20 @@ async fn term_grace_then_kill_order() {
     let mut cfg2 = cfg;
     cfg2.shutdown_grace_ms = 200;
     cfg2.kill_timeout_ms = 400;
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data2, "ignore_term", None, serde_json::json!({})),
-        config: cfg2,
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data2, "ignore_term", None, serde_json::json!({})),
+            config: cfg2,
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     let pid = snap.pid.unwrap();
@@ -1132,15 +1248,20 @@ async fn owner_registry_does_not_grow_across_restarts() {
     cfg.restart_backoff_initial_ms = 5;
     cfg.restart_backoff_max_ms = 10;
     let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler,
-        config: cfg,
-        clock: clock.clone(),
-        jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0, 0, 0, 0, 0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler,
+            config: cfg,
+            clock: clock.clone(),
+            jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0, 0, 0, 0, 0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
     loop {
@@ -1182,15 +1303,20 @@ async fn term_leader_kill_ignoring_descendant_holding_pipes() {
     cfg.kill_timeout_ms = 400;
     cfg.drain_timeout_ms = 10;
     clear_signal_log();
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "child_ignore_term", None, extra),
-        config: cfg,
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "child_ignore_term", None, extra),
+            config: cfg,
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
     let pid = snap.pid.unwrap();
@@ -1266,15 +1392,20 @@ async fn compile_failure_does_not_inherit_prior_exit() {
     cfg.restart_backoff_initial_ms = 5;
     cfg.restart_backoff_max_ms = 10;
     let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler,
-        config: cfg,
-        clock: clock.clone(),
-        jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0])),
-        redactor: Redactor::new(),
-        lease_path: None,
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler,
+            config: cfg,
+            clock: clock.clone(),
+            jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0])),
+            redactor: Redactor::new(),
+            lease_path: None,
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     wait_state(&sup, SupervisorState::Running).await;
     let backoff = wait_state(&sup, SupervisorState::BackingOff).await;
@@ -1311,15 +1442,20 @@ async fn lease_persist_failure_reaps_child_and_never_runs() {
     let lease = dir.path().join("child.lease");
     open_compute_runtime::set_start_key_hook(Some(test_start_key));
     open_compute_runtime::set_lease_write_fail(true);
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "ready", None, serde_json::json!({})),
-        config: small_cfg(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: Some(lease),
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "ready", None, serde_json::json!({})),
+            config: small_cfg(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: Some(lease),
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Failed).await;
     assert_ne!(snap.state, SupervisorState::Running);
@@ -1340,15 +1476,20 @@ async fn teardown_retains_lease_until_reap_is_proved() {
     let lease = dir.path().join("child.lease");
     open_compute_runtime::set_start_key_hook(Some(test_start_key));
 
-    let sup = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime: runtime.clone(),
-        compiler: compiler(data.clone(), "ready", None, serde_json::json!({})),
-        config: small_cfg(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: Some(lease.clone()),
-    });
+    let sup = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime: runtime.clone(),
+            compiler: compiler(data.clone(), "ready", None, serde_json::json!({})),
+            config: small_cfg(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: Some(lease.clone()),
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     sup.start();
     let running = wait_state(&sup, SupervisorState::Running).await;
     let pid = running.pid.unwrap();
@@ -1376,15 +1517,20 @@ async fn teardown_retains_lease_until_reap_is_proved() {
         "the same actor must not clear a lease after losing its reap proof"
     );
 
-    let replacement = WorkerdSupervisor::new(WorkerdSupervisorOptions {
-        runtime,
-        compiler: compiler(data, "ready", None, serde_json::json!({})),
-        config: small_cfg(),
-        clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
-        jitter: Arc::new(SequenceJitter::new(vec![0])),
-        redactor: Redactor::new(),
-        lease_path: Some(lease.clone()),
-    });
+    let replacement = WorkerdSupervisor::new(
+        WorkerdSupervisorOptions {
+            runtime,
+            compiler: compiler(data, "ready", None, serde_json::json!({})),
+            config: small_cfg(),
+            clock: Arc::new(DeterministicClock::new(UNIX_EPOCH)),
+            jitter: Arc::new(SequenceJitter::new(vec![0])),
+            redactor: Redactor::new(),
+            lease_path: Some(lease.clone()),
+        },
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
     replacement.start();
     let next = wait_state(&replacement, SupervisorState::Running).await;
     assert_ne!(next.pid, Some(pid));

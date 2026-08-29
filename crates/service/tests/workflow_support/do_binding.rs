@@ -11,7 +11,7 @@ use serde_json::json;
 pub(super) async fn verify(harness: &Harness, definition: WorkflowId) {
     let account = harness.storage.identity().default_account_id;
     let worker = WorkerRepository::new(harness.storage.db())
-        .create_worker(account, "workflow-reader", RequestId::generate(), now())
+        .create_worker(account, "workflow-reader", RequestId::generate(), now(), 1_000_000)
         .unwrap()
         .0;
     let driver = DurableObjectResourceDriver::new(&harness.storage, worker.id, "Reader");
@@ -43,7 +43,6 @@ pub(super) async fn verify(harness: &Harness, definition: WorkflowId) {
         (
             name.into(),
             DeploymentBindingInput {
-                capability_version: 1,
                 kind,
                 id,
                 permissions: Default::default(),

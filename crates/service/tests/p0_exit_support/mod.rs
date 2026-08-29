@@ -11,7 +11,8 @@ use open_compute_core::config::{
 };
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, Redactor, RequestId,
-    ResourceId, SchedulerConfig, SystemSchedulerClock, WorkerId,
+    ResourceId, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SystemSchedulerClock,
+    WorkerId,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -25,7 +26,7 @@ use open_compute_service::runtime_bridge::{
 use open_compute_service::{
     D1ApiState, D1BindingService, DoApiState, HealthCoordinator, KvApiState, MetricsRegistry,
     R2ApiState, R2BindingService, SchedulerService, SqliteKvBindingExecutor, bind_binding_backend,
-    serve_binding_backend_with_scheduler,
+    serve_binding_backend,
 };
 use open_compute_storage::{
     D1DatabaseRepository, D1Paths, DeploymentRecord, PlatformStorage, SchedulerStore,
@@ -219,7 +220,7 @@ impl GateStack {
             let d1 = d1.clone();
             let scheduler_store = scheduler_store.clone();
             async move {
-                serve_binding_backend_with_scheduler(
+                serve_binding_backend(
                     binding_listener,
                     backend_storage,
                     auth,
@@ -265,7 +266,7 @@ impl GateStack {
                 runtime.version_output(),
             )
             .unwrap();
-        let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+        let supervisor = Arc::new(WorkerdSupervisor::new(
             WorkerdSupervisorOptions {
                 runtime,
                 compiler,
@@ -285,15 +286,23 @@ impl GateStack {
         *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
         supervisor.start();
         wait_running(&supervisor, Duration::from_secs(30)).await;
+        let scheduler_config = SchedulerConfig {
+            max_in_flight: 4,
+            pools: SchedulerPoolsConfig {
+                alarm: SchedulerPoolConfig {
+                    claim_batch: 4,
+                    max_in_flight: 4,
+                    ..SchedulerPoolConfig::default()
+                },
+                ..SchedulerPoolsConfig::default()
+            },
+            ..SchedulerConfig::default()
+        };
         let scheduler = Arc::new(SchedulerService::new(
             scheduler_store,
             storage,
             transport.clone(),
-            SchedulerConfig {
-                claim_batch: 4,
-                max_in_flight: 4,
-                ..SchedulerConfig::default()
-            },
+            scheduler_config,
             open_compute_core::WorkflowsConfig::default(),
             Arc::new(SystemSchedulerClock),
         ));
@@ -335,6 +344,7 @@ pub(super) fn admin_router(
             artifacts.clone(),
             pins.clone(),
             kv_config(),
+            1_000,
             Duration::from_secs(2),
         ))
         .with_r2_api(R2ApiState::new(
@@ -350,6 +360,7 @@ pub(super) fn admin_router(
             pins.clone(),
             stack.d1.clone(),
             d1_config(),
+            1_000,
             Duration::from_secs(2),
         ))
         .with_do_api(
@@ -476,7 +487,6 @@ pub(super) fn deployment_request(
         resources.insert(
             name.to_owned(),
             DeploymentBindingInput {
-                capability_version: 1,
                 kind,
                 id,
                 permissions: CanonicalPermissions::default(),

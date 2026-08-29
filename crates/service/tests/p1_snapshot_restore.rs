@@ -1,5 +1,8 @@
 //! P1.2/P1.3 full snapshot and fresh-host restore integration Gate.
 
+#[path = "p1_snapshot_restore/staged_validation.rs"]
+mod staged_validation;
+
 use base64::Engine as _;
 use open_compute_artifacts::{
     MockS3, S3ArtifactClient, SnapshotObjectStore, resolve_s3_credentials,
@@ -242,7 +245,8 @@ async fn snapshot_restore_gate() {
         .activate_queue_consumer(consumer_id, 1, 1_002)
         .expect("activate snapshot Queue consumer");
     let claimed_queue = scheduler
-        .claim_queue_batches(1_002, 1_000, 250, 1)
+        .claim_queue_batches(1_002, 1_000, 250, 1, None)
+        .map(|(items, _)| items)
         .expect("claim snapshot Queue batch")
         .pop()
         .expect("claimed snapshot Queue batch");
@@ -275,6 +279,7 @@ async fn snapshot_restore_gate() {
     );
     let claimed_cron = scheduler
         .claim_cron_runs(60_000, 1_000, 250, 1)
+        .map(|(items, _)| items)
         .expect("claim snapshot Cron run")
         .pop()
         .expect("claimed snapshot Cron run");
@@ -358,6 +363,13 @@ async fn snapshot_restore_gate() {
     let original_manifest: PlatformSnapshotManifestV1 =
         serde_json::from_slice(&original_manifest_bytes).expect("manifest JSON");
     let recovery_key = inspect_master_key(&source_loaded.config.storage).expect("recovery key");
+    staged_validation::reject_invalid_staging(
+        &snapshot_objects,
+        &original_manifest,
+        &root,
+        recovery_key.fingerprint(),
+    )
+    .await;
 
     mock.put_raw(&manifest_key, b"{".to_vec());
     assert_eq!(

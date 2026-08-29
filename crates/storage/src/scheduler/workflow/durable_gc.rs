@@ -5,15 +5,15 @@ use crate::{WorkflowGcAcknowledgement, WorkflowGcReceipt};
 use open_compute_core::WorkflowOperationId;
 
 impl SchedulerStore {
-    /// Enumerate one bounded page of logically expired capability-two identities.
-    pub fn expired_workflows_v2(
+    /// Enumerate one bounded page of logically expired current identities.
+    pub fn expired_workflows(
         &self,
         now_ms: i64,
         limit: u32,
     ) -> Result<Vec<WorkflowInstanceIdentity>, PlatformError> {
         bounded(limit)?;
         let conn = self.lock()?;
-        let mut statement=conn.prepare(&format!("{INSTANCE_SELECT} WHERE capability_version=2 AND state IN ('complete','errored','terminated')
+        let mut statement=conn.prepare(&format!("{INSTANCE_SELECT} WHERE capability_version=1 AND state IN ('complete','errored','terminated')
             AND expires_at_ms<=?1 ORDER BY expires_at_ms,id LIMIT ?2")).map_err(sql_error)?;
         statement
             .query_map(params![now_ms, limit], instance_row)

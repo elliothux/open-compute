@@ -11,17 +11,31 @@ fn snapshot_policy_covers_the_current_workflow_configuration() {
     assert_ne!(platform_config_policy_sha256(&loaded).unwrap(), initial);
     loaded.config.workflows = open_compute_core::WorkflowsConfig::default();
     assert_eq!(platform_config_policy_sha256(&loaded).unwrap(), initial);
+    for change in [
+        |config: &mut open_compute_core::WorkflowsConfig| config.max_parallel_steps = 2,
+        |config: &mut open_compute_core::WorkflowsConfig| config.max_buffered_events = 64,
+        |config: &mut open_compute_core::WorkflowsConfig| config.max_event_bytes = 1_048_576,
+        |config: &mut open_compute_core::WorkflowsConfig| {
+            config.default_retention.success_retention_ms = 3_600_000;
+        },
+        |config: &mut open_compute_core::WorkflowsConfig| {
+            config.default_retention.error_retention_ms = 7_200_000;
+        },
+    ] {
+        change(&mut loaded.config.workflows);
+        loaded.config.validate().unwrap();
+        assert_ne!(platform_config_policy_sha256(&loaded).unwrap(), initial);
+        loaded.config.workflows = open_compute_core::WorkflowsConfig::default();
+        assert_eq!(platform_config_policy_sha256(&loaded).unwrap(), initial);
+    }
 }
 
 #[test]
-fn workflow_capabilities_report_explicit_v2_and_current_operator_limits() {
+fn workflow_capabilities_report_current_model_and_operator_limits() {
     let products = product_registry();
-    for (name, product) in &products {
+    for product in products.values() {
         if product.status == CapabilityStatus::Supported {
-            assert_eq!(
-                product.capability_version,
-                Some(if name == "workflows" { 2 } else { 1 })
-            );
+            assert_eq!(product.capability_version, Some(1));
         }
     }
     assert!(

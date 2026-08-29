@@ -23,7 +23,7 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_service::{
     D1BindingService, R2BindingService, SqliteKvBindingExecutor, bind_binding_backend,
-    serve_binding_backend_with_products,
+    serve_binding_backend,
 };
 use open_compute_storage::{
     D1_DATABASE_SCHEMA_VERSION, DeploymentRecord, PlatformStorage, R2_SCHEMA_VERSION,
@@ -106,7 +106,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
         let auth = binding_auth.clone();
         let pins = pins.clone();
         async move {
-            serve_binding_backend_with_products(
+            serve_binding_backend(
                 binding_listener,
                 backend_storage,
                 auth,
@@ -118,6 +118,10 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
                 None,
                 Some(r2_service),
                 Some(d1_service_for_backend),
+                open_compute_core::DurableObjectsConfig::default(),
+                open_compute_core::QueuesConfig::default(),
+                open_compute_core::WorkflowsConfig::default(),
+                None,
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -148,7 +152,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
             runtime.version_output(),
         )
         .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -177,7 +181,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     let deployments =
         DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
     let (worker, _) = repository
-        .create_worker(account, "d1-matrix", RequestId::generate(), 20)
+        .create_worker(account, "d1-matrix", RequestId::generate(), 20, 1_000_000)
         .unwrap();
     let deployment = deploy(
         &deployments,
@@ -246,7 +250,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
         ("d1-class", class_source(), "class:true:true", 40_i64),
     ] {
         let (shape_worker, _) = repository
-            .create_worker(account, name, RequestId::generate(), now)
+            .create_worker(account, name, RequestId::generate(), now, 1_000_000)
             .unwrap();
         let shape = deploy(
             &deployments,
@@ -330,19 +334,22 @@ fn reserve(
     let fingerprint = storage.crypto().fingerprint_request(key.as_bytes());
     let resource_id = ResourceId::generate();
     let reservation = ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind,
-            name: &format!("gate-{key}"),
-            idempotency_key: &format!("p0-6-{key}"),
-            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id,
-            driver_schema_version: schema,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 1_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind,
+                name: &format!("gate-{key}"),
+                idempotency_key: &format!("p0-6-{key}"),
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: schema,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 1_000,
+            },
+            1_000_000,
+        )
         .unwrap();
     let ResourceCreateReservation::Reserved(resource) = reservation else {
         panic!("unexpected reservation")
@@ -395,7 +402,6 @@ fn deployment_request(
         bindings.insert(
             name.to_owned(),
             DeploymentBindingInput {
-                capability_version: 1,
                 kind: BindingKind::D1Database,
                 id: database,
                 permissions: CanonicalPermissions::default(),
@@ -407,7 +413,6 @@ fn deployment_request(
         bindings.insert(
             "BUCKET".to_owned(),
             DeploymentBindingInput {
-                capability_version: 1,
                 kind: BindingKind::R2Bucket,
                 id: bucket,
                 permissions: CanonicalPermissions::default(),

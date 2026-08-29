@@ -16,7 +16,6 @@ fn documented_defaults_validate() {
     let config = parse_ok("");
     assert_eq!(config.server.public_bind, "127.0.0.1:8787");
     assert!(config.server.admin_bind.is_none());
-    assert!(config.server.trusted_proxies.is_empty());
     assert_eq!(
         config.storage.data_dir,
         PathBuf::from("/var/lib/open-compute")
@@ -37,7 +36,6 @@ fn documented_defaults_validate() {
     assert!((config.cache.low_watermark_ratio - 0.80).abs() < f64::EPSILON);
     assert!((config.cache.high_watermark_ratio - 0.90).abs() < f64::EPSILON);
     assert!(config.metrics.enabled);
-    assert_eq!(config.diagnostics.max_failed_starts, 32);
     config.validate().expect("defaults");
 }
 
@@ -227,24 +225,14 @@ fn r2_bounds_fail_closed() {
 }
 
 #[test]
-fn trusted_proxies_must_be_cidrs() {
+fn removed_config_surfaces_are_rejected() {
     assert_eq!(
-        parse_err("[server]\ntrusted_proxies = [\"\"]\n").code(),
-        ErrorCode::ConfigInvalid
+        parse_err("[server]\ntrusted_proxies = [\"10.0.0.0/8\"]\n").code(),
+        ErrorCode::ConfigParseFailed
     );
     assert_eq!(
-        parse_err("[server]\ntrusted_proxies = [\"not-a-cidr\"]\n").code(),
-        ErrorCode::ConfigInvalid
-    );
-    let ok = parse_ok(
-        r#"
-[server]
-trusted_proxies = ["10.0.0.0/8", "2001:db8::/32"]
-"#,
-    );
-    assert_eq!(
-        ok.server.trusted_proxies,
-        vec!["10.0.0.0/8".to_string(), "2001:db8::/32".to_string()]
+        parse_err("[diagnostics]\nmax_failed_starts = 32\nmax_bytes = 16777216\n").code(),
+        ErrorCode::ConfigParseFailed
     );
 }
 
@@ -293,10 +281,6 @@ fn runtime_and_storage_timeout_bounds() {
     );
     assert_eq!(
         parse_err("[metrics]\nmax_series = 0\n").code(),
-        ErrorCode::LimitInvalid
-    );
-    assert_eq!(
-        parse_err("[diagnostics]\nmax_failed_starts = 0\n").code(),
         ErrorCode::LimitInvalid
     );
 }
@@ -419,7 +403,7 @@ fn remaining_authority_and_worker_limit_boundaries_fail_closed() {
         "[workers]\nmax_bundle_bytes = 67108865\n",
         "[workers]\ndelete_recovery_batch = 10001\n",
         "[scheduler]\npoll_interval_ms = 0\n",
-        "[scheduler]\nclaim_batch = 33\nmax_in_flight = 16\n",
+        "[scheduler]\nmax_in_flight = 0\n",
         "[scheduler]\nclaim_lease_ms = 34999\n",
     ] {
         let code = parse_err(input).code();
@@ -457,18 +441,25 @@ fn private_config_helpers_cover_single_source_boundaries() {
 }
 
 #[test]
-fn scheduler_pool_defaults_preserve_p0_8_config_and_enable_p2_3_products() {
-    let legacy =
-        parse_ok("[scheduler]\nmax_in_flight = 7\nclaim_batch = 12\nclaim_lease_ms = 60000\n");
-    assert!(legacy.scheduler.pools.is_none());
+fn scheduler_pool_defaults_are_independent_of_global_admission() {
+    let defaults = parse_ok("[scheduler]\nmax_in_flight = 7\nclaim_lease_ms = 60000\n");
+    assert_eq!(defaults.scheduler.pools, SchedulerPoolsConfig::default());
     assert_eq!(
-        legacy.scheduler.pool(SchedulerKind::Alarm),
+        defaults.scheduler.pool(SchedulerKind::Alarm),
         SchedulerPoolConfig {
             enabled: true,
-            max_in_flight: 7,
-            claim_batch: 12,
+            max_in_flight: 16,
+            claim_batch: 32,
             weight: 1,
         }
+    );
+    assert_eq!(
+        parse_err("[scheduler]\nclaim_batch = 12\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
+    assert_eq!(
+        toml::from_str::<SchedulerConfig>(&toml::to_string(&defaults.scheduler).unwrap()).unwrap(),
+        defaults.scheduler
     );
 
     let configured = parse_ok(
@@ -489,6 +480,23 @@ fn scheduler_pool_defaults_preserve_p0_8_config_and_enable_p2_3_products() {
     assert!(cron.scheduler.pool(SchedulerKind::Cron).enabled);
     let workflow = parse_ok("[scheduler.pools.workflow]\nenabled = true\n");
     assert!(workflow.scheduler.pool(SchedulerKind::Workflow).enabled);
+    for (name, kind) in [
+        ("alarm", SchedulerKind::Alarm),
+        ("queue", SchedulerKind::Queue),
+        ("cron", SchedulerKind::Cron),
+        ("workflow", SchedulerKind::Workflow),
+    ] {
+        let partial = parse_ok(&format!("[scheduler.pools.{name}]\nweight = 3\n"));
+        let expected = SchedulerPoolConfig {
+            weight: 3,
+            ..SchedulerConfig::default().pool(kind)
+        };
+        assert_eq!(partial.scheduler.pool(kind), expected);
+        assert_eq!(
+            parse_err(&format!("[scheduler.pools.{name}]\nunknown = 3\n")).code(),
+            ErrorCode::ConfigParseFailed
+        );
+    }
 }
 
 #[test]

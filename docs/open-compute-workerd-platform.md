@@ -114,7 +114,7 @@ Node SSR 服务，也不以 Miniflare 代替平台运行时。
 
 遵循 [AGENTS.md](../AGENTS.md)：直接调整当前部署、schema、配置和内部协议，不保留旧开发
 版本的双读写、迁移回退或旧引擎。现有阶段编号、V1/V2 名称和历史验证记录不产生兼容义务；
-已识别的历史路径按 [Day1 清理清单](./day1-architecture-cleanup.md) 收敛。
+已识别的历史路径已按归档的 [Day1 架构清理](./implemented/day1-architecture-cleanup.md) 收敛。
 
 只有声明支持范围内、Cloudflare 官方 API 要求的兼容日期/flag 行为可作为兼容例外，并需记录
 来源、适用范围、workerd pin 和回归测试。跟踪 vinext 的版本是固定依赖与测试基线，不是保留
@@ -1503,7 +1503,7 @@ P1.0 至 P1.7 是进入 P2 的必过 Gate；P1.8 hibernation 可以是 Go、Cond
 同一 S3 authority、同一外部 master key 和当前实现支持的 schema；它恢复本地 authority，但不是
 R2 point-in-time backup，R2 使用 restore 时外部 provider 中的当前状态。
 
-详细的离线 snapshot/restore format、升级/回滚协议、磁盘 admission、安全与长稳矩阵、运维合同、
+详细的离线 snapshot/restore format、当前 release 恢复边界、磁盘 admission、安全与长稳矩阵、运维合同、
 工作包和 Exit Gate 见 [P1：P0 平台加固详细设计](./implemented/p1-platform-hardening.md)。
 
 ### P2.1：Scheduler hardening
@@ -1571,9 +1571,9 @@ terminal/referrer、crash matrix、工作包与 Exit Gate 见
 
 ### P2.5：Workflow durable waiting
 
-这一阶段的实现记录使用 Workflow capability V2 扩展 durable waiting。当前 Day1 目标是将这些
-能力收敛为唯一 Workflow 实现，不保留旧 instance/version/binding 的平台引擎兼容分支；现有双路径
-清理见第 2.4 节，不能将“目标唯一”误记为已经清理完成。继续使用一个 platformd、一个 pinned
+这一阶段的历史实现记录曾用 capability V2 表示 durable waiting。当前源码已将这些能力收敛为
+唯一 Workflow 实现，当前 binding/execution capability 标记为 1，不保留旧 instance/version/binding
+的平台引擎分支。继续使用一个 platformd、一个 pinned
 workerd 子进程，以及 control/scheduler 两个 SQLite authority，不新增 Redis 或独立 Workflow 服务。
 
 按依赖逐项增加：
@@ -1589,7 +1589,7 @@ workerd 子进程，以及 control/scheduler 两个 SQLite authority，不新增
 9. 有界同步 fan-out 的 parallel `step.do`；
 10. Aggregate Gate 与完整 P2 黑盒链路。
 
-Waiting/paused 不占 run lease 或执行槽位；V2 terminal 在 retention 内继续保留 artifact 引用，支持
+Waiting/paused 不占 run lease 或执行槽位；Workflow terminal 在 retention 内继续保留 artifact 引用，支持
 原版本 restart。Parallel 最后实现，限整体 join 的 do batch，不开放并行 sleep/event 或任意 Promise DAG。
 P2.4 已验证的 DO output-gate 限制继续保留：DO 内 Workflow mutation fail closed，只读 get/status 可用。
 

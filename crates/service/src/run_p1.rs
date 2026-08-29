@@ -30,8 +30,8 @@ pub(crate) fn require_current_serving_schema(loaded: &LoadedConfig) -> Result<()
     let target = open_compute_storage::migrations::current_schema_version();
     if actual != target {
         return Err(PlatformError::new(
-            ErrorCode::UpgradeRequired,
-            "platformd run refuses pending or future schemas; use offline upgrade or restore",
+            ErrorCode::SchemaUnsupported,
+            "platformd run requires the current schema; restore a snapshot from this exact release",
         ));
     }
     Ok(())

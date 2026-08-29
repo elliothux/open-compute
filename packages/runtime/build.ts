@@ -76,8 +76,27 @@ emitted.set("manifest.json", `${JSON.stringify({
 if (!check) await mkdir(outputDirectory, { recursive: true });
 if (!(await lstat(outputDirectory)).isDirectory()) throw new Error("runtime output must be a regular directory");
 const existing = await filesIn(outputDirectory, "asset");
+const obsolete = existing.filter(name => !emitted.has(name));
+if (obsolete.length) {
+  const unexpected = () => new Error(`unexpected runtime asset: ${obsolete[0]}`);
+  if (check) throw unexpected();
+  let previous: unknown;
+  try { previous = JSON.parse(await readFile(resolve(outputDirectory, "manifest.json"), "utf8")); }
+  catch { throw unexpected(); }
+  if (previous === null || typeof previous !== "object" || Array.isArray(previous)
+      || !("schemaVersion" in previous) || previous.schemaVersion !== 1
+      || !("sources" in previous) || previous.sources === null
+      || typeof previous.sources !== "object" || Array.isArray(previous.sources)) throw unexpected();
+  for (const name of obsolete) {
+    const output = await readFile(resolve(outputDirectory, name));
+    const digest = createHash("sha256").update(output).digest("hex");
+    const header = `// Generated from packages/runtime/src/${name.replace(/\.js$/, ".ts")} by Rolldown. Do not edit.\n`;
+    if (!name.endsWith(".js") || !Object.prototype.hasOwnProperty.call(previous.sources, name)
+        || Reflect.get(previous.sources, name) !== digest
+        || !output.subarray(0, Buffer.byteLength(header)).equals(Buffer.from(header))) throw unexpected();
+  }
+}
 for (const name of existing) {
-  if (!emitted.has(name)) throw new Error(`unexpected runtime asset: ${name}`);
   if (!(await lstat(resolve(outputDirectory, name))).isFile()) {
     throw new Error(`runtime asset must be a regular file: ${name}`);
   }
@@ -99,6 +118,8 @@ try {
       finally { await file.close(); }
     }
   }
+  // Only unchanged files owned by the previous generated manifest may be retired.
+  for (const name of obsolete) await rm(resolve(outputDirectory, name));
   for (const [temporary, outputPath] of staged) await rename(temporary, outputPath);
 } finally {
   for (const temporary of staged.keys()) await rm(temporary, { force: true });

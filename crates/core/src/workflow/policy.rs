@@ -1,4 +1,4 @@
-//! Frozen capability V2 retry, timeout, and instance retention policy.
+//! Frozen retry, timeout, and instance retention policy.
 
 use super::{WORKFLOW_MAX_DURATION_MS, WORKFLOW_MAX_SAFE_INTEGER, duration_ms, error};
 use crate::{ErrorCode, PlatformError};

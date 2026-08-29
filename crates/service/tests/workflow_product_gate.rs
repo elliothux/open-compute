@@ -26,7 +26,7 @@ fn start_backend(
     let listener = harness.binding_listener.take().unwrap();
     let mut shutdown = harness.shutdown.subscribe();
     tokio::spawn(
-        open_compute_service::binding_backend::serve_binding_backend_with_scheduler(
+        open_compute_service::binding_backend::serve_binding_backend(
             listener,
             harness.storage.clone(),
             auth,

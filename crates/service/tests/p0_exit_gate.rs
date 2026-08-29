@@ -149,7 +149,7 @@ async fn p0_real_combined_exit_matrix_inner() {
     let account = storage.identity().default_account_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "p0-combined", RequestId::generate(), 10)
+        .create_worker(account, "p0-combined", RequestId::generate(), 10, 1_000_000)
         .unwrap();
     let router = admin_router(
         storage.clone(),

@@ -1,4 +1,4 @@
-//! Actual V2 caller, private backend, scheduler driver and stock-workerd execution.
+//! Current caller, private backend, scheduler driver and stock-workerd execution.
 
 use super::{Harness, now};
 use open_compute_core::{
@@ -18,7 +18,7 @@ use std::{
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn production_v2_driver_replays_waits_retries_and_events_after_runtime_restart() {
+async fn production_driver_replays_waits_retries_and_events_after_runtime_restart() {
     let mut harness = Harness::start().await;
     let store = Arc::new(
         SchedulerStore::open(
@@ -44,7 +44,7 @@ async fn production_v2_driver_replays_waits_retries_and_events_after_runtime_res
         harness.transport.clone(),
         Default::default(),
     );
-    api.create_version(account, definition.id, flow.deployment_id, "Flow".into(), 2)
+    api.create_version(account, definition.id, flow.deployment_id, "Flow".into())
         .await
         .unwrap();
     let caller = harness
@@ -56,7 +56,6 @@ async fn production_v2_driver_replays_waits_retries_and_events_after_runtime_res
                 DeploymentBindingInput {
                     kind: BindingKind::Workflow,
                     id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
-                    capability_version: 2,
                     permissions: Default::default(),
                     config: Default::default(),
                 },
@@ -97,7 +96,7 @@ async fn production_v2_driver_replays_waits_retries_and_events_after_runtime_res
         .workflow_instance(identity.instance_id)
         .unwrap()
         .unwrap();
-    assert_eq!(before.durable.as_ref().unwrap().registered_step_count, 4);
+    assert_eq!(before.durable.registered_step_count, 4);
     assert!(before.run_token.is_none());
     assert_eq!(
         request(&harness, &caller, "pause").await,
@@ -145,7 +144,7 @@ async fn production_v2_driver_replays_waits_retries_and_events_after_runtime_res
         assert_ne!(status["status"], "errored", "{status}");
         assert!(
             Instant::now() < deadline,
-            "V2 driver did not finish: {status}"
+            "Workflow driver did not finish: {status}"
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -157,17 +156,9 @@ async fn production_v2_driver_replays_waits_retries_and_events_after_runtime_res
         .unwrap();
     assert_eq!(complete.state, WorkflowState::Complete);
     assert_eq!(complete.identity, identity);
+    assert_eq!(complete.durable.retention.success_retention_ms, 3_600_000);
     assert_eq!(
-        complete
-            .durable
-            .as_ref()
-            .unwrap()
-            .retention
-            .success_retention_ms,
-        3_600_000
-    );
-    assert_eq!(
-        complete.durable.as_ref().unwrap().expires_at_ms,
+        complete.durable.expires_at_ms,
         complete.terminal_at_ms.map(|time| time + 3_600_000)
     );
     assert_eq!(
@@ -222,7 +213,7 @@ async fn wait_event_wait(
         let rendered =
             metrics.render(&open_compute_service::health::HealthCoordinator::new().snapshot());
         if record.state == WorkflowState::Waiting
-            && record.durable.as_ref().unwrap().registered_step_count == 4
+            && record.durable.registered_step_count == 4
             && rendered.contains("open_compute_workflow_in_flight 0")
         {
             return;
@@ -235,7 +226,7 @@ async fn wait_event_wait(
         );
         assert!(
             Instant::now() < deadline,
-            "V2 did not release its wait activation: {record:?}"
+            "Workflow did not release its wait activation: {record:?}"
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

@@ -114,7 +114,7 @@ async fn workflow_fixture_drop_waits_for_child_reaping() {
 async fn workflow_production_step_http_known_unknown_commit_matrix() {
     // Each operation owns a fresh supervisor: its two intentional crashes must not
     // consume another operation's rolling restart budget.
-    for operation in ["claim", "success", "failure"] {
+    for operation in ["claim-batch", "success", "failure"] {
         let mut harness = Harness::start().await;
         let store = Arc::new(
             SchedulerStore::open(
@@ -157,13 +157,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
             harness.transport.clone(),
             Default::default(),
         )
-        .create_version(
-            account,
-            definition.id,
-            target.deployment_id,
-            "Flow".into(),
-            1,
-        )
+        .create_version(account, definition.id, target.deployment_id, "Flow".into())
         .await
         .unwrap();
         assert_eq!(version.state, DeploymentState::Ready);
@@ -185,7 +179,6 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                     .create(
                         account,
                         definition.id,
-                        1,
                         None,
                         open_compute_workers::WorkflowCreateInput {
                             payload_json: if operation == "failure" {
@@ -206,7 +199,11 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 assert_eq!(run.external_instance_id, id);
                 let result = harness
                     .transport
-                    .dispatch_workflow(&target, &envelope(&run), Duration::from_secs(30))
+                    .dispatch_workflow(
+                        &version.target,
+                        &envelope(&run),
+                        Duration::from_millis(config.dispatch_timeout_ms),
+                    )
                     .await;
                 assert!(trace.lock().unwrap().fault.is_none(), "{fault:?}");
                 let record = store
@@ -225,7 +222,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                         .workflow_steps(run.fence.instance_id, None, 10)
                         .unwrap();
                     let expected_state = match (operation, after_commit) {
-                        ("claim", false) => None,
+                        ("claim-batch", false) => None,
                         ("success", true) => Some("complete"),
                         ("failure", true) => Some("failed"),
                         _ => Some("running"),
@@ -271,10 +268,14 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                     );
                     let result = harness
                         .transport
-                        .dispatch_workflow(&target, &envelope(&replay), Duration::from_secs(30))
+                        .dispatch_workflow(
+                            &version.target,
+                            &envelope(&replay),
+                            Duration::from_millis(config.dispatch_timeout_ms),
+                        )
                         .await
                         .unwrap();
-                    let expected_reports = if operation != "claim" && !after_commit {
+                    let expected_reports = if operation != "claim-batch" && !after_commit {
                         2
                     } else {
                         1
@@ -287,7 +288,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                     (replay, result)
                 } else {
                     let result = result.unwrap();
-                    let expected_reports = usize::from(operation != "claim" || after_commit);
+                    let expected_reports = usize::from(operation != "claim-batch" || after_commit);
                     assert_eq!(
                         trace.lock().unwrap().callback_reports,
                         expected_reports,
@@ -297,26 +298,31 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 };
                 let expected_error =
                     operation == "failure" || (observation == Observation::Known && !after_commit);
-                assert_eq!(result.outcome == "errored", expected_error, "{fault:?}");
-                let completion = if expected_error {
-                    WorkflowCompletion::Errored {
-                        code: open_compute_core::workflow::terminal_error_code(
-                            result.error_code.as_deref().unwrap(),
-                        )
-                        .unwrap(),
+                let completion = match result.result {
+                    WorkflowOutcome::Errored { error_code, .. } => {
+                        assert!(expected_error, "{fault:?}");
+                        WorkflowCompletion::Errored {
+                            code: open_compute_core::workflow::terminal_error_code(&error_code)
+                                .unwrap(),
+                        }
                     }
-                } else {
-                    let output: serde_json::Value =
-                        serde_json::from_str(result.output_json.as_ref().unwrap()).unwrap();
-                    assert_eq!(output["id"], id);
-                    let replayed = observation == Observation::Unknown
-                        && operation == "success"
-                        && after_commit;
-                    assert_eq!(output["callbacks"], usize::from(!replayed));
-                    WorkflowCompletion::Complete {
-                        output_json: result.output_json.unwrap(),
-                        final_ordinal: result.final_ordinal,
+                    WorkflowOutcome::Complete {
+                        output_json,
+                        final_ordinal,
+                    } => {
+                        assert!(!expected_error, "{fault:?}");
+                        let output: serde_json::Value = serde_json::from_str(&output_json).unwrap();
+                        assert_eq!(output["id"], id);
+                        let replayed = observation == Observation::Unknown
+                            && operation == "success"
+                            && after_commit;
+                        assert_eq!(output["callbacks"], usize::from(!replayed));
+                        WorkflowCompletion::Complete {
+                            output_json,
+                            final_ordinal,
+                        }
                     }
+                    outcome => panic!("unexpected Workflow outcome {outcome:?}: {fault:?}"),
                 };
                 let state = store
                     .finish_workflow(&active_run.fence, &completion, now(), &config)
@@ -331,7 +337,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 WorkflowController::new(&harness.storage, &store, &config)
                     .reconcile(&mut WorkflowReconcileCursor::default(), 32, now())
                     .unwrap();
-                assert!(!repository.instance_referrers_intact(&identity).unwrap());
+                assert!(repository.instance_referrers_intact(&identity).unwrap());
                 store.verify_workflow_history(identity.instance_id).unwrap();
                 let reopened = SchedulerStore::open(
                     &harness.storage.data_dir().scheduler_db_path(),
@@ -358,7 +364,6 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 BTreeMap::from([(
                     "FLOW".into(),
                     DeploymentBindingInput {
-                        capability_version: 1,
                         kind: BindingKind::Workflow,
                         id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                         permissions: CanonicalPermissions::default(),
@@ -426,16 +431,14 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                             .code(),
                         ErrorCode::WorkflowInstanceNotFound
                     );
-                    assert_eq!(
-                        request(
-                            &harness,
-                            &caller,
-                            &format!("/create/{id}"),
-                            serde_json::Value::Null
-                        )
-                        .await["status"],
-                        "queued"
-                    );
+                    let retry = request(
+                        &harness,
+                        &caller,
+                        &format!("/create/{id}"),
+                        serde_json::Value::Null,
+                    )
+                    .await;
+                    assert_eq!(retry["status"], "queued", "{retry}");
                 }
                 assert_eq!(
                     request(
@@ -464,7 +467,7 @@ import { WorkflowEntrypoint } from 'cloudflare:workers';
 export class Flow extends WorkflowEntrypoint {
   async run(event, step) {
     let callbacks = 0;
-    const value = await step.do('durable', () => {
+    const value = await step.do('durable', {timeout:240000,retries:{limit:0,delay:0}}, () => {
       callbacks++;
       if (event.payload?.fail) throw new Error('private callback error');
       return { id: event.instanceId, nonce: crypto.randomUUID() };

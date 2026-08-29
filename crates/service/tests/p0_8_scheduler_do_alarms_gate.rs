@@ -24,7 +24,7 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_service::{
     HealthCoordinator, MetricsRegistry, SchedulerService, SqliteKvBindingExecutor,
-    bind_binding_backend, serve_binding_backend_with_scheduler,
+    bind_binding_backend, serve_binding_backend,
 };
 use open_compute_storage::{
     AlarmProjection, ClaimResult, DO_NAMESPACE_SCHEMA_VERSION, DeploymentRecord,
@@ -92,7 +92,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         let pins = resource_pins.clone();
         let scheduler = scheduler_store.clone();
         async move {
-            serve_binding_backend_with_scheduler(
+            serve_binding_backend(
                 binding_listener,
                 backend_storage,
                 auth,
@@ -138,7 +138,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             runtime.version_output(),
         )
         .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -162,7 +162,13 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     let account = storage.identity().default_account_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "alarm-matrix", RequestId::generate(), 10)
+        .create_worker(
+            account,
+            "alarm-matrix",
+            RequestId::generate(),
+            10,
+            1_000_000,
+        )
         .unwrap();
     let namespace = create_namespace(
         &storage,
@@ -189,10 +195,8 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         MetricsRegistry::new(&MetricsConfig::default(), "p0.8-gate", "pinned-workerd").unwrap(),
     );
     let scheduler_health = HealthCoordinator::new();
-    let scheduler_config = SchedulerConfig {
-        claim_batch: 1,
-        ..SchedulerConfig::default()
-    };
+    let mut scheduler_config = SchedulerConfig::default();
+    scheduler_config.pools.alarm.claim_batch = 1;
     let scheduler = Arc::new(
         SchedulerService::new(
             scheduler_store.clone(),
@@ -858,7 +862,6 @@ fn deployment_request(
     bindings.insert(
         "ALARM".to_owned(),
         DeploymentBindingInput {
-            capability_version: 1,
             kind: BindingKind::DoNamespace,
             id: namespace,
             permissions: CanonicalPermissions::default(),

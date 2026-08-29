@@ -1,12 +1,12 @@
-//! V2 production storage APIs, without SQL-authored step outcomes.
+//! production storage APIs, without SQL-authored step outcomes.
 
 use super::*;
 
 fn do_step(ordinal: u32, config: Value) -> WorkflowStepDescriptor {
     descriptor(ordinal, WorkflowStepKind::Do, config)
 }
-fn attempt(ordinal: u32, grant: WorkflowV2StepGrant) -> WorkflowStepAttempt {
-    let WorkflowV2StepGrant::Run {
+fn attempt(ordinal: u32, grant: WorkflowStepGrant) -> WorkflowStepAttempt {
+    let WorkflowStepGrant::Run {
         step_token,
         attempt,
         ..
@@ -30,7 +30,7 @@ fn claim(
     attempt(
         step.ordinal,
         store
-            .claim_workflow_batch_v2(
+            .claim_workflow_batch(
                 fence,
                 std::slice::from_ref(step),
                 limits.dispatch_timeout_ms,
@@ -43,11 +43,11 @@ fn claim(
 }
 
 #[test]
-fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadlines() {
-    let (temp, store, identity) = setup_v2();
+fn current_pause_drains_grants_and_replays_completed_steps_without_extending_deadlines() {
+    let (temp, store, identity) = setup();
     let limits = WorkflowsConfig::default();
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Pause, 0, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Pause, 0, &limits)
         .unwrap();
     assert!(
         store
@@ -56,10 +56,10 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
             .is_none()
     );
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Pause, 0, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Pause, 0, &limits)
         .unwrap();
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Resume, 1, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Resume, 1, &limits)
         .unwrap();
     let run = store
         .claim_workflow(&identity, 1, &limits)
@@ -68,7 +68,7 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
     let first = do_step(0, json!({"timeout":100}));
     let grant = claim(&store, &run.fence, &first, 1, &limits);
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Pause, 2, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Pause, 2, &limits)
         .unwrap();
     assert!(
         store
@@ -76,29 +76,28 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
             .unwrap()
             .unwrap()
             .durable
-            .unwrap()
             .pause_requested
     );
     assert_eq!(
         store
-            .modify_workflow_v2(&identity, WorkflowInstanceAction::Resume, 3, &limits)
+            .modify_workflow(&identity, WorkflowInstanceAction::Resume, 3, &limits)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowInstanceStateConflict
     );
     assert_eq!(
-        store.yield_workflow_v2(&run.fence, 3).unwrap_err().code(),
+        store.yield_workflow(&run.fence, 3).unwrap_err().code(),
         ErrorCode::WorkflowInstanceBusy
     );
     let next = do_step(1, json!({"timeout":100}));
     assert!(matches!(
         store
-            .claim_workflow_batch_v2(&run.fence, &[next], 300000, 3, &limits)
+            .claim_workflow_batch(&run.fence, &[next], 300000, 3, &limits)
             .unwrap()[0],
-        WorkflowV2StepGrant::Suspended
+        WorkflowStepGrant::Suspended
     ));
     store
-        .settle_workflow_step_v2(
+        .settle_workflow_step(
             &run.fence,
             &grant,
             WorkflowStepOutcome::Success("1"),
@@ -109,7 +108,7 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
     // Pause committed before terminal wins even when it arrived after the last grant.
     assert_eq!(
         store
-            .finish_workflow_v2(
+            .finish_workflow(
                 &run.fence,
                 &WorkflowCompletion::Complete {
                     output_json: "1".into(),
@@ -133,7 +132,7 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
     let store = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 6).unwrap();
     store.verify_workflow_history(identity.instance_id).unwrap();
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Resume, 6, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Resume, 6, &limits)
         .unwrap();
     let run = store
         .claim_workflow(&identity, 6, &limits)
@@ -141,9 +140,9 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
         .unwrap();
     assert!(matches!(
         store
-            .claim_workflow_batch_v2(&run.fence, &[first], 300000, 6, &limits)
+            .claim_workflow_batch(&run.fence, &[first], 300000, 6, &limits)
             .unwrap()[0],
-        WorkflowV2StepGrant::Complete
+        WorkflowStepGrant::Complete
     ));
     let mut wait = descriptor(
         1,
@@ -152,14 +151,14 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
     );
     wait.name_count = 1;
     store
-        .register_workflow_wait_v2(&run.fence, &wait, 6, &limits)
+        .register_workflow_wait(&run.fence, &wait, 6, &limits)
         .unwrap();
-    store.yield_workflow_v2(&run.fence, 6).unwrap();
+    store.yield_workflow(&run.fence, 6).unwrap();
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Pause, 7, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Pause, 7, &limits)
         .unwrap();
     store
-        .send_workflow_event_v2(&identity, "approval", "true", 15, &limits)
+        .send_workflow_event(&identity, "approval", "true", 15, &limits)
         .unwrap();
     assert_eq!(
         store
@@ -170,7 +169,7 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
         WorkflowState::Paused
     );
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Resume, 20, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Resume, 20, &limits)
         .unwrap();
     let run = store
         .claim_workflow(&identity, 20, &limits)
@@ -178,12 +177,12 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
         .unwrap();
     assert!(matches!(
         store
-            .register_workflow_wait_v2(&run.fence, &wait, 20, &limits)
+            .register_workflow_wait(&run.fence, &wait, 20, &limits)
             .unwrap(),
-        WorkflowV2StepResult::Complete { .. }
+        WorkflowStepResult::Complete { .. }
     ));
     store
-        .finish_workflow_v2(
+        .finish_workflow(
             &run.fence,
             &WorkflowCompletion::Complete {
                 output_json: "true".into(),
@@ -200,7 +199,7 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
     ] {
         assert_eq!(
             store
-                .modify_workflow_v2(&identity, action, 22, &limits)
+                .modify_workflow(&identity, action, 22, &limits)
                 .unwrap_err()
                 .code(),
             ErrorCode::WorkflowInstanceStateConflict
@@ -210,8 +209,8 @@ fn v2_pause_drains_grants_and_replays_completed_steps_without_extending_deadline
 }
 
 #[test]
-fn v2_pause_survives_expired_run_recovery_and_terminate_rejects_late_commits() {
-    let (_temp, store, identity) = setup_v2();
+fn current_pause_survives_expired_run_recovery_and_terminate_rejects_late_commits() {
+    let (_temp, store, identity) = setup();
     let limits = WorkflowsConfig::default();
     let run = store
         .claim_workflow(&identity, 0, &limits)
@@ -220,7 +219,7 @@ fn v2_pause_survives_expired_run_recovery_and_terminate_rejects_late_commits() {
     let step = do_step(0, json!({"timeout":100,"retries":{"limit":0,"delay":0}}));
     let grant = claim(&store, &run.fence, &step, 1, &limits);
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Pause, 2, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Pause, 2, &limits)
         .unwrap();
     let after = i64::try_from(limits.lease_ms).unwrap() + 2;
     store.recover_workflows(after, &limits, 10).unwrap();
@@ -232,7 +231,7 @@ fn v2_pause_survives_expired_run_recovery_and_terminate_rejects_late_commits() {
             .state,
         WorkflowState::Paused
     );
-    store.maintain_workflow_due_v2(after, &limits, 10).unwrap();
+    store.maintain_workflow_due(after, &limits, 10).unwrap();
     assert_eq!(
         store
             .workflow_instance(identity.instance_id)
@@ -242,19 +241,19 @@ fn v2_pause_survives_expired_run_recovery_and_terminate_rejects_late_commits() {
         WorkflowState::Paused
     );
     store
-        .modify_workflow_v2(&identity, WorkflowInstanceAction::Resume, after, &limits)
+        .modify_workflow(&identity, WorkflowInstanceAction::Resume, after, &limits)
         .unwrap();
     let run = store
         .claim_workflow(&identity, after, &limits)
         .unwrap()
         .unwrap();
     assert!(
-        matches!(store.workflow_step_result_v2(&run.fence,0,after).unwrap(),WorkflowV2StepResult::Failed{code} if code=="WORKFLOW_STEP_TIMEOUT")
+        matches!(store.workflow_step_result(&run.fence,0,after).unwrap(),WorkflowStepResult::Failed{code} if code=="WORKFLOW_STEP_TIMEOUT")
     );
     let next = do_step(1, json!({"timeout":100}));
     let next_grant = claim(&store, &run.fence, &next, after, &limits);
     store
-        .modify_workflow_v2(
+        .modify_workflow(
             &identity,
             WorkflowInstanceAction::Terminate,
             after + 1,
@@ -263,7 +262,7 @@ fn v2_pause_survives_expired_run_recovery_and_terminate_rejects_late_commits() {
         .unwrap();
     assert_eq!(
         store
-            .settle_workflow_step_v2(
+            .settle_workflow_step(
                 &run.fence,
                 &next_grant,
                 WorkflowStepOutcome::Success("1"),
@@ -276,7 +275,7 @@ fn v2_pause_survives_expired_run_recovery_and_terminate_rejects_late_commits() {
     );
     assert_eq!(
         store
-            .settle_workflow_step_v2(
+            .settle_workflow_step(
                 &run.fence,
                 &grant,
                 WorkflowStepOutcome::Success("1"),
@@ -299,13 +298,13 @@ fn v2_pause_survives_expired_run_recovery_and_terminate_rejects_late_commits() {
         .unwrap();
     assert_eq!(record.state, WorkflowState::Terminated);
     assert!(record.run_token.is_none());
-    assert!(record.durable.unwrap().next_wake_at_ms.is_none());
+    assert!(record.durable.next_wake_at_ms.is_none());
     store.verify_workflow_history(identity.instance_id).unwrap();
 }
 
 #[test]
-fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
-    let (temp, store, identity) = setup_v2();
+fn current_production_do_sleep_event_resume_and_terminal_are_durable() {
+    let (temp, store, identity) = setup();
     let limits = WorkflowsConfig::default();
     let run = store
         .claim_workflow(&identity, 0, &limits)
@@ -315,7 +314,7 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
     let grant = claim(&store, &run.fence, &action, 1, &limits);
     assert!(matches!(
         store
-            .settle_workflow_step_v2(
+            .settle_workflow_step(
                 &run.fence,
                 &grant,
                 WorkflowStepOutcome::Success("7"),
@@ -323,22 +322,22 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
                 &limits
             )
             .unwrap(),
-        WorkflowV2StepResult::Complete { .. }
+        WorkflowStepResult::Complete { .. }
     ));
     let mut sleep = descriptor(1, WorkflowStepKind::Sleep, json!({"duration":10}));
     sleep.name_count = 1;
     assert!(matches!(
         store
-            .register_workflow_wait_v2(&run.fence, &sleep, 3, &limits)
+            .register_workflow_wait(&run.fence, &sleep, 3, &limits)
             .unwrap(),
-        WorkflowV2StepResult::Suspended
+        WorkflowStepResult::Suspended
     ));
     assert_eq!(
-        store.yield_workflow_v2(&run.fence, 3).unwrap(),
+        store.yield_workflow(&run.fence, 3).unwrap(),
         WorkflowState::Waiting
     );
-    assert_eq!(store.maintain_workflow_due_v2(12, &limits, 10).unwrap(), 0);
-    assert_eq!(store.maintain_workflow_due_v2(13, &limits, 10).unwrap(), 1);
+    assert_eq!(store.maintain_workflow_due(12, &limits, 10).unwrap(), 0);
+    assert_eq!(store.maintain_workflow_due(13, &limits, 10).unwrap(), 1);
     drop(store);
     let store = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 13).unwrap();
     store.verify_workflow_history(identity.instance_id).unwrap();
@@ -348,7 +347,7 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
         .unwrap();
     assert!(matches!(
         store
-            .claim_workflow_batch_v2(
+            .claim_workflow_batch(
                 &run.fence,
                 std::slice::from_ref(&action),
                 300000,
@@ -356,13 +355,13 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
                 &limits
             )
             .unwrap()[0],
-        WorkflowV2StepGrant::Complete
+        WorkflowStepGrant::Complete
     ));
     assert!(matches!(
         store
-            .register_workflow_wait_v2(&run.fence, &sleep, 13, &limits)
+            .register_workflow_wait(&run.fence, &sleep, 13, &limits)
             .unwrap(),
-        WorkflowV2StepResult::Complete { output_json: None }
+        WorkflowStepResult::Complete { output_json: None }
     ));
     let mut wait = descriptor(
         2,
@@ -372,22 +371,22 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
     wait.name_count = 1;
     assert!(matches!(
         store
-            .register_workflow_wait_v2(&run.fence, &wait, 13, &limits)
+            .register_workflow_wait(&run.fence, &wait, 13, &limits)
             .unwrap(),
-        WorkflowV2StepResult::Suspended
+        WorkflowStepResult::Suspended
     ));
-    store.yield_workflow_v2(&run.fence, 13).unwrap();
+    store.yield_workflow(&run.fence, 13).unwrap();
     store
-        .send_workflow_event_v2(&identity, "approval", r#"{"decision":true}"#, 14, &limits)
+        .send_workflow_event(&identity, "approval", r#"{"decision":true}"#, 14, &limits)
         .unwrap();
     let run = store
         .claim_workflow(&identity, 14, &limits)
         .unwrap()
         .unwrap();
     let result = store
-        .register_workflow_wait_v2(&run.fence, &wait, 14, &limits)
+        .register_workflow_wait(&run.fence, &wait, 14, &limits)
         .unwrap();
-    let WorkflowV2StepResult::Complete {
+    let WorkflowStepResult::Complete {
         output_json: Some(output),
     } = result
     else {
@@ -399,7 +398,7 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
     );
     assert_eq!(
         store
-            .finish_workflow_v2(
+            .finish_workflow(
                 &run.fence,
                 &WorkflowCompletion::Complete {
                     output_json: "true".into(),
@@ -416,8 +415,7 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
         .workflow_instance(identity.instance_id)
         .unwrap()
         .unwrap()
-        .durable
-        .unwrap();
+        .durable;
     assert_eq!(
         (
             metadata.registered_step_count,
@@ -429,7 +427,7 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
     assert_eq!(metadata.expires_at_ms, Some(3_600_015));
     assert_eq!(
         store
-            .send_workflow_event_v2(&identity, "approval", "null", 16, &limits)
+            .send_workflow_event(&identity, "approval", "null", 16, &limits)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowInstanceStateConflict
@@ -437,8 +435,8 @@ fn v2_production_do_sleep_event_resume_and_terminal_are_durable() {
 }
 
 #[test]
-fn v2_retry_is_claimed_only_when_due_and_settled_failures_can_be_caught() {
-    let (_temp, store, identity) = setup_v2();
+fn current_retry_is_claimed_only_when_due_and_settled_failures_can_be_caught() {
+    let (_temp, store, identity) = setup();
     let limits = WorkflowsConfig::default();
     let run = store
         .claim_workflow(&identity, 0, &limits)
@@ -449,7 +447,7 @@ fn v2_retry_is_claimed_only_when_due_and_settled_failures_can_be_caught() {
     assert_eq!(first.attempt, 1);
     assert!(matches!(
         store
-            .settle_workflow_step_v2(
+            .settle_workflow_step(
                 &run.fence,
                 &first,
                 WorkflowStepOutcome::Failure(ErrorCode::WorkflowExecutionFailed),
@@ -457,11 +455,11 @@ fn v2_retry_is_claimed_only_when_due_and_settled_failures_can_be_caught() {
                 &limits
             )
             .unwrap(),
-        WorkflowV2StepResult::Suspended
+        WorkflowStepResult::Suspended
     ));
-    store.yield_workflow_v2(&run.fence, 2).unwrap();
-    assert_eq!(store.maintain_workflow_due_v2(11, &limits, 10).unwrap(), 0);
-    assert_eq!(store.maintain_workflow_due_v2(12, &limits, 10).unwrap(), 1);
+    store.yield_workflow(&run.fence, 2).unwrap();
+    assert_eq!(store.maintain_workflow_due(11, &limits, 10).unwrap(), 0);
+    assert_eq!(store.maintain_workflow_due(12, &limits, 10).unwrap(), 1);
     let run = store
         .claim_workflow(&identity, 12, &limits)
         .unwrap()
@@ -469,12 +467,12 @@ fn v2_retry_is_claimed_only_when_due_and_settled_failures_can_be_caught() {
     let second = claim(&store, &run.fence, &action, 12, &limits);
     assert_eq!(second.attempt, 2);
     assert!(
-        matches!(store.settle_workflow_step_v2(&run.fence,&second,WorkflowStepOutcome::Failure(ErrorCode::WorkflowExecutionFailed),13,&limits).unwrap(),WorkflowV2StepResult::Failed {code} if code=="WORKFLOW_STEP_RETRIES_EXHAUSTED")
+        matches!(store.settle_workflow_step(&run.fence,&second,WorkflowStepOutcome::Failure(ErrorCode::WorkflowExecutionFailed),13,&limits).unwrap(),WorkflowStepResult::Failed {code} if code=="WORKFLOW_STEP_RETRIES_EXHAUSTED")
     );
     let fallback = do_step(1, json!({"timeout":100}));
     let token = claim(&store, &run.fence, &fallback, 14, &limits);
     store
-        .settle_workflow_step_v2(
+        .settle_workflow_step(
             &run.fence,
             &token,
             WorkflowStepOutcome::Success("42"),
@@ -484,7 +482,7 @@ fn v2_retry_is_claimed_only_when_due_and_settled_failures_can_be_caught() {
         .unwrap();
     assert_eq!(
         store
-            .finish_workflow_v2(
+            .finish_workflow(
                 &run.fence,
                 &WorkflowCompletion::Complete {
                     output_json: "42".into(),
@@ -500,8 +498,8 @@ fn v2_retry_is_claimed_only_when_due_and_settled_failures_can_be_caught() {
 }
 
 #[test]
-fn v2_unknown_recovery_does_not_extend_attempt_and_late_success_loses_to_deadline() {
-    let (_temp, store, identity) = setup_v2();
+fn current_unknown_recovery_does_not_extend_attempt_and_late_success_loses_to_deadline() {
+    let (_temp, store, identity) = setup();
     let limits = WorkflowsConfig {
         lease_ms: 100,
         heartbeat_ms: 20,
@@ -520,7 +518,7 @@ fn v2_unknown_recovery_does_not_extend_attempt_and_late_success_loses_to_deadlin
         .unwrap()
         .unwrap();
     let grants = store
-        .claim_workflow_batch_v2(
+        .claim_workflow_batch(
             &next.fence,
             std::slice::from_ref(&action),
             300000,
@@ -530,7 +528,7 @@ fn v2_unknown_recovery_does_not_extend_attempt_and_late_success_loses_to_deadlin
         .unwrap();
     assert!(matches!(
         &grants[0],
-        WorkflowV2StepGrant::Run {
+        WorkflowStepGrant::Run {
             attempt: 1,
             remaining_ms: 90,
             ..
@@ -540,7 +538,7 @@ fn v2_unknown_recovery_does_not_extend_attempt_and_late_success_loses_to_deadlin
     assert_ne!(new.step_token, old.step_token);
     assert_eq!(
         store
-            .settle_workflow_step_v2(
+            .settle_workflow_step(
                 &next.fence,
                 &old,
                 WorkflowStepOutcome::Success("1"),
@@ -552,14 +550,14 @@ fn v2_unknown_recovery_does_not_extend_attempt_and_late_success_loses_to_deadlin
         ErrorCode::WorkflowStepStale
     );
     assert!(
-        matches!(store.settle_workflow_step_v2(&next.fence,&new,WorkflowStepOutcome::Success("2"),201,&limits).unwrap(),WorkflowV2StepResult::Failed {code} if code=="WORKFLOW_STEP_TIMEOUT")
+        matches!(store.settle_workflow_step(&next.fence,&new,WorkflowStepOutcome::Success("2"),201,&limits).unwrap(),WorkflowStepResult::Failed {code} if code=="WORKFLOW_STEP_TIMEOUT")
     );
     store.verify_workflow_history(identity.instance_id).unwrap();
 }
 
 #[test]
-fn v2_batch_commits_independently_then_yields_after_siblings_drain() {
-    let (_temp, store, identity) = setup_v2();
+fn current_batch_commits_independently_then_yields_after_siblings_drain() {
+    let (_temp, store, identity) = setup();
     let limits = WorkflowsConfig::default();
     let run = store
         .claim_workflow(&identity, 0, &limits)
@@ -578,14 +576,14 @@ fn v2_batch_commits_independently_then_yields_after_siblings_drain() {
         })
         .collect();
     let mut grants = store
-        .claim_workflow_batch_v2(&run.fence, &batch, 300000, 1, &limits)
+        .claim_workflow_batch(&run.fence, &batch, 300000, 1, &limits)
         .unwrap()
         .into_iter();
     let first = attempt(0, grants.next().unwrap());
     let second = attempt(1, grants.next().unwrap());
     assert_ne!(first.step_token, second.step_token);
     store
-        .settle_workflow_step_v2(
+        .settle_workflow_step(
             &run.fence,
             &second,
             WorkflowStepOutcome::Failure(ErrorCode::WorkflowExecutionFailed),
@@ -594,11 +592,11 @@ fn v2_batch_commits_independently_then_yields_after_siblings_drain() {
         )
         .unwrap();
     assert_eq!(
-        store.yield_workflow_v2(&run.fence, 2).unwrap_err().code(),
+        store.yield_workflow(&run.fence, 2).unwrap_err().code(),
         ErrorCode::WorkflowInstanceBusy
     );
     store
-        .settle_workflow_step_v2(
+        .settle_workflow_step(
             &run.fence,
             &first,
             WorkflowStepOutcome::Success("1"),
@@ -606,24 +604,24 @@ fn v2_batch_commits_independently_then_yields_after_siblings_drain() {
             &limits,
         )
         .unwrap();
-    store.yield_workflow_v2(&run.fence, 3).unwrap();
-    store.maintain_workflow_due_v2(12, &limits, 10).unwrap();
+    store.yield_workflow(&run.fence, 3).unwrap();
+    store.maintain_workflow_due(12, &limits, 10).unwrap();
     let run = store
         .claim_workflow(&identity, 12, &limits)
         .unwrap()
         .unwrap();
     let mut grants = store
-        .claim_workflow_batch_v2(&run.fence, &batch, 300000, 12, &limits)
+        .claim_workflow_batch(&run.fence, &batch, 300000, 12, &limits)
         .unwrap()
         .into_iter();
     assert!(matches!(
         grants.next().unwrap(),
-        WorkflowV2StepGrant::Complete
+        WorkflowStepGrant::Complete
     ));
     let last = attempt(1, grants.next().unwrap());
     assert_eq!(last.attempt, 2);
     store
-        .settle_workflow_step_v2(
+        .settle_workflow_step(
             &run.fence,
             &last,
             WorkflowStepOutcome::Success("2"),
@@ -632,7 +630,7 @@ fn v2_batch_commits_independently_then_yields_after_siblings_drain() {
         )
         .unwrap();
     store
-        .finish_workflow_v2(
+        .finish_workflow(
             &run.fence,
             &WorkflowCompletion::Complete {
                 output_json: "[1,2]".into(),
@@ -646,11 +644,11 @@ fn v2_batch_commits_independently_then_yields_after_siblings_drain() {
 }
 
 #[test]
-fn v2_buffering_timeout_boundary_and_budget_yield_do_not_consume_callbacks() {
-    let (_temp, store, identity) = setup_v2();
+fn current_buffering_timeout_boundary_and_budget_yield_do_not_consume_callbacks() {
+    let (_temp, store, identity) = setup();
     let limits = WorkflowsConfig::default();
     store
-        .send_workflow_event_v2(&identity, "ok", "7", 0, &limits)
+        .send_workflow_event(&identity, "ok", "7", 0, &limits)
         .unwrap();
     let run = store
         .claim_workflow(&identity, 1, &limits)
@@ -663,9 +661,9 @@ fn v2_buffering_timeout_boundary_and_budget_yield_do_not_consume_callbacks() {
     );
     assert!(matches!(
         store
-            .register_workflow_wait_v2(&run.fence, &wait, 1, &limits)
+            .register_workflow_wait(&run.fence, &wait, 1, &limits)
             .unwrap(),
-        WorkflowV2StepResult::Complete { .. }
+        WorkflowStepResult::Complete { .. }
     ));
     let mut late = descriptor(
         1,
@@ -674,13 +672,13 @@ fn v2_buffering_timeout_boundary_and_budget_yield_do_not_consume_callbacks() {
     );
     late.name_count = 2;
     store
-        .register_workflow_wait_v2(&run.fence, &late, 1, &limits)
+        .register_workflow_wait(&run.fence, &late, 1, &limits)
         .unwrap();
     store
-        .send_workflow_event_v2(&identity, "ok", "8", 2, &limits)
+        .send_workflow_event(&identity, "ok", "8", 2, &limits)
         .unwrap();
     assert_eq!(
-        store.yield_workflow_v2(&run.fence, 2).unwrap(),
+        store.yield_workflow(&run.fence, 2).unwrap(),
         WorkflowState::Queued
     );
     let run = store
@@ -688,17 +686,17 @@ fn v2_buffering_timeout_boundary_and_budget_yield_do_not_consume_callbacks() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(store.register_workflow_wait_v2(&run.fence,&late,2,&limits).unwrap(),WorkflowV2StepResult::Failed {code} if code=="WORKFLOW_EVENT_TIMEOUT")
+        matches!(store.register_workflow_wait(&run.fence,&late,2,&limits).unwrap(),WorkflowStepResult::Failed {code} if code=="WORKFLOW_EVENT_TIMEOUT")
     );
     let mut action = do_step(2, json!({"timeout":100}));
     action.name_count = 1;
     assert!(matches!(
         store
-            .claim_workflow_batch_v2(&run.fence, std::slice::from_ref(&action), 100, 2, &limits)
+            .claim_workflow_batch(&run.fence, std::slice::from_ref(&action), 100, 2, &limits)
             .unwrap()[0],
-        WorkflowV2StepGrant::Suspended
+        WorkflowStepGrant::Suspended
     ));
-    store.yield_workflow_v2(&run.fence, 2).unwrap();
+    store.yield_workflow(&run.fence, 2).unwrap();
     let run = store
         .claim_workflow(&identity, 3, &limits)
         .unwrap()

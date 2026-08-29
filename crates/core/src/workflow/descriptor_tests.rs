@@ -175,16 +175,14 @@ fn replay_digest_contains_kind_policy_batch_and_ordered_frontier() {
 }
 
 #[test]
-fn logical_accounting_uses_the_shared_v2_contract_and_counts_utf8_and_edges() {
-    let contract: Value = serde_json::from_str(include_str!(
-        "../../../../share/workflow-accounting-v2.json"
-    ))
-    .unwrap();
+fn logical_accounting_uses_the_shared_current_contract_and_counts_utf8_and_edges() {
+    let contract: Value =
+        serde_json::from_str(include_str!("../../../../share/workflow-accounting.json")).unwrap();
     for (field, actual) in [
-        ("instanceFixedBytes", WORKFLOW_V2_INSTANCE_BYTES),
-        ("stepFixedBytes", WORKFLOW_V2_STEP_BYTES),
-        ("dependencyBytes", WORKFLOW_V2_DEPENDENCY_BYTES),
-        ("eventFixedBytes", WORKFLOW_V2_EVENT_BYTES),
+        ("instanceFixedBytes", WORKFLOW_INSTANCE_BYTES),
+        ("stepFixedBytes", WORKFLOW_STEP_BYTES),
+        ("dependencyBytes", WORKFLOW_DEPENDENCY_BYTES),
+        ("eventFixedBytes", WORKFLOW_EVENT_BYTES),
     ] {
         assert_eq!(contract[field], json!(actual));
     }

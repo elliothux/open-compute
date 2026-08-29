@@ -1,4 +1,4 @@
-//! SIGKILL covers V2 durable decisions and both-database lifecycle ownership.
+//! SIGKILL covers durable decisions and both-database lifecycle ownership.
 
 use super::super::durable_lifecycle::{create, durable_fixture};
 use super::*;
@@ -7,7 +7,7 @@ use open_compute_core::{
     workflow::{WorkflowStepDeclaration, WorkflowStepDescriptor, WorkflowStepKind},
 };
 use open_compute_storage::scheduler::{
-    WorkflowInstanceAction, WorkflowStepAttempt, WorkflowStepOutcome, WorkflowV2StepGrant,
+    WorkflowInstanceAction, WorkflowStepAttempt, WorkflowStepGrant, WorkflowStepOutcome,
 };
 use open_compute_storage::{WorkflowOperationKind, WorkflowOperationResult};
 
@@ -51,12 +51,12 @@ fn workflow_durable_crash_child() {
         .claim(11, &mut Default::default())
         .unwrap()
         .unwrap();
-    let WorkflowV2StepGrant::Run {
+    let WorkflowStepGrant::Run {
         step_token,
         attempt,
         ..
     } = scheduler
-        .claim_workflow_batch_v2(
+        .claim_workflow_batch(
             &run.fence,
             &[descriptor()],
             limits.dispatch_timeout_ms,
@@ -76,7 +76,7 @@ fn workflow_durable_crash_child() {
     checkpoint(&cut, "attempt-granted");
     if cut == "retry-committed" {
         scheduler
-            .settle_workflow_step_v2(
+            .settle_workflow_step(
                 &run.fence,
                 &attempt,
                 WorkflowStepOutcome::Failure(ErrorCode::WorkflowExecutionFailed),
@@ -131,7 +131,7 @@ fn workflow_durable_crash_child() {
     }
     if cut.starts_with("purge-") || cut == "terminal-unretained" {
         scheduler
-            .modify_workflow_v2(&identity, WorkflowInstanceAction::Terminate, 20, &limits)
+            .modify_workflow(&identity, WorkflowInstanceAction::Terminate, 20, &limits)
             .unwrap();
         checkpoint(&cut, "terminal-unretained");
         repo.retain_instance(&identity, 20).unwrap();
@@ -162,7 +162,7 @@ fn workflow_durable_crash_child() {
         checkpoint(&cut, "purge-swept");
     }
     scheduler
-        .settle_workflow_step_v2(
+        .settle_workflow_step(
             &run.fence,
             &attempt,
             WorkflowStepOutcome::Success("7"),
@@ -183,7 +183,7 @@ fn workflow_durable_crash_child() {
     .resolve()
     .unwrap();
     scheduler
-        .register_workflow_wait_v2(&run.fence, &wait, 14, &limits)
+        .register_workflow_wait(&run.fence, &wait, 14, &limits)
         .unwrap();
     checkpoint(&cut, "wait-registered");
     if cut == "event-committed" {
@@ -199,9 +199,9 @@ fn workflow_durable_crash_child() {
             .unwrap();
         checkpoint(&cut, "event-committed");
     }
-    scheduler.yield_workflow_v2(&run.fence, 16).unwrap();
+    scheduler.yield_workflow(&run.fence, 16).unwrap();
     checkpoint(&cut, "yield-committed");
-    panic!("unrecognized V2 boundary");
+    panic!("unrecognized Workflow boundary");
 }
 
 #[test]
@@ -271,8 +271,8 @@ fn workflow_sigkill_durable_wait_retry_pause_restart_and_purge_boundaries() {
             if cut.starts_with("restart-") {
                 assert_eq!(record.identity.instance_generation, 2);
                 assert_eq!(record.state, WorkflowState::Queued);
-                assert_eq!(record.durable.as_ref().unwrap().registered_step_count, 0);
-                assert_eq!(record.durable.as_ref().unwrap().event_count, 0);
+                assert_eq!(record.durable.registered_step_count, 0);
+                assert_eq!(record.durable.event_count, 0);
             } else if cut == "pause-requested" {
                 assert_eq!(record.state, WorkflowState::Paused);
                 assert!(
@@ -287,13 +287,10 @@ fn workflow_sigkill_durable_wait_retry_pause_restart_and_purge_boundaries() {
             } else if cut == "event-committed" {
                 assert_eq!(record.state, WorkflowState::Queued);
                 assert_eq!(record.completed_step_count, 2);
-                assert_eq!(record.durable.as_ref().unwrap().event_count, 0);
+                assert_eq!(record.durable.event_count, 0);
             } else if matches!(cut, "wait-registered" | "yield-committed") {
                 assert_eq!(record.state, WorkflowState::Waiting);
-                assert_eq!(
-                    record.durable.as_ref().unwrap().next_wake_at_ms,
-                    Some(300014)
-                );
+                assert_eq!(record.durable.next_wake_at_ms, Some(300014));
                 controller
                     .reconcile(&mut WorkflowReconcileCursor::default(), 32, 300014)
                     .unwrap();
@@ -311,8 +308,8 @@ fn workflow_sigkill_durable_wait_retry_pause_restart_and_purge_boundaries() {
                     .claim(admitted_at, &mut Default::default())
                     .unwrap()
                     .unwrap();
-                let WorkflowV2StepGrant::Run { attempt, .. } = scheduler
-                    .claim_workflow_batch_v2(
+                let WorkflowStepGrant::Run { attempt, .. } = scheduler
+                    .claim_workflow_batch(
                         &run.fence,
                         &[descriptor()],
                         limits.dispatch_timeout_ms,

@@ -29,7 +29,7 @@ export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
 ```sh
 ./test/gate.py p0-2
 ./test/gate.py p0-2 p2-3 --jobs 2
-./test/gate.py p2-4 p2-5 --list
+./test/gate.py workflow --list
 OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py all --jobs 2
 OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
 ```
@@ -44,12 +44,14 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
 | 选择 | 实际目标 |
 | --- | --- |
 | `p0-1` … `p0-8`、`p0-exit` | 对应 service 集成测试；P0.1 本体只有一轮 |
-| `p1-conformance`、`p1-security`、`p1-crash`、`p1-upgrade`、`p1-snapshot` | 对应 P1 集成测试 |
+| `p1-conformance`、`p1-security`、`p1-crash`、`p1-snapshot` | 对应当前 P1 集成测试；恢复 staging 拒绝矩阵归 `p1-snapshot` |
 | `p1-8` | P0.7 基本 WebSocket 与 P1 capability；hibernation 仍不支持 |
 | `p2-1`、`p2-2`、`p2-exit` | 对应 scheduler、queue producer、产品链集成测试 |
 | `p2-3` | P0.2 同一 Worker/Queue/Cron 矩阵，不再重复调度 |
-| `p2-4` | Workflow hard 与 product 两个目标 |
-| `p2-5` | durable Workflow hard/product，以及唯一的 P2.4 product snapshot/recovery 目标 |
+| `workflow-runtime` | 当前 Workflow 的真实 runtime、suspension、timeout、parallel 与 native output gate |
+| `workflow-recovery` | 当前 Workflow 的 snapshot、进程恢复、transport fault 与产品 binding 路径 |
+| `workflow-product` | 当前 durable execution 与大结果/批次边界 |
+| `workflow` | 上述三个 Workflow 目标；`p2` 也包含它们 |
 | `runtime`、`single-binary` | supervisor、单文件离线首启/重启/损坏路径 |
 | `p0`、`p1`、`p2`、`all` | 对应集合；多个选择取并集，首轮完整，后两轮仅时序用例 |
 
@@ -61,15 +63,15 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
 
 | 归属 | 用例和理由 |
 | --- | --- |
-| 一轮 | `p1-conformance`、`p1-security`、`p1-snapshot`、`p1-upgrade`：固定能力/权限/快照/提交故障矩阵；capability 用例内部的两个新 CLI 进程仍保留 |
+| 一轮 | `p1-conformance`、`p1-security`、`p1-snapshot`：固定能力/权限/快照/提交故障矩阵；capability 用例内部的两个新 CLI 进程仍保留 |
 | 一轮 | `p2-1` 与 P2.2 commit-crash 两个用例：每个固定状态点仍启动独立子进程，观察 marker 后 SIGKILL；不靠随机撞中窗口 |
-| 一轮 | P2.4 的版本/重放/终态、snapshot、HTTP known/unknown 完整矩阵：显式驱动 claim/commit/replay，保留每个原有故障和 restart |
+| 一轮 | 当前 Workflow 的版本/重放/终态、snapshot、HTTP known/unknown 完整矩阵：显式驱动 claim/commit/replay，保留每个当前故障和 restart |
 | 一轮 | Workflow hard 中独立的 native DO 回滚/禁止外部 mutation、capability/私有 handle 矩阵；同宿主其他时序用例仍三轮 |
 | 一轮 | single-binary 只读命令、P0.1 固定 listener 排序、supervisor 的拒绝编译/启动前关闭/确定性时钟用例 |
 | 三轮 | 进程启动中断、TERM/KILL、孤儿回收、管道与 pin 清理、在途请求中断、并发写入、alarm/Workflow deadline 与迟到回调、跨产品 crash/recovery |
 | 三轮 | 尚未分离的混合矩阵（P0.2–P0.8、P2.2 producer、Workflow hard 等）：不能因其中 CRUD 确定就把其时序断言降为一轮 |
 
-P2.4 `product_bindings` 还包含外部效果提交后在途 SIGKILL、真实 scheduler 并发 backlog，
+`workflow-recovery` 的 `product_bindings` 还包含外部效果提交后在途 SIGKILL、真实 scheduler 并发 backlog，
 因此整个用例仍跑三轮。`process_crash` 与 fixture drop/reaping 也保留三轮。
 分类不赋予旧平台 schema 或私有协议兼容义务，Day1 清理仍按其独立范围进行。
 
@@ -97,7 +99,7 @@ metadata 声明且 discovery 确认为零用例的 workspace binary harness。
 `--jobs N` 只并发经过隔离审查的**测试进程**；默认 `min(4, CPU 数)`，进程内保留 `--test-threads=1`。
 业务数据库、generation token、临时目录、S3 fixture/prefix 和端口均由各目标独立拥有；
 每目标每轮提供独立 `TMPDIR`，端口由系统分配。P0.1 的全局 staging 断言、supervisor、
-single-binary 与 P2.5 product 使用独占屏障。P2.5 的 16 路约 1 MiB 结果在并行实测中遇到
+single-binary 与 `workflow-product` 使用独占屏障。该目标的 16 路约 1 MiB 结果在并行实测中遇到
 workerd socket `ENOBUFS`，仅完成 15 路；隔离整个目标以避免叠加内核缓冲区压力，不缩小
 数据、减少内部并发、放宽断言超时或将失败改为重试。不能把全局状态测试直接改成多线程。
 临时目录使用较短的 `.temp/gate-tmp/<随机名>/`，避免报告目录中的长目标名称超过 Unix socket

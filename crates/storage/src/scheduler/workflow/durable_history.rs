@@ -1,9 +1,9 @@
-//! Read-only verification of the V2 replay graph and its persisted projections.
+//! Read-only verification of the replay graph and its persisted projections.
 
 use super::*;
 use open_compute_core::workflow::{
-    WORKFLOW_MAX_SAFE_INTEGER, WORKFLOW_V2_EVENT_BYTES, WorkflowDurableConfig,
-    WorkflowEventEnvelope, WorkflowStepDescriptor, WorkflowStepKind,
+    WORKFLOW_EVENT_BYTES, WORKFLOW_MAX_SAFE_INTEGER, WorkflowDurableConfig, WorkflowEventEnvelope,
+    WorkflowStepDescriptor, WorkflowStepKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -11,10 +11,7 @@ pub(super) fn verify(
     conn: &Connection,
     instance: &WorkflowInstanceRecord,
 ) -> Result<(), PlatformError> {
-    let metadata = instance
-        .durable
-        .as_ref()
-        .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
+    let metadata = &instance.durable;
     let mut dependencies = dependencies(conn, instance)?;
     let mut statement = conn
         .prepare("SELECT * FROM workflow_steps WHERE instance_id=?1 ORDER BY ordinal LIMIT 1025")
@@ -111,10 +108,7 @@ pub(super) fn verify(
 }
 
 fn verify_instance(instance: &WorkflowInstanceRecord) -> Result<(), PlatformError> {
-    let metadata = instance
-        .durable
-        .as_ref()
-        .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
+    let metadata = &instance.durable;
     for timestamp in [
         Some(instance.identity.created_at_ms),
         Some(instance.updated_at_ms),
@@ -200,7 +194,7 @@ fn verify_step(
     let cancelled: Option<i64> = row.get("cancelled_at_ms").map_err(sql_error)?;
     let output: Option<Vec<u8>> = row.get("output_json").map_err(sql_error)?;
     let failure: Option<Vec<u8>> = row.get("error_json").map_err(sql_error)?;
-    let code = failure_code(row, "error_code", 2).map_err(sql_error)?;
+    let code = failure_code(row, "error_code").map_err(sql_error)?;
     let updated: i64 = row.get("updated_at_ms").map_err(sql_error)?;
     for field in [
         "started_at_ms",
@@ -378,10 +372,7 @@ fn verify_events(
     instance: &WorkflowInstanceRecord,
     consumed: &BTreeSet<i64>,
 ) -> Result<(u32, u64), PlatformError> {
-    let metadata = instance
-        .durable
-        .as_ref()
-        .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
+    let metadata = &instance.durable;
     let mut statement = conn
         .prepare(
             "SELECT instance_generation,event_seq,type,payload_json,accepted_at_ms,logical_bytes
@@ -415,7 +406,7 @@ fn verify_events(
             || sequence <= previous
             || sequence >= metadata.next_event_seq
             || consumed.contains(&sequence)
-            || logical_bytes != (WORKFLOW_V2_EVENT_BYTES + event_type.len() + payload.len()) as u64
+            || logical_bytes != (WORKFLOW_EVENT_BYTES + event_type.len() + payload.len()) as u64
             || open_compute_core::workflow::canonical_json(
                 &payload,
                 ErrorCode::WorkflowInvariantViolation,

@@ -371,7 +371,7 @@ impl RuntimeSource {
                 descriptor_sha256: hex::encode(digest),
             });
         }
-        let descriptor = WorkerCodeDescriptorV1::new_with_product_bindings(
+        let descriptor = WorkerCodeDescriptorV1::new(
             account_id,
             worker_id,
             deployment_id,
@@ -405,7 +405,7 @@ impl RuntimeSource {
         let mut secrets = BTreeMap::new();
         if scope == RuntimeScope::Runtime {
             for secret in snapshot.secrets.values() {
-                let plaintext = self.storage.crypto().decrypt_revision(
+                let plaintext = self.storage.crypto().decrypt(
                     &secret.envelope,
                     account_id,
                     worker_id,

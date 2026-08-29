@@ -1,4 +1,4 @@
-// Capability V2 duration grammar; decimal long multiplication mirrors Rust.
+// Current Workflow duration grammar; decimal long multiplication mirrors Rust.
 export const WORKFLOW_MAX_SAFE_INTEGER = 9007199254740991;
 export const WORKFLOW_MAX_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const encoder = new TextEncoder();

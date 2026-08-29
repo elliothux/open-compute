@@ -51,10 +51,6 @@ enabled = true
 max_label_value_bytes = 64
 max_series = 1024
 
-[diagnostics]
-max_failed_starts = 32
-max_bytes = 16777216
-
 [workers]
 max_bundle_bytes = 17825792
 max_request_body_bytes = 16777216
@@ -115,7 +111,6 @@ reconcile_batch = 64
 
 [scheduler]
 poll_interval_ms = 100
-claim_batch = 32
 max_in_flight = 16
 claim_lease_ms = 60000
 dispatch_timeout_ms = 30000

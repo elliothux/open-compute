@@ -1,11 +1,11 @@
-//! Admission and read-only history verification use real schema-six SQLite.
+//! Admission and read-only history verification use the current SQLite schema.
 
 use super::*;
 use open_compute_core::workflow::WorkflowRetention;
 
 #[test]
-fn v2_admission_freezes_retention_and_claim_cannot_use_v1_step_protocol() {
-    let (temp, store, identity) = setup_v2();
+fn admission_freezes_retention_and_preserves_the_current_run_fence() {
+    let (temp, store, identity) = setup();
     let id = identity.instance_id;
     let retention = WorkflowRetention {
         success_retention_ms: 3_600_000,
@@ -17,7 +17,7 @@ fn v2_admission_freezes_retention_and_claim_cannot_use_v1_step_protocol() {
         .unwrap();
     let before = store.workflow_instance(id).unwrap().unwrap();
     assert_eq!(before.state_bytes, base_bytes(&identity) as u64);
-    assert!(!before.durable.as_ref().unwrap().has_activated);
+    assert!(!before.durable.has_activated);
     for (input, retention) in [
         ("null", Some(&retention)),
         ("{}", None),
@@ -35,49 +35,27 @@ fn v2_admission_freezes_retention_and_claim_cannot_use_v1_step_protocol() {
         .claim_workflow(&identity, 1, &limits)
         .unwrap()
         .unwrap();
-    assert_eq!(run.target.capability_version, 2);
+    assert_eq!(run.target.capability_version, 1);
     assert!(
         store
             .claim_workflow(&identity, 1, &limits)
             .unwrap()
             .is_none()
     );
-    assert_eq!(
-        store
-            .claim_workflow_step(&run.fence, &step(0, "legacy", 1), 2, &limits)
-            .unwrap_err()
-            .code(),
-        ErrorCode::WorkflowCapabilityMismatch
-    );
-    assert_eq!(
-        store
-            .finish_workflow(
-                &run.fence,
-                &WorkflowCompletion::Complete {
-                    output_json: "null".into(),
-                    final_ordinal: 0
-                },
-                2,
-                &limits
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::WorkflowCapabilityMismatch
-    );
     store.verify_workflow_history(id).unwrap();
     assert_eq!(workflow_invalid_rows(&store.lock().unwrap()).unwrap(), 0);
     drop(store);
     let reopened = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 3).unwrap();
     let record = reopened.workflow_instance(id).unwrap().unwrap();
-    assert!(record.durable.as_ref().unwrap().has_activated);
-    assert_eq!(record.durable.unwrap().retention, retention);
+    assert!(record.durable.has_activated);
+    assert_eq!(record.durable.retention, retention);
     assert_eq!(record.run_token.unwrap(), run.fence.run_token);
     reopened.verify_workflow_history(id).unwrap();
 }
 
 #[test]
-fn paused_v2_instances_still_consume_active_capacity() {
-    let (_temp, store, mut identity) = setup_v2();
+fn paused_instances_still_consume_active_capacity() {
+    let (_temp, store, mut identity) = setup();
     store
         .lock()
         .unwrap()
@@ -90,7 +68,7 @@ fn paused_v2_instances_still_consume_active_capacity() {
     identity.instance_id = WorkflowInstanceId::generate();
     identity.external_instance_id = "next".into();
     let limits = WorkflowsConfig {
-        max_active_per_account: 2,
+        max_active_per_account: 1,
         ..WorkflowsConfig::default()
     };
     assert_eq!(
@@ -140,7 +118,7 @@ fn settled_batch_then_wait(store: &SchedulerStore, id: WorkflowInstanceId) {
 
 #[test]
 fn history_accepts_failed_siblings_dependency_barriers_and_wait_kinds_after_restart() {
-    let (temp, store, identity) = setup_v2();
+    let (temp, store, identity) = setup();
     let id = identity.instance_id;
     settled_batch_then_wait(&store, id);
     store.verify_workflow_history(id).unwrap();
@@ -185,12 +163,7 @@ fn history_accepts_failed_siblings_dependency_barriers_and_wait_kinds_after_rest
     drop(store);
     let reopened = SchedulerStore::open(&temp.path().join("scheduler.sqlite"), 5000, 20).unwrap();
     reopened.verify_workflow_history(id).unwrap();
-    let metadata = reopened
-        .workflow_instance(id)
-        .unwrap()
-        .unwrap()
-        .durable
-        .unwrap();
+    let metadata = reopened.workflow_instance(id).unwrap().unwrap().durable;
     assert_eq!(
         (metadata.registered_step_count, metadata.settled_step_count),
         (4, 4)
@@ -201,7 +174,7 @@ fn history_accepts_failed_siblings_dependency_barriers_and_wait_kinds_after_rest
 
 #[test]
 fn history_detects_corrupt_descriptors_deadlines_edges_and_projections_without_repair() {
-    let (_temp, store, identity) = setup_v2();
+    let (_temp, store, identity) = setup();
     let id = identity.instance_id;
     settled_batch_then_wait(&store, id);
     store.verify_workflow_history(id).unwrap();
@@ -214,8 +187,8 @@ fn history_detects_corrupt_descriptors_deadlines_edges_and_projections_without_r
         "UPDATE workflow_steps SET name_count=2 WHERE ordinal=2",
         "UPDATE workflow_steps SET due_at_ms=16 WHERE ordinal=2",
         "UPDATE workflow_steps SET started_at_ms=9007199254740992 WHERE ordinal=2",
-        "UPDATE workflow_instances SET state_bytes=state_bytes+1 WHERE capability_version=2",
-        "UPDATE workflow_instances SET registered_step_count=4 WHERE capability_version=2",
+        "UPDATE workflow_instances SET state_bytes=state_bytes+1 WHERE capability_version=1",
+        "UPDATE workflow_instances SET registered_step_count=4 WHERE capability_version=1",
         "DELETE FROM workflow_step_dependencies WHERE child_ordinal=2 AND parent_ordinal=0",
         "DELETE FROM workflow_step_dependencies WHERE child_ordinal=2; DELETE FROM workflow_steps WHERE ordinal=2",
     ];
@@ -262,7 +235,7 @@ fn history_detects_corrupt_descriptors_deadlines_edges_and_projections_without_r
 #[test]
 fn durable_yield_keeps_the_lease_until_drain_and_rechecks_the_settled_frontier() {
     for settle_before_yield in [false, true] {
-        let (temp, store, identity) = setup_v2();
+        let (temp, store, identity) = setup();
         let id = identity.instance_id;
         let fence = WorkflowFence {
             instance_id: id,
@@ -284,7 +257,7 @@ fn durable_yield_keeps_the_lease_until_drain_and_rechecks_the_settled_frontier()
             tx.commit().unwrap();
         }
         assert_eq!(
-            store.yield_workflow_v2(&fence, 2).unwrap_err().code(),
+            store.yield_workflow(&fence, 2).unwrap_err().code(),
             ErrorCode::WorkflowInstanceStateConflict
         );
         store
@@ -307,9 +280,9 @@ fn durable_yield_keeps_the_lease_until_drain_and_rechecks_the_settled_frontier()
         } else {
             WorkflowState::Waiting
         };
-        assert_eq!(store.yield_workflow_v2(&fence, 4).unwrap(), expected);
+        assert_eq!(store.yield_workflow(&fence, 4).unwrap(), expected);
         assert_eq!(
-            store.yield_workflow_v2(&fence, 4).unwrap_err().code(),
+            store.yield_workflow(&fence, 4).unwrap_err().code(),
             ErrorCode::WorkflowRunStale
         );
         store.verify_workflow_history(id).unwrap();
@@ -319,18 +292,18 @@ fn durable_yield_keeps_the_lease_until_drain_and_rechecks_the_settled_frontier()
         let record = reopened.workflow_instance(id).unwrap().unwrap();
         assert_eq!(record.state, expected);
         assert!(record.run_token.is_none());
-        assert!(!record.durable.as_ref().unwrap().yield_requested);
+        assert!(!record.durable.yield_requested);
         assert_eq!(
-            record.durable.unwrap().next_wake_at_ms,
+            record.durable.next_wake_at_ms,
             if settle_before_yield { None } else { Some(3) }
         );
     }
 }
 
 #[test]
-fn expired_v2_recovery_preserves_business_attempt_and_deadline_and_honors_pause() {
+fn expired_current_recovery_preserves_business_attempt_and_deadline_and_honors_pause() {
     for pause in [false, true] {
-        let (temp, store, identity) = setup_v2();
+        let (temp, store, identity) = setup();
         let id = identity.instance_id;
         let fence = WorkflowFence {
             instance_id: id,
@@ -359,7 +332,7 @@ fn expired_v2_recovery_preserves_business_attempt_and_deadline_and_honors_pause(
             tx.commit().unwrap();
         }
         assert_eq!(
-            store.yield_workflow_v2(&fence, 2).unwrap_err().code(),
+            store.yield_workflow(&fence, 2).unwrap_err().code(),
             ErrorCode::WorkflowInstanceBusy
         );
         assert!(
@@ -378,7 +351,7 @@ fn expired_v2_recovery_preserves_business_attempt_and_deadline_and_honors_pause(
         assert_eq!(store.recover_workflows(1000, &limits, 10).unwrap(), 1);
         assert_eq!(store.recover_workflows(1000, &limits, 10).unwrap(), 0);
         assert_eq!(
-            store.yield_workflow_v2(&fence, 1000).unwrap_err().code(),
+            store.yield_workflow(&fence, 1000).unwrap_err().code(),
             ErrorCode::WorkflowRunStale
         );
         store.verify_workflow_history(id).unwrap();
@@ -395,9 +368,9 @@ fn expired_v2_recovery_preserves_business_attempt_and_deadline_and_honors_pause(
             }
         );
         assert_eq!(record.next_run_at_ms, if pause { None } else { Some(1010) });
-        assert_eq!(record.durable.as_ref().unwrap().next_wake_at_ms, Some(2001));
-        assert!(!record.durable.as_ref().unwrap().pause_requested);
-        assert!(!record.durable.unwrap().yield_requested);
+        assert_eq!(record.durable.next_wake_at_ms, Some(2001));
+        assert!(!record.durable.pause_requested);
+        assert!(!record.durable.yield_requested);
         let attempt: (u32, i64, i64, String, bool) = reopened.lock().unwrap().query_row("SELECT attempt,attempt_started_at_ms,
             attempt_deadline_at_ms,state,run_token IS NULL AND step_token IS NULL FROM workflow_steps WHERE instance_id=?1",
             [id.to_string()], |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap();
@@ -413,7 +386,7 @@ fn history_verifies_retry_delay_absolute_sleep_event_timeout_and_retained_inbox(
         WorkflowStepKind::SleepUntil,
         WorkflowStepKind::WaitEvent,
     ] {
-        let (_temp, store, identity) = setup_v2();
+        let (_temp, store, identity) = setup();
         let id = identity.instance_id;
         {
             let mut conn = store.lock().unwrap();
@@ -484,7 +457,7 @@ fn history_verifies_retry_delay_absolute_sleep_event_timeout_and_retained_inbox(
                 ErrorCode::WorkflowInvariantViolation
             );
         } else if kind == WorkflowStepKind::Do {
-            tx.execute_batch("DROP TRIGGER workflow_v2_step_transition_guard; UPDATE workflow_steps SET due_at_ms=17;").unwrap();
+            tx.execute_batch("DROP TRIGGER workflow_step_transition_guard; UPDATE workflow_steps SET due_at_ms=17;").unwrap();
             assert_eq!(
                 inspection::verify_history_connection(&tx, id)
                     .unwrap_err()

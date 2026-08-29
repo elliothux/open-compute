@@ -25,7 +25,7 @@ fn p1_local_runners_and_runbooks_are_complete_and_safe() {
         "install-and-first-start.md",
         "backup-and-retention.md",
         "fresh-host-restore.md",
-        "upgrade-and-rollback.md",
+        "current-release-recovery.md",
         "disk-pressure.md",
         "sqlite-corruption.md",
         "s3-outage.md",

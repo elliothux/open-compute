@@ -1,4 +1,4 @@
-import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
+import { DurableObject, RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import { WorkflowBinding } from "./workflow-facade.js";
 
 function assert(value, message) { if (!value) throw new Error(message); }
@@ -14,10 +14,20 @@ export class Store extends DurableObject {
   async count() { return (await this.ctx.storage.get("count")) || 0; }
 }
 
+class Handle extends RpcTarget {
+  constructor(env, id) { super(); this.env = env; this.id = id; }
+  status() { return this.env.STORE.getByName("authority").status(this.id); }
+}
+
 export class Backend extends WorkerEntrypoint {
-  create({ id }) { return this.env.STORE.getByName("authority").create(id); }
-  get(id) { return this.env.STORE.getByName("authority").get(id); }
-  status(id) { return this.env.STORE.getByName("authority").status(id); }
+  async create({ id }) {
+    await this.env.STORE.getByName("authority").create(id);
+    return { id, handle: new Handle(this.env, id) };
+  }
+  async get(id) {
+    await this.env.STORE.getByName("authority").get(id);
+    return { id, handle: new Handle(this.env, id) };
+  }
 }
 
 export class Caller extends DurableObject {

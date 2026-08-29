@@ -31,9 +31,7 @@ impl WorkflowController<'_> {
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         let instance = self.current_instance(account, definition, id, now_ms)?;
-        let _admission = self
-            .storage
-            .reserve_mutation(OperationClass::Scheduler, 64 * 1024)?;
+        let _admission = self.storage.reserve_mutation(64 * 1024)?;
         let repository = WorkflowRepository::new(self.storage.db());
         let operation = repository.prepare_instance_operation(
             &instance.identity,
@@ -59,11 +57,9 @@ impl WorkflowController<'_> {
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         let instance = self.current_instance(account, definition, id, now_ms)?;
-        let _admission = self
-            .storage
-            .reserve_mutation(OperationClass::Scheduler, 64 * 1024)?;
+        let _admission = self.storage.reserve_mutation(64 * 1024)?;
         self.scheduler
-            .modify_workflow_v2(&instance.identity, action, now_ms, self.limits)?;
+            .modify_workflow(&instance.identity, action, now_ms, self.limits)?;
         if action == WorkflowInstanceAction::Terminate {
             WorkflowRepository::new(self.storage.db())
                 .retain_instance(&instance.identity, now_ms)?;
@@ -109,8 +105,7 @@ impl WorkflowController<'_> {
         }
         if instance
             .durable
-            .as_ref()
-            .and_then(|state| state.expires_at_ms)
+            .expires_at_ms
             .is_some_and(|expiry| expiry <= now_ms)
         {
             return Err(error(ErrorCode::WorkflowInstanceNotFound));
@@ -141,7 +136,7 @@ impl WorkflowController<'_> {
             .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
         if instance
             .durable
-            .and_then(|state| state.expires_at_ms)
+            .expires_at_ms
             .is_some_and(|expiry| expiry <= now_ms)
         {
             return Ok(ErrorCode::WorkflowInstanceCleanupPending);
@@ -181,7 +176,7 @@ impl WorkflowController<'_> {
 
     pub(super) fn collect_expired(&self, limit: u32, now_ms: i64) -> Result<(), PlatformError> {
         let repository = WorkflowRepository::new(self.storage.db());
-        for identity in self.scheduler.expired_workflows_v2(now_ms, limit)? {
+        for identity in self.scheduler.expired_workflows(now_ms, limit)? {
             if repository
                 .instance_operation(identity.instance_id)?
                 .is_some()

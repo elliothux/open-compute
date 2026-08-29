@@ -4,6 +4,11 @@
 基线为 `9fe5b4a47a2136ff27a02989b4c8481c09bf412b`，加本次 worktree。
 实际命令、逐轮计数、失败修正和输出路径见 [最终验证记录](./p2-5-gate-results.md)。
 
+> 当前状态（2026-08-29）：本文记录的是 P2.5 当时实际实施和验收的历史模型。
+> 其中 capability V1/V2 双引擎、旧 selector、增量平台 schema 与字节兼容要求已被
+> [Day1 架构清理](day1-architecture-cleanup.md)取代；当前源码只保留 durable Workflow
+> capability 1。以下旧模型描述不再定义当前支持面，也不构成恢复兼容路径的要求。
+
 - Capability V2、独立 runner/controller、generator revision 3、durable retry/sleep/event、生命周期、
   retention 和有界 parallel do 已接入生产路径；V1 wrapper/facade/runner/codec 字节保持。
 - Control schema 14、scheduler schema 8；本阶段追加的 control 013/014、scheduler 006/007/008
@@ -427,7 +432,8 @@ instance/account cap。SQLite 物理页/WAL 大小是另一类 operator 容量�
 V1 保留原有计价规则和 state_bytes；V2 使用新的 metadata 计价。不能仅因为添加 schema 列，就在 migration
 中增加旧实例的已用容量，导致原本合法的历史越过 quota。
 
-当前 V2 基础实现的固定计价契约见 [`share/workflow-accounting-v2.json`](../../share/workflow-accounting-v2.json)：
+当时 V2 基础实现的固定计价契约文件为 `share/workflow-accounting-v2.json`；该文件已由
+Day1 清理删除，当前唯一契约见 [`share/workflow-accounting.json`](../../share/workflow-accounting.json)：
 instance 为 256 bytes、step 为 160 bytes、每条 dependency 为 16 bytes、inbox event 为 32 bytes。
 这些是固定逻辑计价单位，不代表 SQLite 行或物理页大小。Instance 另计 definition name、external ID、
 class name 与 input/output/error；step 另计 name/config/result/error；event 另计 type/payload。

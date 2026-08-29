@@ -176,7 +176,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     .unwrap();
     assert_eq!(
         store
-            .settle_workflow_step_v2(
+            .settle_workflow_step(
                 &fence,
                 &attempt,
                 WorkflowStepOutcome::Success("\"stale\""),
@@ -210,7 +210,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
             "/v1/accounts/{}/workflows/{}/versions",
             fixture.account, fixture.definition
         ),
-        json!({"deploymentId":fixture.future,"className":"Flow","capabilityVersion":2}),
+        json!({"deploymentId":fixture.future,"className":"Flow"}),
     )
     .await;
     assert_eq!(version["state"], "ready");

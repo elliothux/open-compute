@@ -14,9 +14,9 @@ pub enum WorkflowInstanceAction {
 }
 
 impl SchedulerStore {
-    /// Apply an admitted lifecycle action to an exact capability-two generation.
+    /// Apply an admitted lifecycle action to an exact current generation.
     /// Termination fences platform commits; it does not cancel external side effects.
-    pub fn modify_workflow_v2(
+    pub fn modify_workflow(
         &self,
         identity: &WorkflowInstanceIdentity,
         action: WorkflowInstanceAction,
@@ -41,10 +41,7 @@ impl SchedulerStore {
         if instance.identity != *identity {
             return Err(error(ErrorCode::WorkflowRunStale));
         }
-        let durable = instance
-            .durable
-            .as_ref()
-            .ok_or_else(|| error(ErrorCode::WorkflowMethodUnsupported))?;
+        let durable = &instance.durable;
         if durable.expires_at_ms.is_some_and(|expiry| expiry <= now_ms) {
             return Err(error(ErrorCode::WorkflowInstanceNotFound));
         }

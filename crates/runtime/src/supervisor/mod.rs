@@ -272,14 +272,17 @@ impl ConfigCompiler for StaticConfigCompiler {
 }
 
 /// Function-backed compiler for tests.
+#[cfg(any(test, feature = "test-support"))]
 pub struct FnCompiler<F>(pub F);
 
+#[cfg(any(test, feature = "test-support"))]
 impl<F> Debug for FnCompiler<F> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("FnCompiler").finish()
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl<F> ConfigCompiler for FnCompiler<F>
 where
     F: Send
@@ -368,50 +371,8 @@ impl Debug for WorkerdSupervisor {
 }
 
 impl WorkerdSupervisor {
-    /// Create a supervisor. Does not spawn until [`Self::start`] or [`Self::run`].
-    pub fn new<C, K, J>(opts: WorkerdSupervisorOptions<C, K, J>) -> Self
-    where
-        C: ConfigCompiler,
-        K: Clock + 'static,
-        J: JitterRng + 'static,
-    {
-        Self::new_with_external_services(opts, Vec::new(), None)
-    }
-
-    /// Create a supervisor with explicitly injected loopback services and auth revocation.
-    pub fn new_with_external_services<C, K, J>(
-        opts: WorkerdSupervisorOptions<C, K, J>,
-        external_services: Vec<ExternalServiceAddress>,
-        generation_auth: Option<GenerationAuthRegistry>,
-    ) -> Self
-    where
-        C: ConfigCompiler,
-        K: Clock + 'static,
-        J: JitterRng + 'static,
-    {
-        Self::new_with_external_services_and_auth(
-            opts,
-            external_services,
-            generation_auth.into_iter().collect(),
-        )
-    }
-
-    /// Create a supervisor with loopback services and all generation credentials it must revoke.
-    pub fn new_with_external_services_and_auth<C, K, J>(
-        opts: WorkerdSupervisorOptions<C, K, J>,
-        external_services: Vec<ExternalServiceAddress>,
-        generation_auths: Vec<GenerationAuthRegistry>,
-    ) -> Self
-    where
-        C: ConfigCompiler,
-        K: Clock + 'static,
-        J: JitterRng + 'static,
-    {
-        Self::new_with_services_and_auth(opts, external_services, Vec::new(), generation_auths)
-    }
-
-    /// Create a supervisor with loopback HTTP and local directory services.
-    pub fn new_with_services_and_auth<C, K, J>(
+    /// Create a supervisor with the complete current service and auth composition.
+    pub fn new<C, K, J>(
         opts: WorkerdSupervisorOptions<C, K, J>,
         external_services: Vec<ExternalServiceAddress>,
         directory_services: Vec<DirectoryServicePath>,
@@ -1305,14 +1266,19 @@ impl WorkerdSupervisor {
         config: RuntimeConfig,
         redactor: Redactor,
     ) -> Self {
-        Self::new(WorkerdSupervisorOptions {
-            runtime,
-            compiler,
-            config,
-            clock: Arc::new(SystemClock),
-            jitter: Arc::new(OsJitter),
-            redactor,
-            lease_path: None,
-        })
+        Self::new(
+            WorkerdSupervisorOptions {
+                runtime,
+                compiler,
+                config,
+                clock: Arc::new(SystemClock),
+                jitter: Arc::new(OsJitter),
+                redactor,
+                lease_path: None,
+            },
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 }

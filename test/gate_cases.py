@@ -15,8 +15,7 @@ ONCE = {
         'p1_path_corpus_and_production_fault_surface_fail_closed',
         'p1_two_account_resource_and_deployment_matrix_has_no_existence_or_metric_oracle',
     ),
-    # Fixed transaction fault and sequential snapshot validation; no random crash window.
-    'p1-upgrade': ('p1_schema_upgrade_crash_resume_serve_and_snapshot_rollback',),
+    # Current snapshot validation is a fixed input/fault matrix.
     'p1-snapshot': ('p1_full_snapshot_retention_and_fresh_host_restore_are_fail_closed',),
     # Every fault point still gets its own real child; SIGKILL follows a state marker.
     'p2-1': (
@@ -29,15 +28,12 @@ ONCE = {
         'commit_crash::p2_2_sigkill_after_commit_preserves_message_and_counters',
     ),
     # Explicit native DO transaction rollback / Workflow mutation-rejection matrix.
-    'p2-4-hard': ('output_gate::workflow_do_mutation_fails_closed_after_native_output_gate_probe',),
-    # These drive explicit claims/commits/replays, not a live scheduler race. Keep
-    # the complete HTTP known/unknown matrix, all restarts and product assertions.
-    'p2-4-product': (
-        'production_workflow_binding_frozen_versions_replay_and_terminal_history',
+    'workflow-runtime': ('output_gate::workflow_do_mutation_fails_closed_after_native_output_gate_probe',),
+    # These drive explicit claims/commits/replays, not a live scheduler race.
+    'workflow-recovery': (
         'snapshot_restore::workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generation',
         'transport_faults::workflow_production_step_http_known_unknown_commit_matrix',
     ),
-    'p2-5-hard': ('durable_binding::mixed_callers_use_frozen_capabilities_and_private_instance_handles',),
     'runtime': (
         'invalid_compile_does_not_retry',
         'shutdown_before_start_acks_and_is_idempotent',
@@ -60,17 +56,16 @@ TIMING = {
     'p0-exit': ('p0_real_combined_exit_matrix',),
     'p1-crash': ('p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly',),
     'p2-2': ('p2_2_real_queue_producer_matrix',),
-    'p2-4-hard': ('dynamic_workflow_step_bridge_replay_and_restart',),
-    'p2-4-product': (
+    'workflow-runtime': ('workflow_runtime_suspension_timeout_parallel_and_native_errors',),
+    'workflow-recovery': (
         'process_crash::workflow_platformd_sigkill_after_step_commit_replays_without_callback',
         # Also owns in-flight external-effect crashes and concurrent scheduler backlog.
         'product_bindings::workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effects',
         'transport_faults::workflow_fixture_drop_waits_for_child_reaping',
     ),
-    'p2-5-hard': ('workflow_v2_runtime_suspension_timeout_parallel_and_native_errors',),
-    'p2-5-product': (
+    'workflow-product': (
         'durable_batches::production_batches_enforce_join_limits_and_replay_large_outputs',
-        'durable_execution::production_v2_driver_replays_waits_retries_and_events_after_runtime_restart',
+        'durable_execution::production_driver_replays_waits_retries_and_events_after_runtime_restart',
     ),
     'p2-exit': ('p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_sigkill',),
     'runtime': (

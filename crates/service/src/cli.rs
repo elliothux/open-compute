@@ -12,7 +12,6 @@ use crate::exit::{ExitClass, emit_failure, exit_class_for};
 use crate::metrics::MetricsRegistry;
 use crate::run::run_platform;
 use crate::support_bundle::create_support_bundle;
-use crate::upgrade_cli::{upgrade_apply, upgrade_check};
 use clap::{Parser, Subcommand};
 use open_compute_core::{ErrorCode, PlatformConfig, PlatformError};
 use open_compute_storage::DataDir;
@@ -70,12 +69,6 @@ pub enum Command {
         /// Backup subcommand.
         #[command(subcommand)]
         command: BackupCommand,
-    },
-    /// Offline forward-only release upgrade operations.
-    Upgrade {
-        /// Upgrade subcommand.
-        #[command(subcommand)]
-        command: UpgradeCommand,
     },
     /// Generate a bounded, secret-scanned local support archive.
     SupportBundle {
@@ -210,29 +203,6 @@ pub enum BackupCommand {
     Restore {
         /// `UUIDv7` snapshot identity.
         #[arg(long = "snapshot")]
-        snapshot_id: String,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-/// `platformd upgrade` subcommands.
-#[derive(Debug, Subcommand)]
-pub enum UpgradeCommand {
-    /// Verify source schemas, release compatibility, and a committed rollback snapshot.
-    Check {
-        /// Verified pre-upgrade snapshot `UUIDv7`.
-        #[arg(long = "from-snapshot")]
-        snapshot_id: String,
-        /// Emit versioned JSON.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Apply pending checksummed migrations while the daemon remains stopped.
-    Apply {
-        /// Verified pre-upgrade snapshot `UUIDv7`.
-        #[arg(long = "from-snapshot")]
         snapshot_id: String,
         /// Emit versioned JSON.
         #[arg(long)]
@@ -426,31 +396,6 @@ async fn run(cli: Cli, stdout: &mut impl Write) -> Result<ExitCode, PlatformErro
                     ))))
                     .await?;
                     let human = format!("RESTORE_OK {}", result.snapshot_id);
-                    write_result(&result, stdout, json, &human)?;
-                }
-            }
-            Ok(ExitCode::from(ExitClass::Ok.code()))
-        }
-        Command::Upgrade { command } => {
-            let loaded = load_platform_config(config_path)?;
-            MetricsRegistry::validate_limits(&loaded.config.metrics)?;
-            match command {
-                UpgradeCommand::Check { snapshot_id, json } => {
-                    let result = Box::pin(interruptible_offline(Box::pin(upgrade_check(
-                        &loaded,
-                        &snapshot_id,
-                    ))))
-                    .await?;
-                    let human = format!("UPGRADE_READY {}", result.from_snapshot);
-                    write_result(&result, stdout, json, &human)?;
-                }
-                UpgradeCommand::Apply { snapshot_id, json } => {
-                    let result = Box::pin(interruptible_offline(Box::pin(upgrade_apply(
-                        &loaded,
-                        &snapshot_id,
-                    ))))
-                    .await?;
-                    let human = format!("UPGRADE_OK {}", result.from_snapshot);
                     write_result(&result, stdout, json, &human)?;
                 }
             }

@@ -27,7 +27,7 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_service::workers_http::WorkerApiState;
 use open_compute_service::{
-    HealthCoordinator, MetricsRegistry, UnavailableKvBindingExecutor, bind_binding_backend,
+    HealthCoordinator, MetricsRegistry, SqliteKvBindingExecutor, bind_binding_backend,
     serve_binding_backend,
 };
 use open_compute_storage::{DeploymentState, PlatformStorage, QueueContentType, WorkerRepository};
@@ -95,10 +95,17 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         async move {
             serve_binding_backend(
                 binding_listener,
-                storage,
+                storage.clone(),
                 auth,
                 ResourcePins::new(),
-                Arc::new(UnavailableKvBindingExecutor),
+                Arc::new(SqliteKvBindingExecutor::new(storage, Arc::new(SystemClock))),
+                None,
+                None,
+                None,
+                open_compute_core::DurableObjectsConfig::default(),
+                open_compute_core::QueuesConfig::default(),
+                open_compute_core::WorkflowsConfig::default(),
+                None,
                 async move {
                     let _ = binding_shutdown_rx.changed().await;
                 },
@@ -129,7 +136,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
             runtime.version_output(),
         )
         .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -155,7 +162,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     let account = storage.identity().default_account_id;
     let repo = WorkerRepository::new(storage.db());
     let (worker, _) = repo
-        .create_worker(account, "runtime-gate", RequestId::generate(), 1)
+        .create_worker(account, "runtime-gate", RequestId::generate(), 1, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
     let controller = DeploymentController::new(

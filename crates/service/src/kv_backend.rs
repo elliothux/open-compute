@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
+#[cfg(any(test, feature = "test-support"))]
 use std::io::{Read as _, Seek as _};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -115,7 +116,9 @@ impl KvStagedValue {
         self
     }
 
-    pub(crate) fn read_all(&mut self) -> Result<Vec<u8>, PlatformError> {
+    /// Read the exact staged payload for test executors and staging assertions.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn read_all_for_test(&mut self) -> Result<Vec<u8>, PlatformError> {
         self.file.rewind().map_err(|_| staged_unavailable())?;
         let mut value = Vec::with_capacity(self.length);
         self.file
@@ -271,111 +274,6 @@ impl SqliteKvBindingExecutor {
     pub(crate) fn with_metrics(mut self, metrics: Arc<MetricsRegistry>) -> Self {
         self.metrics = Some(metrics);
         self
-    }
-
-    /// Execute one already-authorized KV command.
-    pub fn execute(
-        &self,
-        binding: &AuthorizedBinding,
-        command: KvCommand,
-    ) -> Result<KvCommandResult, PlatformError> {
-        let result = (|| {
-            let reservation_bytes = match &command {
-                KvCommand::Put { value, .. } => Some(value.len() as u64 + 64 * 1024),
-                KvCommand::PutStaged { value, .. } => Some(value.length as u64 + 64 * 1024),
-                _ => None,
-            };
-            let admission = reservation_bytes
-                .map(|bytes| self.storage.reserve_mutation(OperationClass::Kv, bytes))
-                .transpose();
-            if let Some(metrics) = &self.metrics
-                && reservation_bytes.is_some()
-            {
-                metrics.observe_admission(
-                    OperationClass::Kv,
-                    admission.as_ref().err().map(PlatformError::code),
-                );
-            }
-            let _admission = admission?;
-            let mutation = matches!(
-                &command,
-                KvCommand::Put { .. } | KvCommand::PutStaged { .. } | KvCommand::Delete { .. }
-            );
-            let _connection = self.connections.acquire(self.operation_timeout)?;
-            let _connection_metric = self.metrics.as_ref().map(|metrics| {
-                KvGaugeGuard::new(
-                    metrics,
-                    if mutation {
-                        KvGauge::WriterConnection
-                    } else {
-                        KvGauge::ReaderConnection
-                    },
-                )
-            });
-            let (handle, now_ms) = self.open_handle(binding)?;
-            let _writer = mutation.then(|| {
-                handle
-                    .writer
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-            });
-            let _reader = (!mutation)
-                .then(|| handle.readers.acquire(self.operation_timeout))
-                .transpose()?;
-            KvNamespaceRepository::new(self.storage.db())
-                .record_open(binding.resource.id, now_ms)?;
-            let result = self.execute_inner(binding, &handle.engine, now_ms, command);
-            handle.touch(self.effective_now_ms());
-            result
-        })();
-        if let (Some(metrics), Err(error)) = (&self.metrics, &result) {
-            metrics.observe_product_error(OperationClass::Kv, error.code());
-        }
-        self.isolate_failure(binding, &result);
-        result
-    }
-
-    /// Stream a single get through bounded global and per-namespace slots.
-    pub fn stream_get(
-        &self,
-        binding: &AuthorizedBinding,
-        key: &str,
-        cache_ttl: Option<u64>,
-        sink: &mut dyn FnMut(KvStreamPart) -> Result<(), PlatformError>,
-    ) -> Result<(), PlatformError> {
-        let result = (|| {
-            if cache_ttl.is_some_and(|value| value < KV_MIN_CACHE_TTL_SECONDS) {
-                return Err(invalid_options());
-            }
-            let _connection = self.connections.acquire(self.operation_timeout)?;
-            let _global_stream = self.streams.acquire(self.operation_timeout)?;
-            let _connection_metric = self
-                .metrics
-                .as_ref()
-                .map(|metrics| KvGaugeGuard::new(metrics, KvGauge::ReaderConnection));
-            let _stream_metric = self
-                .metrics
-                .as_ref()
-                .map(|metrics| KvGaugeGuard::new(metrics, KvGauge::ActiveStream));
-            let (handle, now_ms) = self.open_handle(binding)?;
-            let _resource_stream = handle.streams.acquire(self.operation_timeout)?;
-            KvNamespaceRepository::new(self.storage.db())
-                .record_open(binding.resource.id, now_ms)?;
-            let sink = RefCell::new(sink);
-            let result = handle.engine.stream_get(
-                key,
-                now_ms,
-                |entry| (sink.borrow_mut())(KvStreamPart::Entry(entry)),
-                |bytes| (sink.borrow_mut())(KvStreamPart::Bytes(bytes.to_vec())),
-            );
-            handle.touch(self.effective_now_ms());
-            result
-        })();
-        if let (Some(metrics), Err(error)) = (&self.metrics, &result) {
-            metrics.observe_product_error(OperationClass::Kv, error.code());
-        }
-        self.isolate_failure(binding, &result);
-        result
     }
 
     fn open_handle(
@@ -796,68 +694,69 @@ impl crate::binding_backend::KvBindingExecutor for SqliteKvBindingExecutor {
         (self.streams.limit, self.streams_per_namespace)
     }
 
-    fn get(&self, binding: &AuthorizedBinding, key: &str) -> Result<Option<String>, PlatformError> {
-        match self.execute(
-            binding,
-            KvCommand::Get {
-                keys: vec![key.to_owned()],
-                cache_ttl: None,
-            },
-        )? {
-            KvCommandResult::Entries(mut entries) => entries
-                .pop()
-                .flatten()
-                .map(|entry| {
-                    String::from_utf8(entry.value).map_err(|_| {
-                        PlatformError::new(
-                            ErrorCode::KvInternalProtocolError,
-                            "legacy KV text response is not valid UTF-8",
-                        )
-                    })
-                })
-                .transpose(),
-            KvCommandResult::Mutation | KvCommandResult::List { .. } => Err(invalid_options()),
-        }
-    }
-
-    fn put(
-        &self,
-        binding: &AuthorizedBinding,
-        key: &str,
-        value: &str,
-    ) -> Result<(), PlatformError> {
-        self.execute(
-            binding,
-            KvCommand::Put {
-                key: key.to_owned(),
-                value: value.as_bytes().to_vec(),
-                expiration: None,
-                expiration_ttl: None,
-                metadata: None,
-                metadata_present: false,
-            },
-        )
-        .map(|_| ())
-    }
-
-    fn delete(&self, binding: &AuthorizedBinding, key: &str) -> Result<(), PlatformError> {
-        self.execute(
-            binding,
-            KvCommand::Delete {
-                key: key.to_owned(),
-            },
-        )
-        .map(|_| ())
-    }
-
+    /// Execute one already-authorized KV command.
     fn execute(
         &self,
         binding: &AuthorizedBinding,
         command: KvCommand,
     ) -> Result<KvCommandResult, PlatformError> {
-        SqliteKvBindingExecutor::execute(self, binding, command)
+        let result = (|| {
+            let reservation_bytes = match &command {
+                KvCommand::Put { value, .. } => Some(value.len() as u64 + 64 * 1024),
+                KvCommand::PutStaged { value, .. } => Some(value.length as u64 + 64 * 1024),
+                _ => None,
+            };
+            let admission = reservation_bytes
+                .map(|bytes| self.storage.reserve_mutation(bytes))
+                .transpose();
+            if let Some(metrics) = &self.metrics
+                && reservation_bytes.is_some()
+            {
+                metrics.observe_admission(
+                    OperationClass::Kv,
+                    admission.as_ref().err().map(PlatformError::code),
+                );
+            }
+            let _admission = admission?;
+            let mutation = matches!(
+                &command,
+                KvCommand::Put { .. } | KvCommand::PutStaged { .. } | KvCommand::Delete { .. }
+            );
+            let _connection = self.connections.acquire(self.operation_timeout)?;
+            let _connection_metric = self.metrics.as_ref().map(|metrics| {
+                KvGaugeGuard::new(
+                    metrics,
+                    if mutation {
+                        KvGauge::WriterConnection
+                    } else {
+                        KvGauge::ReaderConnection
+                    },
+                )
+            });
+            let (handle, now_ms) = self.open_handle(binding)?;
+            let _writer = mutation.then(|| {
+                handle
+                    .writer
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            });
+            let _reader = (!mutation)
+                .then(|| handle.readers.acquire(self.operation_timeout))
+                .transpose()?;
+            KvNamespaceRepository::new(self.storage.db())
+                .record_open(binding.resource.id, now_ms)?;
+            let result = self.execute_inner(binding, &handle.engine, now_ms, command);
+            handle.touch(self.effective_now_ms());
+            result
+        })();
+        if let (Some(metrics), Err(error)) = (&self.metrics, &result) {
+            metrics.observe_product_error(OperationClass::Kv, error.code());
+        }
+        self.isolate_failure(binding, &result);
+        result
     }
 
+    /// Stream a single get through bounded global and per-namespace slots.
     fn stream_get(
         &self,
         binding: &AuthorizedBinding,
@@ -865,7 +764,39 @@ impl crate::binding_backend::KvBindingExecutor for SqliteKvBindingExecutor {
         cache_ttl: Option<u64>,
         sink: &mut dyn FnMut(KvStreamPart) -> Result<(), PlatformError>,
     ) -> Result<(), PlatformError> {
-        SqliteKvBindingExecutor::stream_get(self, binding, key, cache_ttl, sink)
+        let result = (|| {
+            if cache_ttl.is_some_and(|value| value < KV_MIN_CACHE_TTL_SECONDS) {
+                return Err(invalid_options());
+            }
+            let _connection = self.connections.acquire(self.operation_timeout)?;
+            let _global_stream = self.streams.acquire(self.operation_timeout)?;
+            let _connection_metric = self
+                .metrics
+                .as_ref()
+                .map(|metrics| KvGaugeGuard::new(metrics, KvGauge::ReaderConnection));
+            let _stream_metric = self
+                .metrics
+                .as_ref()
+                .map(|metrics| KvGaugeGuard::new(metrics, KvGauge::ActiveStream));
+            let (handle, now_ms) = self.open_handle(binding)?;
+            let _resource_stream = handle.streams.acquire(self.operation_timeout)?;
+            KvNamespaceRepository::new(self.storage.db())
+                .record_open(binding.resource.id, now_ms)?;
+            let sink = RefCell::new(sink);
+            let result = handle.engine.stream_get(
+                key,
+                now_ms,
+                |entry| (sink.borrow_mut())(KvStreamPart::Entry(entry)),
+                |bytes| (sink.borrow_mut())(KvStreamPart::Bytes(bytes.to_vec())),
+            );
+            handle.touch(self.effective_now_ms());
+            result
+        })();
+        if let (Some(metrics), Err(error)) = (&self.metrics, &result) {
+            metrics.observe_product_error(OperationClass::Kv, error.code());
+        }
+        self.isolate_failure(binding, &result);
+        result
     }
 }
 

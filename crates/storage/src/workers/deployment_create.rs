@@ -18,36 +18,8 @@ pub struct NewDeploymentProducts<'a> {
 }
 
 impl WorkerRepository<'_> {
-    /// Insert an immutable deployment without product bindings.
-    pub fn insert_staging_deployment(
-        &self,
-        input: &NewDeployment,
-    ) -> Result<DeploymentRecord, PlatformError> {
-        self.insert_staging_deployment_with_products_and_limit(
-            input,
-            &NewDeploymentProducts::default(),
-            u32::MAX,
-        )
-    }
-
-    /// Insert immutable resource bindings together with a deployment.
-    pub fn insert_staging_deployment_with_bindings(
-        &self,
-        input: &NewDeployment,
-        bindings: &[crate::NewDeploymentBinding],
-    ) -> Result<DeploymentRecord, PlatformError> {
-        self.insert_staging_deployment_with_products_and_limit(
-            input,
-            &NewDeploymentProducts {
-                bindings,
-                ..Default::default()
-            },
-            u32::MAX,
-        )
-    }
-
     /// Insert deployment metadata, bindings, Queue consumers, and Cron declarations atomically.
-    pub fn insert_staging_deployment_with_products_and_limit(
+    pub fn insert_staging_deployment(
         &self,
         input: &NewDeployment,
         products: &NewDeploymentProducts<'_>,

@@ -2,29 +2,29 @@
 # Measure a repeatable local mixed-profile envelope without claiming a universal SLA.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-workerd=${OPEN_COMPUTE_TEST_WORKERD:-"$root/.temp/runtime-cache/v1.20260826.1/workerd"}
-if [ ! -f "$workerd" ]; then
-  echo "OPEN_COMPUTE_TEST_WORKERD is missing; the P1 load Gate refuses to skip" >&2
-  exit 1
-fi
-export OPEN_COMPUTE_TEST_WORKERD="$workerd"
+workerd=${OPEN_COMPUTE_TEST_WORKERD:-}
+archive=${OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE:-}
+case "$workerd" in /*) ;; *) echo "OPEN_COMPUTE_TEST_WORKERD must name an existing absolute path" >&2; exit 1 ;; esac
+case "$archive" in /*) ;; *) echo "OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE must name an existing absolute path" >&2; exit 1 ;; esac
+[ -f "$workerd" ] || { echo "OPEN_COMPUTE_TEST_WORKERD is missing" >&2; exit 1; }
+[ -f "$archive" ] || { echo "OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE is missing" >&2; exit 1; }
 profile=""
 iterations=3
-seed=1701
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --profile) profile=$2; shift 2 ;;
     --iterations) iterations=$2; shift 2 ;;
-    --seed) seed=$2; shift 2 ;;
-    *) echo "usage: $0 --profile mixed [--iterations POSITIVE] [--seed INTEGER]" >&2; exit 2 ;;
+    *) echo "usage: $0 --profile mixed [--iterations POSITIVE]" >&2; exit 2 ;;
   esac
 done
 case "$profile" in mixed) ;; *) echo "only --profile mixed is supported" >&2; exit 2 ;; esac
 case "$iterations" in ''|*[!0-9]*|0) echo "iterations must be positive" >&2; exit 2 ;; esac
-case "$seed" in ''|*[!0-9]*) echo "seed must be an integer" >&2; exit 2 ;; esac
 
-result_dir="$root/target/p1-results/load"
-mkdir -p "$result_dir"
+run_id=$(/bin/date -u +%Y%m%dT%H%M%SZ)-$$
+result_parent="$root/.temp/load-p1"
+result_dir="$result_parent/$run_id"
+mkdir -p "$result_parent"
+mkdir "$result_dir"
 durations="$result_dir/durations.txt"
 time_log="$result_dir/time.log"
 last_log="$result_dir/last-events.log"
@@ -89,8 +89,8 @@ workerd_lock_sha256=$(/usr/bin/shasum -a 256 "$root/packages/runtime/workerd.loc
 config_sha256=$(/usr/bin/shasum -a 256 "$root/share/default-config.toml" | /usr/bin/awk '{print $1}')
 host=$(/usr/bin/uname -srm | /usr/bin/tr -c 'A-Za-z0-9_.-' '_')
 result="$result_dir/result.json"
-printf '{"schema_version":1,"profile":"mixed","scope":"combined_p0_product_saturation_and_p1_process_recovery_gates","revision":"%s","workerd_lock_sha256":"%s","default_config_sha256":"%s","host":"%s","seed":%s,"iterations":%s,"elapsed_seconds":%s,"iteration_p50_seconds":%s,"iteration_p95_seconds":%s,"iteration_p99_seconds":%s,"request_samples":%s,"request_worst_iteration_p50_ms":%s,"request_worst_iteration_p95_ms":%s,"request_worst_iteration_p99_ms":%s,"capacity_evidence":"capacity.ndjson","max_runner_rss_bytes":%s,"process_recovery_gate_seconds":%s,"verdict":"pass"}\n' \
-  "$revision" "$workerd_lock_sha256" "$config_sha256" "$host" "$seed" "$iterations" \
+printf '{"schema_version":1,"profile":"mixed","scope":"combined_p0_product_saturation_and_p1_process_recovery_gates","fault_schedule":"fixed_combined_gate_then_process_recovery","run_id":"%s","revision":"%s","workerd_lock_sha256":"%s","default_config_sha256":"%s","host":"%s","iterations":%s,"elapsed_seconds":%s,"iteration_p50_seconds":%s,"iteration_p95_seconds":%s,"iteration_p99_seconds":%s,"request_samples":%s,"request_worst_iteration_p50_ms":%s,"request_worst_iteration_p95_ms":%s,"request_worst_iteration_p99_ms":%s,"capacity_evidence":"capacity.ndjson","max_runner_rss_bytes":%s,"process_recovery_gate_seconds":%s,"verdict":"pass"}\n' \
+  "$run_id" "$revision" "$workerd_lock_sha256" "$config_sha256" "$host" "$iterations" \
   "$((finish - start))" "$p50" "$p95" "$p99" "$request_samples" "$request_p50" \
   "$request_p95" "$request_p99" "$max_rss_bytes" "$crash_recovery_gate_seconds" \
   >"$result"

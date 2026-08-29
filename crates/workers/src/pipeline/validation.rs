@@ -42,15 +42,7 @@ pub(crate) fn validate_binding_set(
             "deployment contains too many bindings",
         ));
     }
-    for (name, binding) in bindings {
-        if binding.capability_version != 1
-            && !(binding.kind == BindingKind::Workflow && binding.capability_version == 2)
-        {
-            return Err(PlatformError::new(
-                ErrorCode::BindingCapabilityUnsupported,
-                "binding capability is unsupported for this product",
-            ));
-        }
+    for name in bindings.keys() {
         validate_env_name(name)?;
         if name.len() > 64 || vars.contains_key(name) || secrets.contains_key(name) {
             return Err(PlatformError::new(
@@ -157,45 +149,6 @@ pub(crate) fn stable_validation_code(error: &PlatformError) -> ErrorCode {
         ErrorCode::RuntimeUnavailable | ErrorCode::RuntimeResultUnknown => error.code(),
         ErrorCode::ResourceLimitExceeded => ErrorCode::ResourceLimitExceeded,
         _ => ErrorCode::BundleRuntimeInvalid,
-    }
-}
-
-pub(crate) fn parse_failure_code(code: &str) -> ErrorCode {
-    match code {
-        "ACCOUNT_NOT_FOUND" => ErrorCode::AccountNotFound,
-        "WORKER_NOT_FOUND" => ErrorCode::WorkerNotFound,
-        "WORKER_DELETED" => ErrorCode::WorkerDeleted,
-        "DEPLOYMENT_NOT_FOUND" => ErrorCode::DeploymentNotFound,
-        "DEPLOYMENT_NOT_READY" => ErrorCode::DeploymentNotReady,
-        "DEPLOYMENT_INVARIANT_VIOLATION" => ErrorCode::DeploymentInvariantViolation,
-        "BUNDLE_INVALID" => ErrorCode::BundleInvalid,
-        "BUNDLE_TOO_LARGE" => ErrorCode::BundleTooLarge,
-        "BUNDLE_RUNTIME_INVALID" => ErrorCode::BundleRuntimeInvalid,
-        "COMPATIBILITY_UNSUPPORTED" => ErrorCode::CompatibilityUnsupported,
-        "ARTIFACT_UNAVAILABLE" => ErrorCode::ArtifactUnavailable,
-        "ARTIFACT_INTEGRITY_ERROR" => ErrorCode::ArtifactIntegrityError,
-        "SECRET_INVALID" => ErrorCode::SecretInvalid,
-        "RESOURCE_LIMIT_EXCEEDED" => ErrorCode::ResourceLimitExceeded,
-        "RESOURCE_NOT_FOUND" => ErrorCode::ResourceNotFound,
-        "RESOURCE_NAME_CONFLICT" => ErrorCode::ResourceNameConflict,
-        "RESOURCE_NOT_READY" => ErrorCode::ResourceNotReady,
-        "RESOURCE_REFERENCED" => ErrorCode::ResourceReferenced,
-        "RESOURCE_UNAVAILABLE" => ErrorCode::ResourceUnavailable,
-        "RESOURCE_INVARIANT_VIOLATION" => ErrorCode::ResourceInvariantViolation,
-        "BINDING_NOT_FOUND" => ErrorCode::BindingNotFound,
-        "BINDING_TYPE_MISMATCH" => ErrorCode::BindingTypeMismatch,
-        "BINDING_PERMISSION_DENIED" => ErrorCode::BindingPermissionDenied,
-        "BINDING_CAPABILITY_UNSUPPORTED" => ErrorCode::BindingCapabilityUnsupported,
-        "BINDING_PROTOCOL_ERROR" => ErrorCode::BindingProtocolError,
-        "BINDING_LIMIT_EXCEEDED" => ErrorCode::BindingLimitExceeded,
-        "BINDING_RESULT_UNKNOWN" => ErrorCode::BindingResultUnknown,
-        "QUEUE_NOT_FOUND" => ErrorCode::QueueNotFound,
-        "QUEUE_NOT_READY" => ErrorCode::QueueNotReady,
-        "QUEUE_CONFIG_PENDING" => ErrorCode::QueueConfigPending,
-        "QUEUE_INVARIANT_VIOLATION" => ErrorCode::QueueInvariantViolation,
-        "RUNTIME_UNAVAILABLE" => ErrorCode::RuntimeUnavailable,
-        "RUNTIME_RESULT_UNKNOWN" => ErrorCode::RuntimeResultUnknown,
-        _ => ErrorCode::Internal,
     }
 }
 

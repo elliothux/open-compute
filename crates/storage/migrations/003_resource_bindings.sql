@@ -63,9 +63,6 @@ CREATE TABLE resource_referrers (
   PRIMARY KEY(resource_id, referrer_kind, referrer_id)
 ) STRICT, WITHOUT ROWID;
 
-ALTER TABLE control_idempotency
-ADD COLUMN resource_id TEXT REFERENCES resources(id) DEFERRABLE INITIALLY DEFERRED;
-
 CREATE TRIGGER resource_transition_guard
 BEFORE UPDATE OF state ON resources
 WHEN OLD.state != NEW.state AND NOT (

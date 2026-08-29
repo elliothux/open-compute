@@ -4,11 +4,13 @@
 //! values. Secret references stay symbolic until a later crate resolves them.
 
 use crate::error::{ErrorCode, PlatformError};
-use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use url::Url;
+
+mod scheduler;
+pub use scheduler::{SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig};
 
 const DEFAULT_PUBLIC_BIND: &str = "127.0.0.1:8787";
 const DEFAULT_DATA_DIR: &str = "/var/lib/open-compute";
@@ -36,8 +38,6 @@ pub struct PlatformConfig {
     pub cache: CacheConfig,
     /// Bounded metrics export.
     pub metrics: MetricsConfig,
-    /// Bounded diagnostic retention.
-    pub diagnostics: DiagnosticsConfig,
     /// P1 platform-wide admission, resource-count, snapshot, and recovery limits.
     pub hardening: HardeningConfig,
     /// Worker ingress, deletion, and artifact retention policy.
@@ -76,7 +76,6 @@ impl PlatformConfig {
         self.runtime.validate()?;
         self.cache.validate()?;
         self.metrics.validate()?;
-        self.diagnostics.validate()?;
         self.hardening.validate()?;
         if self.hardening.emergency_reserve_bytes >= self.storage.free_space_hard_bytes {
             return Err(PlatformError::new(
@@ -208,8 +207,6 @@ pub struct ServerConfig {
     pub admin_bind: Option<String>,
     /// Optional admin auth secret reference. Required when admin bind is non-loopback.
     pub admin_auth: Option<SecretReference>,
-    /// Trusted proxy CIDRs; empty by default.
-    pub trusted_proxies: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -218,7 +215,6 @@ impl Default for ServerConfig {
             public_bind: DEFAULT_PUBLIC_BIND.to_string(),
             admin_bind: None,
             admin_auth: None,
-            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -243,14 +239,6 @@ impl ServerConfig {
             }
         } else if let Some(reference) = &self.admin_auth {
             reference.validate("server.admin_auth")?;
-        }
-        for proxy in &self.trusted_proxies {
-            if proxy.parse::<IpNet>().is_err() {
-                return Err(PlatformError::new(
-                    ErrorCode::ConfigInvalid,
-                    "server.trusted_proxies entries must be IPv4 or IPv6 CIDR prefixes",
-                ));
-            }
         }
         Ok(())
     }
@@ -596,36 +584,6 @@ impl MetricsConfig {
     fn validate(&self) -> Result<(), PlatformError> {
         require_nonzero(self.max_label_value_bytes, "metrics.max_label_value_bytes")?;
         require_nonzero(self.max_series, "metrics.max_series")?;
-        Ok(())
-    }
-}
-
-/// Bounded diagnostics retention.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, default)]
-pub struct DiagnosticsConfig {
-    /// Maximum failed-start reports retained.
-    pub max_failed_starts: u32,
-    /// Maximum diagnostics directory size in bytes.
-    pub max_bytes: u64,
-}
-
-impl Default for DiagnosticsConfig {
-    fn default() -> Self {
-        Self {
-            max_failed_starts: 32,
-            max_bytes: 16_777_216,
-        }
-    }
-}
-
-impl DiagnosticsConfig {
-    fn validate(&self) -> Result<(), PlatformError> {
-        require_nonzero(
-            u64::from(self.max_failed_starts),
-            "diagnostics.max_failed_starts",
-        )?;
-        require_nonzero(self.max_bytes, "diagnostics.max_bytes")?;
         Ok(())
     }
 }
@@ -1025,216 +983,6 @@ impl DurableObjectsConfig {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
                 "Durable Object host policy is outside the hard platform bounds",
-            ));
-        }
-        Ok(())
-    }
-}
-
-/// One fixed scheduler workload-pool policy.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, default)]
-pub struct SchedulerPoolConfig {
-    /// Whether production composition enables this pool.
-    pub enabled: bool,
-    /// Maximum claims from this pool concurrently dispatched.
-    pub max_in_flight: u32,
-    /// Maximum claims selected in one short transaction.
-    pub claim_batch: u32,
-    /// Weighted deficit round-robin quantum.
-    pub weight: u32,
-}
-
-impl SchedulerPoolConfig {
-    fn alarm_default() -> Self {
-        Self {
-            enabled: true,
-            max_in_flight: 16,
-            claim_batch: 32,
-            weight: 1,
-        }
-    }
-
-    fn validate(self) -> bool {
-        self.max_in_flight > 0
-            && self.max_in_flight <= 4096
-            && self.claim_batch > 0
-            && self.claim_batch <= 10_000
-            && self.weight > 0
-            && self.weight <= 1024
-    }
-}
-
-impl Default for SchedulerPoolConfig {
-    fn default() -> Self {
-        Self::alarm_default()
-    }
-}
-
-/// Fixed scheduler pool registry; Alarm, Queue, and Cron are production workloads.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, default)]
-pub struct SchedulerPoolsConfig {
-    /// Durable Object alarm pool.
-    pub alarm: SchedulerPoolConfig,
-    /// Queue consumer and retention-maintenance pool.
-    pub queue: SchedulerPoolConfig,
-    /// Cron logical-slot and dispatch pool.
-    pub cron: SchedulerPoolConfig,
-    /// Sequential durable Workflow activation pool.
-    pub workflow: SchedulerPoolConfig,
-}
-
-impl Default for SchedulerPoolsConfig {
-    fn default() -> Self {
-        Self {
-            alarm: SchedulerPoolConfig::alarm_default(),
-            queue: SchedulerPoolConfig {
-                enabled: true,
-                max_in_flight: 32,
-                claim_batch: 32,
-                weight: 1,
-            },
-            cron: SchedulerPoolConfig {
-                enabled: true,
-                max_in_flight: 8,
-                claim_batch: 8,
-                weight: 1,
-            },
-            workflow: SchedulerPoolConfig {
-                enabled: true,
-                max_in_flight: 16,
-                claim_batch: 16,
-                weight: 1,
-            },
-        }
-    }
-}
-
-/// P2.1 single-process multi-workload scheduler policy.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, default)]
-pub struct SchedulerConfig {
-    /// Bounded safety-reconcile interval used when no earlier wake is known.
-    pub poll_interval_ms: u64,
-    /// Legacy Alarm claim batch used by configurations without a pools table.
-    pub claim_batch: u32,
-    /// Global maximum concurrent scheduler dispatches.
-    pub max_in_flight: u32,
-    /// Persisted claim lease duration.
-    pub claim_lease_ms: u64,
-    /// Maximum time platformd waits for one workerd alarm dispatch.
-    pub dispatch_timeout_ms: u64,
-    /// Safety interval between dispatch timeout and claim expiry.
-    pub lease_guard_ms: u64,
-    /// Maximum live objects probed by one repair pass.
-    pub repair_batch: u32,
-    /// Delay between bounded repair passes.
-    pub repair_interval_ms: u64,
-    /// Maximum graceful-shutdown wait for in-flight alarm dispatches.
-    pub shutdown_drain_ms: u64,
-    /// Grace within which at most the newest missed Cron slot is projected.
-    pub cron_misfire_grace_ms: u64,
-    /// Number of retries after an initial known Cron handler failure.
-    pub cron_max_retries: u8,
-    /// Per-activation terminal Cron history row cap.
-    pub cron_history_limit: u32,
-    /// Maximum terminal Cron history age.
-    pub cron_history_retention_ms: u64,
-    /// Optional per-pool policy; absence preserves the P0.8 Alarm settings.
-    pub pools: Option<SchedulerPoolsConfig>,
-}
-
-impl Default for SchedulerConfig {
-    fn default() -> Self {
-        Self {
-            poll_interval_ms: 100,
-            claim_batch: 32,
-            max_in_flight: 16,
-            claim_lease_ms: 60_000,
-            dispatch_timeout_ms: 30_000,
-            lease_guard_ms: 5_000,
-            repair_batch: 100,
-            repair_interval_ms: 30_000,
-            shutdown_drain_ms: 10_000,
-            cron_misfire_grace_ms: 300_000,
-            cron_max_retries: 3,
-            cron_history_limit: 100,
-            cron_history_retention_ms: 7 * 24 * 60 * 60 * 1000,
-            pools: None,
-        }
-    }
-}
-
-impl SchedulerConfig {
-    /// Effective policy for one fixed workload kind.
-    #[must_use]
-    pub fn pool(&self, kind: crate::SchedulerKind) -> SchedulerPoolConfig {
-        let Some(pools) = &self.pools else {
-            return match kind {
-                crate::SchedulerKind::Alarm => SchedulerPoolConfig {
-                    enabled: true,
-                    max_in_flight: self.max_in_flight,
-                    claim_batch: self.claim_batch,
-                    weight: 1,
-                },
-                crate::SchedulerKind::Queue => SchedulerPoolsConfig::default().queue,
-                crate::SchedulerKind::Cron => SchedulerPoolsConfig::default().cron,
-                crate::SchedulerKind::Workflow => SchedulerPoolsConfig::default().workflow,
-            };
-        };
-        match kind {
-            crate::SchedulerKind::Alarm => pools.alarm,
-            crate::SchedulerKind::Queue => pools.queue,
-            crate::SchedulerKind::Cron => pools.cron,
-            crate::SchedulerKind::Workflow => pools.workflow,
-        }
-    }
-
-    fn validate(&self) -> Result<(), PlatformError> {
-        let guarded_timeout = self
-            .dispatch_timeout_ms
-            .checked_add(self.lease_guard_ms)
-            .ok_or_else(|| {
-                PlatformError::new(ErrorCode::LimitInvalid, "scheduler lease bounds overflow")
-            })?;
-        if self.poll_interval_ms == 0
-            || self.poll_interval_ms > 60_000
-            || self.claim_batch == 0
-            || self.claim_batch > 10_000
-            || self.max_in_flight == 0
-            || self.max_in_flight > 4096
-            || self.claim_batch > self.max_in_flight.saturating_mul(2)
-            || self.dispatch_timeout_ms == 0
-            || self.dispatch_timeout_ms > 5 * 60 * 1000
-            || self.lease_guard_ms == 0
-            || self.claim_lease_ms < guarded_timeout
-            || self.claim_lease_ms > 15 * 60 * 1000
-            || self.repair_batch == 0
-            || self.repair_batch > 10_000
-            || self.repair_interval_ms == 0
-            || self.repair_interval_ms > 24 * 60 * 60 * 1000
-            || self.shutdown_drain_ms > 5 * 60 * 1000
-            || self.cron_misfire_grace_ms > 24 * 60 * 60 * 1000
-            || self.cron_max_retries > 3
-            || self.cron_history_limit == 0
-            || self.cron_history_limit > 10_000
-            || self.cron_history_retention_ms == 0
-            || self.cron_history_retention_ms > 365 * 24 * 60 * 60 * 1000
-        {
-            return Err(PlatformError::new(
-                ErrorCode::LimitInvalid,
-                "scheduler policy is outside the hard platform bounds",
-            ));
-        }
-        if let Some(pools) = &self.pools
-            && ![pools.alarm, pools.queue, pools.cron, pools.workflow]
-                .into_iter()
-                .all(SchedulerPoolConfig::validate)
-        {
-            return Err(PlatformError::new(
-                ErrorCode::LimitInvalid,
-                "scheduler pool policy is outside the hard platform bounds",
             ));
         }
         Ok(())

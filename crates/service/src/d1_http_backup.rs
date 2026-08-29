@@ -35,7 +35,7 @@ pub(super) async fn create_backup(
     };
     let _admission = match api
         .storage
-        .reserve_mutation(OperationClass::D1, api.config.database_quota_bytes)
+        .reserve_mutation(api.config.database_quota_bytes)
     {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
@@ -96,9 +96,7 @@ pub(super) async fn create_backup(
         .data_dir()
         .backup_staging_dir()
         .join(format!("{backup_id}.d1.sqlite"));
-    if stage.exists() {
-        let _ = std::fs::remove_file(&stage);
-    }
+    crate::sqlite_staging::remove_sqlite_staging(&stage);
     match api
         .backend
         .online_backup(account_id, resource_id, stage.clone())
@@ -111,12 +109,12 @@ pub(super) async fn create_backup(
                 "D1 schema changed while backup was reserved",
             );
             fail_backup(&api.storage, &backup.id, error.code()).await;
-            let _ = std::fs::remove_file(&stage);
+            crate::sqlite_staging::remove_sqlite_staging(&stage);
             return error_response(error, request_id);
         }
         Err(error) => {
             fail_backup(&api.storage, &backup.id, error.code()).await;
-            let _ = std::fs::remove_file(&stage);
+            crate::sqlite_staging::remove_sqlite_staging(&stage);
             return error_response(error, request_id);
         }
     }
@@ -129,12 +127,12 @@ pub(super) async fn create_backup(
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
             fail_backup(&api.storage, &backup.id, error.code()).await;
-            let _ = std::fs::remove_file(&stage);
+            crate::sqlite_staging::remove_sqlite_staging(&stage);
             return error_response(error, request_id);
         }
         Err(_) => {
             fail_backup(&api.storage, &backup.id, ErrorCode::Internal).await;
-            let _ = std::fs::remove_file(&stage);
+            crate::sqlite_staging::remove_sqlite_staging(&stage);
             return error_response(internal(), request_id);
         }
     };
@@ -193,7 +191,7 @@ pub(super) async fn create_backup(
         }
         Err(error) => Err(error),
     };
-    let _ = std::fs::remove_file(stage);
+    crate::sqlite_staging::remove_sqlite_staging(&stage);
     match response {
         Ok(backup) => {
             backup_metric.success();
@@ -287,10 +285,7 @@ pub(super) async fn restore_database(
     else {
         return error_response(internal(), request_id);
     };
-    let _admission = match api
-        .storage
-        .reserve_mutation(OperationClass::D1, size.saturating_mul(2).max(1))
-    {
+    let _admission = match api.storage.reserve_mutation(size.saturating_mul(2).max(1)) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
@@ -356,12 +351,12 @@ pub(super) async fn restore_database(
         .download_d1_backup(&object_key, &hex::encode(digest), size, &mut file)
         .await
     {
-        let _ = std::fs::remove_file(&stage);
+        crate::sqlite_staging::remove_sqlite_staging(&stage);
         return error_response(error, request_id);
     }
     let synced = tokio::task::spawn_blocking(move || file.sync_all()).await;
     if !matches!(synced, Ok(Ok(()))) {
-        let _ = std::fs::remove_file(&stage);
+        crate::sqlite_staging::remove_sqlite_staging(&stage);
         return error_response(internal(), request_id);
     }
     let restore_key = format!(
@@ -375,6 +370,7 @@ pub(super) async fn restore_database(
         idempotency_key: restore_key,
         request_id,
         quota_bytes: api.config.database_quota_bytes,
+        max_resources_per_account: api.max_resources_per_account,
     };
     let storage = api.storage.clone();
     let stage_for_restore = stage.clone();
@@ -382,7 +378,7 @@ pub(super) async fn restore_database(
         restore_downloaded_database(&storage, &stage_for_restore, &operation)
     })
     .await;
-    let _ = std::fs::remove_file(stage);
+    crate::sqlite_staging::remove_sqlite_staging(&stage);
     match restored {
         Ok(Ok(CreateResourceOutcome::Applied(result))) => {
             json_response(&result, StatusCode::CREATED)
@@ -400,6 +396,7 @@ struct RestoreOperation {
     idempotency_key: String,
     request_id: RequestId,
     quota_bytes: u64,
+    max_resources_per_account: u32,
 }
 
 fn restore_downloaded_database(
@@ -416,19 +413,22 @@ fn restore_downloaded_database(
     canonical.extend_from_slice(&operation.quota_bytes.to_be_bytes());
     let fingerprint = storage.crypto().fingerprint_request(&canonical);
     let repository = ResourceRepository::new(storage.db());
-    let reservation = repository.reserve_create(&ReserveResourceCreate {
-        account_id: operation.account_id,
-        kind: BindingKind::D1Database,
-        name: &operation.new_name,
-        idempotency_key: &operation.idempotency_key,
-        fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-        request_fingerprint: &fingerprint,
-        resource_id: ResourceId::generate(),
-        driver_schema_version: D1_DATABASE_SCHEMA_VERSION,
-        request_id: operation.request_id,
-        now_ms: operation_now,
-        expires_at_ms: operation_now.saturating_add(IDEMPOTENCY_TTL_MS),
-    })?;
+    let reservation = repository.reserve_create(
+        &ReserveResourceCreate {
+            account_id: operation.account_id,
+            kind: BindingKind::D1Database,
+            name: &operation.new_name,
+            idempotency_key: &operation.idempotency_key,
+            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+            request_fingerprint: &fingerprint,
+            resource_id: ResourceId::generate(),
+            driver_schema_version: D1_DATABASE_SCHEMA_VERSION,
+            request_id: operation.request_id,
+            now_ms: operation_now,
+            expires_at_ms: operation_now.saturating_add(IDEMPOTENCY_TTL_MS),
+        },
+        operation.max_resources_per_account,
+    )?;
     let resource = match reservation {
         ResourceCreateReservation::Complete(response) => {
             return Ok(CreateResourceOutcome::Replay(response));

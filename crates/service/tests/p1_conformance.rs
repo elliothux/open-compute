@@ -100,11 +100,7 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         "workflows",
     ] {
         assert_eq!(products[name]["status"], "supported", "{name}");
-        assert_eq!(
-            products[name]["capability_version"],
-            if name == "workflows" { 2 } else { 1 },
-            "{name}"
-        );
+        assert_eq!(products[name]["capability_version"], 1, "{name}");
     }
     {
         let name = "websocket_hibernation";
@@ -118,12 +114,9 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         ),
         (
             "kv",
-            vec!["get", "getWithMetadata", "put", "delete", "list", "getBulk"],
+            vec!["get", "getWithMetadata", "put", "delete", "list"],
         ),
-        (
-            "r2",
-            vec!["head", "get", "put", "delete", "list", "deleteMany"],
-        ),
+        ("r2", vec!["head", "get", "put", "delete", "list"]),
         (
             "d1",
             vec![

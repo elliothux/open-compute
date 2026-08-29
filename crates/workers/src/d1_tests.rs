@@ -235,19 +235,22 @@ fn creating_database_keeps_its_frozen_quota_across_config_change() {
     let account = storage.identity().default_account_id;
     let fingerprint = storage.crypto().fingerprint_request(b"frozen-d1-create");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::D1Database,
-            name: "frozen-quota",
-            idempotency_key: "frozen-quota",
-            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id: ResourceId::generate(),
-            driver_schema_version: D1_DATABASE_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 1_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::D1Database,
+                name: "frozen-quota",
+                idempotency_key: "frozen-quota",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: ResourceId::generate(),
+                driver_schema_version: D1_DATABASE_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 1_000,
+            },
+            1_000_000,
+        )
         .unwrap()
     else {
         panic!("first reservation must create the resource");
@@ -275,19 +278,22 @@ fn restore_intent_is_deferred_and_cannot_fall_back_to_empty_create() {
     let account = storage.identity().default_account_id;
     let fingerprint = storage.crypto().fingerprint_request(b"restore-intent");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::D1Database,
-            name: "restore-intent",
-            idempotency_key: "restore-intent",
-            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id: ResourceId::generate(),
-            driver_schema_version: D1_DATABASE_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 1_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::D1Database,
+                name: "restore-intent",
+                idempotency_key: "restore-intent",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: ResourceId::generate(),
+                driver_schema_version: D1_DATABASE_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 1_000,
+            },
+            1_000_000,
+        )
         .unwrap()
     else {
         panic!("first reservation must create the resource");

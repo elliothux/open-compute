@@ -1,4 +1,18 @@
-// Capability V1 canonical JSON. No toJSON hooks or structured-clone extensions.
+// The current codec privately brands serializer errors so tenant getters cannot
+// forge a platform size verdict or inject their exception text into status.
+const serializationFailures = new WeakMap<object, string>();
+const rememberSerializationFailure = serializationFailures.set.bind(serializationFailures);
+const readSerializationFailure = serializationFailures.get.bind(serializationFailures);
+function serializationError(code: string): Error {
+  const error = workflowError(code);
+  rememberSerializationFailure(error, code);
+  return error;
+}
+export function workflowSerializationCode(error: unknown): string {
+  return error !== null && (typeof error === "object" || typeof error === "function")
+    && readSerializationFailure(error) === "WORKFLOW_RESULT_TOO_LARGE"
+    ? "WORKFLOW_RESULT_TOO_LARGE" : "WORKFLOW_SERIALIZATION_UNSUPPORTED";
+}
 const encoder = new TextEncoder();
 export const MAX_WORKFLOW_JSON_BYTES = 1024 * 1024;
 
@@ -20,12 +34,12 @@ export function workflowJson(value: unknown, tooLarge = "WORKFLOW_RESULT_TOO_LAR
   let bytes = 0;
   const push = (part: string): void => {
     bytes += encoder.encode(part).byteLength;
-    if (bytes > MAX_WORKFLOW_JSON_BYTES) throw workflowError(tooLarge);
+    if (bytes > MAX_WORKFLOW_JSON_BYTES) throw serializationError(tooLarge);
     parts.push(part);
   };
   const string = (value: string): string => {
-    if (!value.isWellFormed()) throw workflowError("WORKFLOW_SERIALIZATION_UNSUPPORTED");
-    if (encoder.encode(value).byteLength > MAX_WORKFLOW_JSON_BYTES) throw workflowError(tooLarge);
+    if (!value.isWellFormed()) throw serializationError("WORKFLOW_SERIALIZATION_UNSUPPORTED");
+    if (encoder.encode(value).byteLength > MAX_WORKFLOW_JSON_BYTES) throw serializationError(tooLarge);
     return JSON.stringify(value);
   };
   const omitted = (value: unknown): boolean => ["undefined", "function", "symbol"].includes(typeof value);
@@ -36,11 +50,11 @@ export function workflowJson(value: unknown, tooLarge = "WORKFLOW_RESULT_TOO_LAR
       push(JSON.stringify(value)); return;
     }
     if (typeof value !== "object" || seen.has(value) || depth >= 127) {
-      throw workflowError("WORKFLOW_SERIALIZATION_UNSUPPORTED");
+      throw serializationError("WORKFLOW_SERIALIZATION_UNSUPPORTED");
     }
     const array = Array.isArray(value);
     if (!array && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
-      throw workflowError("WORKFLOW_SERIALIZATION_UNSUPPORTED");
+      throw serializationError("WORKFLOW_SERIALIZATION_UNSUPPORTED");
     }
     seen.add(value);
     push(array ? "[" : "{");

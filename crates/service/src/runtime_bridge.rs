@@ -37,10 +37,8 @@ use tokio::net::TcpListener;
 
 #[path = "runtime_bridge/workflow.rs"]
 mod workflow;
-pub use workflow::{WorkflowDispatchResult, WorkflowRunRequest};
+pub use workflow::{WorkflowDispatchResult, WorkflowOutcome, WorkflowRunRequest};
 mod custom_events;
-mod workflow_v2;
-pub use workflow_v2::{WorkflowV2DispatchResult, WorkflowV2Outcome};
 
 const SOURCE_PATH: &str = "/internal/runtime/v1/deployments/resolve";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
@@ -372,7 +370,7 @@ pub struct WorkerdTransport {
     auth: GenerationAuthRegistry,
     supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     max_request_body: usize,
-    workflow_v2_quarantine: Arc<Mutex<Option<open_compute_runtime::GenerationCredential>>>,
+    workflow_quarantine: Arc<Mutex<Option<open_compute_runtime::GenerationCredential>>>,
     #[cfg(test)]
     test_endpoint: Option<u16>,
 }
@@ -400,7 +398,7 @@ impl WorkerdTransport {
             auth,
             supervisor,
             max_request_body: DEFAULT_MAX_TENANT_BODY,
-            workflow_v2_quarantine: Arc::new(Mutex::new(None)),
+            workflow_quarantine: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_endpoint: None,
         }

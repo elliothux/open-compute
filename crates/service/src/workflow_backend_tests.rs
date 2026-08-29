@@ -13,31 +13,32 @@ fn ready(f: &Fixture) -> (WorkflowId, WorkflowBindingRecord) {
         .create_definition(f.account, "backend", 0)
         .unwrap();
     let version = repository
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 1, 1)
+        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
         .unwrap();
     repository
         .finish_version(f.account, version.target.version_id, true, 2)
         .unwrap();
-    (definition.id, ready_binding(f, definition.id, 1))
+    (definition.id, ready_binding(f, definition.id))
 }
 
-fn ready_binding(f: &Fixture, definition: WorkflowId, capability: u32) -> WorkflowBindingRecord {
+fn ready_binding(f: &Fixture, definition: WorkflowId) -> WorkflowBindingRecord {
     let repository = WorkflowRepository::new(f.storage.db());
     let workers = WorkerRepository::new(f.storage.db());
     let (worker, _) = workers
         .create_worker(
             f.account,
-            &format!("caller-{capability}"),
+            &format!("caller-{}", RequestId::generate()),
             RequestId::generate(),
             0,
+            1_000_000,
         )
         .unwrap();
     let deployment = DeploymentId::generate();
     let binding = repository
-        .prepare_binding(f.account, deployment, "FLOW", definition, capability, 3)
+        .prepare_binding(f.account, deployment, "FLOW", definition, 3)
         .unwrap();
     workers
-        .insert_staging_deployment_with_products_and_limit(
+        .insert_staging_deployment(
             &NewDeployment {
                 id: deployment,
                 account_id: f.account,
@@ -99,10 +100,10 @@ fn body(fence: &WorkflowFence, fields: Value) -> Value {
 }
 
 #[test]
-fn durable_caller_uses_uuid_scope_and_does_not_upgrade_legacy_execution() {
+fn workflow_caller_uses_current_definition_scope_and_strict_handles() {
     let f = fixture();
-    let (definition, legacy) = ready(&f);
-    let durable = ready_binding(&f, definition, 2);
+    let (definition, binding) = ready(&f);
+    let second = ready_binding(&f, definition);
     let service = WorkflowBindingService::new(
         f.storage.clone(),
         f.scheduler.clone(),
@@ -115,92 +116,51 @@ fn durable_caller_uses_uuid_scope_and_does_not_upgrade_legacy_execution() {
             binding.descriptor.binding_id
         )
     };
-    service
+    let created = service
         .execute(
-            &path(&legacy, "create"),
-            &caller(&legacy),
+            &path(&binding, "create"),
+            &caller(&binding),
             json!({"id":"original","payloadJson":"null"}),
             10,
         )
         .unwrap();
-    let repository = WorkflowRepository::new(f.storage.db());
-    let identity = repository
-        .find_instance(definition, "original")
-        .unwrap()
-        .identity;
-    let handle = service
-        .execute(
-            &path(&durable, "get"),
-            &caller(&durable),
-            json!({"id":"original"}),
-            11,
-        )
-        .unwrap();
+    let instance_id: WorkflowInstanceId = created["instanceId"].as_str().unwrap().parse().unwrap();
+    assert_eq!(created["id"], "original");
     assert_eq!(
-        handle,
-        json!({"id":"original","instanceId":identity.instance_id})
+        service
+            .execute(
+                &path(&second, "get"),
+                &caller(&second),
+                json!({"id":"original"}),
+                11,
+            )
+            .unwrap(),
+        json!({"id":"original","instanceId":instance_id})
     );
     assert_eq!(
         service
             .execute(
-                &path(&durable, "status"),
-                &caller(&durable),
-                json!({"instanceId":identity.instance_id}),
-                11
+                &path(&second, "status"),
+                &caller(&second),
+                json!({"instanceId":instance_id}),
+                11,
             )
             .unwrap(),
         json!({"status":"queued"})
     );
-    for body in [
+    for invalid in [
         json!({"id":"original"}),
-        json!({"instanceId":identity.instance_id,"id":"original"}),
+        json!({"instanceId":instance_id,"id":"original"}),
     ] {
         assert_eq!(
             service
-                .execute(&path(&durable, "status"), &caller(&durable), body, 11)
+                .execute(&path(&second, "status"), &caller(&second), invalid, 11)
                 .unwrap_err()
                 .code(),
             ErrorCode::WorkflowSerializationUnsupported
         );
     }
-    assert_eq!(
-        service
-            .execute(
-                &path(&legacy, "status"),
-                &caller(&legacy),
-                json!({"instanceId":identity.instance_id}),
-                11
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::WorkflowSerializationUnsupported
-    );
-    assert_eq!(
-        service
-            .execute(
-                &path(&durable, "status"),
-                &caller(&durable),
-                json!({"instanceId":WorkflowInstanceId::generate()}),
-                11
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::WorkflowInstanceNotFound
-    );
-    assert_eq!(
-        service
-            .execute(
-                &path(&durable, "create"),
-                &caller(&durable),
-                json!({"id":"mismatch","payloadJson":"null"}),
-                11
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::WorkflowCapabilityMismatch
-    );
-    assert!(repository.find_instance(definition, "mismatch").is_err());
-    let mut do_headers = caller(&durable);
+    let mut do_headers = caller(&second);
     do_headers.insert(
         "x-open-compute-workflow-do-context",
         HeaderValue::from_static("1"),
@@ -215,7 +175,7 @@ fn durable_caller_uses_uuid_scope_and_does_not_upgrade_legacy_execution() {
     ] {
         assert_eq!(
             service
-                .execute(&path(&durable, method), &do_headers, json!({}), 11)
+                .execute(&path(&second, method), &do_headers, json!({}), 11)
                 .unwrap_err()
                 .code(),
             ErrorCode::WorkflowDoOutputGateUnsupported
@@ -224,21 +184,21 @@ fn durable_caller_uses_uuid_scope_and_does_not_upgrade_legacy_execution() {
     assert_eq!(
         service
             .execute(
-                &path(&durable, "status"),
+                &path(&second, "status"),
                 &do_headers,
-                json!({"instanceId":identity.instance_id}),
-                11
+                json!({"instanceId":instance_id}),
+                11,
             )
             .unwrap()["status"],
         "queued"
     );
-    // A definition scope is independent of caller capability and cannot be selected in the body.
+    let repository = WorkflowRepository::new(f.storage.db());
     let foreign = repository
         .create_definition(f.account, "foreign", 12)
         .unwrap();
     assert_eq!(
         WorkflowController::new(&f.storage, &f.scheduler, &WorkflowsConfig::default())
-            .status(f.account, foreign.id, identity.instance_id, 2, 0)
+            .status(f.account, foreign.id, instance_id, 12)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowInstanceNotFound
@@ -259,26 +219,30 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
         "/internal/bindings/v1/workflow/{}",
         binding.descriptor.binding_id
     );
-    assert_eq!(
-        service
-            .execute(
-                &format!("{path}/create"),
-                &headers,
-                json!({"id":"one","payloadJson":"{\"secret\":1}"}),
-                10
-            )
-            .unwrap(),
-        json!({"id":"one"})
-    );
+    let created = service
+        .execute(
+            &format!("{path}/create"),
+            &headers,
+            json!({"id":"one","payloadJson":"{\"secret\":1}"}),
+            10,
+        )
+        .unwrap();
+    let instance_id: WorkflowInstanceId = created["instanceId"].as_str().unwrap().parse().unwrap();
+    assert_eq!(created["id"], "one");
     assert_eq!(
         service
             .execute(&format!("{path}/get"), &headers, json!({"id":"one"}), 11)
             .unwrap(),
-        json!({"id":"one"})
+        json!({"id":"one","instanceId":instance_id})
     );
     assert_eq!(
         service
-            .execute(&format!("{path}/status"), &headers, json!({"id":"one"}), 11)
+            .execute(
+                &format!("{path}/status"),
+                &headers,
+                json!({"instanceId":instance_id}),
+                11,
+            )
             .unwrap(),
         json!({"status":"queued"})
     );
@@ -288,7 +252,7 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
                 &format!("{path}/create"),
                 &headers,
                 json!({"id":"one","payloadJson":"null"}),
-                11
+                11,
             )
             .unwrap_err()
             .code(),
@@ -305,7 +269,7 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
                 &format!("{path}/create"),
                 &do_headers,
                 json!({"id":"do","payloadJson":"null"}),
-                11
+                11,
             )
             .unwrap_err()
             .code(),
@@ -316,8 +280,8 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
             .execute(
                 &format!("{path}/status"),
                 &do_headers,
-                json!({"id":"one"}),
-                11
+                json!({"instanceId":instance_id}),
+                11,
             )
             .unwrap()["status"],
         "queued"
@@ -328,7 +292,7 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
                 &format!("{path}/create"),
                 &headers,
                 json!({"id":"forged","payloadJson":"null","definitionId":definition}),
-                11
+                11,
             )
             .unwrap_err()
             .code(),
@@ -339,12 +303,12 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
             .execute(
                 &format!("{path}/restart"),
                 &headers,
-                json!({"id":"one"}),
-                11
+                json!({"instanceId":instance_id}),
+                11,
             )
             .unwrap_err()
             .code(),
-        ErrorCode::WorkflowMethodUnsupported
+        ErrorCode::WorkflowSerializationUnsupported
     );
     let mut stale = headers.clone();
     stale.insert(
@@ -358,56 +322,112 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
             .code(),
         ErrorCode::WorkflowBindingStale
     );
+
     let controller = WorkflowController::new(&f.storage, &f.scheduler, &config);
     let run = controller
         .claim(12, &mut Default::default())
         .unwrap()
         .unwrap();
-    let step = body(
+    let declaration = |ordinal, name: &str, dependencies: Vec<u32>| {
+        json!({
+            "ordinal":ordinal,
+            "kind":"do",
+            "name":name,
+            "nameCount":1,
+            "config":{},
+            "dependencies":dependencies,
+            "batchFirstOrdinal":ordinal,
+            "batchSize":1
+        })
+    };
+    let first_claim = body(
         &run.fence,
-        json!({"ordinal":0,"name":"lookup","nameCount":1,"configJson":"null"}),
+        json!({"steps":[declaration(0,"lookup",vec![])],"remainingMs":config.dispatch_timeout_ms}),
     );
-    let grant = service.run("claim", step.clone(), 13).unwrap();
-    let token = grant["stepToken"].clone();
+    let grant = service.run("claim-batch", first_claim.clone(), 13).unwrap();
+    let first = &grant["steps"][0];
+    assert_eq!(first["state"], "run");
     let success = body(
         &run.fence,
-        json!({"ordinal":0,"stepToken":token,"outputJson":"{\"value\":333333333.33333329}"}),
+        json!({
+            "ordinal":0,
+            "attempt":first["attempt"],
+            "stepToken":first["stepToken"],
+            "outputJson":"{\"value\":333333333.33333329}"
+        }),
     );
     assert_eq!(
-        service.run("success", success.clone(), 14).unwrap(),
-        json!({"ok":true})
+        service.run("success", success.clone(), 14).unwrap()["state"],
+        "complete"
     );
     assert_eq!(
         service.run("success", success, 15).unwrap_err().code(),
         ErrorCode::WorkflowStepStale
     );
     assert_eq!(
-        service.run("claim", step, 15).unwrap()["outputJson"],
+        service.run("claim-batch", first_claim, 15).unwrap()["steps"][0]["state"],
+        "complete"
+    );
+    assert_eq!(
+        service
+            .run("result", body(&run.fence, json!({"ordinal":0})), 15)
+            .unwrap()["outputJson"],
         "{\"value\":333333333.3333333}"
     );
+
+    let second_claim = body(
+        &run.fence,
+        json!({"steps":[declaration(1,"fail",vec![0])],"remainingMs":config.dispatch_timeout_ms}),
+    );
     let second = service
-        .run(
-            "claim",
-            body(
-                &run.fence,
-                json!({"ordinal":1,"name":"fail","nameCount":1,"configJson":"null"}),
-            ),
-            16,
-        )
+        .run("claim-batch", second_claim.clone(), 16)
         .unwrap();
-    assert_eq!(service.run("failure",body(&run.fence,json!({"ordinal":1,"stepToken":second["stepToken"],"error":{"name":"Error","message":"private-stack"}})),17).unwrap_err().code(),ErrorCode::WorkflowSerializationUnsupported);
-    service.run("failure",body(&run.fence,json!({"ordinal":1,"stepToken":second["stepToken"],"error":WorkflowFailure::default(),"errorCode":"WORKFLOW_SERIALIZATION_UNSUPPORTED"})),17).unwrap();
+    let second = &second["steps"][0];
+    assert_eq!(
+        service
+            .run(
+                "failure",
+                body(
+                    &run.fence,
+                    json!({
+                        "ordinal":1,
+                        "attempt":second["attempt"],
+                        "stepToken":second["stepToken"],
+                        "error":{"name":"Error","message":"private-stack"}
+                    }),
+                ),
+                17,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowSerializationUnsupported
+    );
+    assert_eq!(
+        service
+            .run(
+                "failure",
+                body(
+                    &run.fence,
+                    json!({
+                        "ordinal":1,
+                        "attempt":second["attempt"],
+                        "stepToken":second["stepToken"],
+                        "code":"WORKFLOW_SERIALIZATION_UNSUPPORTED"
+                    }),
+                ),
+                17,
+            )
+            .unwrap()["state"],
+        "failed"
+    );
+    assert_eq!(
+        service.run("claim-batch", second_claim, 18).unwrap()["steps"][0]["state"],
+        "failed"
+    );
     let failed = service
-        .run(
-            "claim",
-            body(
-                &run.fence,
-                json!({"ordinal":1,"name":"fail","nameCount":1,"configJson":"null"}),
-            ),
-            18,
-        )
+        .run("result", body(&run.fence, json!({"ordinal":1})), 18)
         .unwrap();
-    assert_eq!(failed["errorCode"], "WORKFLOW_SERIALIZATION_UNSUPPORTED");
+    assert_eq!(failed["code"], "WORKFLOW_SERIALIZATION_UNSUPPORTED");
     assert!(!failed.to_string().contains("private-stack"));
     f.scheduler
         .finish_workflow(
@@ -431,12 +451,12 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
     assert_eq!(
         service
             .run(
-                "claim",
+                "claim-batch",
                 body(
                     &run.fence,
-                    json!({"ordinal":2,"name":"late","nameCount":1,"configJson":"null"})
+                    json!({"steps":[declaration(2,"late",vec![1])],"remainingMs":config.dispatch_timeout_ms}),
                 ),
-                20
+                20,
             )
             .unwrap_err()
             .code(),
@@ -447,6 +467,8 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
         .render(&crate::health::HealthCoordinator::new().snapshot());
     assert!(rendered.contains("open_compute_workflow_replay_steps_total{outcome=\"complete\"} 1"));
     assert!(rendered.contains("open_compute_workflow_replay_steps_total{outcome=\"failed\"} 1"));
+    assert!(rendered.contains("open_compute_workflow_steps_total{outcome=\"success\"} 2"));
+    assert!(rendered.contains("open_compute_workflow_steps_total{outcome=\"error\"} 1"));
     assert!(!rendered.contains("private-stack"));
 }
 
@@ -467,7 +489,7 @@ async fn workflow_private_http_is_bounded_and_rechecks_startup_generation() {
     let request = |content: &str, body: axum::body::Body| {
         Request::builder()
             .method("POST")
-            .uri("/internal/workflows/v1/runs/claim")
+            .uri("/internal/workflows/runs/claim-batch")
             .header("content-type", content)
             .header("x-open-compute-binding-token", "ab".repeat(32))
             .header("x-open-compute-startup-generation", "generation-one")

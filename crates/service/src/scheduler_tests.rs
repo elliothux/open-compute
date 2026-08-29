@@ -84,9 +84,10 @@ async fn kernel_run_claims_releases_and_shuts_down_without_polling() {
             store.clone(),
             storage,
             transport,
-            SchedulerConfig {
-                claim_batch: 1,
-                ..SchedulerConfig::default()
+            {
+                let mut config = SchedulerConfig::default();
+                config.pools.alarm.claim_batch = 1;
+                config
             },
             open_compute_core::WorkflowsConfig::default(),
             clock,
@@ -101,12 +102,14 @@ async fn kernel_run_claims_releases_and_shuts_down_without_polling() {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let kernel = tokio::spawn(scheduler.clone().run(shutdown_rx));
 
-    for _ in 0..10_000 {
-        if store.summary(10).unwrap().scheduled == 0 && fault_count.load(Ordering::Relaxed) == 1 {
-            break;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while store.summary(10).unwrap().scheduled != 0 || fault_count.load(Ordering::Relaxed) != 1
+        {
+            tokio::task::yield_now().await;
         }
-        tokio::task::yield_now().await;
-    }
+    })
+    .await
+    .unwrap();
     assert_eq!(store.summary(10).unwrap().scheduled, 0);
     assert_eq!(fault_count.load(Ordering::Relaxed), 1);
     scheduler.pause_kind(SchedulerKind::Alarm).unwrap();
@@ -138,7 +141,7 @@ async fn kernel_run_reports_disabled_and_globally_paused_pools() {
             pools.queue.enabled = false;
             pools.cron.enabled = false;
             pools.workflow.enabled = false;
-            config.pools = Some(pools);
+            config.pools = pools;
         }
         let scheduler = Arc::new(SchedulerService::new(
             store,
@@ -211,22 +214,9 @@ async fn scheduler_helpers_cover_all_fixed_states_and_completion_results() {
     );
 
     let mut admission = AdmissionTracker::new(2, [2; SchedulerKind::ALL.len()]);
-    let global = AtomicUsize::new(0);
-    let alarm = AtomicUsize::new(0);
-    let queue = AtomicUsize::new(0);
-    let cron = AtomicUsize::new(0);
-    let workflow = AtomicUsize::new(0);
     assert!(admission.reserve(SchedulerKind::Alarm, 1));
-    release_completed(
-        SchedulerKind::Alarm,
-        &mut admission,
-        &global,
-        &alarm,
-        &queue,
-        &cron,
-        &workflow,
-    );
-    assert_eq!(global.load(Ordering::Acquire), 0);
+    admission.release(SchedulerKind::Alarm, 1);
+    assert_eq!(admission.global_in_flight(), 0);
     assert!(admission.reserve(SchedulerKind::Workflow, 1));
     let task = tokio::spawn(async {
         panic!("expected test task failure");
@@ -238,16 +228,8 @@ async fn scheduler_helpers_cover_all_fixed_states_and_completion_results() {
     let failed = task.await.map(|kind| (task_id, kind));
     let kind = completed_kind(failed, &mut kinds).unwrap();
     assert_eq!(kind, SchedulerKind::Workflow);
-    release_completed(
-        kind,
-        &mut admission,
-        &global,
-        &alarm,
-        &queue,
-        &cron,
-        &workflow,
-    );
-    assert_eq!(workflow.load(Ordering::Acquire), 0);
+    admission.release(kind, 1);
+    assert_eq!(admission.pool_in_flight(SchedulerKind::Workflow), 0);
 }
 
 #[test]

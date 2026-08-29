@@ -3,14 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { importRuntime } from "../compiled-runtime.mjs";
 
-const { workflowJson } = await importRuntime("workflows/json.ts");
-const { workflowJson: workflowJsonV2, workflowSerializationCode } = await importRuntime("workflows/json-v2.ts");
+const { workflowJson, workflowSerializationCode } = await importRuntime("workflows/json.ts");
 
 test("shared Rust and JavaScript wire fixtures", () => {
   const fixtures = JSON.parse(readFileSync(new URL("../fixtures/workflow-json.json",import.meta.url),"utf8"));
   for (const {input,expected} of fixtures) {
     assert.equal(workflowJson(JSON.parse(input)),expected,input);
-    assert.equal(workflowJsonV2(JSON.parse(input)),expected,input);
   }
 });
 
@@ -37,13 +35,13 @@ test("size, depth, cycle, surrogate and non-JSON types are bounded", () => {
   assert.throws(() => workflowJson([value]), /WORKFLOW_SERIALIZATION_UNSUPPORTED/);
 });
 
-test("V2 distinguishes generated size failures without reading hostile exception fields", () => {
+test("generated failures are classified without reading hostile exception fields", () => {
   for (const [value, expected] of [
     ["x".repeat(1024*1024), "WORKFLOW_RESULT_TOO_LARGE"],
     [new Date(), "WORKFLOW_SERIALIZATION_UNSUPPORTED"],
     [{get value() {throw new Error("WORKFLOW_RESULT_TOO_LARGE");}}, "WORKFLOW_SERIALIZATION_UNSUPPORTED"],
     [{get value() {throw new Proxy({}, {get() {throw new Error("must not inspect");}});}}, "WORKFLOW_SERIALIZATION_UNSUPPORTED"],
   ]) {
-    assert.throws(() => workflowJsonV2(value), error => workflowSerializationCode(error) === expected);
+    assert.throws(() => workflowJson(value), error => workflowSerializationCode(error) === expected);
   }
 });

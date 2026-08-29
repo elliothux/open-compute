@@ -224,43 +224,9 @@ pub struct WorkerCodeDescriptorV1 {
 }
 
 impl WorkerCodeDescriptorV1 {
-    /// Build and validate the canonical descriptor.
+    /// Build and validate the canonical descriptor with every current product binding kind.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        account_id: AccountId,
-        worker_id: WorkerId,
-        deployment_id: DeploymentId,
-        artifact_sha256: [u8; 32],
-        manifest: &WorkerBundleManifest,
-        compatibility_date: String,
-        compatibility_flags: Vec<String>,
-        canonical_vars: BTreeMap<String, serde_json::Value>,
-        secret_revisions: Vec<SecretDescriptor>,
-        binding_descriptors: Vec<BindingDescriptorV1>,
-        limits: serde_json::Value,
-        loader_schema_version: u32,
-    ) -> Result<Self, PlatformError> {
-        Self::new_with_product_bindings(
-            account_id,
-            worker_id,
-            deployment_id,
-            artifact_sha256,
-            manifest,
-            compatibility_date,
-            compatibility_flags,
-            canonical_vars,
-            secret_revisions,
-            binding_descriptors,
-            Vec::new(),
-            Vec::new(),
-            limits,
-            loader_schema_version,
-        )
-    }
-
-    /// Build and validate the canonical descriptor with independent product bindings.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_product_bindings(
         account_id: AccountId,
         worker_id: WorkerId,
         deployment_id: DeploymentId,

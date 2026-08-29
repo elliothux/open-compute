@@ -24,6 +24,10 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
+    fixture_with_resource_limit(1_000).await
+}
+
+async fn fixture_with_resource_limit(max_resources_per_account: u32) -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
     let storage = Arc::new(
@@ -78,6 +82,7 @@ request_timeout_ms = 500
             namespace_quota_bytes: 256 * 1024 * 1024,
             ..KvConfig::default()
         },
+        max_resources_per_account,
         Duration::from_millis(10),
     );
     assert!(format!("{api:?}").contains("KvApiState"));
@@ -226,7 +231,7 @@ async fn namespace_control_crud_replays_and_fences_pinned_delete() {
 
 #[tokio::test]
 async fn online_backup_restore_and_retention_round_trip_namespace_data() {
-    let fixture = fixture().await;
+    let fixture = fixture_with_resource_limit(1).await;
     let source = create_namespace(&fixture, "source", "create-source").await;
     let record = KvNamespaceRepository::new(fixture.storage.db())
         .get(fixture.account, source)
@@ -317,21 +322,30 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
     );
 
     let restore_uri = format!("/v1/accounts/{}/kv/namespaces:restore", fixture.account);
-    let (status, restored_body) = response_json(
-        fixture
-            .router
-            .clone()
-            .oneshot(request(
-                "POST",
-                &restore_uri,
-                json!({"backupId": backup_id, "newName": "restored"}),
-                Some("restore-source"),
-            ))
-            .await
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
+    let first = fixture.router.clone().oneshot(request(
+        "POST",
+        &restore_uri,
+        json!({"backupId": backup_id, "newName": "restored-a"}),
+        Some("restore-source-a"),
+    ));
+    let second = fixture.router.clone().oneshot(request(
+        "POST",
+        &restore_uri,
+        json!({"backupId": backup_id, "newName": "restored-b"}),
+        Some("restore-source-b"),
+    ));
+    let (first, second) = tokio::join!(first, second);
+    let first = response_json(first.unwrap()).await;
+    let second = response_json(second.unwrap()).await;
+    let (restored_body, restored_name, restore_key) = match (first, second) {
+        ((StatusCode::CREATED, body), (StatusCode::TOO_MANY_REQUESTS, _)) => {
+            (body, "restored-a", "restore-source-a")
+        }
+        ((StatusCode::TOO_MANY_REQUESTS, _), (StatusCode::CREATED, body)) => {
+            (body, "restored-b", "restore-source-b")
+        }
+        statuses => panic!("one concurrent restore must win the only quota slot: {statuses:?}"),
+    };
     let restored: ResourceId = restored_body["resourceId"]
         .as_str()
         .unwrap()
@@ -362,8 +376,8 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
             .oneshot(request(
                 "POST",
                 &restore_uri,
-                json!({"backupId": backup_id, "newName": "restored"}),
-                Some("restore-source"),
+                json!({"backupId": backup_id, "newName": restored_name}),
+                Some(restore_key),
             ))
             .await
             .unwrap(),
@@ -371,6 +385,14 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(replayed_restore["resourceId"], restored.to_string());
+    let backup_staging_entries = std::fs::read_dir(fixture.storage.data_dir().backup_staging_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert!(
+        backup_staging_entries.is_empty(),
+        "restore left backup staging entries: {backup_staging_entries:?}"
+    );
     assert_eq!(
         restored_engine
             .get("after-restore", 2_001)

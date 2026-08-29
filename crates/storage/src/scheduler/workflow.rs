@@ -34,7 +34,7 @@ mod durable_steps;
 #[path = "workflow/durable_waits.rs"]
 mod durable_waits;
 pub use durable_model::{
-    WorkflowStepAttempt, WorkflowStepOutcome, WorkflowV2StepGrant, WorkflowV2StepResult,
+    WorkflowStepAttempt, WorkflowStepGrant, WorkflowStepOutcome, WorkflowStepResult,
 };
 #[path = "workflow/durable_runs.rs"]
 mod durable_runs;
@@ -43,14 +43,9 @@ mod helpers;
 pub use doctor::{WorkflowDatabaseInspection, inspect_workflow_databases};
 #[path = "workflow/inspection.rs"]
 mod inspection;
-pub(super) use inspection::verify_legacy_histories;
 pub(super) use inspection::{workflow_inspection_connection, workflow_invalid_rows};
 #[path = "workflow/model.rs"]
 mod model;
-#[path = "workflow/runs.rs"]
-mod runs;
-#[path = "workflow/steps.rs"]
-mod steps;
 use helpers::*;
 pub use model::*;
 
@@ -61,7 +56,7 @@ mod tests;
 impl SchedulerStore {
     /// Insert durable input after control reserved the immutable target and public identity.
     /// A repeat is accepted only if every immutable field and input byte matches.
-    /// Retention must be explicitly resolved for V2 and absent for V1.
+    /// Retention must be explicitly resolved before insertion.
     pub fn insert_workflow(
         &self,
         identity: &WorkflowInstanceIdentity,
@@ -70,17 +65,12 @@ impl SchedulerStore {
         limits: &WorkflowsConfig,
     ) -> Result<(), PlatformError> {
         limits.validate()?;
-        match (identity.target.capability_version, retention) {
-            (1, None) => {}
-            (2, Some(retention)) => {
-                retention.validate()?;
-                if identity.created_at_ms.unsigned_abs()
-                    > open_compute_core::workflow::WORKFLOW_MAX_SAFE_INTEGER
-                {
-                    return Err(error(ErrorCode::WorkflowDurationInvalid));
-                }
-            }
-            _ => return Err(error(ErrorCode::WorkflowInvariantViolation)),
+        let retention = retention.ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
+        retention.validate()?;
+        if identity.created_at_ms.unsigned_abs()
+            > open_compute_core::workflow::WORKFLOW_MAX_SAFE_INTEGER
+        {
+            return Err(error(ErrorCode::WorkflowDurationInvalid));
         }
         open_compute_core::workflow::validate_workflow_instance_id(&identity.external_instance_id)?;
         let input =
@@ -106,7 +96,7 @@ impl SchedulerStore {
         {
             if existing.identity != *identity
                 || existing.input_json != input
-                || existing.durable.as_ref().map(|state| &state.retention) != retention
+                || &existing.durable.retention != retention
             {
                 return Err(error(ErrorCode::WorkflowInvariantViolation));
             }
@@ -142,7 +132,7 @@ impl SchedulerStore {
                 identity.external_instance_id,target.version_id.to_string(),target.worker_id.to_string(),target.deployment_id.to_string(),
                 target.worker_code_sha256.as_slice(),target.loader_schema_version,target.capability_version,target.descriptor_sha256.as_slice(),
                 target.class_name,identity.creation_nonce.as_bytes().as_slice(),input.as_bytes(),identity.created_at_ms,initial_bytes,
-                retention.map(|value|value.success_retention_ms),retention.map(|value|value.error_retention_ms)])
+                retention.success_retention_ms,retention.error_retention_ms])
             .map_err(sql_error)?;
         tx.commit().map_err(sql_error)
     }

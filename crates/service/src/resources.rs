@@ -26,7 +26,7 @@ runbooks!(
     "s3-outage",
     "scheduler-recovery",
     "sqlite-corruption",
-    "upgrade-and-rollback",
+    "current-release-recovery",
     "workerd-crash-loop",
 );
 

@@ -34,8 +34,8 @@ pub mod runtime_bridge;
 pub mod scheduler;
 pub mod scheduler_http;
 mod snapshot_pins;
+mod sqlite_staging;
 pub mod support_bundle;
-pub mod upgrade_cli;
 mod worker_cli;
 pub mod workers_http;
 pub mod workflow_backend;
@@ -56,12 +56,9 @@ pub fn product_promotion_for_test(
     ))
 }
 
-pub use binding_backend::{
-    KvBindingExecutor, UnavailableKvBindingExecutor, bind_binding_backend, serve_binding_backend,
-    serve_binding_backend_with_metrics, serve_binding_backend_with_products,
-    serve_binding_backend_with_products_and_do_config, serve_binding_backend_with_r2,
-    serve_binding_backend_with_scheduler,
-};
+#[cfg(any(test, feature = "test-support"))]
+pub use binding_backend::UnavailableKvBindingExecutor;
+pub use binding_backend::{KvBindingExecutor, bind_binding_backend, serve_binding_backend};
 pub use cli::{Cli, Command, execute};
 pub use d1_backend::D1BindingService;
 pub use d1_http::D1ApiState;

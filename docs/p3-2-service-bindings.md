@@ -25,7 +25,7 @@ deployment，再固定这次调用。整个数据调用留在现有 stock worker
 | `crates/workers/src/pins.rs` 提供进程内删除 fence/pin | 扩展为可由可信 runtime controller 持有的调用存活引用 |
 | public ingress 当前 pin 直接附着于 Rust body | 新增没有 Rust body 的原生 RPC/内部 fetch 存活协议 |
 
-按 [Day1 约束](day1-architecture-cleanup.md)修改当前 schema/descriptor/wrapper，不保留
+按已验收的 [Day1 约束](implemented/day1-architecture-cleanup.md)修改当前 schema/descriptor/wrapper，不保留
 旧开发版绑定形状或两套 RPC 引擎。生产仍是一个 `platformd`、一个 verified workerd，正式
 pin 来自 [workerd.lock.json](../packages/runtime/workerd.lock.json)，当前为 `v1.20260826.1`。
 布局与验收按 [runtime 布局](implemented/runtime-and-test-layout.md)和[测试规范](references/testing.md)。

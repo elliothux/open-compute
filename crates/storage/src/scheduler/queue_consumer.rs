@@ -362,32 +362,15 @@ impl SchedulerStore {
         Ok(())
     }
 
-    /// Atomically recover expired leases and claim at most one batch per eligible consumer.
+    /// Claim with a deterministic wraparound cursor so a busy Queue cannot starve peers.
     pub fn claim_queue_batches(
         &self,
         now_ms: i64,
         lease_ms: u64,
         infrastructure_backoff_ms: u64,
         max_batches: u32,
-    ) -> Result<Vec<ClaimedQueueBatch>, PlatformError> {
-        self.claim_queue_batches_after(
-            now_ms,
-            lease_ms,
-            infrastructure_backoff_ms,
-            max_batches,
-            None,
-        )
-    }
-
-    /// Claim with a deterministic wraparound cursor so a busy Queue cannot starve peers.
-    pub fn claim_queue_batches_after(
-        &self,
-        now_ms: i64,
-        lease_ms: u64,
-        infrastructure_backoff_ms: u64,
-        max_batches: u32,
         after_queue_id: Option<QueueId>,
-    ) -> Result<Vec<ClaimedQueueBatch>, PlatformError> {
+    ) -> Result<(Vec<ClaimedQueueBatch>, u64), PlatformError> {
         if lease_ms == 0 || max_batches == 0 {
             return Err(consumer_invariant());
         }
@@ -396,7 +379,7 @@ impl SchedulerStore {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(consumer_sql_error)?;
-        recover_expired_batches_tx(
+        let recovered = recover_expired_batches_tx(
             &tx,
             now_ms,
             infrastructure_backoff_ms,
@@ -484,7 +467,7 @@ impl SchedulerStore {
             });
         }
         tx.commit().map_err(consumer_sql_error)?;
-        Ok(batches)
+        Ok((batches, recovered))
     }
 
     /// Apply a complete known disposition under the exact batch token and generation.

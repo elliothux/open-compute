@@ -8,7 +8,6 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export interface WorkerBinding {
   type: "kv_namespace" | "r2_bucket" | "d1_database" | "do_namespace" | "queue_producer" | "workflow";
   id: string;
-  capabilityVersion?: 1 | 2;
   permissions?: { read: boolean; write: boolean };
 }
 
@@ -101,16 +100,12 @@ export async function loadProject(path: string): Promise<WorkerProject> {
     if (!record(value.bindings)) throw new Error("invalid Worker bindings");
     for (const [key, item] of Object.entries(value.bindings)) {
       if (!record(item)) throw new Error("invalid Worker binding");
-      knownKeys(item, ["type", "id", "capabilityVersion", "permissions"], "binding");
+      knownKeys(item, ["type", "id", "permissions"], "binding");
       const kind = item.type;
       if (kind !== "kv_namespace" && kind !== "r2_bucket" && kind !== "d1_database" && kind !== "do_namespace" && kind !== "queue_producer" && kind !== "workflow") {
         throw new Error("unsupported Worker binding type");
       }
       const binding: WorkerBinding = { type: kind, id: string(item.id, "binding id") };
-      if (item.capabilityVersion !== undefined) {
-        if (item.capabilityVersion !== 1 && item.capabilityVersion !== 2) throw new Error("unsupported binding capability version");
-        binding.capabilityVersion = item.capabilityVersion;
-      }
       if (item.permissions !== undefined) {
         if (!record(item.permissions) || typeof item.permissions.read !== "boolean" || typeof item.permissions.write !== "boolean") throw new Error("invalid binding permissions");
         knownKeys(item.permissions, ["read", "write"], "binding permissions");

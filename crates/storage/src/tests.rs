@@ -13,8 +13,8 @@ use crate::{
 use open_compute_core::clock::{DeterministicClock, SystemClock};
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{
-    AccountId, BindingKind, DeploymentId, ErrorCode, HardeningConfig, OperationClass,
-    PlatformReleaseIdentityV1, QueueConsumerId, ResourceId, SecretBytes, WorkerId,
+    AccountId, BindingKind, DeploymentId, ErrorCode, HardeningConfig, PlatformReleaseIdentityV1,
+    QueueConsumerId, ResourceId, SecretBytes, WorkerId,
 };
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -97,6 +97,7 @@ fn p1_control_inventory_returns_only_fixed_aggregate_counts() {
             "inventory-worker",
             open_compute_core::RequestId::generate(),
             1,
+            1_000_000,
         )
         .unwrap();
     let populated = crate::inspect_control_inventory(storage.db()).unwrap();
@@ -110,10 +111,11 @@ fn p1_owned_schema_inspection_sees_uncheckpointed_bootstrap_wal() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    assert!(crate::inspect_current_schema(storage.data_dir(), storage.db(), 5_000).is_err());
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
     drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
 
-    let state = crate::inspect_owned_schema(storage.data_dir(), storage.db(), 5_000, 1).unwrap();
+    let state = crate::inspect_current_schema(storage.data_dir(), storage.db(), 5_000).unwrap();
     assert_eq!(
         i64::from(state.control),
         crate::migrations::current_schema_version()
@@ -142,7 +144,7 @@ fn p1_readonly_schema_fence_sees_uncheckpointed_bootstrap_wal() {
 }
 
 #[test]
-fn p1_schema_inspection_checks_live_kv_and_d1_files_and_apply_is_idempotent() {
+fn p1_schema_inspection_checks_current_kv_and_d1_files_without_mutation() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
@@ -153,19 +155,22 @@ fn p1_schema_inspection_checks_live_kv_and_d1_files_and_apply_is_idempotent() {
     let reserve = |kind, name: &str, key: &str| {
         let fingerprint = storage.crypto().fingerprint_request(key.as_bytes());
         let reserved = ResourceRepository::new(storage.db())
-            .reserve_create(&ReserveResourceCreate {
-                account_id: account,
-                kind,
-                name,
-                idempotency_key: key,
-                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-                request_fingerprint: &fingerprint,
-                resource_id: ResourceId::generate(),
-                driver_schema_version: 1,
-                request_id: open_compute_core::RequestId::generate(),
-                now_ms: 1,
-                expires_at_ms: 10,
-            })
+            .reserve_create(
+                &ReserveResourceCreate {
+                    account_id: account,
+                    kind,
+                    name,
+                    idempotency_key: key,
+                    fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                    request_fingerprint: &fingerprint,
+                    resource_id: ResourceId::generate(),
+                    driver_schema_version: 1,
+                    request_id: open_compute_core::RequestId::generate(),
+                    now_ms: 1,
+                    expires_at_ms: 10,
+                },
+                1_000_000,
+            )
             .unwrap();
         let ResourceCreateReservation::Reserved(resource) = reserved else {
             panic!("resource must be newly reserved");
@@ -219,16 +224,23 @@ fn p1_schema_inspection_checks_live_kv_and_d1_files_and_apply_is_idempotent() {
     d1_paths
         .publish_staging(&d1_staging, account, d1.id)
         .unwrap();
+    for resource in [kv.id, d1.id] {
+        ResourceRepository::new(storage.db())
+            .mark_ready(resource, 2)
+            .unwrap();
+    }
 
-    let owned = crate::inspect_owned_schema(storage.data_dir(), storage.db(), 5_000, 1).unwrap();
+    let owned = crate::inspect_current_schema(storage.data_dir(), storage.db(), 5_000).unwrap();
     assert_eq!(owned.kv_files, 1);
     assert_eq!(owned.d1_files, 1);
-    assert_eq!(owned.kv_min, crate::KV_SCHEMA_VERSION);
-    assert_eq!(owned.d1_max, crate::D1_DATABASE_SCHEMA_VERSION);
+    assert_eq!(owned.kv, crate::KV_SCHEMA_VERSION);
+    assert_eq!(owned.d1, crate::D1_DATABASE_SCHEMA_VERSION);
     drop(storage);
 
     let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
-    let offline = crate::inspect_offline_schema(&data_dir, 5_000, 1).unwrap();
+    let control =
+        crate::ControlDb::open_readonly_wal_aware(&data_dir.control_db_path(), 5_000).unwrap();
+    let offline = crate::inspect_current_schema(&data_dir, &control, 5_000).unwrap();
     assert_eq!(offline, owned);
     let key = crate::inspect_master_key(&config).unwrap();
     let snapshot_id = uuid::Uuid::now_v7().hyphenated().to_string();
@@ -277,8 +289,29 @@ fn p1_schema_inspection_checks_live_kv_and_d1_files_and_apply_is_idempotent() {
             .iter()
             .any(|file| file.role == open_compute_core::SnapshotFileRole::D1Sqlite)
     );
-    let applied = crate::apply_offline_upgrade(&data_dir, 5_000, 2).unwrap();
-    assert_eq!(applied, owned);
+    assert_eq!(
+        crate::inspect_current_schema(&data_dir, &control, 5_000).unwrap(),
+        owned
+    );
+    let directory = kv_paths.namespace_dir(account, kv.id);
+    let relocated = directory.with_extension("held");
+    fs::rename(&directory, &relocated).unwrap();
+    std::os::unix::fs::symlink(&relocated, &directory).unwrap();
+    assert_eq!(
+        crate::inspect_current_schema(&data_dir, &control, 5_000)
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+    fs::remove_file(&directory).unwrap();
+    fs::rename(&relocated, &directory).unwrap();
+    let file = kv_paths.database_path(account, kv.id);
+    fs::remove_file(&file).unwrap();
+    assert!(crate::inspect_current_schema(&data_dir, &control, 5_000).is_err());
+    assert!(
+        !file.exists(),
+        "inspection must not recreate missing authority"
+    );
 }
 
 #[test]
@@ -293,17 +326,10 @@ fn p1_disk_admission_modes_and_staging_tree_validation_are_explicit() {
         open_compute_core::PlatformMode::Serving
     );
     assert_eq!(
-        admission
-            .reserve(storage.data_dir(), OperationClass::Kv, 0)
-            .unwrap_err()
-            .code(),
+        admission.reserve(storage.data_dir(), 0).unwrap_err().code(),
         ErrorCode::LimitInvalid
     );
-    drop(
-        admission
-            .reserve(storage.data_dir(), OperationClass::Kv, 4096)
-            .unwrap(),
-    );
+    drop(admission.reserve(storage.data_dir(), 4096).unwrap());
     admission.begin_draining();
     assert_eq!(
         admission.snapshot(storage.data_dir()).unwrap().mode,
@@ -805,50 +831,6 @@ fn db_fingerprint_mismatch_fails_closed() {
 }
 
 #[test]
-fn aead_roundtrip_nonce_context_tamper_key() {
-    let key = SecretBytes::new(vec![7u8; 32]);
-    let fp = master_key::fingerprint_for_test(key.expose());
-    let crypto = SecretCrypto::new(&key, &fp).unwrap();
-    let account = AccountId::generate();
-    let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
-    let pt = SecretBytes::new(b"super-secret-value".to_vec());
-    let e1 = crypto
-        .encrypt(&pt, account, worker, deployment, "BINDING")
-        .unwrap();
-    let e2 = crypto
-        .encrypt(&pt, account, worker, deployment, "BINDING")
-        .unwrap();
-    assert_ne!(e1.nonce, e2.nonce);
-    let back = crypto
-        .decrypt(&e1, account, worker, deployment, "BINDING")
-        .unwrap();
-    assert_eq!(back.expose(), b"super-secret-value");
-    assert!(
-        crypto
-            .decrypt(&e1, AccountId::generate(), worker, deployment, "BINDING")
-            .is_err()
-    );
-    let mut tampered = e1.clone();
-    tampered.ciphertext[0] ^= 0xff;
-    assert!(
-        crypto
-            .decrypt(&tampered, account, worker, deployment, "BINDING")
-            .is_err()
-    );
-    let other_key = SecretBytes::new(vec![9u8; 32]);
-    let other_fp = master_key::fingerprint_for_test(other_key.expose());
-    let other = SecretCrypto::new(&other_key, &other_fp).unwrap();
-    assert_eq!(
-        other
-            .decrypt(&e1, account, worker, deployment, "BINDING")
-            .unwrap_err()
-            .code(),
-        ErrorCode::MasterKeyMismatch
-    );
-}
-
-#[test]
 fn r2_cursor_hmac_is_domain_separated_and_rejects_tampering() {
     let key = SecretBytes::new(vec![7_u8; 32]);
     let fingerprint = master_key::fingerprint_for_test(key.expose());
@@ -1237,28 +1219,6 @@ fn incomplete_identity_fails_without_mutation() {
 }
 
 #[test]
-fn aead_rejects_empty_overlong_name_and_invalid_key_id() {
-    let key = SecretBytes::new(vec![7u8; 32]);
-    let fp = master_key::fingerprint_for_test(key.expose());
-    let crypto = SecretCrypto::new(&key, &fp).unwrap();
-    let account = AccountId::generate();
-    let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
-    let pt = SecretBytes::new(b"x".to_vec());
-    let err = crypto
-        .encrypt(&pt, account, worker, deployment, "")
-        .unwrap_err();
-    assert_eq!(err.code(), ErrorCode::ConfigInvalid);
-    let long = "a".repeat(4097);
-    let err = crypto
-        .encrypt(&pt, account, worker, deployment, &long)
-        .unwrap_err();
-    assert_eq!(err.code(), ErrorCode::ConfigInvalid);
-    assert!(SecretCrypto::new(&key, "deadbeef").is_err());
-    assert!(SecretCrypto::new(&key, &"A".repeat(64)).is_err());
-}
-
-#[test]
 fn inspect_lock_holds_and_releases_flock() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
@@ -1344,25 +1304,29 @@ fn snapshot_worker_bundle_inventory_uses_the_canonical_sharded_key() {
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, _) = repo
-        .create_worker(account, "snapshot-key", request, 1)
+        .create_worker(account, "snapshot-key", request, 1, 1_000_000)
         .unwrap();
-    repo.insert_staging_deployment(&NewDeployment {
-        id: DeploymentId::generate(),
-        account_id: account,
-        worker_id: worker.id,
-        artifact_sha256: [1; 32],
-        artifact_size: 123,
-        artifact_schema_version: 1,
-        main_module: "index.js".to_owned(),
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
-        limits: serde_json::json!({}),
-        worker_code_sha256: [2; 32],
-        vars: BTreeMap::new(),
-        secrets: BTreeMap::new(),
-        request_id: request,
-        now_ms: 2,
-    })
+    repo.insert_staging_deployment(
+        &NewDeployment {
+            id: DeploymentId::generate(),
+            account_id: account,
+            worker_id: worker.id,
+            artifact_sha256: [1; 32],
+            artifact_size: 123,
+            artifact_schema_version: 1,
+            main_module: "index.js".to_owned(),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: Vec::new(),
+            limits: serde_json::json!({}),
+            worker_code_sha256: [2; 32],
+            vars: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            request_id: request,
+            now_ms: 2,
+        },
+        &crate::NewDeploymentProducts::default(),
+        1_000_000,
+    )
     .unwrap();
     drop(storage);
 
@@ -1388,14 +1352,14 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, route) = repo
-        .create_worker(account, "hello-worker", request, 1_000)
+        .create_worker(account, "hello-worker", request, 1_000, 1_000_000)
         .unwrap();
     assert_eq!(
         route.path_prefix,
         format!("/__workers/{account}/hello-worker/")
     );
     assert_eq!(
-        repo.create_worker(account, "hello-worker", request, 1_001)
+        repo.create_worker(account, "hello-worker", request, 1_001, 1_000_000)
             .unwrap_err()
             .code(),
         ErrorCode::WorkerNameConflict
@@ -1405,7 +1369,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
     let revision = uuid::Uuid::now_v7().to_string();
     let envelope = storage
         .crypto()
-        .encrypt_revision(
+        .encrypt(
             &SecretBytes::new(b"never-persist-plaintext".to_vec()),
             account,
             worker.id,
@@ -1426,23 +1390,27 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
         },
     );
     let created = repo
-        .insert_staging_deployment(&NewDeployment {
-            id: deployment,
-            account_id: account,
-            worker_id: worker.id,
-            artifact_sha256: [1; 32],
-            artifact_size: 123,
-            artifact_schema_version: 1,
-            main_module: "index.js".to_owned(),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: vec!["rpc".to_owned()],
-            limits: serde_json::json!({"profile": "default"}),
-            worker_code_sha256: [2; 32],
-            vars,
-            secrets,
-            request_id: request,
-            now_ms: 2_000,
-        })
+        .insert_staging_deployment(
+            &NewDeployment {
+                id: deployment,
+                account_id: account,
+                worker_id: worker.id,
+                artifact_sha256: [1; 32],
+                artifact_size: 123,
+                artifact_schema_version: 1,
+                main_module: "index.js".to_owned(),
+                compatibility_date: "2026-08-22".to_owned(),
+                compatibility_flags: vec!["rpc".to_owned()],
+                limits: serde_json::json!({"profile": "default"}),
+                worker_code_sha256: [2; 32],
+                vars,
+                secrets,
+                request_id: request,
+                now_ms: 2_000,
+            },
+            &crate::NewDeploymentProducts::default(),
+            1_000_000,
+        )
         .unwrap();
     assert_eq!(created.version_number, 1);
     assert_eq!(created.state, DeploymentState::Staging);
@@ -1462,7 +1430,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
     let secret = snapshot.secrets.get("API_TOKEN").unwrap();
     let plaintext = storage
         .crypto()
-        .decrypt_revision(
+        .decrypt(
             &secret.envelope,
             account,
             worker.id,
@@ -1557,7 +1525,7 @@ fn p0_2_delete_referrer_recovery_and_worker_identity_are_fenced() {
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, route) = repo
-        .create_worker(account, "delete-gate", request, 1)
+        .create_worker(account, "delete-gate", request, 1, 1_000_000)
         .unwrap();
     let a = insert_ready(&repo, account, worker.id, [9; 32], request, 10);
     repo.promote(account, worker.id, a, None, request, 11)
@@ -1622,7 +1590,7 @@ fn p0_2_delete_referrer_recovery_and_worker_identity_are_fenced() {
         ErrorCode::RouteNotFound
     );
     let (replacement, replacement_route) = repo
-        .create_worker(account, "delete-gate", request, 31)
+        .create_worker(account, "delete-gate", request, 31, 1_000_000)
         .unwrap();
     assert_ne!(replacement.id, worker.id);
     assert_ne!(replacement.do_storage_id, worker.do_storage_id);
@@ -1637,7 +1605,7 @@ fn p0_2_concurrent_promotions_have_one_linearization_winner() {
     let repo = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (worker, _) = repo
-        .create_worker(account, "promotion-race", request, 1)
+        .create_worker(account, "promotion-race", request, 1, 1_000_000)
         .unwrap();
     let a = insert_ready(&repo, account, worker.id, [1; 32], request, 10);
     let b = insert_ready(&repo, account, worker.id, [2; 32], request, 11);
@@ -2002,123 +1970,6 @@ fn master_key_process_environment_modes_are_covered_in_isolated_processes() {
 }
 
 #[test]
-fn aead_revision_and_envelope_validation_matrix() {
-    let key = SecretBytes::new(vec![3_u8; 32]);
-    let fingerprint = master_key::fingerprint_for_test(key.expose());
-    let crypto = SecretCrypto::new(&key, &fingerprint).unwrap();
-    assert_eq!(
-        SecretCrypto::new(&SecretBytes::new(vec![0_u8; 31]), &fingerprint)
-            .unwrap_err()
-            .code(),
-        ErrorCode::MasterKeyMismatch
-    );
-    assert_eq!(crypto.key_id(), fingerprint);
-    assert_eq!(crypto.fingerprint_key_id().len(), 64);
-    assert_ne!(
-        crypto.fingerprint_request(b"one"),
-        crypto.fingerprint_request(b"two")
-    );
-    assert!(format!("{crypto:?}").contains("XCHACHA20-POLY1305"));
-
-    let account = AccountId::generate();
-    let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
-    let plaintext = SecretBytes::new(b"revision-secret".to_vec());
-    let envelope = crypto
-        .encrypt_revision(
-            &plaintext,
-            account,
-            worker,
-            deployment,
-            "TOKEN",
-            "revision-1",
-        )
-        .unwrap();
-    assert_eq!(
-        crypto
-            .decrypt_revision(
-                &envelope,
-                account,
-                worker,
-                deployment,
-                "TOKEN",
-                "revision-1",
-            )
-            .unwrap()
-            .expose(),
-        b"revision-secret"
-    );
-    assert!(
-        crypto
-            .decrypt_revision(
-                &envelope,
-                account,
-                worker,
-                deployment,
-                "TOKEN",
-                "revision-2",
-            )
-            .is_err()
-    );
-    for revision in ["", &"r".repeat(4097)] {
-        assert_eq!(
-            crypto
-                .encrypt_revision(&plaintext, account, worker, deployment, "TOKEN", revision,)
-                .unwrap_err()
-                .code(),
-            ErrorCode::SecretInvalid
-        );
-    }
-
-    for mutate in [
-        |value: &mut crate::SecretEnvelope| value.version = 2,
-        |value: &mut crate::SecretEnvelope| value.algorithm = "OTHER".to_owned(),
-        |value: &mut crate::SecretEnvelope| value.nonce.clear(),
-    ] {
-        let mut invalid = envelope.clone();
-        mutate(&mut invalid);
-        assert!(
-            crypto
-                .decrypt_revision(&invalid, account, worker, deployment, "TOKEN", "revision-1",)
-                .is_err()
-        );
-    }
-    let other_key = SecretBytes::new(vec![4_u8; 32]);
-    let other_fingerprint = master_key::fingerprint_for_test(other_key.expose());
-    let other = SecretCrypto::new(&other_key, &other_fingerprint).unwrap();
-    assert_eq!(
-        other
-            .decrypt_revision(
-                &envelope,
-                account,
-                worker,
-                deployment,
-                "TOKEN",
-                "revision-1",
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::MasterKeyMismatch
-    );
-    let legacy = crypto
-        .encrypt(&plaintext, account, worker, deployment, "TOKEN")
-        .unwrap();
-    for mutate in [
-        |value: &mut crate::SecretEnvelope| value.version = 2,
-        |value: &mut crate::SecretEnvelope| value.algorithm = "OTHER".to_owned(),
-        |value: &mut crate::SecretEnvelope| value.nonce.clear(),
-    ] {
-        let mut invalid = legacy.clone();
-        mutate(&mut invalid);
-        assert!(
-            crypto
-                .decrypt(&invalid, account, worker, deployment, "TOKEN")
-                .is_err()
-        );
-    }
-}
-
-#[test]
 fn inspection_layout_migration_and_repository_helpers_are_covered() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
@@ -2167,7 +2018,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 14);
+    assert_eq!(crate::migrations::current_schema_version(), 11);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2324,23 +2175,27 @@ fn insert_ready(
     now: i64,
 ) -> DeploymentId {
     let id = DeploymentId::generate();
-    repo.insert_staging_deployment(&NewDeployment {
-        id,
-        account_id: account,
-        worker_id: worker,
-        artifact_sha256: digest,
-        artifact_size: 100,
-        artifact_schema_version: 1,
-        main_module: "index.js".to_owned(),
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
-        limits: serde_json::json!({"profile":"default"}),
-        worker_code_sha256: digest,
-        vars: BTreeMap::new(),
-        secrets: BTreeMap::new(),
-        request_id: request,
-        now_ms: now,
-    })
+    repo.insert_staging_deployment(
+        &NewDeployment {
+            id,
+            account_id: account,
+            worker_id: worker,
+            artifact_sha256: digest,
+            artifact_size: 100,
+            artifact_schema_version: 1,
+            main_module: "index.js".to_owned(),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: Vec::new(),
+            limits: serde_json::json!({"profile":"default"}),
+            worker_code_sha256: digest,
+            vars: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            request_id: request,
+            now_ms: now,
+        },
+        &crate::NewDeploymentProducts::default(),
+        1_000_000,
+    )
     .unwrap();
     repo.begin_validation(id).unwrap();
     repo.mark_ready(id, now + 1).unwrap();
@@ -2363,16 +2218,16 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
     let workers = WorkerRepository::new(storage.db());
     let request = open_compute_core::RequestId::generate();
     let (first_worker, _) = workers
-        .create_worker(account, "consumer-race-a", request, 3)
+        .create_worker(account, "consumer-race-a", request, 3, 1_000_000)
         .unwrap();
     let (second_worker, _) = workers
-        .create_worker(account, "consumer-race-b", request, 4)
+        .create_worker(account, "consumer-race-b", request, 4, 1_000_000)
         .unwrap();
     let create_declaration = |worker_id: WorkerId, now_ms: i64| {
         let deployment_id = DeploymentId::generate();
         let declaration_id = QueueConsumerId::generate();
         workers
-            .insert_staging_deployment_with_products_and_limit(
+            .insert_staging_deployment(
                 &NewDeployment {
                     id: deployment_id,
                     account_id: account,
@@ -2464,14 +2319,20 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
     let request = open_compute_core::RequestId::generate();
 
     assert_eq!(
-        repo.create_worker(AccountId::generate(), "missing-account", request, 1)
-            .unwrap_err()
-            .code(),
+        repo.create_worker(
+            AccountId::generate(),
+            "missing-account",
+            request,
+            1,
+            1_000_000
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::AccountNotFound
     );
 
     let (worker, _) = repo
-        .create_worker(account, "state-matrix", request, 2)
+        .create_worker(account, "state-matrix", request, 2, 1_000_000)
         .unwrap();
     let ready = insert_ready(&repo, account, worker.id, [3; 32], request, 10);
     assert_eq!(
@@ -2501,23 +2362,27 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
     );
 
     let staging = DeploymentId::generate();
-    repo.insert_staging_deployment(&NewDeployment {
-        id: staging,
-        account_id: account,
-        worker_id: worker.id,
-        artifact_sha256: [4; 32],
-        artifact_size: 100,
-        artifact_schema_version: 1,
-        main_module: "index.js".to_owned(),
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
-        limits: serde_json::json!({"profile":"default"}),
-        worker_code_sha256: [4; 32],
-        vars: BTreeMap::new(),
-        secrets: BTreeMap::new(),
-        request_id: request,
-        now_ms: 14,
-    })
+    repo.insert_staging_deployment(
+        &NewDeployment {
+            id: staging,
+            account_id: account,
+            worker_id: worker.id,
+            artifact_sha256: [4; 32],
+            artifact_size: 100,
+            artifact_schema_version: 1,
+            main_module: "index.js".to_owned(),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: Vec::new(),
+            limits: serde_json::json!({"profile":"default"}),
+            worker_code_sha256: [4; 32],
+            vars: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            request_id: request,
+            now_ms: 14,
+        },
+        &crate::NewDeploymentProducts::default(),
+        1_000_000,
+    )
     .unwrap();
     assert_eq!(
         repo.promote(account, worker.id, staging, None, request, 15)
@@ -2548,7 +2413,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         })
         .unwrap();
     let (foreign_worker, _) = repo
-        .create_worker(foreign_account, "foreign", request, 16)
+        .create_worker(foreign_account, "foreign", request, 16, 1_000_000)
         .unwrap();
     let foreign_ready = insert_ready(
         &repo,
@@ -2685,6 +2550,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             Some(DeploymentId::generate()),
             request,
             21,
+            1_000_000,
         )
         .unwrap_err()
         .code(),
@@ -2700,6 +2566,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             Some(promotable),
             request,
             22,
+            1_000_000,
         )
         .unwrap();
     assert_eq!(
@@ -2712,6 +2579,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             Some(promotable),
             request,
             23,
+            1_000_000,
         )
         .unwrap_err()
         .code(),
@@ -2973,57 +2841,11 @@ fn p1_release_identity() -> PlatformReleaseIdentityV1 {
         facade_capability_version: 1,
         control_schema_version: u32::try_from(crate::migrations::current_schema_version()).unwrap(),
         scheduler_schema_version: u32::try_from(crate::current_scheduler_schema_version()).unwrap(),
-        kv_schema_version_min: crate::KV_SCHEMA_VERSION,
-        kv_schema_version_max: crate::KV_SCHEMA_VERSION,
-        d1_schema_version_min: crate::D1_DATABASE_SCHEMA_VERSION,
-        d1_schema_version_max: crate::D1_DATABASE_SCHEMA_VERSION,
+        kv_schema_version: crate::KV_SCHEMA_VERSION,
+        d1_schema_version: crate::D1_DATABASE_SCHEMA_VERSION,
         snapshot_format_version: 1,
         compatibility_policy_sha256: "c".repeat(64),
     }
-}
-
-fn downgrade_control_to_v8(path: &Path) {
-    let control = Connection::open(path).unwrap();
-    control.pragma_update(None, "foreign_keys", "OFF").unwrap();
-    let triggers = {
-        let mut statement = control
-            .prepare(
-                "SELECT name FROM sqlite_master WHERE type = 'trigger'
-                 AND (name LIKE '%queue%' OR name LIKE '%cron%' OR name LIKE '%workflow%')",
-            )
-            .unwrap();
-        statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-    };
-    for trigger in triggers {
-        control
-            .execute_batch(&format!("DROP TRIGGER \"{trigger}\";"))
-            .unwrap();
-    }
-    control
-        .execute_batch(
-            "DROP TABLE workflow_instance_operations;
-             DROP TABLE workflow_instance_referrers;
-             DROP TABLE workflow_referrers;
-             DROP TABLE workflow_bindings;
-             DROP TABLE workflow_versions;
-             DROP TABLE workflow_definitions;
-             DROP TABLE cron_activations;
-             DROP TABLE deployment_cron_declarations;
-             DROP TABLE deployment_cron_configs;
-             DROP TABLE queue_consumers;
-             DROP TABLE deployment_queue_consumers;
-             DROP TABLE queue_referrers;
-             DROP TABLE queue_producer_bindings;
-             ALTER TABLE control_idempotency DROP COLUMN queue_id;
-             DROP TABLE queues;
-             DELETE FROM schema_migrations WHERE version >= 9;
-             PRAGMA user_version = 8;",
-        )
-        .unwrap();
 }
 
 #[test]
@@ -3078,18 +2900,13 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
         ErrorCode::MasterKeyMismatch
     );
 
-    downgrade_control_to_v8(&data_dir.control_db_path());
+    let mut wrong_schema_request = request.clone();
+    wrong_schema_request.release.control_schema_version += 1;
     assert_eq!(
-        crate::prepare_platform_snapshot(&data_dir, &request)
+        crate::prepare_platform_snapshot(&data_dir, &wrong_schema_request)
             .unwrap_err()
             .code(),
-        ErrorCode::UpgradeRequired
-    );
-    assert_eq!(
-        crate::apply_offline_upgrade(&data_dir, 5_000, 1)
-            .unwrap()
-            .control,
-        u32::try_from(crate::migrations::current_schema_version()).unwrap()
+        ErrorCode::SnapshotInvalid
     );
 
     assert_eq!(
@@ -3184,7 +3001,7 @@ fn p1_offline_snapshot_is_standalone_authenticated_and_rejects_do_symlinks() {
 }
 
 #[test]
-fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
+fn p1_admission_lock_restore_target_and_current_schema_fail_closed() {
     let (tmp, root) = unique_root();
     let mut config = storage_config(&root);
     config.free_space_hard_bytes = u64::MAX - 1;
@@ -3195,10 +3012,7 @@ fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
     let storage =
         PlatformStorage::bootstrap_with_hardening(&config, &hardening, &SystemClock).unwrap();
     assert_eq!(
-        storage
-            .reserve_mutation(OperationClass::Kv, 1)
-            .unwrap_err()
-            .code(),
+        storage.reserve_mutation(1).unwrap_err().code(),
         ErrorCode::StoragePressure
     );
     assert_eq!(
@@ -3211,19 +3025,19 @@ fn p1_admission_lock_restore_target_and_forward_upgrade_fail_closed() {
     drop(crate::SchedulerStore::open(&scheduler_path, 5_000, 1).unwrap());
     drop(storage);
 
-    downgrade_control_to_v8(&root.join("control.sqlite"));
     let data_dir = DataDir::acquire_existing_offline(&config).unwrap();
-    let before = crate::inspect_offline_schema(&data_dir, 5_000, 1).unwrap();
-    assert_eq!(before.control, 8);
-    let after = crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap();
+    let control =
+        crate::ControlDb::open_readonly_wal_aware(&data_dir.control_db_path(), 5_000).unwrap();
+    let current = crate::inspect_current_schema(&data_dir, &control, 5_000).unwrap();
     assert_eq!(
-        i64::from(after.control),
+        i64::from(current.control),
         crate::migrations::current_schema_version()
     );
     assert_eq!(
-        crate::apply_offline_upgrade(&data_dir, 5_000, 1).unwrap(),
-        after
+        crate::inspect_current_schema(&data_dir, &control, 5_000).unwrap(),
+        current
     );
+    drop(control);
     drop(data_dir);
 
     let target = fs::canonicalize(tmp.path()).unwrap().join("restored");
@@ -4149,7 +3963,7 @@ fn p1_concurrent_resource_creates_never_exceed_the_account_kind_limit() {
             let idempotency_key = format!("p1-concurrent-key-{index}");
             let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
             barrier.wait();
-            ResourceRepository::new(storage.db()).reserve_create_with_limit(
+            ResourceRepository::new(storage.db()).reserve_create(
                 &ReserveResourceCreate {
                     account_id: account,
                     kind: BindingKind::KvNamespace,

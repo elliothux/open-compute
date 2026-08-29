@@ -26,7 +26,7 @@ pub enum SchedulerKind {
     /// Cron logical slots, reserved until P2.3.
     #[serde(rename = "cron")]
     Cron,
-    /// Workflow wakeups, reserved until P2.4.
+    /// Workflow wakeups.
     #[serde(rename = "workflow")]
     Workflow,
 }

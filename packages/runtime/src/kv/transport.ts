@@ -3,7 +3,6 @@ import { bindingError, currentStartupGeneration } from "../loader/host.js";
 import type { BindingEnv, ResourceBindingProps } from "../bindings/protocol.js";
 
 const BINDING_TOKEN_HEADER = "x-open-compute-binding-token";
-const BINDING_CONTENT_TYPE = "application/vnd.open-compute.kv.v1+json";
 const BINDING_FRAME_CONTENT_TYPE = "application/vnd.open-compute.kv.v1+frame";
 const MAX_BINDING_KEY_BYTES = 512;
 const MAX_KV_VALUE_BYTES = 25 * 1024 * 1024;
@@ -324,7 +323,7 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
     return props;
   }
 
-  async #request(operation: string, body: BodyInit, permission: "read" | "write", contentType = BINDING_CONTENT_TYPE) {
+  async #request(operation: string, body: BodyInit, permission: "read" | "write") {
     const props = this.#props();
     if (!props.permissions[permission]) {
       throw bindingError("BINDING_PERMISSION_DENIED");
@@ -334,7 +333,7 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
       {
         method: "POST",
         headers: {
-          "content-type": contentType,
+          "content-type": BINDING_FRAME_CONTENT_TYPE,
           [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
           "x-open-compute-startup-generation": currentStartupGeneration(),
           "x-open-compute-deployment-id": props.deploymentId,
@@ -359,7 +358,6 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
       operation,
       JSON.stringify({ keys, cacheTtl: options.cacheTtl }),
       "read",
-      BINDING_FRAME_CONTENT_TYPE,
     );
     if (operation === "get" || operation === "get-with-metadata") {
       return [await decodeSingleEntry(response)];
@@ -429,7 +427,6 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
       "put",
       framedPutBody(header, value),
       "write",
-      BINDING_FRAME_CONTENT_TYPE,
     );
   }
 
@@ -439,7 +436,6 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
       "delete",
       JSON.stringify({ key }),
       "write",
-      BINDING_FRAME_CONTENT_TYPE,
     );
   }
 
@@ -463,7 +459,6 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
       "list",
       JSON.stringify({ prefix, limit, cursor: options.cursor }),
       "read",
-      BINDING_FRAME_CONTENT_TYPE,
     );
     const result: unknown = await response.json();
     if (!record(result) || !Array.isArray(result.keys) || typeof result.list_complete !== "boolean"
@@ -478,19 +473,6 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
         ...(key.metadata === null ? {} : { metadata: key.metadata }) });
     }
     return { keys, list_complete: result.list_complete, ...(result.cursor === null ? {} : { cursor: result.cursor }) };
-  }
-
-  async echoStream(stream: ReadableStream<Uint8Array>) {
-    if (!(stream instanceof ReadableStream)) {
-      throw new TypeError("binding stream must be a byte ReadableStream");
-    }
-    const response = await this.#request(
-      "echo",
-      stream,
-      "read",
-      "application/vnd.open-compute.kv.v1+octet-stream",
-    );
-    return response.body;
   }
 
   async fetch(): Promise<never> {

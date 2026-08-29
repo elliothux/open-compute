@@ -2,9 +2,7 @@ use super::*;
 
 #[path = "scheduler/workflow/migration_tests.rs"]
 mod workflow_migration;
-use open_compute_core::{
-    AccountId, CronActivationId, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId, WorkerId,
-};
+use open_compute_core::{AccountId, CronActivationId, QueueConsumerId, QueueId, WorkerId};
 
 fn object(namespace: ResourceId, byte: u8) -> DurableObjectId {
     let mut bytes = [byte; open_compute_core::DURABLE_OBJECT_ID_BYTES];
@@ -44,15 +42,15 @@ fn open_store(temp: &tempfile::TempDir, now_ms: i64) -> SchedulerStore {
     SchedulerStore::open(&path, 100, now_ms).unwrap()
 }
 
-fn create_scheduler_fixture_at_version(path: &std::path::Path, version: usize) -> Connection {
+fn create_current_scheduler_fixture(path: &std::path::Path, definitions: usize) -> Connection {
     let mut connection = Connection::open(path).unwrap();
     connection
         .pragma_update(None, "foreign_keys", "ON")
         .unwrap();
-    for migration in SCHEDULER_MIGRATIONS.iter().take(version) {
+    for definition in SCHEDULER_MIGRATIONS.iter().take(definitions) {
         let tx = connection.transaction().unwrap();
-        tx.execute_batch(migration.sql).unwrap();
-        if migration.version == 1 {
+        tx.execute_batch(definition.sql).unwrap();
+        if definition.version == 1 {
             tx.execute(
                 "INSERT INTO scheduler_meta
                  (singleton, schema_version, data_format, created_at_ms, updated_at_ms)
@@ -64,7 +62,7 @@ fn create_scheduler_fixture_at_version(path: &std::path::Path, version: usize) -
             tx.execute(
                 "UPDATE scheduler_meta SET schema_version = ?1, updated_at_ms = 1
                  WHERE singleton = 1",
-                [migration.version],
+                [definition.version],
             )
             .unwrap();
         }
@@ -73,199 +71,18 @@ fn create_scheduler_fixture_at_version(path: &std::path::Path, version: usize) -
              (version, name, checksum_sha256, applied_at_ms, app_version)
              VALUES (?1, ?2, ?3, 1, ?4)",
             params![
-                migration.version,
-                migration.name,
-                migration.checksum.as_slice(),
+                definition.version,
+                definition.name,
+                definition.checksum.as_slice(),
                 APP_VERSION,
             ],
         )
         .unwrap();
-        tx.pragma_update(None, "user_version", migration.version)
+        tx.pragma_update(None, "user_version", definition.version)
             .unwrap();
         tx.commit().unwrap();
     }
     connection
-}
-
-#[test]
-fn migration_003_upgrades_a_real_v2_backlog_and_preserves_producer_delivery() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
-    let queue_id = QueueId::generate();
-    let message_id = QueueMessageId::generate();
-    let connection = create_scheduler_fixture_at_version(&path, 2);
-    connection
-        .execute(
-            "INSERT INTO queue_state
-             (queue_id, account_id, lifecycle_generation, config_generation, state,
-              delivery_delay_seconds, retention_seconds, max_message_bytes,
-              max_batch_messages, max_batch_bytes, max_backlog_bytes,
-              message_count, message_bytes, created_at_ms, updated_at_ms)
-             VALUES (?1, ?2, 1, 1, 'accepting', 0, 60, 1024, 100, 4096,
-                     8192, 0, 0, 100, 100)",
-            params![queue_id.to_string(), AccountId::generate().to_string()],
-        )
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO queue_messages
-             (id, queue_id, queue_generation, enqueued_at_ms, available_at_ms,
-              expires_at_ms, content_type, body, body_bytes)
-             VALUES (?1, ?2, 1, 100, 100, 60100, 'text', X'7632', 2)",
-            params![message_id.to_string(), queue_id.to_string()],
-        )
-        .unwrap();
-    drop(connection);
-
-    let store = SchedulerStore::open(&path, 100, 200).unwrap();
-    let metrics = store.queue_metrics(queue_id, 1, 1).unwrap();
-    assert_eq!(metrics.backlog_count, 1);
-    assert_eq!(metrics.backlog_bytes, 2);
-    store
-        .enqueue_queue(
-            &QueueEnqueueRequest {
-                queue_id,
-                lifecycle_generation: 1,
-                config_generation: 1,
-                batch_delay_seconds: None,
-                messages: vec![QueueMessageInput {
-                    content_type: QueueContentType::Text,
-                    body: b"after-upgrade".to_vec(),
-                    delay_seconds: None,
-                }],
-            },
-            200,
-        )
-        .unwrap();
-    assert_eq!(
-        store.queue_metrics(queue_id, 1, 1).unwrap().backlog_count,
-        2
-    );
-    drop(store);
-    let connection = Connection::open(&path).unwrap();
-    assert_eq!(
-        connection
-            .query_row(
-                "SELECT state, attempts, claim_batch_id, consumer_id,
-                        consumer_generation FROM queue_messages WHERE id = ?1",
-                [message_id.to_string()],
-                |row| Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
-                )),
-            )
-            .unwrap(),
-        ("ready".to_owned(), 0, None, None, None)
-    );
-}
-
-#[test]
-fn migration_004_preserves_a_real_v3_claim_without_mutating_queue_authority() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
-    let queue_id = QueueId::generate();
-    let account_id = AccountId::generate();
-    let message_id = QueueMessageId::generate();
-    let consumer_id = QueueConsumerId::generate();
-    let batch_id = QueueBatchId::generate();
-    let deployment_id = DeploymentId::generate();
-    let worker_id = WorkerId::generate();
-    let token = [9_u8; 32];
-    let connection = create_scheduler_fixture_at_version(&path, 3);
-    connection
-        .execute_batch(&format!(
-            "INSERT INTO queue_state
-             (queue_id, account_id, lifecycle_generation, config_generation, state,
-              delivery_delay_seconds, retention_seconds, max_message_bytes,
-              max_batch_messages, max_batch_bytes, max_backlog_bytes,
-              message_count, message_bytes, created_at_ms, updated_at_ms)
-             VALUES ('{queue_id}', '{account_id}', 1, 1, 'accepting', 0, 60, 1024,
-                     100, 4096, 8192, 0, 0, 100, 100);
-             INSERT INTO queue_messages
-             (id, queue_id, queue_generation, enqueued_at_ms, available_at_ms,
-              expires_at_ms, content_type, body, body_bytes)
-             VALUES ('{message_id}', '{queue_id}', 1, 100, 100, 60100, 'text', X'7633', 2);
-             INSERT INTO queue_consumer_state
-             (consumer_id, queue_id, consumer_generation, deployment_id, worker_id,
-              execution_generation, entrypoint, state, max_batch_size,
-              max_batch_timeout_ms, max_retries, retry_delay_seconds,
-              max_concurrency, dlq_queue_id, dlq_queue_generation,
-              descriptor_sha256, updated_at_ms)
-             VALUES ('{consumer_id}', '{queue_id}', 1, '{deployment_id}', '{worker_id}',
-                     1, NULL, 'accepting', 10, 5000, 3, 0, 1, NULL, NULL,
-                     zeroblob(32), 100);"
-        ))
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO queue_delivery_batches
-             (id, queue_id, consumer_id, consumer_generation, deployment_id,
-              execution_generation, entrypoint, claim_token, state, claimed_at_ms,
-              claim_until_ms, message_count, created_at_ms)
-             VALUES (?1, ?2, ?3, 1, ?4, 1, NULL, ?5, 'claimed', 200, 10000, 1, 200)",
-            params![
-                batch_id.to_string(),
-                queue_id.to_string(),
-                consumer_id.to_string(),
-                deployment_id.to_string(),
-                token.as_slice(),
-            ],
-        )
-        .unwrap();
-    connection
-        .execute(
-            "UPDATE queue_messages SET state = 'claimed', claim_batch_id = ?1,
-                    consumer_id = ?2, consumer_generation = 1, claim_token = ?3,
-                    claim_until_ms = 10000, claimed_at_ms = 200
-             WHERE id = ?4",
-            params![
-                batch_id.to_string(),
-                consumer_id.to_string(),
-                token.as_slice(),
-                message_id.to_string(),
-            ],
-        )
-        .unwrap();
-    drop(connection);
-
-    drop(SchedulerStore::open(&path, 100, 300).unwrap());
-    let connection = Connection::open(&path).unwrap();
-    let preserved: (String, String, Vec<u8>, i64, i64) = connection
-        .query_row(
-            "SELECT state, claim_batch_id, claim_token, claim_until_ms, attempts
-             FROM queue_messages WHERE id = ?1",
-            [message_id.to_string()],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
-            },
-        )
-        .unwrap();
-    assert_eq!(
-        preserved,
-        (
-            "claimed".to_owned(),
-            batch_id.to_string(),
-            token.to_vec(),
-            10_000,
-            0,
-        )
-    );
-    assert_eq!(
-        connection
-            .query_row("SELECT COUNT(*) FROM cron_schedules", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
 }
 
 #[test]
@@ -300,7 +117,7 @@ fn migrates_and_reopens_the_independent_database() {
 #[test]
 fn scheduler_registry_is_contiguous_and_future_schema_fails_closed() {
     let registry = scheduler_migration_registry();
-    assert_eq!(registry.len(), 8);
+    assert_eq!(registry.len(), 5);
     assert_eq!(registry[0].0, 1);
     assert_eq!(registry[0].1, "001_scheduler");
     assert_eq!(registry[1].0, 2);
@@ -310,13 +127,7 @@ fn scheduler_registry_is_contiguous_and_future_schema_fails_closed() {
     assert_eq!(registry[3].0, 4);
     assert_eq!(registry[3].1, "004_cron");
     assert_eq!(registry[4].0, 5);
-    assert_eq!(registry[4].1, "005_workflow_core");
-    assert_eq!(registry[5].0, 6);
-    assert_eq!(registry[5].1, "006_workflow_durable_waiting");
-    assert_eq!(registry[6].0, 7);
-    assert_eq!(registry[6].1, "007_workflow_operation_progress");
-    assert_eq!(registry[7].0, 8);
-    assert_eq!(registry[7].1, "008_workflow_due_admission");
+    assert_eq!(registry[4].1, "005_workflow");
 
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("scheduler.sqlite");
@@ -334,7 +145,7 @@ fn scheduler_registry_is_contiguous_and_future_schema_fails_closed() {
 }
 
 #[test]
-fn reopening_v1_preserves_schema_sql_migration_identity_and_alarm_rows() {
+fn reopening_current_schema_preserves_definition_identity_and_alarm_rows() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("scheduler.sqlite");
     let store = open_store(&temp, 10);
@@ -1025,7 +836,8 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         )
         .unwrap();
     let [first] = store
-        .claim_queue_batches(10, 100, 5, 1)
+        .claim_queue_batches(10, 100, 5, 1, None)
+        .map(|(items, _)| items)
         .unwrap()
         .try_into()
         .unwrap();
@@ -1062,7 +874,8 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
     );
 
     let [second] = store
-        .claim_queue_batches(12, 100, 5, 1)
+        .claim_queue_batches(12, 100, 5, 1, None)
+        .map(|(items, _)| items)
         .unwrap()
         .try_into()
         .unwrap();
@@ -1110,13 +923,15 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         )
         .unwrap();
     let [unknown] = store
-        .claim_queue_batches(2_000, 10, 5, 1)
+        .claim_queue_batches(2_000, 10, 5, 1, None)
+        .map(|(items, _)| items)
         .unwrap()
         .try_into()
         .unwrap();
     assert_eq!(store.recover_expired_queue_batches(2_010, 5, 1).unwrap(), 1);
     let [recovered] = store
-        .claim_queue_batches(2_015, 10, 5, 1)
+        .claim_queue_batches(2_015, 10, 5, 1, None)
+        .map(|(items, _)| items)
         .unwrap()
         .try_into()
         .unwrap();
@@ -1153,7 +968,8 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
         )
         .unwrap();
     let [_claimed_at_expiry] = store
-        .claim_queue_batches(4_000, 70_000, 5, 1)
+        .claim_queue_batches(4_000, 70_000, 5, 1, None)
+        .map(|(items, _)| items)
         .unwrap()
         .try_into()
         .unwrap();
@@ -1213,6 +1029,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
     );
     let [first] = store
         .claim_cron_runs(60_000, 100, 5, 10)
+        .map(|(items, _)| items)
         .unwrap()
         .try_into()
         .unwrap();
@@ -1238,6 +1055,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         .unwrap();
     let [retry] = store
         .claim_cron_runs(retry_at, 10, 5, 10)
+        .map(|(items, _)| items)
         .unwrap()
         .try_into()
         .unwrap();
@@ -1251,6 +1069,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
     );
     let [recovered] = store
         .claim_cron_runs(retry_at + 15, 10, 5, 10)
+        .map(|(items, _)| items)
         .unwrap()
         .try_into()
         .unwrap();

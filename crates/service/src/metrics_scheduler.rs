@@ -83,7 +83,7 @@ impl AlarmRepairSource {
 pub(super) fn write_scheduler_metrics(out: &mut String, metrics: &Inner) {
     write_help(
         out,
-        "oc_scheduler_jobs",
+        "oc_do_alarm_jobs",
         "gauge",
         "Scheduler jobs by kind and state",
     );
@@ -93,65 +93,26 @@ pub(super) fn write_scheduler_metrics(out: &mut String, metrics: &Inner) {
     {
         writeln!(
             out,
-            "oc_scheduler_jobs{{kind=\"do_alarm\",state=\"{state}\"}} {}",
+            "oc_do_alarm_jobs{{state=\"{state}\"}} {}",
             metrics.scheduler_jobs[index]
         )
         .ok();
     }
     write_help(
         out,
-        "oc_scheduler_claim_total",
-        "counter",
-        "Scheduler claim pass outcomes",
-    );
-    for outcome in claim_outcomes() {
-        writeln!(
-            out,
-            "oc_scheduler_claim_total{{outcome=\"{}\"}} {}",
-            outcome.as_str(),
-            metrics.scheduler_claim[claim_index(outcome)]
-        )
-        .ok();
-    }
-    write_help(
-        out,
-        "oc_scheduler_dispatch_duration_seconds",
+        "oc_do_alarm_delivery_duration_seconds",
         "gauge",
-        "Last scheduler dispatch duration",
+        "Last Durable Object alarm delivery duration",
     );
     for outcome in alarm_outcomes() {
         writeln!(
             out,
-            "oc_scheduler_dispatch_duration_seconds{{kind=\"do_alarm\",outcome=\"{}\"}} {}",
+            "oc_do_alarm_delivery_duration_seconds{{outcome=\"{}\"}} {}",
             outcome.as_str(),
             metrics.scheduler_dispatch_duration[alarm_index(outcome)]
         )
         .ok();
     }
-    write_help(
-        out,
-        "oc_scheduler_claim_expired_total",
-        "counter",
-        "Expired alarm claims recovered",
-    );
-    writeln!(
-        out,
-        "oc_scheduler_claim_expired_total{{kind=\"do_alarm\"}} {}",
-        metrics.scheduler_claim_expired
-    )
-    .ok();
-    write_help(
-        out,
-        "oc_scheduler_in_flight",
-        "gauge",
-        "Alarm dispatches currently in flight",
-    );
-    writeln!(
-        out,
-        "oc_scheduler_in_flight{{kind=\"do_alarm\"}} {}",
-        metrics.scheduler_in_flight
-    )
-    .ok();
     write_p2_scheduler_metrics(out, metrics);
     write_help(
         out,
@@ -224,14 +185,14 @@ impl super::MetricsRegistry {
             .map_or(0.0, |due| now_ms.saturating_sub(due).max(0) as f64 / 1000.0);
     }
 
-    pub(crate) fn inc_scheduler_claim(&self, outcome: SchedulerClaimOutcome) {
+    pub(crate) fn inc_scheduler_claim(&self, kind: SchedulerKind, outcome: SchedulerClaimOutcome) {
         let mut guard = self.lock();
-        let index = claim_index(outcome);
+        let index = kind.index() * claim_outcomes().len() + claim_index(outcome);
         guard.scheduler_claim[index] = guard.scheduler_claim[index].saturating_add(1);
     }
 
-    pub(crate) fn observe_scheduler_claim_duration(&self, duration: Duration) {
-        self.lock().scheduler_claim_duration = duration.as_secs_f64();
+    pub(crate) fn observe_scheduler_claim_duration(&self, kind: SchedulerKind, duration: Duration) {
+        self.lock().scheduler_claim_duration[kind.index()] = duration.as_secs_f64();
     }
 
     pub(crate) fn observe_scheduler_workload(
@@ -242,6 +203,9 @@ impl super::MetricsRegistry {
     ) {
         let mut guard = self.lock();
         guard.scheduler_ready[kind.index()] = summary.ready;
+        guard.scheduler_oldest_due_age[kind.index()] = summary
+            .oldest_due_at_ms
+            .map_or(0.0, |due| now_ms.saturating_sub(due).max(0) as f64 / 1000.0);
         if kind == SchedulerKind::Alarm {
             guard.alarm_lag_seconds = summary
                 .oldest_due_at_ms
@@ -270,18 +234,14 @@ impl super::MetricsRegistry {
         guard.scheduler_wake[index] = guard.scheduler_wake[index].saturating_add(1);
     }
 
-    pub(crate) fn inc_scheduler_claim_expired(&self, count: u64) {
+    pub(crate) fn inc_scheduler_claim_expired(&self, kind: SchedulerKind, count: u64) {
         let mut guard = self.lock();
-        guard.scheduler_claim_expired = guard.scheduler_claim_expired.saturating_add(count);
+        guard.scheduler_claim_expired[kind.index()] =
+            guard.scheduler_claim_expired[kind.index()].saturating_add(count);
     }
 
-    pub(crate) fn adjust_scheduler_in_flight(&self, starting: bool) {
-        let mut guard = self.lock();
-        guard.scheduler_in_flight = if starting {
-            guard.scheduler_in_flight.saturating_add(1)
-        } else {
-            guard.scheduler_in_flight.saturating_sub(1)
-        };
+    pub(crate) fn set_scheduler_in_flight(&self, kind: SchedulerKind, value: usize) {
+        self.lock().scheduler_in_flight[kind.index()] = u64::try_from(value).unwrap_or(u64::MAX);
     }
 
     pub(crate) fn observe_alarm_delivery(
@@ -293,7 +253,6 @@ impl super::MetricsRegistry {
         let mut guard = self.lock();
         let index = alarm_index(outcome);
         guard.scheduler_dispatch_duration[index] = duration.as_secs_f64();
-        guard.scheduler_dispatch_last = duration.as_secs_f64();
         let delivery = index * 7 + usize::from(retry_count.min(6));
         guard.alarm_delivery[delivery] = guard.alarm_delivery[delivery].saturating_add(1);
     }
@@ -318,92 +277,94 @@ fn write_p2_scheduler_metrics(out: &mut String, metrics: &Inner) {
         "gauge",
         "Ready scheduler claims by registered workload",
     );
-    writeln!(
-        out,
-        "open_compute_scheduler_ready{{kind=\"do_alarm\"}} {}",
-        metrics.scheduler_ready[SchedulerKind::Alarm.index()]
-    )
-    .ok();
+    for kind in SchedulerKind::ALL {
+        writeln!(
+            out,
+            "open_compute_scheduler_ready{{kind=\"{}\"}} {}",
+            kind.as_str(),
+            metrics.scheduler_ready[kind.index()]
+        )
+        .ok();
+    }
     write_help(
         out,
         "open_compute_scheduler_in_flight",
         "gauge",
         "In-flight scheduler dispatches by registered workload",
     );
-    writeln!(
-        out,
-        "open_compute_scheduler_in_flight{{kind=\"do_alarm\"}} {}",
-        metrics.scheduler_in_flight
-    )
-    .ok();
+    for kind in SchedulerKind::ALL {
+        writeln!(
+            out,
+            "open_compute_scheduler_in_flight{{kind=\"{}\"}} {}",
+            kind.as_str(),
+            metrics.scheduler_in_flight[kind.index()]
+        )
+        .ok();
+    }
     write_help(
         out,
         "open_compute_scheduler_claim_total",
         "counter",
         "Scheduler claims by registered workload and fixed outcome",
     );
-    for outcome in claim_outcomes() {
-        writeln!(
-            out,
-            "open_compute_scheduler_claim_total{{kind=\"do_alarm\",outcome=\"{}\"}} {}",
-            outcome.as_str(),
-            metrics.scheduler_claim[claim_index(outcome)]
-        )
-        .ok();
+    for kind in SchedulerKind::ALL {
+        for outcome in claim_outcomes() {
+            writeln!(
+                out,
+                "open_compute_scheduler_claim_total{{kind=\"{}\",outcome=\"{}\"}} {}",
+                kind.as_str(),
+                outcome.as_str(),
+                metrics.scheduler_claim
+                    [kind.index() * claim_outcomes().len() + claim_index(outcome)]
+            )
+            .ok();
+        }
     }
-    write_help(
-        out,
-        "open_compute_scheduler_dispatch_total",
-        "counter",
-        "Scheduler dispatches by registered workload and fixed outcome",
-    );
-    for outcome in alarm_outcomes() {
-        let index = alarm_index(outcome);
-        let total = metrics.alarm_delivery[index * 7..index * 7 + 7]
-            .iter()
-            .copied()
-            .sum::<u64>();
-        writeln!(
-            out,
-            "open_compute_scheduler_dispatch_total{{kind=\"do_alarm\",outcome=\"{}\"}} {total}",
-            outcome.as_str()
-        )
-        .ok();
-    }
-    for (name, help, value) in [
+    for (name, help, values) in [
         (
             "open_compute_scheduler_claim_latency_seconds",
             "Last scheduler claim latency",
-            metrics.scheduler_claim_duration,
-        ),
-        (
-            "open_compute_scheduler_dispatch_latency_seconds",
-            "Last scheduler dispatch latency",
-            metrics.scheduler_dispatch_last,
+            &metrics.scheduler_claim_duration,
         ),
         (
             "open_compute_scheduler_oldest_due_age_seconds",
             "Oldest ready scheduler claim age",
-            metrics.alarm_lag_seconds,
+            &metrics.scheduler_oldest_due_age,
         ),
     ] {
         write_help(out, name, "gauge", help);
-        writeln!(out, "{name}{{kind=\"do_alarm\"}} {value}").ok();
+        for kind in SchedulerKind::ALL {
+            writeln!(
+                out,
+                "{name}{{kind=\"{}\"}} {}",
+                kind.as_str(),
+                values[kind.index()]
+            )
+            .ok();
+        }
     }
-    for (name, help, value) in [
+    for (name, help, values) in [
         (
             "open_compute_scheduler_stale_completion_total",
             "Token-fenced stale completions",
-            metrics.scheduler_stale_completion[SchedulerKind::Alarm.index()],
+            &metrics.scheduler_stale_completion,
         ),
         (
             "open_compute_scheduler_lease_recovery_total",
             "Expired scheduler claims recovered",
-            metrics.scheduler_claim_expired,
+            &metrics.scheduler_claim_expired,
         ),
     ] {
         write_help(out, name, "counter", help);
-        writeln!(out, "{name}{{kind=\"do_alarm\"}} {value}").ok();
+        for kind in SchedulerKind::ALL {
+            writeln!(
+                out,
+                "{name}{{kind=\"{}\"}} {}",
+                kind.as_str(),
+                values[kind.index()]
+            )
+            .ok();
+        }
     }
     write_help(
         out,
@@ -411,14 +372,17 @@ fn write_p2_scheduler_metrics(out: &mut String, metrics: &Inner) {
         "gauge",
         "Registered scheduler pool state",
     );
-    let current = usize::from(metrics.scheduler_pool_state[SchedulerKind::Alarm.index()]);
-    for (index, state) in pool_states().into_iter().enumerate() {
-        let value = usize::from(index == current);
-        writeln!(
-            out,
-            "open_compute_scheduler_pool_state{{kind=\"do_alarm\",state=\"{state}\"}} {value}"
-        )
-        .ok();
+    for kind in SchedulerKind::ALL {
+        let current = usize::from(metrics.scheduler_pool_state[kind.index()]);
+        for (index, state) in pool_states().into_iter().enumerate() {
+            let value = usize::from(index == current);
+            writeln!(
+                out,
+                "open_compute_scheduler_pool_state{{kind=\"{}\",state=\"{state}\"}} {value}",
+                kind.as_str()
+            )
+            .ok();
+        }
     }
     write_help(
         out,

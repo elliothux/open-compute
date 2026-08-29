@@ -1,4 +1,4 @@
-//! Forward-only control-plane migrations.
+//! Current control-plane schema, split into ordered domain definitions.
 
 use crate::control_db::{self, ControlDb};
 use open_compute_core::clock::Clock;
@@ -51,39 +51,24 @@ const MIGRATIONS: &[ControlMigration] = &[
         checksum: &MIGRATION_007_SHA256,
     },
     ControlMigration {
-        name: "008_p1_format_freeze",
-        sql: include_str!("../migrations/008_p1_format_freeze.sql"),
+        name: "008_queues",
+        sql: include_str!("../migrations/008_queues.sql"),
         checksum: &MIGRATION_008_SHA256,
     },
     ControlMigration {
-        name: "009_queues",
-        sql: include_str!("../migrations/009_queues.sql"),
+        name: "009_queue_consumers",
+        sql: include_str!("../migrations/009_queue_consumers.sql"),
         checksum: &MIGRATION_009_SHA256,
     },
     ControlMigration {
-        name: "010_queue_consumers",
-        sql: include_str!("../migrations/010_queue_consumers.sql"),
+        name: "010_cron_triggers",
+        sql: include_str!("../migrations/010_cron_triggers.sql"),
         checksum: &MIGRATION_010_SHA256,
     },
     ControlMigration {
-        name: "011_cron_triggers",
-        sql: include_str!("../migrations/011_cron_triggers.sql"),
+        name: "011_workflows",
+        sql: include_str!("../migrations/011_workflows.sql"),
         checksum: &MIGRATION_011_SHA256,
-    },
-    ControlMigration {
-        name: "012_workflows",
-        sql: include_str!("../migrations/012_workflows.sql"),
-        checksum: &MIGRATION_012_SHA256,
-    },
-    ControlMigration {
-        name: "013_workflow_durable_waiting",
-        sql: include_str!("../migrations/013_workflow_durable_waiting.sql"),
-        checksum: &MIGRATION_013_SHA256,
-    },
-    ControlMigration {
-        name: "014_workflow_operation_sequence",
-        sql: include_str!("../migrations/014_workflow_operation_sequence.sql"),
-        checksum: &MIGRATION_014_SHA256,
     },
 ];
 const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
@@ -97,15 +82,13 @@ pub enum MigrationFault {
     BeforeExecution,
     /// Fail after migration DDL execution, before invariant checks.
     DuringDdl,
-    /// Fail after rebuilding the Workflow tables, before restoring their saved rows.
-    AfterWorkflowRebuild,
     /// Fail after SQL/invariants and before the migration row write.
     BeforeMigrationRow,
     /// Fail immediately after a successful commit.
     AfterCommit,
 }
 
-/// Apply pending migrations. Never down-migrates.
+/// Initialize every missing current-schema domain in order. Never down-migrates.
 pub fn apply(db: &ControlDb, clock: &dyn Clock) -> Result<(), PlatformError> {
     apply_inner(db, clock, None)
 }
@@ -300,20 +283,6 @@ fn apply_one(
         }
         // `execute_batch` is required because migrations may contain triggers,
         // whose bodies contain semicolons that are not statement boundaries.
-        if version == 13 {
-            crate::workflows::integrity::verify_catalog(tx).map_err(|_| {
-                PlatformError::new(ErrorCode::MigrationFailed, "Workflow migration history is invalid")
-            })?;
-            #[cfg(any(test, feature = "test-support"))]
-            if fault == Some(MigrationFault::AfterWorkflowRebuild) {
-                let (before_restore, _) = sql.split_once("INSERT INTO workflow_versions SELECT")
-                    .ok_or_else(|| PlatformError::new(ErrorCode::MigrationFailed, "migration restore boundary missing"))?;
-                tx.execute_batch(before_restore).map_err(|_| {
-                    PlatformError::new(ErrorCode::MigrationFailed, "migration rebuild failed")
-                })?;
-                return Err(PlatformError::new(ErrorCode::MigrationFailed, "injected fault before Workflow restore"));
-            }
-        }
         tx.execute_batch(sql).map_err(|_| {
             PlatformError::new(ErrorCode::MigrationFailed, "migration SQL failed")
         })?;
@@ -388,30 +357,28 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
     if version >= 7 {
         tables.extend(["do_namespaces", "do_objects"]);
     }
-    if version >= 9 {
+    if version >= 8 {
         tables.extend(["queues", "queue_producer_bindings", "queue_referrers"]);
     }
-    if version >= 10 {
+    if version >= 9 {
         tables.extend(["deployment_queue_consumers", "queue_consumers"]);
     }
-    if version >= 11 {
+    if version >= 10 {
         tables.extend([
             "deployment_cron_configs",
             "deployment_cron_declarations",
             "cron_activations",
         ]);
     }
-    if version >= 12 {
+    if version >= 11 {
         tables.extend([
             "workflow_definitions",
             "workflow_versions",
             "workflow_bindings",
             "workflow_referrers",
             "workflow_instance_referrers",
+            "workflow_instance_operations",
         ]);
-    }
-    if version >= 13 {
-        tables.push("workflow_instance_operations");
         crate::workflows::integrity::verify_catalog(tx).map_err(|_| {
             PlatformError::new(
                 ErrorCode::MigrationFailed,
@@ -509,7 +476,7 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
             ));
         }
     }
-    if version >= 9 {
+    if version >= 8 {
         let sql: String = tx
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'queues_live_name'",
@@ -593,25 +560,25 @@ pub fn migration_007_checksum() -> &'static [u8; 32] {
     &MIGRATION_007_SHA256
 }
 
-/// Compiled SHA-256 for the P1 offline-upgrade format fence.
+/// Compiled SHA-256 for the Queue catalog schema.
 #[must_use]
 pub fn migration_008_checksum() -> &'static [u8; 32] {
     &MIGRATION_008_SHA256
 }
 
-/// Compiled SHA-256 for the independent P2.2 Queue catalog migration.
+/// Compiled SHA-256 for the Queue consumer control schema.
 #[must_use]
 pub fn migration_009_checksum() -> &'static [u8; 32] {
     &MIGRATION_009_SHA256
 }
 
-/// Compiled SHA-256 for the P2.3 Queue consumer control schema.
+/// Compiled SHA-256 for the Cron control schema.
 #[must_use]
 pub fn migration_010_checksum() -> &'static [u8; 32] {
     &MIGRATION_010_SHA256
 }
 
-/// Compiled SHA-256 for the P2.3 Cron control schema.
+/// Compiled SHA-256 for the Workflow control schema.
 #[must_use]
 pub fn migration_011_checksum() -> &'static [u8; 32] {
     &MIGRATION_011_SHA256

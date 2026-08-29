@@ -57,6 +57,30 @@ test("runtime assets are reproducible and stale or unexpected output fails close
   assert.equal(rebuilt.status, 0, rebuilt.stderr);
   assert.deepEqual(await readFile(asset), contents[0]);
 
+  const retiredName = "retired.js";
+  const retiredPath = join(directory, retiredName);
+  const retiredContent = "// Generated from packages/runtime/src/retired.ts by Rolldown. Do not edit.\nexport {};\n";
+  const previous = {
+    ...manifest,
+    sources: { ...manifest.sources, [retiredName]: createHash("sha256").update(retiredContent).digest("hex") },
+  };
+  const previousBytes = JSON.stringify(previous);
+  await writeFile(retiredPath, retiredContent);
+  await writeFile(join(directory, "manifest.json"), previousBytes);
+  assert.notEqual(build(directory, "--check").status, 0);
+  assert.equal(await readFile(retiredPath, "utf8"), retiredContent);
+  await writeFile(retiredPath, `${retiredContent}// modified locally\n`);
+  const modifiedRetired = build(directory);
+  assert.notEqual(modifiedRetired.status, 0);
+  assert.match(modifiedRetired.stderr, /unexpected runtime asset/);
+  assert.equal(await readFile(retiredPath, "utf8"), `${retiredContent}// modified locally\n`);
+  assert.equal(await readFile(join(directory, "manifest.json"), "utf8"), previousBytes);
+  await writeFile(retiredPath, retiredContent);
+  const pruned = build(directory);
+  assert.equal(pruned.status, 0, pruned.stderr);
+  assert.ok(!(await readdir(directory)).includes(retiredName));
+  assert.deepEqual(await readFile(join(directory, "manifest.json")), manifestBytes);
+
   await writeFile(join(directory, "unexpected.js"), "unrelated");
   const unexpected = build(directory);
   assert.notEqual(unexpected.status, 0);

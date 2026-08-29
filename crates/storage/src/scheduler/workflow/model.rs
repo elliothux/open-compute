@@ -23,7 +23,7 @@ pub enum WorkflowState {
 }
 
 impl WorkflowState {
-    /// Whether this execution is terminal; only an explicit V2 restart can make it runnable again.
+    /// Whether this execution is terminal; only an explicit restart can make it runnable again.
     #[must_use]
     pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Complete | Self::Errored | Self::Terminated)
@@ -85,11 +85,11 @@ pub struct WorkflowInstanceRecord {
     pub terminal_at_ms: Option<i64>,
     /// Last durable scheduler mutation.
     pub updated_at_ms: i64,
-    /// Capability-two scheduling, accounting and lifecycle authority; absent for V1 history.
-    pub durable: Option<WorkflowDurableState>,
+    /// Scheduling, accounting, and lifecycle authority.
+    pub durable: WorkflowDurableState,
 }
 
-/// Persisted capability-two metadata, with no payloads or private run/creation tokens.
+/// Persisted durable metadata, with no payloads or private run/creation tokens.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDurableState {
@@ -142,6 +142,8 @@ pub struct ClaimedWorkflowRun {
     pub created_at_ms: i64,
     /// Canonical durable input.
     pub input_json: String,
+    /// Whether this activation was recovered from an expired earlier run lease.
+    pub recovered: bool,
 }
 
 impl std::fmt::Debug for ClaimedWorkflowRun {
@@ -149,57 +151,6 @@ impl std::fmt::Debug for ClaimedWorkflowRun {
         f.debug_struct("ClaimedWorkflowRun")
             .field("fence", &self.fence)
             .finish_non_exhaustive()
-    }
-}
-
-/// Exact sequential replay identity submitted by the trusted callback controller.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkflowStepIdentity {
-    /// Zero-based position within this activation.
-    pub ordinal: u32,
-    /// Validated user step name.
-    pub name: String,
-    /// One-based count of this name in the replay sequence.
-    pub name_count: u32,
-    /// V1 accepts only the canonical JSON string `null`.
-    pub config_json: String,
-}
-
-/// Private persistence reply. Execution grants never reach tenant code.
-#[derive(Clone, Serialize)]
-#[serde(
-    tag = "state",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
-pub enum WorkflowStepGrant {
-    /// Callback may execute under this private step token.
-    Run {
-        /// Unpredictable exact step mutation fence.
-        step_token: WorkflowToken,
-    },
-    /// Durable success; callback must not execute.
-    Complete {
-        /// Canonical result to parse inside the tenant realm.
-        output_json: String,
-    },
-    /// Durable failure; callback must not execute.
-    Failed {
-        /// Sanitized exception to rethrow.
-        error: WorkflowFailure,
-        /// Original low-cardinality permanent failure category.
-        error_code: String,
-    },
-}
-
-impl std::fmt::Debug for WorkflowStepGrant {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Run { .. } => "Run([REDACTED])",
-            Self::Complete { .. } => "Complete([REDACTED])",
-            Self::Failed { .. } => "Failed",
-        })
     }
 }
 
@@ -240,9 +191,9 @@ pub struct WorkflowInspection {
     pub queued: u64,
     /// Currently leased instances.
     pub running: u64,
-    /// Durable successes, including retained V2 history.
+    /// Durable successes, including retained history.
     pub complete: u64,
-    /// Durable known failures, including retained V2 history.
+    /// Durable known failures, including retained history.
     pub errored: u64,
     /// Persisted logical state bytes across all accounts.
     pub state_bytes: u64,
@@ -254,7 +205,7 @@ pub struct WorkflowInspection {
     pub paused: u64,
     /// Explicitly terminated instances.
     pub terminated: u64,
-    /// Terminal V2 histories pending retention expiry or purge.
+    /// Terminal histories pending retention expiry or purge.
     pub retained: u64,
     /// Unconsumed events across retained generations.
     pub buffered_events: u64,
@@ -312,11 +263,10 @@ pub struct WorkflowInstanceInspection {
     pub terminal_at_ms: Option<i64>,
     /// Sanitized terminal category.
     pub error_code: Option<String>,
-    /// Frozen execution capability; V1 history is never implicitly upgraded.
+    /// Frozen execution capability marker.
     pub capability_version: u32,
-    /// Persisted waiting, retention and inbox metadata; absent for V1 history.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub durable: Option<WorkflowDurableState>,
+    /// Persisted waiting, retention, and inbox metadata.
+    pub durable: WorkflowDurableState,
 }
 
 /// Authenticated operator step metadata, excluding outputs and private token material.
@@ -345,8 +295,8 @@ pub struct WorkflowStepInspection {
     pub attempt_deadline_at_ms: Option<i64>,
     /// Original absolute retry, sleep or event deadline.
     pub due_at_ms: Option<i64>,
-    /// First ordinal of the immutable V2 batch; absent for V1 history.
+    /// First ordinal of the immutable batch.
     pub batch_first_ordinal: Option<u32>,
-    /// Immutable V2 batch size; absent for V1 history.
+    /// Immutable batch size.
     pub batch_size: Option<u32>,
 }

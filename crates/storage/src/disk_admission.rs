@@ -3,7 +3,7 @@
 use crate::DataDir;
 use open_compute_core::{
     AdmissionReservation, AdmissionReservations, AdmissionSnapshotV1, ErrorCode, HardeningConfig,
-    OperationClass, PlatformError, PlatformMode, StorageConfig,
+    PlatformError, PlatformMode, StorageConfig,
 };
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -69,7 +69,6 @@ impl DiskAdmission {
     pub fn reserve(
         &self,
         data_dir: &DataDir,
-        _class: OperationClass,
         bytes: u64,
     ) -> Result<AdmissionReservation, PlatformError> {
         if bytes == 0 {

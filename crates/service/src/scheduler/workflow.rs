@@ -1,14 +1,11 @@
 //! Frozen Workflow activation, private lease heartbeats, and terminal release.
 
 use super::*;
-use crate::runtime_bridge::{DispatchTarget, WorkflowRunRequest};
-use open_compute_core::RequestId;
+use crate::metrics::SchedulerClaimOutcome;
+use crate::runtime_bridge::{WorkflowOutcome, WorkflowRunRequest};
 use open_compute_storage::WorkflowRepository;
-use open_compute_storage::scheduler::{ClaimedWorkflowRun, WorkflowCompletion};
+use open_compute_storage::scheduler::{ClaimedWorkflowRun, WorkflowCompletion, WorkflowState};
 use open_compute_workers::WorkflowController;
-
-#[path = "workflow_v2.rs"]
-mod v2;
 
 impl SchedulerService {
     /// Resume a bounded validation page; transport Unknown leaves its durable target unchanged.
@@ -54,20 +51,7 @@ impl SchedulerService {
                 continue;
             }
             let frozen = &record.identity.target;
-            let target = DispatchTarget {
-                account_id: frozen.account_id,
-                worker_id: frozen.worker_id,
-                deployment_id: frozen.deployment_id,
-                worker_code_sha256: hex::encode(frozen.worker_code_sha256),
-                entrypoint: Some(frozen.class_name.clone()),
-                route_generation: record.identity.instance_generation,
-                request_id: RequestId::generate(),
-            };
-            let probe = if frozen.capability_version == 2 {
-                self.transport.probe_workflow_v2(frozen).await
-            } else {
-                self.transport.probe_workflow(&target).await
-            };
+            let probe = self.transport.probe_workflow(frozen).await;
             if let Err(error) = probe {
                 if matches!(
                     error.code(),
@@ -100,7 +84,8 @@ impl SchedulerService {
         let transport = self.transport.clone();
         let cursor = self.workflow_claim_cursor.clone();
         let now_ms = self.observed_wall_time_ms();
-        tokio::task::spawn_blocking(move || {
+        let started = self.clock.monotonic_now();
+        let result = tokio::task::spawn_blocking(move || {
             transport.ensure_workflow_admission()?;
             let mut cursor = cursor.lock().map_err(|_| scheduler_task_failed())?;
             let controller = WorkflowController::new(&storage, &store, &config);
@@ -119,7 +104,30 @@ impl SchedulerService {
             Ok(runs)
         })
         .await
-        .map_err(|_| scheduler_task_failed())?
+        .map_err(|_| scheduler_task_failed())?;
+        if let Some(metrics) = &self.metrics {
+            metrics.observe_scheduler_claim_duration(
+                SchedulerKind::Workflow,
+                self.clock
+                    .monotonic_now()
+                    .saturating_duration_since(started),
+            );
+            metrics.inc_scheduler_claim(
+                SchedulerKind::Workflow,
+                match &result {
+                    Ok(runs) if runs.is_empty() => SchedulerClaimOutcome::Empty,
+                    Ok(_) => SchedulerClaimOutcome::Claimed,
+                    Err(_) => SchedulerClaimOutcome::Error,
+                },
+            );
+            if let Ok(runs) = &result {
+                metrics.inc_scheduler_claim_expired(
+                    SchedulerKind::Workflow,
+                    runs.iter().filter(|run| run.recovered).count() as u64,
+                );
+            }
+        }
+        result
     }
 
     /// Reconcile a bounded Workflow page without guessing execution history or target identity.
@@ -153,49 +161,34 @@ impl SchedulerService {
     }
 
     pub(crate) async fn dispatch_workflow_run(self: Arc<Self>, run: ClaimedWorkflowRun) {
-        if run.target.capability_version == 2 {
-            self.dispatch_workflow_run_v2(run).await;
-            return;
-        }
         let mut observation = self.metrics.as_ref().map(MetricsRegistry::workflow_run);
-        let target = DispatchTarget {
-            account_id: run.target.account_id,
-            worker_id: run.target.worker_id,
-            deployment_id: run.target.deployment_id,
-            worker_code_sha256: hex::encode(run.target.worker_code_sha256),
-            entrypoint: Some(run.target.class_name.clone()),
-            route_generation: run.fence.instance_generation,
-            request_id: RequestId::generate(),
-        };
         let request = WorkflowRunRequest {
             fence: run.fence.clone(),
-            external_instance_id: run.external_instance_id,
-            definition_name: run.target.definition_name,
+            external_instance_id: run.external_instance_id.clone(),
+            definition_name: run.target.definition_name.clone(),
             created_at_ms: run.created_at_ms,
-            payload_json: run.input_json,
+            payload_json: run.input_json.clone(),
         };
+        let version = run.target.clone();
         let dispatch = self.transport.dispatch_workflow(
-            &target,
+            &version,
             &request,
             Duration::from_millis(self.workflows.dispatch_timeout_ms),
         );
         tokio::pin!(dispatch);
+        let mut heartbeat_live = true;
         let response = loop {
             let deadline = self
                 .clock
                 .monotonic_deadline(Duration::from_millis(self.workflows.heartbeat_ms));
             tokio::select! {
-                response = &mut dispatch => break response,
-                () = self.clock.sleep_until(deadline) => {
-                    let store = self.store.clone();
-                    let fence = run.fence.clone();
-                    let config = self.workflows.clone();
-                    let now_ms = self.observed_wall_time_ms();
-                    let result = tokio::task::spawn_blocking(move ||store.heartbeat_workflow(&fence,now_ms,&config)).await;
-                    if !matches!(result,Ok(Ok(()))) {
-                        self.workflow_unknown();
-                        return;
-                    }
+                response=&mut dispatch=>break response,
+                ()=self.clock.sleep_until(deadline),if heartbeat_live=>{
+                    let store=self.store.clone();let fence=run.fence.clone();let config=self.workflows.clone();let now_ms=self.observed_wall_time_ms();
+                    let result=tokio::task::spawn_blocking(move||store.heartbeat_workflow(&fence,now_ms,&config)).await;
+                    // Yield may clear the lease before its HTTP acknowledgement arrives. Keep the
+                    // permit until the bounded transport actually ends; never infer RPC cancellation.
+                    heartbeat_live=matches!(result,Ok(Ok(())));
                 }
             }
         };
@@ -206,55 +199,65 @@ impl SchedulerService {
         let store = self.store.clone();
         let storage = self.storage.clone();
         let config = self.workflows.clone();
-        let now_ms = self.observed_wall_time_ms();
         let transport = self.transport.clone();
+        let now_ms = self.observed_wall_time_ms();
         let result = tokio::task::spawn_blocking(move || {
-            transport.commit_workflow(response, |response| {
+            transport.commit_workflow(response, |outcome| {
+                if matches!(outcome, WorkflowOutcome::Unknown { .. }) {
+                    return Err(scheduler_task_failed());
+                }
                 let record = store
                     .workflow_instance(run.fence.instance_id)?
-                    .ok_or_else(|| {
-                        PlatformError::new(
-                            ErrorCode::WorkflowInvariantViolation,
-                            "Workflow authority missing",
-                        )
-                    })?;
-                let state = if record.state.is_terminal() {
-                    record.state
-                } else {
-                    let completion = if response.outcome == "complete" {
-                        WorkflowCompletion::Complete {
-                            output_json: response.output_json.ok_or_else(scheduler_task_failed)?,
-                            final_ordinal: response.final_ordinal,
+                    .ok_or_else(scheduler_task_failed)?;
+                if record.identity.instance_generation != run.fence.instance_generation
+                    || record.identity.target != run.target
+                {
+                    return Err(PlatformError::new(
+                        ErrorCode::WorkflowRunStale,
+                        "Workflow generation is stale",
+                    ));
+                }
+                let completion = match outcome {
+                    WorkflowOutcome::Suspended { .. } => {
+                        if record.run_token.as_ref() == Some(&run.fence.run_token) {
+                            return Err(scheduler_task_failed());
                         }
-                    } else {
-                        WorkflowCompletion::Errored {
-                            code: open_compute_core::workflow::terminal_error_code(
-                                response
-                                    .error_code
-                                    .as_deref()
-                                    .ok_or_else(scheduler_task_failed)?,
-                            )?,
-                        }
-                    };
-                    store.finish_workflow(&run.fence, &completion, now_ms, &config)?
+                        return Ok(None);
+                    }
+                    WorkflowOutcome::Complete {
+                        output_json,
+                        final_ordinal,
+                    } => WorkflowCompletion::Complete {
+                        output_json,
+                        final_ordinal,
+                    },
+                    WorkflowOutcome::Errored { error_code, .. } => WorkflowCompletion::Errored {
+                        code: open_compute_core::workflow::terminal_error_code(&error_code)?,
+                    },
+                    WorkflowOutcome::Unknown { .. } => return Err(scheduler_task_failed()),
                 };
-                WorkflowRepository::new(storage.db()).release_instance(&record.identity, now_ms)?;
-                Ok::<_, PlatformError>(state)
+                let state = store.finish_workflow(&run.fence, &completion, now_ms, &config)?;
+                if !state.is_terminal() {
+                    return Ok(None);
+                }
+                WorkflowRepository::new(storage.db()).retain_instance(&record.identity, now_ms)?;
+                Ok(Some(state))
             })
         })
         .await;
         match result {
             Ok(Ok(state)) => {
                 if let Some(observation) = &mut observation {
-                    observation.finish(
-                        if state == open_compute_storage::scheduler::WorkflowState::Complete {
-                            crate::metrics::WorkflowOutcome::Success
-                        } else {
-                            crate::metrics::WorkflowOutcome::Error
-                        },
-                    );
+                    match state {
+                        Some(WorkflowState::Complete) => {
+                            observation.finish(crate::metrics::WorkflowOutcome::Success);
+                        }
+                        Some(_) => observation.finish(crate::metrics::WorkflowOutcome::Error),
+                        None => observation.suspended(),
+                    }
                 }
                 self.workflow_infra_failures.store(0, Ordering::Release);
+                self.wake.notify();
             }
             Ok(Err(error))
                 if matches!(

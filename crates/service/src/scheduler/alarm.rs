@@ -1,8 +1,6 @@
 //! Durable Object Alarm workload adapter.
 
-use super::{
-    InFlightMetric, SchedulerService, repair_cursor, scheduler_task_failed, scheduler_timeout,
-};
+use super::{SchedulerService, repair_cursor, scheduler_task_failed, scheduler_timeout};
 use crate::metrics::{AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
 use crate::runtime_bridge::{AlarmDispatchOutcome, AlarmRepairResult};
 #[cfg(any(test, feature = "test-support"))]
@@ -30,17 +28,21 @@ impl SchedulerService {
         .map_err(|_| scheduler_task_failed())?;
         if let Some(metrics) = &self.metrics {
             metrics.observe_scheduler_claim_duration(
+                SchedulerKind::Alarm,
                 self.clock
                     .monotonic_now()
                     .saturating_duration_since(started),
             );
-            metrics.inc_scheduler_claim(match &result {
-                Ok((jobs, _)) if jobs.is_empty() => SchedulerClaimOutcome::Empty,
-                Ok(_) => SchedulerClaimOutcome::Claimed,
-                Err(_) => SchedulerClaimOutcome::Error,
-            });
+            metrics.inc_scheduler_claim(
+                SchedulerKind::Alarm,
+                match &result {
+                    Ok((jobs, _)) if jobs.is_empty() => SchedulerClaimOutcome::Empty,
+                    Ok(_) => SchedulerClaimOutcome::Claimed,
+                    Err(_) => SchedulerClaimOutcome::Error,
+                },
+            );
             if let Ok((_, recovered)) = &result {
-                metrics.inc_scheduler_claim_expired(*recovered);
+                metrics.inc_scheduler_claim_expired(SchedulerKind::Alarm, *recovered);
             }
             if let Ok(summary) = self.store.summary(now_ms) {
                 metrics.observe_scheduler_summary(summary, now_ms);
@@ -56,7 +58,6 @@ impl SchedulerService {
 
     pub(super) async fn dispatch_one(self: Arc<Self>, job: ClaimedJob) {
         let started = self.clock.monotonic_now();
-        let _in_flight = InFlightMetric::new(self.metrics.clone());
         let authority = match self.authority(&job).await {
             Ok(authority) => authority,
             Err(error)

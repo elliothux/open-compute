@@ -26,7 +26,10 @@ use open_compute_runtime::{
 use open_compute_service::runtime_bridge::{
     DispatchTarget, LoaderOutcome, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
-use open_compute_service::{KvBindingExecutor, bind_binding_backend, serve_binding_backend};
+use open_compute_service::{
+    KvBindingExecutor, KvCommand, KvCommandResult, KvStreamPart, bind_binding_backend,
+    serve_binding_backend,
+};
 use open_compute_storage::{
     AuthorizedBinding, BindingRepository, DeploymentRecord, PlatformStorage, ResourceRecord,
     ResourceRepository, WorkerRepository,
@@ -45,7 +48,7 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Default)]
 struct FakeState {
-    values: Mutex<HashMap<ResourceId, HashMap<String, String>>>,
+    values: Mutex<HashMap<ResourceId, HashMap<String, Vec<u8>>>>,
     unavailable: Mutex<HashSet<ResourceId>>,
     deleted: Mutex<HashSet<ResourceId>>,
 }
@@ -111,39 +114,73 @@ impl ResourceDriver for FakeDriver {
 struct FakeExecutor(Arc<FakeState>);
 
 impl KvBindingExecutor for FakeExecutor {
-    fn get(&self, binding: &AuthorizedBinding, key: &str) -> Result<Option<String>, PlatformError> {
+    fn execute(
+        &self,
+        binding: &AuthorizedBinding,
+        command: KvCommand,
+    ) -> Result<KvCommandResult, PlatformError> {
         self.ensure_available(binding.resource.id)?;
-        Ok(self
+        let mut resources = self.0.values.lock().unwrap();
+        let values = resources
+            .get_mut(&binding.resource.id)
+            .ok_or_else(missing)?;
+        match command {
+            KvCommand::Get { keys, .. } => Ok(KvCommandResult::Entries(
+                keys.iter()
+                    .map(|key| {
+                        values.get(key).map(|value| open_compute_storage::KvEntry {
+                            value: value.clone(),
+                            metadata_json: None,
+                            expires_at_ms: None,
+                        })
+                    })
+                    .collect(),
+            )),
+            KvCommand::Put { key, value, .. } => {
+                values.insert(key, value);
+                Ok(KvCommandResult::Mutation)
+            }
+            KvCommand::PutStaged { key, mut value, .. } => {
+                values.insert(key, value.read_all_for_test()?);
+                Ok(KvCommandResult::Mutation)
+            }
+            KvCommand::Delete { key } => {
+                values.remove(&key);
+                Ok(KvCommandResult::Mutation)
+            }
+            KvCommand::List { .. } => {
+                unreachable!("resource binding fixture does not list KV keys")
+            }
+        }
+    }
+
+    fn stream_get(
+        &self,
+        binding: &AuthorizedBinding,
+        key: &str,
+        _: Option<u64>,
+        sink: &mut dyn FnMut(KvStreamPart) -> Result<(), PlatformError>,
+    ) -> Result<(), PlatformError> {
+        self.ensure_available(binding.resource.id)?;
+        let value = self
             .0
             .values
             .lock()
             .unwrap()
             .get(&binding.resource.id)
-            .and_then(|values| values.get(key).cloned()))
-    }
-
-    fn put(
-        &self,
-        binding: &AuthorizedBinding,
-        key: &str,
-        value: &str,
-    ) -> Result<(), PlatformError> {
-        self.ensure_available(binding.resource.id)?;
-        let mut resources = self.0.values.lock().unwrap();
-        let values = resources
-            .get_mut(&binding.resource.id)
-            .ok_or_else(missing)?;
-        values.insert(key.to_owned(), value.to_owned());
-        Ok(())
-    }
-
-    fn delete(&self, binding: &AuthorizedBinding, key: &str) -> Result<(), PlatformError> {
-        self.ensure_available(binding.resource.id)?;
-        let mut resources = self.0.values.lock().unwrap();
-        let values = resources
-            .get_mut(&binding.resource.id)
-            .ok_or_else(missing)?;
-        values.remove(key);
+            .and_then(|values| values.get(key).cloned());
+        sink(KvStreamPart::Entry(value.as_ref().map(|value| {
+            open_compute_storage::KvEntryInfo {
+                value_length: value.len(),
+                metadata_json: None,
+                expires_at_ms: None,
+            }
+        })))?;
+        if let Some(value) = value {
+            for chunk in value.chunks(64 * 1024) {
+                sink(KvStreamPart::Bytes(chunk.to_vec()))?;
+            }
+        }
         Ok(())
     }
 }
@@ -212,6 +249,13 @@ async fn p0_3_real_binding_matrix() {
                 auth,
                 pins,
                 executor,
+                None,
+                None,
+                None,
+                open_compute_core::DurableObjectsConfig::default(),
+                open_compute_core::QueuesConfig::default(),
+                open_compute_core::WorkflowsConfig::default(),
+                None,
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -242,7 +286,7 @@ async fn p0_3_real_binding_matrix() {
             runtime.version_output(),
         )
         .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -274,7 +318,13 @@ async fn p0_3_real_binding_matrix() {
     ));
     let repository = WorkerRepository::new(storage.db());
     let (worker, _) = repository
-        .create_worker(account, "binding-gate", RequestId::generate(), 12)
+        .create_worker(
+            account,
+            "binding-gate",
+            RequestId::generate(),
+            12,
+            1_000_000,
+        )
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
     let deployments = DeploymentController::new(
@@ -301,7 +351,7 @@ async fn p0_3_real_binding_matrix() {
     let foreign = AccountId::generate();
     insert_account(storage.data_dir().control_db_path(), foreign);
     let (foreign_worker, _) = repository
-        .create_worker(foreign, "foreign", RequestId::generate(), 21)
+        .create_worker(foreign, "foreign", RequestId::generate(), 21, 1_000_000)
         .unwrap();
     let cross_account = deployments
         .create_deployment(deployment_request(
@@ -352,8 +402,19 @@ async fn p0_3_real_binding_matrix() {
     assert_eq!(props.status, 200);
     assert!(!props.body.contains(&resource.to_string()));
     assert!(!props.body.contains("BINDING_BACKEND"));
-    let echoed = dispatch(&transport, account, worker.id, &bound, "/echo", "stream-ok").await;
-    assert_eq!((echoed.status, echoed.body.as_str()), (200, "stream-ok"));
+    let streamed = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &bound,
+        "/stream",
+        "stream-ok",
+    )
+    .await;
+    assert_eq!(
+        (streamed.status, streamed.body.as_str()),
+        (200, "stream-ok")
+    );
     assert_eq!(pins.count(resource), 0);
 
     let binding = BindingRepository::new(storage.db())
@@ -371,7 +432,7 @@ async fn p0_3_real_binding_matrix() {
         bound.id,
         &hex::encode(binding.descriptor_sha256),
         "get",
-        br#"{"key":"k"}"#,
+        br#"{"keys":["k"]}"#,
         None,
     )
     .await;
@@ -390,7 +451,7 @@ async fn p0_3_real_binding_matrix() {
         bound.id,
         &"00".repeat(32),
         "get",
-        br#"{"key":"k"}"#,
+        br#"{"keys":["k"]}"#,
         None,
     )
     .await;
@@ -410,7 +471,7 @@ async fn p0_3_real_binding_matrix() {
         &hex::encode(binding.descriptor_sha256),
         "put",
         b"",
-        Some(1024 * 1024 + 1),
+        Some(open_compute_storage::KV_MAX_VALUE_BYTES + 64 * 1024 + 1),
     )
     .await;
     assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
@@ -461,16 +522,19 @@ async fn p0_3_real_binding_matrix() {
         .unwrap()
         .get_mut(&resource)
         .unwrap()
-        .insert("gate".to_owned(), "x".repeat(1024 * 1024 + 1));
+        .insert(
+            "gate".to_owned(),
+            vec![b'x'; open_compute_storage::KV_MAX_VALUE_BYTES + 1],
+        );
     let result_limit = dispatch(&transport, account, worker.id, &read_only, "/get", "").await;
     assert_eq!(result_limit.status, 500);
-    assert!(result_limit.body.contains("BINDING_LIMIT_EXCEEDED"));
+    assert!(result_limit.body.contains("KV_VALUE_TOO_LARGE"));
     fake.values
         .lock()
         .unwrap()
         .get_mut(&resource)
         .unwrap()
-        .insert("gate".to_owned(), "alpha".to_owned());
+        .insert("gate".to_owned(), b"alpha".to_vec());
 
     ResourceRepository::new(storage.db())
         .set_availability(
@@ -512,7 +576,7 @@ async fn p0_3_real_binding_matrix() {
         bound.id,
         &hex::encode(original_hash),
         "get",
-        br#"{"key":"gate"}"#,
+        br#"{"keys":["gate"]}"#,
         None,
     )
     .await;
@@ -632,7 +696,7 @@ fn deployment_request(
     const path = new URL(request.url).pathname;
     if (path === "/put") { await env.KV.put("gate", await request.text()); return new Response("put"); }
     if (path === "/get") return new Response((await env.KV.get("gate")) ?? "null");
-    if (path === "/echo") return new Response(await env.KV.echoStream(request.body));
+    if (path === "/stream") { await env.KV.put("stream", request.body); return new Response(await env.KV.get("stream", "stream")); }
     if (path === "/props") return Response.json({ own: Reflect.ownKeys(env.KV).map(String), backend: "BINDING_BACKEND" in env });
     return new Response("plain");
   }
@@ -656,7 +720,6 @@ fn deployment_request(
         bindings.insert(
             "KV".to_owned(),
             DeploymentBindingInput {
-                capability_version: 1,
                 kind: BindingKind::KvNamespace,
                 id: resource_id,
                 permissions,
@@ -747,7 +810,7 @@ async fn backend_call(
         .uri(format!(
             "http://{address}/internal/bindings/v1/kv/{binding_id}/{operation}"
         ))
-        .header("content-type", "application/vnd.open-compute.kv.v1+json")
+        .header("content-type", "application/vnd.open-compute.kv.v1+frame")
         .header("x-open-compute-binding-token", token)
         .header("x-open-compute-startup-generation", generation)
         .header("x-open-compute-deployment-id", deployment_id.to_string())

@@ -1,6 +1,6 @@
 # 整机备份与保留
 
-触发信号：升级前、计划维护窗口或 RPO 要求到期。影响面是本地 control/KV/D1/DO/scheduler authority；R2 只绑定当前外部 S3，不是 point-in-time copy。
+触发信号：计划维护窗口、当前 release 恢复演练或 RPO 要求到期。影响面是本地 control/KV/D1/DO/scheduler authority；R2 只绑定当前外部 S3，不是 point-in-time copy。
 
 只读诊断：停止 service 后检查当前 release、schema 和已有 committed manifest：
 

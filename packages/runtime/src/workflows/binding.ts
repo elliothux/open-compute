@@ -62,7 +62,7 @@ async function request(env: BindingEnv, props: WorkflowBindingProps, operation: 
   catch { throw bindingError("WORKFLOW_RUNTIME_UNAVAILABLE"); }
 }
 
-class WorkflowInstanceTransportV2 extends RpcTarget implements WorkflowHandle {
+class WorkflowInstanceTransport extends RpcTarget implements WorkflowHandle {
   #env: BindingEnv;
   #props: WorkflowBindingProps;
   #instanceId: string;
@@ -85,7 +85,7 @@ class WorkflowInstanceTransportV2 extends RpcTarget implements WorkflowHandle {
   sendEvent(body: { type: string; payloadJson: string }) { return this.#request("send-event", body); }
 }
 
-export class WorkflowBindingTransportV2 extends WorkerEntrypoint<BindingEnv, WorkflowBindingProps> {
+export class WorkflowBindingTransport extends WorkerEntrypoint<BindingEnv, WorkflowBindingProps> {
   async #resolve(operation: string, body: object) {
     const props = this.ctx.props;
     const result = await request(this.env, props, operation, body);
@@ -94,8 +94,8 @@ export class WorkflowBindingTransportV2 extends WorkerEntrypoint<BindingEnv, Wor
         || typeof result.id !== "string") {
       throw bindingError("WORKFLOW_RUNTIME_UNAVAILABLE");
     }
-    return { id: result.id, handle: new WorkflowInstanceTransportV2(this.env, props, result.instanceId) };
+    return { id: result.id, handle: new WorkflowInstanceTransport(this.env, props, result.instanceId) };
   }
-  create(body: { id: string | undefined; payloadJson: string; retention: unknown }) { return this.#resolve("create", body); }
+  create(body: { id?: string; payloadJson: string; retention?: unknown }) { return this.#resolve("create", body); }
   get(id: string) { return this.#resolve("get", { id }); }
 }

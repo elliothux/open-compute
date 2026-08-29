@@ -22,7 +22,7 @@ use open_compute_service::runtime_bridge::{
     DispatchTarget, LoaderOutcome, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
 use open_compute_service::{
-    R2BindingService, SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_r2,
+    R2BindingService, SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend,
 };
 use open_compute_storage::{
     DeploymentRecord, PlatformStorage, R2_SCHEMA_VERSION, ReserveResourceCreate,
@@ -98,7 +98,7 @@ async fn p0_5_real_r2_facade_matrix() {
         let auth = binding_auth.clone();
         let pins = pins.clone();
         async move {
-            serve_binding_backend_with_r2(
+            serve_binding_backend(
                 binding_listener,
                 binding_storage,
                 auth,
@@ -109,6 +109,11 @@ async fn p0_5_real_r2_facade_matrix() {
                 )),
                 None,
                 Some(r2_service),
+                None,
+                open_compute_core::DurableObjectsConfig::default(),
+                open_compute_core::QueuesConfig::default(),
+                open_compute_core::WorkflowsConfig::default(),
+                None,
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -140,7 +145,7 @@ async fn p0_5_real_r2_facade_matrix() {
             runtime.version_output(),
         )
         .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -169,7 +174,7 @@ async fn p0_5_real_r2_facade_matrix() {
         DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
 
     let (object_worker, _) = repository
-        .create_worker(account, "r2-object", RequestId::generate(), 20)
+        .create_worker(account, "r2-object", RequestId::generate(), 20, 1_000_000)
         .unwrap();
     let object = deploy(
         &deployments,
@@ -266,7 +271,7 @@ async fn p0_5_real_r2_facade_matrix() {
         ("r2-class", class_source(), "class:true:true", 40_i64),
     ] {
         let (worker, _) = repository
-            .create_worker(account, name, RequestId::generate(), now)
+            .create_worker(account, name, RequestId::generate(), now, 1_000_000)
             .unwrap();
         let deployment = deploy(
             &deployments,
@@ -373,19 +378,22 @@ async fn create_bucket(
     let fingerprint = storage.crypto().fingerprint_request(b"p0-5-r2-bucket");
     let resource_id = ResourceId::generate();
     let reservation = ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::R2Bucket,
-            name: "gate-bucket",
-            idempotency_key: "p0-5-r2-bucket",
-            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id,
-            driver_schema_version: R2_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 1_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::R2Bucket,
+                name: "gate-bucket",
+                idempotency_key: "p0-5-r2-bucket",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 1_000,
+            },
+            1_000_000,
+        )
         .unwrap();
     let ResourceCreateReservation::Reserved(resource) = reservation else {
         panic!("unexpected resource reservation")
@@ -442,7 +450,6 @@ fn request(
     bindings.insert(
         "BUCKET".to_owned(),
         DeploymentBindingInput {
-            capability_version: 1,
             kind: BindingKind::R2Bucket,
             id: resource,
             permissions: CanonicalPermissions::default(),
@@ -452,7 +459,6 @@ fn request(
     bindings.insert(
         "BUCKET_ALIAS".to_owned(),
         DeploymentBindingInput {
-            capability_version: 1,
             kind: BindingKind::R2Bucket,
             id: resource,
             permissions: CanonicalPermissions::default(),

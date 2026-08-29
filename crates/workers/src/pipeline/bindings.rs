@@ -44,7 +44,6 @@ impl DeploymentController<'_> {
                         deployment,
                         name,
                         definition,
-                        input.capability_version,
                         request.now_ms,
                     )?;
                 workflow_descriptors.push(binding.descriptor.clone());

@@ -70,7 +70,13 @@ pub(super) async fn prepare() -> Fixture {
     let account = storage.identity().default_account_id;
     let workers = WorkerRepository::new(storage.db());
     let worker = workers
-        .create_worker(account, "p2-chain", RequestId::generate(), now_ms())
+        .create_worker(
+            account,
+            "p2-chain",
+            RequestId::generate(),
+            now_ms(),
+            1_000_000,
+        )
         .unwrap()
         .0;
     let mut bindings = BTreeMap::new();
@@ -120,7 +126,7 @@ pub(super) async fn prepare() -> Fixture {
         };
         bindings.insert(
             name.into(),
-            binding(kind, id.as_str().unwrap().parse().unwrap(), 1),
+            binding(kind, id.as_str().unwrap().parse().unwrap()),
         );
     }
     let CreateQueueOutcome::Applied(queue) = QueueController::new(&storage, scheduler.clone())
@@ -161,7 +167,6 @@ pub(super) async fn prepare() -> Fixture {
                 binding(
                     BindingKind::Workflow,
                     ResourceId::from_uuid(definition.as_uuid()).unwrap(),
-                    2,
                 ),
             );
             bound.insert(
@@ -169,7 +174,6 @@ pub(super) async fn prepare() -> Fixture {
                 binding(
                     BindingKind::QueueProducer,
                     ResourceId::from_uuid(queue.as_uuid()).unwrap(),
-                    1,
                 ),
             );
         }
@@ -226,7 +230,7 @@ pub(super) async fn prepare() -> Fixture {
                 stack.transport.clone(),
                 Default::default(),
             )
-            .create_version(account, definition, deployment.id, "Flow".into(), 2)
+            .create_version(account, definition, deployment.id, "Flow".into())
             .await
             .unwrap();
             assert_eq!(version.state, open_compute_storage::DeploymentState::Ready);
@@ -243,6 +247,7 @@ pub(super) async fn prepare() -> Fixture {
             None,
             RequestId::generate(),
             now_ms(),
+            1_000_000,
         )
         .unwrap();
     stack.stop().await;
@@ -258,11 +263,10 @@ pub(super) async fn prepare() -> Fixture {
     }
 }
 
-fn binding(kind: BindingKind, id: ResourceId, capability_version: u32) -> DeploymentBindingInput {
+fn binding(kind: BindingKind, id: ResourceId) -> DeploymentBindingInput {
     DeploymentBindingInput {
         kind,
         id,
-        capability_version,
         permissions: Default::default(),
         config: Default::default(),
     }

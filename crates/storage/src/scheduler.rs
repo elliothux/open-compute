@@ -33,8 +33,7 @@ pub use workflow::{
     ClaimedWorkflowRun, WorkflowClaimCursor, WorkflowCompletion, WorkflowDatabaseInspection,
     WorkflowFailure, WorkflowInspection, WorkflowInstanceAction, WorkflowInstanceInspection,
     WorkflowInstanceRecord, WorkflowState, WorkflowStepAttempt, WorkflowStepGrant,
-    WorkflowStepIdentity, WorkflowStepInspection, WorkflowStepOutcome, WorkflowV2StepGrant,
-    WorkflowV2StepResult, inspect_workflow_databases,
+    WorkflowStepInspection, WorkflowStepOutcome, WorkflowStepResult, inspect_workflow_databases,
 };
 
 pub use cron::{
@@ -82,7 +81,6 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SchedulerMigrationFault {
     BeforeExecution,
-    AfterWorkflowRebuild,
     BeforeMigrationRow,
     AfterCommit,
 }
@@ -252,23 +250,8 @@ impl SchedulerStore {
             if fault == Some(SchedulerMigrationFault::BeforeExecution) {
                 return Err(corrupt());
             }
-            if migration.version == 6 {
-                workflow::verify_legacy_histories(&tx)?;
-                #[cfg(test)]
-                if fault == Some(SchedulerMigrationFault::AfterWorkflowRebuild) {
-                    let (before_restore, _) = migration
-                        .sql
-                        .split_once("INSERT INTO workflow_instances(")
-                        .ok_or_else(corrupt)?;
-                    tx.execute_batch(before_restore).map_err(map_sql_error)?;
-                    return Err(corrupt());
-                }
-            }
             tx.execute_batch(migration.sql).map_err(map_sql_error)?;
-            if migration.version == 6 {
-                workflow::verify_legacy_histories(&tx)?;
-            }
-            if migration.version >= 7 {
+            if migration.version >= 5 {
                 workflow::verify_operation_progress(&tx)?;
             }
             #[cfg(test)]

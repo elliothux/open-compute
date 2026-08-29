@@ -23,19 +23,22 @@ fn storage_fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
     .unwrap();
     let fingerprint = storage.crypto().fingerprint_request(b"r2-driver");
     let reservation = ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: storage.identity().default_account_id,
-            kind: BindingKind::R2Bucket,
-            name: "images",
-            idempotency_key: "r2-driver",
-            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id: open_compute_core::ResourceId::generate(),
-            driver_schema_version: R2_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 1_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: storage.identity().default_account_id,
+                kind: BindingKind::R2Bucket,
+                name: "images",
+                idempotency_key: "r2-driver",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: open_compute_core::ResourceId::generate(),
+                driver_schema_version: R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 1_000,
+            },
+            1_000_000,
+        )
         .unwrap();
     let ResourceCreateReservation::Reserved(resource) = reservation else {
         unreachable!()

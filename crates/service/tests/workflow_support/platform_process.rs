@@ -177,7 +177,7 @@ shutdown_grace_ms = 500
 [workflows]
 lease_ms = 6000
 heartbeat_ms = 1000
-dispatch_timeout_ms = 30000
+dispatch_timeout_ms = 300000
 recovery_backoff_ms = 100
 "#,
             data.display(),

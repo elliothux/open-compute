@@ -4,7 +4,7 @@ use super::*;
 use open_compute_core::WorkflowOperationId;
 use open_compute_core::workflow::{WorkflowRetention, WorkflowStepDeclaration, WorkflowStepKind};
 use open_compute_storage::scheduler::{
-    WorkflowInstanceAction, WorkflowStepAttempt, WorkflowStepOutcome, WorkflowV2StepGrant,
+    WorkflowInstanceAction, WorkflowStepAttempt, WorkflowStepGrant, WorkflowStepOutcome,
 };
 use open_compute_storage::{WorkflowOperationKind, WorkflowOperationResult};
 
@@ -38,7 +38,7 @@ pub(super) fn durable_fixture() -> (
         .unwrap();
     let deployment = repo.version(account, current).unwrap().target.deployment_id;
     let version = repo
-        .stage_version(account, definition, deployment, "Flow", 2, 5)
+        .stage_version(account, definition, deployment, "Flow", 5)
         .unwrap();
     repo.finish_version(account, version.target.version_id, true, 6)
         .unwrap();
@@ -55,7 +55,6 @@ pub(super) fn create(
         .create(
             account,
             definition,
-            2,
             Some("reusable"),
             WorkflowCreateInput {
                 payload_json: r#"{"value":7}"#,
@@ -87,12 +86,12 @@ pub(super) fn grant(
     }
     .resolve()
     .unwrap();
-    let WorkflowV2StepGrant::Run {
+    let WorkflowStepGrant::Run {
         step_token,
         attempt,
         ..
     } = store
-        .claim_workflow_batch_v2(&run.fence, &[step], config.dispatch_timeout_ms, now, config)
+        .claim_workflow_batch(&run.fence, &[step], config.dispatch_timeout_ms, now, config)
         .unwrap()
         .remove(0)
     else {
@@ -185,7 +184,6 @@ fn operator_retention_defaults_affect_only_new_instances_even_after_restart() {
         .create(
             account,
             definition,
-            2,
             None,
             WorkflowCreateInput {
                 payload_json: "null",
@@ -207,7 +205,6 @@ fn operator_retention_defaults_affect_only_new_instances_even_after_restart() {
         .create(
             account,
             definition,
-            2,
             None,
             WorkflowCreateInput {
                 payload_json: "null",
@@ -222,7 +219,6 @@ fn operator_retention_defaults_affect_only_new_instances_even_after_restart() {
             .unwrap()
             .unwrap()
             .durable
-            .unwrap()
             .retention,
         limits.default_retention
     );
@@ -239,8 +235,7 @@ fn operator_retention_defaults_affect_only_new_instances_even_after_restart() {
         .workflow_instance(old.instance_id)
         .unwrap()
         .unwrap()
-        .durable
-        .unwrap();
+        .durable;
     assert_eq!(retained.retention, frozen);
     assert_eq!(retained.expires_at_ms, Some(7200012));
     controller
@@ -258,7 +253,6 @@ fn operator_retention_defaults_affect_only_new_instances_even_after_restart() {
             .unwrap()
             .unwrap()
             .durable
-            .unwrap()
             .retention,
         frozen
     );
@@ -294,7 +288,6 @@ fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
                 definition,
                 identity.target.deployment_id,
                 "Flow",
-                2,
                 13,
             )
             .unwrap();
@@ -334,7 +327,7 @@ fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
         );
         assert_eq!(
             controller
-                .status(account, definition, identity.instance_id, 2, 14)
+                .status(account, definition, identity.instance_id, 14)
                 .unwrap_err()
                 .code(),
             ErrorCode::WorkflowInstanceBusy
@@ -368,7 +361,7 @@ fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
             );
             assert_eq!(
                 scheduler
-                    .settle_workflow_step_v2(
+                    .settle_workflow_step(
                         &old.fence,
                         &old_grant,
                         WorkflowStepOutcome::Success("true"),
@@ -400,9 +393,9 @@ fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
         assert_ne!(next.identity.target.version_id, newer.target.version_id);
         assert_eq!(next.identity.created_at_ms, 10);
         assert_eq!(next.input_json, r#"{"value":7}"#);
-        assert_eq!(next.durable.as_ref().unwrap().registered_step_count, 0);
-        assert_eq!(next.durable.as_ref().unwrap().event_count, 0);
-        assert_eq!(next.durable.as_ref().unwrap().next_event_seq, 1);
+        assert_eq!(next.durable.registered_step_count, 0);
+        assert_eq!(next.durable.event_count, 0);
+        assert_eq!(next.durable.next_event_seq, 1);
         assert_eq!(
             repo.reservation(identity.instance_id)
                 .unwrap()
@@ -421,7 +414,7 @@ fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
             .unwrap();
         let step = grant(&scheduler, &run, 18, &config);
         scheduler
-            .settle_workflow_step_v2(
+            .settle_workflow_step(
                 &run.fence,
                 &step,
                 WorkflowStepOutcome::Success("8"),
@@ -585,13 +578,13 @@ fn purge_saga_keeps_references_until_proof_and_only_then_reuses_the_public_id() 
         let expiry = 3600020;
         assert!(matches!(
             controller
-                .status(account, definition, identity.instance_id, 2, expiry - 1)
+                .status(account, definition, identity.instance_id, expiry - 1)
                 .unwrap(),
             WorkflowStatus::Terminated
         ));
         assert_eq!(
             controller
-                .status(account, definition, identity.instance_id, 2, expiry)
+                .status(account, definition, identity.instance_id, expiry)
                 .unwrap_err()
                 .code(),
             ErrorCode::WorkflowInstanceNotFound
@@ -601,7 +594,6 @@ fn purge_saga_keeps_references_until_proof_and_only_then_reuses_the_public_id() 
                 .create(
                     account,
                     definition,
-                    2,
                     Some("reusable"),
                     WorkflowCreateInput {
                         payload_json: "{}",

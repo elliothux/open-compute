@@ -1,8 +1,8 @@
 //! Workflow create, claim eligibility, and cross-database recovery orchestration.
 
 use open_compute_core::{
-    AccountId, ErrorCode, OperationClass, PlatformError, ResourceAvailability, ResourceState,
-    WorkflowId, WorkflowInstanceId, WorkflowsConfig,
+    AccountId, ErrorCode, PlatformError, ResourceAvailability, ResourceState, WorkflowId,
+    WorkflowInstanceId, WorkflowsConfig,
 };
 use open_compute_storage::scheduler::{ClaimedWorkflowRun, WorkflowFailure, WorkflowState};
 use open_compute_storage::{
@@ -18,7 +18,7 @@ mod lifecycle;
 pub struct WorkflowCreateInput<'a> {
     /// Serialized supported JSON input; normalized before either database is mutated.
     pub payload_json: &'a str,
-    /// Explicit V2 retention override; V1 rejects retention options.
+    /// Explicit retention override.
     pub retention: Option<&'a open_compute_core::workflow::WorkflowRetention>,
 }
 impl std::fmt::Debug for WorkflowCreateInput<'_> {
@@ -112,20 +112,12 @@ impl<'a> WorkflowController<'a> {
         &self,
         account: AccountId,
         definition: WorkflowId,
-        caller_capability: u32,
         external_id: Option<&str>,
         input: WorkflowCreateInput<'_>,
         now_ms: i64,
     ) -> Result<WorkflowInstanceIdentity, PlatformError> {
-        let retention = match caller_capability {
-            1 if input.retention.is_none() => None,
-            1 => return Err(error(ErrorCode::WorkflowMethodUnsupported)),
-            2 => Some(input.retention.unwrap_or(&self.limits.default_retention)),
-            _ => return Err(error(ErrorCode::WorkflowCapabilityMismatch)),
-        };
-        if let Some(retention) = retention {
-            retention.validate()?;
-        }
+        let retention = input.retention.unwrap_or(&self.limits.default_retention);
+        retention.validate()?;
         let payload = open_compute_core::workflow::canonical_json(
             input.payload_json,
             ErrorCode::WorkflowPayloadTooLarge,
@@ -134,21 +126,17 @@ impl<'a> WorkflowController<'a> {
             .check_workflow_create_capacity(account, payload.len(), self.limits)?;
         let _reservation = self
             .storage
-            .reserve_mutation(OperationClass::Scheduler, payload.len() as u64 + 64 * 1024)?;
+            .reserve_mutation(payload.len() as u64 + 64 * 1024)?;
         let repository = WorkflowRepository::new(self.storage.db());
         let reservation = match repository.reserve_instance(
             account,
             definition,
             external_id,
-            caller_capability,
             self.limits,
             now_ms,
         ) {
             Ok(reservation) => reservation,
-            Err(failure)
-                if caller_capability == 2
-                    && failure.code() == ErrorCode::WorkflowInstanceAlreadyExists =>
-            {
+            Err(failure) if failure.code() == ErrorCode::WorkflowInstanceAlreadyExists => {
                 return Err(error(self.creation_conflict(
                     definition,
                     external_id,
@@ -160,7 +148,7 @@ impl<'a> WorkflowController<'a> {
         let identity = reservation.identity;
         if let Err(err) =
             self.scheduler
-                .insert_workflow(&identity, &payload, retention, self.limits)
+                .insert_workflow(&identity, &payload, Some(retention), self.limits)
         {
             // A failed commit response is not proof of absence. Never delete a possibly durable instance pin.
             if self
@@ -178,34 +166,21 @@ impl<'a> WorkflowController<'a> {
     }
 
     /// Read an exact instance in the caller's definition scope, without loading step history.
-    /// Capability-one callers cannot access instances whose public names may be reused.
     pub fn status(
         &self,
         account: AccountId,
         definition: WorkflowId,
         instance_id: WorkflowInstanceId,
-        caller_capability: u32,
         now_ms: i64,
     ) -> Result<WorkflowStatus, PlatformError> {
         let instance = self.current_instance(account, definition, instance_id, now_ms)?;
-        if !matches!(caller_capability, 1 | 2)
-            || (caller_capability == 1 && instance.identity.target.capability_version != 1)
-        {
-            return Err(error(ErrorCode::WorkflowCapabilityMismatch));
-        }
         match instance.state {
             WorkflowState::Queued => Ok(WorkflowStatus::Queued),
-            WorkflowState::Running => Ok(
-                if instance
-                    .durable
-                    .as_ref()
-                    .is_some_and(|state| state.pause_requested)
-                {
-                    WorkflowStatus::WaitingForPause
-                } else {
-                    WorkflowStatus::Running
-                },
-            ),
+            WorkflowState::Running => Ok(if instance.durable.pause_requested {
+                WorkflowStatus::WaitingForPause
+            } else {
+                WorkflowStatus::Running
+            }),
             WorkflowState::Waiting => Ok(WorkflowStatus::Waiting),
             WorkflowState::Paused => Ok(WorkflowStatus::Paused),
             WorkflowState::Terminated => Ok(WorkflowStatus::Terminated),
@@ -227,7 +202,7 @@ impl<'a> WorkflowController<'a> {
         }
     }
 
-    /// Admit an event only for the caller's exact live, non-restarting V2 instance identity.
+    /// Admit an event only for the caller's exact live, non-restarting instance identity.
     pub fn send_event(
         &self,
         account: AccountId,
@@ -238,13 +213,10 @@ impl<'a> WorkflowController<'a> {
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         let instance = self.current_instance(account, definition, id, now_ms)?;
-        if instance.identity.target.capability_version != 2 {
-            return Err(error(ErrorCode::WorkflowMethodUnsupported));
-        }
         let _admission = self
             .storage
-            .reserve_mutation(OperationClass::Scheduler, payload.len() as u64 + 64 * 1024)?;
-        self.scheduler.send_workflow_event_v2(
+            .reserve_mutation(payload.len() as u64 + 64 * 1024)?;
+        self.scheduler.send_workflow_event(
             &instance.identity,
             event_type,
             payload,
@@ -263,7 +235,7 @@ impl<'a> WorkflowController<'a> {
         let repository = WorkflowRepository::new(self.storage.db());
         self.scheduler.recover_workflows(now_ms, self.limits, 32)?;
         self.scheduler
-            .maintain_workflow_due_v2(now_ms, self.limits, 32)?;
+            .maintain_workflow_due(now_ms, self.limits, 32)?;
         for id in self.scheduler.due_workflows(now_ms, 32, cursor)? {
             let instance = self
                 .scheduler
@@ -339,11 +311,7 @@ impl<'a> WorkflowController<'a> {
                         return self.corrupt(identity, now_ms);
                     }
                     if instance.state.is_terminal() {
-                        if identity.target.capability_version == 2 {
-                            repository.retain_instance(identity, now_ms)?;
-                        } else {
-                            repository.release_instance(identity, now_ms)?;
-                        }
+                        repository.retain_instance(identity, now_ms)?;
                     } else {
                         if !matches!(
                             reservation.state,
@@ -398,7 +366,7 @@ impl<'a> WorkflowController<'a> {
         self.scheduler
             .recover_workflows(now_ms, self.limits, limit)?;
         self.scheduler
-            .maintain_workflow_due_v2(now_ms, self.limits, limit)?;
+            .maintain_workflow_due(now_ms, self.limits, limit)?;
         self.collect_expired(limit, now_ms)?;
         repository.retire_unused_versions(limit, now_ms)?;
         self.scheduler.wake_signal().notify();

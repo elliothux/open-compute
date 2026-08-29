@@ -26,6 +26,8 @@ fn every_deployment_binds_the_complete_system_source_identity() {
         BTreeMap::new(),
         Vec::new(),
         Vec::new(),
+        Vec::new(),
+        Vec::new(),
         json!({"profile":"default"}),
         1,
     )
@@ -97,7 +99,7 @@ fn all_system_module_paths_are_reserved_without_binding_exceptions() {
     for name in [
         "__open_compute__/entry.js",
         "__open_compute__/d1/facade.js",
-        "__open_compute__/workflows/json-v2.js",
+        "__open_compute__/workflows/json.js",
         "__open_compute__/other.js",
     ] {
         let bundle = crate::CanonicalBundle::build(
@@ -131,10 +133,9 @@ fn all_system_module_paths_are_reserved_without_binding_exceptions() {
 }
 
 #[test]
-fn caller_declaration_validates_capabilities_for_each_product() {
+fn caller_declaration_uses_one_current_capability_and_rejects_selectors() {
     let body = json!({"type":"workflow","id":ResourceId::generate(),"permissions":{"read":true,"write":true},"config":{}});
-    let mut declaration: DeploymentBindingInput = serde_json::from_value(body.clone()).unwrap();
-    assert_eq!(declaration.capability_version, 1);
+    let declaration: DeploymentBindingInput = serde_json::from_value(body.clone()).unwrap();
     let valid = |value: &DeploymentBindingInput| {
         validate_binding_set(
             &BTreeMap::from([("FLOW".into(), value.clone())]),
@@ -142,26 +143,16 @@ fn caller_declaration_validates_capabilities_for_each_product() {
             &BTreeMap::new(),
         )
     };
-    declaration.capability_version = 2;
-    assert_eq!(
-        serde_json::to_value(&declaration).unwrap()["capabilityVersion"],
-        2
-    );
     valid(&declaration).unwrap();
-    declaration.kind = BindingKind::KvNamespace;
-    assert_eq!(
-        valid(&declaration).unwrap_err().code(),
-        ErrorCode::BindingCapabilityUnsupported
-    );
-    declaration.kind = BindingKind::Workflow;
-    for capability in [0, 3, u32::MAX] {
-        declaration.capability_version = capability;
-        assert_eq!(
-            valid(&declaration).unwrap_err().code(),
-            ErrorCode::BindingCapabilityUnsupported
-        );
-    }
-    for capability in [json!(null), json!("2"), json!(2.5), json!(-1)] {
+    assert!(serde_json::to_value(&declaration).unwrap()["capabilityVersion"].is_null());
+    for capability in [
+        json!(null),
+        json!(1),
+        json!(2),
+        json!("2"),
+        json!(2.5),
+        json!(-1),
+    ] {
         let mut invalid = body.clone();
         invalid["capabilityVersion"] = capability;
         assert!(serde_json::from_value::<DeploymentBindingInput>(invalid).is_err());

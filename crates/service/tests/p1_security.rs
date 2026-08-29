@@ -123,23 +123,27 @@ fn ready_deployment(
 ) -> DeploymentId {
     let id = DeploymentId::generate();
     repository
-        .insert_staging_deployment(&NewDeployment {
-            id,
-            account_id: account,
-            worker_id: worker,
-            artifact_sha256: [byte; 32],
-            artifact_size: 1,
-            artifact_schema_version: 1,
-            main_module: "index.js".to_owned(),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: Vec::new(),
-            limits: serde_json::json!({"profile":"p1-isolation"}),
-            worker_code_sha256: [byte; 32],
-            vars: BTreeMap::new(),
-            secrets: BTreeMap::new(),
-            request_id: RequestId::generate(),
-            now_ms,
-        })
+        .insert_staging_deployment(
+            &NewDeployment {
+                id,
+                account_id: account,
+                worker_id: worker,
+                artifact_sha256: [byte; 32],
+                artifact_size: 1,
+                artifact_schema_version: 1,
+                main_module: "index.js".to_owned(),
+                compatibility_date: "2026-08-22".to_owned(),
+                compatibility_flags: Vec::new(),
+                limits: serde_json::json!({"profile":"p1-isolation"}),
+                worker_code_sha256: [byte; 32],
+                vars: BTreeMap::new(),
+                secrets: BTreeMap::new(),
+                request_id: RequestId::generate(),
+                now_ms,
+            },
+            &open_compute_storage::NewDeploymentProducts::default(),
+            1_000_000,
+        )
         .expect("insert deployment");
     repository.begin_validation(id).expect("begin validation");
     repository.mark_ready(id, now_ms + 1).expect("ready");
@@ -183,19 +187,22 @@ fn p1_two_account_resource_and_deployment_matrix_has_no_existence_or_metric_orac
                 let key = format!("p1-{account_index}-{kind_index}-{instance}");
                 let fingerprint = storage.crypto().fingerprint_request(key.as_bytes());
                 let outcome = resources
-                    .reserve_create(&ReserveResourceCreate {
-                        account_id: account,
-                        kind,
-                        name: &key,
-                        idempotency_key: &key,
-                        fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-                        request_fingerprint: &fingerprint,
-                        resource_id: id,
-                        driver_schema_version: 1,
-                        request_id: RequestId::generate(),
-                        now_ms: 10,
-                        expires_at_ms: 1_000,
-                    })
+                    .reserve_create(
+                        &ReserveResourceCreate {
+                            account_id: account,
+                            kind,
+                            name: &key,
+                            idempotency_key: &key,
+                            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                            request_fingerprint: &fingerprint,
+                            resource_id: id,
+                            driver_schema_version: 1,
+                            request_id: RequestId::generate(),
+                            now_ms: 10,
+                            expires_at_ms: 1_000,
+                        },
+                        1_000_000,
+                    )
                     .expect("reserve resource");
                 assert!(matches!(outcome, ResourceCreateReservation::Reserved(_)));
                 resources.mark_ready(id, 11).expect("resource ready");
@@ -236,10 +243,10 @@ fn p1_two_account_resource_and_deployment_matrix_has_no_existence_or_metric_orac
 
     let workers = WorkerRepository::new(storage.db());
     let (worker_a, _) = workers
-        .create_worker(account_a, "account-a", RequestId::generate(), 20)
+        .create_worker(account_a, "account-a", RequestId::generate(), 20, 1_000_000)
         .expect("worker A");
     let (worker_b, _) = workers
-        .create_worker(account_b, "account-b", RequestId::generate(), 21)
+        .create_worker(account_b, "account-b", RequestId::generate(), 21, 1_000_000)
         .expect("worker B");
     let a1 = ready_deployment(workers, account_a, worker_a.id, 1, 30);
     let a2 = ready_deployment(workers, account_a, worker_a.id, 2, 40);

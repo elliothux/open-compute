@@ -5,9 +5,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse as _, Response};
-use open_compute_core::{
-    BindingId, DeploymentId, ErrorCode, OperationClass, PlatformError, QueuesConfig,
-};
+use open_compute_core::{BindingId, DeploymentId, ErrorCode, PlatformError, QueuesConfig};
 use open_compute_storage::{
     QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES, QUEUE_MAX_DELAY_SECONDS,
     QUEUE_MAX_MESSAGE_BYTES, QueueContentType, QueueEnqueueRequest, QueueMessageInput,
@@ -154,8 +152,7 @@ impl QueueBindingService {
                 deployment_id,
                 &descriptor,
             )?;
-            let _admission =
-                storage.reserve_mutation(OperationClass::Scheduler, admission_bytes)?;
+            let _admission = storage.reserve_mutation(admission_bytes)?;
             scheduler.enqueue_queue(
                 &QueueEnqueueRequest {
                     queue_id: authorized.queue.id,

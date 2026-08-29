@@ -45,14 +45,9 @@ impl SchedulerService {
                 }
             }
             while let Some(completed) = dispatches.try_join_next_with_id() {
-                release_completed(
+                self.release_completed(
                     completed_kind(completed, &mut dispatch_kinds)?,
                     &mut admission,
-                    &self.global_in_flight,
-                    &self.alarm_in_flight,
-                    &self.queue_in_flight,
-                    &self.cron_in_flight,
-                    &self.workflow_in_flight,
                 );
             }
             if *shutdown.borrow() {
@@ -259,14 +254,7 @@ impl SchedulerService {
                                 if !admission.reserve(SchedulerKind::Alarm, jobs.len()) {
                                     return Err(scheduler_task_failed());
                                 }
-                                store_admission_metrics(
-                                    &admission,
-                                    &self.global_in_flight,
-                                    &self.alarm_in_flight,
-                                    &self.queue_in_flight,
-                                    &self.cron_in_flight,
-                                    &self.workflow_in_flight,
-                                );
+                                self.store_admission_metrics(&admission);
                                 for job in jobs {
                                     let service = self.clone();
                                     let handle = dispatches.spawn(async move {
@@ -320,14 +308,7 @@ impl SchedulerService {
                                 if !admission.reserve(SchedulerKind::Queue, batches.len()) {
                                     return Err(scheduler_task_failed());
                                 }
-                                store_admission_metrics(
-                                    &admission,
-                                    &self.global_in_flight,
-                                    &self.alarm_in_flight,
-                                    &self.queue_in_flight,
-                                    &self.cron_in_flight,
-                                    &self.workflow_in_flight,
-                                );
+                                self.store_admission_metrics(&admission);
                                 for batch in batches {
                                     let service = self.clone();
                                     let handle = dispatches.spawn(async move {
@@ -381,14 +362,7 @@ impl SchedulerService {
                                 if !admission.reserve(SchedulerKind::Cron, runs.len()) {
                                     return Err(scheduler_task_failed());
                                 }
-                                store_admission_metrics(
-                                    &admission,
-                                    &self.global_in_flight,
-                                    &self.alarm_in_flight,
-                                    &self.queue_in_flight,
-                                    &self.cron_in_flight,
-                                    &self.workflow_in_flight,
-                                );
+                                self.store_admission_metrics(&admission);
                                 for run in runs {
                                     let service = self.clone();
                                     let handle = dispatches.spawn(async move {
@@ -442,14 +416,7 @@ impl SchedulerService {
                                 if !admission.reserve(SchedulerKind::Workflow, runs.len()) {
                                     return Err(scheduler_task_failed());
                                 }
-                                store_admission_metrics(
-                                    &admission,
-                                    &self.global_in_flight,
-                                    &self.alarm_in_flight,
-                                    &self.queue_in_flight,
-                                    &self.cron_in_flight,
-                                    &self.workflow_in_flight,
-                                );
+                                self.store_admission_metrics(&admission);
                                 for run in runs {
                                     let service = self.clone();
                                     let handle = dispatches.spawn(async move {
@@ -555,14 +522,9 @@ impl SchedulerService {
                 }
                 completed = dispatches.join_next_with_id(), if !dispatches.is_empty() => {
                     if let Some(completed) = completed {
-                        release_completed(
+                        self.release_completed(
                             completed_kind(completed, &mut dispatch_kinds)?,
                             &mut admission,
-                            &self.global_in_flight,
-                            &self.alarm_in_flight,
-                            &self.queue_in_flight,
-                            &self.cron_in_flight,
-                            &self.workflow_in_flight,
                         );
                     }
                 }
@@ -594,14 +556,7 @@ impl SchedulerService {
             SchedulerKind::Workflow,
             admission.pool_in_flight(SchedulerKind::Workflow),
         );
-        store_admission_metrics(
-            &admission,
-            &self.global_in_flight,
-            &self.alarm_in_flight,
-            &self.queue_in_flight,
-            &self.cron_in_flight,
-            &self.workflow_in_flight,
-        );
+        self.store_admission_metrics(&admission);
         Ok(())
     }
 

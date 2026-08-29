@@ -2,8 +2,7 @@
 
 use crate::auth::{bearer_matches, resolve_admin_auth};
 use crate::cli::{
-    BackupCommand, Cli, Command, ConfigCommand, SchedulerCommand, UpgradeCommand, execute,
-    load_checked, parse_from,
+    BackupCommand, Cli, Command, ConfigCommand, SchedulerCommand, execute, load_checked, parse_from,
 };
 use crate::config_load::{MAX_CONFIG_BYTES, load_platform_config};
 use crate::doctor::{CheckStatus, DoctorMode, doctor_report};
@@ -19,8 +18,8 @@ use crate::metrics::{
     SchedulerClaimOutcome, SqliteOp, StartResult, StartStage, WebSocketCloseReason,
 };
 use crate::run::{
-    FailAfter, RunOptions, join_listener, join_runtime_source, listener_plan, run_kv_maintenance,
-    run_platform, run_platform_with,
+    FailAfter, RunOptions, gc_worker_artifacts, join_listener, join_runtime_source, listener_plan,
+    run_kv_maintenance, run_platform, run_platform_with,
 };
 use crate::runtime_bridge::WorkerdTransport;
 use crate::scheduler::SchedulerService;
@@ -135,7 +134,7 @@ fn package_and_cli_shape() {
     assert!(help.contains("scheduler"));
     assert!(help.contains("capabilities"));
     assert!(help.contains("backup"));
-    assert!(help.contains("upgrade"));
+    assert!(!help.contains("upgrade"));
     assert!(help.contains("support-bundle"));
     let parsed = parse_from(["platformd", "run", "--config", "/tmp/config.toml"]).unwrap();
     assert!(matches!(parsed.command, Command::Run));
@@ -159,7 +158,7 @@ fn package_and_cli_shape() {
         "backup",
         "create",
         "--name",
-        "before-upgrade",
+        "before-snapshot",
         "--config",
         "/tmp/config.toml",
         "--json",
@@ -210,22 +209,7 @@ fn package_and_cli_shape() {
             }
         }
     ));
-    let parsed = parse_from([
-        "platformd",
-        "upgrade",
-        "check",
-        "--from-snapshot",
-        "01900000-0000-7000-8000-000000000000",
-        "--config",
-        "/tmp/config.toml",
-    ])
-    .unwrap();
-    assert!(matches!(
-        parsed.command,
-        Command::Upgrade {
-            command: UpgradeCommand::Check { .. }
-        }
-    ));
+    assert!(parse_from(["platformd", "upgrade"]).is_err());
     let parsed = parse_from([
         "platformd",
         "doctor",
@@ -1117,7 +1101,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         .await
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(body["version"], 2);
+    assert_eq!(body["version"], 1);
     assert_eq!(body["paused"], false);
     assert_eq!(body["global"]["inFlight"], 0);
     assert_eq!(body["pools"].as_array().unwrap().len(), 4);
@@ -1765,7 +1749,7 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     }
     reg.inc_do_reconcile(DoReconcileState::Creating, true);
     reg.inc_do_reconcile(DoReconcileState::Deleting, false);
-    reg.set_do_runtime_gauges(2, 4096, usize::MAX);
+    reg.set_do_storage_watermark(usize::MAX);
     reg.observe_scheduler_summary(
         SchedulerSummary {
             scheduled: 3,
@@ -1776,23 +1760,36 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
         },
         4_000,
     );
-    reg.inc_scheduler_claim(SchedulerClaimOutcome::Claimed);
-    reg.inc_scheduler_claim_expired(2);
-    reg.adjust_scheduler_in_flight(true);
-    reg.observe_scheduler_workload(
-        SchedulerKind::Alarm,
-        open_compute_core::WorkloadSummary {
-            ready: 3,
-            claimed: 2,
-            expired: 0,
-            oldest_due_at_ms: Some(1_000),
-            next_due_at_ms: Some(1_000),
-        },
-        4_000,
-    );
-    reg.observe_scheduler_claim_duration(Duration::from_millis(4));
-    reg.inc_scheduler_stale_completion(SchedulerKind::Alarm);
-    reg.set_scheduler_pool_state(SchedulerKind::Alarm, SchedulerPoolState::Ready);
+    for kind in SchedulerKind::ALL {
+        reg.inc_scheduler_claim(kind, SchedulerClaimOutcome::Claimed);
+        reg.inc_scheduler_claim_expired(kind, 2);
+        reg.set_scheduler_in_flight(kind, 1);
+    }
+    for kind in SchedulerKind::ALL {
+        reg.observe_scheduler_workload(
+            kind,
+            open_compute_core::WorkloadSummary {
+                ready: 3 + kind.index() as u64,
+                claimed: 2,
+                expired: 0,
+                oldest_due_at_ms: Some(1_000),
+                next_due_at_ms: Some(1_000),
+            },
+            4_000,
+        );
+    }
+    for kind in SchedulerKind::ALL {
+        reg.observe_scheduler_claim_duration(kind, Duration::from_millis(4));
+    }
+    for (kind, state) in SchedulerKind::ALL.into_iter().zip([
+        SchedulerPoolState::Ready,
+        SchedulerPoolState::Paused,
+        SchedulerPoolState::Backoff,
+        SchedulerPoolState::CircuitOpen,
+    ]) {
+        reg.inc_scheduler_stale_completion(kind);
+        reg.set_scheduler_pool_state(kind, state);
+    }
     reg.inc_scheduler_wake("notification");
     reg.observe_alarm_delivery(AlarmOutcome::Retry, 2, Duration::from_millis(9));
     reg.inc_alarm_mutation(AlarmMutation::Set, true);
@@ -1856,13 +1853,11 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     assert!(
         rendered.contains("oc_do_object_reconcile_total{state=\"deleting\",outcome=\"failure\"} 1")
     );
-    assert!(rendered.contains("oc_do_websocket_active 2"));
-    assert!(rendered.contains("oc_do_storage_bytes 4096"));
+    assert!(!rendered.contains("oc_do_websocket_active"));
+    assert!(!rendered.contains("oc_do_storage_bytes"));
     assert!(rendered.contains("oc_do_storage_watermark{state=\"stop\"} 1"));
-    assert!(rendered.contains("oc_scheduler_jobs{kind=\"do_alarm\",state=\"scheduled\"} 3"));
-    assert!(rendered.contains("oc_scheduler_claim_total{outcome=\"claimed\"} 1"));
-    assert!(rendered.contains("oc_scheduler_claim_expired_total{kind=\"do_alarm\"} 2"));
-    assert!(rendered.contains("oc_scheduler_in_flight{kind=\"do_alarm\"} 1"));
+    assert!(rendered.contains("oc_do_alarm_jobs{state=\"scheduled\"} 3"));
+    assert!(!rendered.contains("oc_scheduler_"));
     assert!(rendered.contains("open_compute_scheduler_ready{kind=\"do_alarm\"} 3"));
     assert!(
         rendered.contains(
@@ -1872,8 +1867,22 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     assert!(
         rendered.contains("open_compute_scheduler_stale_completion_total{kind=\"do_alarm\"} 1")
     );
+    assert!(rendered.contains("open_compute_scheduler_ready{kind=\"queue\"} 4"));
+    assert!(rendered.contains("open_compute_scheduler_ready{kind=\"cron\"} 5"));
+    assert!(rendered.contains("open_compute_scheduler_ready{kind=\"workflow\"} 6"));
+    assert!(rendered.contains("open_compute_scheduler_in_flight{kind=\"workflow\"} 1"));
+    assert!(rendered.contains("open_compute_scheduler_lease_recovery_total{kind=\"queue\"} 2"));
+    assert!(
+        rendered.contains("open_compute_scheduler_stale_completion_total{kind=\"workflow\"} 1")
+    );
     assert!(
         rendered.contains("open_compute_scheduler_pool_state{kind=\"do_alarm\",state=\"ready\"} 1")
+    );
+    assert!(
+        rendered.contains("open_compute_scheduler_pool_state{kind=\"queue\",state=\"paused\"} 1")
+    );
+    assert!(
+        rendered.contains("open_compute_scheduler_pool_state{kind=\"cron\",state=\"backoff\"} 1")
     );
     assert!(rendered.contains("open_compute_scheduler_wake_total{reason=\"notification\"} 1"));
     assert!(
@@ -2094,7 +2103,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     assert_eq!(
         capabilities.products["workflows"].deviations,
-        vec!["OC-WORKFLOW-001", "OC-WORKFLOW-002", "OC-WORKFLOW-003"]
+        vec!["OC-WORKFLOW-001", "OC-WORKFLOW-002"]
     );
     assert_eq!(
         capabilities.products["websocket_hibernation"].status,
@@ -2104,7 +2113,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     assert!(metadata.validate());
     assert_eq!(metadata.release, capabilities.release);
     assert_eq!(
-        metadata.migrations.last().unwrap().version,
+        metadata.schema_definitions.last().unwrap().version,
         metadata.release.control_schema_version
     );
     let policy = crate::capabilities::platform_config_policy_sha256(&loaded).unwrap();
@@ -2207,7 +2216,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     loaded.config.hardening.max_support_bundle_bytes = 32 * 1024 * 1024;
 
     fs::remove_file(operations.join("last-restore.json")).unwrap();
-    write_mode(&operations.join("last-upgrade.json"), "not-json", 0o600);
+    write_mode(&operations.join("last-restore.json"), "not-json", 0o600);
     assert_eq!(
         crate::support_bundle::create_support_bundle(
             &loaded,
@@ -2220,7 +2229,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         .code(),
         ErrorCode::SupportBundleInvalid
     );
-    fs::remove_file(operations.join("last-upgrade.json")).unwrap();
+    fs::remove_file(operations.join("last-restore.json")).unwrap();
 
     let admin_secret = dir.path().join("admin-auth-secret");
     write_mode(&admin_secret, "p1-support-admin-secret", 0o600);
@@ -2256,7 +2265,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         Some(ErrorCode::StoragePressure),
     );
     metrics.observe_admission(
-        open_compute_core::OperationClass::Upgrade,
+        open_compute_core::OperationClass::Snapshot,
         Some(ErrorCode::PlatformUnavailable),
     );
     metrics.set_disk_admission(
@@ -2272,7 +2281,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         },
         10,
     );
-    metrics.set_schema_state(7, 8);
+    metrics.set_schema_version(8);
     metrics.set_schema_failed_resources(2);
     metrics.set_resource_counts([1, 2, 3, 4, 5, 6, 7, 8]);
     metrics.observe_product_error(
@@ -2332,7 +2341,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     assert!(rendered.contains(
         "platform_admission_total{operation=\"restore\",outcome=\"storage_pressure\"} 1"
     ));
-    assert!(rendered.contains("platform_schema_migration_required 1"));
+    assert!(rendered.contains("platform_schema_current 8"));
     assert!(rendered.contains("platform_schema_failed_resources 2"));
     assert!(rendered.contains("platform_resource_count{resource=\"d1_databases\"} 7"));
     assert!(rendered.contains("platform_quota_reject_total{product=\"durable_objects\"} 1"));
@@ -2434,6 +2443,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             "p2-3-promotion",
             open_compute_core::RequestId::generate(),
             2,
+            1_000_000,
         )
         .unwrap();
     let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
@@ -2817,13 +2827,15 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
     assert!(scheduler.poll_once().await.unwrap() >= 1);
     clock.set_wall_time_ms(706_000);
     for batch in scheduler_store
-        .claim_queue_batches(706_000, 60_000, 250, 1)
+        .claim_queue_batches(706_000, 60_000, 250, 1, None)
+        .map(|(items, _)| items)
         .unwrap()
     {
         scheduler.clone().dispatch_queue_batch(batch).await;
     }
     for run in scheduler_store
         .claim_cron_runs(706_000, 60_000, 250, 1)
+        .map(|(items, _)| items)
         .unwrap()
     {
         scheduler.clone().dispatch_cron_run(run).await;
@@ -4204,27 +4216,32 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
                 "maintenance-worker",
                 open_compute_core::RequestId::generate(),
                 1,
+                1_000_000,
             )
             .unwrap();
         for (index, timestamp) in [(1_u8, 2_i64), (2, 3)] {
             let deployment = open_compute_core::DeploymentId::generate();
-            repo.insert_staging_deployment(&open_compute_storage::NewDeployment {
-                id: deployment,
-                account_id: account,
-                worker_id: worker.id,
-                artifact_sha256: [index; 32],
-                artifact_size: u64::from(index),
-                artifact_schema_version: 1,
-                main_module: "index.js".to_owned(),
-                compatibility_date: "2026-08-22".to_owned(),
-                compatibility_flags: Vec::new(),
-                limits: serde_json::json!({}),
-                worker_code_sha256: [index.saturating_add(10); 32],
-                vars: std::collections::BTreeMap::new(),
-                secrets: std::collections::BTreeMap::new(),
-                request_id: open_compute_core::RequestId::generate(),
-                now_ms: timestamp,
-            })
+            repo.insert_staging_deployment(
+                &open_compute_storage::NewDeployment {
+                    id: deployment,
+                    account_id: account,
+                    worker_id: worker.id,
+                    artifact_sha256: [index; 32],
+                    artifact_size: u64::from(index),
+                    artifact_schema_version: 1,
+                    main_module: "index.js".to_owned(),
+                    compatibility_date: "2026-08-22".to_owned(),
+                    compatibility_flags: Vec::new(),
+                    limits: serde_json::json!({}),
+                    worker_code_sha256: [index.saturating_add(10); 32],
+                    vars: std::collections::BTreeMap::new(),
+                    secrets: std::collections::BTreeMap::new(),
+                    request_id: open_compute_core::RequestId::generate(),
+                    now_ms: timestamp,
+                },
+                &open_compute_storage::NewDeploymentProducts::default(),
+                1_000_000,
+            )
             .unwrap();
             repo.mark_rejected(
                 deployment,
@@ -4266,6 +4283,143 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
         .unwrap()
         .unwrap();
     assert_eq!(mock.object_count(), 0);
+}
+
+#[tokio::test]
+async fn worker_artifact_gc_skips_when_final_reference_snapshot_fails() {
+    let (_dir, path, mock) = initialized_doctor_fixture().await;
+    let loaded = load_platform_config(&path).unwrap();
+    let storage = Arc::new(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &loaded.config.storage,
+            &open_compute_core::SystemClock,
+        )
+        .unwrap(),
+    );
+    let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
+    let client = open_compute_artifacts::S3ArtifactClient::connect(
+        &loaded.config.s3,
+        &credentials,
+        loaded.config.cache.max_artifact_bytes,
+    )
+    .unwrap();
+    let store = open_compute_artifacts::ArtifactStore::new(client);
+    let payload = bytes::Bytes::from_static(b"unreferenced-old-artifact");
+    let digest = hex::encode(sha2::Sha256::digest(&payload));
+    store
+        .put_verified(
+            futures::stream::iter(vec![Ok::<_, std::io::Error>(payload.clone())]),
+            &digest,
+            payload.len() as u64,
+        )
+        .await
+        .unwrap();
+    storage.db().set_foreign_keys_for_test(false).unwrap();
+    let mut workers = loaded.config.workers;
+    workers.artifact_gc_grace_ms = 0;
+    gc_worker_artifacts(
+        &storage,
+        &store,
+        &workers,
+        &crate::snapshot_pins::SnapshotPins::empty(),
+    )
+    .await;
+    assert_eq!(mock.object_count(), 1);
+    storage.db().set_foreign_keys_for_test(true).unwrap();
+}
+
+#[tokio::test]
+async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
+    let (_dir, path, mock) = initialized_doctor_fixture().await;
+    let loaded = load_platform_config(&path).unwrap();
+    let storage = Arc::new(
+        open_compute_storage::PlatformStorage::bootstrap(
+            &loaded.config.storage,
+            &open_compute_core::SystemClock,
+        )
+        .unwrap(),
+    );
+    let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
+    let client = open_compute_artifacts::S3ArtifactClient::connect(
+        &loaded.config.s3,
+        &credentials,
+        loaded.config.cache.max_artifact_bytes,
+    )
+    .unwrap();
+    let store = open_compute_artifacts::ArtifactStore::new(client);
+    let payload = bytes::Bytes::from_static(b"reused-old-artifact");
+    let digest: [u8; 32] = sha2::Sha256::digest(&payload).into();
+    let digest_hex = hex::encode(digest);
+    store
+        .put_verified(
+            futures::stream::iter(vec![Ok::<_, std::io::Error>(payload.clone())]),
+            &digest_hex,
+            payload.len() as u64,
+        )
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(2)).await;
+
+    let repo = open_compute_storage::WorkerRepository::new(storage.db());
+    let account = storage.identity().default_account_id;
+    let (worker, _) = repo
+        .create_worker(
+            account,
+            "gc-reference-fence",
+            open_compute_core::RequestId::generate(),
+            1,
+            1_000_000,
+        )
+        .unwrap();
+    let reservation = store.reserve_deployment_artifact().await;
+    let mut workers = loaded.config.workers;
+    workers.artifact_gc_grace_ms = 0;
+    let gc_storage = storage.clone();
+    let gc_store = store.clone();
+    let mut gc = tokio::spawn(async move {
+        gc_worker_artifacts(
+            &gc_storage,
+            &gc_store,
+            &workers,
+            &crate::snapshot_pins::SnapshotPins::empty(),
+        )
+        .await;
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut gc)
+            .await
+            .is_err(),
+        "GC must wait for the deployment commit reservation"
+    );
+    let deployment = open_compute_core::DeploymentId::generate();
+    repo.insert_staging_deployment(
+        &open_compute_storage::NewDeployment {
+            id: deployment,
+            account_id: account,
+            worker_id: worker.id,
+            artifact_sha256: digest,
+            artifact_size: payload.len() as u64,
+            artifact_schema_version: 1,
+            main_module: "index.js".to_owned(),
+            compatibility_date: "2026-08-22".to_owned(),
+            compatibility_flags: Vec::new(),
+            limits: serde_json::json!({}),
+            worker_code_sha256: [7; 32],
+            vars: std::collections::BTreeMap::new(),
+            secrets: std::collections::BTreeMap::new(),
+            request_id: open_compute_core::RequestId::generate(),
+            now_ms: 2,
+        },
+        &open_compute_storage::NewDeploymentProducts::default(),
+        1_000_000,
+    )
+    .unwrap();
+    drop(reservation);
+    tokio::time::timeout(Duration::from_secs(1), gc)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(mock.object_count(), 1);
 }
 
 #[tokio::test]

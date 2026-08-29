@@ -1,4 +1,4 @@
-//! Batch admission, illegal overlap, and bounded large replay on the real V2 path.
+//! Batch admission, illegal overlap, and bounded large replay on the current path.
 
 use super::{Harness, now, start_backend};
 use open_compute_core::{MetricsConfig, SchedulerConfig, WorkflowsConfig};
@@ -42,13 +42,7 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
         harness.transport.clone(),
         limits.clone(),
     )
-    .create_version(
-        account,
-        definition.id,
-        target.deployment_id,
-        "Flow".into(),
-        2,
-    )
+    .create_version(account, definition.id, target.deployment_id, "Flow".into())
     .await
     .unwrap();
     let controller = WorkflowController::new(&harness.storage, &store, &limits);
@@ -61,7 +55,6 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
             .create(
                 account,
                 definition.id,
-                2,
                 Some(mode),
                 WorkflowCreateInput {
                     payload_json: &input,
@@ -136,7 +129,7 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
                 "{mode}"
             );
             if mode == "overflow" {
-                assert_eq!(record.durable.as_ref().unwrap().registered_step_count, 0);
+                assert_eq!(record.durable.registered_step_count, 0);
             }
         }
         store.verify_workflow_history(id).unwrap();

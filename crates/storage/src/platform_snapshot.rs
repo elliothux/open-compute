@@ -105,13 +105,11 @@ pub fn prepare_platform_snapshot(
     if u32::try_from(control_schema).ok() != Some(request.release.control_schema_version)
         || u32::try_from(scheduler_schema.schema_version).ok()
             != Some(request.release.scheduler_schema_version)
-        || request.release.kv_schema_version_min != KV_SCHEMA_VERSION
-        || request.release.kv_schema_version_max != KV_SCHEMA_VERSION
-        || request.release.d1_schema_version_min != D1_DATABASE_SCHEMA_VERSION
-        || request.release.d1_schema_version_max != D1_DATABASE_SCHEMA_VERSION
+        || request.release.kv_schema_version != KV_SCHEMA_VERSION
+        || request.release.d1_schema_version != D1_DATABASE_SCHEMA_VERSION
     {
         return Err(PlatformError::new(
-            ErrorCode::UpgradeRequired,
+            ErrorCode::SchemaUnsupported,
             "snapshot source schema tuple does not match the executing release",
         ));
     }

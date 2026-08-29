@@ -33,7 +33,6 @@ futures = "0.3.31"
 hex = "0.4.3"
 hmac = "0.12.1"
 md-5 = "0.10.6"
-ipnet = "2.11.0"
 rand = "0.9.2"
 rusqlite = { version = "0.37.0", features = ["backup", "blob", "bundled", "hooks", "limits"] }
 rustix = { version = "1.1.2", features = ["alloc", "fs"] }

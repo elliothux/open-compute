@@ -71,7 +71,7 @@ impl ControlDb {
 
     /// Open an existing control database read-only while observing committed WAL frames.
     ///
-    /// This is reserved for stopped-platform startup and upgrade fences. SQLite may create
+    /// This is reserved for stopped-platform startup and restore fences. SQLite may create
     /// or update WAL coordination sidecars, so zero-side-effect diagnostics must use
     /// [`Self::open_readonly`] instead.
     pub fn open_readonly_wal_aware(
@@ -159,6 +159,19 @@ impl ControlDb {
     pub(crate) fn verify_foreign_keys(&self) -> Result<(), PlatformError> {
         let conn = self.lock()?;
         verify_foreign_keys_on(&conn)
+    }
+
+    /// Toggle foreign-key enforcement for fail-closed integration tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_foreign_keys_for_test(&self, enabled: bool) -> Result<(), PlatformError> {
+        let conn = self.lock()?;
+        conn.pragma_update(None, "foreign_keys", if enabled { "ON" } else { "OFF" })
+            .map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::MigrationFailed,
+                    "failed to configure test foreign-key enforcement",
+                )
+            })
     }
 
     /// Apply pending forward-only migrations.

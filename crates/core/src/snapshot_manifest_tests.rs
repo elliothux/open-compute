@@ -13,10 +13,8 @@ fn release() -> PlatformReleaseIdentityV1 {
         facade_capability_version: 1,
         control_schema_version: 8,
         scheduler_schema_version: 1,
-        kv_schema_version_min: 1,
-        kv_schema_version_max: 1,
-        d1_schema_version_min: 1,
-        d1_schema_version_max: 1,
+        kv_schema_version: 1,
+        d1_schema_version: 1,
         snapshot_format_version: 1,
         compatibility_policy_sha256: "3".repeat(64),
     }
@@ -106,9 +104,11 @@ fn manifest_paths_caps_and_uniqueness_are_strict() {
         duplicate.validate(10, 100, 100).unwrap_err().code(),
         ErrorCode::SnapshotInvalid
     );
-    let mut bad_schema = value.clone();
-    bad_schema.source_schemas.insert("control".to_owned(), 7);
-    assert!(bad_schema.validate(10, 100, 100).is_err());
+    for owner in ["control", "scheduler", "kv", "d1"] {
+        let mut bad_schema = value.clone();
+        *bad_schema.source_schemas.get_mut(owner).unwrap() += 1;
+        assert!(bad_schema.validate(10, 100, 100).is_err(), "{owner}");
+    }
     let mut traversal = value;
     traversal.files[0].restore_path = "do/../control.sqlite".to_owned();
     assert!(traversal.validate(10, 100, 100).is_err());

@@ -144,14 +144,6 @@ impl<'a> ResourceRepository<'a> {
     pub fn reserve_create(
         &self,
         input: &ReserveResourceCreate<'_>,
-    ) -> Result<ResourceCreateReservation, PlatformError> {
-        self.reserve_create_with_limit(input, u32::MAX)
-    }
-
-    /// Atomically enforce the account/product live-resource limit and reserve create.
-    pub fn reserve_create_with_limit(
-        &self,
-        input: &ReserveResourceCreate<'_>,
         max_live: u32,
     ) -> Result<ResourceCreateReservation, PlatformError> {
         validate_name(input.name)?;

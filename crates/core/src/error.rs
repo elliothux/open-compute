@@ -1,6 +1,6 @@
 //! Stable error codes and a secret-safe error type.
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 
@@ -8,7 +8,7 @@ use thiserror::Error;
 ///
 /// Codes cover every P0.1 failure in the platform foundation design section 16
 /// plus the static validation failures this crate owns.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     /// `--config` path was missing, relative, or not a regular file path form.
@@ -51,9 +51,9 @@ pub enum ErrorCode {
     SnapshotInvalid,
     /// A fresh-host restore target or restored authority failed validation.
     RestoreInvalid,
-    /// The data directory requires an explicit offline forward upgrade.
-    UpgradeRequired,
-    /// A release identity is not supported for restore or upgrade.
+    /// Persisted schema identity does not match this implementation.
+    SchemaUnsupported,
+    /// A release identity is not supported for restore.
     ReleaseUnsupported,
     /// A support-bundle output path or allowlisted input failed validation.
     SupportBundleInvalid,
@@ -141,8 +141,6 @@ pub enum ErrorCode {
     BindingProtocolError,
     /// Binding request, response, or stream exceeded its fixed budget.
     BindingLimitExceeded,
-    /// A binding mutation may have committed before transport failure.
-    BindingResultUnknown,
     /// A KV key is empty or otherwise outside the documented key grammar.
     KvKeyInvalid,
     /// A KV key exceeds the 512-byte UTF-8 limit.
@@ -408,6 +406,14 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// Decode one canonical persisted error code from the current schema.
+    #[must_use]
+    pub fn from_stable_str(value: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(value.to_owned())).ok()
+    }
+}
+
+impl ErrorCode {
     /// Canonical uppercase snake-case token.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -432,7 +438,7 @@ impl ErrorCode {
             Self::PlatformUnavailable => "PLATFORM_UNAVAILABLE",
             Self::SnapshotInvalid => "SNAPSHOT_INVALID",
             Self::RestoreInvalid => "RESTORE_INVALID",
-            Self::UpgradeRequired => "UPGRADE_REQUIRED",
+            Self::SchemaUnsupported => "SCHEMA_UNSUPPORTED",
             Self::ReleaseUnsupported => "RELEASE_UNSUPPORTED",
             Self::SupportBundleInvalid => "SUPPORT_BUNDLE_INVALID",
             Self::DataDirInUse => "DATA_DIR_IN_USE",
@@ -477,7 +483,6 @@ impl ErrorCode {
             Self::BindingCapabilityUnsupported => "BINDING_CAPABILITY_UNSUPPORTED",
             Self::BindingProtocolError => "BINDING_PROTOCOL_ERROR",
             Self::BindingLimitExceeded => "BINDING_LIMIT_EXCEEDED",
-            Self::BindingResultUnknown => "BINDING_RESULT_UNKNOWN",
             Self::KvKeyInvalid => "KV_KEY_INVALID",
             Self::KvKeyTooLarge => "KV_KEY_TOO_LARGE",
             Self::KvValueTooLarge => "KV_VALUE_TOO_LARGE",

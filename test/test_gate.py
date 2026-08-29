@@ -35,10 +35,10 @@ class GateTests(unittest.TestCase):
             self.assertEqual(gate.rounds_from_env(), 3)
 
     def test_overlapping_selections_run_each_physical_target_once(self):
-        selected = gate.selection(['p0-2', 'p2-3', 'p2-5', 'p2-4', 'p1-8', 'p0-7'])
+        selected = gate.selection(['p0-2', 'p2-3', 'workflow', 'p1-8', 'p0-7'])
         self.assertEqual(len(selected), len(set(gate.TARGETS[name][:2] for name in selected)))
         self.assertEqual(selected.count('p0-2'), 1)
-        self.assertEqual(selected.count('p2-4-product'), 1)
+        self.assertEqual(selected.count('workflow-product'), 1)
         with self.assertRaises(ValueError):
             gate.selection(['g0'])
 
@@ -57,7 +57,7 @@ class GateTests(unittest.TestCase):
             with lock:
                 running.remove(name)
             return {'target': name, 'exit_code': 0}
-        selected = ['p0-1', 'p0-2', 'p0-3', 'p2-5-product', 'runtime', 'p0-4']
+        selected = ['p0-1', 'p0-2', 'p0-3', 'workflow-product', 'runtime', 'p0-4']
         with tempfile.TemporaryDirectory() as temp:
             artifacts = {name: name for name in selected}
             results = gate.run_round(self.targets(selected), artifacts, Path(temp)/'round', 4, execute)
@@ -211,22 +211,22 @@ class GateTests(unittest.TestCase):
             resolve.assert_not_called()
 
     def test_final_workspace_runs_complete_inventory_once_and_only_timing_twice_more(self):
-        targets = self.targets(['p0-1', 'p1-security', 'p2-1', 'p2-4-product'])
+        targets = self.targets(['p0-1', 'p1-security', 'p2-1', 'workflow-product'])
         targets['unit'] = gate.Target('package', 'lib', 'lib', '/repo', False)
         plans = gate.round_plan(targets, 3)
         self.assertEqual(plans[0], targets)
         for plan in plans[1:]:
-            self.assertEqual(set(plan), {'p0-1', 'p2-4-product'})
+            self.assertEqual(set(plan), {'p0-1', 'workflow-product'})
             for name, target in plan.items():
                 self.assertEqual(set(target.cases), set(gate.TIMING[name]))
-                self.assertFalse(set(target.cases) & set(gate.ONCE[name]))
+                self.assertFalse(set(target.cases) & set(gate.ONCE.get(name, ())))
         self.assertEqual(gate.round_plan(targets, 1), [targets])
         deterministic = self.targets(['p1-security', 'p2-1'])
         self.assertEqual(gate.round_plan(deterministic, 3), [deterministic])
 
     def test_final_main_records_mixed_rounds_and_stops_after_second_round_failure(self):
         for failure in [False, True]:
-            selected = ['p1-security', 'p2-4-product']
+            selected = ['p1-security', 'workflow-product']
             targets = {name: target._replace(cases=tuple(sorted(
                 gate.ONCE.get(name, ()) + gate.TIMING.get(name, ()))))
                 for name, target in self.targets(selected).items()}
@@ -251,8 +251,8 @@ class GateTests(unittest.TestCase):
                 report = json.loads(next(Path(temp).rglob('report.json')).read_text())
             self.assertEqual(set(calls[1]), set(selected))
             for planned in calls[2:]:
-                self.assertEqual(set(planned), {'p2-4-product'})
-                self.assertEqual(set(planned['p2-4-product'].cases), set(gate.TIMING['p2-4-product']))
+                self.assertEqual(set(planned), {'workflow-product'})
+                self.assertEqual(set(planned['workflow-product'].cases), set(gate.TIMING['workflow-product']))
             self.assertEqual(len(calls), 3 if failure else 4)
             self.assertTrue(report['inventory_verified'])
             self.assertEqual(report['test_processes_executed'], 3 if failure else 4)

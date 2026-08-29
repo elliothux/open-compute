@@ -211,10 +211,8 @@ impl D1BindingService {
                     paths.resolve_storage_key(&catalog.storage_key, account_id, resource_id)?;
                 let engine = D1Engine::from_record(path, &catalog)?;
                 let _admission = if mutation {
-                    let result = storage.reserve_mutation(
-                        OperationClass::D1,
-                        config.max_result_bytes.saturating_add(64 * 1024),
-                    );
+                    let result =
+                        storage.reserve_mutation(config.max_result_bytes.saturating_add(64 * 1024));
                     if let Some(metrics) = &metrics {
                         metrics.observe_admission(
                             OperationClass::D1,
@@ -343,7 +341,6 @@ impl D1BindingService {
                             None
                         } else {
                             let result = storage.reserve_mutation(
-                                OperationClass::D1,
                                 config
                                     .max_result_bytes
                                     .saturating_add(D1_MAX_FRAME_BYTES as u64),
@@ -395,7 +392,6 @@ impl D1BindingService {
                     }
                     Command::Exec(sql) => {
                         let result = storage.reserve_mutation(
-                            OperationClass::D1,
                             config.max_result_bytes.saturating_add(sql.len() as u64),
                         );
                         if let Some(metrics) = &metrics {

@@ -318,7 +318,7 @@ impl SchedulerStore {
         lease_ms: u64,
         infrastructure_backoff_ms: u64,
         limit: u32,
-    ) -> Result<Vec<ClaimedCronRun>, PlatformError> {
+    ) -> Result<(Vec<ClaimedCronRun>, u64), PlatformError> {
         if lease_ms == 0 || limit == 0 {
             return Err(cron_invariant());
         }
@@ -327,7 +327,8 @@ impl SchedulerStore {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(cron_sql_error)?;
-        recover_expired_cron_runs_tx(&tx, now_ms, infrastructure_backoff_ms, limit)?;
+        let recovered =
+            recover_expired_cron_runs_tx(&tx, now_ms, infrastructure_backoff_ms, limit)?;
         let ids = {
             let mut statement = tx
                 .prepare(
@@ -364,7 +365,7 @@ impl SchedulerStore {
             runs.push(read_claimed_run_tx(&tx, &id, token, claim_until_ms)?);
         }
         tx.commit().map_err(cron_sql_error)?;
-        Ok(runs)
+        Ok((runs, recovered))
     }
 
     /// Apply one known scheduled-handler result under the exact token and generation.

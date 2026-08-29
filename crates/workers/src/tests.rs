@@ -1,6 +1,5 @@
 use crate::pipeline::{
-    idempotency_ref_id, parse_failure_code, stable_validation_code, validate_idempotency_key,
-    validate_secret_set,
+    idempotency_ref_id, stable_validation_code, validate_idempotency_key, validate_secret_set,
 };
 use crate::runtime_source::{invariant as source_invariant, map_artifact_error, not_ready};
 use crate::*;
@@ -693,6 +692,8 @@ fn descriptor_binds_every_runtime_effective_input() {
         vars,
         Vec::new(),
         Vec::new(),
+        Vec::new(),
+        Vec::new(),
         serde_json::json!({"profile": "default"}),
         1,
     )
@@ -835,6 +836,8 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             Vec::new(),
             vars,
             secrets,
+            Vec::new(),
+            Vec::new(),
             Vec::new(),
             limits,
             1,
@@ -1072,7 +1075,10 @@ fn deployment_pipeline_helper_contracts_cover_failure_code_matrix() {
         ("UNKNOWN", ErrorCode::Internal),
     ];
     for (code, expected) in failure_codes {
-        assert_eq!(parse_failure_code(code), expected);
+        assert_eq!(
+            ErrorCode::from_stable_str(code).unwrap_or(ErrorCode::Internal),
+            expected
+        );
     }
 }
 
@@ -1167,7 +1173,7 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     let account = storage.identity().default_account_id;
     let repo = WorkerRepository::new(storage.db());
     let (worker, _) = repo
-        .create_worker(account, "pipeline", RequestId::generate(), 1)
+        .create_worker(account, "pipeline", RequestId::generate(), 1, 1_000_000)
         .unwrap();
     let mock = MockS3::spawn("open-compute").await;
     let validator: Arc<dyn RuntimeValidator> = Arc::new(AcceptAllValidator);
@@ -1363,7 +1369,7 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
     let account = storage.identity().default_account_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "products", RequestId::generate(), 1)
+        .create_worker(account, "products", RequestId::generate(), 1, 1_000_000)
         .unwrap();
     let queues = open_compute_storage::QueueRepository::new(storage.db());
     let source = open_compute_core::QueueId::generate();
@@ -1530,10 +1536,10 @@ async fn shared_artifact_gc_waits_for_last_deployment_reference() {
     let repo = WorkerRepository::new(storage.db());
     let request_id = RequestId::generate();
     let (first_worker, _) = repo
-        .create_worker(account, "gc-first", request_id, 1)
+        .create_worker(account, "gc-first", request_id, 1, 1_000_000)
         .unwrap();
     let (second_worker, _) = repo
-        .create_worker(account, "gc-second", request_id, 2)
+        .create_worker(account, "gc-second", request_id, 2, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(|_| async { Ok(()) });
     let controller = DeploymentController::new(
@@ -1570,7 +1576,11 @@ async fn shared_artifact_gc_waits_for_last_deployment_reference() {
         .collect::<HashSet<_>>();
     assert_eq!(
         artifacts
-            .gc_unreferenced(&referenced, SystemTime::now() + Duration::from_secs(1))
+            .gc_unreferenced(
+                &artifacts.fence_deployment_gc().await,
+                &referenced,
+                SystemTime::now() + Duration::from_secs(1),
+            )
             .await
             .unwrap(),
         0
@@ -1583,7 +1593,11 @@ async fn shared_artifact_gc_waits_for_last_deployment_reference() {
         .unwrap();
     assert_eq!(
         artifacts
-            .gc_unreferenced(&HashSet::new(), SystemTime::now() + Duration::from_secs(1))
+            .gc_unreferenced(
+                &artifacts.fence_deployment_gc().await,
+                &HashSet::new(),
+                SystemTime::now() + Duration::from_secs(1),
+            )
             .await
             .unwrap(),
         1
@@ -1599,7 +1613,13 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
     let account = storage.identity().default_account_id;
     let repo = WorkerRepository::new(storage.db());
     let (worker, _) = repo
-        .create_worker(account, "invalid-runtime", RequestId::generate(), 1)
+        .create_worker(
+            account,
+            "invalid-runtime",
+            RequestId::generate(),
+            1,
+            1_000_000,
+        )
         .unwrap();
     let mock = MockS3::spawn("open-compute").await;
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1613,29 +1633,58 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
             ))
         }
     });
+    let artifacts = artifact_store(&mock);
     let controller = DeploymentController::new(
         &storage,
-        artifact_store(&mock),
-        validator,
+        artifacts.clone(),
+        validator.clone(),
         BundleLimits::default(),
     );
     let request = deployment_request(account, worker.id, "rejected-key", "rejected-secret");
-    for _ in 0..2 {
-        assert_eq!(
-            controller
-                .create_deployment(request.clone())
-                .await
-                .unwrap_err()
-                .code(),
-            ErrorCode::BundleRuntimeInvalid
-        );
-    }
+    assert_eq!(
+        controller
+            .create_deployment(request.clone())
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::BundleRuntimeInvalid
+    );
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     let deployments = repo.list_deployments(account, worker.id).unwrap();
     assert_eq!(deployments.len(), 1);
     assert_eq!(deployments[0].state, DeploymentState::Rejected);
     assert_eq!(
         repo.get_worker(account, worker.id)
+            .unwrap()
+            .active_deployment_id,
+        None
+    );
+
+    drop(controller);
+    drop(storage);
+    let restarted = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let restarted_controller =
+        DeploymentController::new(&restarted, artifacts, validator, BundleLimits::default());
+    assert_eq!(
+        restarted_controller
+            .create_deployment(request)
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::BundleRuntimeInvalid
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let restarted_repo = WorkerRepository::new(restarted.db());
+    assert_eq!(
+        restarted_repo
+            .list_deployments(account, worker.id)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        restarted_repo
+            .get_worker(account, worker.id)
             .unwrap()
             .active_deployment_id,
         None

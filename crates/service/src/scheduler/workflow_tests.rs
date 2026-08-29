@@ -14,7 +14,7 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
         .create_definition(f.account, "verdict", 0)
         .unwrap();
     let version = repository
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 1, 1)
+        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
         .unwrap();
     repository
         .finish_version(f.account, version.target.version_id, true, 2)
@@ -29,8 +29,8 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
                 "/internal/workflow",
                 post(|| async {
                     // A successful transport cannot manufacture missing durable steps.
-                    Json(json!({"outcome":"complete","finalOrdinal":1,
-                        "outputJson":"null","loaderOutcome":"warm"}))
+                    Json(json!({"result":{"outcome":"complete","finalOrdinal":1,
+                        "outputJson":"null"},"loaderOutcome":"warm","drainIncomplete":false}))
                 }),
             ),
         )
@@ -48,7 +48,6 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
         .create(
             f.account,
             definition.id,
-            1,
             Some("short-frontier"),
             open_compute_workers::WorkflowCreateInput {
                 payload_json: "null",
@@ -81,7 +80,7 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
         Some("WORKFLOW_NON_DETERMINISTIC")
     );
     assert!(
-        !repository
+        repository
             .instance_referrers_intact(&record.identity)
             .unwrap()
     );
@@ -102,7 +101,7 @@ async fn quarantined_generation_stops_claims_even_after_operator_resume() {
         .create_definition(f.account, "admission", 0)
         .unwrap();
     let version = repository
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 2, 1)
+        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
         .unwrap();
     repository
         .finish_version(f.account, version.target.version_id, true, 2)
@@ -114,7 +113,6 @@ async fn quarantined_generation_stops_claims_even_after_operator_resume() {
             .create(
                 f.account,
                 definition.id,
-                2,
                 Some(name),
                 open_compute_workers::WorkflowCreateInput {
                     payload_json: "null",
@@ -128,7 +126,7 @@ async fn quarantined_generation_stops_claims_even_after_operator_resume() {
     let port = listener.local_addr().unwrap().port();
     let (stop, stopped) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
-        axum::serve(listener, Router::new().route("/internal/workflow-v2", post(|| async {
+        axum::serve(listener, Router::new().route("/internal/workflow", post(|| async {
             Json(json!({"result":{"outcome":"unknown","finalOrdinal":0},"loaderOutcome":"warm","drainIncomplete":true}))
         }))).with_graceful_shutdown(async {let _ = stopped.await;}).await.unwrap();
     });

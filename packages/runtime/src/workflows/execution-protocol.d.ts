@@ -8,7 +8,7 @@ export interface WorkflowEventWire {
 export interface WorkflowRunIdentity { instanceId: string; instanceGeneration: number; runToken: string }
 export interface WorkflowActivation extends WorkflowEventWire, WorkflowRunIdentity {
   activationBudgetMs: number;
-  versionDescriptorSha256?: string;
+  versionDescriptorSha256: string;
 }
 export interface WorkflowClass {
   new(ctx: ExecutionContext, env: Record<string, unknown>): {
@@ -47,7 +47,7 @@ export type WorkflowBatchStep = { ordinal: number } & (
 export type WorkflowBatchReply = WorkflowProtocolError | WorkflowSuspended
   | { steps: WorkflowBatchStep[]; state?: never; errorCode?: never };
 export type WorkflowDrainReply = WorkflowProtocolError | WorkflowSuspended | { ok: true; state?: never; errorCode?: never };
-export interface WorkflowControllerV2 {
+export interface WorkflowController {
   claimBatch(body: { steps: WorkflowClaimDeclaration[] }): Promise<WorkflowBatchReply>;
   success(body: { ordinal: number; outputJson: string }): Promise<WorkflowVerdict>;
   failure(body: { ordinal: number; code: string }): Promise<WorkflowVerdict>;
@@ -55,19 +55,7 @@ export interface WorkflowControllerV2 {
   drain(): Promise<WorkflowDrainReply>;
   registerWait(body: WorkflowClaimDeclaration): Promise<WorkflowVerdict>;
 }
-export interface WorkflowClaimV1 { ordinal: number; name: string; nameCount: number; configJson: "null" }
-export type WorkflowClaimReplyV1 = WorkflowProtocolError
-  | { state: "run"; errorCode?: never }
-  | { state: "complete"; outputJson: string; errorCode?: never }
-  | { state: "failed"; errorCode?: string | undefined; error?: { name: string; message: string } | undefined };
-export type WorkflowCommitReplyV1 = WorkflowProtocolError | { ok: true; errorCode?: never };
-export interface WorkflowFailureV1 { ordinal: number; error: { name: string; message: string }; errorCode?: string }
-export interface WorkflowControllerV1 {
-  claim(body: WorkflowClaimV1): Promise<WorkflowClaimReplyV1>;
-  success(body: { ordinal: number; outputJson: string }): Promise<WorkflowCommitReplyV1>;
-  failure(body: WorkflowFailureV1): Promise<WorkflowCommitReplyV1>;
-}
 export interface LoadedWorkflow extends Rpc.WorkerEntrypointBranded {
   validate(): Promise<boolean>;
-  execute(event: WorkflowEventWire, controller: WorkflowControllerV1 | WorkflowControllerV2): Promise<WorkflowRunResult>;
+  execute(event: WorkflowEventWire, controller: WorkflowController): Promise<WorkflowRunResult>;
 }

@@ -1,9 +1,15 @@
 //! P1 real-process SIGKILL/orphan recovery Gate.
 
 use open_compute_artifacts::MockS3;
-use open_compute_core::SystemClock;
+use open_compute_core::{
+    BindingKind, PlatformConfig, RequestId, ResourceId, ResourceState, SystemClock,
+};
 use open_compute_service::config_load::load_platform_config;
-use open_compute_storage::PlatformStorage;
+use open_compute_storage::{
+    ControlDb, D1DatabaseRepository, D1Engine, D1Paths, D1QueryLimits, PlatformStorage,
+    ReserveResourceCreate, ResourceCreateReservation, ResourceRecord, ResourceRepository,
+};
+use open_compute_workers::{D1ResourceDriver, KvResourceDriver, ResourceDriver};
 use std::fs;
 use std::fs::OpenOptions;
 use std::net::{SocketAddr, TcpListener};
@@ -180,6 +186,119 @@ async fn wait_exit(child: &mut Child, timeout: Duration) -> std::process::ExitSt
     }
 }
 
+fn seed_resource_recovery(config: &PlatformConfig) -> Vec<(ResourceRecord, ResourceState)> {
+    let storage =
+        PlatformStorage::bootstrap_with_hardening(&config.storage, &config.hardening, &SystemClock)
+            .expect("initialize platform authority");
+    let resources = ResourceRepository::new(storage.db());
+    let reserve = |kind, name: &str| {
+        let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
+        let reservation = resources
+            .reserve_create(
+                &ReserveResourceCreate {
+                    account_id: storage.identity().default_account_id,
+                    kind,
+                    name,
+                    idempotency_key: name,
+                    fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                    request_fingerprint: &fingerprint,
+                    resource_id: ResourceId::generate(),
+                    driver_schema_version: 1,
+                    request_id: RequestId::generate(),
+                    now_ms: 1,
+                    expires_at_ms: i64::MAX,
+                },
+                config.hardening.max_resources_per_kind_per_account,
+            )
+            .expect("reserve current resource intent");
+        let ResourceCreateReservation::Reserved(resource) = reservation else {
+            panic!("expected new resource reservation");
+        };
+        resource
+    };
+
+    // The daemon must recover both a catalog-free reservation and an unpublished
+    // valid database without replacing the latter with an empty database.
+    let kv = reserve(BindingKind::KvNamespace, "pending-kv");
+    let d1 = reserve(BindingKind::D1Database, "pending-d1");
+    D1DatabaseRepository::new(storage.db())
+        .ensure_database(
+            &d1,
+            &D1Paths::storage_key(d1.account_id, d1.id),
+            1,
+            config.d1.database_quota_bytes,
+        )
+        .expect("D1 catalog intent");
+    let stage = D1Paths::open(storage.data_dir().root())
+        .expect("D1 paths")
+        .create_database_staging(d1.id)
+        .expect("D1 staging");
+    let engine = D1Engine::create(
+        &stage.join("data.sqlite"),
+        d1.account_id,
+        d1.id,
+        d1.created_at_ms,
+        config.d1.database_quota_bytes,
+    )
+    .expect("staged D1 database");
+    engine
+        .exec(
+            "CREATE TABLE recovery_marker(value TEXT); INSERT INTO recovery_marker VALUES('retained');",
+            D1QueryLimits::query(&config.d1).expect("D1 limits"),
+        )
+        .expect("staged user data");
+    engine.checkpoint(true).expect("staging checkpoint");
+
+    let mut expected = vec![(kv, ResourceState::Ready), (d1, ResourceState::Ready)];
+    let drivers: [Box<dyn ResourceDriver + '_>; 2] = [
+        Box::new(KvResourceDriver::new(
+            &storage,
+            config.kv.namespace_quota_bytes,
+        )),
+        Box::new(D1ResourceDriver::new(
+            &storage,
+            config.d1.database_quota_bytes,
+        )),
+    ];
+    for (index, driver) in drivers.into_iter().enumerate() {
+        let resource = reserve(driver.kind(), &format!("deleting-{index}"));
+        driver.create(&resource).expect("create deletion fixture");
+        resources.mark_ready(resource.id, 2).expect("ready fixture");
+        resources
+            .begin_delete(resource.account_id, resource.id, 3)
+            .expect("persist deletion intent");
+        let deleting = resources
+            .get(resource.account_id, resource.id)
+            .expect("deleting authority");
+        driver.begin_delete(&deleting).expect("quarantine resource");
+        expected.push((deleting, ResourceState::Tombstoned));
+    }
+    expected
+}
+
+fn assert_recovered_resources(data_dir: &Path, expected: &[(ResourceRecord, ResourceState)]) {
+    // Only inspect through a WAL-aware read-only connection while platformd owns
+    // the data directory. No second writer or lifecycle owner is introduced.
+    let db = ControlDb::open_readonly_wal_aware(&data_dir.join("control.sqlite"), 5_000)
+        .expect("read serving authority");
+    let repository = ResourceRepository::new(&db);
+    for (resource, state) in expected {
+        assert_eq!(
+            repository
+                .get(resource.account_id, resource.id)
+                .expect("recovered resource")
+                .state,
+            *state,
+        );
+    }
+    assert!(
+        repository
+            .reconcile_candidates()
+            .expect("pending resources")
+            .is_empty()
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly() {
     let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
@@ -195,19 +314,18 @@ async fn p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly() {
     let config = write_config(&root, &data_dir, &mock, public, admin);
     let process_log = root.join("platformd.log");
     let loaded = load_platform_config(&config).expect("load config");
-    drop(
-        PlatformStorage::bootstrap(&loaded.config.storage, &SystemClock)
-            .expect("initialize platform authority"),
-    );
+    let resources = seed_resource_recovery(&loaded.config);
 
     let mut first = ChildGuard(spawn_platformd(&config, &process_log));
     wait_ready(admin, first.child_mut()).await;
+    assert_recovered_resources(&data_dir, &resources);
     signal(first.child(), "-KILL");
     let first_status = wait_exit(first.child_mut(), Duration::from_secs(5)).await;
     assert!(!first_status.success());
 
     let mut second = ChildGuard(spawn_platformd(&config, &process_log));
     wait_ready(admin, second.child_mut()).await;
+    assert_recovered_resources(&data_dir, &resources);
     signal(second.child(), "-TERM");
     let second_status = wait_exit(second.child_mut(), Duration::from_secs(20)).await;
     assert!(
@@ -218,6 +336,21 @@ async fn p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly() {
     let storage = PlatformStorage::bootstrap(&loaded.config.storage, &SystemClock)
         .expect("reacquire data-dir and verify control SQLite");
     storage.db().quick_check().expect("control quick_check");
+    let (d1, _) = resources
+        .iter()
+        .find(|(resource, state)| {
+            resource.kind == BindingKind::D1Database && *state == ResourceState::Ready
+        })
+        .expect("recovered D1");
+    let path = D1Paths::open(storage.data_dir().root())
+        .expect("D1 paths")
+        .database_path(d1.account_id, d1.id);
+    let value: String =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("read recovered D1")
+            .query_row("SELECT value FROM recovery_marker", [], |row| row.get(0))
+            .expect("retained staged data");
+    assert_eq!(value, "retained");
     let logs = fs::read(&process_log).expect("process logs");
     for canary in [
         b"AKIAP1CRASHPROCESS1".as_slice(),

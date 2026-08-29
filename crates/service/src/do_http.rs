@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use open_compute_core::{
     AccountId, BindingKind, DurableObjectId, DurableObjectState, DurableObjectsConfig, ErrorCode,
-    OperationClass, PlatformError, RequestId, ResourceId, WorkerId,
+    PlatformError, RequestId, ResourceId, WorkerId,
 };
 use open_compute_storage::{
     AuthorizedDurableObjectDelete, DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRecord,
@@ -344,10 +344,7 @@ async fn rename_namespace(
     if body.name.len() > api.config.max_namespace_name_bytes as usize {
         return error_response(invalid(), request_id);
     }
-    let _admission = match api
-        .storage
-        .reserve_mutation(OperationClass::DurableObjects, 64 * 1024)
-    {
+    let _admission = match api.storage.reserve_mutation(64 * 1024) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };

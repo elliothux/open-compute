@@ -48,13 +48,13 @@ fn create_replay_rename_health_delete_and_same_name_recreate() {
     let fingerprint = [7; 32];
     let first_id = ResourceId::generate();
     let input = reserve(account, "cache", "create-cache", &fingerprint, first_id);
-    let first = match repo.reserve_create(&input).unwrap() {
+    let first = match repo.reserve_create(&input, 1_000_000).unwrap() {
         ResourceCreateReservation::Reserved(record) => record,
         other => panic!("unexpected {other:?}"),
     };
     assert_eq!(first.state, ResourceState::Creating);
     assert!(matches!(
-        repo.reserve_create(&input).unwrap(),
+        repo.reserve_create(&input, 1_000_000).unwrap(),
         ResourceCreateReservation::Continue(record) if record.id == first_id
     ));
     repo.mark_ready(first_id, 11).unwrap();
@@ -95,7 +95,7 @@ fn create_replay_rename_health_delete_and_same_name_recreate() {
         second_id,
     );
     assert!(matches!(
-        repo.reserve_create(&second).unwrap(),
+        repo.reserve_create(&second, 1_000_000).unwrap(),
         ResourceCreateReservation::Reserved(record) if record.id == second_id
     ));
     assert_ne!(first_id, second_id);
@@ -109,12 +109,15 @@ fn resource_repository_fails_closed_on_conflicts_scope_and_invalid_transitions()
     let fingerprint = [1; 32];
     let id = ResourceId::generate();
     let input = reserve(account, "cache", "key", &fingerprint, id);
-    repo.reserve_create(&input).unwrap();
+    repo.reserve_create(&input, 1_000_000).unwrap();
     assert_eq!(
-        repo.reserve_create(&ReserveResourceCreate {
-            request_fingerprint: &[2; 32],
-            ..input.clone()
-        })
+        repo.reserve_create(
+            &ReserveResourceCreate {
+                request_fingerprint: &[2; 32],
+                ..input.clone()
+            },
+            1_000_000
+        )
         .unwrap_err()
         .code(),
         ErrorCode::IdempotencyConflict
@@ -140,7 +143,7 @@ fn resource_repository_fails_closed_on_conflicts_scope_and_invalid_transitions()
     repo.complete_create(account, "key", &fingerprint, id, b"done")
         .unwrap();
     assert!(matches!(
-        repo.reserve_create(&input).unwrap(),
+        repo.reserve_create(&input, 1_000_000).unwrap(),
         ResourceCreateReservation::Complete(body) if body == b"done"
     ));
     assert_eq!(
@@ -160,13 +163,16 @@ fn create_input_bounds_fail_before_persistence() {
 
     for name in ["", "bad\nname"] {
         assert_eq!(
-            repo.reserve_create(&reserve(
-                account,
-                name,
-                "valid-key",
-                &fingerprint,
-                ResourceId::generate(),
-            ))
+            repo.reserve_create(
+                &reserve(
+                    account,
+                    name,
+                    "valid-key",
+                    &fingerprint,
+                    ResourceId::generate(),
+                ),
+                1_000_000
+            )
             .unwrap_err()
             .code(),
             ErrorCode::ResourceInvariantViolation
@@ -174,13 +180,16 @@ fn create_input_bounds_fail_before_persistence() {
     }
     for key in ["", "bad key"] {
         assert_eq!(
-            repo.reserve_create(&reserve(
-                account,
-                "valid-name",
-                key,
-                &fingerprint,
-                ResourceId::generate(),
-            ))
+            repo.reserve_create(
+                &reserve(
+                    account,
+                    "valid-name",
+                    key,
+                    &fingerprint,
+                    ResourceId::generate(),
+                ),
+                1_000_000
+            )
             .unwrap_err()
             .code(),
             ErrorCode::IdempotencyConflict
@@ -195,7 +204,9 @@ fn create_input_bounds_fail_before_persistence() {
     );
     invalid_schema.driver_schema_version = 0;
     assert_eq!(
-        repo.reserve_create(&invalid_schema).unwrap_err().code(),
+        repo.reserve_create(&invalid_schema, 1_000_000)
+            .unwrap_err()
+            .code(),
         ErrorCode::ResourceInvariantViolation
     );
 }
@@ -207,8 +218,11 @@ fn read_only_inspection_lists_only_secret_free_resource_health() {
     let id = ResourceId::generate();
     let fingerprint = [4; 32];
     let repo = ResourceRepository::new(storage.db());
-    repo.reserve_create(&reserve(account, "inspect", "inspect", &fingerprint, id))
-        .unwrap();
+    repo.reserve_create(
+        &reserve(account, "inspect", "inspect", &fingerprint, id),
+        1_000_000,
+    )
+    .unwrap();
     repo.mark_ready(id, 11).unwrap();
     repo.set_availability(
         account,

@@ -1,7 +1,7 @@
 import { RpcTarget } from "cloudflare:workers";
 import { currentStartupGeneration } from "../loader/host.js";
 import type { BindingEnv } from "../bindings/protocol.js";
-import type { WorkflowBatchReply, WorkflowBatchStep, WorkflowClaimDeclaration, WorkflowControllerV2, WorkflowDrainReply, WorkflowResolvedConfig, WorkflowRunIdentity, WorkflowRunResult, WorkflowVerdict } from "./execution-protocol.js";
+import type { WorkflowBatchReply, WorkflowBatchStep, WorkflowClaimDeclaration, WorkflowController, WorkflowDrainReply, WorkflowResolvedConfig, WorkflowRunIdentity, WorkflowRunResult, WorkflowVerdict } from "./execution-protocol.js";
 
 interface Grant {
   stepToken: string;
@@ -35,7 +35,7 @@ export const closeWorkflowRun = Symbol("closeWorkflowRun");
 
 // A controller belongs to exactly one dispatch RPC. No raw grant, private reply,
 // or asynchronous operation returning one ever enters the loaded tenant realm.
-export class WorkflowRunControllerV2 extends RpcTarget implements WorkflowControllerV2 {
+export class WorkflowRunController extends RpcTarget implements WorkflowController {
   #env: BindingEnv;
   #identity: WorkflowRunIdentity;
   #grants = new Map<number, Grant>();
@@ -70,7 +70,7 @@ export class WorkflowRunControllerV2 extends RpcTarget implements WorkflowContro
     if (this.#closed || this.#unknown) throw new Error("WORKFLOW_RUNTIME_UNAVAILABLE");
     try {
       const response = await this.#env.BINDING_BACKEND.fetch(
-        `http://binding-backend/internal/workflows/v2/runs/${operation}`, {
+        `http://binding-backend/internal/workflows/runs/${operation}`, {
           method: "POST",
           headers: {
             "content-type": "application/json",

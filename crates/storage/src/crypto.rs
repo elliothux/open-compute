@@ -12,10 +12,8 @@ use sha2::{Digest, Sha256};
 const ENVELOPE_VERSION: u8 = 1;
 const ALGORITHM: &str = "XCHACHA20-POLY1305";
 const NONCE_LEN: usize = 24;
-/// Explicit secret-envelope AAD schema, independent of artifact schema version.
+/// Current revision-bound secret-envelope AAD schema, independent of artifact format.
 pub const SECRET_AAD_SCHEMA: u32 = 1;
-/// Revision-bound secret-envelope AAD schema used by immutable deployments.
-pub const SECRET_AAD_REVISION_SCHEMA: u32 = 2;
 const MAX_SECRET_NAME_LEN: usize = 4096;
 const KEY_ID_LEN: usize = 64;
 
@@ -199,7 +197,7 @@ impl SecretCrypto {
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
     }
 
-    /// Encrypt `plaintext` bound to the canonical associated-data context.
+    /// Encrypt a deployment secret bound to its immutable revision and identity.
     pub fn encrypt(
         &self,
         plaintext: &SecretBytes,
@@ -207,64 +205,7 @@ impl SecretCrypto {
         worker: WorkerId,
         deployment: DeploymentId,
         secret_name: &str,
-    ) -> Result<SecretEnvelope, PlatformError> {
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        rand::rngs::OsRng
-            .try_fill_bytes(&mut nonce_bytes)
-            .map_err(|_| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "failed to generate AEAD nonce")
-            })?;
-        let nonce = XNonce::from(nonce_bytes);
-        let aad = associated_data(account, worker, deployment, secret_name, None)?;
-        let ciphertext = self
-            .cipher
-            .encrypt(
-                &nonce,
-                Payload {
-                    msg: plaintext.expose(),
-                    aad: &aad,
-                },
-            )
-            .map_err(|_| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "secret encryption failed")
-            })?;
-        Ok(SecretEnvelope {
-            version: ENVELOPE_VERSION,
-            key_id: self.key_id.clone(),
-            algorithm: ALGORITHM.to_string(),
-            nonce: nonce_bytes.to_vec(),
-            ciphertext,
-        })
-    }
-
-    /// Encrypt a deployment secret with its immutable random revision in AAD.
-    pub fn encrypt_revision(
-        &self,
-        plaintext: &SecretBytes,
-        account: AccountId,
-        worker: WorkerId,
-        deployment: DeploymentId,
-        secret_name: &str,
         revision_id: &str,
-    ) -> Result<SecretEnvelope, PlatformError> {
-        self.encrypt_inner(
-            plaintext,
-            account,
-            worker,
-            deployment,
-            secret_name,
-            Some(revision_id),
-        )
-    }
-
-    fn encrypt_inner(
-        &self,
-        plaintext: &SecretBytes,
-        account: AccountId,
-        worker: WorkerId,
-        deployment: DeploymentId,
-        secret_name: &str,
-        revision_id: Option<&str>,
     ) -> Result<SecretEnvelope, PlatformError> {
         let mut nonce_bytes = [0u8; NONCE_LEN];
         rand::rngs::OsRng
@@ -295,7 +236,7 @@ impl SecretCrypto {
         })
     }
 
-    /// Decrypt `envelope`, rejecting version/algorithm/key/context mismatch and tampering.
+    /// Decrypt a deployment secret, rejecting envelope, revision, or identity mismatch.
     pub fn decrypt(
         &self,
         envelope: &SecretEnvelope,
@@ -303,76 +244,7 @@ impl SecretCrypto {
         worker: WorkerId,
         deployment: DeploymentId,
         secret_name: &str,
-    ) -> Result<SecretBytes, PlatformError> {
-        if envelope.version != ENVELOPE_VERSION {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "secret envelope version is unsupported",
-            ));
-        }
-        if envelope.algorithm != ALGORITHM {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "secret envelope algorithm mismatch",
-            ));
-        }
-        if envelope.key_id != self.key_id {
-            return Err(PlatformError::new(
-                ErrorCode::MasterKeyMismatch,
-                "secret envelope key id mismatch",
-            ));
-        }
-        if envelope.nonce.len() != NONCE_LEN {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "secret envelope nonce is invalid",
-            ));
-        }
-        let nonce = XNonce::from_slice(&envelope.nonce);
-        let aad = associated_data(account, worker, deployment, secret_name, None)?;
-        let plaintext = self
-            .cipher
-            .decrypt(
-                nonce,
-                Payload {
-                    msg: &envelope.ciphertext,
-                    aad: &aad,
-                },
-            )
-            .map_err(|_| {
-                PlatformError::new(ErrorCode::ConfigInvalid, "secret decryption failed")
-            })?;
-        Ok(SecretBytes::new(plaintext))
-    }
-
-    /// Decrypt a deployment secret while authenticating its immutable revision.
-    pub fn decrypt_revision(
-        &self,
-        envelope: &SecretEnvelope,
-        account: AccountId,
-        worker: WorkerId,
-        deployment: DeploymentId,
-        secret_name: &str,
         revision_id: &str,
-    ) -> Result<SecretBytes, PlatformError> {
-        self.decrypt_inner(
-            envelope,
-            account,
-            worker,
-            deployment,
-            secret_name,
-            Some(revision_id),
-        )
-    }
-
-    fn decrypt_inner(
-        &self,
-        envelope: &SecretEnvelope,
-        account: AccountId,
-        worker: WorkerId,
-        deployment: DeploymentId,
-        secret_name: &str,
-        revision_id: Option<&str>,
     ) -> Result<SecretBytes, PlatformError> {
         if envelope.version != ENVELOPE_VERSION {
             return Err(PlatformError::new(
@@ -432,7 +304,7 @@ fn associated_data(
     worker: WorkerId,
     deployment: DeploymentId,
     secret_name: &str,
-    revision_id: Option<&str>,
+    revision_id: &str,
 ) -> Result<Vec<u8>, PlatformError> {
     if secret_name.is_empty() {
         return Err(PlatformError::new(
@@ -447,24 +319,18 @@ fn associated_data(
         ));
     }
     let mut out = Vec::new();
-    out.extend_from_slice(
-        &revision_id
-            .map_or(SECRET_AAD_SCHEMA, |_| SECRET_AAD_REVISION_SCHEMA)
-            .to_be_bytes(),
-    );
+    out.extend_from_slice(&SECRET_AAD_SCHEMA.to_be_bytes());
     write_framed(&mut out, account.as_canonical_str().as_bytes())?;
     write_framed(&mut out, worker.as_canonical_str().as_bytes())?;
     write_framed(&mut out, deployment.as_canonical_str().as_bytes())?;
     write_framed(&mut out, secret_name.as_bytes())?;
-    if let Some(revision) = revision_id {
-        if revision.is_empty() || revision.len() > MAX_SECRET_NAME_LEN {
-            return Err(PlatformError::new(
-                ErrorCode::SecretInvalid,
-                "secret revision is invalid",
-            ));
-        }
-        write_framed(&mut out, revision.as_bytes())?;
+    if revision_id.is_empty() || revision_id.len() > MAX_SECRET_NAME_LEN {
+        return Err(PlatformError::new(
+            ErrorCode::SecretInvalid,
+            "secret revision is invalid",
+        ));
     }
+    write_framed(&mut out, revision_id.as_bytes())?;
     Ok(out)
 }
 
@@ -486,3 +352,7 @@ fn is_sha256_fingerprint(key_id: &str) -> bool {
             .bytes()
             .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
+
+#[cfg(test)]
+#[path = "crypto_tests.rs"]
+mod tests;

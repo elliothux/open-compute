@@ -2,12 +2,12 @@
 
 use super::*;
 
-fn v2(storage: &PlatformStorage, deployment: DeploymentId) -> WorkflowDefinition {
+fn current(storage: &PlatformStorage, deployment: DeploymentId) -> WorkflowDefinition {
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
     let definition = repo.create_definition(account, "durable", 0).unwrap();
     let version = repo
-        .stage_version(account, definition.id, deployment, "Flow", 2, 1)
+        .stage_version(account, definition.id, deployment, "Flow", 1)
         .unwrap();
     repo.finish_version(account, version.target.version_id, true, 2)
         .unwrap();
@@ -15,58 +15,32 @@ fn v2(storage: &PlatformStorage, deployment: DeploymentId) -> WorkflowDefinition
 }
 
 #[test]
-fn capability_is_explicit_and_retained_history_still_pins_but_does_not_consume_active_quota() {
+fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() {
     let (_temp, storage, deployment) = setup();
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
-    let definition = v2(&storage, deployment);
+    let definition = current(&storage, deployment);
     let limits = WorkflowsConfig {
         max_active_per_account: 1,
         ..Default::default()
     };
-    for capability in [0, 1, 3] {
-        assert_eq!(
-            repo.reserve_instance(account, definition.id, None, capability, &limits, 3)
-                .unwrap_err()
-                .code(),
-            ErrorCode::WorkflowCapabilityMismatch
-        );
-    }
-    for capability in [0, 3] {
-        assert_eq!(
-            repo.stage_version(account, definition.id, deployment, "Flow", capability, 3)
-                .unwrap_err()
-                .code(),
-            ErrorCode::WorkflowCapabilityMismatch
-        );
-    }
     let version = repo
         .version(account, definition.current_version_id.unwrap())
         .unwrap();
     let mut changed = version.target.clone();
-    changed.capability_version = 1;
-    assert_ne!(
-        version_digest(&changed).unwrap(),
-        version.target.descriptor_sha256
-    );
+    changed.capability_version = 2;
+    assert!(version_digest(&changed).is_err());
     let binding = repo
-        .prepare_binding(
-            account,
-            DeploymentId::generate(),
-            "FLOW",
-            definition.id,
-            2,
-            3,
-        )
+        .prepare_binding(account, DeploymentId::generate(), "FLOW", definition.id, 3)
         .unwrap();
-    assert_eq!(binding.descriptor.capability_version, 2);
+    assert_eq!(binding.descriptor.capability_version, 1);
     let mut changed = binding.descriptor.clone();
-    changed.capability_version = 1;
-    assert_ne!(changed.sha256().unwrap(), binding.descriptor_sha256);
+    changed.capability_version = 0;
+    assert!(changed.sha256().is_err());
     changed.capability_version = 3;
     assert!(changed.sha256().is_err());
     let first = repo
-        .reserve_instance(account, definition.id, Some("first"), 2, &limits, 4)
+        .reserve_instance(account, definition.id, Some("first"), &limits, 4)
         .unwrap()
         .identity;
     assert_eq!(
@@ -74,10 +48,6 @@ fn capability_is_explicit_and_retained_history_still_pins_but_does_not_consume_a
         ErrorCode::WorkflowInstanceStateConflict
     );
     repo.finalize_instance(&first, 5).unwrap();
-    assert_eq!(
-        repo.release_instance(&first, 6).unwrap_err().code(),
-        ErrorCode::WorkflowMethodUnsupported
-    );
     repo.retain_instance(&first, 6).unwrap();
     repo.retain_instance(&first, 6).unwrap();
     assert!(repo.instance_referrers_intact(&first).unwrap());
@@ -86,7 +56,7 @@ fn capability_is_explicit_and_retained_history_still_pins_but_does_not_consume_a
         ErrorCode::WorkflowReferenced
     );
     let second = repo
-        .reserve_instance(account, definition.id, Some("second"), 2, &limits, 7)
+        .reserve_instance(account, definition.id, Some("second"), &limits, 7)
         .unwrap()
         .identity;
     assert_eq!(
@@ -155,7 +125,7 @@ fn capability_is_explicit_and_retained_history_still_pins_but_does_not_consume_a
         ErrorCode::WorkflowInstanceBusy
     );
     assert_eq!(
-        repo.reserve_instance(account, definition.id, None, 2, &limits, 10)
+        repo.reserve_instance(account, definition.id, None, &limits, 10)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowStateQuotaExceeded
@@ -183,12 +153,12 @@ fn capability_is_explicit_and_retained_history_still_pins_but_does_not_consume_a
 #[test]
 fn operation_finalize_is_atomic_and_idempotent_and_purge_releases_external_identity() {
     let (_temp, storage, deployment) = setup();
-    let definition = v2(&storage, deployment);
+    let definition = current(&storage, deployment);
     let account = storage.identity().default_account_id;
     let repo = WorkflowRepository::new(storage.db());
     let limits = WorkflowsConfig::default();
     let identity = repo
-        .reserve_instance(account, definition.id, Some("reusable"), 2, &limits, 3)
+        .reserve_instance(account, definition.id, Some("reusable"), &limits, 3)
         .unwrap()
         .identity;
     repo.finalize_instance(&identity, 4).unwrap();
@@ -291,7 +261,7 @@ fn operation_finalize_is_atomic_and_idempotent_and_purge_releases_external_ident
     assert!(!repo.instance_referrers_intact(&next).unwrap());
     assert!(repo.instance_operations(None, 100).unwrap().is_empty());
     let reused = repo
-        .reserve_instance(account, definition.id, Some("reusable"), 2, &limits, 12)
+        .reserve_instance(account, definition.id, Some("reusable"), &limits, 12)
         .unwrap()
         .identity;
     assert_ne!(reused.instance_id, identity.instance_id);

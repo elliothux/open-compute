@@ -1,7 +1,7 @@
 //! Authenticated Queue/Cron operator mutations, reconciliation, and inspection.
 
 use super::{
-    CronActivationInspect, QueueConsumerInspect, SchedulerGlobalInspect, SchedulerInspectV2,
+    CronActivationInspect, QueueConsumerInspect, SchedulerGlobalInspect, SchedulerInspect,
     SchedulerPoolInspect, SchedulerService, atomic_option_i64, queue_consumer_generation_stale,
     scheduler_task_failed,
 };
@@ -337,7 +337,7 @@ impl SchedulerService {
     }
 
     /// Versioned global and registered-pool operator state.
-    pub fn inspect(&self) -> Result<SchedulerInspectV2, PlatformError> {
+    pub fn inspect(&self) -> Result<SchedulerInspect, PlatformError> {
         let now_ms = self.observed_wall_time_ms();
         let summary = self.store.workload_summary(now_ms)?;
         let alarm = self.config.pool(SchedulerKind::Alarm);
@@ -404,8 +404,8 @@ impl SchedulerService {
         } else {
             self.alarm_pool_state()
         };
-        Ok(SchedulerInspectV2 {
-            version: 2,
+        Ok(SchedulerInspect {
+            version: 1,
             paused: self.is_paused(),
             global: SchedulerGlobalInspect {
                 in_flight: self.global_in_flight.load(Ordering::Acquire),

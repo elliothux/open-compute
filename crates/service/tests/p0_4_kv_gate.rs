@@ -90,6 +90,13 @@ async fn p0_4_real_kv_matrix() {
                     executor_storage,
                     Arc::new(SystemClock),
                 )),
+                None,
+                None,
+                None,
+                open_compute_core::DurableObjectsConfig::default(),
+                open_compute_core::QueuesConfig::default(),
+                open_compute_core::WorkflowsConfig::default(),
+                None,
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -121,7 +128,7 @@ async fn p0_4_real_kv_matrix() {
             runtime.version_output(),
         )
         .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -152,7 +159,7 @@ async fn p0_4_real_kv_matrix() {
     let secondary = create_resource(&resources, account, "secondary", "create-secondary", 11);
     let repository = WorkerRepository::new(storage.db());
     let (worker, _) = repository
-        .create_worker(account, "kv-gate", RequestId::generate(), 12)
+        .create_worker(account, "kv-gate", RequestId::generate(), 12, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
     let deployments =
@@ -405,7 +412,6 @@ fn deployment_request(
         bindings.insert(
             name.to_owned(),
             DeploymentBindingInput {
-                capability_version: 1,
                 kind: BindingKind::KvNamespace,
                 id,
                 permissions: CanonicalPermissions::default(),

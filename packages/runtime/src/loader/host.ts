@@ -4,8 +4,7 @@ export { modulesFor } from "./modules.js";
 import { handleWorkflow } from "../workflows/host.js";
 import { tenantEnv } from "./bindings.js";
 export { tenantEnv } from "./bindings.js";
-export { WorkflowBindingTransportV2 } from "../workflows/binding-v2.js";
-export { WorkflowBindingTransport } from "../workflows/host.js";
+export { WorkflowBindingTransport } from "../workflows/binding.js";
 import { makeR2TransportBase } from "../r2/transport.js";
 import { makeD1TransportBase } from "../d1/transport.js";
 import { assertSnapshot } from "./snapshot.js";
@@ -628,8 +627,8 @@ async function validateDurableObjectClass(request: Request, env: LoaderEnv) {
 export default {
   async fetch(request: Request, env: LoaderEnv, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname;
-    if (request.method === "POST" && ["/internal/workflow", "/internal/validate-workflow", "/internal/workflow-v2", "/internal/validate-workflow-v2"].includes(path)) {
-      return handleWorkflow(request, env, ctx, path.includes("/validate-workflow"), path.endsWith("-v2") ? 2 : 1);
+    if (request.method === "POST" && ["/internal/workflow", "/internal/validate-workflow"].includes(path)) {
+      return handleWorkflow(request, env, ctx, path === "/internal/validate-workflow");
     }
     if (request.method === "POST" && path === "/internal/dispatch") return handle(request, env, ctx, false);
     if (request.method === "POST" && path === "/internal/queue") {

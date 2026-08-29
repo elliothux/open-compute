@@ -263,19 +263,22 @@ fn startup_reconcile_converges_create_and_delete() {
     let fingerprint = [7; 32];
     let resource_id = ResourceId::generate();
     let resource = match repo
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::KvNamespace,
-            name: "cache",
-            idempotency_key: "crash-create",
-            fingerprint_key_id: "key",
-            request_fingerprint: &fingerprint,
-            resource_id,
-            driver_schema_version: 1,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 100,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::KvNamespace,
+                name: "cache",
+                idempotency_key: "crash-create",
+                fingerprint_key_id: "key",
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: 1,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 100,
+            },
+            1_000_000,
+        )
         .unwrap()
     {
         ResourceCreateReservation::Reserved(resource) => resource,
@@ -427,19 +430,22 @@ fn health_rejects_a_resource_that_is_still_creating() {
     let resource_id = ResourceId::generate();
     let fingerprint = [9; 32];
     ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::KvNamespace,
-            name: "creating",
-            idempotency_key: "creating",
-            fingerprint_key_id: "key",
-            request_fingerprint: &fingerprint,
-            resource_id,
-            driver_schema_version: 1,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 100,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::KvNamespace,
+                name: "creating",
+                idempotency_key: "creating",
+                fingerprint_key_id: "key",
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: 1,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 100,
+            },
+            1_000_000,
+        )
         .unwrap();
     let controller = ResourceController::new(&storage, ResourcePins::new(), FakeDriver::default());
     assert_eq!(

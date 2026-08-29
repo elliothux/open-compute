@@ -1,9 +1,9 @@
-//! Contiguous scheduler migration registry.
+//! Current scheduler schema, split into ordered domain definitions.
 
 use open_compute_core::{ErrorCode, PlatformError};
 use rusqlite::{Connection, OptionalExtension as _};
 
-/// One immutable scheduler migration.
+/// One current scheduler domain definition.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct SchedulerMigration {
     pub(super) version: i64,
@@ -16,13 +16,7 @@ const MIGRATION_001_SQL: &str = include_str!("../../scheduler-migrations/001_sch
 const MIGRATION_002_SQL: &str = include_str!("../../scheduler-migrations/002_queue_producer.sql");
 const MIGRATION_003_SQL: &str = include_str!("../../scheduler-migrations/003_queue_consumer.sql");
 const MIGRATION_004_SQL: &str = include_str!("../../scheduler-migrations/004_cron.sql");
-const MIGRATION_005_SQL: &str = include_str!("../../scheduler-migrations/005_workflow_core.sql");
-const MIGRATION_006_SQL: &str =
-    include_str!("../../scheduler-migrations/006_workflow_durable_waiting.sql");
-const MIGRATION_007_SQL: &str =
-    include_str!("../../scheduler-migrations/007_workflow_operation_progress.sql");
-const MIGRATION_008_SQL: &str =
-    include_str!("../../scheduler-migrations/008_workflow_due_admission.sql");
+const MIGRATION_005_SQL: &str = include_str!("../../scheduler-migrations/005_workflow.sql");
 
 pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[
     SchedulerMigration {
@@ -51,27 +45,9 @@ pub(super) const SCHEDULER_MIGRATIONS: &[SchedulerMigration] = &[
     },
     SchedulerMigration {
         version: 5,
-        name: "005_workflow_core",
+        name: "005_workflow",
         sql: MIGRATION_005_SQL,
         checksum: &crate::migrations::SCHEDULER_MIGRATION_005_SHA256,
-    },
-    SchedulerMigration {
-        version: 6,
-        name: "006_workflow_durable_waiting",
-        sql: MIGRATION_006_SQL,
-        checksum: &crate::migrations::SCHEDULER_MIGRATION_006_SHA256,
-    },
-    SchedulerMigration {
-        version: 7,
-        name: "007_workflow_operation_progress",
-        sql: MIGRATION_007_SQL,
-        checksum: &crate::migrations::SCHEDULER_MIGRATION_007_SHA256,
-    },
-    SchedulerMigration {
-        version: 8,
-        name: "008_workflow_due_admission",
-        sql: MIGRATION_008_SQL,
-        checksum: &crate::migrations::SCHEDULER_MIGRATION_008_SHA256,
     },
 ];
 

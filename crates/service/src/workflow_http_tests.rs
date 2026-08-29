@@ -8,30 +8,17 @@ use std::sync::Mutex;
 use tower::ServiceExt as _;
 
 #[test]
-fn version_capability_defaults_to_legacy_and_requires_an_explicit_integer() {
-    let mut body = serde_json::json!({"deploymentId":DeploymentId::generate(),"className":"Flow"});
-    assert_eq!(
-        serde_json::from_value::<VersionBody>(body.clone())
-            .unwrap()
-            .capability_version,
-        1
+fn version_rejects_the_removed_capability_selector() {
+    let body = serde_json::json!({"deploymentId":DeploymentId::generate(),"className":"Flow"});
+    assert!(serde_json::from_value::<VersionBody>(body.clone()).is_ok());
+    assert!(
+        serde_json::from_value::<VersionBody>(serde_json::json!({
+            "deploymentId": body["deploymentId"],
+            "className": "Flow",
+            "capabilityVersion": 1,
+        }))
+        .is_err()
     );
-    body["capabilityVersion"] = serde_json::json!(2);
-    assert_eq!(
-        serde_json::from_value::<VersionBody>(body.clone())
-            .unwrap()
-            .capability_version,
-        2
-    );
-    for value in [
-        serde_json::Value::Null,
-        serde_json::json!("2"),
-        serde_json::json!(2.5),
-        serde_json::json!(true),
-    ] {
-        body["capabilityVersion"] = value;
-        assert!(serde_json::from_value::<VersionBody>(body.clone()).is_err());
-    }
 }
 
 pub(crate) struct Fixture {
@@ -67,27 +54,31 @@ pub(crate) fn fixture() -> Fixture {
     let account = storage.identity().default_account_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "workflow-api", RequestId::generate(), 0)
+        .create_worker(account, "workflow-api", RequestId::generate(), 0, 1_000_000)
         .unwrap();
     let deployment = DeploymentId::generate();
     workers
-        .insert_staging_deployment(&NewDeployment {
-            id: deployment,
-            account_id: account,
-            worker_id: worker.id,
-            artifact_sha256: [1; 32],
-            artifact_size: 100,
-            artifact_schema_version: 1,
-            main_module: "index.js".into(),
-            compatibility_date: "2026-08-26".into(),
-            compatibility_flags: Vec::new(),
-            limits: serde_json::json!({"profile":"default"}),
-            worker_code_sha256: [2; 32],
-            vars: Default::default(),
-            secrets: Default::default(),
-            request_id: RequestId::generate(),
-            now_ms: 0,
-        })
+        .insert_staging_deployment(
+            &NewDeployment {
+                id: deployment,
+                account_id: account,
+                worker_id: worker.id,
+                artifact_sha256: [1; 32],
+                artifact_size: 100,
+                artifact_schema_version: 1,
+                main_module: "index.js".into(),
+                compatibility_date: "2026-08-26".into(),
+                compatibility_flags: Vec::new(),
+                limits: serde_json::json!({"profile":"default"}),
+                worker_code_sha256: [2; 32],
+                vars: Default::default(),
+                secrets: Default::default(),
+                request_id: RequestId::generate(),
+                now_ms: 0,
+            },
+            &open_compute_storage::NewDeploymentProducts::default(),
+            1_000_000,
+        )
         .unwrap();
     workers.begin_validation(deployment).unwrap();
     workers.mark_ready(deployment, 1).unwrap();
@@ -255,7 +246,6 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
         .create(
             f.account,
             definition,
-            1,
             Some("instance"),
             open_compute_workers::WorkflowCreateInput {
                 payload_json: "{\"private\":\"payload-marker\"}",
@@ -313,6 +303,17 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
         .unwrap();
     controller
         .reconcile(&mut Default::default(), 32, now_ms())
+        .unwrap();
+    let expires_at = f
+        .scheduler
+        .workflow_instance(instance.parse().unwrap())
+        .unwrap()
+        .unwrap()
+        .durable
+        .expires_at_ms
+        .unwrap();
+    controller
+        .reconcile(&mut Default::default(), 32, expires_at)
         .unwrap();
     assert_eq!(
         f.request("DELETE", &detail, serde_json::Value::Null)
@@ -460,7 +461,7 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
         .create_definition(f.account, "admin-durable", 0)
         .unwrap();
     let version = repo
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 2, 1)
+        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
         .unwrap();
     repo.finish_version(f.account, version.target.version_id, true, 2)
         .unwrap();
@@ -470,7 +471,6 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
         .create(
             f.account,
             definition.id,
-            2,
             Some("stable-name"),
             WorkflowCreateInput {
                 payload_json: "\"admin-private-input\"",
@@ -491,7 +491,7 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
     );
     let (status, metadata) = f.request("GET", &instance, Value::Null).await;
     assert_eq!(status, StatusCode::OK, "{metadata}");
-    assert_eq!(metadata["capabilityVersion"], 2);
+    assert_eq!(metadata["capabilityVersion"], 1);
     assert_eq!(metadata["durable"]["eventCount"], 0);
     for forbidden in [
         "admin-private-input",

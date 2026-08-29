@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 1,
   "instanceFixedBytes": 256,
   "stepFixedBytes": 160,
   "dependencyBytes": 16,

@@ -24,25 +24,28 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord, WorkerId) {
     .unwrap();
     let account = storage.identity().default_account_id;
     let worker = WorkerRepository::new(storage.db())
-        .create_worker(account, "driver", RequestId::generate(), 1)
+        .create_worker(account, "driver", RequestId::generate(), 1, 1_000_000)
         .unwrap()
         .0
         .id;
     let resource_id = ResourceId::generate();
     let resource = match ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::DoNamespace,
-            name: "COUNTER",
-            idempotency_key: "create-counter",
-            fingerprint_key_id: "key",
-            request_fingerprint: &[1; 32],
-            resource_id,
-            driver_schema_version: DO_NAMESPACE_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms: 2,
-            expires_at_ms: 10_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::DoNamespace,
+                name: "COUNTER",
+                idempotency_key: "create-counter",
+                fingerprint_key_id: "key",
+                request_fingerprint: &[1; 32],
+                resource_id,
+                driver_schema_version: DO_NAMESPACE_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 2,
+                expires_at_ms: 10_000,
+            },
+            1_000_000,
+        )
         .unwrap()
     {
         ResourceCreateReservation::Reserved(value) => value,

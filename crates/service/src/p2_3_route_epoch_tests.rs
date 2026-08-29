@@ -37,6 +37,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
             "epoch-worker",
             open_compute_core::RequestId::generate(),
             1,
+            1_000_000,
         )
         .unwrap()
         .0;
@@ -137,6 +138,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
             None,
             open_compute_core::RequestId::generate(),
             60_001,
+            1_000_000,
         )
         .unwrap();
     let worker = workers.get_worker(account, worker.id).unwrap();

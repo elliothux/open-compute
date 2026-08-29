@@ -54,26 +54,29 @@ fn binding_insert_referrer_authorize_and_release_are_atomic() {
     let resource_id = ResourceId::generate();
     let fingerprint = [3; 32];
     let reserved = resources
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::KvNamespace,
-            name: "cache",
-            idempotency_key: "resource",
-            fingerprint_key_id: "key",
-            request_fingerprint: &fingerprint,
-            resource_id,
-            driver_schema_version: 1,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 100,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::KvNamespace,
+                name: "cache",
+                idempotency_key: "resource",
+                fingerprint_key_id: "key",
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: 1,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 100,
+            },
+            1_000_000,
+        )
         .unwrap();
     assert!(matches!(reserved, ResourceCreateReservation::Reserved(_)));
     resources.mark_ready(resource_id, 11).unwrap();
 
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "bound", RequestId::generate(), 12)
+        .create_worker(account, "bound", RequestId::generate(), 12, 1_000_000)
         .unwrap();
     let deployment_id = DeploymentId::generate();
     let binding_id = BindingId::generate();
@@ -90,9 +93,13 @@ fn binding_insert_referrer_authorize_and_release_are_atomic() {
         descriptor_sha256: descriptor,
     };
     workers
-        .insert_staging_deployment_with_bindings(
+        .insert_staging_deployment(
             &deployment(account, worker.id, deployment_id),
-            std::slice::from_ref(&binding),
+            &crate::NewDeploymentProducts {
+                bindings: std::slice::from_ref(&binding),
+                ..Default::default()
+            },
+            1_000_000,
         )
         .unwrap();
     assert_eq!(resources.referrers(resource_id).unwrap().len(), 1);
@@ -125,24 +132,27 @@ fn binding_triggers_reject_cross_kind_and_runtime_forgery() {
     let resource_id = ResourceId::generate();
     let fingerprint = [4; 32];
     resources
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::KvNamespace,
-            name: "cache",
-            idempotency_key: "resource",
-            fingerprint_key_id: "key",
-            request_fingerprint: &fingerprint,
-            resource_id,
-            driver_schema_version: 1,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 100,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::KvNamespace,
+                name: "cache",
+                idempotency_key: "resource",
+                fingerprint_key_id: "key",
+                request_fingerprint: &fingerprint,
+                resource_id,
+                driver_schema_version: 1,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 100,
+            },
+            1_000_000,
+        )
         .unwrap();
     resources.mark_ready(resource_id, 11).unwrap();
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "bound", RequestId::generate(), 12)
+        .create_worker(account, "bound", RequestId::generate(), 12, 1_000_000)
         .unwrap();
     let deployment_id = DeploymentId::generate();
     let binding_id = BindingId::generate();
@@ -159,9 +169,13 @@ fn binding_triggers_reject_cross_kind_and_runtime_forgery() {
     };
     assert_eq!(
         workers
-            .insert_staging_deployment_with_bindings(
+            .insert_staging_deployment(
                 &deployment(account, worker.id, deployment_id),
-                &[bad],
+                &crate::NewDeploymentProducts {
+                    bindings: &[bad],
+                    ..Default::default()
+                },
+                1_000_000
             )
             .unwrap_err()
             .code(),

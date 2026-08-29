@@ -16,7 +16,7 @@
 - Change the current model directly and keep one authoritative implementation. Update affected producers, consumers, schema definitions, fixtures, tests, build paths, and documentation together within the requested scope; remove superseded code in the same change. Existing code, version labels, tests, and historical design documents do not create compatibility obligations.
 - Continue to enforce current dependency/protocol contracts, the pinned workerd requirements, security boundaries, data integrity, immutable deployment semantics, and restart/crash recovery within the current implementation. Development status does not permit weaker validation, skipped Gates, or silent repair of corrupt state.
 - Day1 design does not authorize deleting or resetting existing local data, rewriting Git history, or removing retained evidence. The Operating Contract's approval requirements and evidence-preservation rules still apply.
-- Track known removals and their acceptance criteria in [Day1 architecture cleanup](docs/day1-architecture-cleanup.md). A recorded cleanup item is not evidence that its implementation or verification is complete.
+- The completed removals and their acceptance evidence are archived in [Day1 architecture cleanup](docs/implemented/day1-architecture-cleanup.md). Historical stage documents do not recreate compatibility obligations.
 
 ## Repository Scope
 

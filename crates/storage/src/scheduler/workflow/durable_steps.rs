@@ -9,14 +9,14 @@ use open_compute_core::workflow::{
 impl SchedulerStore {
     /// Register an entire immutable batch before granting any callback, or replay its exact shape.
     /// A recovered pending attempt keeps its old attempt number and absolute deadline.
-    pub fn claim_workflow_batch_v2(
+    pub fn claim_workflow_batch(
         &self,
         fence: &WorkflowFence,
         descriptors: &[WorkflowStepDescriptor],
         remaining_ms: u64,
         now_ms: i64,
         limits: &WorkflowsConfig,
-    ) -> Result<Vec<WorkflowV2StepGrant>, PlatformError> {
+    ) -> Result<Vec<WorkflowStepGrant>, PlatformError> {
         limits.validate()?;
         let first = descriptors
             .first()
@@ -40,14 +40,11 @@ impl SchedulerStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let instance = running(&tx, fence, now_ms)?;
-        let metadata = instance
-            .durable
-            .as_ref()
-            .ok_or_else(|| error(ErrorCode::WorkflowCapabilityMismatch))?;
+        let metadata = &instance.durable;
         if metadata.pause_requested || metadata.yield_requested {
             return Ok(descriptors
                 .iter()
-                .map(|_| WorkflowV2StepGrant::Suspended)
+                .map(|_| WorkflowStepGrant::Suspended)
                 .collect());
         }
         if first.ordinal == metadata.registered_step_count {
@@ -70,7 +67,7 @@ impl SchedulerStore {
             let extra = descriptors.iter().try_fold(0_usize, |bytes, descriptor| {
                 Ok::<_, PlatformError>(bytes + descriptor.state_bytes()?)
             })?;
-            capacity_v2(
+            capacity_change(
                 &tx,
                 &instance,
                 extra as i64,
@@ -98,8 +95,8 @@ impl SchedulerStore {
                 return Err(error(ErrorCode::WorkflowNonDeterministic));
             }
             let grant = match step.state.as_str() {
-                "complete" => WorkflowV2StepGrant::Complete,
-                "failed" => WorkflowV2StepGrant::Failed,
+                "complete" => WorkflowStepGrant::Complete,
+                "failed" => WorkflowStepGrant::Failed,
                 "running" => {
                     if step.run_token.as_ref() != Some(&fence.run_token) {
                         return Err(error(ErrorCode::WorkflowStepStale));
@@ -113,8 +110,8 @@ impl SchedulerStore {
                             ErrorCode::WorkflowStepTimeout,
                             now_ms,
                         )? {
-                            WorkflowV2StepResult::Suspended => WorkflowV2StepGrant::Suspended,
-                            _ => WorkflowV2StepGrant::Failed,
+                            WorkflowStepResult::Suspended => WorkflowStepGrant::Suspended,
+                            _ => WorkflowStepGrant::Failed,
                         }
                     } else {
                         admitted += 1;
@@ -133,8 +130,8 @@ impl SchedulerStore {
                         ErrorCode::WorkflowStepTimeout,
                         now_ms,
                     )? {
-                        WorkflowV2StepResult::Suspended => WorkflowV2StepGrant::Suspended,
-                        _ => WorkflowV2StepGrant::Failed,
+                        WorkflowStepResult::Suspended => WorkflowStepGrant::Suspended,
+                        _ => WorkflowStepGrant::Failed,
                     }
                 }
                 "pending" | "retry_wait" => {
@@ -162,7 +159,7 @@ impl SchedulerStore {
                             .saturating_add(open_compute_core::workflow::WORKFLOW_DRAIN_MARGIN_MS)
                             > remaining_ms
                     {
-                        WorkflowV2StepGrant::Suspended
+                        WorkflowStepGrant::Suspended
                     } else {
                         let fresh = step.attempt == 0 || step.state == "retry_wait";
                         let step_token = token()?;
@@ -178,7 +175,7 @@ impl SchedulerStore {
                                 params![fence.instance_id.to_string(),fence.instance_generation,descriptor.ordinal,fence.run_token.as_bytes().as_slice(),step_token.as_bytes().as_slice(),now_ms]).map_err(sql_error)?;
                         }
                         admitted += 1;
-                        WorkflowV2StepGrant::Run {
+                        WorkflowStepGrant::Run {
                             step_token,
                             attempt: step.attempt + u32::from(fresh),
                             remaining_ms: duration,
@@ -188,7 +185,7 @@ impl SchedulerStore {
                 }
                 _ => return Err(error(ErrorCode::WorkflowStepStale)),
             };
-            yielding |= matches!(grant, WorkflowV2StepGrant::Suspended);
+            yielding |= matches!(grant, WorkflowStepGrant::Suspended);
             grants.push(grant);
         }
         if yielding {
@@ -200,17 +197,14 @@ impl SchedulerStore {
     }
 
     /// Fetch one immutable result separately from the batch grant, under the current run lease.
-    pub fn workflow_step_result_v2(
+    pub fn workflow_step_result(
         &self,
         fence: &WorkflowFence,
         ordinal: u32,
         now_ms: i64,
-    ) -> Result<WorkflowV2StepResult, PlatformError> {
+    ) -> Result<WorkflowStepResult, PlatformError> {
         let conn = self.lock()?;
-        let instance = running(&conn, fence, now_ms)?;
-        if instance.durable.is_none() {
-            return Err(error(ErrorCode::WorkflowCapabilityMismatch));
-        }
+        running(&conn, fence, now_ms)?;
         result(
             &read_step(&conn, fence.instance_id, fence.instance_generation, ordinal)?
                 .ok_or_else(|| error(ErrorCode::WorkflowStepStale))?,
@@ -218,7 +212,7 @@ impl SchedulerStore {
     }
 }
 
-pub(super) fn result(step: &DurableStep) -> Result<WorkflowV2StepResult, PlatformError> {
+pub(super) fn result(step: &DurableStep) -> Result<WorkflowStepResult, PlatformError> {
     match step.state.as_str() {
         "complete" => {
             match &step.descriptor.config {
@@ -249,26 +243,26 @@ pub(super) fn result(step: &DurableStep) -> Result<WorkflowV2StepResult, Platfor
                 }
                 _ => {}
             }
-            Ok(WorkflowV2StepResult::Complete {
+            Ok(WorkflowStepResult::Complete {
                 output_json: step.output.clone(),
             })
         }
-        "failed" => Ok(WorkflowV2StepResult::Failed {
+        "failed" => Ok(WorkflowStepResult::Failed {
             code: step
                 .failure
                 .clone()
                 .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?,
         }),
-        "waiting" | "retry_wait" | "pending" => Ok(WorkflowV2StepResult::Suspended),
+        "waiting" | "retry_wait" | "pending" => Ok(WorkflowStepResult::Suspended),
         _ => Err(error(ErrorCode::WorkflowStepStale)),
     }
 }
 
-fn grant(step: &DurableStep, now_ms: i64) -> Result<WorkflowV2StepGrant, PlatformError> {
+fn grant(step: &DurableStep, now_ms: i64) -> Result<WorkflowStepGrant, PlatformError> {
     let WorkflowDurableConfig::Do(config) = &step.descriptor.config else {
         return Err(error(ErrorCode::WorkflowInvariantViolation));
     };
-    Ok(WorkflowV2StepGrant::Run {
+    Ok(WorkflowStepGrant::Run {
         step_token: step
             .step_token
             .clone()

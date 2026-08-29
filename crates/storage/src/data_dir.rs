@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 const KEYS: &str = "keys";
 const RUNTIME: &str = "runtime";
-const RUNTIME_PREVIOUS: &str = "previous";
 const CACHE: &str = "cache";
 const ARTIFACTS: &str = "artifacts";
 const SHA256: &str = "sha256";
@@ -405,10 +404,10 @@ impl DataDir {
         let schema = crate::migrations::inspect_schema(&control)?;
         // These are checked schema-owned tables, never operator-supplied SQL identifiers.
         for (since, table) in [
-            (9, "queues"),
-            (11, "cron_activations"),
-            (12, "workflow_instance_referrers"),
-            (13, "workflow_instance_operations"),
+            (8, "queues"),
+            (10, "cron_activations"),
+            (11, "workflow_instance_referrers"),
+            (11, "workflow_instance_operations"),
         ] {
             if schema >= since {
                 let retained: bool = control.with_read(|connection| {
@@ -428,15 +427,15 @@ impl DataDir {
                 }
             }
         }
-        if schema >= 13 {
+        if schema >= 11 {
             // A purge can already have released its control reservation while its scheduler
-            // receipt still awaits acknowledgement. Immutable V2 versions are never deleted,
+            // receipt still awaits acknowledgement. Immutable Workflow versions are never deleted,
             // so this catalog evidence also fences recovery when the corrupt file cannot
             // reliably prove whether such receipts or operation watermarks remain.
             let durable_workflow: bool = control.with_read(|connection| {
                 connection
                     .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM workflow_versions WHERE capability_version=2)",
+                        "SELECT EXISTS(SELECT 1 FROM workflow_versions)",
                         [],
                         |row| row.get(0),
                     )
@@ -479,7 +478,6 @@ impl DataDir {
         for dir in [
             self.keys_dir(),
             self.root.join(RUNTIME),
-            self.root.join(RUNTIME).join(RUNTIME_PREVIOUS),
             self.root.join(CACHE),
             self.root.join(CACHE).join(ARTIFACTS),
             self.root.join(CACHE).join(ARTIFACTS).join(SHA256),
@@ -622,7 +620,6 @@ fn do_storage_unavailable() -> PlatformError {
 fn create_layout(root: &Path) -> Result<(), PlatformError> {
     fs::create_dir_secure(&root.join(KEYS))?;
     fs::create_dir_secure(&root.join(RUNTIME))?;
-    fs::create_dir_secure(&root.join(RUNTIME).join(RUNTIME_PREVIOUS))?;
     fs::create_dir_secure(&root.join(CACHE))?;
     fs::create_dir_secure(&root.join(CACHE).join(ARTIFACTS))?;
     fs::create_dir_secure(&root.join(CACHE).join(ARTIFACTS).join(SHA256))?;
@@ -642,6 +639,7 @@ pub(crate) fn initialize_restored_layout(root: &Path) -> Result<(), PlatformErro
 
 /// Paths that must not exist after a clean P0.1 bootstrap.
 #[must_use]
+#[cfg(any(test, feature = "test-support"))]
 pub fn future_resource_paths(root: &Path) -> Vec<PathBuf> {
     FORBIDDEN_PRECREATE
         .iter()
@@ -651,11 +649,11 @@ pub fn future_resource_paths(root: &Path) -> Vec<PathBuf> {
 
 /// Layout directories created for P0.1.
 #[must_use]
+#[cfg(any(test, feature = "test-support"))]
 pub fn expected_directories(root: &Path) -> Vec<PathBuf> {
     vec![
         root.join(KEYS),
         root.join(RUNTIME),
-        root.join(RUNTIME).join(RUNTIME_PREVIOUS),
         root.join(CACHE),
         root.join(CACHE).join(ARTIFACTS),
         root.join(CACHE).join(ARTIFACTS).join(SHA256),

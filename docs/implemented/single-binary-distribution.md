@@ -6,7 +6,7 @@
 本任务落实“内嵌 workerd，按 Day1 实现，不兼容其他分发方式”。
 持续维护的构建、配置和部署步骤见[单二进制分发与部署](../references/single-binary.md)；
 该文件是运维参考，不作为已结束的计划归档。本记录只归档本次实现与验证，
-不将 [Day1 全仓清理](../day1-architecture-cleanup.md)或
+不将 [Day1 全仓清理](day1-architecture-cleanup.md)或
 [Runtime 包与测试入口迁移](runtime-and-test-layout.md)标为完成。
 
 ## 已实现契约

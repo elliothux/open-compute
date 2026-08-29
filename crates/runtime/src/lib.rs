@@ -28,12 +28,14 @@ pub use lock::{RuntimeLock, RuntimeTarget, load_runtime_lock};
 pub use process::BoundedOutput;
 #[cfg(any(test, feature = "test-support"))]
 pub use process::{clear_signal_log, set_reap_probe_fail, take_signal_log};
+#[cfg(any(test, feature = "test-support"))]
+pub use supervisor::FnCompiler;
 pub use supervisor::{
-    ConfigCompiler, DirectoryServicePath, ExternalServiceAddress, FnCompiler,
-    GenerationAuthRegistry, GenerationCredential, JitterRng, OsJitter, ProcessDiagnostics,
-    READY_PATH, StaticConfigCompiler, SupervisorSnapshot, SupervisorState, TOKEN_HEADER,
-    WorkerdSupervisor, WorkerdSupervisorOptions, generate_internal_token,
-    probe_ready_with_raw_token, serve_argv, token_fingerprint,
+    ConfigCompiler, DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry,
+    GenerationCredential, JitterRng, OsJitter, ProcessDiagnostics, READY_PATH,
+    StaticConfigCompiler, SupervisorSnapshot, SupervisorState, TOKEN_HEADER, WorkerdSupervisor,
+    WorkerdSupervisorOptions, generate_internal_token, probe_ready_with_raw_token, serve_argv,
+    token_fingerprint,
 };
 pub use verify::VerifiedRuntime;
 #[cfg(any(test, feature = "test-support"))]

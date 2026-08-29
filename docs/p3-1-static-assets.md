@@ -25,7 +25,7 @@
 | `packages/runtime/src/loader/host.ts`：每次 resolve 后再 WorkerLoader get | 在默认 fetch 前接资源路由，命名入口和非 HTTP 事件不受影响 |
 | `crates/service/src/workers_http.rs`：public route 和响应 body pin | 扩展为 deployment dispatch；核实执行、后台任务与 body 的完整存活期 |
 
-遵循 [Day1 约束](day1-architecture-cleanup.md)：直接修改当前 schema、descriptor、工具链和
+遵循已验收的 [Day1 约束](implemented/day1-architecture-cleanup.md)：直接修改当前 schema、descriptor、工具链和
 测试；不增加旧 open-compute deployment/manifest 双读、V1/V2 引擎或历史升级适配。
 当前源码仍有历史命名不意味着新增实现应复制这些模式。平台 SQL 按当前模型整理，并同步
 校验和、装配和测试；不自动重置使用者的数据目录。

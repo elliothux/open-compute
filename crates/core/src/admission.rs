@@ -37,8 +37,6 @@ pub enum OperationClass {
     Snapshot,
     /// Fresh-host restore staging.
     Restore,
-    /// Forward-only offline upgrade.
-    Upgrade,
 }
 
 /// One immutable decision input captured before a bounded mutation starts.

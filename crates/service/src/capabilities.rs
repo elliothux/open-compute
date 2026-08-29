@@ -4,7 +4,7 @@ use crate::config_load::LoadedConfig;
 use open_compute_core::{
     CacheConfig, CapabilityStatus, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig,
     KvConfig, PlatformCapabilitiesV1, PlatformConfig, PlatformError, PlatformReleaseIdentityV1,
-    PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config, ReleaseMigrationV1,
+    PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config, ReleaseSchemaDefinitionV1,
     RuntimeCapabilityV1, SchedulerConfig, WorkersConfig,
 };
 use open_compute_runtime::{embedded_runtime_assets_sha256, embedded_runtime_lock};
@@ -63,10 +63,8 @@ pub fn platform_capabilities(
             .map_err(|_| capability_invalid())?,
         scheduler_schema_version: u32::try_from(current_scheduler_schema_version())
             .map_err(|_| capability_invalid())?,
-        kv_schema_version_min: KV_SCHEMA_VERSION,
-        kv_schema_version_max: KV_SCHEMA_VERSION,
-        d1_schema_version_min: D1_DATABASE_SCHEMA_VERSION,
-        d1_schema_version_max: D1_DATABASE_SCHEMA_VERSION,
+        kv_schema_version: KV_SCHEMA_VERSION,
+        d1_schema_version: D1_DATABASE_SCHEMA_VERSION,
         snapshot_format_version: SNAPSHOT_FORMAT_VERSION,
         compatibility_policy_sha256,
     };
@@ -97,28 +95,24 @@ pub fn platform_capabilities(
     Ok(capabilities)
 }
 
-/// Build the package and upgrade metadata from the same production registries.
+/// Build the current release metadata from the same production registries.
 pub fn platform_release_metadata(
     loaded: &LoadedConfig,
 ) -> Result<PlatformReleaseMetadataV1, PlatformError> {
     let release = platform_capabilities(&loaded.config)?.release;
-    let migrations = migrations::migration_registry()
+    let schema_definitions = migrations::migration_registry()
         .into_iter()
         .map(|(version, name, digest)| {
-            Ok(ReleaseMigrationV1 {
+            Ok(ReleaseSchemaDefinitionV1 {
                 version: u32::try_from(version).map_err(|_| capability_invalid())?,
                 name: name.to_owned(),
                 sha256: hex::encode(digest),
             })
         })
         .collect::<Result<Vec<_>, PlatformError>>()?;
-    let version = release.platform_version.clone();
     let metadata = PlatformReleaseMetadataV1 {
         schema_version: 1,
         release,
-        upgrade_from_control_schema_min: 7,
-        upgrade_from_platform_versions: vec![version.clone()],
-        restore_compatible_platform_versions: vec![version],
         target_schemas: BTreeMap::from([
             (
                 "control".to_owned(),
@@ -133,16 +127,16 @@ pub fn platform_release_metadata(
             ("kv".to_owned(), KV_SCHEMA_VERSION),
             ("d1".to_owned(), D1_DATABASE_SCHEMA_VERSION),
         ]),
-        migrations,
-        readable_object_formats: BTreeMap::from([
-            ("artifacts".to_owned(), vec![1]),
-            ("kv_backups".to_owned(), vec![1]),
-            ("d1_backups".to_owned(), vec![1]),
-            ("r2".to_owned(), vec![1]),
-            ("snapshots".to_owned(), vec![1]),
+        schema_definitions,
+        object_formats: BTreeMap::from([
+            ("artifacts".to_owned(), 1),
+            ("kv_backups".to_owned(), 1),
+            ("d1_backups".to_owned(), 1),
+            ("r2".to_owned(), 1),
+            ("snapshots".to_owned(), 1),
         ]),
         workerd_local_disk_gate_result: "p0.7-stock-workerd".to_owned(),
-        conformance_result: "p2.5-workflow-durable-v2".to_owned(),
+        conformance_result: "workflow-current".to_owned(),
         websocket_hibernation_result: "no-go:p1.8-unsupported".to_owned(),
     };
     if !metadata.validate() {
@@ -213,16 +207,13 @@ fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
     products.insert(
         "kv".to_owned(),
         supported(
-            &["get", "getWithMetadata", "put", "delete", "list", "getBulk"],
+            &["get", "getWithMetadata", "put", "delete", "list"],
             &["OC-KV-001"],
         ),
     );
     products.insert(
         "r2".to_owned(),
-        supported(
-            &["head", "get", "put", "delete", "list", "deleteMany"],
-            &["OC-R2-001"],
-        ),
+        supported(&["head", "get", "put", "delete", "list"], &["OC-R2-001"]),
     );
     products.insert(
         "d1".to_owned(),
@@ -279,7 +270,7 @@ fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
         "cron".to_owned(),
         supported(&["scheduled", "noRetry"], &["OC-CRON-001"]),
     );
-    let mut workflows = supported(
+    let workflows = supported(
         &[
             "create",
             "get",
@@ -295,9 +286,8 @@ fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
             "terminate",
             "restart",
         ],
-        &["OC-WORKFLOW-001", "OC-WORKFLOW-002", "OC-WORKFLOW-003"],
+        &["OC-WORKFLOW-001", "OC-WORKFLOW-002"],
     );
-    workflows.capability_version = Some(2);
     products.insert("workflows".to_owned(), workflows);
     products.insert("websocket_hibernation".to_owned(), unsupported());
     products

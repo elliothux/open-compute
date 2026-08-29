@@ -24,6 +24,10 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
+    fixture_with_resource_limit(1_000).await
+}
+
+async fn fixture_with_resource_limit(max_resources_per_account: u32) -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
     let storage = Arc::new(
@@ -85,9 +89,9 @@ request_timeout_ms = 500
         pins.clone(),
         backend,
         config,
+        max_resources_per_account,
         Duration::from_millis(10),
     );
-    assert_eq!(api.reconcile_pending().await.unwrap(), 0);
     assert!(format!("{api:?}").contains("D1ApiState"));
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
@@ -152,7 +156,7 @@ fn engine(fixture: &Fixture, resource: ResourceId) -> D1Engine {
 
 #[tokio::test]
 async fn database_migration_backup_restore_and_delete_round_trip() {
-    let fixture = fixture().await;
+    let fixture = fixture_with_resource_limit(2).await;
     let collection = format!("/v1/accounts/{}/d1/databases", fixture.account);
     let source = create_database(&fixture, "primary", "create-primary").await;
     assert_eq!(
@@ -310,21 +314,30 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
     assert!(!backup_list.to_string().contains("objectKey"));
 
     let restore = format!("{collection}:restore");
-    let (status, restored_body) = response_json(
-        fixture
-            .router
-            .clone()
-            .oneshot(request(
-                "POST",
-                &restore,
-                json!({"backupId": backup_id, "newName": "restored"}),
-                Some("restore-primary"),
-            ))
-            .await
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
+    let first = fixture.router.clone().oneshot(request(
+        "POST",
+        &restore,
+        json!({"backupId": backup_id, "newName": "restored-a"}),
+        Some("restore-primary-a"),
+    ));
+    let second = fixture.router.clone().oneshot(request(
+        "POST",
+        &restore,
+        json!({"backupId": backup_id, "newName": "restored-b"}),
+        Some("restore-primary-b"),
+    ));
+    let (first, second) = tokio::join!(first, second);
+    let first = response_json(first.unwrap()).await;
+    let second = response_json(second.unwrap()).await;
+    let (restored_body, restored_name, restore_key) = match (first, second) {
+        ((StatusCode::CREATED, body), (StatusCode::TOO_MANY_REQUESTS, _)) => {
+            (body, "restored-a", "restore-primary-a")
+        }
+        ((StatusCode::TOO_MANY_REQUESTS, _), (StatusCode::CREATED, body)) => {
+            (body, "restored-b", "restore-primary-b")
+        }
+        statuses => panic!("one concurrent restore must win the only quota slot: {statuses:?}"),
+    };
     assert_eq!(
         fixture
             .router
@@ -332,8 +345,8 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
             .oneshot(request(
                 "POST",
                 &restore,
-                json!({"backupId": backup_id, "newName": "restored"}),
-                Some("restore-primary"),
+                json!({"backupId": backup_id, "newName": restored_name}),
+                Some(restore_key),
             ))
             .await
             .unwrap()
@@ -346,6 +359,14 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
         .parse()
         .unwrap();
     assert_ne!(restored, source);
+    let backup_staging_entries = std::fs::read_dir(fixture.storage.data_dir().backup_staging_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert!(
+        backup_staging_entries.is_empty(),
+        "restore left backup staging entries: {backup_staging_entries:?}"
+    );
     let restored_engine = engine(&fixture, restored);
     let result = restored_engine
         .query(

@@ -60,19 +60,22 @@ async fn fixture() -> Fixture {
     let resource = ResourceId::generate();
     let fingerprint = storage.crypto().fingerprint_request(b"r2-backend-test");
     let reservation = ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::R2Bucket,
-            name: "objects",
-            idempotency_key: "r2-backend-test",
-            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id: resource,
-            driver_schema_version: open_compute_storage::R2_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 1000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::R2Bucket,
+                name: "objects",
+                idempotency_key: "r2-backend-test",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: resource,
+                driver_schema_version: open_compute_storage::R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 1000,
+            },
+            1_000_000,
+        )
         .unwrap();
     let ResourceCreateReservation::Reserved(resource_record) = reservation else {
         unreachable!()
@@ -93,25 +96,29 @@ async fn fixture() -> Fixture {
 
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "r2-worker", RequestId::generate(), 12)
+        .create_worker(account, "r2-worker", RequestId::generate(), 12, 1_000_000)
         .unwrap();
     let deployment = DeploymentId::generate();
     let binding = BindingId::generate();
     let descriptor = [9_u8; 32];
     workers
-        .insert_staging_deployment_with_bindings(
+        .insert_staging_deployment(
             &deployment_input(account, worker.id, deployment),
-            &[NewDeploymentBinding {
-                id: binding,
-                name: "BUCKET".to_owned(),
-                kind: BindingKind::R2Bucket,
-                resource_id: resource,
-                resource_spec_generation: 1,
-                capability_version: 1,
-                permissions_json: serde_json::to_vec(&CanonicalPermissions::default()).unwrap(),
-                config_json: serde_json::to_vec(&CanonicalBindingConfig::default()).unwrap(),
-                descriptor_sha256: descriptor,
-            }],
+            &open_compute_storage::NewDeploymentProducts {
+                bindings: &[NewDeploymentBinding {
+                    id: binding,
+                    name: "BUCKET".to_owned(),
+                    kind: BindingKind::R2Bucket,
+                    resource_id: resource,
+                    resource_spec_generation: 1,
+                    capability_version: 1,
+                    permissions_json: serde_json::to_vec(&CanonicalPermissions::default()).unwrap(),
+                    config_json: serde_json::to_vec(&CanonicalBindingConfig::default()).unwrap(),
+                    descriptor_sha256: descriptor,
+                }],
+                ..Default::default()
+            },
+            1_000_000,
         )
         .unwrap();
     workers.begin_validation(deployment).unwrap();

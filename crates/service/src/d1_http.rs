@@ -11,8 +11,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, BindingKind, D1Config, ErrorCode, OperationClass, PlatformError, RequestId,
-    ResourceId, ResourceState,
+    AccountId, BindingKind, D1Config, ErrorCode, PlatformError, RequestId, ResourceId,
+    ResourceState,
 };
 use open_compute_storage::{
     D1_DATABASE_SCHEMA_VERSION, D1BackupState, D1DatabaseRepository, D1Engine, D1Migration,
@@ -43,6 +43,7 @@ pub struct D1ApiState {
     pins: ResourcePins,
     backend: Arc<D1BindingService>,
     config: D1Config,
+    max_resources_per_account: u32,
     delete_drain_timeout: Duration,
 }
 
@@ -64,6 +65,7 @@ impl D1ApiState {
         pins: ResourcePins,
         backend: Arc<D1BindingService>,
         config: D1Config,
+        max_resources_per_account: u32,
         delete_drain_timeout: Duration,
     ) -> Self {
         Self {
@@ -72,22 +74,9 @@ impl D1ApiState {
             pins,
             backend,
             config,
+            max_resources_per_account,
             delete_drain_timeout,
         }
-    }
-
-    /// Converge durable creating/deleting databases before accepting traffic.
-    pub async fn reconcile_pending(&self) -> Result<u32, PlatformError> {
-        let storage = self.storage.clone();
-        let pins = self.pins.clone();
-        let quota = self.config.database_quota_bytes;
-        tokio::task::spawn_blocking(move || {
-            let driver = D1ResourceDriver::new(&storage, quota);
-            ResourceController::new(&storage, pins, driver)
-                .reconcile_pending(RequestId::generate(), now_ms())
-        })
-        .await
-        .map_err(|_| internal())?
     }
 }
 
@@ -251,7 +240,7 @@ async fn rename_database(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
-    let admission = match api.storage.reserve_mutation(OperationClass::D1, 64 * 1024) {
+    let admission = match api.storage.reserve_mutation(64 * 1024) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };

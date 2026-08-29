@@ -110,12 +110,13 @@ test("generated modules only wire imports and configuration into the checked run
 test("all binding and entrypoint combinations produce valid import-only bridges", () => {
   const bindings = [
     ["r2_bucket", 1, "BUCKET"], ["d1_database", 1, "DATABASE"], ["do_namespace", 1, "OBJECTS"],
-    ["queue_producer", 1, "QUEUE"], ["workflow", 1, "FLOW"], ["workflow", 2, "DURABLE_FLOW"],
+    ["queue_producer", 1, "QUEUE"], ["workflow", 1, "FLOW"],
   ].map(([kind, capabilityVersion, name]) => ({ kind, capabilityVersion, name }));
   for (const options of [{}, { entrypointName: "default" }, { entrypointName: "Named" }, { entrypointName: "Object", durableObject: true }, { entrypointName: "default", durableObject: true },
-    { entrypointName: "Flow", workflowCapability: 1 }, { entrypointName: "Flow", workflowCapability: 2 }]) {
+    { entrypointName: "Flow", workflow: true }]) {
     const code = generator.generateBindingWrapper({ mainModule: "src/index.js", bindings, durableObject: false, ...options });
     assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
+    assert.match(code, /WorkflowBinding/);
     assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   }
   assert.deepEqual(parseSync("validation.js", generator.generateValidationWrapper("Named"), { sourceType: "module" }).errors, []);

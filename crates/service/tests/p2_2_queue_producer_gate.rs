@@ -21,9 +21,7 @@ use open_compute_runtime::{
 use open_compute_service::runtime_bridge::{
     DispatchTarget, LoaderOutcome, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
-use open_compute_service::{
-    SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_scheduler,
-};
+use open_compute_service::{SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend};
 use open_compute_storage::{
     DeploymentRecord, PlatformStorage, QueueConfig, QueueRepository, SchedulerStore,
     WorkerRepository,
@@ -88,7 +86,7 @@ async fn p2_2_real_queue_producer_matrix() {
         let pins = resource_pins.clone();
         let scheduler = scheduler.clone();
         async move {
-            serve_binding_backend_with_scheduler(
+            serve_binding_backend(
                 binding_listener,
                 backend_storage,
                 auth,
@@ -133,7 +131,7 @@ async fn p2_2_real_queue_producer_matrix() {
             runtime.version_output(),
         )
         .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -158,7 +156,7 @@ async fn p2_2_real_queue_producer_matrix() {
     let queue = create_queue(&storage, scheduler.clone(), account);
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "queue-gate", RequestId::generate(), 10)
+        .create_worker(account, "queue-gate", RequestId::generate(), 10, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
     let deployments =
@@ -180,7 +178,13 @@ async fn p2_2_real_queue_producer_matrix() {
     let foreign = AccountId::generate();
     insert_account(storage.data_dir().control_db_path(), foreign);
     let (foreign_worker, _) = workers
-        .create_worker(foreign, "foreign-queue", RequestId::generate(), 21)
+        .create_worker(
+            foreign,
+            "foreign-queue",
+            RequestId::generate(),
+            21,
+            1_000_000,
+        )
         .unwrap();
     let cross_account = deployments
         .create_deployment(deployment_request(
@@ -437,7 +441,6 @@ fn deployment_request(
         bindings.insert(
             "EVENTS".to_owned(),
             DeploymentBindingInput {
-                capability_version: 1,
                 kind: BindingKind::QueueProducer,
                 id: ResourceId::from_uuid(queue_id.as_uuid()).unwrap(),
                 permissions: CanonicalPermissions::default(),

@@ -396,14 +396,10 @@ fn replayed_failure(bytes: &[u8]) -> PlatformError {
     let code = serde_json::from_slice::<serde_json::Value>(bytes)
         .ok()
         .and_then(|value| value.get("code")?.as_str().map(ToOwned::to_owned));
-    let code = match code.as_deref() {
-        Some("QUEUE_NAME_CONFLICT") => ErrorCode::QueueNameConflict,
-        Some("QUEUE_NOT_READY") => ErrorCode::QueueNotReady,
-        Some("QUEUE_CONFIG_PENDING") => ErrorCode::QueueConfigPending,
-        Some("QUEUE_REFERENCED") => ErrorCode::QueueReferenced,
-        Some("QUEUE_NOT_EMPTY") => ErrorCode::QueueNotEmpty,
-        _ => ErrorCode::Internal,
-    };
+    let code = code
+        .as_deref()
+        .and_then(ErrorCode::from_stable_str)
+        .unwrap_or(ErrorCode::Internal);
     PlatformError::new(code, "idempotent Queue operation previously failed")
 }
 

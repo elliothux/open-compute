@@ -4,7 +4,7 @@ use super::{WORKFLOW_JSON_MAX_BYTES, WORKFLOW_JSON_MAX_DEPTH, error};
 use crate::{ErrorCode, PlatformError};
 use serde_json::value::RawValue;
 
-/// Parse and canonicalize a capability V1 JSON string at the authority boundary.
+/// Parse and canonicalize a Workflow JSON string at the authority boundary.
 /// JSON numbers have JavaScript Number semantics, not arbitrary-precision integers.
 pub fn canonical_json(input: &str, size_error: ErrorCode) -> Result<String, PlatformError> {
     let value = decode_json(input, size_error)?;

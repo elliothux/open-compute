@@ -31,10 +31,10 @@ pub use capability::{
 };
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    CacheConfig, D1Config, DiagnosticsConfig, DurableObjectsConfig, HardeningConfig, KvConfig,
-    MetricsConfig, PlatformConfig, QueuesConfig, R2Config, RuntimeConfig, S3Config,
-    SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig,
-    StorageConfig, WorkersConfig, validate_bootstrap_config_path,
+    CacheConfig, D1Config, DurableObjectsConfig, HardeningConfig, KvConfig, MetricsConfig,
+    PlatformConfig, QueuesConfig, R2Config, RuntimeConfig, S3Config, SchedulerConfig,
+    SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig, StorageConfig,
+    WorkersConfig, validate_bootstrap_config_path,
 };
 pub use cron::CronSchedule;
 pub use durable_objects::{
@@ -50,7 +50,7 @@ pub use ids::{
 };
 pub use redact::Redactor;
 pub use release_identity::{
-    PlatformReleaseIdentityV1, PlatformReleaseMetadataV1, ReleaseMigrationV1,
+    PlatformReleaseIdentityV1, PlatformReleaseMetadataV1, ReleaseSchemaDefinitionV1,
 };
 pub use resource::{
     BindingKind, CanonicalBindingConfig, CanonicalPermissions, ResourceAvailability, ResourceState,

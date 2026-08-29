@@ -5,12 +5,15 @@ use axum::body::to_bytes;
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse as _, Response};
+use open_compute_core::workflow::WorkflowStepDeclaration;
 use open_compute_core::{
-    BindingId, DeploymentId, ErrorCode, OperationClass, PlatformError, SchedulerClock as _,
-    WorkflowFence, WorkflowInstanceId, WorkflowToken, WorkflowsConfig,
+    BindingId, DeploymentId, ErrorCode, PlatformError, SchedulerClock as _, WorkflowFence,
+    WorkflowInstanceId, WorkflowsConfig,
 };
 use open_compute_runtime::GenerationAuthRegistry;
-use open_compute_storage::scheduler::{WorkflowFailure, WorkflowStepIdentity};
+use open_compute_storage::scheduler::{
+    WorkflowStepAttempt, WorkflowStepGrant, WorkflowStepOutcome,
+};
 use open_compute_storage::{PlatformStorage, SchedulerStore, WorkflowRepository};
 use open_compute_workers::WorkflowController;
 use serde::Deserialize;
@@ -20,9 +23,6 @@ use std::time::Duration;
 
 const MAX_BODY: usize = 2 * 1024 * 1024 + 8192;
 const TIMEOUT: Duration = Duration::from_secs(30);
-
-#[path = "workflow_backend/v2.rs"]
-mod v2;
 
 /// Bounded private Workflow data plane composed with platform-owned authorities.
 #[derive(Clone, Debug)]
@@ -110,11 +110,8 @@ impl WorkflowBindingService {
         body: Value,
         now_ms: i64,
     ) -> Result<Value, PlatformError> {
-        if let Some(operation) = path.strip_prefix("/internal/workflows/v1/runs/") {
+        if let Some(operation) = path.strip_prefix("/internal/workflows/runs/") {
             return self.run(operation, body, now_ms);
-        }
-        if let Some(operation) = path.strip_prefix("/internal/workflows/v2/runs/") {
-            return self.run_v2(operation, body, now_ms);
         }
         let tail = path
             .strip_prefix("/internal/bindings/v1/workflow/")
@@ -143,6 +140,9 @@ impl WorkflowBindingService {
         let (account, binding) = repository.authorize_binding(binding, deployment, &expected)?;
         let definition = binding.descriptor.definition_id;
         let capability = binding.descriptor.capability_version;
+        if capability != 1 {
+            return Err(failure(ErrorCode::WorkflowCapabilityMismatch));
+        }
         let controller = WorkflowController::new(&self.storage, &self.scheduler, &self.config);
         if matches!(
             operation,
@@ -153,9 +153,6 @@ impl WorkflowBindingService {
         }
         match operation {
             "create" => {
-                if capability == 1 && body.get("retention").is_some() {
-                    return Err(failure(ErrorCode::WorkflowMethodUnsupported));
-                }
                 let request: CreateRequest = decode(body)?;
                 let retention = request
                     .retention
@@ -170,7 +167,6 @@ impl WorkflowBindingService {
                 let result = controller.create(
                     account,
                     definition,
-                    capability,
                     request.id.as_deref(),
                     open_compute_workers::WorkflowCreateInput {
                         payload_json: &request.payload_json,
@@ -186,16 +182,12 @@ impl WorkflowBindingService {
                     });
                 }
                 let identity = result?;
-                if capability == 2 {
-                    Ok(
-                        serde_json::json!({"id":identity.external_instance_id,"instanceId":identity.instance_id}),
-                    )
-                } else {
-                    Ok(serde_json::json!({"id":identity.external_instance_id}))
-                }
+                Ok(
+                    serde_json::json!({"id":identity.external_instance_id,"instanceId":identity.instance_id}),
+                )
             }
             "get" | "status" => {
-                let (id, external) = if operation == "get" || capability == 1 {
+                let (id, external) = if operation == "get" {
                     let request: InstanceRequest = decode(body)?;
                     let reservation = repository.find_instance(definition, &request.id)?;
                     (reservation.identity.instance_id, Some(request.id))
@@ -203,20 +195,16 @@ impl WorkflowBindingService {
                     let request: HandleRequest = decode(body)?;
                     (request.instance_id, None)
                 };
-                let status = controller.status(account, definition, id, capability, now_ms)?;
+                let status = controller.status(account, definition, id, now_ms)?;
                 if operation == "get" {
-                    if capability == 2 {
-                        Ok(serde_json::json!({"id":external,"instanceId":id}))
-                    } else {
-                        Ok(serde_json::json!({"id":external}))
-                    }
+                    Ok(serde_json::json!({"id":external,"instanceId":id}))
                 } else {
                     serde_json::to_value(status)
                         .map_err(|_| failure(ErrorCode::WorkflowInvariantViolation))
                 }
             }
-            "restart" if capability == 2 => {
-                let request: v2::RestartRequest = decode(body)?;
+            "restart" => {
+                let request: RestartRequest = decode(body)?;
                 let result = controller.restart(
                     account,
                     definition,
@@ -230,7 +218,7 @@ impl WorkflowBindingService {
                 result?;
                 Ok(serde_json::json!({"ok":true}))
             }
-            "pause" | "resume" | "terminate" if capability == 2 => {
+            "pause" | "resume" | "terminate" => {
                 use open_compute_storage::scheduler::WorkflowInstanceAction;
                 let request: HandleRequest = decode(body)?;
                 let action = match operation {
@@ -246,8 +234,8 @@ impl WorkflowBindingService {
                 result?;
                 Ok(serde_json::json!({"ok":true}))
             }
-            "send-event" if capability == 2 => {
-                let request: v2::EventRequest = decode(body)?;
+            "send-event" => {
+                let request: EventRequest = decode(body)?;
                 let result = controller.send_event(
                     account,
                     definition,
@@ -265,108 +253,174 @@ impl WorkflowBindingService {
             _ => Err(failure(ErrorCode::WorkflowMethodUnsupported)),
         }
     }
+}
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RestartRequest {
+    instance_id: WorkflowInstanceId,
+    operation_id: open_compute_core::WorkflowOperationId,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BatchRequest {
+    steps: Vec<WorkflowStepDeclaration>,
+    remaining_ms: u64,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResultRequest {
+    ordinal: u32,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct YieldRequest {
+    final_ordinal: u32,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OutputRequest {
+    output_json: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ErrorRequest {
+    code: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventRequest {
+    instance_id: WorkflowInstanceId,
+    #[serde(rename = "type")]
+    event_type: String,
+    payload_json: String,
+}
+
+impl WorkflowBindingService {
     fn run(&self, operation: &str, body: Value, now_ms: i64) -> Result<Value, PlatformError> {
         let (fence, body) = run_fence(body)?;
-        // Growth is admitted before the transaction, while terminal cleanup uses its reserved error budget.
-        let _admission = self.storage.reserve_mutation(
-            OperationClass::Scheduler,
-            match operation {
+        let _admission = if operation == "result" {
+            None
+        } else {
+            Some(self.storage.reserve_mutation(match operation {
                 "success" => 2 * 1024 * 1024,
-                "claim" => 64 * 1024,
+                "claim-batch" => 128 * 1024,
                 _ => 8192,
-            },
-        )?;
-        let result = match operation {
-            "claim" => {
-                let identity: WorkflowStepIdentity = decode(body)?;
-                self.scheduler
-                    .claim_workflow_step(&fence, &identity, now_ms, &self.config)
-                    .and_then(|grant| {
-                        if let Some(metrics) = &self.metrics {
-                            match &grant {
-                                open_compute_storage::scheduler::WorkflowStepGrant::Complete {
-                                    ..
-                                } => metrics.workflow_replay(false),
-                                open_compute_storage::scheduler::WorkflowStepGrant::Failed {
-                                    ..
-                                } => metrics.workflow_replay(true),
-                                _ => {}
-                            }
-                        }
-                        serde_json::to_value(grant)
-                            .map_err(|_| failure(ErrorCode::WorkflowInvariantViolation))
-                    })
-            }
-            "success" => {
-                let request: SuccessRequest = decode(body)?;
-                let started = self
-                    .scheduler
-                    .workflow_step_started_at(fence.instance_id, request.ordinal)?;
-                self.scheduler
-                    .complete_workflow_step(
-                        &fence,
-                        request.ordinal,
-                        &request.step_token,
-                        &request.output_json,
-                        now_ms,
-                        &self.config,
-                    )
-                    .map(|()| {
-                        self.observe_step(WorkflowOutcome::Success, started, now_ms);
-                        serde_json::json!({"ok":true})
-                    })
-            }
-            "failure" => {
-                let request: FailureRequest = decode(body)?;
-                let started = self
-                    .scheduler
-                    .workflow_step_started_at(fence.instance_id, request.ordinal)?;
-                if request.error != WorkflowFailure::default() {
-                    return Err(failure(ErrorCode::WorkflowSerializationUnsupported));
+            })?)
+        };
+        match operation {
+            "claim-batch" => {
+                let request: BatchRequest = decode(body)?;
+                if request.steps.is_empty() || request.steps.len() > 16 {
+                    return Err(failure(ErrorCode::WorkflowParallelStepUnsupported));
                 }
-                let code = request.error_code.as_deref().map_or(
-                    Ok(ErrorCode::WorkflowExecutionFailed),
-                    open_compute_core::workflow::terminal_error_code,
+                let descriptors = request
+                    .steps
+                    .into_iter()
+                    .map(WorkflowStepDeclaration::resolve)
+                    .collect::<Result<Vec<_>, _>>()?;
+                let steps = self.scheduler.claim_workflow_batch(
+                    &fence,
+                    &descriptors,
+                    request.remaining_ms,
+                    now_ms,
+                    &self.config,
                 )?;
-                self.scheduler
-                    .fail_workflow_step(
-                        &fence,
-                        request.ordinal,
-                        &request.step_token,
-                        code,
-                        now_ms,
-                        &self.config,
-                    )
-                    .map(|()| {
-                        self.observe_step(WorkflowOutcome::Error, started, now_ms);
-                        serde_json::json!({"ok":true})
-                    })
+                if let Some(metrics) = &self.metrics {
+                    for grant in &steps {
+                        match grant {
+                            WorkflowStepGrant::Complete => metrics.workflow_replay(false),
+                            WorkflowStepGrant::Failed => metrics.workflow_replay(true),
+                            WorkflowStepGrant::Run { .. } | WorkflowStepGrant::Suspended => {}
+                        }
+                    }
+                }
+                Ok(serde_json::json!({"steps":steps}))
+            }
+            "result" => {
+                let request: ResultRequest = decode(body)?;
+                serde_json::to_value(self.scheduler.workflow_step_result(
+                    &fence,
+                    request.ordinal,
+                    now_ms,
+                )?)
+                .map_err(|_| failure(ErrorCode::WorkflowInvariantViolation))
+            }
+            "register-sleep" | "register-wait" => {
+                let declaration: WorkflowStepDeclaration = decode(body)?;
+                if (declaration.kind == open_compute_core::workflow::WorkflowStepKind::WaitEvent)
+                    != (operation == "register-wait")
+                {
+                    return Err(failure(ErrorCode::WorkflowStepConfigUnsupported));
+                }
+                let descriptor = declaration.resolve()?;
+                serde_json::to_value(self.scheduler.register_workflow_wait(
+                    &fence,
+                    &descriptor,
+                    now_ms,
+                    &self.config,
+                )?)
+                .map_err(|_| failure(ErrorCode::WorkflowInvariantViolation))
+            }
+            "yield" => {
+                let request: YieldRequest = decode(body)?;
+                if request.final_ordinal > 1024 {
+                    return Err(failure(ErrorCode::WorkflowStepLimitExceeded));
+                }
+                self.scheduler.yield_workflow(&fence, now_ms)?;
+                Ok(serde_json::json!({"ok":true}))
+            }
+            "success" | "failure" | "timeout" => {
+                let Value::Object(mut fields) = body else {
+                    return Err(failure(ErrorCode::WorkflowStepStale));
+                };
+                let attempt: WorkflowStepAttempt = decode(
+                    serde_json::json!({"ordinal":fields.remove("ordinal"),"attempt":fields.remove("attempt"),"stepToken":fields.remove("stepToken")}),
+                )?;
+                let output;
+                let outcome = match operation {
+                    "success" => {
+                        let request: OutputRequest = decode(Value::Object(fields))?;
+                        output = request.output_json;
+                        WorkflowStepOutcome::Success(&output)
+                    }
+                    "failure" => {
+                        let request: ErrorRequest = decode(Value::Object(fields))?;
+                        WorkflowStepOutcome::Failure(
+                            open_compute_core::workflow::terminal_error_code(&request.code)?,
+                        )
+                    }
+                    _ => {
+                        if !fields.is_empty() {
+                            return Err(failure(ErrorCode::WorkflowMethodUnsupported));
+                        }
+                        WorkflowStepOutcome::Timeout
+                    }
+                };
+                let started = std::time::Instant::now();
+                let result = self.scheduler.settle_workflow_step(
+                    &fence,
+                    &attempt,
+                    outcome,
+                    now_ms,
+                    &self.config,
+                );
+                if let Some(metrics) = &self.metrics {
+                    metrics.workflow_step(
+                        if result.is_ok() {
+                            WorkflowOutcome::Success
+                        } else {
+                            WorkflowOutcome::Error
+                        },
+                        started.elapsed(),
+                    );
+                }
+                serde_json::to_value(result?)
+                    .map_err(|_| failure(ErrorCode::WorkflowInvariantViolation))
             }
             _ => Err(failure(ErrorCode::WorkflowMethodUnsupported)),
-        };
-        if let (Some(metrics), Err(error)) = (&self.metrics, &result) {
-            match error.code() {
-                ErrorCode::WorkflowRunStale => metrics.workflow_stale(false),
-                ErrorCode::WorkflowStepStale => metrics.workflow_stale(true),
-                _ => {}
-            }
-        }
-        if let Some(instance) = self.scheduler.workflow_instance(fence.instance_id)?
-            && instance.state.is_terminal()
-        {
-            WorkflowRepository::new(self.storage.db())
-                .release_instance(&instance.identity, now_ms)?;
-        }
-        result
-    }
-
-    fn observe_step(&self, outcome: WorkflowOutcome, started: Option<i64>, now_ms: i64) {
-        if let (Some(metrics), Some(started)) = (&self.metrics, started) {
-            metrics.workflow_step(
-                outcome,
-                Duration::from_millis(now_ms.saturating_sub(started).max(0) as u64),
-            );
         }
     }
 }
@@ -397,22 +451,6 @@ struct InstanceRequest {
 struct HandleRequest {
     instance_id: WorkflowInstanceId,
 }
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SuccessRequest {
-    ordinal: u32,
-    step_token: WorkflowToken,
-    output_json: String,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FailureRequest {
-    ordinal: u32,
-    step_token: WorkflowToken,
-    error: WorkflowFailure,
-    error_code: Option<String>,
-}
-
 fn decode<T: serde::de::DeserializeOwned>(body: Value) -> Result<T, PlatformError> {
     serde_json::from_value(body).map_err(|_| failure(ErrorCode::WorkflowSerializationUnsupported))
 }

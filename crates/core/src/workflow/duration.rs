@@ -1,4 +1,4 @@
-//! Exact, bounded duration parsing shared with the capability V2 facade.
+//! Exact, bounded duration parsing shared with the current facade.
 
 use super::error;
 use crate::{ErrorCode, PlatformError};

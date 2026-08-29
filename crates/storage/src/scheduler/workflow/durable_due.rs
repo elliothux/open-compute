@@ -5,7 +5,7 @@ use super::*;
 impl SchedulerStore {
     /// Settle at most one bounded page of due waits/recovered timeouts and enqueue eligible continuations.
     /// Business attempt counters change only in claim, never during maintenance or infrastructure recovery.
-    pub fn maintain_workflow_due_v2(
+    pub fn maintain_workflow_due(
         &self,
         now_ms: i64,
         limits: &WorkflowsConfig,
@@ -45,7 +45,7 @@ impl SchedulerStore {
             let ready = match step.state.as_str() {
                 "waiting" => !matches!(
                     durable_waits::settle(&tx, &instance, &step, now_ms, limits)?,
-                    WorkflowV2StepResult::Suspended
+                    WorkflowStepResult::Suspended
                 ),
                 "pending" => !matches!(
                     durable_settlement::fail(
@@ -56,7 +56,7 @@ impl SchedulerStore {
                         ErrorCode::WorkflowStepTimeout,
                         now_ms
                     )?,
-                    WorkflowV2StepResult::Suspended
+                    WorkflowStepResult::Suspended
                 ),
                 "retry_wait" => true,
                 _ => return Err(error(ErrorCode::WorkflowInvariantViolation)),
@@ -78,16 +78,16 @@ impl SchedulerStore {
 pub(super) const DUE_STEPS: &str = "SELECT instance_id,ordinal FROM (
     SELECT * FROM (SELECT s.instance_id,s.ordinal,s.due_at_ms AS deadline FROM workflow_steps s
       JOIN workflow_instances i ON i.id=s.instance_id WHERE s.state='waiting' AND s.due_at_ms<=?1
-        AND i.capability_version=2 AND i.state IN ('queued','running','waiting','paused')
+        AND i.capability_version=1 AND i.state IN ('queued','running','waiting','paused')
       ORDER BY s.due_at_ms,s.instance_id,s.ordinal LIMIT ?2)
     UNION ALL
     SELECT * FROM (SELECT s.instance_id,s.ordinal,s.attempt_deadline_at_ms AS deadline FROM workflow_steps s
       JOIN workflow_instances i ON i.id=s.instance_id WHERE s.state='pending' AND s.attempt>0 AND s.attempt_deadline_at_ms<=?1
-        AND i.capability_version=2 AND i.state IN ('queued','running','waiting','paused')
+        AND i.capability_version=1 AND i.state IN ('queued','running','waiting','paused')
       ORDER BY s.attempt_deadline_at_ms,s.instance_id,s.ordinal LIMIT ?2)
     UNION ALL
     SELECT * FROM (SELECT s.instance_id,s.ordinal,s.due_at_ms AS deadline FROM workflow_steps s
       JOIN workflow_instances i ON i.id=s.instance_id WHERE s.state='retry_wait' AND s.due_at_ms<=?1
-        AND i.capability_version=2 AND i.state='waiting'
+        AND i.capability_version=1 AND i.state='waiting'
       ORDER BY s.due_at_ms,s.instance_id,s.ordinal LIMIT ?2)
 ) ORDER BY deadline,instance_id,ordinal LIMIT ?2";

@@ -9,11 +9,8 @@ export const DO_ID_CODEC_MODULE = `${INTERNAL_MODULE_PREFIX}durable-objects/id-c
 export const DO_ALARM_SHIM_MODULE = `${INTERNAL_MODULE_PREFIX}durable-objects/alarm-shim.js`;
 export const QUEUE_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}queues/facade.js`;
 export const WORKFLOW_RUNNER_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/runner.js`;
-export const WORKFLOW_RUNNER_V2_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/runner-v2.js`;
 export const WORKFLOW_JSON_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/json.js`;
-export const WORKFLOW_JSON_V2_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/json-v2.js`;
 export const WORKFLOW_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/facade.js`;
-export const WORKFLOW_V2_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/facade-v2.js`;
 export const WRAPPER_RUNTIME_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/runtime.js`;
 export const DO_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/durable-object.js`;
 export const WORKFLOW_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/workflow.js`;
@@ -25,18 +22,18 @@ export interface WrapperOptions {
   bindings: readonly RuntimeBinding[];
   entrypointName?: string | undefined;
   durableObject: boolean;
-  workflowCapability?: 1 | 2 | undefined;
+  workflow?: boolean | undefined;
 }
 
 function fromWrapper(module: string): string { return JSON.stringify(`./${module.slice(INTERNAL_MODULE_PREFIX.length)}`); }
 
 /** Only module wiring and validated data are generated; behavior lives in TS modules. */
 export function generateBindingWrapper(options: WrapperOptions): string {
-  const { mainModule, bindings, entrypointName, durableObject, workflowCapability } = options;
+  const { mainModule, bindings, entrypointName, durableObject, workflow = false } = options;
   if (entrypointName !== undefined && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypointName)) {
     throw new Error("invalid entrypoint name");
   }
-  if ((workflowCapability !== undefined || durableObject) && entrypointName === undefined) throw new Error("missing entrypoint");
+  if ((workflow || durableObject) && entrypointName === undefined) throw new Error("missing entrypoint");
   const main = JSON.stringify(`../${mainModule}`);
   const lines = [
     `import * as tenant from ${main};`, `export * from ${main};`,
@@ -49,7 +46,6 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     ["do_namespace", 1, DO_FACADE_MODULE, "DurableObjectNamespace"],
     ["queue_producer", 1, QUEUE_FACADE_MODULE, "QueueProducer"],
     ["workflow", 1, WORKFLOW_FACADE_MODULE, "WorkflowBinding"],
-    ["workflow", 2, WORKFLOW_V2_FACADE_MODULE, "WorkflowBindingV2"],
   ] as const) {
     const names = bindings.filter(binding => binding.kind === kind && binding.capabilityVersion === version).map(binding => binding.name);
     if (names.length === 0) continue;
@@ -57,9 +53,9 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     factories.push(`{ names: ${JSON.stringify(names)}, create: ${exported} }`);
   }
   lines.push(`const wrapEnv = createEnvironment([${factories.join(",")}], ${durableObject});`);
-  if (workflowCapability !== undefined) {
+  if (workflow) {
     lines.push(`import { createWorkflowEntrypoint } from ${fromWrapper(WORKFLOW_WRAPPER_MODULE)};`);
-    lines.push(`import { runWorkflow, validateWorkflowClass } from ${fromWrapper(workflowCapability === 2 ? WORKFLOW_RUNNER_V2_MODULE : WORKFLOW_RUNNER_MODULE)};`);
+    lines.push(`import { runWorkflow, validateWorkflowClass } from ${fromWrapper(WORKFLOW_RUNNER_MODULE)};`);
     lines.push(`const __OpenComputeWorkflow = createWorkflowEntrypoint(tenant[${JSON.stringify(entrypointName)}], wrapEnv, runWorkflow, validateWorkflowClass);`);
     lines.push("export { __OpenComputeWorkflow };");
   } else if (entrypointName !== undefined && (durableObject || entrypointName !== "default")) {

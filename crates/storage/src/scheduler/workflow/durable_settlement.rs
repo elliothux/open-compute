@@ -7,23 +7,20 @@ use open_compute_core::workflow::WorkflowDurableConfig;
 impl SchedulerStore {
     /// Commit one trusted callback report under the exact run, ordinal, attempt and step token.
     /// The stored deadline wins over a late success or failure, independently of host timer order.
-    pub fn settle_workflow_step_v2(
+    pub fn settle_workflow_step(
         &self,
         fence: &WorkflowFence,
         attempt: &WorkflowStepAttempt,
         outcome: WorkflowStepOutcome<'_>,
         now_ms: i64,
         limits: &WorkflowsConfig,
-    ) -> Result<WorkflowV2StepResult, PlatformError> {
+    ) -> Result<WorkflowStepResult, PlatformError> {
         limits.validate()?;
         let mut conn = self.lock()?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let instance = running(&tx, fence, now_ms)?;
-        if instance.durable.is_none() {
-            return Err(error(ErrorCode::WorkflowCapabilityMismatch));
-        }
         let step = read_step(
             &tx,
             fence.instance_id,
@@ -68,14 +65,14 @@ impl SchedulerStore {
                         ErrorCode::WorkflowResultTooLarge,
                     )
                     .and_then(|value| {
-                        capacity_v2(&tx, &instance, value.len() as i64, -1, limits)?;
+                        capacity_change(&tx, &instance, value.len() as i64, -1, limits)?;
                         Ok(value)
                     }) {
                         Ok(output) => {
                             tx.execute("UPDATE workflow_steps SET state='complete',run_token=NULL,step_token=NULL,output_json=?4,
                                 completed_at_ms=?5,updated_at_ms=?5 WHERE instance_id=?1 AND instance_generation=?2 AND ordinal=?3",
                                 params![fence.instance_id.to_string(),fence.instance_generation,attempt.ordinal,output.as_bytes(),now_ms]).map_err(sql_error)?;
-                            WorkflowV2StepResult::Complete {
+                            WorkflowStepResult::Complete {
                                 output_json: Some(output),
                             }
                         }
@@ -91,7 +88,7 @@ impl SchedulerStore {
                 }
             }
         };
-        if matches!(verdict, WorkflowV2StepResult::Suspended) {
+        if matches!(verdict, WorkflowStepResult::Suspended) {
             durable_steps::request_yield(&tx, fence, now_ms)?;
         }
         heartbeat(&tx, fence, now_ms, limits)?;
@@ -109,8 +106,8 @@ pub(super) fn fail(
     step: &DurableStep,
     code: ErrorCode,
     now_ms: i64,
-) -> Result<WorkflowV2StepResult, PlatformError> {
-    open_compute_core::workflow::terminal_error_code_v2(code.as_str())?;
+) -> Result<WorkflowStepResult, PlatformError> {
+    open_compute_core::workflow::terminal_error_code(code.as_str())?;
     let WorkflowDurableConfig::Do(config) = &step.descriptor.config else {
         return Err(error(ErrorCode::WorkflowInvariantViolation));
     };
@@ -139,9 +136,9 @@ pub(super) fn fail(
         params![id.to_string(),generation,step.descriptor.ordinal,if retry {"retry_wait"} else {"failed"},
             failure_json().as_bytes(),code.as_str(),due,now_ms,if retry {None} else {Some(now_ms)}]).map_err(sql_error)?;
     Ok(if retry {
-        WorkflowV2StepResult::Suspended
+        WorkflowStepResult::Suspended
     } else {
-        WorkflowV2StepResult::Failed {
+        WorkflowStepResult::Failed {
             code: code.as_str().into(),
         }
     })

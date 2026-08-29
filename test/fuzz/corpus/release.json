@@ -1,1 +1,1 @@
-{"schema_version":1,"release":{},"upgrade_from_control_schema_min":1,"upgrade_from_platform_versions":["0.1.0"],"restore_compatible_platform_versions":["0.1.0"],"target_schemas":{},"migrations":[],"readable_object_formats":{},"workerd_local_disk_gate_result":"seed","conformance_result":"seed","websocket_hibernation_result":"no-go"}
+{"schema_version":1,"release":{},"target_schemas":{},"workerd_local_disk_gate_result":"seed","conformance_result":"seed","websocket_hibernation_result":"no-go","schema_definitions":[],"object_formats":{}}

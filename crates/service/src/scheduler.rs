@@ -85,10 +85,10 @@ pub struct SchedulerService {
     fault_hook: Option<Arc<dyn Fn(open_compute_core::SchedulerFaultPoint) + Send + Sync>>,
 }
 
-/// Versioned P2.1 scheduler operator response.
+/// Current scheduler operator response.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SchedulerInspectV2 {
+pub struct SchedulerInspect {
     /// Response schema version.
     pub version: u32,
     /// Whether global operator pause blocks all new claims.
@@ -489,6 +489,37 @@ impl SchedulerService {
         }
     }
 
+    fn release_completed(&self, kind: SchedulerKind, admission: &mut AdmissionTracker) {
+        admission.release(kind, 1);
+        self.store_admission_metrics(admission);
+    }
+
+    fn store_admission_metrics(&self, admission: &AdmissionTracker) {
+        self.global_in_flight
+            .store(admission.global_in_flight(), Ordering::Release);
+        self.alarm_in_flight.store(
+            admission.pool_in_flight(SchedulerKind::Alarm),
+            Ordering::Release,
+        );
+        self.queue_in_flight.store(
+            admission.pool_in_flight(SchedulerKind::Queue),
+            Ordering::Release,
+        );
+        self.cron_in_flight.store(
+            admission.pool_in_flight(SchedulerKind::Cron),
+            Ordering::Release,
+        );
+        self.workflow_in_flight.store(
+            admission.pool_in_flight(SchedulerKind::Workflow),
+            Ordering::Release,
+        );
+        if let Some(metrics) = &self.metrics {
+            for kind in SchedulerKind::ALL {
+                metrics.set_scheduler_in_flight(kind, admission.pool_in_flight(kind));
+            }
+        }
+    }
+
     fn observe_health(&self, summary: SchedulerSummary, now_ms: i64) {
         let Some(health) = &self.health else {
             return;
@@ -525,26 +556,6 @@ impl SchedulerService {
     }
 }
 
-fn release_completed(
-    kind: SchedulerKind,
-    admission: &mut AdmissionTracker,
-    global_in_flight: &AtomicUsize,
-    alarm_in_flight: &AtomicUsize,
-    queue_in_flight: &AtomicUsize,
-    cron_in_flight: &AtomicUsize,
-    workflow_in_flight: &AtomicUsize,
-) {
-    admission.release(kind, 1);
-    store_admission_metrics(
-        admission,
-        global_in_flight,
-        alarm_in_flight,
-        queue_in_flight,
-        cron_in_flight,
-        workflow_in_flight,
-    );
-}
-
 fn completed_kind(
     completed: Result<(tokio::task::Id, SchedulerKind), tokio::task::JoinError>,
     kinds: &mut std::collections::HashMap<tokio::task::Id, SchedulerKind>,
@@ -557,33 +568,6 @@ fn completed_kind(
         }
     };
     kinds.remove(&id).ok_or_else(scheduler_task_failed)
-}
-
-fn store_admission_metrics(
-    admission: &AdmissionTracker,
-    global_in_flight: &AtomicUsize,
-    alarm_in_flight: &AtomicUsize,
-    queue_in_flight: &AtomicUsize,
-    cron_in_flight: &AtomicUsize,
-    workflow_in_flight: &AtomicUsize,
-) {
-    global_in_flight.store(admission.global_in_flight(), Ordering::Release);
-    alarm_in_flight.store(
-        admission.pool_in_flight(SchedulerKind::Alarm),
-        Ordering::Release,
-    );
-    queue_in_flight.store(
-        admission.pool_in_flight(SchedulerKind::Queue),
-        Ordering::Release,
-    );
-    cron_in_flight.store(
-        admission.pool_in_flight(SchedulerKind::Cron),
-        Ordering::Release,
-    );
-    workflow_in_flight.store(
-        admission.pool_in_flight(SchedulerKind::Workflow),
-        Ordering::Release,
-    );
 }
 
 fn minimum_timestamp<const N: usize>(values: [Option<i64>; N]) -> Option<i64> {
@@ -640,25 +624,6 @@ async fn scheduler_timeout<T>(
     tokio::select! {
         value = &mut future => Ok(value),
         () = &mut timer => Err(()),
-    }
-}
-
-struct InFlightMetric(Option<Arc<MetricsRegistry>>);
-
-impl InFlightMetric {
-    fn new(metrics: Option<Arc<MetricsRegistry>>) -> Self {
-        if let Some(registry) = &metrics {
-            registry.adjust_scheduler_in_flight(true);
-        }
-        Self(metrics)
-    }
-}
-
-impl Drop for InFlightMetric {
-    fn drop(&mut self) {
-        if let Some(metrics) = &self.0 {
-            metrics.adjust_scheduler_in_flight(false);
-        }
     }
 }
 

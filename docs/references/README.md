@@ -20,7 +20,7 @@ P0.2 的阶段性支持范围见归档的 [API 矩阵](../implemented/p0-2-api-m
 - [安装与首次启动](runbooks/install-and-first-start.md)
 - [备份与保留](runbooks/backup-and-retention.md)
 - [全新主机恢复](runbooks/fresh-host-restore.md)
-- [升级与回滚](runbooks/upgrade-and-rollback.md)
+- [当前 release 恢复](runbooks/current-release-recovery.md)
 - [磁盘压力](runbooks/disk-pressure.md)
 - [SQLite 损坏](runbooks/sqlite-corruption.md)
 - [S3 故障](runbooks/s3-outage.md)

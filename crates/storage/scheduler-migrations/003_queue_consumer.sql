@@ -1,9 +1,3 @@
-DROP TRIGGER queue_messages_update_guard;
-
-ALTER TABLE queue_messages ADD COLUMN claim_batch_id TEXT;
-ALTER TABLE queue_messages ADD COLUMN consumer_id TEXT;
-ALTER TABLE queue_messages ADD COLUMN consumer_generation INTEGER;
-
 CREATE TABLE queue_consumer_state (
   consumer_id                    TEXT PRIMARY KEY
                                  CHECK(length(consumer_id) = 36 AND consumer_id = lower(consumer_id)),

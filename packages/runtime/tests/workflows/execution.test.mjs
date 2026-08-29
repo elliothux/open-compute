@@ -5,14 +5,14 @@ import { compileRuntime, importRuntime, moduleUrl } from "../compiled-runtime.mj
 const workerModule = moduleUrl(`export class RpcTarget {}
   export class WorkflowEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }`);
 const { WorkflowEntrypoint } = await import(workerModule);
-const { WorkflowRunControllerV2, finishWorkflowRun, closeWorkflowRun } = await importRuntime("workflows/controller-v2.ts", {
+const { WorkflowRunController, finishWorkflowRun, closeWorkflowRun } = await importRuntime("workflows/controller.ts", {
   "cloudflare:workers": workerModule,
   "../loader/host.js": moduleUrl('export const currentStartupGeneration = () => "current-generation";'),
 });
-const { runWorkflow } = await importRuntime("workflows/runner-v2.ts", {
+const { runWorkflow } = await importRuntime("workflows/runner.ts", {
   "cloudflare:workers": workerModule,
   "cloudflare:workflows": moduleUrl("export class NonRetryableError extends Error {}"),
-  "./json-v2.js": moduleUrl(await compileRuntime("workflows/json-v2.ts")),
+  "./json.js": moduleUrl(await compileRuntime("workflows/json.ts")),
 });
 const identity = { instanceId: "private-instance", instanceGeneration: 1, runToken: "private-run-token" };
 const event = { externalInstanceId: "order", definitionName: "flow", createdAtMs: 123, payloadJson: '{"value":1}' };
@@ -21,7 +21,7 @@ const declaration = { ordinal: 0, kind: "do", name: "compute", nameCount: 1, con
 const config = { timeout: 1000, retries: { limit: 0, delay: 0, backoff: "constant" } };
 
 function controller(t, fetch) {
-  const value = new WorkflowRunControllerV2({ BINDING_BACKEND: { fetch }, BINDING_BACKEND_TOKEN: "private-backend-token" }, identity, 10_000);
+  const value = new WorkflowRunController({ BINDING_BACKEND: { fetch }, BINDING_BACKEND_TOKEN: "private-backend-token" }, identity, 10_000);
   t.after(() => value[closeWorkflowRun]());
   return value;
 }

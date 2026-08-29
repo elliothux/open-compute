@@ -1,4 +1,4 @@
-//! Versioned P1 release identity shared by capabilities, snapshots, and upgrades.
+//! Current release identity shared by capabilities and authenticated snapshots.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -27,14 +27,10 @@ pub struct PlatformReleaseIdentityV1 {
     pub control_schema_version: u32,
     /// Current scheduler database schema version.
     pub scheduler_schema_version: u32,
-    /// Minimum readable KV resource schema version.
-    pub kv_schema_version_min: u32,
-    /// Maximum readable KV resource schema version.
-    pub kv_schema_version_max: u32,
-    /// Minimum readable D1 resource schema version.
-    pub d1_schema_version_min: u32,
-    /// Maximum readable D1 resource schema version.
-    pub d1_schema_version_max: u32,
+    /// Current KV resource schema version.
+    pub kv_schema_version: u32,
+    /// Current D1 resource schema version.
+    pub d1_schema_version: u32,
     /// Full platform snapshot format version.
     pub snapshot_format_version: u32,
     /// Digest of the supported compatibility date and flag policy.
@@ -54,22 +50,20 @@ impl PlatformReleaseIdentityV1 {
             && self.facade_capability_version > 0
             && self.control_schema_version > 0
             && self.scheduler_schema_version > 0
-            && self.kv_schema_version_min > 0
-            && self.kv_schema_version_min <= self.kv_schema_version_max
-            && self.d1_schema_version_min > 0
-            && self.d1_schema_version_min <= self.d1_schema_version_max
+            && self.kv_schema_version > 0
+            && self.d1_schema_version > 0
             && self.snapshot_format_version == 1
             && is_sha256(&self.compatibility_policy_sha256)
     }
 }
 
-/// One checksummed forward-only migration shipped in a release.
+/// One checksummed SQL definition in the current control schema.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReleaseMigrationV1 {
-    /// Monotonic control schema version.
+pub struct ReleaseSchemaDefinitionV1 {
+    /// Contiguous position in the current schema definition sequence.
     pub version: u32,
-    /// Stable migration name.
+    /// Schema definition name.
     pub name: String,
     /// Build-time SHA-256 of the exact SQL.
     pub sha256: String,
@@ -83,18 +77,12 @@ pub struct PlatformReleaseMetadataV1 {
     pub schema_version: u32,
     /// Exact packaged release identity.
     pub release: PlatformReleaseIdentityV1,
-    /// Oldest control schema accepted by `upgrade apply`.
-    pub upgrade_from_control_schema_min: u32,
-    /// Platform semantic versions accepted for a forward upgrade.
-    pub upgrade_from_platform_versions: Vec<String>,
-    /// Platform semantic versions whose snapshots may be restored directly.
-    pub restore_compatible_platform_versions: Vec<String>,
     /// Current project-owned schema tuple.
     pub target_schemas: BTreeMap<String, u32>,
-    /// Complete ordered control migration registry.
-    pub migrations: Vec<ReleaseMigrationV1>,
-    /// Readable immutable object format versions by owner.
-    pub readable_object_formats: BTreeMap<String, Vec<u32>>,
+    /// Complete ordered definition of the current control schema.
+    pub schema_definitions: Vec<ReleaseSchemaDefinitionV1>,
+    /// Single current immutable object format version for each owner.
+    pub object_formats: BTreeMap<String, u32>,
     /// Stock-workerd local-disk compatibility Gate result identity.
     pub workerd_local_disk_gate_result: String,
     /// Capability/conformance result identity.
@@ -106,41 +94,39 @@ pub struct PlatformReleaseMetadataV1 {
 impl PlatformReleaseMetadataV1 {
     /// Validate the release contract without consulting runtime state.
     pub fn validate(&self) -> bool {
-        let versions_are_valid = |values: &[String]| {
-            !values.is_empty()
-                && values
-                    .iter()
-                    .all(|value| !value.is_empty() && value.len() <= 64)
-        };
         self.schema_version == 1
             && self.release.validate()
-            && self.upgrade_from_control_schema_min > 0
-            && self.upgrade_from_control_schema_min <= self.release.control_schema_version
-            && versions_are_valid(&self.upgrade_from_platform_versions)
-            && versions_are_valid(&self.restore_compatible_platform_versions)
+            && self.target_schemas.len() == 4
             && self.target_schemas.get("control").copied()
                 == Some(self.release.control_schema_version)
             && self.target_schemas.get("scheduler").copied()
                 == Some(self.release.scheduler_schema_version)
-            && self.target_schemas.get("kv").copied() == Some(self.release.kv_schema_version_max)
-            && self.target_schemas.get("d1").copied() == Some(self.release.d1_schema_version_max)
-            && !self.migrations.is_empty()
+            && self.target_schemas.get("kv").copied() == Some(self.release.kv_schema_version)
+            && self.target_schemas.get("d1").copied() == Some(self.release.d1_schema_version)
+            && !self.schema_definitions.is_empty()
             && self
-                .migrations
+                .schema_definitions
                 .iter()
                 .enumerate()
-                .all(|(index, migration)| {
-                    migration.version == (index + 1) as u32
-                        && !migration.name.is_empty()
-                        && is_sha256(&migration.sha256)
+                .all(|(index, definition)| {
+                    definition.version == (index + 1) as u32
+                        && !definition.name.is_empty()
+                        && is_sha256(&definition.sha256)
                 })
-            && self.migrations.last().map(|migration| migration.version)
-                == Some(self.release.control_schema_version)
-            && !self.readable_object_formats.is_empty()
             && self
-                .readable_object_formats
-                .values()
-                .all(|versions| !versions.is_empty() && versions.iter().all(|version| *version > 0))
+                .schema_definitions
+                .last()
+                .map(|definition| definition.version)
+                == Some(self.release.control_schema_version)
+            && self
+                .object_formats
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                == ["artifacts", "d1_backups", "kv_backups", "r2", "snapshots"]
+            && self.object_formats.values().all(|version| *version > 0)
+            && self.object_formats.get("snapshots").copied()
+                == Some(self.release.snapshot_format_version)
             && !self.workerd_local_disk_gate_result.is_empty()
             && !self.conformance_result.is_empty()
             && !self.websocket_hibernation_result.is_empty()

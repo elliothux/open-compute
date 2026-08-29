@@ -28,7 +28,8 @@ DEFAULT_JOBS = min(4, os.cpu_count() or 1)
 Target = namedtuple('Target', 'package_id name kind cwd exclusive cases', defaults=[None])
 # Only these targets have been audited for independent TempDir/SQLite/S3/port-0 state.
 # p0_1 scans global executable staging, so it is an exclusive barrier.
-# P2.5's 16 concurrent MiB results exhausted shared kernel socket buffers in a
+# The current Workflow product target's 16 concurrent MiB results exhausted
+# shared kernel socket buffers in a
 # parallel measurement. Keep the workload intact and isolate its test process.
 TARGETS = {
     'p0-1': ('open-compute-service', 'p0_1_gate', True),
@@ -43,28 +44,25 @@ TARGETS = {
     'p1-conformance': ('open-compute-service', 'p1_conformance', False),
     'p1-security': ('open-compute-service', 'p1_security', False),
     'p1-crash': ('open-compute-service', 'p1_crash_process', False),
-    'p1-upgrade': ('open-compute-service', 'p1_upgrade', False),
     'p1-snapshot': ('open-compute-service', 'p1_snapshot_restore', False),
     'p2-1': ('open-compute-service', 'p2_1_scheduler_hardening_gate', False),
     'p2-2': ('open-compute-service', 'p2_2_queue_producer_gate', False),
-    'p2-4-hard': ('open-compute-service', 'p2_4_workflow_hard_gate', False),
-    'p2-4-product': ('open-compute-service', 'p2_4_workflow_product_gate', False),
-    'p2-5-hard': ('open-compute-service', 'p2_5_workflow_hard_gate', False),
+    'workflow-runtime': ('open-compute-service', 'workflow_runtime_gate', False),
+    'workflow-recovery': ('open-compute-service', 'workflow_recovery_gate', False),
     'p2-exit': ('open-compute-service', 'p2_exit_gate', False),
     # Finish independent work together before the remaining exclusive barriers.
-    'p2-5-product': ('open-compute-service', 'p2_5_workflow_product_gate', True),
+    'workflow-product': ('open-compute-service', 'workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),
     'single-binary': ('open-compute-service', 'single_binary', True),
 }
 GROUPS = {
     'p0': [name for name in TARGETS if name.startswith('p0-')],
     'p1': [name for name in TARGETS if name.startswith('p1-')],
-    'p2': [name for name in TARGETS if name.startswith('p2-')],
+    'p2': [name for name in TARGETS if name.startswith('p2-') or name.startswith('workflow-')],
     # Queue/Cron share the immutable loader matrix; selecting both never duplicates it.
     'p2-3': ['p0-2'],
     'p1-8': ['p0-7', 'p1-conformance'],
-    'p2-4': ['p2-4-hard', 'p2-4-product'],
-    'p2-5': ['p2-5-hard', 'p2-5-product', 'p2-4-product'],
+    'workflow': ['workflow-runtime', 'workflow-recovery', 'workflow-product'],
     'all': list(TARGETS),
 }
 

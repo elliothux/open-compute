@@ -25,10 +25,8 @@ fn capability_status_serialization_and_contract_are_strict() {
         facade_capability_version: 1,
         control_schema_version: 8,
         scheduler_schema_version: 1,
-        kv_schema_version_min: 1,
-        kv_schema_version_max: 1,
-        d1_schema_version_min: 1,
-        d1_schema_version_max: 1,
+        kv_schema_version: 1,
+        d1_schema_version: 1,
         snapshot_format_version: 1,
         compatibility_policy_sha256: "c".repeat(64),
     };

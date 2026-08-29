@@ -6,13 +6,11 @@ import type { DoPolicy } from "../durable-objects/protocol.js";
 function makeBinding(ctx: BindingContext, descriptor: RuntimeBinding, deploymentId: string,
   routeGeneration: number, accountId: string, workerId: string, policy: DoPolicy, durableObject: boolean): unknown {
   const identity = { bindingId: descriptor.bindingId, deploymentId, descriptorSha256: descriptor.descriptorSha256 };
+  if (descriptor.capabilityVersion !== 1) throw bindingError("BINDING_CAPABILITY_UNSUPPORTED");
   if (descriptor.kind === "workflow") {
     const props = Object.freeze({ ...identity, durableObject });
-    if (descriptor.capabilityVersion === 2) return ctx.exports.WorkflowBindingTransportV2({ props });
-    if (descriptor.capabilityVersion === 1) return ctx.exports.WorkflowBindingTransport({ props });
-    throw bindingError("BINDING_CAPABILITY_UNSUPPORTED");
+    return ctx.exports.WorkflowBindingTransport({ props });
   }
-  if (descriptor.capabilityVersion !== 1) throw bindingError("BINDING_CAPABILITY_UNSUPPORTED");
   if (descriptor.kind === "queue_producer") {
     return ctx.exports.QueueTransport({ props: Object.freeze({
       ...identity, accountId, workerId, queueId: descriptor.queueId,

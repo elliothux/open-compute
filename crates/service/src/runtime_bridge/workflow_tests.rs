@@ -1,20 +1,25 @@
 use super::*;
 use open_compute_core::{
-    AccountId, DeploymentId, SecretString, WorkerId, WorkflowFence, WorkflowInstanceId,
-    WorkflowToken,
+    AccountId, DeploymentId, SecretString, WorkerId, WorkflowFence, WorkflowId, WorkflowInstanceId,
+    WorkflowToken, WorkflowVersionId,
 };
 use open_compute_runtime::GenerationAuthRegistry;
+use open_compute_storage::WorkflowTarget;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
-fn target() -> DispatchTarget {
-    DispatchTarget {
+fn target() -> WorkflowTarget {
+    WorkflowTarget {
         account_id: AccountId::generate(),
+        definition_id: WorkflowId::generate(),
+        definition_name: "flow".into(),
+        version_id: WorkflowVersionId::generate(),
         worker_id: WorkerId::generate(),
         deployment_id: DeploymentId::generate(),
-        worker_code_sha256: "11".repeat(32),
-        entrypoint: Some("Flow".into()),
-        route_generation: 1,
-        request_id: RequestId::generate(),
+        worker_code_sha256: [0x11; 32],
+        class_name: "Flow".into(),
+        loader_schema_version: 1,
+        capability_version: 1,
+        descriptor_sha256: [0x22; 32],
     }
 }
 
@@ -24,7 +29,7 @@ async fn workflow_probe_unknown_and_generation_bound_completion_fail_closed() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app=Router::new().route("/internal/validate-workflow",post({let status=status.clone();move || {let status=status.clone();async move { (StatusCode::from_u16(status.load(Ordering::SeqCst)).unwrap(),axum::Json(serde_json::json!({"valid":true}))) }}}))
-        .route("/internal/workflow",post(||async {axum::Json(serde_json::json!({"outcome":"complete","finalOrdinal":1,"outputJson":"null","loaderOutcome":"warm"}))}));
+        .route("/internal/workflow",post(||async {axum::Json(serde_json::json!({"result":{"outcome":"complete","finalOrdinal":1,"outputJson":"null"},"loaderOutcome":"warm","drainIncomplete":false}))}));
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async {
         axum::serve(listener, app)
@@ -124,8 +129,7 @@ fn workflow_generation_transaction_rejects_unbound_and_retired_tokens() {
 }
 
 #[tokio::test]
-async fn workflow_v2_invalid_results_quarantine_all_transport_clones_until_rotation() {
-    use open_compute_storage::WorkflowTarget;
+async fn invalid_workflow_results_quarantine_all_transport_clones_until_rotation() {
     use serde_json::json;
     use std::sync::atomic::AtomicUsize;
     let received = Arc::new(AtomicUsize::new(0));
@@ -136,7 +140,7 @@ async fn workflow_v2_invalid_results_quarantine_all_transport_clones_until_rotat
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = Router::new().route(
-        "/internal/workflow-v2",
+        "/internal/workflow",
         post({
             let received = received.clone();
             let result = result.clone();
@@ -171,20 +175,7 @@ async fn workflow_v2_invalid_results_quarantine_all_transport_clones_until_rotat
     );
     transport.test_endpoint = Some(port);
     transport.ensure_workflow_admission().unwrap();
-    let target = target();
-    let version = WorkflowTarget {
-        account_id: target.account_id,
-        definition_id: open_compute_core::WorkflowId::generate(),
-        definition_name: "flow".into(),
-        version_id: open_compute_core::WorkflowVersionId::generate(),
-        worker_id: target.worker_id,
-        deployment_id: target.deployment_id,
-        worker_code_sha256: [0x11; 32],
-        class_name: "Flow".into(),
-        loader_schema_version: 1,
-        capability_version: 2,
-        descriptor_sha256: [0x22; 32],
-    };
+    let version = target();
     let request = WorkflowRunRequest {
         fence: WorkflowFence {
             instance_id: WorkflowInstanceId::generate(),
@@ -197,7 +188,7 @@ async fn workflow_v2_invalid_results_quarantine_all_transport_clones_until_rotat
         payload_json: "null".into(),
     };
     transport
-        .dispatch_workflow_v2(&version, &request, Duration::from_secs(1))
+        .dispatch_workflow(&version, &request, Duration::from_secs(1))
         .await
         .unwrap();
     let invalid = [
@@ -213,7 +204,7 @@ async fn workflow_v2_invalid_results_quarantine_all_transport_clones_until_rotat
         let before = received.load(Ordering::SeqCst);
         assert_eq!(
             transport
-                .dispatch_workflow_v2(&version, &request, Duration::from_secs(1))
+                .dispatch_workflow(&version, &request, Duration::from_secs(1))
                 .await
                 .unwrap_err()
                 .code(),
@@ -223,7 +214,7 @@ async fn workflow_v2_invalid_results_quarantine_all_transport_clones_until_rotat
         assert_eq!(
             transport
                 .clone()
-                .dispatch_workflow_v2(&version, &request, Duration::from_secs(1))
+                .dispatch_workflow(&version, &request, Duration::from_secs(1))
                 .await
                 .unwrap_err()
                 .code(),

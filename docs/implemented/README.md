@@ -37,13 +37,13 @@
 | 2026-08-28 | [单二进制分发](single-binary-distribution.md) | darwin-arm64 单文件首启/重启/恢复、完整检查、90.20% 行覆盖率和最终 P0.1/P0.2 三轮通过；未正式发布、签名、公证或验证其他平台 |
 | 2026-08-29 | [Runtime 包与测试流程整理](runtime-and-test-layout.md) | [实测与验收](runtime-and-test-layout-results.md)：未跟踪 dist 可复现构建、POC 收敛、统一并行调度；六目标串行/四并行 148.10/70.98 秒，workspace 690 用例、90.16% 覆盖率、最终 23 目标各三轮通过；跨平台和正式发行未验证 |
 | 2026-08-29 | [按用例选择验收轮数](test-repetition.md) | 完整 workspace 690 用例一次、43 个时序用例追加两次，70 个宿主执行/776 次用例全部通过；90.15% 行覆盖率，同条件追加轮墙钟减少 16.85%；重启后 macOS 签名服务仍崩溃一次并自行恢复，系统缺陷未根治，跨平台和正式发行未验证 |
+| 2026-08-29 | [Day1 架构清理](day1-architecture-cleanup.md) | [验收记录](day1-architecture-cleanup-results.md)：清单 1–17 与 artifact GC 完成；coverage 32 目标通过、90.02% 行覆盖率；最终完整 32 目标 / 662 用例一轮及 17 目标 / 42 个时序用例追加两轮全部通过 |
 
 ## 仍在维护或尚未完成
 
 - [P1 剩余验收](../p1-release-acceptance.md)：仅追踪尚无完成证据的长时 soak 与发行演练，
   不把已完成的 P1 核心实现重新列为待实现。
 - [平台方案](../open-compute-workerd-platform.md)：Next.js/vinext 目标尚未完成平台验收。
-- [Day1 架构清理](../day1-architecture-cleanup.md)：除已归档的 runtime 布局与测试流程外，其余清理仍待实施。
 - [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 

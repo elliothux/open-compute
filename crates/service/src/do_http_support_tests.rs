@@ -66,7 +66,7 @@ pub(super) fn fixture() -> Fixture {
     );
     let account = storage.identity().default_account_id;
     let worker = WorkerRepository::new(storage.db())
-        .create_worker(account, "durable-api", RequestId::generate(), 1)
+        .create_worker(account, "durable-api", RequestId::generate(), 1, 1_000_000)
         .unwrap()
         .0
         .id;

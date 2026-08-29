@@ -16,7 +16,7 @@
 /opt/open-compute/platformd --config /etc/open-compute/recovery.toml doctor --full --json
 ```
 
-包含 Workflow V2 的 snapshot 必须同时保留 control/scheduler authority、restart/purge intent、
+包含 Workflow 的 snapshot 必须同时保留 control/scheduler authority、restart/purge intent、
 operation progress 和 GC receipt。waiting/paused 的原始 deadline、inbox 及冻结 retention 不重算。
 恢复后先让 exact-release reconciler 完成合法中间态，再验证原版本 replay、暂停状态、事件和 due work；
 不得单独复制一边数据库或通过删除 operation row 使诊断变绿。这些状态已通过 P2.5 的三轮 snapshot

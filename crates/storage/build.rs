@@ -15,13 +15,10 @@ fn main() {
         ("005_r2", "MIGRATION_005_SHA256"),
         ("006_d1", "MIGRATION_006_SHA256"),
         ("007_durable_objects", "MIGRATION_007_SHA256"),
-        ("008_p1_format_freeze", "MIGRATION_008_SHA256"),
-        ("009_queues", "MIGRATION_009_SHA256"),
-        ("010_queue_consumers", "MIGRATION_010_SHA256"),
-        ("011_cron_triggers", "MIGRATION_011_SHA256"),
-        ("012_workflows", "MIGRATION_012_SHA256"),
-        ("013_workflow_durable_waiting", "MIGRATION_013_SHA256"),
-        ("014_workflow_operation_sequence", "MIGRATION_014_SHA256"),
+        ("008_queues", "MIGRATION_008_SHA256"),
+        ("009_queue_consumers", "MIGRATION_009_SHA256"),
+        ("010_cron_triggers", "MIGRATION_010_SHA256"),
+        ("011_workflows", "MIGRATION_011_SHA256"),
     ];
     let mut generated = String::new();
     for (file, constant) in migrations {
@@ -46,19 +43,7 @@ fn main() {
         ("002_queue_producer", "SCHEDULER_MIGRATION_002_SHA256"),
         ("003_queue_consumer", "SCHEDULER_MIGRATION_003_SHA256"),
         ("004_cron", "SCHEDULER_MIGRATION_004_SHA256"),
-        ("005_workflow_core", "SCHEDULER_MIGRATION_005_SHA256"),
-        (
-            "006_workflow_durable_waiting",
-            "SCHEDULER_MIGRATION_006_SHA256",
-        ),
-        (
-            "007_workflow_operation_progress",
-            "SCHEDULER_MIGRATION_007_SHA256",
-        ),
-        (
-            "008_workflow_due_admission",
-            "SCHEDULER_MIGRATION_008_SHA256",
-        ),
+        ("005_workflow", "SCHEDULER_MIGRATION_005_SHA256"),
     ] {
         let scheduler_path = manifest_dir
             .join("scheduler-migrations")

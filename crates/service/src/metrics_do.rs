@@ -129,25 +129,6 @@ pub(super) fn write_do_metrics(out: &mut String, metrics: &Inner) {
     }
     write_help(
         out,
-        "oc_do_websocket_active",
-        "gauge",
-        "Active Durable Object WebSockets visible to the host transport",
-    );
-    writeln!(
-        out,
-        "oc_do_websocket_active {}",
-        metrics.do_websocket_active
-    )
-    .ok();
-    write_help(
-        out,
-        "oc_do_storage_bytes",
-        "gauge",
-        "Native Durable Object localDisk bytes reported by the runtime",
-    );
-    writeln!(out, "oc_do_storage_bytes {}", metrics.do_storage_bytes).ok();
-    write_help(
-        out,
         "oc_do_storage_watermark",
         "gauge",
         "Durable Object localDisk watermark state",
@@ -192,16 +173,8 @@ impl super::MetricsRegistry {
         guard.do_reconcile[index] = guard.do_reconcile[index].saturating_add(1);
     }
 
-    pub(crate) fn set_do_runtime_gauges(
-        &self,
-        websocket_active: u64,
-        storage_bytes: u64,
-        watermark: usize,
-    ) {
-        let mut guard = self.lock();
-        guard.do_websocket_active = websocket_active;
-        guard.do_storage_bytes = storage_bytes;
-        guard.do_storage_watermark = watermark.min(2);
+    pub(crate) fn set_do_storage_watermark(&self, watermark: usize) {
+        self.lock().do_storage_watermark = watermark.min(2);
     }
 }
 

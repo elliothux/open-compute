@@ -50,7 +50,7 @@ impl Harness {
             .parent()
             .unwrap()
             .to_path_buf();
-        let runs = root.join(".temp/p2-4-run");
+        let runs = root.join(".temp/workflow-run");
         std::fs::create_dir_all(&runs).unwrap();
         let temp = tempfile::Builder::new()
             .prefix("workflow-")
@@ -176,7 +176,7 @@ request_timeout_ms = 3000
                 runtime.version_output(),
             )
             .unwrap();
-        let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+        let supervisor = Arc::new(WorkerdSupervisor::new(
             WorkerdSupervisorOptions {
                 runtime,
                 compiler,
@@ -237,6 +237,7 @@ request_timeout_ms = 3000
                 &format!("workflow-{}", RequestId::generate()),
                 RequestId::generate(),
                 1,
+                1_000_000,
             )
             .unwrap();
         self.deploy_worker(worker.id, source, class, bindings).await

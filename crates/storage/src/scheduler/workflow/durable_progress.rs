@@ -100,10 +100,10 @@ pub(super) fn decide(
 
 const INVALID_PROGRESS:&str="SELECT COUNT(*) FROM workflow_operation_progress p WHERE (?1 IS NULL OR p.instance_id=?1) AND NOT (
     (p.outcome='rejected' AND p.error_code IS NOT NULL AND p.error_code IN ('WORKFLOW_INSTANCE_NOT_FOUND','WORKFLOW_INSTANCE_STATE_CONFLICT','WORKFLOW_STATE_QUOTA_EXCEEDED')
-      AND EXISTS(SELECT 1 FROM workflow_instances i WHERE i.id=p.instance_id AND i.capability_version=2
+      AND EXISTS(SELECT 1 FROM workflow_instances i WHERE i.id=p.instance_id AND i.capability_version=1
       AND i.creation_nonce=p.creation_nonce AND i.instance_generation=p.expected_generation)) OR
     (p.outcome='applied' AND p.error_code IS NULL AND p.kind='restart' AND EXISTS(SELECT 1 FROM workflow_instances i WHERE i.id=p.instance_id
-      AND i.capability_version=2 AND i.creation_nonce=p.creation_nonce AND i.instance_generation=p.target_generation AND i.last_restart_operation_id=p.operation_id)) OR
+      AND i.capability_version=1 AND i.creation_nonce=p.creation_nonce AND i.instance_generation=p.target_generation AND i.last_restart_operation_id=p.operation_id)) OR
     (p.outcome='applied' AND p.error_code IS NULL AND p.kind='purge' AND NOT EXISTS(SELECT 1 FROM workflow_instances WHERE id=p.instance_id)
       AND EXISTS(SELECT 1 FROM workflow_gc_receipts r WHERE r.instance_id=p.instance_id AND r.operation_id=p.operation_id
         AND r.creation_nonce=p.creation_nonce AND r.instance_generation=p.expected_generation)))";

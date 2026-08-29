@@ -2,8 +2,8 @@
 
 use crate::ResourcePins;
 use open_compute_core::{
-    AccountId, BindingKind, ErrorCode, OperationClass, PlatformError, RequestId,
-    ResourceAvailability, ResourceId, ResourceState,
+    AccountId, BindingKind, ErrorCode, PlatformError, RequestId, ResourceAvailability, ResourceId,
+    ResourceState,
 };
 use open_compute_storage::{
     PlatformStorage, ReserveResourceCreate, ResourceCreateReservation, ResourceRecord,
@@ -133,15 +133,19 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
         &self,
         request: &CreateResourceRequest,
     ) -> Result<CreateResourceOutcome, PlatformError> {
-        if request.kind != self.driver.kind() || request.driver_schema_version == 0 {
+        if request.kind != self.driver.kind()
+            || request.driver_schema_version == 0
+            || matches!(
+                request.kind,
+                BindingKind::QueueProducer | BindingKind::Workflow
+            )
+        {
             return Err(PlatformError::new(
                 ErrorCode::BindingTypeMismatch,
                 "resource driver does not implement the requested kind",
             ));
         }
-        let _admission = self
-            .storage
-            .reserve_mutation(resource_operation_class(request.kind)?, 64 * 1024)?;
+        let _admission = self.storage.reserve_mutation(64 * 1024)?;
         let fingerprint_input =
             create_fingerprint(request, &self.driver.create_fingerprint_material())?;
         let fingerprint = self
@@ -149,7 +153,7 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
             .crypto()
             .fingerprint_request(&fingerprint_input);
         let repository = ResourceRepository::new(self.storage.db());
-        let reservation = repository.reserve_create_with_limit(
+        let reservation = repository.reserve_create(
             &ReserveResourceCreate {
                 account_id: request.account_id,
                 kind: request.kind,
@@ -383,21 +387,6 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
         repository.mark_ready(resource.id, now_ms)?;
         repository.get(resource.account_id, resource.id)
     }
-}
-
-fn resource_operation_class(kind: BindingKind) -> Result<OperationClass, PlatformError> {
-    Ok(match kind {
-        BindingKind::KvNamespace => OperationClass::Kv,
-        BindingKind::R2Bucket => OperationClass::R2,
-        BindingKind::D1Database => OperationClass::D1,
-        BindingKind::DoNamespace => OperationClass::DurableObjects,
-        BindingKind::QueueProducer | BindingKind::Workflow => {
-            return Err(PlatformError::new(
-                ErrorCode::BindingTypeMismatch,
-                "binding kind requires its owning product controller",
-            ));
-        }
-    })
 }
 
 fn create_fingerprint(

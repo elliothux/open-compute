@@ -38,19 +38,22 @@ fn reserve_resource(
     now_ms: i64,
 ) -> ResourceRecord {
     match ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind,
-            name,
-            idempotency_key: name,
-            fingerprint_key_id: "key",
-            request_fingerprint: &[7; 32],
-            resource_id: ResourceId::generate(),
-            driver_schema_version: DO_NAMESPACE_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms,
-            expires_at_ms: now_ms + 1000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind,
+                name,
+                idempotency_key: name,
+                fingerprint_key_id: "key",
+                request_fingerprint: &[7; 32],
+                resource_id: ResourceId::generate(),
+                driver_schema_version: DO_NAMESPACE_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms,
+                expires_at_ms: now_ms + 1000,
+            },
+            1_000_000,
+        )
         .unwrap()
     {
         ResourceCreateReservation::Reserved(value) => value,
@@ -72,25 +75,28 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
     let account = storage.identity().default_account_id;
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
-        .create_worker(account, "durable", RequestId::generate(), 10)
+        .create_worker(account, "durable", RequestId::generate(), 10, 1_000_000)
         .unwrap();
     let resources = ResourceRepository::new(storage.db());
     let namespace = ResourceId::generate();
     let fingerprint = [3; 32];
     let resource = match resources
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::DoNamespace,
-            name: "COUNTERS",
-            idempotency_key: "create-do",
-            fingerprint_key_id: "key",
-            request_fingerprint: &fingerprint,
-            resource_id: namespace,
-            driver_schema_version: DO_NAMESPACE_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms: 11,
-            expires_at_ms: 1000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::DoNamespace,
+                name: "COUNTERS",
+                idempotency_key: "create-do",
+                fingerprint_key_id: "key",
+                request_fingerprint: &fingerprint,
+                resource_id: namespace,
+                driver_schema_version: DO_NAMESPACE_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms: 11,
+                expires_at_ms: 1000,
+            },
+            1_000_000,
+        )
         .unwrap()
     {
         ResourceCreateReservation::Reserved(value) => value,
@@ -106,7 +112,7 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
     let descriptor_value = open_compute_workers_forbidden_descriptor(binding, namespace);
     let descriptor = descriptor_value.0;
     workers
-        .insert_staging_deployment_with_bindings(
+        .insert_staging_deployment(
             &NewDeployment {
                 id: deployment,
                 account_id: account,
@@ -124,17 +130,21 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
                 request_id: RequestId::generate(),
                 now_ms: 13,
             },
-            &[NewDeploymentBinding {
-                id: binding,
-                name: "COUNTERS".to_owned(),
-                kind: BindingKind::DoNamespace,
-                resource_id: namespace,
-                resource_spec_generation: 1,
-                capability_version: 1,
-                permissions_json: serde_json::to_vec(&CanonicalPermissions::default()).unwrap(),
-                config_json: serde_json::to_vec(&CanonicalBindingConfig::default()).unwrap(),
-                descriptor_sha256: descriptor,
-            }],
+            &crate::NewDeploymentProducts {
+                bindings: &[NewDeploymentBinding {
+                    id: binding,
+                    name: "COUNTERS".to_owned(),
+                    kind: BindingKind::DoNamespace,
+                    resource_id: namespace,
+                    resource_spec_generation: 1,
+                    capability_version: 1,
+                    permissions_json: serde_json::to_vec(&CanonicalPermissions::default()).unwrap(),
+                    config_json: serde_json::to_vec(&CanonicalBindingConfig::default()).unwrap(),
+                    descriptor_sha256: descriptor,
+                }],
+                ..Default::default()
+            },
+            1_000_000,
         )
         .unwrap();
     workers.begin_validation(deployment).unwrap();
@@ -535,7 +545,13 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
 
     let workers = WorkerRepository::new(storage.db());
     let deleted_worker = workers
-        .create_worker(account, "deleted-owner", RequestId::generate(), 41)
+        .create_worker(
+            account,
+            "deleted-owner",
+            RequestId::generate(),
+            41,
+            1_000_000,
+        )
         .unwrap()
         .0;
     workers
@@ -556,7 +572,7 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
     );
 
     let worker = workers
-        .create_worker(account, "live-owner", RequestId::generate(), 44)
+        .create_worker(account, "live-owner", RequestId::generate(), 44, 1_000_000)
         .unwrap()
         .0;
     let existing = reserve_resource(&storage, account, BindingKind::DoNamespace, "EXISTING", 45);
@@ -590,7 +606,7 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
     let binding = BindingId::generate();
     let descriptor = [8; 32];
     workers
-        .insert_staging_deployment_with_bindings(
+        .insert_staging_deployment(
             &NewDeployment {
                 id: deployment,
                 account_id: account,
@@ -608,17 +624,21 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
                 request_id: RequestId::generate(),
                 now_ms: 48,
             },
-            &[NewDeploymentBinding {
-                id: binding,
-                name: "WRONG_KIND".to_owned(),
-                kind: BindingKind::KvNamespace,
-                resource_id: wrong_kind.id,
-                resource_spec_generation: 1,
-                capability_version: 1,
-                permissions_json: serde_json::to_vec(&CanonicalPermissions::default()).unwrap(),
-                config_json: serde_json::to_vec(&CanonicalBindingConfig::default()).unwrap(),
-                descriptor_sha256: descriptor,
-            }],
+            &crate::NewDeploymentProducts {
+                bindings: &[NewDeploymentBinding {
+                    id: binding,
+                    name: "WRONG_KIND".to_owned(),
+                    kind: BindingKind::KvNamespace,
+                    resource_id: wrong_kind.id,
+                    resource_spec_generation: 1,
+                    capability_version: 1,
+                    permissions_json: serde_json::to_vec(&CanonicalPermissions::default()).unwrap(),
+                    config_json: serde_json::to_vec(&CanonicalBindingConfig::default()).unwrap(),
+                    descriptor_sha256: descriptor,
+                }],
+                ..Default::default()
+            },
+            1_000_000,
         )
         .unwrap();
     workers.begin_validation(deployment).unwrap();

@@ -25,19 +25,22 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
     let account = storage.identity().default_account_id;
     let fingerprint = storage.crypto().fingerprint_request(b"d1-catalog");
     let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: account,
-            kind: BindingKind::D1Database,
-            name: "catalog-db",
-            idempotency_key: "catalog-db",
-            fingerprint_key_id: storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id: ResourceId::generate(),
-            driver_schema_version: 1,
-            request_id: RequestId::generate(),
-            now_ms: 10,
-            expires_at_ms: 1_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: account,
+                kind: BindingKind::D1Database,
+                name: "catalog-db",
+                idempotency_key: "catalog-db",
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: ResourceId::generate(),
+                driver_schema_version: 1,
+                request_id: RequestId::generate(),
+                now_ms: 10,
+                expires_at_ms: 1_000,
+            },
+            1_000_000,
+        )
         .unwrap()
     else {
         panic!("first reservation must create a resource");

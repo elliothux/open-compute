@@ -1,12 +1,18 @@
 use super::*;
 
 #[test]
-fn workflow_v2_capacity_defaults_preserve_legacy_serialization() {
-    let legacy = r#"{"max_in_flight_requests":64,"max_steps":1024,"max_state_bytes":33554432,"max_instances_per_account":10000,"max_instances_per_definition":10000,"max_active_per_account":1000,"max_account_state_bytes":1073741824,"lease_ms":60000,"heartbeat_ms":20000,"dispatch_timeout_ms":300000,"recovery_backoff_ms":1000,"creation_grace_ms":60000}"#;
+fn workflow_capacity_serializes_the_complete_current_policy() {
     let default = WorkflowsConfig::default();
-    assert_eq!(serde_json::to_string(&default).unwrap(), legacy);
+    let encoded = serde_json::to_value(&default).unwrap();
+    assert_eq!(encoded["max_parallel_steps"], 4);
+    assert_eq!(encoded["max_buffered_events"], 128);
+    assert_eq!(encoded["max_event_bytes"], 8 * 1024 * 1024);
     assert_eq!(
-        serde_json::from_str::<WorkflowsConfig>(legacy).unwrap(),
+        encoded["default_retention"],
+        serde_json::to_value(&default.default_retention).unwrap()
+    );
+    assert_eq!(
+        serde_json::from_value::<WorkflowsConfig>(encoded).unwrap(),
         default
     );
     let altered = WorkflowsConfig {
@@ -47,8 +53,7 @@ fn durable_failure_vocabulary_keeps_unknown_and_stale_outcomes_nonterminal() {
         ErrorCode::WorkflowDurationInvalid,
         ErrorCode::WorkflowEventTypeInvalid,
     ] {
-        assert_eq!(terminal_error_code_v2(code.as_str()).unwrap(), code);
-        assert!(terminal_error_code(code.as_str()).is_err());
+        assert_eq!(terminal_error_code(code.as_str()).unwrap(), code);
     }
     for code in [
         ErrorCode::WorkflowRunStale,
@@ -57,9 +62,9 @@ fn durable_failure_vocabulary_keeps_unknown_and_stale_outcomes_nonterminal() {
         ErrorCode::WorkflowInstanceBusy,
         ErrorCode::WorkflowEventQueueFull,
     ] {
-        assert!(terminal_error_code_v2(code.as_str()).is_err());
+        assert!(terminal_error_code(code.as_str()).is_err());
     }
-    assert!(terminal_error_code_v2("private exception text").is_err());
+    assert!(terminal_error_code("private exception text").is_err());
 }
 
 #[test]
@@ -166,7 +171,7 @@ fn workflow_duration_shared_javascript_fixtures() {
 }
 
 #[test]
-fn workflow_v2_config_is_resolved_strict_frozen_and_bounded() {
+fn workflow_config_is_resolved_strict_frozen_and_bounded() {
     use serde_json::json;
     let config = WorkflowStepConfig::resolve(&json!({})).unwrap();
     assert_eq!(config, WorkflowStepConfig::default());
@@ -299,7 +304,7 @@ fn workflow_retention_freezes_defaults_and_checked_expiry() {
         serde_json::to_value(&config)
             .unwrap()
             .get("default_retention")
-            .is_none()
+            .is_some()
     );
     config.default_retention = custom;
     config.validate().unwrap();

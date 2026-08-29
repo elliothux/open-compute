@@ -1,11 +1,214 @@
-//! Capability V2 activation release after drain or expired-run recovery.
+//! Capability activation release after drain or expired-run recovery.
 
 use super::*;
 
 impl SchedulerStore {
-    /// Commit V2 terminal state after the trusted host drained the activation.
+    /// Back off an unclaimable queued identity so unavailable definitions cannot starve other work.
+    pub fn defer_workflow(
+        &self,
+        id: WorkflowInstanceId,
+        now_ms: i64,
+        limits: &WorkflowsConfig,
+    ) -> Result<(), PlatformError> {
+        limits.validate()?;
+        self.lock()?
+            .execute(
+                "UPDATE workflow_instances SET next_run_at_ms=?3,updated_at_ms=?2
+             WHERE id=?1 AND state='queued' AND next_run_at_ms<=?2",
+                params![
+                    id.to_string(),
+                    now_ms,
+                    deadline(now_ms, limits.recovery_backoff_ms)?
+                ],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+
+    /// Page one ready account in round-robin order, checking fresh work after at most three recoveries.
+    /// The cursor is process-local; all eligibility remains in the durable ready index.
+    pub fn due_workflows(
+        &self,
+        now_ms: i64,
+        limit: u32,
+        cursor: &mut WorkflowClaimCursor,
+    ) -> Result<Vec<WorkflowInstanceId>, PlatformError> {
+        bounded(limit)?;
+        let conn = self.lock()?;
+        let preferred = cursor.recovered_streak < 3;
+        for recovered in [preferred, !preferred] {
+            for after in [
+                cursor.account.map_or_else(String::new, |id| id.to_string()),
+                String::new(),
+            ] {
+                let account: Option<String> = conn.query_row(
+                    "SELECT account_id FROM workflow_instances WHERE state='queued' AND has_activated=?1
+                     AND account_id>?2 AND next_run_at_ms<=?3 ORDER BY account_id LIMIT 1",
+                    params![recovered, after, now_ms],
+                    |row| row.get(0),
+                ).optional().map_err(sql_error)?;
+                let Some(account) = account else {
+                    continue;
+                };
+                let mut statement = conn.prepare(
+                    "SELECT id FROM workflow_instances
+                     WHERE state='queued' AND has_activated=?1 AND account_id=?2 AND next_run_at_ms<=?3
+                     ORDER BY next_run_at_ms,created_at_ms,id LIMIT ?4",
+                ).map_err(sql_error)?;
+                let ids = statement
+                    .query_map(params![recovered, account, now_ms, limit], |row| {
+                        parse(row, 0)
+                    })
+                    .map_err(sql_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sql_error)?;
+                cursor.account = Some(
+                    account
+                        .parse()
+                        .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?,
+                );
+                cursor.recovered_streak = if recovered {
+                    cursor.recovered_streak.saturating_add(1).min(3)
+                } else {
+                    0
+                };
+                return Ok(ids);
+            }
+        }
+        Ok(Vec::new())
+    }
+
+    /// Claim only the exact identity whose live control references the caller has validated.
+    /// A missing or changed projection is never repaired by this execution path.
+    pub fn claim_workflow(
+        &self,
+        identity: &WorkflowInstanceIdentity,
+        now_ms: i64,
+        limits: &WorkflowsConfig,
+    ) -> Result<Option<ClaimedWorkflowRun>, PlatformError> {
+        limits.validate()?;
+        let mut conn = self.lock()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let Some(record) = tx
+            .query_row(
+                &format!("{INSTANCE_SELECT} WHERE id=?1 AND state='queued' AND next_run_at_ms<=?2"),
+                params![identity.instance_id.to_string(), now_ms],
+                instance_row,
+            )
+            .optional()
+            .map_err(sql_error)?
+        else {
+            return Ok(None);
+        };
+        if record.identity != *identity {
+            return Err(error(ErrorCode::WorkflowInvariantViolation));
+        }
+        let run_token = token()?;
+        tx.execute(
+            "UPDATE workflow_instances SET state='running',run_token=?2,run_claimed_at_ms=?3,
+             run_lease_until_ms=?4,next_run_at_ms=NULL,updated_at_ms=?3,has_activated=1
+             WHERE id=?1 AND state='queued'",
+            params![
+                identity.instance_id.to_string(),
+                run_token.as_bytes().as_slice(),
+                now_ms,
+                deadline(now_ms, limits.lease_ms)?
+            ],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(Some(ClaimedWorkflowRun {
+            fence: WorkflowFence {
+                instance_id: identity.instance_id,
+                instance_generation: identity.instance_generation,
+                run_token,
+            },
+            target: identity.target.clone(),
+            external_instance_id: identity.external_instance_id.clone(),
+            created_at_ms: identity.created_at_ms,
+            input_json: record.input_json,
+            recovered: record.durable.has_activated,
+        }))
+    }
+
+    /// Extend a still-live lease. Old tokens and exactly expired leases cannot be revived.
+    pub fn heartbeat_workflow(
+        &self,
+        fence: &WorkflowFence,
+        now_ms: i64,
+        limits: &WorkflowsConfig,
+    ) -> Result<(), PlatformError> {
+        limits.validate()?;
+        let connection = self.lock()?;
+        heartbeat(&connection, fence, now_ms, limits)
+    }
+
+    /// Recover a bounded set of expired activations without increasing product attempt.
+    pub fn recover_workflows(
+        &self,
+        now_ms: i64,
+        limits: &WorkflowsConfig,
+        limit: u32,
+    ) -> Result<u64, PlatformError> {
+        limits.validate()?;
+        bounded(limit)?;
+        let mut conn = self.lock()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let expired = {
+            let mut statement = tx
+                .prepare(
+                    "SELECT id,instance_generation,run_token FROM workflow_instances
+                 WHERE state='running' AND run_lease_until_ms<=?1
+                 ORDER BY run_lease_until_ms,id LIMIT ?2",
+                )
+                .map_err(sql_error)?;
+            statement
+                .query_map(params![now_ms, limit], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                })
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?
+        };
+        for (id, generation, token) in &expired {
+            // Reset step ownership before the parent: the schema verifies the expired parent token.
+            tx.execute(
+                "UPDATE workflow_steps SET state='pending',run_token=NULL,step_token=NULL,updated_at_ms=?4
+                 WHERE instance_id=?1 AND instance_generation=?2 AND state='running' AND run_token=?3",
+                params![id, generation, token, now_ms],
+            ).map_err(sql_error)?;
+            let instance = tx
+                .query_row(
+                    &format!("{INSTANCE_SELECT} WHERE id=?1"),
+                    [id],
+                    instance_row,
+                )
+                .map_err(sql_error)?;
+            release(
+                &tx,
+                &instance,
+                deadline(now_ms, limits.recovery_backoff_ms)?,
+                now_ms,
+            )?;
+        }
+        tx.commit().map_err(sql_error)?;
+        if !expired.is_empty() {
+            self.wake.notify();
+        }
+        Ok(expired.len() as u64)
+    }
+
+    /// Commit terminal state after the trusted host drained the activation.
     /// Settled business failures may be caught; protocol failures remain a permanent latch.
-    pub fn finish_workflow_v2(
+    pub fn finish_workflow(
         &self,
         fence: &WorkflowFence,
         completion: &WorkflowCompletion,
@@ -18,10 +221,7 @@ impl SchedulerStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let instance = running(&tx, fence, now_ms)?;
-        let metadata = instance
-            .durable
-            .as_ref()
-            .ok_or_else(|| error(ErrorCode::WorkflowCapabilityMismatch))?;
+        let metadata = &instance.durable;
         if metadata.pause_requested || metadata.yield_requested {
             let state = release(&tx, &instance, now_ms, now_ms)?;
             tx.commit().map_err(sql_error)?;
@@ -32,11 +232,11 @@ impl SchedulerStore {
             AND error_code NOT IN ('WORKFLOW_STEP_TIMEOUT','WORKFLOW_STEP_RETRIES_EXHAUSTED','WORKFLOW_NON_RETRYABLE','WORKFLOW_EVENT_TIMEOUT')
             ORDER BY ordinal LIMIT 1",[fence.instance_id.to_string()],|row|row.get(0)).optional().map_err(sql_error)?;
         let result = if let Some(code) = platform_failure {
-            Err(open_compute_core::workflow::terminal_error_code_v2(&code)?)
+            Err(open_compute_core::workflow::terminal_error_code(&code)?)
         } else {
             match completion {
                 WorkflowCompletion::Errored { code } => Err(
-                    open_compute_core::workflow::terminal_error_code_v2(code.as_str())?,
+                    open_compute_core::workflow::terminal_error_code(code.as_str())?,
                 ),
                 WorkflowCompletion::Complete {
                     output_json,
@@ -52,7 +252,7 @@ impl SchedulerStore {
                             ErrorCode::WorkflowResultTooLarge,
                         )
                         .and_then(|output| {
-                            capacity_v2(&tx, &instance, output.len() as i64, -1, limits)?;
+                            capacity_change(&tx, &instance, output.len() as i64, -1, limits)?;
                             Ok(output)
                         })
                         .map_err(|error| error.code())
@@ -91,9 +291,9 @@ impl SchedulerStore {
         Ok(state)
     }
 
-    /// Release a V2 activation only after every granted callback has durably relinquished its token.
+    /// Release an activation only after every granted callback has durably relinquished its token.
     /// Registration/request and release are separate phases; persisted pause takes precedence.
-    pub fn yield_workflow_v2(
+    pub fn yield_workflow(
         &self,
         fence: &WorkflowFence,
         now_ms: i64,
@@ -103,10 +303,7 @@ impl SchedulerStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
         let instance = running(&tx, fence, now_ms)?;
-        let durable = instance
-            .durable
-            .as_ref()
-            .ok_or_else(|| error(ErrorCode::WorkflowCapabilityMismatch))?;
+        let durable = &instance.durable;
         if !durable.yield_requested && !durable.pause_requested {
             return Err(error(ErrorCode::WorkflowInstanceStateConflict));
         }
@@ -124,10 +321,7 @@ pub(super) fn release(
     queued_at_ms: i64,
     now_ms: i64,
 ) -> Result<WorkflowState, PlatformError> {
-    let durable = instance
-        .durable
-        .as_ref()
-        .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
+    let durable = &instance.durable;
     let (running, pending): (bool, bool) = conn
         .query_row(
             "SELECT
@@ -155,7 +349,7 @@ pub(super) fn release(
         .ok_or_else(|| error(ErrorCode::WorkflowRunStale))?;
     let changed = conn.execute("UPDATE workflow_instances SET state=?4,run_token=NULL,run_claimed_at_ms=NULL,run_lease_until_ms=NULL,
         pause_requested=0,yield_requested=0,next_run_at_ms=?5,updated_at_ms=?6
-        WHERE id=?1 AND instance_generation=?2 AND run_token=?3 AND state='running' AND capability_version=2",
+        WHERE id=?1 AND instance_generation=?2 AND run_token=?3 AND state='running' AND capability_version=1",
         params![instance.identity.instance_id.to_string(),instance.identity.instance_generation,token.as_bytes().as_slice(),
             encoded,next_run,now_ms]).map_err(sql_error)?;
     if changed != 1 {

@@ -2,22 +2,6 @@ use super::*;
 use open_compute_core::WorkloadSummary;
 
 impl SchedulerStore {
-    /// Read a step's durable start timestamp for bounded completion latency metrics.
-    pub fn workflow_step_started_at(
-        &self,
-        id: WorkflowInstanceId,
-        ordinal: u32,
-    ) -> Result<Option<i64>, PlatformError> {
-        self.lock()?
-            .query_row(
-                "SELECT started_at_ms FROM workflow_steps WHERE instance_id=?1 AND ordinal=?2",
-                params![id.to_string(), ordinal],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sql_error)
-    }
-
     /// Page through one account/definition without reading payloads or private fences.
     pub fn inspect_workflow_instances(
         &self,
@@ -107,7 +91,7 @@ impl SchedulerStore {
                         name_count: row.get(2)?,
                         state: row.get(3)?,
                         output_bytes: row.get(4)?,
-                        error_code: failure_code(row, 5, row.get(6)?)?,
+                        error_code: failure_code(row, 5)?,
                         kind: row.get(7)?,
                         attempt: row.get(8)?,
                         attempt_deadline_at_ms: row.get(9)?,
@@ -139,14 +123,17 @@ const INSTANCE_INSPECTION_SELECT: &str = "SELECT id,external_instance_id,version
 fn inspection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowInstanceInspection> {
     let state: String = row.get(6)?;
     let capability: i64 = row.get(14)?;
+    if capability != 1 {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
     let status = match state.as_str() {
         "queued" => WorkflowState::Queued,
         "running" => WorkflowState::Running,
         "complete" => WorkflowState::Complete,
         "errored" => WorkflowState::Errored,
-        "waiting" if capability == 2 => WorkflowState::Waiting,
-        "paused" if capability == 2 => WorkflowState::Paused,
-        "terminated" if capability == 2 => WorkflowState::Terminated,
+        "waiting" => WorkflowState::Waiting,
+        "paused" => WorkflowState::Paused,
+        "terminated" => WorkflowState::Terminated,
         _ => return Err(rusqlite::Error::InvalidQuery),
     };
     Ok(WorkflowInstanceInspection {
@@ -163,13 +150,9 @@ fn inspection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowInstanceI
         lease_remaining_ms: row.get(10)?,
         created_at_ms: row.get(11)?,
         terminal_at_ms: row.get(12)?,
-        error_code: failure_code(row, 13, capability)?,
+        error_code: failure_code(row, 13)?,
         capability_version: row.get(14)?,
-        durable: if capability == 2 {
-            Some(durable_state(row)?)
-        } else {
-            None
-        },
+        durable: durable_state(row)?,
     })
 }
 
@@ -200,54 +183,7 @@ pub(super) fn verify_history_connection(
             return Err(error(ErrorCode::WorkflowInvariantViolation));
         }
     }
-    if instance.identity.target.capability_version == 2 {
-        return durable_history::verify(conn, &instance);
-    }
-    let mut statement = conn
-        .prepare(
-            "SELECT ordinal,name,name_count,config_json,descriptor_sha256,state,
-        coalesce(length(output_json),0)+coalesce(length(error_json),0) FROM workflow_steps
-        WHERE instance_id=?1 ORDER BY ordinal LIMIT 1025",
-        )
-        .map_err(sql_error)?;
-    let mut rows = statement.query([id.to_string()]).map_err(sql_error)?;
-    let mut ordinal = 0;
-    let mut completed = 0;
-    let mut counts = std::collections::BTreeMap::new();
-    let mut bytes = instance.input_json.len() as u64
-        + instance.output_json.as_ref().map_or(0, |s| s.len() as u64)
-        + u64::from(instance.error.is_some()) * failure_json().len() as u64;
-    let mut incomplete = false;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let identity = WorkflowStepIdentity {
-            ordinal: row.get(0).map_err(sql_error)?,
-            name: row.get(1).map_err(sql_error)?,
-            name_count: row.get(2).map_err(sql_error)?,
-            config_json: text(row, 3).map_err(sql_error)?,
-        };
-        let digest: Vec<u8> = row.get(4).map_err(sql_error)?;
-        let state: String = row.get(5).map_err(sql_error)?;
-        let count = counts.entry(identity.name.clone()).or_insert(0);
-        *count += 1;
-        if identity.ordinal != ordinal
-            || identity.name_count != *count
-            || identity.sha256()?.as_slice() != digest
-            || incomplete
-        {
-            return Err(error(ErrorCode::WorkflowInvariantViolation));
-        }
-        ordinal += 1;
-        completed += u32::from(state == "complete");
-        incomplete = state != "complete";
-        bytes += identity.state_bytes() as u64 + row.get::<_, u64>(6).map_err(sql_error)?;
-    }
-    if completed != instance.completed_step_count
-        || bytes != instance.state_bytes
-        || (instance.state == WorkflowState::Complete && (incomplete || ordinal == 0))
-    {
-        return Err(error(ErrorCode::WorkflowInvariantViolation));
-    }
-    Ok(())
+    durable_history::verify(conn, &instance)
 }
 
 pub(crate) fn workflow_inspection_connection(
@@ -258,8 +194,8 @@ pub(crate) fn workflow_inspection_connection(
         coalesce(SUM(state='queued'),0),coalesce(SUM(state='running'),0),coalesce(SUM(state='complete'),0),coalesce(SUM(state='errored'),0),
         coalesce(SUM(state_bytes),0),coalesce(SUM(state='running' AND run_lease_until_ms<=?1),0),
         coalesce(SUM(state='waiting'),0),coalesce(SUM(state='paused'),0),coalesce(SUM(state='terminated'),0),
-        coalesce(SUM(capability_version=2 AND state IN ('complete','errored','terminated')),0),coalesce(SUM(event_count),0),coalesce(SUM(event_bytes),0),
-        coalesce(SUM(CASE WHEN capability_version=2 THEN next_event_seq-1-event_count ELSE 0 END),0),
+        coalesce(SUM(capability_version=1 AND state IN ('complete','errored','terminated')),0),coalesce(SUM(event_count),0),coalesce(SUM(event_bytes),0),
+        coalesce(SUM(CASE WHEN capability_version=1 THEN next_event_seq-1-event_count ELSE 0 END),0),
         (SELECT COUNT(*) FROM workflow_gc_receipts) FROM workflow_instances",[now_ms],|row|Ok(WorkflowInspection {
             queued:row.get(0)?,running:row.get(1)?,complete:row.get(2)?,errored:row.get(3)?,state_bytes:row.get(4)?,expired_runs:row.get(5)?,
             waiting:row.get(6)?,paused:row.get(7)?,terminated:row.get(8)?,retained:row.get(9)?,buffered_events:row.get(10)?,inbox_bytes:row.get(11)?,
@@ -279,9 +215,8 @@ pub(crate) fn workflow_inspection_connection(
 }
 
 pub(crate) fn workflow_invalid_rows(connection: &Connection) -> Result<u64, PlatformError> {
-    let legacy = legacy_invalid_rows(connection)?;
     let durable: u64 = connection.query_row("SELECT COUNT(*) FROM workflow_instances i
-        JOIN workflow_v2_accounting a ON a.id=i.id WHERE
+        JOIN workflow_accounting a ON a.id=i.id WHERE
         i.registered_step_count!=a.registered OR i.settled_step_count!=a.settled
         OR i.completed_step_count!=a.completed OR i.event_count!=a.event_count OR i.event_bytes!=a.event_bytes
         OR i.next_wake_at_ms IS NOT a.next_wake
@@ -297,44 +232,5 @@ pub(crate) fn workflow_invalid_rows(connection: &Connection) -> Result<u64, Plat
           OR s.name_count!=1+(SELECT COUNT(*) FROM workflow_steps p WHERE p.instance_id=i.id AND p.kind=s.kind AND p.name=s.name AND p.ordinal<s.ordinal)
           OR s.dependency_count!=(SELECT COUNT(*) FROM workflow_step_dependencies d WHERE d.instance_id=i.id AND d.child_ordinal=s.ordinal)))",
         [],|row|row.get(0)).map_err(sql_error)?;
-    Ok(legacy + durable)
-}
-
-fn legacy_invalid_rows(connection: &Connection) -> Result<u64, PlatformError> {
-    connection.query_row("SELECT (SELECT COUNT(*) FROM workflow_instances i WHERE
-        i.capability_version=1 AND ((i.state='running') != (i.run_token IS NOT NULL AND i.run_lease_until_ms IS NOT NULL AND i.run_claimed_at_ms IS NOT NULL)
-        OR (i.run_token IS NOT NULL AND length(i.run_token)!=32)
-        OR i.completed_step_count!=(SELECT COUNT(*) FROM workflow_steps s WHERE s.instance_id=i.id AND s.state='complete')
-        OR i.state_bytes!=length(i.input_json)+coalesce(length(i.output_json),0)+coalesce(length(i.error_json),0)
-          +coalesce((SELECT SUM(length(CAST(s.name AS BLOB))+length(s.config_json)+50+coalesce(length(s.output_json),0)+coalesce(length(s.error_json),0)) FROM workflow_steps s WHERE s.instance_id=i.id),0)
-        OR (i.state='complete' AND (i.completed_step_count=0 OR EXISTS(SELECT 1 FROM workflow_steps s WHERE s.instance_id=i.id AND s.state!='complete')))
-        OR (i.state='errored' AND i.error_json!=?1)))
-        +(SELECT COUNT(*) FROM workflow_steps s LEFT JOIN workflow_instances i ON i.id=s.instance_id
-          WHERE i.id IS NULL OR (i.capability_version=1 AND (s.instance_generation!=i.instance_generation OR s.attempt!=1
-          OR s.ordinal!=(SELECT COUNT(*) FROM workflow_steps p WHERE p.instance_id=s.instance_id AND p.ordinal<s.ordinal)
-          OR s.name_count!=1+(SELECT COUNT(*) FROM workflow_steps p WHERE p.instance_id=s.instance_id AND p.name=s.name AND p.ordinal<s.ordinal)
-          OR (s.state='failed' AND s.error_json!=?1)
-          OR (s.state='running' AND i.state='running' AND s.run_token!=i.run_token))))",
-        [failure_json().as_bytes()],|row|row.get(0)).map_err(sql_error)
-}
-
-/// Exhaustive migration preflight over V1 history; no policy is reinterpreted or repaired.
-pub(crate) fn verify_legacy_histories(conn: &Connection) -> Result<(), PlatformError> {
-    let status: String = conn
-        .pragma_query_value(None, "quick_check", |row| row.get(0))
-        .map_err(sql_error)?;
-    let invalid: bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check) OR EXISTS(SELECT 1 FROM workflow_instances WHERE capability_version!=1)",[],|row|row.get(0)).map_err(sql_error)?;
-    if status != "ok" || invalid || legacy_invalid_rows(conn)? != 0 {
-        return Err(error(ErrorCode::WorkflowInvariantViolation));
-    }
-    let mut statement = conn
-        .prepare("SELECT id FROM workflow_instances ORDER BY id")
-        .map_err(sql_error)?;
-    for id in statement
-        .query_map([], |row| parse(row, 0))
-        .map_err(sql_error)?
-    {
-        verify_history_connection(conn, id.map_err(sql_error)?)?;
-    }
-    Ok(())
+    Ok(durable)
 }

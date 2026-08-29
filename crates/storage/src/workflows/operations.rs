@@ -110,7 +110,7 @@ impl WorkflowRepository<'_> {
         now_ms: i64,
     ) -> Result<WorkflowOperation, PlatformError> {
         limits.validate()?;
-        if identity.target.capability_version != 2 {
+        if identity.target.capability_version != 1 {
             return Err(error(ErrorCode::WorkflowMethodUnsupported));
         }
         self.db.with_immediate(|tx| {
@@ -298,7 +298,7 @@ fn read_operation(
         || sequence != reserved_sequence
         || row.identity.creation_nonce.as_bytes() != &nonce
         || row.identity.instance_generation != expected_generation
-        || row.identity.target.capability_version != 2
+        || row.identity.target.capability_version != 1
         || version_digest(&row.identity.target)? != row.identity.target.descriptor_sha256
         || !instances::referrers_intact(conn, &row.identity)?
         || (kind == WorkflowOperationKind::Restart

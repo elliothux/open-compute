@@ -1,17 +1,17 @@
 //! Runtime feasibility through production loading and a test-owned real SQLite
 //! protocol fixture. Product-schema and scheduler acceptance belong to the product Gate.
 
-#[path = "workflow_support/durable_binding.rs"]
-mod durable_binding;
+#[path = "workflow_support/output_gate.rs"]
+mod output_gate;
 mod workflow_support;
 
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
-use open_compute_core::{ErrorCode, WorkflowFence, WorkflowInstanceId, WorkflowToken};
+use open_compute_core::{WorkflowFence, WorkflowInstanceId, WorkflowToken};
 use open_compute_runtime::GenerationAuthRegistry;
-use open_compute_service::runtime_bridge::{WorkflowRunRequest, WorkflowV2Outcome};
+use open_compute_service::runtime_bridge::{WorkflowOutcome, WorkflowRunRequest};
 use open_compute_service::workflow_http::WorkflowApiState;
 use open_compute_storage::{DeploymentState, SchedulerStore, WorkflowRepository};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -368,7 +368,7 @@ export default { fetch(){return new Response('ordinary');} };
 "#;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
+async fn workflow_runtime_suspension_timeout_parallel_and_native_errors() {
     let mut harness = Harness::start().await;
     let db = Connection::open(
         harness
@@ -393,7 +393,7 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
         axum::serve(
             listener,
             Router::new()
-                .route("/internal/workflows/v2/runs/{operation}", post(handle))
+                .route("/internal/workflows/runs/{operation}", post(handle))
                 .with_state(backend),
         )
         .with_graceful_shutdown(async move {
@@ -422,60 +422,29 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
         harness.transport.clone(),
         Default::default(),
     );
-    let legacy = api
-        .create_version(
-            account,
-            definition.id,
-            target.deployment_id,
-            "Flow".into(),
-            1,
-        )
+    let current = api
+        .create_version(account, definition.id, target.deployment_id, "Flow".into())
         .await
         .unwrap();
-    let durable = api
-        .create_version(
-            account,
-            definition.id,
-            target.deployment_id,
-            "Flow".into(),
-            2,
-        )
-        .await
-        .unwrap();
-    assert_eq!(legacy.state, DeploymentState::Ready);
-    assert_eq!(durable.state, DeploymentState::Ready);
-    assert_eq!(durable.target.capability_version, 2);
+    assert_eq!(current.state, DeploymentState::Ready);
+    assert_eq!(current.target.capability_version, 1);
     assert_eq!(
         repository
-            .version(account, legacy.target.version_id)
+            .version(account, current.target.version_id)
             .unwrap()
             .target,
-        legacy.target
+        current.target
     );
-    assert_eq!(
-        api.create_version(
-            account,
-            definition.id,
-            target.deployment_id,
-            "Flow".into(),
-            3
-        )
-        .await
-        .unwrap_err()
-        .code(),
-        ErrorCode::WorkflowCapabilityMismatch
-    );
-    let version = durable.target;
-    harness.transport.probe_workflow(&target).await.unwrap();
-    harness.transport.probe_workflow_v2(&version).await.unwrap();
+    let version = current.target;
+    harness.transport.probe_workflow(&version).await.unwrap();
     for mode in ["hostileWait", "hostileRetry"] {
         let mut request = envelope(&db.lock().unwrap(), mode);
         let first = harness
             .transport
-            .dispatch_workflow_v2(&version, &request, Duration::from_secs(10))
+            .dispatch_workflow(&version, &request, Duration::from_secs(10))
             .await
             .unwrap();
-        assert!(matches!(first.result, WorkflowV2Outcome::Suspended { .. }));
+        assert!(matches!(first.result, WorkflowOutcome::Suspended { .. }));
         assert!(!first.drain_incomplete);
         {
             let db = db.lock().unwrap();
@@ -499,10 +468,10 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
         request.fence.run_token = WorkflowToken::from_bytes([0x33; 32]);
         let replay = harness
             .transport
-            .dispatch_workflow_v2(&version, &request, Duration::from_secs(10))
+            .dispatch_workflow(&version, &request, Duration::from_secs(10))
             .await
             .unwrap();
-        let WorkflowV2Outcome::Complete { output_json, .. } = replay.result else {
+        let WorkflowOutcome::Complete { output_json, .. } = replay.result else {
             panic!("expected replay completion");
         };
         let output: Value = serde_json::from_str(&output_json).unwrap();
@@ -535,7 +504,7 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
         let started = Instant::now();
         let response = harness
             .transport
-            .dispatch_workflow_v2(&version, &request, Duration::from_secs(40))
+            .dispatch_workflow(&version, &request, Duration::from_secs(40))
             .await;
         assert!(
             response.is_ok(),
@@ -548,7 +517,7 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
             "long waiting must end the actual dispatch RPC"
         );
         match (&response.result, mode) {
-            (WorkflowV2Outcome::Suspended { final_ordinal }, "sleep" | "catch") => {
+            (WorkflowOutcome::Suspended { final_ordinal }, "sleep" | "catch") => {
                 assert_eq!(*final_ordinal, 1);
                 let db = db.lock().unwrap();
                 let (state, token): (String, Option<String>) = db
@@ -573,16 +542,16 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
                     sleeping = Some(request);
                 }
             }
-            (WorkflowV2Outcome::Errored { error_code, .. }, "forged") => {
+            (WorkflowOutcome::Errored { error_code, .. }, "forged") => {
                 assert_eq!(error_code, "WORKFLOW_EXECUTION_FAILED");
             }
-            (WorkflowV2Outcome::Errored { error_code, .. }, "oversizedFinal" | "oversizedStep") => {
+            (WorkflowOutcome::Errored { error_code, .. }, "oversizedFinal" | "oversizedStep") => {
                 assert_eq!(error_code, "WORKFLOW_RESULT_TOO_LARGE");
             }
-            (WorkflowV2Outcome::Errored { error_code, .. }, "forgedSerialization") => {
+            (WorkflowOutcome::Errored { error_code, .. }, "forgedSerialization") => {
                 assert_eq!(error_code, "WORKFLOW_SERIALIZATION_UNSUPPORTED");
             }
-            (WorkflowV2Outcome::Complete { output_json, .. }, _) => {
+            (WorkflowOutcome::Complete { output_json, .. }, _) => {
                 let output: Value = serde_json::from_str(output_json).unwrap();
                 match mode {
                     "normal" => assert_eq!(output, 7),
@@ -615,7 +584,7 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
                     _ => panic!("unexpected completion"),
                 }
             }
-            (WorkflowV2Outcome::Unknown { .. }, "timeout") => {
+            (WorkflowOutcome::Unknown { .. }, "timeout") => {
                 assert!(response.drain_incomplete);
                 assert!(started.elapsed() >= Duration::from_secs(30));
                 // Logical timeout is persisted, but a non-drained invocation
@@ -631,7 +600,7 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
                     .unwrap();
                 assert_eq!(state, "running");
             }
-            (WorkflowV2Outcome::Errored { error_code, .. }, _) => {
+            (WorkflowOutcome::Errored { error_code, .. }, _) => {
                 panic!("unexpected mode={mode}: {error_code}")
             }
             _ => panic!("unexpected mode={mode}: {:?}", response.result),
@@ -645,7 +614,7 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
             harness
                 .transport
                 .clone()
-                .dispatch_workflow_v2(&version, &quarantined, Duration::from_secs(10))
+                .dispatch_workflow(&version, &quarantined, Duration::from_secs(10))
                 .await
                 .is_err()
         );
@@ -692,12 +661,12 @@ async fn workflow_v2_runtime_suspension_timeout_parallel_and_native_errors() {
     sleeping.fence.run_token = WorkflowToken::from_bytes([0x33; 32]);
     let replay = harness
         .transport
-        .dispatch_workflow_v2(&version, &sleeping, Duration::from_secs(10))
+        .dispatch_workflow(&version, &sleeping, Duration::from_secs(10))
         .await
         .unwrap();
     assert_eq!(replay.loader_outcome, "cold");
     assert!(
-        matches!(replay.result,WorkflowV2Outcome::Complete{ref output_json,..} if output_json=="\"awake\"")
+        matches!(replay.result,WorkflowOutcome::Complete{ref output_json,..} if output_json=="\"awake\"")
     );
     assert_eq!(
         db.lock()

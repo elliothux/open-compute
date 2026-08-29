@@ -154,7 +154,6 @@ pub async fn compile_static_config(
     }
     let (digest, rendered, workers) = digest_for_with_tokens_and_policy(
         request.assets_dir,
-        request.runtime.lock(),
         &lock_bytes,
         request.runtime,
         request.platform,

@@ -214,7 +214,7 @@ pub(super) async fn run_full_extras(
             return;
         }
     };
-    let supervisor = WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,

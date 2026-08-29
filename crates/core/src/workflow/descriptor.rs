@@ -1,4 +1,4 @@
-//! Capability V2 replay identity, resolved wait policy, and logical byte accounting.
+//! Current replay identity, resolved wait policy, and logical byte accounting.
 
 use super::{
     WORKFLOW_MAX_DURATION_MS, WORKFLOW_MAX_SAFE_INTEGER, WorkflowStepConfig, duration_ms, error,
@@ -9,14 +9,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
-/// Fixed instance metadata charge defined by `share/workflow-accounting-v2.json`.
-pub const WORKFLOW_V2_INSTANCE_BYTES: usize = 256;
+/// Fixed instance metadata charge defined by `share/workflow-accounting.json`.
+pub const WORKFLOW_INSTANCE_BYTES: usize = 256;
 /// Fixed step metadata charge, excluding variable name/config/result bytes.
-pub const WORKFLOW_V2_STEP_BYTES: usize = 160;
+pub const WORKFLOW_STEP_BYTES: usize = 160;
 /// Logical bytes per immutable predecessor edge.
-pub const WORKFLOW_V2_DEPENDENCY_BYTES: usize = 16;
+pub const WORKFLOW_DEPENDENCY_BYTES: usize = 16;
 /// Fixed inbox metadata charge, excluding type and canonical payload bytes.
-pub const WORKFLOW_V2_EVENT_BYTES: usize = 32;
+pub const WORKFLOW_EVENT_BYTES: usize = 32;
 
 /// Durable API operation kind, independent of the caller's display name.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -235,7 +235,7 @@ impl WorkflowStepDeclaration {
     }
 }
 
-/// Canonical capability V2 replay identity, including immutable batch and dependency shape.
+/// Canonical replay identity, including immutable batch and dependency shape.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowStepDescriptor {
     /// Zero-based API call order.
@@ -290,7 +290,7 @@ impl WorkflowStepDescriptor {
         self.validate()?;
         let config: Value =
             serde_json::from_str(&self.config.canonical_json()?).map_err(|_| unsupported())?;
-        let descriptor = json!({"capabilityVersion":2,"ordinal":self.ordinal,"kind":self.config.kind(),"name":self.name,
+        let descriptor = json!({"capabilityVersion":1,"ordinal":self.ordinal,"kind":self.config.kind(),"name":self.name,
             "nameCount":self.name_count,"config":config,"dependencies":self.dependencies,
             "batchFirstOrdinal":self.batch_first_ordinal,"batchSize":self.batch_size});
         Ok(Sha256::digest(descriptor.to_string().as_bytes()).into())
@@ -299,10 +299,10 @@ impl WorkflowStepDescriptor {
     /// Exact retained descriptor/edge bytes, excluding later result and error bytes.
     pub fn state_bytes(&self) -> Result<usize, PlatformError> {
         self.validate()?;
-        Ok(WORKFLOW_V2_STEP_BYTES
+        Ok(WORKFLOW_STEP_BYTES
             + self.name.len()
             + self.config.canonical_json()?.len()
-            + WORKFLOW_V2_DEPENDENCY_BYTES * self.dependencies.len())
+            + WORKFLOW_DEPENDENCY_BYTES * self.dependencies.len())
     }
 }
 

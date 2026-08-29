@@ -1,7 +1,7 @@
 //! Queue retention and native push-consumer workload adapter.
 
 use super::{SchedulerService, decode_pool_state, encode_pool_state, scheduler_task_failed};
-use crate::metrics::{MetricsRegistry, QueueConsumerBatchOutcome};
+use crate::metrics::{MetricsRegistry, QueueConsumerBatchOutcome, SchedulerClaimOutcome};
 use crate::runtime_bridge::{DispatchTarget, QueueDispatchMessage, QueueDispatchRequest};
 use base64::Engine as _;
 use open_compute_core::{
@@ -31,11 +31,26 @@ impl SchedulerService {
             .lock()
             .map_err(|_| scheduler_task_failed())?
             .to_owned();
-        let claimed = tokio::task::spawn_blocking(move || {
-            store.claim_queue_batches_after(now_ms, lease_ms, 250, batch, cursor)
+        let result = tokio::task::spawn_blocking(move || {
+            store.claim_queue_batches(now_ms, lease_ms, 250, batch, cursor)
         })
         .await
-        .map_err(|_| scheduler_task_failed())??;
+        .map_err(|_| scheduler_task_failed())?;
+        if let Some(metrics) = &self.metrics {
+            metrics.observe_scheduler_claim_duration(SchedulerKind::Queue, started.elapsed());
+            metrics.inc_scheduler_claim(
+                SchedulerKind::Queue,
+                match &result {
+                    Ok((claimed, _)) if claimed.is_empty() => SchedulerClaimOutcome::Empty,
+                    Ok(_) => SchedulerClaimOutcome::Claimed,
+                    Err(_) => SchedulerClaimOutcome::Error,
+                },
+            );
+            if let Ok((_, recovered)) = &result {
+                metrics.inc_scheduler_claim_expired(SchedulerKind::Queue, *recovered);
+            }
+        }
+        let (claimed, _) = result?;
         if let Some(last) = claimed.last() {
             *self
                 .queue_claim_cursor

@@ -6,7 +6,7 @@ use crate::compile::{
 };
 use crate::digest::{
     BINDING_TOKEN_PLACEHOLDER, DigestInputs, PlatformReleaseMeta, config_input_digest, digest_for,
-    load_assets, render_config, render_config_with_tokens, validate_token,
+    load_assets, render_config_with_tokens, validate_token,
 };
 use crate::fsutil::{
     FILE_MODE, clear_publish_hook, set_publish_hook, set_test_max_asset_entries,
@@ -26,13 +26,15 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 const VERSION: &str = "workerd 2026-08-26";
 const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TOKEN_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const TOKEN_C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+static TEST_BINDING_TOKEN: LazyLock<SecretString> = LazyLock::new(|| SecretString::new(TOKEN_B));
 
 fn sha256_file(path: &Path) -> String {
     let bytes = fs::read(path).expect("read");
@@ -186,7 +188,7 @@ fn compile_req<'a>(
         runtime_data_dir: data,
         platform,
         token,
-        binding_token: token,
+        binding_token: &TEST_BINDING_TOKEN,
         durable_objects: open_compute_core::DurableObjectsConfig::default(),
         deadline,
         redactor,
@@ -512,10 +514,6 @@ fn digest_assets_tokens_and_supervisor_auth_are_fail_closed() {
     assert_eq!(config_path, dir.path().join("config.capnp"));
 
     let valid = SecretString::new(TOKEN);
-    assert_eq!(
-        render_config(RuntimeLock::token_placeholder(), &valid).unwrap(),
-        TOKEN
-    );
     let binding = SecretString::new(TOKEN_B);
     let rendered = render_config_with_tokens(
         &format!(
@@ -552,23 +550,6 @@ fn digest_assets_tokens_and_supervisor_auth_are_fail_closed() {
             ErrorCode::RuntimeInvalid
         );
     }
-    assert_eq!(
-        render_config("no placeholder", &valid).unwrap_err().code(),
-        ErrorCode::ConfigCompileFailed
-    );
-    assert_eq!(
-        render_config(
-            &format!(
-                "{}{}",
-                RuntimeLock::token_placeholder(),
-                RuntimeLock::token_placeholder()
-            ),
-            &valid,
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::ConfigCompileFailed
-    );
 
     use crate::supervisor::{
         ExternalServiceAddress, GenerationAuthRegistry, SupervisorSnapshot, SupervisorState,
@@ -936,7 +917,7 @@ async fn supervisor_construction_debug_and_default_wiring_are_secret_safe() {
         lease_path: None,
     };
     assert!(format!("{options:?}").contains("WorkerdSupervisorOptions"));
-    let supervisor = crate::WorkerdSupervisor::new(options);
+    let supervisor = crate::WorkerdSupervisor::new(options, Vec::new(), Vec::new(), Vec::new());
     assert!(format!("{supervisor:?}").contains("WorkerdSupervisor"));
     supervisor.shutdown().await;
 
@@ -1002,18 +983,17 @@ fn input_digest_changes_with_any_input() {
         .unwrap();
     let runtime = rt.block_on(verify_ok(&lock_path, &dummy));
     let lock_bytes = runtime.lock_bytes().to_vec();
-    let lock = runtime.lock().clone();
     let token = SecretString::new(TOKEN);
 
     fs::write(dir.path().join("config.capnp"), [0xff]).unwrap();
     assert_eq!(
         digest_for(
             dir.path(),
-            &lock,
             &lock_bytes,
             &runtime,
             &platform_meta(),
             &token,
+            &SecretString::new(TOKEN_C),
         )
         .unwrap_err()
         .code(),
@@ -1022,20 +1002,20 @@ fn input_digest_changes_with_any_input() {
     copy_formal_assets(dir.path());
     let (d1, _, _) = digest_for(
         dir.path(),
-        &lock,
         &lock_bytes,
         &runtime,
         &platform_meta(),
         &token,
+        &SecretString::new(TOKEN_C),
     )
     .unwrap();
     let (d2, _, _) = digest_for(
         dir.path(),
-        &lock,
         &lock_bytes,
         &runtime,
         &platform_meta(),
         &token,
+        &SecretString::new(TOKEN_C),
     )
     .unwrap();
     assert_eq!(d1, d2);
@@ -1047,11 +1027,11 @@ fn input_digest_changes_with_any_input() {
     .unwrap();
     let (d_cfg, _, _) = digest_for(
         dir.path(),
-        &lock,
         &lock_bytes,
         &runtime,
         &platform_meta(),
         &token,
+        &SecretString::new(TOKEN_C),
     )
     .unwrap();
     assert_ne!(d1, d_cfg);
@@ -1070,11 +1050,11 @@ fn input_digest_changes_with_any_input() {
     .unwrap();
     let (d_w, _, _) = digest_for(
         dir.path(),
-        &lock,
         &lock_bytes,
         &runtime,
         &platform_meta(),
         &token,
+        &SecretString::new(TOKEN_C),
     )
     .unwrap();
     assert_ne!(d1, d_w);
@@ -1084,11 +1064,11 @@ fn input_digest_changes_with_any_input() {
     lock_bytes2.extend_from_slice(b" ");
     let (d_lock, rendered, workers) = digest_for(
         dir.path(),
-        &lock,
         &lock_bytes,
         &runtime,
         &platform_meta(),
         &token,
+        &SecretString::new(TOKEN_C),
     )
     .unwrap();
     let d_lock2 = config_input_digest(&DigestInputs {
@@ -1104,11 +1084,11 @@ fn input_digest_changes_with_any_input() {
     let runtime2 = runtime.clone().with_binary_sha256("cd".repeat(32));
     let (d_bin, _, _) = digest_for(
         dir.path(),
-        &lock,
         &lock_bytes,
         &runtime2,
         &platform_meta(),
         &token,
+        &SecretString::new(TOKEN_C),
     )
     .unwrap();
     assert_ne!(d1, d_bin);
@@ -1116,20 +1096,37 @@ fn input_digest_changes_with_any_input() {
     let other = SecretString::new(TOKEN_B);
     let (d_tok, _, _) = digest_for(
         dir.path(),
-        &lock,
         &lock_bytes,
         &runtime,
         &platform_meta(),
         &other,
+        &SecretString::new(TOKEN_C),
     )
     .unwrap();
     assert_ne!(d1, d_tok);
+    let (d_binding, _, _) = digest_for(
+        dir.path(),
+        &lock_bytes,
+        &runtime,
+        &platform_meta(),
+        &token,
+        &SecretString::new(TOKEN_B),
+    )
+    .unwrap();
+    assert_ne!(d1, d_binding);
 
     let meta2 = PlatformReleaseMeta {
         version: "other".into(),
     };
-    let (d_rel, _, _) =
-        digest_for(dir.path(), &lock, &lock_bytes, &runtime, &meta2, &token).unwrap();
+    let (d_rel, _, _) = digest_for(
+        dir.path(),
+        &lock_bytes,
+        &runtime,
+        &meta2,
+        &token,
+        &SecretString::new(TOKEN_C),
+    )
+    .unwrap();
     assert_ne!(d1, d_rel);
 }
 
@@ -1149,6 +1146,25 @@ async fn cache_reuse_and_corrupt_rebuild() {
     let mut redactor = redactor_with_token();
     redactor.register_secret_string(&token);
     let platform = platform_meta();
+
+    let mut same_token_request = compile_req(
+        &runtime,
+        &lock_path,
+        dir.path(),
+        &data,
+        &platform,
+        &token,
+        &redactor,
+        Duration::from_secs(5),
+    );
+    same_token_request.binding_token = &token;
+    assert_eq!(
+        compile_static_config(same_token_request)
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::RuntimeInvalid
+    );
 
     let first_request = compile_req(
         &runtime,
@@ -1789,11 +1805,11 @@ printf 'COMPILED-%s' \"$$\"
     let dest_name = {
         let (digest, _, _) = digest_for(
             dir.path(),
-            runtime.lock(),
             runtime.lock_bytes(),
             &runtime,
             &platform,
             &token,
+            &TEST_BINDING_TOKEN,
         )
         .unwrap();
         format!("config.{digest}.bin")
@@ -1893,11 +1909,11 @@ async fn same_digest_cache_lookup_cannot_delete_publish_window() {
     let dest_name = {
         let (digest, _, _) = digest_for(
             dir.path(),
-            runtime.lock(),
             runtime.lock_bytes(),
             &runtime,
             &platform,
             &token,
+            &TEST_BINDING_TOKEN,
         )
         .unwrap();
         format!("config.{digest}.bin")

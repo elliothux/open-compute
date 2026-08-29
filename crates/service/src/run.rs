@@ -1,6 +1,6 @@
 //! Production `run` composition and shutdown.
 
-use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_scheduler};
+use crate::binding_backend::{bind_binding_backend, serve_binding_backend};
 use crate::capabilities::{platform_capabilities, platform_release_metadata};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
@@ -24,6 +24,8 @@ use crate::snapshot_pins::{SnapshotPins, load_snapshot_pins};
 use crate::workers_http::WorkerApiState;
 #[path = "run_p1.rs"]
 pub(super) mod p1;
+#[path = "run_storage.rs"]
+mod storage_bootstrap;
 use open_compute_artifacts::{
     ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, R2ObjectStore,
     S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
@@ -37,9 +39,7 @@ use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
     PlatformReleaseMeta, StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions,
 };
-use open_compute_storage::{
-    DurableObjectRepository, PlatformStorage, SchedulerStore, WorkerRepository,
-};
+use open_compute_storage::{DurableObjectRepository, PlatformStorage, WorkerRepository};
 use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins, RuntimeSource};
 use p1::{
     load_offline_metrics_receipts, refresh_metrics as refresh_p1_metrics,
@@ -144,55 +144,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         Some(ReadinessReason::Ready),
     )?;
 
-    let clock = SystemClock;
     let storage_started = Instant::now();
-    let storage = match tokio::task::spawn_blocking({
-        let cfg = loaded.config.storage.clone();
-        let hardening = loaded.config.hardening.clone();
-        let recovery_batch = loaded.config.workers.delete_recovery_batch;
-        move || {
-            let storage = PlatformStorage::bootstrap_with_hardening(&cfg, &hardening, &clock)?;
-            open_compute_storage::KvPaths::open(storage.data_dir().root())?
-                .cleanup_write_staging()?;
-            open_compute_storage::R2Staging::open(storage.data_dir().root())?.cleanup()?;
-            let maintenance_now = unix_ms();
-            WorkerRepository::new(storage.db())
-                .prune_expired_idempotency(maintenance_now, recovery_batch)?;
-            WorkerRepository::new(storage.db()).recover_deleting_deployments(
-                RequestId::generate(),
-                maintenance_now,
-                recovery_batch,
-            )?;
-            let scheduler_path = storage.data_dir().ensure_scheduler_db()?;
-            drop(SchedulerStore::open(
-                &scheduler_path,
-                cfg.sqlite_busy_timeout_ms,
-                maintenance_now,
-            )?);
-            let schemas = open_compute_storage::inspect_owned_schema(
-                storage.data_dir(),
-                storage.db(),
-                cfg.sqlite_busy_timeout_ms,
-                maintenance_now,
-            )?;
-            if schemas.control
-                != u32::try_from(open_compute_storage::migrations::current_schema_version())
-                    .unwrap_or(u32::MAX)
-                || schemas.scheduler
-                    != u32::try_from(open_compute_storage::current_scheduler_schema_version())
-                        .unwrap_or(u32::MAX)
-                || schemas.kv_min != open_compute_storage::KV_SCHEMA_VERSION
-                || schemas.kv_max != open_compute_storage::KV_SCHEMA_VERSION
-                || schemas.d1_min != open_compute_storage::D1_DATABASE_SCHEMA_VERSION
-                || schemas.d1_max != open_compute_storage::D1_DATABASE_SCHEMA_VERSION
-            {
-                return Err(PlatformError::new(
-                    ErrorCode::UpgradeRequired,
-                    "platformd run refuses a mixed project-owned schema tuple",
-                ));
-            }
-            Ok::<_, PlatformError>(storage)
-        }
+    let (storage, scheduler_store) = match tokio::task::spawn_blocking({
+        let config = loaded.config.clone();
+        move || storage_bootstrap::bootstrap(&config)
     })
     .await
     {
@@ -209,14 +164,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             ));
         }
     };
-    let storage = Arc::new(storage);
     refresh_p1_metrics(
         &storage,
         &metrics,
         loaded.config.hardening.emergency_reserve_bytes,
     )?;
-    metrics.set_schema_state(
-        u64::try_from(open_compute_storage::migrations::current_schema_version()).unwrap_or(0),
+    metrics.set_schema_version(
         u64::try_from(open_compute_storage::migrations::current_schema_version()).unwrap_or(0),
     );
     load_offline_metrics_receipts(storage.data_dir(), &metrics);
@@ -225,22 +178,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         loaded.config.hardening.snapshot_stale_after_ms,
         &health,
     )?;
-    let scheduler_store = match storage.data_dir().ensure_scheduler_db().and_then(|path| {
-        SchedulerStore::open(
-            &path,
-            loaded.config.storage.sqlite_busy_timeout_ms,
-            unix_ms(),
-        )
-    }) {
-        Ok(store) => Some(Arc::new(store)),
-        Err(error) => {
-            tracing::warn!(
-                code = error.code().as_str(),
-                "scheduler unavailable; ordinary Worker and Durable Object traffic remains enabled"
-            );
-            None
-        }
-    };
     metrics.observe_sqlite(SqliteOp::Open, storage_started.elapsed());
     metrics.observe_sqlite(SqliteOp::Migrate, storage_started.elapsed());
     record(&opts, "storage");
@@ -271,16 +208,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     )?;
     health.set_component(
         ComponentName::Scheduler,
-        if scheduler_store.is_some() {
-            ComponentState::Healthy
-        } else {
-            ComponentState::Degraded
-        },
-        Some(if scheduler_store.is_some() {
-            ReadinessReason::Ready
-        } else {
-            ReadinessReason::SchedulerUnavailable
-        }),
+        ComponentState::Healthy,
+        Some(ReadinessReason::Ready),
     )?;
 
     let mut redactor = Redactor::new();
@@ -491,24 +420,20 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                 PlatformError::new(ErrorCode::LimitInvalid, "Worker body limit is invalid")
             })?,
         );
-    let scheduler_service = scheduler_store.as_ref().map(|store| {
-        Arc::new(
-            SchedulerService::new(
-                store.clone(),
-                storage.clone(),
-                transport.clone(),
-                loaded.config.scheduler.clone(),
-                loaded.config.workflows.clone(),
-                Arc::new(SystemSchedulerClock),
-            )
-            .with_metrics(metrics.clone())
-            .with_health(health.clone()),
+    let scheduler_service = Arc::new(
+        SchedulerService::new(
+            scheduler_store.clone(),
+            storage.clone(),
+            transport.clone(),
+            loaded.config.scheduler.clone(),
+            loaded.config.workflows.clone(),
+            Arc::new(SystemSchedulerClock),
         )
-    });
-    if let Some(scheduler) = &scheduler_service {
-        scheduler.repair_products(1_000)?;
-        scheduler.repair_workflows(32)?;
-    }
+        .with_metrics(metrics.clone())
+        .with_health(health.clone()),
+    );
+    scheduler_service.repair_products(1_000)?;
+    scheduler_service.repair_workflows(32)?;
     let bundle_limits = BundleLimits {
         max_artifact_bytes: usize::try_from(loaded.config.workers.max_bundle_bytes).map_err(
             |_| PlatformError::new(ErrorCode::LimitInvalid, "Worker bundle limit is invalid"),
@@ -549,9 +474,9 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         resource_pins.clone(),
         d1_backend.clone(),
         loaded.config.d1.clone(),
+        loaded.config.hardening.max_resources_per_kind_per_account,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     );
-    d1_api.reconcile_pending().await?;
     let do_api = DoApiState::new(
         storage.clone(),
         resource_pins.clone(),
@@ -560,27 +485,21 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
     .with_metrics(metrics.clone())
-    .with_scheduler(scheduler_store.clone());
-    let queue_api = scheduler_store.as_ref().map(|scheduler| {
-        QueueApiState::new(storage.clone(), scheduler.clone())
-            .with_metrics(metrics.clone())
-            .with_default_max_backlog_bytes(loaded.config.queues.default_max_backlog_bytes)
-    });
-    let workflow_api = scheduler_store.as_ref().map(|scheduler| {
-        crate::workflow_http::WorkflowApiState::new(
-            storage.clone(),
-            scheduler.clone(),
-            transport.clone(),
-            loaded.config.workflows.clone(),
-        )
-    });
-    if let Some(api) = &queue_api {
-        api.reconcile_pending().await?;
-    }
-    metrics.set_do_runtime_gauges(0, 0, 0);
+    .with_scheduler(Some(scheduler_store.clone()));
+    let queue_api = QueueApiState::new(storage.clone(), scheduler_store.clone())
+        .with_metrics(metrics.clone())
+        .with_default_max_backlog_bytes(loaded.config.queues.default_max_backlog_bytes);
+    let workflow_api = crate::workflow_http::WorkflowApiState::new(
+        storage.clone(),
+        scheduler_store.clone(),
+        transport.clone(),
+        loaded.config.workflows.clone(),
+    );
+    queue_api.reconcile_pending().await?;
+    metrics.set_do_storage_watermark(0);
     let maintenance_do_api = do_api.clone();
     let supervisor_for_http = supervisor_handle.clone();
-    let mut worker_api = WorkerApiState::new(
+    let worker_api = WorkerApiState::new(
         storage.clone(),
         store.clone(),
         transport.clone(),
@@ -588,14 +507,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         bundle_limits,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
-    .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency);
-    if let Some(scheduler) = &scheduler_store {
-        worker_api = worker_api.with_product_promoter(Arc::new(P23PromotionCoordinator::new(
-            storage.clone(),
-            scheduler.clone(),
-            Duration::from_millis(loaded.config.scheduler.shutdown_drain_ms),
-        )));
-    }
+    .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency)
+    .with_product_promoter(Arc::new(P23PromotionCoordinator::new(
+        storage.clone(),
+        scheduler_store.clone(),
+        Duration::from_millis(loaded.config.scheduler.shutdown_drain_ms),
+    )));
     let state = HttpState::new(
         health.clone(),
         metrics.clone(),
@@ -615,6 +532,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             store.clone(),
             resource_pins.clone(),
             loaded.config.kv.clone(),
+            loaded.config.hardening.max_resources_per_kind_per_account,
             Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
         )
         .with_snapshot_pins(snapshot_pins.clone()),
@@ -622,9 +540,9 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     .with_r2_api(r2_api)
     .with_d1_api(d1_api)
     .with_do_api(do_api)
-    .with_queue_api(queue_api)
-    .with_workflow_api(workflow_api)
-    .with_scheduler(scheduler_service.clone());
+    .with_queue_api(Some(queue_api))
+    .with_workflow_api(Some(workflow_api))
+    .with_scheduler(Some(scheduler_service.clone()));
 
     let public_listener = match http::bind(public_addr).await {
         Ok(l) => l,
@@ -767,7 +685,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let binding_queue_config = loaded.config.queues.clone();
     let binding_workflow_config = loaded.config.workflows.clone();
     let binding_backend_task = tokio::spawn(async move {
-        serve_binding_backend_with_scheduler(
+        serve_binding_backend(
             binding_backend_listener,
             binding_storage,
             binding_auth,
@@ -779,7 +697,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             binding_do_config,
             binding_queue_config,
             binding_workflow_config,
-            scheduler_store,
+            Some(scheduler_store),
             async move {
                 let _ = shutdown_binding.changed().await;
             },
@@ -811,7 +729,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         None
     };
 
-    let supervisor = Arc::new(WorkerdSupervisor::new_with_services_and_auth(
+    let supervisor = Arc::new(WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
             compiler,
@@ -837,8 +755,9 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     supervisor.start();
     record(&opts, "supervisor");
     metrics.inc_start(StartResult::Success, StartStage::Supervisor);
-    let scheduler_task = scheduler_service
-        .map(|service| tokio::spawn(async move { service.run(scheduler_shutdown_rx).await }));
+    let scheduler_task = Some(tokio::spawn(async move {
+        scheduler_service.run(scheduler_shutdown_rx).await
+    }));
 
     let mut watch_rx = supervisor.subscribe();
     let health_watch = health.clone();
@@ -909,7 +828,7 @@ fn update_do_storage_health(
     } else {
         0
     };
-    metrics.set_do_runtime_gauges(0, 0, watermark);
+    metrics.set_do_storage_watermark(watermark);
     let state = if watermark == 0 {
         ComponentState::Healthy
     } else {
@@ -1068,11 +987,10 @@ async fn run_worker_maintenance(
             policy.retain_rejected_deployments,
             batch,
         )?;
-        let references = repo.referenced_artifacts()?;
-        Ok::<_, PlatformError>((references, candidates))
+        Ok::<_, PlatformError>(candidates)
     })
     .await;
-    let (fallback_references, candidates) = match pass {
+    let candidates = match pass {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => {
             tracing::warn!(
@@ -1129,6 +1047,22 @@ async fn run_worker_maintenance(
             tracing::warn!("Worker retention finalization failed");
         }
     }
+    gc_worker_artifacts(storage, store, config, snapshot_pins).await;
+    if let Err(error) = cache.evict_if_needed().await {
+        tracing::warn!(
+            code = error.code().as_str(),
+            "Worker cache eviction pass failed"
+        );
+    }
+}
+
+pub(crate) async fn gc_worker_artifacts(
+    storage: &Arc<PlatformStorage>,
+    store: &ArtifactStore,
+    config: &open_compute_core::WorkersConfig,
+    snapshot_pins: &SnapshotPins,
+) {
+    let gc_fence = store.fence_deployment_gc().await;
     let storage_for_refs = storage.clone();
     let references = match tokio::task::spawn_blocking(move || {
         WorkerRepository::new(storage_for_refs.db()).referenced_artifacts()
@@ -1136,7 +1070,17 @@ async fn run_worker_maintenance(
     .await
     {
         Ok(Ok(references)) => references,
-        _ => fallback_references,
+        Ok(Err(error)) => {
+            tracing::warn!(
+                code = error.code().as_str(),
+                "Worker artifact GC skipped because the final reference snapshot failed"
+            );
+            return;
+        }
+        Err(_) => {
+            tracing::warn!("Worker artifact GC skipped because the final reference task failed");
+            return;
+        }
     };
     let mut retained = HashSet::new();
     for (digest, size) in references {
@@ -1149,7 +1093,7 @@ async fn run_worker_maintenance(
             let grace = SystemTime::now()
                 .checked_sub(Duration::from_millis(config.artifact_gc_grace_ms))
                 .unwrap_or(SystemTime::UNIX_EPOCH);
-            if let Err(error) = store.gc_unreferenced(&retained, grace).await {
+            if let Err(error) = store.gc_unreferenced(&gc_fence, &retained, grace).await {
                 tracing::warn!(
                     code = error.code().as_str(),
                     "Worker artifact GC pass failed"
@@ -1160,12 +1104,6 @@ async fn run_worker_maintenance(
             code = error.code().as_str(),
             "Worker artifact GC skipped because snapshot pins are unavailable"
         ),
-    }
-    if let Err(error) = cache.evict_if_needed().await {
-        tracing::warn!(
-            code = error.code().as_str(),
-            "Worker cache eviction pass failed"
-        );
     }
 }
 

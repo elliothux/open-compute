@@ -2,15 +2,13 @@ use super::*;
 use open_compute_core::WorkflowsConfig;
 
 impl WorkflowRepository<'_> {
-    /// Retain a proven terminal V2 instance without releasing either immutable artifact pin.
+    /// Retain a proven terminal instance without releasing either immutable artifact pin.
     pub fn retain_instance(
         &self,
         identity: &WorkflowInstanceIdentity,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        if identity.target.capability_version != 2 {
-            return Err(error(ErrorCode::WorkflowMethodUnsupported));
-        }
+        version_digest(&identity.target)?;
         self.db.with_immediate(|tx| {
             verify_identity(tx, identity)?;
             let state: String = tx.query_row("SELECT state FROM workflow_instance_referrers WHERE instance_id=?1",
@@ -33,7 +31,6 @@ impl WorkflowRepository<'_> {
         account: AccountId,
         definition: WorkflowId,
         external: Option<&str>,
-        caller_capability: u32,
         limits: &WorkflowsConfig,
         now_ms: i64,
     ) -> Result<WorkflowReservation, PlatformError> {
@@ -47,9 +44,6 @@ impl WorkflowRepository<'_> {
                 params![account.to_string(),definition.to_string()],version_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotReady))?;
             if version_digest(&version.target)? != version.target.descriptor_sha256 { return Err(invariant()); }
-            if i64::from(caller_capability) != version.target.capability_version {
-                return Err(error(ErrorCode::WorkflowCapabilityMismatch));
-            }
             if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_instance_referrers WHERE definition_id=?1 AND external_instance_id=?2)",
                 params![definition.to_string(),external],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
                 return Err(error(ErrorCode::WorkflowInstanceAlreadyExists));
@@ -143,27 +137,6 @@ impl WorkflowRepository<'_> {
             )
             .map(|count| count == 1)
             .map_err(sql_error)
-        })
-    }
-
-    /// Release both typed live references only after observing durable scheduler terminal state.
-    pub fn release_instance(
-        &self,
-        reservation: &WorkflowInstanceIdentity,
-        now_ms: i64,
-    ) -> Result<(), PlatformError> {
-        if reservation.target.capability_version != 1 {
-            return Err(error(ErrorCode::WorkflowMethodUnsupported));
-        }
-        self.db.with_immediate(|tx| {
-            verify_identity(tx,reservation)?;
-            tx.execute("UPDATE workflow_instance_referrers SET state='live',updated_at_ms=?3 WHERE instance_id=?1
-                AND creation_nonce=?2 AND state='creating'",params![reservation.instance_id.to_string(),reservation.creation_nonce.as_bytes().as_slice(),now_ms]).map_err(sql_error)?;
-            tx.execute("UPDATE workflow_instance_referrers SET state='releasing',updated_at_ms=?3 WHERE instance_id=?1
-                AND creation_nonce=?2 AND state='live'",params![reservation.instance_id.to_string(),reservation.creation_nonce.as_bytes().as_slice(),now_ms]).map_err(sql_error)?;
-            tx.execute("UPDATE workflow_instance_referrers SET state='released',released_at_ms=?3,updated_at_ms=?3 WHERE instance_id=?1
-                AND creation_nonce=?2 AND state='releasing'",params![reservation.instance_id.to_string(),reservation.creation_nonce.as_bytes().as_slice(),now_ms]).map_err(sql_error)?;
-            Ok(())
         })
     }
 

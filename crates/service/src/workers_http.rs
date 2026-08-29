@@ -12,8 +12,8 @@ use http_body_util::BodyExt as _;
 use hyper::body::{Body as HttpBody, Frame, SizeHint};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
-    AccountId, BindingKind, DeploymentId, ErrorCode, OperationClass, PlatformError, RequestId,
-    SecretString, WorkerId,
+    AccountId, BindingKind, DeploymentId, ErrorCode, PlatformError, RequestId, SecretString,
+    WorkerId,
 };
 use open_compute_storage::{
     BindingRepository, DeploymentRecord, PlatformStorage, WorkerRepository,
@@ -154,17 +154,14 @@ async fn create_worker(
         request_id,
         None,
         || {
-            let _admission = api
-                .storage
-                .reserve_mutation(OperationClass::Workers, 64 * 1024)?;
-            let (worker, route) = WorkerRepository::new(api.storage.db())
-                .create_worker_with_limit(
-                    account_id,
-                    &body.name,
-                    request_id,
-                    now_ms(),
-                    api.storage.hardening().max_workers_per_account,
-                )?;
+            let _admission = api.storage.reserve_mutation(64 * 1024)?;
+            let (worker, route) = WorkerRepository::new(api.storage.db()).create_worker(
+                account_id,
+                &body.name,
+                request_id,
+                now_ms(),
+                api.storage.hardening().max_workers_per_account,
+            )?;
             Ok(serde_json::json!({ "worker": worker, "defaultRoute": route }))
         },
     );
@@ -304,10 +301,10 @@ async fn create_deployment(
             request_id,
         );
     }
-    let staging_admission = match api.storage.reserve_mutation(
-        OperationClass::Workers,
-        u64::try_from(body_limit).unwrap_or(u64::MAX),
-    ) {
+    let staging_admission = match api
+        .storage
+        .reserve_mutation(u64::try_from(body_limit).unwrap_or(u64::MAX))
+    {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
@@ -508,9 +505,7 @@ async fn promotion_impl(
         request_id,
         Some(body.target_deployment_id),
         || async {
-            let _admission = api
-                .storage
-                .reserve_mutation(OperationClass::Workers, 64 * 1024)?;
+            let _admission = api.storage.reserve_mutation(64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
             let worker_before = repo.get_worker(account_id, worker_id)?;
             if body.expected_active_deployment_id.is_some()
@@ -628,9 +623,7 @@ async fn create_route(
         request_id,
         None,
         || async {
-            let _admission = api
-                .storage
-                .reserve_mutation(OperationClass::Workers, 64 * 1024)?;
+            let _admission = api.storage.reserve_mutation(64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
             let expected_active = if let Some(entrypoint) = body.entrypoint.as_ref() {
                 let worker = repo.get_worker(account_id, worker_id)?;
@@ -656,7 +649,7 @@ async fn create_route(
             } else {
                 None
             };
-            let route = repo.create_exact_route_with_limit(
+            let route = repo.create_exact_route(
                 account_id,
                 worker_id,
                 &hostname,
@@ -1225,7 +1218,10 @@ fn replayed_failure(response: &[u8]) -> PlatformError {
         .ok()
         .and_then(|value| value.get("code")?.as_str().map(str::to_owned))
         .unwrap_or_else(|| ErrorCode::Internal.as_str().to_owned());
-    PlatformError::new(error_code(&code), "idempotent operation previously failed")
+    PlatformError::new(
+        ErrorCode::from_stable_str(&code).unwrap_or(ErrorCode::Internal),
+        "idempotent operation previously failed",
+    )
 }
 
 fn idempotency_ref_id(account_id: AccountId, scope: &str, key: &str) -> String {
@@ -1408,38 +1404,6 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         .extensions_mut()
         .insert(ProductErrorCode(error.code()));
     response
-}
-
-fn error_code(value: &str) -> ErrorCode {
-    [
-        ErrorCode::AccountNotFound,
-        ErrorCode::WorkerNameConflict,
-        ErrorCode::WorkerNotFound,
-        ErrorCode::WorkerDeleted,
-        ErrorCode::DeploymentNotFound,
-        ErrorCode::DeploymentNotReady,
-        ErrorCode::DeploymentActive,
-        ErrorCode::DeploymentReferenced,
-        ErrorCode::DeploymentInvariantViolation,
-        ErrorCode::BundleInvalid,
-        ErrorCode::BundleTooLarge,
-        ErrorCode::BundleRuntimeInvalid,
-        ErrorCode::CompatibilityUnsupported,
-        ErrorCode::ArtifactUnavailable,
-        ErrorCode::ArtifactIntegrityError,
-        ErrorCode::RouteNotFound,
-        ErrorCode::RouteConflict,
-        ErrorCode::EntrypointNotFound,
-        ErrorCode::SecretInvalid,
-        ErrorCode::IdempotencyConflict,
-        ErrorCode::RuntimeUnavailable,
-        ErrorCode::RuntimeResultUnknown,
-        ErrorCode::ResourceLimitExceeded,
-        ErrorCode::Internal,
-    ]
-    .into_iter()
-    .find(|code| code.as_str() == value)
-    .unwrap_or(ErrorCode::Internal)
 }
 
 fn internal() -> PlatformError {

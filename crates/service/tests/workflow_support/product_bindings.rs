@@ -16,7 +16,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     let root = repo_root();
     let temp = tempfile::Builder::new()
         .prefix("workflow-products-")
-        .tempdir_in(root.join(".temp/p2-4-run"))
+        .tempdir_in(root.join(".temp/workflow-run"))
         .unwrap();
     let evidence = process_crash::Evidence(Some(temp));
     let temp = evidence.0.as_ref().unwrap();
@@ -52,7 +52,13 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     );
     let account = storage.identity().default_account_id;
     let worker = WorkerRepository::new(storage.db())
-        .create_worker(account, "workflow-products", RequestId::generate(), now())
+        .create_worker(
+            account,
+            "workflow-products",
+            RequestId::generate(),
+            now(),
+            1_000_000,
+        )
         .unwrap()
         .0;
     let mut bindings = BTreeMap::new();
@@ -103,7 +109,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         bindings.insert(
             binding.into(),
             DeploymentBindingInput {
-                capability_version: 1,
                 kind,
                 id: id.as_str().unwrap().parse().unwrap(),
                 permissions: Default::default(),
@@ -127,7 +132,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     bindings.insert(
         "QUEUE".into(),
         DeploymentBindingInput {
-            capability_version: 1,
             kind: BindingKind::QueueProducer,
             id: ResourceId::from_uuid(queue.queue.id.as_uuid()).unwrap(),
             permissions: Default::default(),
@@ -184,13 +188,13 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     let definition = WorkflowRepository::new(storage.db())
         .create_definition(account, "workflow-products", now())
         .unwrap();
-    WorkflowApiState::new(
+    let version = WorkflowApiState::new(
         storage.clone(),
         scheduler.clone(),
         stack.transport.clone(),
         Default::default(),
     )
-    .create_version(account, definition.id, deployment.id, "Flow".into(), 1)
+    .create_version(account, definition.id, deployment.id, "Flow".into())
     .await
     .unwrap();
     let config = WorkflowsConfig::default();
@@ -199,7 +203,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .create(
             account,
             definition.id,
-            1,
             Some("products-instance"),
             open_compute_workers::WorkflowCreateInput {
                 payload_json: "null",
@@ -212,15 +215,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .claim(now(), &mut Default::default())
         .unwrap()
         .unwrap();
-    let target = DispatchTarget {
-        account_id: account,
-        worker_id: worker.id,
-        deployment_id: deployment.id,
-        worker_code_sha256: hex::encode(deployment.worker_code_sha256),
-        entrypoint: Some("Flow".into()),
-        route_generation: 1,
-        request_id: RequestId::generate(),
-    };
+    let target = version.target;
     let envelope = WorkflowRunRequest {
         fence: run.fence.clone(),
         external_instance_id: run.external_instance_id,
@@ -230,11 +225,15 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     };
     let result = stack
         .transport
-        .dispatch_workflow(&target, &envelope, Duration::from_secs(30))
+        .dispatch_workflow(
+            &target,
+            &envelope,
+            Duration::from_millis(config.dispatch_timeout_ms),
+        )
         .await
         .unwrap();
-    assert_eq!(result.outcome, "complete", "{result:?}");
-    let before: Value = serde_json::from_str(result.output_json.as_ref().unwrap()).unwrap();
+    let (_, output_json) = complete(result);
+    let before: Value = serde_json::from_str(&output_json).unwrap();
     assert!(
         before["value"].get("failure").is_none(),
         "product facade failure: {before}"
@@ -246,7 +245,9 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     assert_eq!(before["value"]["object"], 1);
     assert_eq!(
         before["value"]["context"],
-        json!({"attempt":1,"step":{"name":"products","count":1},"config":null})
+        json!({"attempt":1,"step":{"name":"products","count":1},"config":{
+            "retries":{"limit":5,"delay":10000,"backoff":"exponential"},"timeout":60000
+        }})
     );
     let expired = now() + i64::try_from(config.lease_ms + 1).unwrap();
     scheduler.recover_workflows(expired, &config, 32).unwrap();
@@ -263,10 +264,15 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     };
     let replay_result = stack
         .transport
-        .dispatch_workflow(&target, &envelope, Duration::from_secs(30))
+        .dispatch_workflow(
+            &target,
+            &envelope,
+            Duration::from_millis(config.dispatch_timeout_ms),
+        )
         .await
         .unwrap();
-    let after: Value = serde_json::from_str(replay_result.output_json.as_ref().unwrap()).unwrap();
+    let (final_ordinal, replay_output) = complete(replay_result);
+    let after: Value = serde_json::from_str(&replay_output).unwrap();
     assert_eq!(after["calls"], 0);
     assert_eq!(after["value"], before["value"]);
     assert_eq!(
@@ -280,8 +286,8 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .finish_workflow(
             &replay.fence,
             &WorkflowCompletion::Complete {
-                output_json: replay_result.output_json.unwrap(),
-                final_ordinal: 1,
+                output_json: replay_output,
+                final_ordinal,
             },
             expired + 1001,
             &config,
@@ -296,7 +302,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .create(
             account,
             definition.id,
-            1,
             Some("external-effect"),
             open_compute_workers::WorkflowCreateInput {
                 payload_json: "{\"crashBeforeCommit\":true}",
@@ -316,12 +321,13 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         created_at_ms: interrupted.created_at_ms,
         payload_json: interrupted.input_json,
     };
+    let dispatch_timeout = Duration::from_millis(config.dispatch_timeout_ms);
     let observation = tokio::spawn({
         let transport = stack.transport.clone();
         let target = target.clone();
         async move {
             transport
-                .dispatch_workflow(&target, &request, Duration::from_secs(30))
+                .dispatch_workflow(&target, &request, dispatch_timeout)
                 .await
         }
     });
@@ -376,18 +382,22 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     };
     let retried = stack
         .transport
-        .dispatch_workflow(&target, &request, Duration::from_secs(30))
+        .dispatch_workflow(
+            &target,
+            &request,
+            Duration::from_millis(config.dispatch_timeout_ms),
+        )
         .await
         .unwrap();
-    assert_eq!(retried.outcome, "complete", "{retried:?}");
-    let value: Value = serde_json::from_str(retried.output_json.as_ref().unwrap()).unwrap();
+    let (final_ordinal, retried_output) = complete(retried);
+    let value: Value = serde_json::from_str(&retried_output).unwrap();
     assert_eq!(value, json!({"attempts":2,"durable":1}));
     scheduler
         .finish_workflow(
             &retry.fence,
             &WorkflowCompletion::Complete {
-                output_json: retried.output_json.unwrap(),
-                final_ordinal: 1,
+                output_json: retried_output,
+                final_ordinal,
             },
             expired + 1001,
             &config,
@@ -401,7 +411,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             .create(
                 account,
                 definition.id,
-                1,
                 Some(&format!("backlog-{index}")),
                 open_compute_workers::WorkflowCreateInput {
                     payload_json: "{\"backlog\":true}",
@@ -491,7 +500,7 @@ export class Counter extends DurableObject {
 export class Flow extends WorkflowEntrypoint {
   async run(event,step) {
     if(event.payload?.crashBeforeCommit) {
-      return step.do('effect',async context=>{
+      return step.do('effect',{timeout:240000,retries:{limit:0,delay:0}},async context=>{
         const attempts = Number(await this.env.KV.get('effects') || 0)+1;
         await this.env.KV.put('effects',String(attempts));
         const durable = await this.env.OBJECTS.getByName('counter').recordOnce(`${event.instanceId}:${context.step.name}:${context.step.count}`);

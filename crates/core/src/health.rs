@@ -24,7 +24,7 @@ pub enum ComponentName {
     Runtime,
     /// Independent Durable Object alarm scheduler.
     Scheduler,
-    /// Snapshot, restore, and upgrade operator receipts.
+    /// Snapshot and restore operator receipts.
     Operations,
 }
 

@@ -6,7 +6,7 @@ impl WorkflowBindingDescriptor {
         let name = self.name.as_bytes();
         if self.kind != open_compute_core::BindingKind::Workflow
             || self.schema_version != 1
-            || !matches!(self.capability_version, 1 | 2)
+            || self.capability_version != 1
             || self.definition_lifecycle_generation < 1
             || name.is_empty()
             || name.len() > 64
@@ -31,7 +31,6 @@ impl WorkflowRepository<'_> {
         deployment: DeploymentId,
         name: &str,
         definition: WorkflowId,
-        capability_version: u32,
         now_ms: i64,
     ) -> Result<WorkflowBindingRecord, PlatformError> {
         let definition = self.definition(account, definition)?;
@@ -47,7 +46,7 @@ impl WorkflowRepository<'_> {
             name: name.into(),
             definition_id: definition.id,
             definition_lifecycle_generation: definition.lifecycle_generation,
-            capability_version,
+            capability_version: 1,
         };
         Ok(WorkflowBindingRecord {
             descriptor_sha256: descriptor.sha256()?,

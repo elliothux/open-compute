@@ -34,7 +34,7 @@ impl WebSocketCloseReason {
 
 #[derive(Debug)]
 pub(super) struct P1Metrics {
-    admission_total: [u64; 45],
+    admission_total: [u64; 40],
     disk_free_bytes: u64,
     disk_reserved_bytes: u64,
     disk_staging_bytes: u64,
@@ -50,8 +50,6 @@ pub(super) struct P1Metrics {
     restore_last_duration: f64,
     restore_last_smoke_verified: u64,
     schema_current: u64,
-    schema_target: u64,
-    schema_migration_required: u64,
     schema_failed_resources: u64,
     sqlite_busy_total: u64,
     sqlite_check_failure_total: u64,
@@ -63,7 +61,7 @@ pub(super) struct P1Metrics {
 impl Default for P1Metrics {
     fn default() -> Self {
         Self {
-            admission_total: [0; 45],
+            admission_total: [0; 40],
             disk_free_bytes: 0,
             disk_reserved_bytes: 0,
             disk_staging_bytes: 0,
@@ -79,8 +77,6 @@ impl Default for P1Metrics {
             restore_last_duration: 0.0,
             restore_last_smoke_verified: 0,
             schema_current: 0,
-            schema_target: 0,
-            schema_migration_required: 0,
             schema_failed_resources: 0,
             sqlite_busy_total: 0,
             sqlite_check_failure_total: 0,
@@ -157,12 +153,10 @@ impl MetricsRegistry {
             guard.p1.snapshot_inspect_failure_total.saturating_add(1);
     }
 
-    /// Publish the serving and target control schema fence.
-    pub fn set_schema_state(&self, current: u64, target: u64) {
+    /// Publish the verified current control schema version.
+    pub fn set_schema_version(&self, current: u64) {
         let mut guard = self.lock();
         guard.p1.schema_current = current;
-        guard.p1.schema_target = target;
-        guard.p1.schema_migration_required = u64::from(current != target);
     }
 
     /// Publish the number of project resource files that failed schema inspection.
@@ -238,10 +232,9 @@ impl MetricsRegistry {
                 OperationClass::R2 => Some("r2"),
                 OperationClass::D1 => Some("d1"),
                 OperationClass::DurableObjects => Some("durable_objects"),
-                OperationClass::Scheduler
-                | OperationClass::Snapshot
-                | OperationClass::Restore
-                | OperationClass::Upgrade => None,
+                OperationClass::Scheduler | OperationClass::Snapshot | OperationClass::Restore => {
+                    None
+                }
             };
             if let Some(product) = product {
                 self.inc_quota_reject(product);
@@ -332,12 +325,6 @@ pub(super) fn write_p1_metrics(out: &mut String, metrics: &P1Metrics) {
             "gauge",
         ),
         ("platform_schema_current", metrics.schema_current, "gauge"),
-        ("platform_schema_target", metrics.schema_target, "gauge"),
-        (
-            "platform_schema_migration_required",
-            metrics.schema_migration_required,
-            "gauge",
-        ),
         (
             "platform_schema_failed_resources",
             metrics.schema_failed_resources,
@@ -431,7 +418,7 @@ pub(super) fn write_p1_metrics(out: &mut String, metrics: &P1Metrics) {
     }
 }
 
-const fn operations() -> [OperationClass; 9] {
+const fn operations() -> [OperationClass; 8] {
     [
         OperationClass::Workers,
         OperationClass::Kv,
@@ -441,7 +428,6 @@ const fn operations() -> [OperationClass; 9] {
         OperationClass::Scheduler,
         OperationClass::Snapshot,
         OperationClass::Restore,
-        OperationClass::Upgrade,
     ]
 }
 
@@ -455,7 +441,6 @@ const fn admission_operation_index(operation: OperationClass) -> usize {
         OperationClass::Scheduler => 5,
         OperationClass::Snapshot => 6,
         OperationClass::Restore => 7,
-        OperationClass::Upgrade => 8,
     }
 }
 
@@ -469,7 +454,6 @@ const fn admission_operation_name(operation: OperationClass) -> &'static str {
         OperationClass::Scheduler => "scheduler",
         OperationClass::Snapshot => "snapshot",
         OperationClass::Restore => "restore",
-        OperationClass::Upgrade => "upgrade",
     }
 }
 

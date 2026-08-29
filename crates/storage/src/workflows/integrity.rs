@@ -72,14 +72,8 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
         open_compute_core::workflow::validate_workflow_instance_id(&identity.external_instance_id)
             .map_err(|_| invariant())?;
         if version_digest(&identity.target)? != identity.target.descriptor_sha256
-            || (identity.target.capability_version == 1
-                && (identity.instance_generation != 1
-                    || matches!(
-                        reservation.state,
-                        WorkflowRefState::Retained | WorkflowRefState::Restarting
-                    )))
-            || (identity.target.capability_version == 2
-                && reservation.state == WorkflowRefState::Released)
+            || identity.target.capability_version != 1
+            || reservation.state == WorkflowRefState::Released
         {
             return Err(invariant());
         }

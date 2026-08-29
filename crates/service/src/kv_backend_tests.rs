@@ -1,4 +1,5 @@
 use super::*;
+use crate::binding_backend::KvBindingExecutor;
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{
     BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
@@ -301,23 +302,6 @@ fn concrete_executor_rejects_option_boundaries_without_replay() {
 }
 
 #[test]
-fn legacy_trait_methods_remain_a_text_only_p0_3_compatibility_path() {
-    let (_temp, storage, binding, clock) = fixture();
-    let executor = SqliteKvBindingExecutor::new(storage, clock);
-    crate::binding_backend::KvBindingExecutor::put(&executor, &binding, "legacy", "value").unwrap();
-    assert_eq!(
-        crate::binding_backend::KvBindingExecutor::get(&executor, &binding, "legacy").unwrap(),
-        Some("value".to_owned())
-    );
-    crate::binding_backend::KvBindingExecutor::delete(&executor, &binding, "legacy").unwrap();
-    assert!(
-        crate::binding_backend::KvBindingExecutor::get(&executor, &binding, "legacy")
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[test]
 fn connection_gate_handle_lru_generation_and_corruption_fail_closed() {
     let (_temp, storage, binding, clock) = fixture();
     let executor =
@@ -431,7 +415,7 @@ fn connection_gate_handle_lru_generation_and_corruption_fail_closed() {
 }
 
 #[test]
-fn absolute_expiration_cursor_and_legacy_binary_errors_are_stable() {
+fn absolute_expiration_cursor_and_binary_values_are_stable() {
     let (_temp, storage, binding, clock) = fixture();
     let executor = SqliteKvBindingExecutor::new(storage.clone(), clock.clone());
     executor
@@ -447,12 +431,19 @@ fn absolute_expiration_cursor_and_legacy_binary_errors_are_stable() {
             },
         )
         .unwrap();
-    assert_eq!(
-        crate::binding_backend::KvBindingExecutor::get(&executor, &binding, "binary")
-            .unwrap_err()
-            .code(),
-        ErrorCode::KvInternalProtocolError
-    );
+    let KvCommandResult::Entries(entries) = executor
+        .execute(
+            &binding,
+            KvCommand::Get {
+                keys: vec!["binary".to_owned()],
+                cache_ttl: None,
+            },
+        )
+        .unwrap()
+    else {
+        panic!("expected binary result")
+    };
+    assert_eq!(entries[0].as_ref().unwrap().value, [0xff]);
     assert_eq!(
         executor
             .execute(

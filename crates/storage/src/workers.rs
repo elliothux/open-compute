@@ -297,19 +297,8 @@ impl<'a> WorkerRepository<'a> {
         Self { db }
     }
 
-    /// Create a Worker and its mandatory platform route atomically.
-    pub fn create_worker(
-        &self,
-        account_id: AccountId,
-        name: &str,
-        request_id: RequestId,
-        now_ms: i64,
-    ) -> Result<(WorkerRecord, RouteRecord), PlatformError> {
-        self.create_worker_with_limit(account_id, name, request_id, now_ms, u32::MAX)
-    }
-
     /// Create a Worker while atomically enforcing the account live-Worker limit.
-    pub fn create_worker_with_limit(
+    pub fn create_worker(
         &self,
         account_id: AccountId,
         name: &str,
@@ -815,35 +804,9 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Add an exact-host route and bump the Worker generation atomically.
-    #[allow(clippy::too_many_arguments)]
-    pub fn create_exact_route(
-        &self,
-        account_id: AccountId,
-        worker_id: WorkerId,
-        hostname_ascii: &str,
-        path_prefix: &str,
-        entrypoint: Option<&str>,
-        expected_active: Option<DeploymentId>,
-        request_id: RequestId,
-        now_ms: i64,
-    ) -> Result<RouteRecord, PlatformError> {
-        self.create_exact_route_with_limit(
-            account_id,
-            worker_id,
-            hostname_ascii,
-            path_prefix,
-            entrypoint,
-            expected_active,
-            request_id,
-            now_ms,
-            u32::MAX,
-        )
-    }
-
     /// Add an exact-host route while atomically enforcing the account route limit.
     #[allow(clippy::too_many_arguments)]
-    pub fn create_exact_route_with_limit(
+    pub fn create_exact_route(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,

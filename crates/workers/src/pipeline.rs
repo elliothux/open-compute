@@ -9,7 +9,7 @@ mod validation;
 use binding_preparation::PreparedBindings;
 use validation::{invariant, request_fingerprint};
 pub(crate) use validation::{
-    parse_failure_code, stable_validation_code, validate_binding_set, validate_idempotency_key,
+    stable_validation_code, validate_binding_set, validate_idempotency_key,
     validate_injection_module_collisions, validate_secret_set,
 };
 
@@ -27,9 +27,8 @@ use futures::stream;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
     AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions,
-    CronActivationId, CronSchedule, DeploymentId, ErrorCode, OperationClass, PlatformError,
-    QueueConsumerId, QueueId, RequestId, ResourceId, ResourceState, SecretBytes, SecretString,
-    WorkerId,
+    CronActivationId, CronSchedule, DeploymentId, ErrorCode, PlatformError, QueueConsumerId,
+    QueueId, RequestId, ResourceId, ResourceState, SecretBytes, SecretString, WorkerId,
 };
 use open_compute_storage::{
     CRON_PARSER_VERSION, CronDeclarationMode, DeploymentRecord, DeploymentState,
@@ -66,28 +65,12 @@ pub struct DeploymentBindingInput {
     pub kind: BindingKind,
     /// Existing ready resource identity. Display names are never accepted.
     pub id: ResourceId,
-    /// Immutable adapter capability; only Workflow currently supports version two.
-    #[serde(
-        default = "legacy_binding_capability",
-        skip_serializing_if = "is_legacy_binding_capability"
-    )]
-    pub capability_version: u32,
     /// Method capability set; defaults to read/write for product compatibility.
     #[serde(default)]
     pub permissions: CanonicalPermissions,
     /// Capability-version-one product configuration.
     #[serde(default)]
     pub config: CanonicalBindingConfig,
-}
-
-const fn legacy_binding_capability() -> u32 {
-    1
-}
-
-// Serde's skip predicate receives a shared field reference.
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn is_legacy_binding_capability(version: &u32) -> bool {
-    *version == 1
 }
 
 /// Immutable Queue push-consumer declaration supplied with a deployment.
@@ -437,7 +420,7 @@ impl<'a> DeploymentController<'a> {
                 let failed: FailedResponse =
                     serde_json::from_slice(&response).map_err(|_| invariant())?;
                 return Err(PlatformError::new(
-                    parse_failure_code(&failed.code),
+                    ErrorCode::from_stable_str(&failed.code).unwrap_or(ErrorCode::Internal),
                     "idempotent deployment operation previously failed",
                 ));
             }
@@ -491,9 +474,7 @@ impl<'a> DeploymentController<'a> {
         stored_vars: BTreeMap<String, Vec<u8>>,
     ) -> Result<CreateDeploymentResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
-        let _admission = self
-            .storage
-            .reserve_mutation(OperationClass::Workers, bundle.admission_bytes()?)?;
+        let _admission = self.storage.reserve_mutation(bundle.admission_bytes()?)?;
         let deployment_id = DeploymentId::generate();
         let (stored_secrets, secret_descriptors) = self.encrypt_secrets(
             request.account_id,
@@ -512,7 +493,7 @@ impl<'a> DeploymentController<'a> {
         } = self.prepare_bindings(request, deployment_id)?;
         let queue_consumers = self.prepare_queue_consumers(request)?;
         let cron = prepare_cron_config(request)?;
-        let descriptor = WorkerCodeDescriptorV1::new_with_product_bindings(
+        let descriptor = WorkerCodeDescriptorV1::new(
             request.account_id,
             request.worker_id,
             deployment_id,
@@ -530,6 +511,7 @@ impl<'a> DeploymentController<'a> {
         )?;
         let descriptor_hash = descriptor.sha256()?;
         let size = bundle.size()?;
+        let artifact_reservation = self.artifacts.reserve_deployment_artifact().await;
         let artifact = bundle.store(&self.artifacts).await?;
         if artifact.sha256_bytes() != &bundle.sha256() || artifact.size() != size {
             return Err(PlatformError::new(
@@ -537,7 +519,7 @@ impl<'a> DeploymentController<'a> {
                 "ArtifactStore returned a different immutable artifact",
             ));
         }
-        let mut deployment = repo.insert_staging_deployment_with_products_and_limit(
+        let mut deployment = repo.insert_staging_deployment(
             &NewDeployment {
                 id: deployment_id,
                 account_id: request.account_id,
@@ -564,6 +546,7 @@ impl<'a> DeploymentController<'a> {
             },
             self.storage.hardening().max_deployments_per_worker,
         )?;
+        drop(artifact_reservation);
         repo.begin_validation(deployment_id)?;
         let candidate = ValidationCandidate {
             account_id: request.account_id,
@@ -692,7 +675,7 @@ impl<'a> DeploymentController<'a> {
         for (name, value) in secrets {
             let revision_id = Uuid::now_v7().to_string();
             let plaintext = SecretBytes::new(value.expose().as_bytes().to_vec());
-            let envelope = self.storage.crypto().encrypt_revision(
+            let envelope = self.storage.crypto().encrypt(
                 &plaintext,
                 account_id,
                 worker_id,

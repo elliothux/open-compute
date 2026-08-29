@@ -45,16 +45,11 @@ pub(super) fn parse<T: std::str::FromStr>(
 pub(super) fn failure_code(
     row: &rusqlite::Row<'_>,
     index: impl rusqlite::RowIndex,
-    capability: i64,
 ) -> rusqlite::Result<Option<String>> {
     let code: Option<String> = row.get(index)?;
     if let Some(code) = &code {
-        match capability {
-            1 => open_compute_core::workflow::terminal_error_code(code),
-            2 => open_compute_core::workflow::terminal_error_code_v2(code),
-            _ => return Err(rusqlite::Error::InvalidQuery),
-        }
-        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+        open_compute_core::workflow::terminal_error_code(code)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?;
     }
     Ok(code)
 }
@@ -66,12 +61,10 @@ pub(super) fn digest(
         .try_into()
         .map_err(|_| rusqlite::Error::InvalidQuery)
 }
-// Named columns allow the V1 migration preflight to read its original schema.
-// Capability-two rows must provide every new column; missing metadata is corruption.
 pub(super) const INSTANCE_SELECT: &str = "SELECT * FROM workflow_instances";
 pub(super) fn instance_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowInstanceRecord> {
     let capability: i64 = row.get("capability_version")?;
-    if !matches!(capability, 1 | 2) {
+    if capability != 1 {
         return Err(rusqlite::Error::InvalidQuery);
     }
     let state = match row.get::<_, String>("state")?.as_str() {
@@ -79,9 +72,9 @@ pub(super) fn instance_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workflow
         "running" => WorkflowState::Running,
         "complete" => WorkflowState::Complete,
         "errored" => WorkflowState::Errored,
-        "waiting" if capability == 2 => WorkflowState::Waiting,
-        "paused" if capability == 2 => WorkflowState::Paused,
-        "terminated" if capability == 2 => WorkflowState::Terminated,
+        "waiting" => WorkflowState::Waiting,
+        "paused" => WorkflowState::Paused,
+        "terminated" => WorkflowState::Terminated,
         _ => return Err(rusqlite::Error::InvalidQuery),
     };
     Ok(WorkflowInstanceRecord {
@@ -123,7 +116,7 @@ pub(super) fn instance_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workflow
                 Ok(failure)
             })
             .transpose()?,
-        error_code: failure_code(row, "error_code", capability)?,
+        error_code: failure_code(row, "error_code")?,
         run_token: row
             .get::<_, Option<Vec<u8>>>("run_token")?
             .map(|bytes| {
@@ -138,11 +131,7 @@ pub(super) fn instance_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workflow
         completed_step_count: row.get("completed_step_count")?,
         state_bytes: row.get("state_bytes")?,
         terminal_at_ms: row.get("terminal_at_ms")?,
-        durable: if capability == 2 {
-            Some(durable_state(row)?)
-        } else {
-            None
-        },
+        durable: durable_state(row)?,
     })
 }
 
@@ -236,7 +225,7 @@ pub(super) fn account_capacity(
         "SELECT coalesce(SUM(state_bytes),0),
         coalesce(SUM(state IN ('queued','running','waiting','paused')),0)
         +(SELECT COUNT(*) FROM workflow_steps s JOIN workflow_instances i ON i.id=s.instance_id
-          WHERE i.account_id=?1 AND i.capability_version=2 AND s.kind IN ('do','wait_event')
+          WHERE i.account_id=?1 AND i.capability_version=1 AND s.kind IN ('do','wait_event')
           AND s.state IN ('pending','running','waiting'))
         FROM workflow_instances WHERE account_id=?1",
         [account.to_string()],
@@ -247,7 +236,7 @@ pub(super) fn account_capacity(
 
 /// Admission charges pending failures as well as bytes; settlements may use an existing reservation
 /// even after capacity is lowered, but may not introduce new growth beyond the current policy.
-pub(super) fn capacity_v2(
+pub(super) fn capacity_change(
     conn: &Connection,
     instance: &WorkflowInstanceRecord,
     extra_bytes: i64,
@@ -257,7 +246,7 @@ pub(super) fn capacity_v2(
     let (bytes,reservations):(u64,u64)=conn.query_row("SELECT state_bytes,
         (state IN ('queued','running','waiting','paused'))
         +(SELECT COUNT(*) FROM workflow_steps s WHERE s.instance_id=i.id AND s.kind IN ('do','wait_event')
-          AND s.state IN ('pending','running','waiting')) FROM workflow_instances i WHERE id=?1 AND capability_version=2",
+          AND s.state IN ('pending','running','waiting')) FROM workflow_instances i WHERE id=?1 AND capability_version=1",
         [instance.identity.instance_id.to_string()],|row|Ok((row.get(0)?,row.get(1)?))).map_err(sql_error)?;
     let (account_bytes, account_reservations) =
         account_capacity(conn, instance.identity.target.account_id)?;
@@ -307,14 +296,10 @@ pub(super) fn initial_state_bytes(
     input_bytes: usize,
 ) -> usize {
     input_bytes
-        + if identity.target.capability_version == 2 {
-            open_compute_core::workflow::WORKFLOW_V2_INSTANCE_BYTES
-                + identity.target.definition_name.len()
-                + identity.external_instance_id.len()
-                + identity.target.class_name.len()
-        } else {
-            0
-        }
+        + open_compute_core::workflow::WORKFLOW_INSTANCE_BYTES
+        + identity.target.definition_name.len()
+        + identity.external_instance_id.len()
+        + identity.target.class_name.len()
 }
 
 pub(super) fn heartbeat(
@@ -337,31 +322,4 @@ pub(super) fn deadline(now_ms: i64, duration: u64) -> Result<i64, PlatformError>
     now_ms
         .checked_add(i64::try_from(duration).map_err(|_| error(ErrorCode::LimitInvalid))?)
         .ok_or_else(|| error(ErrorCode::LimitInvalid))
-}
-
-impl WorkflowStepIdentity {
-    /// Validate the supported sequential identity and hash its canonical descriptor.
-    pub fn sha256(&self) -> Result<[u8; 32], PlatformError> {
-        if self.config_json != "null" {
-            return Err(error(ErrorCode::WorkflowStepConfigUnsupported));
-        }
-        if self.name.is_empty() || self.name.len() > 256 || self.name_count == 0 {
-            return Err(error(ErrorCode::WorkflowSerializationUnsupported));
-        }
-        if self.ordinal >= 1024 {
-            return Err(error(ErrorCode::WorkflowStepLimitExceeded));
-        }
-        let descriptor = serde_json::json!({"kind":"do","ordinal":self.ordinal,"name":self.name,
-            "nameCount":self.name_count,"config":null});
-        Ok(Sha256::digest(
-            serde_json::to_vec(&descriptor)
-                .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?,
-        )
-        .into())
-    }
-    /// Logical descriptor bytes accounted by the schema triggers.
-    #[must_use]
-    pub fn state_bytes(&self) -> usize {
-        self.name.len() + self.config_json.len() + 50
-    }
 }

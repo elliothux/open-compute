@@ -616,19 +616,22 @@ fn reserve_bucket(
 ) -> open_compute_storage::ResourceRecord {
     let fingerprint = fixture.storage.crypto().fingerprint_request(key.as_bytes());
     let reservation = ResourceRepository::new(fixture.storage.db())
-        .reserve_create(&ReserveResourceCreate {
-            account_id: fixture.account,
-            kind: BindingKind::R2Bucket,
-            name,
-            idempotency_key: key,
-            fingerprint_key_id: fixture.storage.crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id: ResourceId::generate(),
-            driver_schema_version: R2_SCHEMA_VERSION,
-            request_id: RequestId::generate(),
-            now_ms,
-            expires_at_ms: now_ms + 1_000,
-        })
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id: fixture.account,
+                kind: BindingKind::R2Bucket,
+                name,
+                idempotency_key: key,
+                fingerprint_key_id: fixture.storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: ResourceId::generate(),
+                driver_schema_version: R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms,
+                expires_at_ms: now_ms + 1_000,
+            },
+            1_000_000,
+        )
         .unwrap();
     let ResourceCreateReservation::Reserved(resource) = reservation else {
         panic!("unexpected reservation")

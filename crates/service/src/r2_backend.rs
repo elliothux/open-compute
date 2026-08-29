@@ -190,10 +190,9 @@ impl R2BindingService {
                 }
             }
             Operation::Put => {
-                let admission = self.storage.reserve_mutation(
-                    OperationClass::R2,
-                    bucket.max_object_bytes.saturating_add(64 * 1024),
-                );
+                let admission = self
+                    .storage
+                    .reserve_mutation(bucket.max_object_bytes.saturating_add(64 * 1024));
                 if let Some(metrics) = &self.metrics {
                     metrics.observe_admission(
                         OperationClass::R2,
