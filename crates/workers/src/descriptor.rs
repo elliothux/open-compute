@@ -1,5 +1,6 @@
 //! Immutable `WorkerCode` descriptor and loader key grammar.
 
+use crate::assets::{AssetManifestV1, AssetRoutingConfigV1};
 use crate::bundle::{ModuleManifest, WorkerBundleManifest};
 use open_compute_core::{
     AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
@@ -21,7 +22,29 @@ pub const COMPATIBILITY_DATE_MIN: &str = "2022-01-01";
 /// Latest compatibility date accepted by the pinned P1 policy.
 pub const COMPATIBILITY_DATE_MAX: &str = "2026-08-26";
 /// Compatibility flags accepted by the production descriptor validator.
-pub const COMPATIBILITY_FLAGS_ALLOWED: &[&str] = &["nodejs_compat", "rpc"];
+///
+/// The navigation pair implements Cloudflare's documented Static Assets contract:
+/// `assets_navigation_prefers_asset_serving` defaults on at `2025-04-01`, while
+/// `assets_navigation_has_no_effect` explicitly disables it. The pinned behavior is
+/// regression-tested by the asset handler matrix.
+pub const COMPATIBILITY_FLAGS_ALLOWED: &[&str] = &[
+    "assets_navigation_has_no_effect",
+    "assets_navigation_prefers_asset_serving",
+    "nodejs_compat",
+    "rpc",
+];
+
+/// Immutable asset identity and routing included in the deployment descriptor.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetDescriptorV1 {
+    /// Canonical manifest artifact digest.
+    pub manifest_sha256: String,
+    /// Canonical manifest byte length.
+    pub manifest_size: u64,
+    /// Frozen route and optional binding configuration.
+    pub routing: AssetRoutingConfigV1,
+}
 
 #[cfg(test)]
 mod source_tests;
@@ -191,14 +214,18 @@ pub struct WorkerCodeDescriptorV1 {
     pub schema_version: u32,
     /// Canonical three-segment loader key.
     pub loader_key: String,
+    /// Explicit deployment content union discriminator.
+    pub content_kind: open_compute_storage::DeploymentContentKind,
     /// Canonical artifact digest.
-    pub artifact_sha256: String,
+    pub artifact_sha256: Option<String>,
     /// Artifact schema.
-    pub artifact_schema_version: u32,
+    pub artifact_schema_version: Option<u32>,
     /// Main module.
-    pub main_module: String,
+    pub main_module: Option<String>,
     /// Ordered module descriptors.
     pub ordered_modules: Vec<ModuleManifest>,
+    /// Optional immutable static-asset descriptor.
+    pub assets: Option<AssetDescriptorV1>,
     /// Tenant compatibility date.
     pub compatibility_date: String,
     /// Sorted compatibility flags.
@@ -230,8 +257,8 @@ impl WorkerCodeDescriptorV1 {
         account_id: AccountId,
         worker_id: WorkerId,
         deployment_id: DeploymentId,
-        artifact_sha256: [u8; 32],
-        manifest: &WorkerBundleManifest,
+        artifact: Option<([u8; 32], &WorkerBundleManifest)>,
+        assets: Option<(&AssetManifestV1, &AssetRoutingConfigV1)>,
         compatibility_date: String,
         compatibility_flags: Vec<String>,
         canonical_vars: BTreeMap<String, serde_json::Value>,
@@ -243,6 +270,14 @@ impl WorkerCodeDescriptorV1 {
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
         let compatibility_flags = validate_compatibility(&compatibility_date, compatibility_flags)?;
+        let content_kind = if artifact.is_some() {
+            open_compute_storage::DeploymentContentKind::Worker
+        } else {
+            open_compute_storage::DeploymentContentKind::AssetsOnly
+        };
+        if artifact.is_none() && assets.is_none() {
+            return Err(binding_invariant());
+        }
         secret_revisions.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
         if secret_revisions
             .windows(2)
@@ -315,14 +350,66 @@ impl WorkerCodeDescriptorV1 {
                 return Err(binding_invariant());
             }
         }
+        if let Some((manifest, routing)) = assets {
+            manifest.validate()?;
+            routing.validate()?;
+            if let Some(binding) = routing.binding.as_deref()
+                && !env_names.insert(binding)
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::BindingTypeMismatch,
+                    "asset binding name conflicts with deployment env",
+                ));
+            }
+        }
+        if content_kind == open_compute_storage::DeploymentContentKind::AssetsOnly
+            && (!canonical_vars.is_empty()
+                || !secret_revisions.is_empty()
+                || !binding_descriptors.is_empty()
+                || !queue_binding_descriptors.is_empty()
+                || !workflow_binding_descriptors.is_empty()
+                || matches!(
+                    assets.map(|(_, routing)| &routing.run_worker_first),
+                    Some(
+                        crate::assets::RunWorkerFirst::All(true)
+                            | crate::assets::RunWorkerFirst::Rules(_)
+                    )
+                ))
+        {
+            return Err(PlatformError::new(
+                ErrorCode::AssetConfigUnsupported,
+                "assets-only deployments cannot declare an execution environment",
+            ));
+        }
         validate_limits(&limits)?;
+        let (artifact_sha256, artifact_schema_version, main_module, ordered_modules) = artifact
+            .map_or((None, None, None, Vec::new()), |(digest, manifest)| {
+                (
+                    Some(hex::encode(digest)),
+                    Some(manifest.schema_version),
+                    Some(manifest.main_module.clone()),
+                    manifest.modules.clone(),
+                )
+            });
+        let assets = assets
+            .map(|(manifest, routing)| {
+                Ok::<AssetDescriptorV1, PlatformError>(AssetDescriptorV1 {
+                    manifest_sha256: hex::encode(manifest.sha256()?),
+                    manifest_size: u64::try_from(manifest.canonical_bytes()?.len())
+                        .map_err(|_| binding_invariant())?,
+                    routing: routing.clone(),
+                })
+            })
+            .transpose()?;
         Ok(Self {
             schema_version: 1,
             loader_key: loader_key(account_id, worker_id, deployment_id),
-            artifact_sha256: hex::encode(artifact_sha256),
-            artifact_schema_version: manifest.schema_version,
-            main_module: manifest.main_module.clone(),
-            ordered_modules: manifest.modules.clone(),
+            content_kind,
+            artifact_sha256,
+            artifact_schema_version,
+            main_module,
+            ordered_modules,
+            assets,
             compatibility_date,
             compatibility_flags,
             canonical_vars,
@@ -440,6 +527,14 @@ pub fn validate_compatibility(
             ));
         }
         unique.insert(flag);
+    }
+    if unique.contains("assets_navigation_prefers_asset_serving")
+        && unique.contains("assets_navigation_has_no_effect")
+    {
+        return Err(PlatformError::new(
+            ErrorCode::CompatibilityUnsupported,
+            "asset navigation compatibility flags conflict",
+        ));
     }
     Ok(unique.into_iter().collect())
 }

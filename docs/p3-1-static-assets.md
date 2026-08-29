@@ -1,6 +1,8 @@
 # P3.1：框架产物导入与 Static Assets
 
-状态：待实现的详细方案。2026-08-29。本文没有执行新 Gate，也不代表 vinext 已通过验收。
+状态：平台实现与维护 Gate 已完成，阶段仍未完成。2026-08-29。SA-0/SA-5 所需的 P3.0
+固定输入元组尚不存在，因此 vinext App/Pages、真实浏览器 hydration 与框架产物报告未运行，
+不能据本次平台验收声称 vinext 已通过。
 
 本阶段把静态文件纳入现有不可变 deployment：框架构建产物经过导入、校验和上传后，代码、
 资源 manifest、路由配置一起 ready、promote、rollback。请求仍由一个 `platformd` 和一个
@@ -478,3 +480,30 @@ Rust 静态检查与 coverage（保持 90% 门槛），最后统一验收：完�
 - [固定兼容开关](https://github.com/cloudflare/workers-sdk/blob/296a1a7c97e027a308740e1eaaa6d904dec8f102/packages/workers-shared/asset-worker/src/compatibility-flags.ts)：官方导航行为开关与日期。
 
 这些来源证明可参考的接口与算法，不证明 open-compute 的上传、权限或生命周期实现已经通过。
+
+## 12. 2026-08-29 实施记录
+
+本次直接实现了当前 Day1 平台模型：Worker-only、Worker + Assets、Assets-only 统一 deployment，
+资源 manifest/routing/对象引用与可恢复上传会话，工具链扫描、框架产物 importer 和断点续传
+deploy 协议，受信任默认 HTTP router 与显式 assets binding，以及 deployment-scoped 私有读取、
+校验缓存、存活 pin、快照引用和删除围栏。Assets-only 不生成伪 Worker；上传 finalize 的成功和
+失败均形成可精确重放的终态。
+
+维护证据如下：
+
+- `bun run build`、`bun run typecheck`、`bun run check:generated` 和 59 项 JS 测试通过；
+- format、Clippy（workspace/all-targets/all-features）、no-default-features、Rust 1.98 MSRV、metadata、
+  dependency boundaries 与 `git diff --check` 通过；
+- `./test/coverage.sh --jobs 1` 的 33 个目标全部通过，Rust 行覆盖率为 90.11%，报告位于
+  `target/llvm-cov/summary.json`，执行报告为
+  `.temp/gate-run/20260829T183335-e3f0d5e7/report.json`；
+- `OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 1` 通过：第一轮执行完整
+  workspace，后两轮各执行 17 个登记的时序用例；报告为
+  `.temp/gate-run/20260829T185236-dd70d44e/report.json`；
+- `p3-assets` 使用本地已验证的 stock workerd `v1.20260826.1`，覆盖静态 GET/HEAD、ETag/304、
+  HTML/redirect/404、Worker-first 规则、显式 binding、伪造内部 header、跨版本不可变性和
+  删除存活围栏。
+
+仍未执行 SA-0/SA-5：仓库没有 P3.0 定义的 vinext/React/Vite/RSC/browser 固定输入元组，且本次
+未获授权下载这些运行时依赖。因此本文保持在 `docs/`，不归档到 `docs/implemented/`。这不否定
+上述平台实现和维护 Gate 结果，也不把它们扩写成真实框架或浏览器验收。

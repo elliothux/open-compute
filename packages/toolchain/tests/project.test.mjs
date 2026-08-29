@@ -60,3 +60,42 @@ test("dictionary keys cannot modify prototypes", async t => {
   assert.deepEqual(Object.getOwnPropertyDescriptor(project.vars, "__proto__").value, { polluted: true });
   assert.equal({}.polluted, undefined);
 });
+
+test("loads Worker-plus-assets and assets-only project unions", async t => {
+  const combined = await loadProject(await fixture(t, {
+    ...config,
+    assets: {
+      directory: "dist", binding: "ASSETS", run_worker_first: ["/api/*"],
+      not_found_handling: "single-page-application",
+    },
+  }));
+  assert.equal(combined.assets.binding, "ASSETS");
+  assert.equal(combined.assets.htmlHandling, "auto-trailing-slash");
+  const staticOnly = await loadProject(await fixture(t, {
+    name: "static", compatibilityDate: "2026-08-22", assets: { directory: "dist" },
+  }));
+  assert.equal(staticOnly.main, undefined);
+  assert.equal(staticOnly.assets.runWorkerFirst, false);
+  await assert.rejects(loadProject(await fixture(t, {
+    ...config, vars: { ASSETS: true }, assets: { directory: "dist", binding: "ASSETS" },
+  })), /conflicts/);
+  await assert.rejects(loadProject(await fixture(t, {
+    name: "static", compatibilityDate: "2026-08-22", vars: { MODE: "x" }, assets: { directory: "dist" },
+  })), /assets-only/);
+  await assert.rejects(loadProject(await fixture(t, {
+    ...config, assets: { directory: "dist", runWorkerFirst: true },
+  })), /unknown assets field/);
+});
+
+test("loads a framework output union without retaining a second source entry", async t => {
+  const project = await loadProject(await fixture(t, {
+    name: "framework", compatibilityDate: "2026-08-22",
+    frameworkOutput: ".wrangler/deploy/config.json",
+  }));
+  assert.equal(project.main, undefined);
+  assert.equal(project.assets, undefined);
+  assert.equal(project.frameworkOutput, ".wrangler/deploy/config.json");
+  await assert.rejects(loadProject(await fixture(t, {
+    ...config, frameworkOutput: ".wrangler/deploy/config.json",
+  })), /cannot be combined/);
+});

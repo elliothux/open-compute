@@ -164,7 +164,10 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             account_id: account,
             worker_id: worker.id,
             idempotency_key: "workflow-products".into(),
-            bundle: bundle.into_bytes().into(),
+            content: open_compute_workers::DeploymentContent::Worker {
+                bundle: bundle.into_bytes().into(),
+                assets: None,
+            },
             compatibility_date: "2026-08-22".into(),
             compatibility_flags: vec!["rpc".into()],
             vars: Default::default(),

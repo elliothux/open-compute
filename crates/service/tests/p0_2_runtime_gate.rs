@@ -644,7 +644,12 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     // A warm WorkerLoader entry must not bypass the pre-get source/descriptor
     // check. Corrupting the authority after warm load fails closed instead of
     // executing the already-cached isolate.
-    let artifact = ArtifactRef::new(1, &hex::encode(a.artifact_sha256), a.artifact_size).unwrap();
+    let artifact = ArtifactRef::new(
+        1,
+        &hex::encode(a.artifact_sha256.unwrap()),
+        a.artifact_size.unwrap(),
+    )
+    .unwrap();
     mock.corrupt_body(&artifact.physical_key("system/"));
     let warm_corrupt = dispatch(&transport, account, worker.id, &a, None, "must-not-run").await;
     assert_eq!(warm_corrupt.status, 500);
@@ -726,7 +731,10 @@ export default {
         account_id: account,
         worker_id: worker,
         idempotency_key: "deploy-egress".to_owned(),
-        bundle: bundle.into_bytes().into(),
+        content: open_compute_workers::DeploymentContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
+        },
         compatibility_date: "2026-08-22".to_owned(),
         compatibility_flags: Vec::new(),
         vars: BTreeMap::new(),
@@ -803,7 +811,10 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
         account_id: account,
         worker_id: worker,
         idempotency_key: "deploy-node-compat".to_owned(),
-        bundle: bundle.into_bytes().into(),
+        content: open_compute_workers::DeploymentContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
+        },
         compatibility_date: "2026-08-22".to_owned(),
         compatibility_flags: vec!["nodejs_compat".to_owned()],
         vars: BTreeMap::new(),
@@ -938,7 +949,10 @@ export default {{
         account_id: account,
         worker_id: worker,
         idempotency_key: key.to_owned(),
-        bundle: bundle.into_bytes().into(),
+        content: open_compute_workers::DeploymentContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
+        },
         compatibility_date: "2026-08-22".to_owned(),
         compatibility_flags: vec!["rpc".to_owned()],
         vars,

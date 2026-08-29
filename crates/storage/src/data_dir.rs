@@ -132,6 +132,12 @@ impl DataDir {
         &self.root
     }
 
+    /// Startup generation that owns the exclusive data-directory lock.
+    #[must_use]
+    pub fn startup_id(&self) -> StartupId {
+        self.lock.startup_id()
+    }
+
     /// Control database path: `<data_dir>/control.sqlite`.
     #[must_use]
     pub fn control_db_path(&self) -> PathBuf {

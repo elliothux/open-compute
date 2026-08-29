@@ -1,5 +1,6 @@
 //! P0.2 Worker control API and public route ingress.
 
+use crate::asset_backend::pin_response;
 use crate::http::{HttpState, ProductErrorCode, authorize};
 use crate::metrics::DoFacetReloadReason;
 use crate::runtime_bridge::{DispatchTarget, WorkerdTransport};
@@ -7,10 +8,8 @@ use axum::body::{Body, to_bytes};
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use bytes::Bytes;
 use http_body_util::BodyExt as _;
-use hyper::body::{Body as HttpBody, Frame, SizeHint};
-use open_compute_artifacts::ArtifactStore;
+use open_compute_artifacts::{ArtifactCache, ArtifactStore};
 use open_compute_core::{
     AccountId, BindingKind, DeploymentId, ErrorCode, PlatformError, RequestId, SecretString,
     WorkerId,
@@ -20,7 +19,7 @@ use open_compute_storage::{
 };
 use open_compute_workers::{
     BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBindingInput,
-    DeploymentBundle, DeploymentController, DeploymentPin, DeploymentPins,
+    DeploymentBundle, DeploymentContent, DeploymentController, DeploymentPins,
     ProductPromotionCoordinator, ProductPromotionRequest, QueueConsumerInput, RuntimeValidator,
     StagedBundle,
 };
@@ -31,16 +30,19 @@ use std::fs::OpenOptions;
 use std::future::Future;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 mod control;
 pub use control::control_router;
+mod uploads;
+use uploads::{
+    abort_deployment_upload, create_deployment_upload, finalize_deployment_upload,
+    get_deployment_upload, put_deployment_upload_object,
+};
 
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 pub(crate) const DEPLOYMENT_METADATA_HEADER: &str = "x-open-compute-deployment-metadata";
@@ -54,12 +56,14 @@ const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 pub struct WorkerApiState {
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
+    cache: Option<Arc<ArtifactCache>>,
     transport: WorkerdTransport,
     pins: DeploymentPins,
     bundle_limits: BundleLimits,
     delete_drain_timeout: Duration,
     max_queue_consumer_concurrency: u32,
     product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
+    finalize_locks: Arc<[tokio::sync::Mutex<()>; 16]>,
 }
 
 impl std::fmt::Debug for WorkerApiState {
@@ -85,13 +89,22 @@ impl WorkerApiState {
         Self {
             storage,
             artifacts,
+            cache: None,
             transport,
             pins,
             bundle_limits,
             delete_drain_timeout,
             max_queue_consumer_concurrency: 32,
             product_promoter: None,
+            finalize_locks: Arc::new(std::array::from_fn(|_| tokio::sync::Mutex::new(()))),
         }
+    }
+
+    /// Attach the verified local artifact cache used for backpressured asset bodies.
+    #[must_use]
+    pub fn with_cache(mut self, cache: Arc<ArtifactCache>) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// Apply the operator-local Queue consumer concurrency ceiling.
@@ -345,7 +358,10 @@ async fn create_deployment(
             account_id,
             worker_id,
             idempotency_key: key,
-            bundle: DeploymentBundle::Staged(staged.bundle.clone()),
+            content: DeploymentContent::Worker {
+                bundle: DeploymentBundle::Staged(staged.bundle.clone()),
+                assets: None,
+            },
             compatibility_date: metadata.compatibility_date,
             compatibility_flags: metadata.compatibility_flags,
             vars: metadata.vars,
@@ -769,42 +785,6 @@ pub async fn public_ingress(State(state): State<HttpState>, request: Request) ->
         Ok(response) => pin_response(response, pin),
         Err(error) => error_response(error, request_id),
     }
-}
-
-struct PinnedBody {
-    inner: Body,
-    _pin: DeploymentPin,
-}
-
-impl HttpBody for PinnedBody {
-    type Data = Bytes;
-    type Error = axum::Error;
-
-    fn poll_frame(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        Pin::new(&mut self.inner).poll_frame(cx)
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.inner.is_end_stream()
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.inner.size_hint()
-    }
-}
-
-fn pin_response(response: Response, pin: DeploymentPin) -> Response {
-    let (parts, body) = response.into_parts();
-    Response::from_parts(
-        parts,
-        Body::new(PinnedBody {
-            inner: body,
-            _pin: pin,
-        }),
-    )
 }
 
 fn authorized_api<'a>(
@@ -1292,8 +1272,9 @@ fn deployment_json(deployment: &DeploymentRecord) -> serde_json::Value {
         "id": deployment.id,
         "workerId": deployment.worker_id,
         "versionNumber": deployment.version_number,
+        "contentKind": deployment.content_kind,
         "state": deployment.state,
-        "artifactSha256": hex::encode(deployment.artifact_sha256),
+        "artifactSha256": deployment.artifact_sha256.map(hex::encode),
         "artifactSize": deployment.artifact_size,
         "artifactSchemaVersion": deployment.artifact_schema_version,
         "mainModule": deployment.main_module,
@@ -1369,14 +1350,18 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         ErrorCode::DeploymentNotReady
         | ErrorCode::DeploymentActive
         | ErrorCode::DeploymentReferenced
-        | ErrorCode::IdempotencyConflict => StatusCode::CONFLICT,
-        ErrorCode::BundleTooLarge | ErrorCode::LimitInvalid => StatusCode::PAYLOAD_TOO_LARGE,
-        ErrorCode::BundleRuntimeInvalid | ErrorCode::CompatibilityUnsupported => {
-            StatusCode::UNPROCESSABLE_ENTITY
+        | ErrorCode::IdempotencyConflict
+        | ErrorCode::AssetUploadIncomplete
+        | ErrorCode::AssetUploadConflict => StatusCode::CONFLICT,
+        ErrorCode::BundleTooLarge | ErrorCode::LimitInvalid | ErrorCode::AssetLimitExceeded => {
+            StatusCode::PAYLOAD_TOO_LARGE
         }
-        ErrorCode::RuntimeUnavailable | ErrorCode::ArtifactUnavailable => {
-            StatusCode::SERVICE_UNAVAILABLE
-        }
+        ErrorCode::BundleRuntimeInvalid
+        | ErrorCode::CompatibilityUnsupported
+        | ErrorCode::AssetConfigUnsupported => StatusCode::UNPROCESSABLE_ENTITY,
+        ErrorCode::RuntimeUnavailable
+        | ErrorCode::ArtifactUnavailable
+        | ErrorCode::AssetStorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::ResourceLimitExceeded | ErrorCode::QuotaExceeded | ErrorCode::AdmissionBusy => {
             StatusCode::TOO_MANY_REQUESTS
         }
@@ -1385,7 +1370,8 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         ErrorCode::Internal
         | ErrorCode::RuntimeResultUnknown
         | ErrorCode::DeploymentInvariantViolation
-        | ErrorCode::ArtifactIntegrityError => StatusCode::INTERNAL_SERVER_ERROR,
+        | ErrorCode::ArtifactIntegrityError
+        | ErrorCode::AssetIntegrityError => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::BAD_REQUEST,
     };
     let mut response = (
@@ -1413,3 +1399,7 @@ fn internal() -> PlatformError {
 #[cfg(test)]
 #[path = "workers_http_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workers_http_asset_tests.rs"]
+mod asset_tests;

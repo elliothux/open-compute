@@ -17,9 +17,25 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
   if (!record(value) || value.schemaVersion !== 1 || typeof value.loaderKey !== "string"
       || typeof value.workerCodeSha256 !== "string" || typeof value.routeGeneration !== "number"
       || !Number.isSafeInteger(value.routeGeneration) || value.routeGeneration < 0
-      || typeof value.mainModule !== "string" || typeof value.compatibilityDate !== "string"
+      || !["worker", "assets_only"].includes(String(value.contentKind))
+      || (value.contentKind === "worker" && typeof value.mainModule !== "string")
+      || (value.contentKind === "assets_only" && value.mainModule !== undefined)
+      || typeof value.compatibilityDate !== "string"
       || !strings(value.compatibilityFlags) || !Array.isArray(value.modules)
       || !record(value.env) || !Array.isArray(value.bindings)) invalid();
+  if (value.assetBinding !== undefined
+      && (!record(value.assetBinding) || typeof value.assetBinding.name !== "string")) invalid();
+  if (value.assets !== undefined) {
+    if (!record(value.assets) || !record(value.assets.manifest) || !record(value.assets.routing)
+        || value.assets.manifest.schemaVersion !== 1 || !Array.isArray(value.assets.manifest.entries)
+        || value.assets.routing.schemaVersion !== 1) invalid();
+    for (const entry of value.assets.manifest.entries as unknown[]) {
+      if (!record(entry) || typeof entry.path !== "string" || typeof entry.sha256 !== "string"
+          || typeof entry.size !== "number" || !Number.isSafeInteger(entry.size)
+          || typeof entry.contentType !== "string") invalid();
+    }
+  }
+  if (value.contentKind === "assets_only" && value.assets === undefined) invalid();
   for (const module of value.modules as unknown[]) {
     if (!record(module) || typeof module.name !== "string" || typeof module.bytesBase64 !== "string"
         || typeof module.type !== "string"

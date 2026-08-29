@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+pub mod assets;
 pub mod bindings;
 pub mod control_db;
 pub mod cron;
@@ -38,6 +39,13 @@ pub use workflows::{
     WorkflowVersion,
 };
 
+pub use assets::{
+    BeginDeploymentUploadFinalize, DeploymentAssetsRecord, DeploymentAssetsRepository,
+    DeploymentObjectKind, DeploymentUploadFinalize, DeploymentUploadFinalizeDisposition,
+    DeploymentUploadObjectRecord, DeploymentUploadRecord, DeploymentUploadRepository,
+    DeploymentUploadStatus, NewDeploymentAssets, NewDeploymentObjectRef, NewDeploymentUpload,
+    NewDeploymentUploadObject,
+};
 pub use bindings::{
     AuthorizedBinding, BindingRepository, DeploymentBindingRecord, NewDeploymentBinding,
 };
@@ -129,10 +137,10 @@ pub use scheduler::{
 pub use schema_inspection::{CurrentSchemaState, inspect_current_schema};
 pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
 pub use workers::{
-    DeploymentRecord, DeploymentReferrer, DeploymentSnapshot, DeploymentState,
-    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment, NewDeploymentProducts,
-    RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot, StoredDeploymentSecret,
-    WorkerRecord, WorkerRepository,
+    DeploymentContentKind, DeploymentRecord, DeploymentReferrer, DeploymentSnapshot,
+    DeploymentState, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment,
+    NewDeploymentProducts, RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot,
+    StoredDeploymentSecret, WorkerRecord, WorkerRepository,
 };
 
 use open_compute_core::clock::Clock;

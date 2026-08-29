@@ -70,6 +70,11 @@ const MIGRATIONS: &[ControlMigration] = &[
         sql: include_str!("../migrations/011_workflows.sql"),
         checksum: &MIGRATION_011_SHA256,
     },
+    ControlMigration {
+        name: "012_static_assets",
+        sql: include_str!("../migrations/012_static_assets.sql"),
+        checksum: &MIGRATION_012_SHA256,
+    },
 ];
 const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -391,6 +396,14 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
                 "Workflow operation invariant failed",
             )
         })?;
+    }
+    if version >= 12 {
+        tables.extend([
+            "deployment_assets",
+            "deployment_object_refs",
+            "deployment_uploads",
+            "deployment_upload_objects",
+        ]);
     }
     for table in tables {
         let sql: String = tx

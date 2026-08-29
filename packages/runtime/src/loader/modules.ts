@@ -11,8 +11,9 @@ import workflowFacadeSource from "workflow-facade-source";
 import wrapperRuntimeSource from "wrapper-runtime-source";
 import doWrapperSource from "do-wrapper-source";
 import workflowWrapperSource from "workflow-wrapper-source";
+import assetFacadeSource from "assets-facade-source";
 import {
-  D1_FACADE_MODULE, DO_ALARM_SHIM_MODULE, DO_FACADE_MODULE, DO_ID_CODEC_MODULE,
+  ASSET_FACADE_MODULE, D1_FACADE_MODULE, DO_ALARM_SHIM_MODULE, DO_FACADE_MODULE, DO_ID_CODEC_MODULE,
   DO_WRAPPER_MODULE, INTERNAL_MODULE_PREFIX, LOADED_ISOLATE_WRAPPER_MODULE,
   QUEUE_FACADE_MODULE, R2_FACADE_MODULE, VALIDATION_MODULE, WORKFLOW_FACADE_MODULE,
   WORKFLOW_JSON_MODULE, WORKFLOW_RUNNER_MODULE, WORKFLOW_WRAPPER_MODULE,
@@ -49,6 +50,9 @@ function moduleValue(module: RuntimeModule): WorkerLoaderModule {
 }
 
 export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entrypointName: string | undefined, durableObject = false, workflow = false) {
+  if (snapshot.contentKind !== "worker" || typeof snapshot.mainModule !== "string") {
+    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+  }
   const modules: Record<string, WorkerLoaderModule> = {};
   for (const module of snapshot.modules) {
     if (module.name.startsWith(INTERNAL_MODULE_PREFIX)) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
@@ -67,6 +71,7 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   }
   if (has("queue_producer")) modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
   if (has("workflow")) modules[WORKFLOW_FACADE_MODULE] = { js: workflowFacadeSource };
+  if (snapshot.assetBinding) modules[ASSET_FACADE_MODULE] = { js: assetFacadeSource };
   if (workflow || has("workflow")) modules[WORKFLOW_JSON_MODULE] = { js: workflowJsonSource };
   if (workflow) {
     modules[WORKFLOW_WRAPPER_MODULE] = { js: workflowWrapperSource };
@@ -79,7 +84,7 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   modules[LOADED_ISOLATE_WRAPPER_MODULE] = {
     js: generateBindingWrapper({
       mainModule: snapshot.mainModule, bindings: snapshot.bindings,
-      entrypointName, durableObject, workflow,
+      entrypointName, durableObject, workflow, assetBindingName: snapshot.assetBinding?.name,
     }),
   };
   if (validation) {

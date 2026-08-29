@@ -114,9 +114,12 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
   ].map(([kind, capabilityVersion, name]) => ({ kind, capabilityVersion, name }));
   for (const options of [{}, { entrypointName: "default" }, { entrypointName: "Named" }, { entrypointName: "Object", durableObject: true }, { entrypointName: "default", durableObject: true },
     { entrypointName: "Flow", workflow: true }]) {
-    const code = generator.generateBindingWrapper({ mainModule: "src/index.js", bindings, durableObject: false, ...options });
+    const code = generator.generateBindingWrapper({
+      mainModule: "src/index.js", bindings, assetBindingName: "ASSETS", durableObject: false, ...options,
+    });
     assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
     assert.match(code, /WorkflowBinding/);
+    assert.match(code, /AssetsBinding/);
     assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   }
   assert.deepEqual(parseSync("validation.js", generator.generateValidationWrapper("Named"), { sourceType: "module" }).errors, []);

@@ -3,6 +3,7 @@ import { currentStartupGeneration, doPolicy, stableCode } from "../loader/host.j
 import type { DoHostEnv, DoPolicy, DoPolicyEnv, ResolvedDoAuthority } from "./protocol.js";
 export {
   AlarmIndex,
+  AssetTransport,
   D1Transport,
   DoTransport,
   KVNamespace,

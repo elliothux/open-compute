@@ -1296,7 +1296,7 @@ fn inspect_control_db_accepts_uri_special_path_chars() {
 }
 
 #[test]
-fn snapshot_worker_bundle_inventory_uses_the_canonical_sharded_key() {
+fn snapshot_deployment_artifact_inventory_uses_the_canonical_sharded_key() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
@@ -1311,10 +1311,11 @@ fn snapshot_worker_bundle_inventory_uses_the_canonical_sharded_key() {
             id: DeploymentId::generate(),
             account_id: account,
             worker_id: worker.id,
-            artifact_sha256: [1; 32],
-            artifact_size: 123,
-            artifact_schema_version: 1,
-            main_module: "index.js".to_owned(),
+            content_kind: crate::DeploymentContentKind::Worker,
+            artifact_sha256: Some([1; 32]),
+            artifact_size: Some(123),
+            artifact_schema_version: Some(1),
+            main_module: Some("index.js".to_owned()),
             compatibility_date: "2026-08-22".to_owned(),
             compatibility_flags: Vec::new(),
             limits: serde_json::json!({}),
@@ -1337,6 +1338,7 @@ fn snapshot_worker_bundle_inventory_uses_the_canonical_sharded_key() {
     )
     .unwrap();
     assert_eq!(references.len(), 1);
+    assert_eq!(references[0].role, "deployment_artifact");
     assert_eq!(
         references[0].object_key,
         format!("system/artifacts/v1/sha256/01/{}", "01".repeat(31))
@@ -1395,10 +1397,11 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
                 id: deployment,
                 account_id: account,
                 worker_id: worker.id,
-                artifact_sha256: [1; 32],
-                artifact_size: 123,
-                artifact_schema_version: 1,
-                main_module: "index.js".to_owned(),
+                content_kind: crate::DeploymentContentKind::Worker,
+                artifact_sha256: Some([1; 32]),
+                artifact_size: Some(123),
+                artifact_schema_version: Some(1),
+                main_module: Some("index.js".to_owned()),
                 compatibility_date: "2026-08-22".to_owned(),
                 compatibility_flags: vec!["rpc".to_owned()],
                 limits: serde_json::json!({"profile": "default"}),
@@ -2018,7 +2021,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 11);
+    assert_eq!(crate::migrations::current_schema_version(), 12);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2180,10 +2183,11 @@ fn insert_ready(
             id,
             account_id: account,
             worker_id: worker,
-            artifact_sha256: digest,
-            artifact_size: 100,
-            artifact_schema_version: 1,
-            main_module: "index.js".to_owned(),
+            content_kind: crate::DeploymentContentKind::Worker,
+            artifact_sha256: Some(digest),
+            artifact_size: Some(100),
+            artifact_schema_version: Some(1),
+            main_module: Some("index.js".to_owned()),
             compatibility_date: "2026-08-22".to_owned(),
             compatibility_flags: Vec::new(),
             limits: serde_json::json!({"profile":"default"}),
@@ -2232,10 +2236,11 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
                     id: deployment_id,
                     account_id: account,
                     worker_id,
-                    artifact_sha256: [5; 32],
-                    artifact_size: 100,
-                    artifact_schema_version: 1,
-                    main_module: "index.js".to_owned(),
+                    content_kind: crate::DeploymentContentKind::Worker,
+                    artifact_sha256: Some([5; 32]),
+                    artifact_size: Some(100),
+                    artifact_schema_version: Some(1),
+                    main_module: Some("index.js".to_owned()),
                     compatibility_date: "2026-08-22".to_owned(),
                     compatibility_flags: Vec::new(),
                     limits: serde_json::json!({"profile":"default"}),
@@ -2367,10 +2372,11 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             id: staging,
             account_id: account,
             worker_id: worker.id,
-            artifact_sha256: [4; 32],
-            artifact_size: 100,
-            artifact_schema_version: 1,
-            main_module: "index.js".to_owned(),
+            content_kind: crate::DeploymentContentKind::Worker,
+            artifact_sha256: Some([4; 32]),
+            artifact_size: Some(100),
+            artifact_schema_version: Some(1),
+            main_module: Some("index.js".to_owned()),
             compatibility_date: "2026-08-22".to_owned(),
             compatibility_flags: Vec::new(),
             limits: serde_json::json!({"profile":"default"}),

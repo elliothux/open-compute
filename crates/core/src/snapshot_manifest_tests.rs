@@ -39,7 +39,7 @@ fn manifest() -> PlatformSnapshotManifestV1 {
         r2_prefix_fingerprint: "6".repeat(64),
         config_policy_sha256: "b".repeat(64),
         immutable_references: vec![SnapshotImmutableReferenceV1 {
-            role: "worker_bundle".to_owned(),
+            role: "deployment_artifact".to_owned(),
             sha256: "7".repeat(64),
             object_key: "system/artifacts/v1/sha256/x".to_owned(),
             size: 1,

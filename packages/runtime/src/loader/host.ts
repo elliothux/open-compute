@@ -3,12 +3,13 @@ import { bytes, modulesFor } from "./modules.js";
 export { modulesFor } from "./modules.js";
 import { handleWorkflow } from "../workflows/host.js";
 import { tenantEnv } from "./bindings.js";
+import { routeDefaultHttp } from "../assets/router.js";
 export { tenantEnv } from "./bindings.js";
 export { WorkflowBindingTransport } from "../workflows/binding.js";
 import { makeR2TransportBase } from "../r2/transport.js";
 import { makeD1TransportBase } from "../d1/transport.js";
 import { assertSnapshot } from "./snapshot.js";
-import type { BindingEnv, ResourceBindingProps } from "../bindings/protocol.js";
+import type { AssetBindingProps, BindingEnv, ResourceBindingProps } from "../bindings/protocol.js";
 import type { QueueBindingProps } from "../queues/protocol.js";
 import type { AlarmIdentity, AlarmProjection, DoPolicy, DoPolicyEnv, DoWireValue } from "../durable-objects/protocol.js";
 import type { DispatchEnvelope, LoaderEnv, RuntimeEnvelope, RuntimeModule, RuntimeSnapshot } from "./protocol.js";
@@ -28,6 +29,8 @@ const INTERNAL_HEADERS = [
   "x-open-compute-worker-id",
   "x-open-compute-deployment-id",
   "x-open-compute-loader-key",
+  "x-open-compute-execution-started",
+  "x-open-compute-asset-representation-length",
   "x-open-compute-worker-code-sha256",
   "x-open-compute-entrypoint",
   "x-open-compute-original-method",
@@ -41,6 +44,8 @@ const INTERNAL_HEADERS = [
   "x-open-compute-object-id",
   "x-open-compute-object-generation",
   "x-open-compute-class-name",
+  "x-open-compute-asset-method",
+  "x-open-compute-asset-url",
   "x-open-compute-do-method",
   "x-open-compute-do-url",
   "x-open-compute-do-operation",
@@ -242,6 +247,71 @@ export class QueueTransport extends WorkerEntrypoint<BindingEnv, QueueBindingPro
   }
 }
 
+export class AssetTransport extends WorkerEntrypoint<BindingEnv, AssetBindingProps> {
+  #props() {
+    const props = this.ctx.props;
+    if (!props || typeof props.deploymentId !== "string"
+        || typeof props.descriptorSha256 !== "string"
+        || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) {
+      throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    }
+    return props;
+  }
+
+  async fetchAsset(input: unknown): Promise<Response> {
+    if (!isRecord(input) || typeof input.url !== "string" || typeof input.method !== "string"
+        || !Array.isArray(input.headers) || input.headers.length > 256) {
+      throw bindingError("BINDING_PROTOCOL_ERROR");
+    }
+    const headers = new Headers();
+    for (const pair of input.headers) {
+      if (!Array.isArray(pair) || pair.length !== 2
+          || typeof pair[0] !== "string" || typeof pair[1] !== "string") {
+        throw bindingError("BINDING_PROTOCOL_ERROR");
+      }
+      headers.append(pair[0], pair[1]);
+    }
+    return this.#fetch(new Request(input.url, { method: input.method, headers }));
+  }
+
+  fetch(request: Request): Promise<Response> {
+    return this.#fetch(request);
+  }
+
+  async #fetch(request: Request): Promise<Response> {
+    const props = this.#props();
+    const headers = new Headers(request.headers);
+    for (const name of INTERNAL_HEADERS) headers.delete(name);
+    headers.set(BINDING_TOKEN_HEADER, this.env.BINDING_BACKEND_TOKEN);
+    headers.set("x-open-compute-startup-generation", currentStartupGeneration());
+    headers.set("x-open-compute-deployment-id", props.deploymentId);
+    headers.set("x-open-compute-descriptor-sha256", props.descriptorSha256);
+    headers.set("x-open-compute-request-id", crypto.randomUUID());
+    headers.set("x-open-compute-asset-method", request.method);
+    headers.set("x-open-compute-asset-url", request.url);
+    const response = await this.env.BINDING_BACKEND.fetch(
+      "http://binding-backend/internal/assets/v1/fetch",
+      { method: "POST", headers, redirect: "manual" },
+    );
+    if (!response.ok && response.headers.has("x-open-compute-error-code")) {
+      throw bindingError(response.headers.get("x-open-compute-error-code") || "ASSET_STORAGE_UNAVAILABLE");
+    }
+    const responseHeaders = new Headers(response.headers);
+    const representationLength = responseHeaders.get("x-open-compute-asset-representation-length")
+      ?? responseHeaders.get("content-length");
+    if (representationLength) {
+      responseHeaders.set("x-open-compute-asset-representation-length", representationLength);
+    }
+    const forwarded = new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    });
+    if (representationLength) forwarded.headers.set("content-length", representationLength);
+    return forwarded;
+  }
+}
+
 export class DoTransport extends WorkerEntrypoint<LoaderEnv, ResourceBindingProps> {
   #props() {
     const props = this.ctx.props;
@@ -400,12 +470,38 @@ export function stableCode(error: unknown): string | undefined {
 
 async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, validation: boolean) {
   const requestId = request.headers.get("x-open-compute-request-id") || crypto.randomUUID();
+  let executionStarted = false;
   try {
     const entrypoint = request.headers.get("x-open-compute-entrypoint") || undefined;
     const envelope = assertEnvelope(request, validation, entrypoint);
     const internalToken = request.headers.get(TOKEN_HEADER) || "";
     // Resolve and verify on every path, including a warm WorkerLoader key.
     const snapshot = await resolveSnapshot(env, envelope, validation, Boolean(entrypoint), internalToken);
+    const deploymentId = envelope.loaderKey.split("/")[2]!;
+    const tenant = validation ? undefined : tenantRequest(request);
+    if (!validation && !entrypoint && tenant && routeDefaultHttp(snapshot, tenant) === "asset") {
+      const response = await ctx.exports.AssetTransport({ props: Object.freeze({
+        deploymentId,
+        descriptorSha256: snapshot.workerCodeSha256,
+      }) }).fetch(tenant);
+      const headers = new Headers(response.headers);
+      const representationLength = headers.get("x-open-compute-asset-representation-length")
+        ?? headers.get("content-length");
+      for (const name of INTERNAL_HEADERS) headers.delete(name);
+      if (representationLength) {
+        headers.set("x-open-compute-asset-representation-length", representationLength);
+      }
+      headers.set("x-open-compute-request-id", requestId);
+      headers.set("x-open-compute-loader-outcome", "asset");
+      const forwarded = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+      if (representationLength) forwarded.headers.set("content-length", representationLength);
+      return forwarded;
+    }
+    if (snapshot.contentKind !== "worker") throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
     const prior = seenHashes.get(envelope.runtimeKey);
     if (prior && prior !== snapshot.workerCodeSha256) {
       throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
@@ -413,7 +509,6 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
     seenHashes.set(envelope.runtimeKey, snapshot.workerCodeSha256);
     const code = await assembleOnce(envelope.runtimeKey, async () => {
       const built = modulesFor(snapshot, validation, entrypoint);
-      const deploymentId = envelope.loaderKey.split("/")[2]!;
       return {
         compatibilityDate: snapshot.compatibilityDate,
         compatibilityFlags: snapshot.compatibilityFlags,
@@ -432,7 +527,8 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
       return code;
     });
     const target = stub.getEntrypoint(validation ? undefined : entrypoint, { limits: PROFILE });
-    const response = await target.fetch(validation ? "https://validation.invalid/" : tenantRequest(request));
+    executionStarted = !validation;
+    const response = await target.fetch(validation ? "https://validation.invalid/" : tenant!);
     if (validation) {
       const body = await response.text();
       if (response.status !== 200 || body !== "open-compute-validation-v1") {
@@ -441,9 +537,14 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
       return new Response(null, { status: 204 });
     }
     const headers = new Headers(response.headers);
+    const representationLength = headers.get("x-open-compute-asset-representation-length");
     for (const name of INTERNAL_HEADERS) headers.delete(name);
+    if (representationLength) {
+      headers.set("x-open-compute-asset-representation-length", representationLength);
+    }
     headers.set("x-open-compute-request-id", requestId);
     headers.set("x-open-compute-loader-outcome", cold ? "cold" : "warm");
+    if (executionStarted) headers.set("x-open-compute-execution-started", "1");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   } catch (error) {
     const stable = stableCode(error);
@@ -452,10 +553,14 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
         : stable === "ARTIFACT_UNAVAILABLE" ? 503
         : stable === "BUNDLE_RUNTIME_INVALID" ? 422
         : 500;
-      return stableError(stable, status, requestId);
+      const response = stableError(stable, status, requestId);
+      if (executionStarted) response.headers.set("x-open-compute-execution-started", "1");
+      return response;
     }
     const [code, status] = classify(error);
-    return stableError(code, status, requestId);
+    const response = stableError(code, status, requestId);
+    if (executionStarted) response.headers.set("x-open-compute-execution-started", "1");
+    return response;
   }
 }
 

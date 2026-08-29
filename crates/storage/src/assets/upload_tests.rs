@@ -1,0 +1,248 @@
+use super::*;
+use crate::{PlatformStorage, WorkerRepository};
+use open_compute_core::{RequestId, StorageConfig, SystemClock};
+
+fn storage_config(root: &std::path::Path) -> StorageConfig {
+    StorageConfig {
+        data_dir: root.to_owned(),
+        master_key_file: root.join("keys/master.key"),
+        master_key_env: None,
+        sqlite_busy_timeout_ms: 5_000,
+        free_space_soft_bytes: 1_073_741_824,
+        free_space_hard_bytes: 268_435_456,
+    }
+}
+
+fn new_upload<'a>(
+    account_id: AccountId,
+    worker_id: WorkerId,
+    idempotency_key: &'a str,
+    fingerprint: [u8; 32],
+    objects: &'a [NewDeploymentUploadObject],
+    now_ms: i64,
+) -> NewDeploymentUpload<'a> {
+    NewDeploymentUpload {
+        id: DeploymentUploadId::generate(),
+        account_id,
+        worker_id,
+        idempotency_key,
+        input_fingerprint: fingerprint,
+        content_kind: DeploymentContentKind::AssetsOnly,
+        bundle: None,
+        manifest_sha256: [1; 32],
+        manifest_json: b"{}",
+        routing_config_json: b"{}",
+        objects,
+        now_ms,
+        expires_at_ms: now_ms + 100,
+    }
+}
+
+#[test]
+fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage =
+        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
+            .unwrap();
+    let account = storage.identity().default_account_id;
+    let worker = WorkerRepository::new(storage.db())
+        .create_worker(account, "assets", RequestId::generate(), 1, 100)
+        .unwrap()
+        .0;
+    let objects = vec![
+        NewDeploymentUploadObject {
+            sha256: [1; 32],
+            kind: DeploymentObjectKind::AssetManifest,
+            size: 2,
+        },
+        NewDeploymentUploadObject {
+            sha256: [2; 32],
+            kind: DeploymentObjectKind::AssetBlob,
+            size: 7,
+        },
+    ];
+    let repo = DeploymentUploadRepository::new(storage.db());
+    let first_input = new_upload(account, worker.id, "same", [3; 32], &objects, 10);
+    let first = repo.create_or_get(&first_input, 2, 4).unwrap();
+    assert_eq!(first.status, DeploymentUploadStatus::Open);
+    assert_eq!(first.objects.len(), 2);
+
+    let replay_input = new_upload(account, worker.id, "same", [3; 32], &objects, 11);
+    assert_eq!(
+        repo.create_or_get(&replay_input, 2, 4).unwrap().id,
+        first.id
+    );
+    let conflict_input = new_upload(account, worker.id, "same", [4; 32], &objects, 11);
+    assert_eq!(
+        repo.create_or_get(&conflict_input, 2, 4)
+            .unwrap_err()
+            .code(),
+        ErrorCode::AssetUploadConflict
+    );
+    assert_eq!(
+        repo.get(AccountId::generate(), worker.id, first.id, 11)
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentNotFound
+    );
+
+    repo.mark_object_verified(account, worker.id, first.id, &[1; 32], 2, 12)
+        .unwrap();
+    assert_eq!(
+        repo.begin_finalize(BeginDeploymentUploadFinalize {
+            account_id: account,
+            worker_id: worker.id,
+            upload_id: first.id,
+            deployment_id: DeploymentId::generate(),
+            finalize_fingerprint: [9; 32],
+            owner_startup_id: storage.data_dir().startup_id(),
+            now_ms: 13,
+        })
+        .unwrap_err()
+        .code(),
+        ErrorCode::AssetUploadIncomplete
+    );
+    repo.mark_object_verified(account, worker.id, first.id, &[2; 32], 7, 14)
+        .unwrap();
+    let deployment = DeploymentId::generate();
+    let finalizing = repo
+        .begin_finalize(BeginDeploymentUploadFinalize {
+            account_id: account,
+            worker_id: worker.id,
+            upload_id: first.id,
+            deployment_id: deployment,
+            finalize_fingerprint: [9; 32],
+            owner_startup_id: storage.data_dir().startup_id(),
+            now_ms: 15,
+        })
+        .unwrap();
+    assert_eq!(
+        finalizing.disposition,
+        DeploymentUploadFinalizeDisposition::Reserved
+    );
+    assert_eq!(finalizing.upload.status, DeploymentUploadStatus::Finalizing);
+    assert_eq!(finalizing.upload.deployment_id, Some(deployment));
+    assert_eq!(
+        repo.begin_finalize(BeginDeploymentUploadFinalize {
+            account_id: account,
+            worker_id: worker.id,
+            upload_id: first.id,
+            deployment_id: deployment,
+            finalize_fingerprint: [8; 32],
+            owner_startup_id: storage.data_dir().startup_id(),
+            now_ms: 16,
+        })
+        .unwrap_err()
+        .code(),
+        ErrorCode::AssetUploadConflict
+    );
+    assert_eq!(
+        repo.abort(account, worker.id, first.id, 17)
+            .unwrap_err()
+            .code(),
+        ErrorCode::AssetUploadConflict
+    );
+    assert_eq!(
+        repo.mark_committed(
+            account,
+            worker.id,
+            first.id,
+            deployment,
+            br#"{"ok":true}"#,
+            18
+        )
+        .unwrap()
+        .status,
+        DeploymentUploadStatus::Committed
+    );
+    assert_eq!(
+        repo.mark_committed(
+            account,
+            worker.id,
+            first.id,
+            deployment,
+            br#"{"ok":true}"#,
+            19
+        )
+        .unwrap()
+        .status,
+        DeploymentUploadStatus::Committed
+    );
+    let replay = repo
+        .begin_finalize(BeginDeploymentUploadFinalize {
+            account_id: account,
+            worker_id: worker.id,
+            upload_id: first.id,
+            deployment_id: deployment,
+            finalize_fingerprint: [9; 32],
+            owner_startup_id: storage.data_dir().startup_id(),
+            now_ms: 20,
+        })
+        .unwrap();
+    assert_eq!(
+        replay.disposition,
+        DeploymentUploadFinalizeDisposition::Committed
+    );
+    assert_eq!(
+        replay.upload.finalize_response_json.unwrap(),
+        br#"{"ok":true}"#
+    );
+}
+
+#[test]
+fn upload_session_quota_and_expiration_fail_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage =
+        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
+            .unwrap();
+    let account = storage.identity().default_account_id;
+    let worker = WorkerRepository::new(storage.db())
+        .create_worker(account, "quota", RequestId::generate(), 1, 100)
+        .unwrap()
+        .0;
+    let objects = [NewDeploymentUploadObject {
+        sha256: [1; 32],
+        kind: DeploymentObjectKind::AssetManifest,
+        size: 2,
+    }];
+    let repo = DeploymentUploadRepository::new(storage.db());
+    for (index, key) in ["one", "two"].into_iter().enumerate() {
+        repo.create_or_get(
+            &new_upload(account, worker.id, key, [index as u8; 32], &objects, 10),
+            2,
+            4,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        repo.create_or_get(
+            &new_upload(account, worker.id, "three", [3; 32], &objects, 10),
+            2,
+            4,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::AssetLimitExceeded
+    );
+    let expiring = new_upload(
+        account,
+        worker.id,
+        "expired-after-quota",
+        [4; 32],
+        &objects,
+        200,
+    );
+    let created = repo.create_or_get(&expiring, 2, 4).unwrap();
+    assert_eq!(
+        repo.get(account, worker.id, created.id, 301)
+            .unwrap()
+            .status,
+        DeploymentUploadStatus::Expired
+    );
+    assert_eq!(
+        repo.object_for_upload(account, worker.id, created.id, &[1; 32], 302)
+            .unwrap_err()
+            .code(),
+        ErrorCode::AssetUploadConflict
+    );
+}

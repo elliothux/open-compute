@@ -72,13 +72,35 @@ pub(crate) fn validate_injection_module_collisions(
 
 pub(super) fn request_fingerprint(
     request: &CreateDeploymentRequest,
-    bundle: &PreparedBundle,
+    content: &PreparedContent,
     vars: &BTreeMap<String, serde_json::Value>,
+    deployment_id: Option<DeploymentId>,
 ) -> Result<[u8; 32], PlatformError> {
     let mut canonical = Vec::new();
     frame(&mut canonical, request.account_id.to_string().as_bytes())?;
     frame(&mut canonical, request.worker_id.to_string().as_bytes())?;
-    frame(&mut canonical, &bundle.sha256())?;
+    frame(
+        &mut canonical,
+        deployment_id
+            .as_ref()
+            .map(DeploymentId::as_canonical_str)
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    )?;
+    frame(&mut canonical, content.kind().as_str().as_bytes())?;
+    if let Some(bundle) = content.bundle() {
+        frame(&mut canonical, &bundle.sha256())?;
+    } else {
+        frame(&mut canonical, &[])?;
+    }
+    if let Some(assets) = content.assets() {
+        frame(&mut canonical, &assets.manifest.canonical_bytes()?)?;
+        frame(&mut canonical, &assets.routing.canonical_bytes()?)?;
+    } else {
+        frame(&mut canonical, &[])?;
+        frame(&mut canonical, &[])?;
+    }
     frame(&mut canonical, request.compatibility_date.as_bytes())?;
     let mut flags = request.compatibility_flags.clone();
     flags.sort();

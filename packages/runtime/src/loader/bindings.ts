@@ -51,5 +51,13 @@ export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext, deploy
     env[descriptor.name] = makeBinding(ctx, descriptor, deploymentId, snapshot.routeGeneration,
       accountId, workerId, policy, durableObject);
   }
+  if (snapshot.assetBinding) {
+    const name = snapshot.assetBinding.name;
+    if (Object.prototype.hasOwnProperty.call(env, name)) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    env[name] = ctx.exports.AssetTransport({ props: Object.freeze({
+      deploymentId,
+      descriptorSha256: snapshot.workerCodeSha256,
+    }) });
+  }
   return env;
 }

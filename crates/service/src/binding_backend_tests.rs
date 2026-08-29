@@ -159,6 +159,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
         scheduler: None,
         queue: None,
         workflow: None,
+        assets: None,
     };
     let binding_id = BindingId::generate();
     let path = format!("/internal/bindings/v1/kv/{binding_id}/get");

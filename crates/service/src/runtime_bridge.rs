@@ -23,7 +23,7 @@ use open_compute_storage::{
     AuthorizedDurableObjectDelete, ClaimedJob, QUEUE_MAX_MESSAGE_BYTES, QueueContentType,
 };
 use open_compute_workers::{
-    RuntimeScope, RuntimeSource, RuntimeValidator, ValidationCandidate, loader_key,
+    DeploymentPins, RuntimeScope, RuntimeSource, RuntimeValidator, ValidationCandidate, loader_key,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -370,6 +370,7 @@ pub struct WorkerdTransport {
     auth: GenerationAuthRegistry,
     supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     max_request_body: usize,
+    deployment_pins: Option<DeploymentPins>,
     workflow_quarantine: Arc<Mutex<Option<open_compute_runtime::GenerationCredential>>>,
     #[cfg(test)]
     test_endpoint: Option<u16>,
@@ -398,6 +399,7 @@ impl WorkerdTransport {
             auth,
             supervisor,
             max_request_body: DEFAULT_MAX_TENANT_BODY,
+            deployment_pins: None,
             workflow_quarantine: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_endpoint: None,
@@ -415,6 +417,13 @@ impl WorkerdTransport {
     #[must_use]
     pub fn with_max_request_body(mut self, max_request_body: usize) -> Self {
         self.max_request_body = max_request_body.max(1);
+        self
+    }
+
+    /// Attach the conservative execution-lifetime authority used for deployment deletion.
+    #[must_use]
+    pub fn with_deployment_pins(mut self, pins: DeploymentPins) -> Self {
+        self.deployment_pins = Some(pins);
         self
     }
 
@@ -734,6 +743,10 @@ impl WorkerdTransport {
             })?
             .map_err(|_| runtime_unavailable())?;
         let (mut parts, body) = response.into_parts();
+        let execution_started = parts
+            .headers
+            .get("x-open-compute-execution-started")
+            .is_some_and(|value| value == "1");
         let loader_outcome = parts
             .headers
             .get("x-open-compute-loader-outcome")
@@ -743,7 +756,21 @@ impl WorkerdTransport {
                 "warm" => Some(LoaderOutcome::Warm),
                 _ => None,
             });
+        let asset_representation_length = if original_method == Method::HEAD.as_str() {
+            parts
+                .headers
+                .get("x-open-compute-asset-representation-length")
+                .cloned()
+        } else {
+            None
+        };
+        if execution_started && let Some(pins) = &self.deployment_pins {
+            pins.retain_until_restart(target.deployment_id)?;
+        }
         sanitize_response_headers(&mut parts.headers);
+        if let Some(length) = asset_representation_length {
+            parts.headers.insert(header::CONTENT_LENGTH, length);
+        }
         if let Some(outcome) = loader_outcome {
             parts.extensions.insert(outcome);
         }

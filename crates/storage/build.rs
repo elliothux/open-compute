@@ -19,6 +19,7 @@ fn main() {
         ("009_queue_consumers", "MIGRATION_009_SHA256"),
         ("010_cron_triggers", "MIGRATION_010_SHA256"),
         ("011_workflows", "MIGRATION_011_SHA256"),
+        ("012_static_assets", "MIGRATION_012_SHA256"),
     ];
     let mut generated = String::new();
     for (file, constant) in migrations {

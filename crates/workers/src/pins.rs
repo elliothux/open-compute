@@ -10,6 +10,7 @@ use tokio::sync::Notify;
 struct Entry {
     count: usize,
     fenced: bool,
+    retained_until_restart: bool,
 }
 
 #[derive(Debug, Default)]
@@ -55,6 +56,28 @@ impl DeploymentPins {
         })
     }
 
+    /// Conservatively retain one deployment until this platform process and workerd generation end.
+    ///
+    /// Stock workerd does not expose an acknowledgement that every tenant `waitUntil()` task
+    /// completed. Retaining the immutable deployment for the owning process lifetime prevents
+    /// deletion from racing background execution without guessing a time-to-live.
+    pub fn retain_until_restart(&self, deployment_id: DeploymentId) -> Result<(), PlatformError> {
+        let mut entries = self
+            .inner
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = entries.entry(deployment_id).or_default();
+        if entry.fenced {
+            return Err(PlatformError::new(
+                ErrorCode::DeploymentNotReady,
+                "deployment is fenced for deletion",
+            ));
+        }
+        entry.retained_until_restart = true;
+        Ok(())
+    }
+
     /// Fence new pins and wait for current work to drain to zero.
     pub async fn fence_and_wait(
         &self,
@@ -78,7 +101,7 @@ impl DeploymentPins {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .get(&deployment_id)
-                    .is_none_or(|entry| entry.count == 0);
+                    .is_none_or(|entry| entry.count == 0 && !entry.retained_until_restart);
                 if empty {
                     return;
                 }
@@ -102,7 +125,7 @@ impl DeploymentPins {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(entry) = entries.get_mut(&deployment_id) {
             entry.fenced = false;
-            if entry.count == 0 {
+            if entry.count == 0 && !entry.retained_until_restart {
                 entries.remove(&deployment_id);
             }
         }
@@ -121,7 +144,7 @@ impl DeploymentPins {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if entries
             .get(&deployment_id)
-            .is_some_and(|entry| entry.fenced && entry.count == 0)
+            .is_some_and(|entry| entry.fenced && entry.count == 0 && !entry.retained_until_restart)
         {
             entries.remove(&deployment_id);
         }
@@ -136,7 +159,9 @@ impl DeploymentPins {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&deployment_id)
-            .map_or(0, |entry| entry.count)
+            .map_or(0, |entry| {
+                entry.count + usize::from(entry.retained_until_restart)
+            })
     }
 }
 
@@ -168,7 +193,7 @@ impl Drop for DeploymentPin {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(entry) = entries.get_mut(&self.deployment_id) {
             entry.count = entry.count.saturating_sub(1);
-            if entry.count == 0 && !entry.fenced {
+            if entry.count == 0 && !entry.fenced && !entry.retained_until_restart {
                 entries.remove(&self.deployment_id);
             }
         }

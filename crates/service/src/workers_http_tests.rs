@@ -1,10 +1,15 @@
 use super::*;
+use crate::asset_backend::serve_asset_plan;
+use axum::body::HttpBody as _;
+use bytes::Bytes;
 use open_compute_artifacts::{
     ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
-use open_compute_core::{PlatformConfig, StorageConfig, SystemClock};
+use open_compute_core::{MetricsConfig, PlatformConfig, StorageConfig, SystemClock};
 use open_compute_runtime::GenerationAuthRegistry;
-use open_compute_storage::{NewDeployment, PlatformStorage};
+use open_compute_storage::{
+    DeploymentAssetsRepository, DeploymentContentKind, NewDeployment, PlatformStorage,
+};
 use open_compute_workers::{CanonicalBundle, ModuleInput, ModuleType};
 use std::collections::BTreeMap;
 use std::fs;
@@ -23,7 +28,7 @@ fn storage_config(root: &Path) -> StorageConfig {
     }
 }
 
-async fn worker_api_fixture() -> (TempDir, MockS3, WorkerApiState, AccountId) {
+pub(super) async fn worker_api_fixture() -> (TempDir, MockS3, WorkerApiState, AccountId) {
     let temp = TempDir::new().unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
@@ -69,6 +74,18 @@ request_timeout_ms = 1500
     (temp, mock, api, account)
 }
 
+pub(super) fn authorized_http_state(api: WorkerApiState) -> HttpState {
+    HttpState::for_test(
+        crate::HealthCoordinator::new(),
+        Arc::new(
+            crate::MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap(),
+        ),
+        false,
+        Some(SecretString::new("account-admin")),
+    )
+    .with_worker_api(api)
+}
+
 #[tokio::test]
 async fn default_account_discovery_is_authenticated_and_uses_persisted_identity() {
     use crate::{HealthCoordinator, MetricsRegistry};
@@ -108,6 +125,220 @@ async fn default_account_discovery_is_authenticated_and_uses_persisted_identity(
             assert!(!String::from_utf8_lossy(&body).contains(&account.to_string()));
         }
     }
+}
+
+#[tokio::test]
+async fn assets_only_upload_resume_finalize_and_handler_share_one_authority() {
+    use tower::ServiceExt;
+
+    let (_temp, mock, api, account) = worker_api_fixture().await;
+    let (worker, _route) = WorkerRepository::new(api.storage.db())
+        .create_worker(account, "asset-site", RequestId::generate(), 1, 100)
+        .unwrap();
+    let bytes = b"<main>static</main>";
+    let digest = hex::encode(Sha256::digest(bytes));
+    let state = authorized_http_state(api.clone());
+    let router = control_router().with_state(state.clone());
+    let collection = format!(
+        "/v1/accounts/{account}/workers/{}/deployment-uploads",
+        worker.id
+    );
+    let create = serde_json::json!({
+        "contentKind": "assets_only",
+        "manifest": {
+            "schemaVersion": 1,
+            "entries": [{
+                "path": "/index.html",
+                "sha256": digest,
+                "size": bytes.len(),
+                "contentType": "text/html; charset=utf-8"
+            }]
+        },
+        "routing": {
+            "schemaVersion": 1,
+            "runWorkerFirst": false,
+            "htmlHandling": "auto-trailing-slash",
+            "notFoundHandling": "404-page",
+            "headers": [],
+            "redirects": []
+        }
+    });
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&collection)
+                .header(header::AUTHORIZATION, "Bearer account-admin")
+                .header(IDEMPOTENCY_HEADER, "asset-create")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&create).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap()).unwrap();
+    let upload = created["id"].as_str().unwrap();
+    assert_eq!(created["status"], "open");
+    assert_eq!(
+        created["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|object| object["verified"] == true)
+            .count(),
+        1
+    );
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("{collection}/{upload}/objects/{digest}"))
+                .header(header::AUTHORIZATION, "Bearer account-admin")
+                .header(header::CONTENT_LENGTH, bytes.len())
+                .body(Body::from(bytes.as_slice()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let replayed_put = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("{collection}/{upload}/objects/{digest}"))
+                .header(header::AUTHORIZATION, "Bearer account-admin")
+                .header(header::CONTENT_LENGTH, bytes.len())
+                .body(Body::from(bytes.as_slice()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replayed_put.status(), StatusCode::OK);
+    let finalized_body = serde_json::json!({
+        "compatibilityDate": "2026-08-22",
+        "promote": true
+    });
+    let finalize_request = || {
+        Request::builder()
+            .method("POST")
+            .uri(format!("{collection}/{upload}/finalize"))
+            .header(header::AUTHORIZATION, "Bearer account-admin")
+            .header(IDEMPOTENCY_HEADER, "asset-finalize")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&finalized_body).unwrap()))
+            .unwrap()
+    };
+    let response = router.clone().oneshot(finalize_request()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let first = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&first).unwrap();
+    assert_eq!(value["deployment"]["contentKind"], "assets_only");
+    assert_eq!(
+        value["deployment"]["artifactSha256"],
+        serde_json::Value::Null
+    );
+    assert_eq!(value["promoted"], true);
+    let deployment_id: DeploymentId = value["deployment"]["id"].as_str().unwrap().parse().unwrap();
+    let replay = router.clone().oneshot(finalize_request()).await.unwrap();
+    assert_eq!(replay.status(), StatusCode::CREATED);
+    assert_eq!(
+        to_bytes(replay.into_body(), 64 * 1024).await.unwrap(),
+        first
+    );
+
+    let deployment = WorkerRepository::new(api.storage.db())
+        .get_deployment(account, worker.id, deployment_id)
+        .unwrap();
+    let stored = DeploymentAssetsRepository::new(api.storage.db())
+        .get(deployment_id)
+        .unwrap()
+        .unwrap();
+    let manifest: open_compute_workers::AssetManifestV1 =
+        serde_json::from_slice(&stored.manifest_json).unwrap();
+    let routing: open_compute_workers::AssetRoutingConfigV1 =
+        serde_json::from_slice(&stored.routing_config_json).unwrap();
+    let plan = open_compute_workers::plan_asset_response(
+        &manifest,
+        &routing,
+        open_compute_workers::AssetRequest {
+            method: "GET",
+            path: "/",
+            query: None,
+            host: "localhost",
+            sec_fetch_mode: None,
+            if_none_match: None,
+            has_authorization: false,
+            has_range: false,
+        },
+    )
+    .unwrap();
+    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &deployment, plan)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/html; charset=utf-8"
+    );
+    let etag = response.headers()[header::ETAG].clone();
+    assert_eq!(
+        to_bytes(response.into_body(), 64 * 1024).await.unwrap(),
+        bytes.as_slice()
+    );
+
+    let conditional = open_compute_workers::plan_asset_response(
+        &manifest,
+        &routing,
+        open_compute_workers::AssetRequest {
+            method: "GET",
+            path: "/",
+            query: None,
+            host: "localhost",
+            sec_fetch_mode: None,
+            if_none_match: etag.to_str().ok(),
+            has_authorization: false,
+            has_range: false,
+        },
+    )
+    .unwrap();
+    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &deployment, conditional)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+    assert!(
+        to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let redirect = open_compute_workers::plan_asset_response(
+        &manifest,
+        &routing,
+        open_compute_workers::AssetRequest {
+            method: "GET",
+            path: "/index.html",
+            query: None,
+            host: "localhost",
+            sec_fetch_mode: None,
+            if_none_match: None,
+            has_authorization: false,
+            has_range: false,
+        },
+    )
+    .unwrap();
+    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &deployment, redirect)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(response.headers()[header::LOCATION], "/");
+    assert_eq!(mock.object_count(), 2);
 }
 
 #[test]
@@ -291,6 +522,9 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
         (ErrorCode::DeploymentNotReady, StatusCode::CONFLICT),
         (ErrorCode::DeploymentReferenced, StatusCode::CONFLICT),
         (ErrorCode::BundleTooLarge, StatusCode::PAYLOAD_TOO_LARGE),
+        (ErrorCode::AssetLimitExceeded, StatusCode::PAYLOAD_TOO_LARGE),
+        (ErrorCode::AssetUploadConflict, StatusCode::CONFLICT),
+        (ErrorCode::AssetUploadIncomplete, StatusCode::CONFLICT),
         (
             ErrorCode::BundleRuntimeInvalid,
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -300,11 +534,19 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
         (
+            ErrorCode::AssetConfigUnsupported,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
             ErrorCode::RuntimeUnavailable,
             StatusCode::SERVICE_UNAVAILABLE,
         ),
         (
             ErrorCode::ArtifactUnavailable,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            ErrorCode::AssetStorageUnavailable,
             StatusCode::SERVICE_UNAVAILABLE,
         ),
         (
@@ -318,6 +560,10 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
         ),
         (
             ErrorCode::DeploymentInvariantViolation,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        (
+            ErrorCode::AssetIntegrityError,
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
         (ErrorCode::ConfigInvalid, StatusCode::BAD_REQUEST),
@@ -497,10 +743,11 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
             id: deployment,
             account_id: account,
             worker_id: worker.id,
-            artifact_sha256: [7; 32],
-            artifact_size: 7,
-            artifact_schema_version: 1,
-            main_module: "index.js".to_owned(),
+            content_kind: DeploymentContentKind::Worker,
+            artifact_sha256: Some([7; 32]),
+            artifact_size: Some(7),
+            artifact_schema_version: Some(1),
+            main_module: Some("index.js".to_owned()),
             compatibility_date: "2026-08-22".to_owned(),
             compatibility_flags: Vec::new(),
             limits: serde_json::json!({}),
@@ -612,10 +859,11 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
             id: delete_deployment,
             account_id: account,
             worker_id: worker.id,
-            artifact_sha256: [9; 32],
-            artifact_size: 9,
-            artifact_schema_version: 1,
-            main_module: "index.js".to_owned(),
+            content_kind: DeploymentContentKind::Worker,
+            artifact_sha256: Some([9; 32]),
+            artifact_size: Some(9),
+            artifact_schema_version: Some(1),
+            main_module: Some("index.js".to_owned()),
             compatibility_date: "2026-08-22".to_owned(),
             compatibility_flags: Vec::new(),
             limits: serde_json::json!({}),

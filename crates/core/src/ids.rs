@@ -85,6 +85,7 @@ typed_id!(StartupId, "startup generation");
 typed_id!(RequestId, "request");
 typed_id!(WorkerId, "worker");
 typed_id!(DeploymentId, "deployment");
+typed_id!(DeploymentUploadId, "deployment upload session");
 typed_id!(ResourceId, "resource");
 typed_id!(BindingId, "deployment binding");
 typed_id!(QueueId, "Queue resource");

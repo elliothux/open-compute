@@ -32,9 +32,9 @@ use open_compute_storage::{
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    CreateResourceOutcome, CreateResourceRequest, DeploymentBindingInput, DeploymentController,
-    DurableObjectResourceDriver, ModuleInput, ModuleType, ResourceController, ResourcePins,
-    RuntimeSource, RuntimeValidator,
+    CreateResourceOutcome, CreateResourceRequest, DeploymentBindingInput, DeploymentContent,
+    DeploymentController, DurableObjectResourceDriver, ModuleInput, ModuleType, ResourceController,
+    ResourcePins, RuntimeSource, RuntimeValidator,
 };
 use sha2::Sha256;
 use std::collections::BTreeMap;
@@ -384,18 +384,21 @@ async fn p0_7_real_durable_objects_matrix() {
         29,
         false,
     );
-    missing_class.bundle = CanonicalBundle::build(
-        "index.js",
-        vec![ModuleInput {
-            name: "index.js".to_owned(),
-            module_type: ModuleType::EsModule,
-            bytes: b"export default { fetch() { return new Response('missing'); } };".to_vec(),
-        }],
-        BundleLimits::default(),
-    )
-    .unwrap()
-    .into_bytes()
-    .into();
+    missing_class.content = DeploymentContent::Worker {
+        bundle: CanonicalBundle::build(
+            "index.js",
+            vec![ModuleInput {
+                name: "index.js".to_owned(),
+                module_type: ModuleType::EsModule,
+                bytes: b"export default { fetch() { return new Response('missing'); } };".to_vec(),
+            }],
+            BundleLimits::default(),
+        )
+        .unwrap()
+        .into_bytes()
+        .into(),
+        assets: None,
+    };
     assert_eq!(
         deployments
             .create_deployment(missing_class)
@@ -668,7 +671,10 @@ fn deployment_request(
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        bundle: bundle.into_bytes().into(),
+        content: DeploymentContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
+        },
         compatibility_date: "2026-08-22".to_owned(),
         compatibility_flags: vec!["rpc".to_owned()],
         vars,

@@ -104,6 +104,11 @@ impl WorkerdTransport {
         let request = request
             .body(Body::from(bytes))
             .map_err(|_| custom_event_protocol_error())?;
+        if !matches!(path, "/internal/validate-workflow")
+            && let Some(pins) = &self.deployment_pins
+        {
+            pins.retain_until_restart(target.deployment_id)?;
+        }
         let response = self
             .body_client
             .request(request)

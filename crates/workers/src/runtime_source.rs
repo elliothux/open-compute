@@ -1,5 +1,6 @@
 //! Scoped immutable `RuntimeSource` assembly from `SQLite` and verified artifacts.
 
+use crate::assets::{AssetManifestV1, AssetRoutingConfigV1};
 use crate::bundle::{BundleLimits, CanonicalBundle, ModuleType};
 use crate::descriptor::{
     BindingDescriptorV1, QueueProducerBindingDescriptorV1, SecretDescriptor,
@@ -9,7 +10,8 @@ use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
 use open_compute_core::{BindingKind, ErrorCode, PlatformError, SecretString};
 use open_compute_storage::{
-    DeploymentState, DurableObjectRepository, PlatformStorage, WorkerRepository,
+    DeploymentContentKind, DeploymentState, DurableObjectRepository, PlatformStorage,
+    WorkerRepository,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -106,6 +108,24 @@ pub struct RuntimeWorkflowBinding {
     pub descriptor_sha256: String,
 }
 
+/// Optional static-assets fetch capability exposed under one declared env name.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAssetBinding {
+    /// Tenant environment name.
+    pub name: String,
+}
+
+/// Verified static-asset routing data consumed only by the trusted loader host.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAssets {
+    /// Canonical path-to-object manifest.
+    pub manifest: AssetManifestV1,
+    /// Canonical default-route and response configuration.
+    pub routing: AssetRoutingConfigV1,
+}
+
 /// Fully verified immutable deployment assembly.
 #[derive(Clone)]
 pub struct RuntimeSnapshot {
@@ -115,8 +135,10 @@ pub struct RuntimeSnapshot {
     pub worker_code_sha256: String,
     /// Current Worker route generation used to fence Durable Object dispatch.
     pub route_generation: u64,
-    /// Main module.
-    pub main_module: String,
+    /// Executable or assets-only content discriminator.
+    pub content_kind: DeploymentContentKind,
+    /// Main module for executable Workers.
+    pub main_module: Option<String>,
     /// Exact tenant compatibility date.
     pub compatibility_date: String,
     /// Canonically sorted flags.
@@ -133,6 +155,10 @@ pub struct RuntimeSnapshot {
     pub queue_bindings: Vec<RuntimeQueueBinding>,
     /// Verified Workflow caller bindings, carrying no execution or creation tokens.
     pub workflow_bindings: Vec<RuntimeWorkflowBinding>,
+    /// Optional deployment-scoped static-assets fetch capability.
+    pub asset_binding: Option<RuntimeAssetBinding>,
+    /// Optional verified static assets used by the trusted default HTTP router.
+    pub assets: Option<RuntimeAssets>,
     /// Immutable resource limits.
     pub limits: serde_json::Value,
 }
@@ -149,6 +175,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("binding_count", &self.bindings.len())
             .field("queue_binding_count", &self.queue_bindings.len())
             .field("workflow_binding_count", &self.workflow_bindings.len())
+            .field("asset_binding", &self.asset_binding.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -258,32 +285,70 @@ impl RuntimeSource {
             }
             RuntimeScope::Runtime | RuntimeScope::Validation | RuntimeScope::Probe => {}
         }
-        let artifact = ArtifactRef::new(
-            ARTIFACT_KEY_VERSION,
-            &hex::encode(snapshot.deployment.artifact_sha256),
-            snapshot.deployment.artifact_size,
-        )?;
-        let bytes = match &self.cache {
-            Some(cache) => {
-                let mut pinned = cache
-                    .acquire(&self.artifacts, &artifact)
-                    .await
-                    .map_err(map_artifact_error)?;
-                pinned.read_all().map_err(map_artifact_error)?
+        let assets = snapshot
+            .assets
+            .as_ref()
+            .map(|stored| {
+                let manifest = serde_json::from_slice::<AssetManifestV1>(&stored.manifest_json)
+                    .map_err(|_| invariant())?;
+                let routing =
+                    serde_json::from_slice::<AssetRoutingConfigV1>(&stored.routing_config_json)
+                        .map_err(|_| invariant())?;
+                if manifest.sha256()? != stored.manifest_sha256
+                    || manifest.canonical_bytes()? != stored.manifest_json
+                    || routing.canonical_bytes()? != stored.routing_config_json
+                    || routing.binding != stored.binding_name
+                {
+                    return Err(invariant());
+                }
+                Ok((manifest, routing))
+            })
+            .transpose()?;
+        let bundle = match snapshot.deployment.content_kind {
+            DeploymentContentKind::Worker => {
+                let artifact_sha256 = snapshot.deployment.artifact_sha256.ok_or_else(invariant)?;
+                let artifact_size = snapshot.deployment.artifact_size.ok_or_else(invariant)?;
+                let main_module = snapshot
+                    .deployment
+                    .main_module
+                    .as_deref()
+                    .ok_or_else(invariant)?;
+                let artifact = ArtifactRef::new(
+                    ARTIFACT_KEY_VERSION,
+                    &hex::encode(artifact_sha256),
+                    artifact_size,
+                )?;
+                let bytes = match &self.cache {
+                    Some(cache) => {
+                        let mut pinned = cache
+                            .acquire(&self.artifacts, &artifact)
+                            .await
+                            .map_err(map_artifact_error)?;
+                        pinned.read_all().map_err(map_artifact_error)?
+                    }
+                    None => self
+                        .artifacts
+                        .open(&artifact)
+                        .await
+                        .map_err(map_artifact_error)?
+                        .to_vec(),
+                };
+                let bundle = CanonicalBundle::parse(bytes, self.limits)?;
+                if bundle.sha256() != artifact_sha256
+                    || bundle.manifest().main_module != main_module
+                {
+                    return Err(invariant());
+                }
+                Some(bundle)
             }
-            None => self
-                .artifacts
-                .open(&artifact)
-                .await
-                .map_err(map_artifact_error)?
-                .to_vec(),
+            DeploymentContentKind::AssetsOnly if scope == RuntimeScope::Runtime => {
+                if assets.is_none() {
+                    return Err(invariant());
+                }
+                None
+            }
+            DeploymentContentKind::AssetsOnly => return Err(not_ready()),
         };
-        let bundle = CanonicalBundle::parse(bytes, self.limits)?;
-        if bundle.sha256() != snapshot.deployment.artifact_sha256
-            || bundle.manifest().main_module != snapshot.deployment.main_module
-        {
-            return Err(invariant());
-        }
 
         let mut vars = BTreeMap::new();
         for (name, raw) in &snapshot.vars {
@@ -375,8 +440,12 @@ impl RuntimeSource {
             account_id,
             worker_id,
             deployment_id,
-            bundle.sha256(),
-            bundle.manifest(),
+            bundle
+                .as_ref()
+                .map(|bundle| (bundle.sha256(), bundle.manifest())),
+            assets
+                .as_ref()
+                .map(|(manifest, routing)| (manifest, routing)),
             snapshot.deployment.compatibility_date.clone(),
             snapshot.deployment.compatibility_flags.clone(),
             vars.clone(),
@@ -394,13 +463,16 @@ impl RuntimeSource {
             return Err(invariant());
         }
 
-        let mut modules = Vec::with_capacity(bundle.manifest().modules.len());
-        for module in &bundle.manifest().modules {
-            modules.push(RuntimeModule {
-                name: module.name.clone(),
-                module_type: module.module_type,
-                bytes: bundle.module_bytes(module)?.to_vec(),
-            });
+        let mut modules = Vec::new();
+        if let Some(bundle) = &bundle {
+            modules.reserve(bundle.manifest().modules.len());
+            for module in &bundle.manifest().modules {
+                modules.push(RuntimeModule {
+                    name: module.name.clone(),
+                    module_type: module.module_type,
+                    bytes: bundle.module_bytes(module)?.to_vec(),
+                });
+            }
         }
         let mut secrets = BTreeMap::new();
         if scope == RuntimeScope::Runtime {
@@ -419,11 +491,18 @@ impl RuntimeSource {
                 secrets.insert(secret.name.clone(), SecretString::new(text));
             }
         }
+        let asset_binding = assets
+            .as_ref()
+            .and_then(|(_, routing)| routing.binding.clone())
+            .map(|name| RuntimeAssetBinding { name });
         Ok(RuntimeSnapshot {
             loader_key: key.to_owned(),
             worker_code_sha256: hex::encode(actual_descriptor),
             route_generation: snapshot.worker.route_generation,
-            main_module: bundle.manifest().main_module.clone(),
+            content_kind: snapshot.deployment.content_kind,
+            main_module: bundle
+                .as_ref()
+                .map(|bundle| bundle.manifest().main_module.clone()),
             compatibility_date: snapshot.deployment.compatibility_date,
             compatibility_flags: snapshot.deployment.compatibility_flags,
             modules,
@@ -432,6 +511,8 @@ impl RuntimeSource {
             bindings: runtime_bindings,
             queue_bindings: runtime_queue_bindings,
             workflow_bindings: runtime_workflow_bindings,
+            asset_binding,
+            assets: assets.map(|(manifest, routing)| RuntimeAssets { manifest, routing }),
             limits: snapshot.deployment.limits,
         })
     }
@@ -453,12 +534,18 @@ impl RuntimeSource {
             loader_key: &'a str,
             worker_code_sha256: &'a str,
             route_generation: u64,
-            main_module: &'a str,
+            content_kind: DeploymentContentKind,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            main_module: Option<&'a str>,
             compatibility_date: &'a str,
             compatibility_flags: &'a [String],
             modules: Vec<Module<'a>>,
             env: BTreeMap<&'a str, serde_json::Value>,
             bindings: Vec<BindingPayload<'a>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            asset_binding: Option<&'a RuntimeAssetBinding>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            assets: Option<&'a RuntimeAssets>,
             limits: &'a serde_json::Value,
         }
         #[derive(Serialize)]
@@ -541,12 +628,15 @@ impl RuntimeSource {
             loader_key: &snapshot.loader_key,
             worker_code_sha256: &snapshot.worker_code_sha256,
             route_generation: snapshot.route_generation,
-            main_module: &snapshot.main_module,
+            content_kind: snapshot.content_kind,
+            main_module: snapshot.main_module.as_deref(),
             compatibility_date: &snapshot.compatibility_date,
             compatibility_flags: &snapshot.compatibility_flags,
             modules,
             env,
             bindings,
+            asset_binding: snapshot.asset_binding.as_ref(),
+            assets: snapshot.assets.as_ref(),
             limits: &snapshot.limits,
         })
         .map_err(|_| invariant())?;

@@ -196,7 +196,10 @@ pub(super) async fn prepare() -> Fixture {
             account_id: account,
             worker_id: worker.id,
             idempotency_key: format!("chain-{index}"),
-            bundle: bundle.into_bytes().into(),
+            content: open_compute_workers::DeploymentContent::Worker {
+                bundle: bundle.into_bytes().into(),
+                assets: None,
+            },
             compatibility_date: "2026-08-22".into(),
             compatibility_flags: vec!["rpc".into()],
             vars: Default::default(),

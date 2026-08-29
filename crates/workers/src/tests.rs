@@ -685,8 +685,8 @@ fn descriptor_binds_every_runtime_effective_input() {
         account,
         worker,
         deployment,
-        bundle.sha256(),
-        bundle.manifest(),
+        Some((bundle.sha256(), bundle.manifest())),
+        None,
         "2026-08-22".to_owned(),
         vec!["rpc".to_owned(), "rpc".to_owned()],
         vars,
@@ -830,8 +830,8 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             account,
             worker,
             deployment,
-            bundle.sha256(),
-            bundle.manifest(),
+            Some((bundle.sha256(), bundle.manifest())),
+            None,
             "2026-08-22".to_owned(),
             Vec::new(),
             vars,
@@ -1149,7 +1149,10 @@ fn deployment_request(
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        bundle: bundle.into_bytes().into(),
+        content: DeploymentContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
+        },
         compatibility_date: "2026-08-22".to_owned(),
         compatibility_flags: Vec::new(),
         vars,
@@ -1356,6 +1359,200 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
             .unwrap_err()
             .code(),
         ErrorCode::DeploymentInvariantViolation
+    );
+}
+
+#[tokio::test]
+async fn fixed_upload_finalize_resumes_one_cancelled_validating_deployment() {
+    let temp = tempfile::tempdir().unwrap();
+    let storage = Arc::new(
+        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
+            .unwrap(),
+    );
+    let account = storage.identity().default_account_id;
+    let worker = WorkerRepository::new(storage.db())
+        .create_worker(
+            account,
+            "resume-upload",
+            RequestId::generate(),
+            1,
+            1_000_000,
+        )
+        .unwrap()
+        .0;
+    let mock = MockS3::spawn("open-compute").await;
+    let artifacts = artifact_store(&mock);
+    let deployment_id = DeploymentId::generate();
+    let request = deployment_request(account, worker.id, "upload-resume", "secret");
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let started = Arc::new(std::sync::Mutex::new(Some(started_tx)));
+    let blocking_validator: Arc<dyn RuntimeValidator> = Arc::new({
+        let started = started.clone();
+        move |_: ValidationCandidate| {
+            let started = started.lock().unwrap().take();
+            async move {
+                if let Some(started) = started {
+                    let _ = started.send(());
+                }
+                std::future::pending::<Result<(), open_compute_core::PlatformError>>().await
+            }
+        }
+    });
+    let first_storage = storage.clone();
+    let first_artifacts = artifacts.clone();
+    let first_request = request.clone();
+    let attempt = tokio::spawn(async move {
+        DeploymentController::new(
+            &first_storage,
+            first_artifacts,
+            blocking_validator,
+            BundleLimits::default(),
+        )
+        .finalize_upload(first_request, deployment_id)
+        .await
+    });
+    started_rx.await.unwrap();
+    attempt.abort();
+    assert!(attempt.await.unwrap_err().is_cancelled());
+    let stranded = WorkerRepository::new(storage.db())
+        .get_deployment(account, worker.id, deployment_id)
+        .unwrap();
+    assert_eq!(stranded.state, DeploymentState::Validating);
+
+    let recovered = DeploymentController::new(
+        &storage,
+        artifacts,
+        Arc::new(AcceptAllValidator),
+        BundleLimits::default(),
+    )
+    .finalize_upload(request, deployment_id)
+    .await
+    .unwrap();
+    let CreateDeploymentOutcome::Applied(result) = recovered else {
+        panic!("cancelled finalize must complete its fixed deployment");
+    };
+    assert_eq!(result.deployment.id, deployment_id);
+    assert_eq!(result.deployment.state, DeploymentState::Ready);
+    assert_eq!(
+        WorkerRepository::new(storage.db())
+            .list_deployments(account, worker.id)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("data");
+    let storage =
+        Arc::new(PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap());
+    let account = storage.identity().default_account_id;
+    let workers = WorkerRepository::new(storage.db());
+    let worker = workers
+        .create_worker(account, "static-site", RequestId::generate(), 1, 1_000_000)
+        .unwrap()
+        .0;
+    let mock = MockS3::spawn("open-compute").await;
+    let store = artifact_store(&mock);
+    let bytes = bytes::Bytes::from_static(b"hello assets");
+    let digest = sha2::Sha256::digest(&bytes);
+    store
+        .put_verified(
+            futures::stream::once(async { Ok::<_, std::io::Error>(bytes) }),
+            &hex::encode(digest),
+            12,
+        )
+        .await
+        .unwrap();
+    let assets = DeploymentAssets {
+        manifest: AssetManifestV1 {
+            schema_version: 1,
+            entries: vec![AssetEntryV1 {
+                path: "/index.html".to_owned(),
+                sha256: hex::encode(digest),
+                size: 12,
+                content_type: "text/html; charset=utf-8".to_owned(),
+            }],
+        },
+        routing: AssetRoutingConfigV1 {
+            schema_version: 1,
+            binding: None,
+            run_worker_first: RunWorkerFirst::All(false),
+            html_handling: HtmlHandling::AutoTrailingSlash,
+            not_found_handling: NotFoundHandling::Page404,
+            headers: Vec::new(),
+            redirects: Vec::new(),
+        },
+    };
+    let controller = DeploymentController::new(
+        &storage,
+        store.clone(),
+        Arc::new(AcceptAllValidator),
+        BundleLimits::default(),
+    );
+    let request = CreateDeploymentRequest {
+        account_id: account,
+        worker_id: worker.id,
+        idempotency_key: "assets-only".to_owned(),
+        content: DeploymentContent::AssetsOnly {
+            assets: assets.clone(),
+        },
+        compatibility_date: "2026-08-22".to_owned(),
+        compatibility_flags: Vec::new(),
+        vars: BTreeMap::new(),
+        secrets: BTreeMap::new(),
+        bindings: BTreeMap::new(),
+        queue_consumers: Vec::new(),
+        crons: None,
+        limits: serde_json::json!({"profile": "default"}),
+        promote: true,
+        request_id: RequestId::generate(),
+        now_ms: 10,
+    };
+    let result = match controller.create_deployment(request.clone()).await.unwrap() {
+        CreateDeploymentOutcome::Applied(result) => result,
+        CreateDeploymentOutcome::Replay(_) => panic!("first assets deployment replayed"),
+    };
+    assert_eq!(
+        result.deployment.content_kind,
+        open_compute_storage::DeploymentContentKind::AssetsOnly
+    );
+    assert!(result.deployment.artifact_sha256.is_none());
+    assert!(result.deployment.main_module.is_none());
+    let stored = open_compute_storage::DeploymentAssetsRepository::new(storage.db())
+        .get(result.deployment.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.logical_file_count, 1);
+    assert_eq!(stored.logical_total_bytes, 12);
+    assert_eq!(workers.referenced_artifacts().unwrap().len(), 2);
+    assert_eq!(mock.object_count(), 2);
+    let static_snapshot = RuntimeSource::new(storage.clone(), store, BundleLimits::default())
+        .resolve(
+            &loader_key(account, worker.id, result.deployment.id),
+            &hex::encode(result.deployment.worker_code_sha256),
+            RuntimeScope::Runtime,
+        )
+        .await
+        .unwrap();
+    assert_eq!(static_snapshot.main_module, None);
+    assert!(static_snapshot.modules.is_empty());
+    assert!(static_snapshot.assets.is_some());
+
+    let mut invalid = request;
+    invalid.idempotency_key = "assets-only-env".to_owned();
+    invalid
+        .vars
+        .insert("MODE".to_owned(), serde_json::json!("x"));
+    assert_eq!(
+        controller
+            .create_deployment(invalid)
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::AssetConfigUnsupported
     );
 }
 

@@ -1,5 +1,6 @@
 import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import type { AssetsProject } from "./assets/types.ts";
 
 /** JSON values admitted in public Worker variables. */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -14,7 +15,8 @@ export interface WorkerBinding {
 /** Developer project configuration. Secret values never belong in this document. */
 export interface WorkerProject {
   readonly project: string;
-  readonly main: string;
+  readonly main?: string;
+  readonly frameworkOutput?: string;
   readonly name: string;
   readonly tsconfig: string;
   readonly compatibilityDate: string;
@@ -22,6 +24,7 @@ export interface WorkerProject {
   readonly vars: Record<string, JsonValue>;
   readonly secrets: Record<string, { env: string }>;
   readonly bindings: Record<string, WorkerBinding>;
+  readonly assets?: AssetsProject;
   readonly accountId?: string;
   readonly endpoint: string;
 }
@@ -70,7 +73,7 @@ export async function loadProject(path: string): Promise<WorkerProject> {
   try { value = JSON.parse(content); }
   catch { throw new Error("project config must be valid JSON"); }
   if (!record(value)) throw new Error("project config must be an object");
-  knownKeys(value, ["main", "name", "tsconfig", "compatibilityDate", "compatibilityFlags", "vars", "secrets", "bindings", "accountId", "endpoint"], "project");
+  knownKeys(value, ["main", "frameworkOutput", "name", "tsconfig", "compatibilityDate", "compatibilityFlags", "vars", "secrets", "bindings", "assets", "accountId", "endpoint"], "project");
   const name = string(value.name, "name");
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) throw new Error("invalid Worker name");
   const compatibilityDate = string(value.compatibilityDate, "compatibilityDate");
@@ -114,11 +117,70 @@ export async function loadProject(path: string): Promise<WorkerProject> {
       Object.defineProperty(bindings, key, { value: binding, enumerable: true });
     }
   }
+  let assets: AssetsProject | undefined;
+  if (value.assets !== undefined) {
+    if (!record(value.assets)) throw new Error("invalid project assets");
+    knownKeys(value.assets, ["directory", "binding", "run_worker_first", "html_handling", "not_found_handling", "publish_source_maps"], "assets");
+    const runWorkerFirst = value.assets.run_worker_first === undefined ? false : value.assets.run_worker_first;
+    if (typeof runWorkerFirst !== "boolean"
+        && (!Array.isArray(runWorkerFirst) || !runWorkerFirst.length
+          || runWorkerFirst.length > 100 || !runWorkerFirst.every((rule): rule is string =>
+            typeof rule === "string" && rule.length > 0 && rule.length <= 2048
+            && (rule.startsWith("/") || rule.startsWith("!/"))))) {
+      throw new Error("invalid assets runWorkerFirst");
+    }
+    const htmlHandling = value.assets.html_handling ?? "auto-trailing-slash";
+    if (!["auto-trailing-slash", "force-trailing-slash", "drop-trailing-slash", "none"].includes(String(htmlHandling))) {
+      throw new Error("invalid assets htmlHandling");
+    }
+    const notFoundHandling = value.assets.not_found_handling ?? "none";
+    if (!["none", "404-page", "single-page-application"].includes(String(notFoundHandling))) {
+      throw new Error("invalid assets notFoundHandling");
+    }
+    const binding = value.assets.binding;
+    if (binding !== undefined && (typeof binding !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(binding))) {
+      throw new Error("invalid assets binding");
+    }
+    if (binding !== undefined && (Object.hasOwn(variables, binding) || Object.hasOwn(secrets, binding) || Object.hasOwn(bindings, binding))) {
+      throw new Error("assets binding conflicts with another environment name");
+    }
+    if (value.assets.publish_source_maps !== undefined && typeof value.assets.publish_source_maps !== "boolean") {
+      throw new Error("invalid assets publishSourceMaps");
+    }
+    assets = {
+      directory: string(value.assets.directory, "assets directory"),
+      ...(binding === undefined ? {} : { binding }),
+      runWorkerFirst,
+      htmlHandling: htmlHandling as AssetsProject["htmlHandling"],
+      notFoundHandling: notFoundHandling as AssetsProject["notFoundHandling"],
+      publishSourceMaps: value.assets.publish_source_maps === true,
+    };
+  }
+  const main = value.main === undefined ? undefined : string(value.main, "main");
+  const frameworkOutput = value.frameworkOutput === undefined
+    ? undefined : string(value.frameworkOutput, "frameworkOutput");
+  if (frameworkOutput !== undefined && (main !== undefined || assets !== undefined)) {
+    throw new Error("frameworkOutput cannot be combined with main or assets");
+  }
+  if (main === undefined && assets === undefined && frameworkOutput === undefined) {
+    throw new Error("project requires main, assets, or frameworkOutput");
+  }
+  if (main === undefined && assets !== undefined
+      && (Object.keys(variables).length || Object.keys(secrets).length || Object.keys(bindings).length
+        || runWorkerFirstRequiresCode(assets.runWorkerFirst))) {
+    throw new Error("assets-only projects cannot declare an execution environment");
+  }
   return {
-    project: dirname(filename), main: string(value.main, "main"), name,
+    project: dirname(filename), ...(main === undefined ? {} : { main }),
+    ...(frameworkOutput === undefined ? {} : { frameworkOutput }), name,
     tsconfig: value.tsconfig === undefined ? "tsconfig.json" : string(value.tsconfig, "tsconfig"),
     compatibilityDate, compatibilityFlags: flags, vars: variables, secrets, bindings,
+    ...(assets === undefined ? {} : { assets }),
     ...(value.accountId === undefined ? {} : { accountId: string(value.accountId, "accountId") }),
     endpoint: value.endpoint === undefined ? "http://127.0.0.1:8787" : string(value.endpoint, "endpoint"),
   };
+}
+
+function runWorkerFirstRequiresCode(value: boolean | readonly string[]): boolean {
+  return value === true || Array.isArray(value);
 }

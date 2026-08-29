@@ -1,8 +1,7 @@
 //! P1.0 release/capability contract black-box Gate.
 
 use open_compute_workers::{
-    COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN, COMPATIBILITY_FLAGS_ALLOWED,
-    validate_compatibility,
+    COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN, validate_compatibility,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -204,17 +203,31 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
 
     for date in [COMPATIBILITY_DATE_MIN, COMPATIBILITY_DATE_MAX] {
         assert_eq!(
-            validate_compatibility(
-                date,
-                COMPATIBILITY_FLAGS_ALLOWED
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-            )
-            .expect("supported compatibility boundary"),
+            validate_compatibility(date, vec!["nodejs_compat".to_owned(), "rpc".to_owned()],)
+                .expect("supported compatibility boundary"),
             ["nodejs_compat".to_owned(), "rpc".to_owned()]
         );
+        for flag in [
+            "assets_navigation_has_no_effect",
+            "assets_navigation_prefers_asset_serving",
+        ] {
+            assert_eq!(
+                validate_compatibility(date, vec![flag.to_owned()])
+                    .expect("supported official assets compatibility flag"),
+                [flag.to_owned()]
+            );
+        }
     }
+    assert!(
+        validate_compatibility(
+            COMPATIBILITY_DATE_MIN,
+            vec![
+                "assets_navigation_has_no_effect".to_owned(),
+                "assets_navigation_prefers_asset_serving".to_owned(),
+            ],
+        )
+        .is_err()
+    );
     assert!(validate_compatibility("2021-12-31", Vec::new()).is_err());
     assert!(validate_compatibility("2026-08-27", Vec::new()).is_err());
     assert!(validate_compatibility(COMPATIBILITY_DATE_MIN, vec!["unknown".to_owned()]).is_err());

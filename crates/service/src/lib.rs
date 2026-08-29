@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+pub mod asset_backend;
 pub mod auth;
 mod backup_attestation;
 pub mod backup_cli;
@@ -58,7 +59,10 @@ pub fn product_promotion_for_test(
 
 #[cfg(any(test, feature = "test-support"))]
 pub use binding_backend::UnavailableKvBindingExecutor;
-pub use binding_backend::{KvBindingExecutor, bind_binding_backend, serve_binding_backend};
+pub use binding_backend::{
+    KvBindingExecutor, bind_binding_backend, serve_binding_backend,
+    serve_binding_backend_with_assets,
+};
 pub use cli::{Cli, Command, execute};
 pub use d1_backend::D1BindingService;
 pub use d1_http::D1ApiState;

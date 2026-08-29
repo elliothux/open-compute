@@ -270,9 +270,17 @@ pub fn inspect_snapshot_immutable_references(
         let mut references = Vec::new();
         let mut deployments = connection
             .prepare(
-                "SELECT artifact_sha256, artifact_size FROM worker_deployments
-                 WHERE deleted_at_ms IS NULL
-                 ORDER BY artifact_sha256",
+                "SELECT sha256, size FROM (
+                   SELECT r.sha256 AS sha256, r.size AS size
+                   FROM deployment_object_refs r
+                   JOIN worker_deployments d ON d.id = r.deployment_id
+                   WHERE d.state != 'tombstoned'
+                   UNION
+                   SELECT o.sha256 AS sha256, o.size AS size
+                   FROM deployment_upload_objects o
+                   JOIN deployment_uploads u ON u.id = o.session_id
+                   WHERE u.status IN ('open', 'finalizing') AND o.verified = 1
+                 ) ORDER BY sha256, size",
             )
             .map_err(|_| inspect_error())?;
         let rows = deployments
@@ -284,7 +292,7 @@ pub fn inspect_snapshot_immutable_references(
             let (digest, size) = row.map_err(|_| inspect_error())?;
             let sha256 = valid_digest(&digest)?;
             references.push(SnapshotImmutableReferenceV1 {
-                role: "worker_bundle".to_owned(),
+                role: "deployment_artifact".to_owned(),
                 object_key: format!(
                     "{system_prefix}artifacts/v1/sha256/{}/{rest}",
                     &sha256[..2],

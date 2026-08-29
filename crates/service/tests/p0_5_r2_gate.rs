@@ -469,7 +469,10 @@ fn request(
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        bundle: bundle.into_bytes().into(),
+        content: open_compute_workers::DeploymentContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
+        },
         compatibility_date: "2026-08-22".to_owned(),
         compatibility_flags: vec!["rpc".to_owned()],
         vars: BTreeMap::new(),

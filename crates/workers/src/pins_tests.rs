@@ -32,6 +32,7 @@ fn unfence_empty_entry_and_released_drop_are_idempotent() {
             Entry {
                 count: 0,
                 fenced: true,
+                retained_until_restart: false,
             },
         );
     }
@@ -43,4 +44,23 @@ fn unfence_empty_entry_and_released_drop_are_idempotent() {
         released: true,
     });
     assert_eq!(pins.count(deployment), 0);
+}
+
+#[tokio::test]
+async fn unobservable_background_execution_is_retained_until_process_restart() {
+    let pins = DeploymentPins::new();
+    let deployment = DeploymentId::generate();
+    pins.retain_until_restart(deployment).unwrap();
+    pins.retain_until_restart(deployment).unwrap();
+    assert_eq!(pins.count(deployment), 1);
+    assert_eq!(
+        pins.fence_and_wait(deployment, Duration::from_millis(1))
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::DeploymentReferenced
+    );
+    pins.unfence(deployment);
+    assert_eq!(pins.count(deployment), 1);
+    assert!(DeploymentPins::new().pin(deployment).is_ok());
 }

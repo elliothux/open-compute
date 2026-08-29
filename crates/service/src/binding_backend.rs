@@ -111,6 +111,7 @@ struct BackendState {
     scheduler: Option<Arc<SchedulerStore>>,
     queue: Option<Arc<QueueBindingService>>,
     workflow: Option<Arc<crate::workflow_backend::WorkflowBindingService>>,
+    assets: Option<Arc<crate::asset_backend::AssetBindingService>>,
 }
 
 /// Bind the private binding backend to an ephemeral IPv4 loopback port.
@@ -140,6 +141,79 @@ pub async fn serve_binding_backend(
     queue_config: QueuesConfig,
     workflow_config: open_compute_core::WorkflowsConfig,
     scheduler: Option<Arc<SchedulerStore>>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), PlatformError> {
+    serve_binding_backend_inner(
+        listener,
+        storage,
+        auth,
+        pins,
+        executor,
+        metrics,
+        r2,
+        d1,
+        do_config,
+        queue_config,
+        workflow_config,
+        scheduler,
+        None,
+        shutdown,
+    )
+    .await
+}
+
+/// Serve every product plane plus the deployment-scoped static-assets binding backend.
+#[allow(clippy::too_many_arguments)]
+pub async fn serve_binding_backend_with_assets(
+    listener: TcpListener,
+    storage: Arc<PlatformStorage>,
+    auth: GenerationAuthRegistry,
+    pins: ResourcePins,
+    executor: Arc<dyn KvBindingExecutor>,
+    metrics: Option<Arc<MetricsRegistry>>,
+    r2: Option<Arc<R2BindingService>>,
+    d1: Option<Arc<D1BindingService>>,
+    do_config: DurableObjectsConfig,
+    queue_config: QueuesConfig,
+    workflow_config: open_compute_core::WorkflowsConfig,
+    scheduler: Option<Arc<SchedulerStore>>,
+    assets: Arc<crate::asset_backend::AssetBindingService>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), PlatformError> {
+    serve_binding_backend_inner(
+        listener,
+        storage,
+        auth,
+        pins,
+        executor,
+        metrics,
+        r2,
+        d1,
+        do_config,
+        queue_config,
+        workflow_config,
+        scheduler,
+        Some(assets),
+        shutdown,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn serve_binding_backend_inner(
+    listener: TcpListener,
+    storage: Arc<PlatformStorage>,
+    auth: GenerationAuthRegistry,
+    pins: ResourcePins,
+    executor: Arc<dyn KvBindingExecutor>,
+    metrics: Option<Arc<MetricsRegistry>>,
+    r2: Option<Arc<R2BindingService>>,
+    d1: Option<Arc<D1BindingService>>,
+    do_config: DurableObjectsConfig,
+    queue_config: QueuesConfig,
+    workflow_config: open_compute_core::WorkflowsConfig,
+    scheduler: Option<Arc<SchedulerStore>>,
+    assets: Option<Arc<crate::asset_backend::AssetBindingService>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     let (global_streams, resource_streams) = executor.stream_limits();
@@ -182,6 +256,7 @@ pub async fn serve_binding_backend(
         scheduler,
         queue,
         workflow,
+        assets,
     };
     let router = Router::new().fallback(handle).with_state(state);
     axum::serve(listener, router.into_make_service())
@@ -235,6 +310,12 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
             ErrorCode::BindingProtocolError,
             StatusCode::METHOD_NOT_ALLOWED,
         );
+    }
+    if request.uri().path() == "/internal/assets/v1/fetch" {
+        return match &state.assets {
+            Some(assets) => assets.handle(request).await,
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
     }
     if request.uri().path().starts_with("/internal/alarms/v1/") {
         return handle_alarm_index(state, request).await;

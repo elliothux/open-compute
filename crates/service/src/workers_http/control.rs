@@ -2,7 +2,7 @@
 
 use super::*;
 use axum::Router;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 
 /// Router containing the stable P0.2 management surface.
 pub fn control_router() -> Router<HttpState> {
@@ -19,6 +19,22 @@ pub fn control_router() -> Router<HttpState> {
         .route(
             "/v1/accounts/{account_id}/workers/{worker_id}/deployments",
             post(create_deployment).get(list_deployments),
+        )
+        .route(
+            "/v1/accounts/{account_id}/workers/{worker_id}/deployment-uploads",
+            post(create_deployment_upload),
+        )
+        .route(
+            "/v1/accounts/{account_id}/workers/{worker_id}/deployment-uploads/{upload_id}",
+            get(get_deployment_upload).delete(abort_deployment_upload),
+        )
+        .route(
+            "/v1/accounts/{account_id}/workers/{worker_id}/deployment-uploads/{upload_id}/objects/{sha256}",
+            put(put_deployment_upload_object),
+        )
+        .route(
+            "/v1/accounts/{account_id}/workers/{worker_id}/deployment-uploads/{upload_id}/finalize",
+            post(finalize_deployment_upload),
         )
         .route(
             "/v1/accounts/{account_id}/workers/{worker_id}/deployments/{deployment_id}",

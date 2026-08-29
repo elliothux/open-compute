@@ -10,6 +10,10 @@ export interface BindingProps {
   deploymentId: string;
   descriptorSha256: string;
 }
+export interface AssetBindingProps {
+  deploymentId: string;
+  descriptorSha256: string;
+}
 export interface ResourceBindingProps extends BindingProps {
   accountId: string;
   workerId: string;

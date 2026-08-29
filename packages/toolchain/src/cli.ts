@@ -1,10 +1,14 @@
+import { createHash } from "node:crypto";
 import { mkdir, open, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { compileWorker } from "./build-worker.ts";
 import { encodeWorker } from "./bundle-worker.ts";
-import { deployWorker } from "./deploy-worker.ts";
+import { readAssetObject, scanAssets } from "./assets/scan.ts";
+import type { ScannedAssets } from "./assets/types.ts";
+import { deployProject } from "./deploy-worker.ts";
 import { loadProject } from "./project.ts";
+import { importFrameworkOutput } from "./import/framework-output.ts";
 
 const HELP = `Usage: oc <build|run|deploy> [entry.ts] [options]
 
@@ -14,7 +18,7 @@ const HELP = `Usage: oc <build|run|deploy> [entry.ts] [options]
 
 Options:
   --config <file>       Project JSON (default: open-compute.json)
-  --platformd <file>    Matching platformd binary, or OPEN_COMPUTE_PLATFORMD
+  --platformd <file>    Matching platformd binary for Worker code, or OPEN_COMPUTE_PLATFORMD
   --out <file>          New bundle output file (required for build; never overwritten)
   --endpoint <origin>   Override the platform origin
   --account <id>        Override the platform's default account
@@ -43,33 +47,77 @@ export async function runCli(args: readonly string[]): Promise<void> {
   if (!["build", "run", "deploy"].includes(command ?? "") || positionals.length > 2) throw new Error(HELP);
   if (command === "build" && values.out === undefined) throw new Error("build requires --out; existing output is never overwritten");
   if (command !== "build" && values.out !== undefined) throw new Error("--out is only supported by build");
-  const binary = values.platformd ?? process.env.OPEN_COMPUTE_PLATFORMD;
-  if (!binary) throw new Error("set --platformd or OPEN_COMPUTE_PLATFORMD to a matching platformd binary");
   const project = await loadProject(values.config);
-  const compiled = await compileWorker({
-    project: project.project, entry: entry ?? project.main, tsconfig: project.tsconfig,
-    compatibilityFlags: project.compatibilityFlags,
-  });
-  const artifact = await encodeWorker(compiled, resolve(binary));
+  if (entry !== undefined && project.frameworkOutput !== undefined) {
+    throw new Error("an entry argument cannot override frameworkOutput");
+  }
+  const framework = project.frameworkOutput === undefined ? undefined : await importFrameworkOutput(project);
+  const effectiveProject = framework === undefined ? project : {
+    ...project,
+    ...(framework.assets === undefined ? {} : { assets: framework.assets }),
+  };
+  const main = entry ?? project.main;
+  const binary = values.platformd ?? process.env.OPEN_COMPUTE_PLATFORMD;
+  if (main !== undefined && !binary) throw new Error("set --platformd or OPEN_COMPUTE_PLATFORMD to encode Worker code");
+  const assets = effectiveProject.assets === undefined
+    ? undefined : await scanAssets(effectiveProject.project, effectiveProject.assets);
+  let artifact: Awaited<ReturnType<typeof encodeWorker>> | undefined;
+  if (framework !== undefined) {
+    if (binary === undefined) throw new Error("platformd is required to encode framework Worker code");
+    artifact = await encodeWorker(framework.worker, resolve(binary));
+  } else if (main !== undefined) {
+    if (binary === undefined) throw new Error("platformd is required to encode Worker code");
+    artifact = await encodeWorker(await compileWorker({
+      project: project.project, entry: main, tsconfig: project.tsconfig,
+      compatibilityFlags: project.compatibilityFlags,
+    }), resolve(binary));
+  }
   if (command === "build") {
     if (values.out === undefined) throw new Error("build requires --out");
     const output = resolve(values.out);
     await mkdir(dirname(output), { recursive: true });
+    const bytes = assets === undefined
+      ? artifact?.bytes
+      : await deploymentPackage(artifact, assets);
+    if (bytes === undefined) throw new Error("build has no deployment content");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
     const file = await open(output, "wx", 0o600);
-    try { await file.writeFile(artifact.bytes); await file.sync(); }
+    try { await file.writeFile(bytes); await file.sync(); }
     catch (error) { await file.close(); await rm(output); throw error; }
     await file.close();
     process.stdout.write(values.json
-      ? `${JSON.stringify({ output, sha256: artifact.sha256, bytes: artifact.bytes.byteLength })}\n`
-      : `Built ${output} (${artifact.bytes.byteLength} bytes, SHA-256 ${artifact.sha256})\n`);
+      ? `${JSON.stringify({ output, sha256, bytes: bytes.byteLength })}\n`
+      : `Built ${output} (${bytes.byteLength} bytes, SHA-256 ${sha256})\n`);
     return;
   }
   const token = process.env[values["token-env"]];
-  const result = await deployWorker(project, artifact, {
+  const result = await deployProject(effectiveProject, artifact, assets, {
     localOnly: command === "run",
     ...(values.endpoint === undefined ? {} : { endpoint: values.endpoint }),
     ...(values.account === undefined ? {} : { accountId: values.account }),
     ...(token === undefined ? {} : { token }),
   });
   process.stdout.write(values.json ? `${JSON.stringify(result)}\n` : `Worker is serving at ${result.url}\nDeployment: ${result.deploymentId}\n`);
+}
+
+async function deploymentPackage(
+  artifact: Awaited<ReturnType<typeof encodeWorker>> | undefined,
+  assets: ScannedAssets,
+): Promise<Uint8Array> {
+  const objects: { sha256: string; size: number; bytesBase64: string }[] = [];
+  for (const source of [...assets.objects.values()].sort((left, right) => left.sha256.localeCompare(right.sha256))) {
+    const bytes = await readAssetObject(source);
+    objects.push({ sha256: source.sha256, size: source.size, bytesBase64: Buffer.from(bytes).toString("base64") });
+  }
+  return Buffer.from(JSON.stringify({
+    schemaVersion: 1,
+    contentKind: artifact === undefined ? "assets_only" : "worker",
+    ...(artifact === undefined ? {} : {
+      bundle: { sha256: artifact.sha256, size: artifact.bytes.byteLength,
+        bytesBase64: Buffer.from(artifact.bytes).toString("base64") },
+    }),
+    manifest: assets.manifest,
+    routing: assets.routing,
+    objects,
+  }));
 }

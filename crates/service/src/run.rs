@@ -1,6 +1,7 @@
 //! Production `run` composition and shutdown.
 
-use crate::binding_backend::{bind_binding_backend, serve_binding_backend};
+use crate::asset_backend::AssetBindingService;
+use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_assets};
 use crate::capabilities::{platform_capabilities, platform_release_metadata};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
@@ -413,8 +414,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let admin_addr = loaded.config.server.admin_addr()?;
     let merged = !matches!(admin_addr, Some(admin) if admin != public_addr);
 
+    let deployment_pins = DeploymentPins::new();
     let supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>> = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(generation_auth.clone(), supervisor_handle.clone())
+        .with_deployment_pins(deployment_pins.clone())
         .with_max_request_body(
             usize::try_from(loaded.config.workers.max_request_body_bytes).map_err(|_| {
                 PlatformError::new(ErrorCode::LimitInvalid, "Worker body limit is invalid")
@@ -440,7 +443,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         )?,
         ..BundleLimits::default()
     };
-    let deployment_pins = DeploymentPins::new();
     let resource_pins = ResourcePins::new();
     let r2_api = R2ApiState::new(
         storage.clone(),
@@ -507,6 +509,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         bundle_limits,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
+    .with_cache(cache.clone())
     .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency)
     .with_product_promoter(Arc::new(P23PromotionCoordinator::new(
         storage.clone(),
@@ -595,7 +598,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let maintenance_emergency_reserve_bytes = loaded.config.hardening.emergency_reserve_bytes;
     let maintenance_r2_objects = r2_objects;
     let maintenance_health = health.clone();
-    let maintenance_pins = deployment_pins;
+    let maintenance_pins = deployment_pins.clone();
     let maintenance_resource_pins = resource_pins.clone();
     let maintenance_metrics = metrics.clone();
     let maintenance_snapshot_pins = snapshot_pins;
@@ -684,8 +687,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let binding_do_config = loaded.config.durable_objects.clone();
     let binding_queue_config = loaded.config.queues.clone();
     let binding_workflow_config = loaded.config.workflows.clone();
+    let binding_assets = Arc::new(AssetBindingService::new(
+        storage.clone(),
+        store.clone(),
+        cache.clone(),
+        deployment_pins.clone(),
+    ));
     let binding_backend_task = tokio::spawn(async move {
-        serve_binding_backend(
+        serve_binding_backend_with_assets(
             binding_backend_listener,
             binding_storage,
             binding_auth,
@@ -698,6 +707,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             binding_queue_config,
             binding_workflow_config,
             Some(scheduler_store),
+            binding_assets,
             async move {
                 let _ = shutdown_binding.changed().await;
             },

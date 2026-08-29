@@ -19,13 +19,14 @@ CREATE TABLE worker_deployments (
   id TEXT PRIMARY KEY,
   worker_id TEXT NOT NULL REFERENCES workers(id),
   version_number INTEGER NOT NULL CHECK(version_number > 0),
+  content_kind TEXT NOT NULL CHECK(content_kind IN ('worker', 'assets_only')),
   state TEXT NOT NULL CHECK(state IN (
     'staging', 'validating', 'ready', 'rejected', 'deleting', 'tombstoned'
   )),
-  artifact_sha256 BLOB NOT NULL CHECK(length(artifact_sha256) = 32),
-  artifact_size INTEGER NOT NULL CHECK(artifact_size >= 0),
-  artifact_schema_version INTEGER NOT NULL,
-  main_module TEXT NOT NULL,
+  artifact_sha256 BLOB CHECK(artifact_sha256 IS NULL OR length(artifact_sha256) = 32),
+  artifact_size INTEGER CHECK(artifact_size IS NULL OR artifact_size >= 0),
+  artifact_schema_version INTEGER,
+  main_module TEXT,
   compatibility_date TEXT NOT NULL,
   compatibility_flags_json BLOB NOT NULL,
   limits_json BLOB NOT NULL,
@@ -36,6 +37,14 @@ CREATE TABLE worker_deployments (
   rejected_at_ms INTEGER,
   rejection_code TEXT,
   deleted_at_ms INTEGER,
+  CHECK(
+    (content_kind = 'worker' AND artifact_sha256 IS NOT NULL AND
+     artifact_size IS NOT NULL AND artifact_schema_version IS NOT NULL AND
+     main_module IS NOT NULL) OR
+    (content_kind = 'assets_only' AND artifact_sha256 IS NULL AND
+     artifact_size IS NULL AND artifact_schema_version IS NULL AND
+     main_module IS NULL)
+  ),
   UNIQUE(worker_id, version_number)
 ) STRICT;
 
@@ -156,7 +165,7 @@ BEGIN
 END;
 
 CREATE TRIGGER deployment_immutable_guard
-BEFORE UPDATE OF artifact_sha256, artifact_size, artifact_schema_version,
+BEFORE UPDATE OF content_kind, artifact_sha256, artifact_size, artifact_schema_version,
   main_module, compatibility_date, compatibility_flags_json, limits_json,
   worker_code_sha256, loader_schema_version
 ON worker_deployments

@@ -4,10 +4,13 @@ import { realpath, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
+/** Module representation accepted by the canonical Rust bundle encoder. */
+export type CompiledModuleType = "esModule" | "commonJsModule" | "text" | "json" | "data" | "wasm";
+
 /** Module bytes ready for the canonical Rust bundle encoder. */
 export interface CompiledModule {
   readonly name: string;
-  readonly type: "esModule";
+  readonly type: CompiledModuleType;
   readonly bytes: Uint8Array;
 }
 

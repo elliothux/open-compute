@@ -11,6 +11,7 @@ export const QUEUE_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}queues/facade.js`;
 export const WORKFLOW_RUNNER_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/runner.js`;
 export const WORKFLOW_JSON_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/json.js`;
 export const WORKFLOW_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/facade.js`;
+export const ASSET_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}assets/facade.js`;
 export const WRAPPER_RUNTIME_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/runtime.js`;
 export const DO_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/durable-object.js`;
 export const WORKFLOW_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/workflow.js`;
@@ -23,13 +24,14 @@ export interface WrapperOptions {
   entrypointName?: string | undefined;
   durableObject: boolean;
   workflow?: boolean | undefined;
+  assetBindingName?: string | undefined;
 }
 
 function fromWrapper(module: string): string { return JSON.stringify(`./${module.slice(INTERNAL_MODULE_PREFIX.length)}`); }
 
 /** Only module wiring and validated data are generated; behavior lives in TS modules. */
 export function generateBindingWrapper(options: WrapperOptions): string {
-  const { mainModule, bindings, entrypointName, durableObject, workflow = false } = options;
+  const { mainModule, bindings, entrypointName, durableObject, workflow = false, assetBindingName } = options;
   if (entrypointName !== undefined && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypointName)) {
     throw new Error("invalid entrypoint name");
   }
@@ -40,6 +42,10 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     `import { createEnvironment, wrapDefault, wrapEntrypoint } from ${fromWrapper(WRAPPER_RUNTIME_MODULE)};`,
   ];
   const factories: string[] = [];
+  if (assetBindingName !== undefined) {
+    lines.push(`import { AssetsBinding } from ${fromWrapper(ASSET_FACADE_MODULE)};`);
+    factories.push(`{ names: ${JSON.stringify([assetBindingName])}, create: AssetsBinding }`);
+  }
   for (const [kind, version, module, exported] of [
     ["r2_bucket", 1, R2_FACADE_MODULE, "R2Bucket"],
     ["d1_database", 1, D1_FACADE_MODULE, "D1Database"],

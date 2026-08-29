@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readAssetObject } from "./assets/scan.ts";
+import type { ScannedAssets } from "./assets/types.ts";
 import type { WorkerArtifact } from "./bundle-worker.ts";
 import { record } from "./project.ts";
 import type { WorkerProject } from "./project.ts";
@@ -17,7 +19,7 @@ export interface WorkerDeployment {
   readonly workerId: string;
   readonly deploymentId: string;
   readonly url: string;
-  readonly sha256: string;
+  readonly sha256?: string;
 }
 
 function identifier(value: unknown): value is string {
@@ -44,6 +46,17 @@ async function readJson(response: Response): Promise<unknown> {
 
 /** Compile output enters the ordinary immutable deployment and promotion API. */
 export async function deployWorker(project: WorkerProject, artifact: WorkerArtifact, options: DeployOptions): Promise<WorkerDeployment> {
+  return deployProject(project, artifact, undefined, options);
+}
+
+/** Deploy Worker code, static assets, or both through one immutable deployment model. */
+export async function deployProject(
+  project: WorkerProject,
+  artifact: WorkerArtifact | undefined,
+  assets: ScannedAssets | undefined,
+  options: DeployOptions,
+): Promise<WorkerDeployment> {
+  if (artifact === undefined && assets === undefined) throw new Error("deployment has no Worker or static assets");
   const endpoint = new URL(options.endpoint ?? project.endpoint);
   const loopback = ["127.0.0.1", "[::1]", "localhost"].includes(endpoint.hostname);
   if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/"
@@ -62,16 +75,18 @@ export async function deployWorker(project: WorkerProject, artifact: WorkerArtif
   // HTTP field values are ASCII. Escaping UTF-16 code units preserves JSON values,
   // including astral characters, without putting credentials in URLs or artifacts.
   const metadata = JSON.stringify({
-    mainModule: artifact.mainModule, compatibilityDate: project.compatibilityDate,
+    ...(artifact === undefined ? {} : { mainModule: artifact.mainModule }),
+    compatibilityDate: project.compatibilityDate,
     compatibilityFlags: project.compatibilityFlags, vars: project.vars, secrets,
     bindings: project.bindings, promote: true,
   }).replace(/[^\x20-\x7e]/g, value => `\\u${value.charCodeAt(0).toString(16).padStart(4, "0")}`);
   if (metadata.length > 1024 * 1024) throw new Error("deployment metadata exceeds 1 MiB");
 
-  const request = async (path: string, method = "GET", body?: RequestInit["body"], extraHeaders?: Record<string, string>): Promise<unknown> => {
+  const request = async (path: string, method = "GET", body?: RequestInit["body"],
+    extraHeaders?: Record<string, string>, mutationKey?: string): Promise<unknown> => {
     const headers = new Headers(extraHeaders);
     if (options.token !== undefined) headers.set("authorization", `Bearer ${options.token}`);
-    if (method === "POST") headers.set("idempotency-key", randomUUID());
+    if (method === "POST") headers.set("idempotency-key", mutationKey ?? randomUUID());
     let response: Response;
     try {
       response = await fetch(new URL(path, endpoint), {
@@ -111,9 +126,15 @@ export async function deployWorker(project: WorkerProject, artifact: WorkerArtif
         || created.worker.accountId !== account || created.worker.name !== project.name) throw new Error("invalid Worker creation response");
     workerId = created.worker.id;
   }
-  const result = await request(`${collection}/${workerId}/deployments`, "POST", Buffer.from(artifact.bytes), {
-    "content-type": "application/octet-stream", "x-open-compute-deployment-metadata": metadata,
-  });
+  let result: unknown;
+  if (assets === undefined) {
+    if (artifact === undefined) throw new Error("Worker deployment is missing its bundle");
+    result = await request(`${collection}/${workerId}/deployments`, "POST", Buffer.from(artifact.bytes), {
+      "content-type": "application/octet-stream", "x-open-compute-deployment-metadata": metadata,
+    });
+  } else {
+    result = await deployAssets(request, collection, workerId, project, artifact, assets, secrets);
+  }
   if (!record(result) || result.promoted !== true || !record(result.deployment)
       || !identifier(result.deployment.id) || result.deployment.state !== "ready"
       || result.deployment.workerId !== workerId) {
@@ -130,5 +151,84 @@ export async function deployWorker(project: WorkerProject, artifact: WorkerArtif
   }
   const url = new URL(route.pathPrefix, endpoint);
   if (url.origin !== endpoint.origin || url.search || url.hash) throw new Error("invalid default Worker route");
-  return { workerId, deploymentId: result.deployment.id, url: url.href, sha256: artifact.sha256 };
+  return {
+    workerId,
+    deploymentId: result.deployment.id,
+    url: url.href,
+    ...(artifact === undefined ? {} : { sha256: artifact.sha256 }),
+  };
+}
+
+async function deployAssets(
+  request: (path: string, method?: string, body?: RequestInit["body"],
+    headers?: Record<string, string>, mutationKey?: string) => Promise<unknown>,
+  collection: string,
+  workerId: string,
+  project: WorkerProject,
+  artifact: WorkerArtifact | undefined,
+  assets: ScannedAssets,
+  secrets: Record<string, string>,
+): Promise<unknown> {
+  const createBody = JSON.stringify({
+    contentKind: artifact === undefined ? "assets_only" : "worker",
+    ...(artifact === undefined ? {} : { bundle: { sha256: artifact.sha256, size: artifact.bytes.byteLength } }),
+    manifest: assets.manifest,
+    routing: assets.routing,
+  });
+  // This input-derived key survives a CLI process restart without storing credentials.
+  // The server scopes it to the account and Worker and rejects any fingerprint drift.
+  const createKey = `oc-assets-${createHash("sha256").update(createBody).digest("hex")}`;
+  const created = await request(
+    `${collection}/${workerId}/deployment-uploads`,
+    "POST",
+    createBody,
+    { "content-type": "application/json" },
+    createKey,
+  );
+  if (!record(created) || !identifier(created.id) || created.workerId !== workerId
+      || !Array.isArray(created.objects)) throw new Error("invalid deployment upload response");
+  const uploadId = created.id;
+  for (const raw of created.objects as readonly unknown[]) {
+    if (!record(raw) || typeof raw.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(raw.sha256)
+        || typeof raw.size !== "number" || !Number.isSafeInteger(raw.size) || raw.size < 0
+        || typeof raw.verified !== "boolean" || typeof raw.kind !== "string") {
+      throw new Error("invalid deployment upload inventory");
+    }
+    if (raw.verified) continue;
+    let bytes: Uint8Array;
+    if (raw.kind === "bundle") {
+      if (!artifact || raw.sha256 !== artifact.sha256 || raw.size !== artifact.bytes.byteLength) {
+        throw new Error("deployment upload bundle inventory changed");
+      }
+      bytes = artifact.bytes;
+    } else if (raw.kind === "asset_blob") {
+      const source = assets.objects.get(raw.sha256);
+      if (!source || source.size !== raw.size) throw new Error("deployment upload asset inventory changed");
+      bytes = await readAssetObject(source);
+    } else if (raw.kind === "asset_manifest") {
+      // The server verifies and confirms the canonical manifest submitted at session creation.
+      throw new Error("platform did not confirm the submitted asset manifest");
+    } else throw new Error("invalid deployment upload object kind");
+    await request(
+      `${collection}/${workerId}/deployment-uploads/${uploadId}/objects/${raw.sha256}`,
+      "PUT",
+      Buffer.from(bytes),
+      { "content-type": "application/octet-stream", "content-length": String(bytes.byteLength) },
+    );
+  }
+  return request(
+    `${collection}/${workerId}/deployment-uploads/${uploadId}/finalize`,
+    "POST",
+    JSON.stringify({
+      ...(artifact === undefined ? {} : { mainModule: artifact.mainModule }),
+      compatibilityDate: project.compatibilityDate,
+      compatibilityFlags: project.compatibilityFlags,
+      vars: project.vars,
+      secrets,
+      bindings: project.bindings,
+      promote: true,
+    }),
+    { "content-type": "application/json" },
+    `oc-assets-finalize-${uploadId}`,
+  );
 }

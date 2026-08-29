@@ -498,7 +498,10 @@ pub(super) fn deployment_request(
         account_id,
         worker_id,
         idempotency_key: idempotency_key.to_owned(),
-        bundle: bundle.into_bytes().into(),
+        content: open_compute_workers::DeploymentContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
+        },
         compatibility_date: "2026-08-22".to_owned(),
         compatibility_flags: vec!["rpc".to_owned()],
         vars: BTreeMap::from([("RELEASE".to_owned(), serde_json::json!(release))]),

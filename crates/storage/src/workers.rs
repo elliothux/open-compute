@@ -57,6 +57,35 @@ pub enum DeploymentState {
     Tombstoned,
 }
 
+/// Executable or static-only content carried by an immutable deployment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentContentKind {
+    /// Tenant Worker code, with optional static assets.
+    Worker,
+    /// Static assets without a fabricated tenant Worker.
+    AssetsOnly,
+}
+
+impl DeploymentContentKind {
+    /// Stable current-schema token.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Worker => "worker",
+            Self::AssetsOnly => "assets_only",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, PlatformError> {
+        match value {
+            "worker" => Ok(Self::Worker),
+            "assets_only" => Ok(Self::AssetsOnly),
+            _ => Err(invariant()),
+        }
+    }
+}
+
 impl DeploymentState {
     /// Stable database token.
     #[must_use]
@@ -94,16 +123,18 @@ pub struct DeploymentRecord {
     pub worker_id: WorkerId,
     /// Monotonic Worker-local version.
     pub version_number: u64,
+    /// Deployment content union discriminator.
+    pub content_kind: DeploymentContentKind,
     /// Lifecycle state.
     pub state: DeploymentState,
     /// Canonical bundle digest.
-    pub artifact_sha256: [u8; 32],
+    pub artifact_sha256: Option<[u8; 32]>,
     /// Canonical bundle size.
-    pub artifact_size: u64,
+    pub artifact_size: Option<u64>,
     /// Artifact framing schema.
-    pub artifact_schema_version: u32,
+    pub artifact_schema_version: Option<u32>,
     /// Main ES module.
-    pub main_module: String,
+    pub main_module: Option<String>,
     /// Tenant compatibility date.
     pub compatibility_date: String,
     /// Canonically sorted compatibility flags.
@@ -146,6 +177,8 @@ pub struct DeploymentSnapshot {
     pub worker: WorkerRecord,
     /// Deployment row.
     pub deployment: DeploymentRecord,
+    /// Static-asset authority when the deployment declares assets.
+    pub assets: Option<crate::DeploymentAssetsRecord>,
     /// Canonical JSON vars keyed by env name.
     pub vars: BTreeMap<String, Vec<u8>>,
     /// Encrypted secrets keyed by env name.
@@ -209,6 +242,8 @@ pub struct RouteSnapshot {
     pub worker: WorkerRecord,
     /// Active ready deployment.
     pub deployment: DeploymentRecord,
+    /// Static-asset authority frozen with the same active deployment.
+    pub assets: Option<crate::DeploymentAssetsRecord>,
 }
 
 /// Registered reason a deployment must remain reachable.
@@ -245,14 +280,16 @@ pub struct NewDeployment {
     pub account_id: AccountId,
     /// Parent Worker.
     pub worker_id: WorkerId,
+    /// Deployment content union discriminator.
+    pub content_kind: DeploymentContentKind,
     /// Artifact digest.
-    pub artifact_sha256: [u8; 32],
+    pub artifact_sha256: Option<[u8; 32]>,
     /// Artifact size.
-    pub artifact_size: u64,
+    pub artifact_size: Option<u64>,
     /// Artifact schema.
-    pub artifact_schema_version: u32,
+    pub artifact_schema_version: Option<u32>,
     /// Main module.
-    pub main_module: String,
+    pub main_module: Option<String>,
     /// Tenant compatibility date.
     pub compatibility_date: String,
     /// Sorted flags.
@@ -652,7 +689,7 @@ impl<'a> WorkerRepository<'a> {
             }
             let deployment = conn
                 .query_row(
-                    "SELECT id, worker_id, version_number, state, artifact_sha256,
+                    "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
                         compatibility_date, compatibility_flags_json, limits_json,
                         worker_code_sha256, loader_schema_version, created_at_ms,
@@ -679,6 +716,7 @@ impl<'a> WorkerRepository<'a> {
             Ok(DeploymentSnapshot {
                 account_id,
                 worker,
+                assets: crate::assets::read_assets_conn(conn, deployment_id)?,
                 deployment,
                 vars,
                 secrets,
@@ -702,7 +740,7 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, worker_id, version_number, state, artifact_sha256,
+                    "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
                         compatibility_date, compatibility_flags_json, limits_json,
                         worker_code_sha256, loader_schema_version, created_at_ms,
@@ -728,7 +766,7 @@ impl<'a> WorkerRepository<'a> {
         self.get_worker(account_id, worker_id)?;
         self.db.with_read(|conn| {
             conn.query_row(
-                "SELECT id, worker_id, version_number, state, artifact_sha256,
+                "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
                         compatibility_date, compatibility_flags_json, limits_json,
                         worker_code_sha256, loader_schema_version, created_at_ms,
@@ -784,7 +822,7 @@ impl<'a> WorkerRepository<'a> {
             let active = worker.active_deployment_id.ok_or_else(route_not_found)?;
             let deployment = conn
                 .query_row(
-                    "SELECT id, worker_id, version_number, state, artifact_sha256,
+                    "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
                         compatibility_date, compatibility_flags_json, limits_json,
                         worker_code_sha256, loader_schema_version, created_at_ms,
@@ -799,6 +837,7 @@ impl<'a> WorkerRepository<'a> {
             Ok(RouteSnapshot {
                 route,
                 worker,
+                assets: crate::assets::read_assets_conn(conn, active)?,
                 deployment,
             })
         })
@@ -1411,6 +1450,19 @@ impl<'a> WorkerRepository<'a> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             read_worker_tx(tx, account_id, worker_id)?;
+            let deleting: bool = tx
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM worker_deployments
+                        WHERE id = ?1 AND worker_id = ?2 AND state = 'deleting'
+                    )",
+                    params![deployment_id.to_string(), worker_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if !deleting {
+                return Err(deployment_not_found());
+            }
             let referenced: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM deployment_referrers WHERE deployment_id = ?1)",
@@ -1464,6 +1516,7 @@ impl<'a> WorkerRepository<'a> {
                 [deployment_id.to_string()],
             )
             .map_err(|_| db_error())?;
+            crate::assets::delete_deployment_assets(tx, deployment_id)?;
             let changed = tx
                 .execute(
                     "UPDATE worker_deployments SET state = 'tombstoned', deleted_at_ms = ?1
@@ -1600,6 +1653,8 @@ impl<'a> WorkerRepository<'a> {
                     [&deployment],
                 )
                 .map_err(|_| db_error())?;
+                let deployment_id = DeploymentId::from_str(&deployment).map_err(|_| invariant())?;
+                crate::assets::delete_deployment_assets(tx, deployment_id)?;
                 let changed = tx
                     .execute(
                         "UPDATE worker_deployments
@@ -1768,8 +1823,15 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT DISTINCT artifact_sha256, artifact_size
-                 FROM worker_deployments WHERE state != 'tombstoned'",
+                    "SELECT DISTINCT r.sha256, r.size
+                     FROM deployment_object_refs r
+                     JOIN worker_deployments d ON d.id = r.deployment_id
+                     WHERE d.state != 'tombstoned'
+                     UNION
+                     SELECT DISTINCT o.sha256, o.size
+                     FROM deployment_upload_objects o
+                     JOIN deployment_uploads u ON u.id = o.session_id
+                     WHERE o.verified = 1 AND u.status IN ('open', 'finalizing')",
                 )
                 .map_err(|_| db_error())?;
             let rows = stmt
@@ -2005,36 +2067,44 @@ fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord>
     let id: String = row.get(0)?;
     let worker: String = row.get(1)?;
     let version: i64 = row.get(2)?;
-    let state: String = row.get(3)?;
-    let artifact: Vec<u8> = row.get(4)?;
-    let artifact_size: i64 = row.get(5)?;
-    let artifact_schema: i64 = row.get(6)?;
-    let flags: Vec<u8> = row.get(9)?;
-    let limits: Vec<u8> = row.get(10)?;
-    let descriptor: Vec<u8> = row.get(11)?;
-    let loader_schema: i64 = row.get(12)?;
+    let content_kind: String = row.get(3)?;
+    let state: String = row.get(4)?;
+    let artifact: Option<Vec<u8>> = row.get(5)?;
+    let artifact_size: Option<i64> = row.get(6)?;
+    let artifact_schema: Option<i64> = row.get(7)?;
+    let flags: Vec<u8> = row.get(10)?;
+    let limits: Vec<u8> = row.get(11)?;
+    let descriptor: Vec<u8> = row.get(12)?;
+    let loader_schema: i64 = row.get(13)?;
     Ok(DeploymentRecord {
         id: DeploymentId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
         version_number: u64::try_from(version).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        state: DeploymentState::parse(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        artifact_sha256: array32(&artifact)?,
-        artifact_size: u64::try_from(artifact_size).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        artifact_schema_version: u32::try_from(artifact_schema)
+        content_kind: DeploymentContentKind::parse(&content_kind)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        main_module: row.get(7)?,
-        compatibility_date: row.get(8)?,
+        state: DeploymentState::parse(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        artifact_sha256: artifact.as_deref().map(array32).transpose()?,
+        artifact_size: artifact_size
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        artifact_schema_version: artifact_schema
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        main_module: row.get(8)?,
+        compatibility_date: row.get(9)?,
         compatibility_flags: serde_json::from_slice(&flags)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         limits: serde_json::from_slice(&limits).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_code_sha256: array32(&descriptor)?,
         loader_schema_version: u32::try_from(loader_schema)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        created_at_ms: row.get(13)?,
-        ready_at_ms: row.get(14)?,
-        rejected_at_ms: row.get(15)?,
-        rejection_code: row.get(16)?,
-        deleted_at_ms: row.get(17)?,
+        created_at_ms: row.get(14)?,
+        ready_at_ms: row.get(15)?,
+        rejected_at_ms: row.get(16)?,
+        rejection_code: row.get(17)?,
+        deleted_at_ms: row.get(18)?,
     })
 }
 

@@ -227,11 +227,10 @@ impl PlatformSnapshotManifestV1 {
             if reference.role.is_empty()
                 || !matches!(
                     reference.role.as_str(),
-                    "worker_bundle" | "kv_backup" | "d1_backup" | "r2_bucket_marker"
+                    "deployment_artifact" | "kv_backup" | "d1_backup" | "r2_bucket_marker"
                 )
                 || !valid_object_key(&reference.object_key)
                 || !is_sha256(&reference.sha256)
-                || reference.size == 0
                 || reference.size > max_file_bytes
                 || !reference_keys.insert(&reference.object_key)
             {

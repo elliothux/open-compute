@@ -117,6 +117,22 @@ pub enum ErrorCode {
     RuntimeResultUnknown,
     /// A request or runtime resource limit was exceeded.
     ResourceLimitExceeded,
+    /// Canonical static-asset manifest validation failed.
+    AssetManifestInvalid,
+    /// A static-asset logical URL path is invalid.
+    AssetPathInvalid,
+    /// A static-asset manifest, file, rule, or upload exceeded a fixed limit.
+    AssetLimitExceeded,
+    /// A deployment upload is missing one or more verified objects.
+    AssetUploadIncomplete,
+    /// An upload session or object conflicts with its immutable input identity.
+    AssetUploadConflict,
+    /// A referenced static-asset object failed integrity verification.
+    AssetIntegrityError,
+    /// The configured static-asset object provider is unavailable.
+    AssetStorageUnavailable,
+    /// Static-asset routing or rule configuration is unsupported.
+    AssetConfigUnsupported,
     /// Requested resource does not exist in the authorized account.
     ResourceNotFound,
     /// A live resource already owns the requested display name.
@@ -471,6 +487,14 @@ impl ErrorCode {
             Self::RuntimeUnavailable => "RUNTIME_UNAVAILABLE",
             Self::RuntimeResultUnknown => "RUNTIME_RESULT_UNKNOWN",
             Self::ResourceLimitExceeded => "RESOURCE_LIMIT_EXCEEDED",
+            Self::AssetManifestInvalid => "ASSET_MANIFEST_INVALID",
+            Self::AssetPathInvalid => "ASSET_PATH_INVALID",
+            Self::AssetLimitExceeded => "ASSET_LIMIT_EXCEEDED",
+            Self::AssetUploadIncomplete => "ASSET_UPLOAD_INCOMPLETE",
+            Self::AssetUploadConflict => "ASSET_UPLOAD_CONFLICT",
+            Self::AssetIntegrityError => "ASSET_INTEGRITY_ERROR",
+            Self::AssetStorageUnavailable => "ASSET_STORAGE_UNAVAILABLE",
+            Self::AssetConfigUnsupported => "ASSET_CONFIG_UNSUPPORTED",
             Self::ResourceNotFound => "RESOURCE_NOT_FOUND",
             Self::ResourceNameConflict => "RESOURCE_NAME_CONFLICT",
             Self::ResourceNotReady => "RESOURCE_NOT_READY",

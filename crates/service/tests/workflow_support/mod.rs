@@ -272,7 +272,10 @@ request_timeout_ms = 3000
                 account_id: account,
                 worker_id: worker,
                 idempotency_key: RequestId::generate().to_string(),
-                bundle: bundle.into_bytes().into(),
+                content: open_compute_workers::DeploymentContent::Worker {
+                    bundle: bundle.into_bytes().into(),
+                    assets: None,
+                },
                 compatibility_date: "2026-08-22".into(),
                 compatibility_flags: vec!["rpc".into()],
                 vars: BTreeMap::from([("MODE".into(), serde_json::json!("frozen"))]),

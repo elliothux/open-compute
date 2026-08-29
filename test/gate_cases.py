@@ -17,6 +17,7 @@ ONCE = {
     ),
     # Current snapshot validation is a fixed input/fault matrix.
     'p1-snapshot': ('p1_full_snapshot_retention_and_fresh_host_restore_are_fail_closed',),
+    'p3-assets': ('p3_assets_real_runtime_routing_binding_immutability_and_lifecycle',),
     # Every fault point still gets its own real child; SIGKILL follows a state marker.
     'p2-1': (
         'p2_1_fault_child',

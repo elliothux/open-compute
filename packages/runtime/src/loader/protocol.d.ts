@@ -41,14 +41,34 @@ export interface RuntimeSnapshot {
   loaderKey: string;
   workerCodeSha256: string;
   routeGeneration: number;
-  mainModule: string;
+  contentKind: "worker" | "assets_only";
+  mainModule?: string;
   compatibilityDate: string;
   compatibilityFlags: string[];
   modules: RuntimeModule[];
   env: Record<string, unknown>;
   bindings: RuntimeBinding[];
+  assetBinding?: { name: string };
+  assets?: RuntimeAssets;
   limits: unknown;
 }
+export interface RuntimeAssetEntry {
+  path: string;
+  sha256: string;
+  size: number;
+  contentType: string;
+}
+export interface RuntimeAssetManifest { schemaVersion: 1; entries: RuntimeAssetEntry[] }
+export interface RuntimeAssetRouting {
+  schemaVersion: 1;
+  binding?: string;
+  runWorkerFirst: boolean | string[];
+  htmlHandling: "auto-trailing-slash" | "force-trailing-slash" | "drop-trailing-slash" | "none";
+  notFoundHandling: "none" | "404-page" | "single-page-application";
+  headers: unknown[];
+  redirects: Array<{ from: string; to: string; status: number }>;
+}
+export interface RuntimeAssets { manifest: RuntimeAssetManifest; routing: RuntimeAssetRouting }
 export interface RuntimeEnvelope { loaderKey: string; expected: string }
 export interface DispatchEnvelope extends RuntimeEnvelope { routeGeneration: number; runtimeKey: string }
 export type BindingContext = Pick<ExecutionContext, "exports">;

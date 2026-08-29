@@ -15,6 +15,7 @@ pub(crate) use validation::{
 
 use products::{prepare_cron_config, validate_product_counts};
 
+use crate::assets::{DeploymentAssets, RunWorkerFirst};
 use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
@@ -31,11 +32,13 @@ use open_compute_core::{
     QueueId, RequestId, ResourceId, ResourceState, SecretBytes, SecretString, WorkerId,
 };
 use open_compute_storage::{
-    CRON_PARSER_VERSION, CronDeclarationMode, DeploymentRecord, DeploymentState,
-    DurableObjectRepository, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig,
-    NewCronDeclaration, NewDeployment, NewDeploymentBinding, NewQueueConsumerDeclaration,
-    NewQueueProducerBinding, PlatformStorage, QueueAvailability, QueueConsumerConfig,
-    QueueRepository, QueueState, ResourceRepository, StoredDeploymentSecret, WorkerRepository,
+    BindingRepository, CRON_PARSER_VERSION, CronDeclarationMode, DeploymentContentKind,
+    DeploymentObjectKind, DeploymentRecord, DeploymentState, DurableObjectRepository,
+    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration,
+    NewDeployment, NewDeploymentAssets, NewDeploymentBinding, NewDeploymentObjectRef,
+    NewQueueConsumerDeclaration, NewQueueProducerBinding, PlatformStorage, QueueAvailability,
+    QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository,
+    StoredDeploymentSecret, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -191,8 +194,8 @@ pub struct CreateDeploymentRequest {
     pub worker_id: WorkerId,
     /// Required control idempotency key.
     pub idempotency_key: String,
-    /// Canonical `WorkerBundleV1` input.
-    pub bundle: DeploymentBundle,
+    /// Explicit Worker/Assets deployment content union.
+    pub content: DeploymentContent,
     /// Exact tenant compatibility date.
     pub compatibility_date: String,
     /// Tenant compatibility flags.
@@ -226,6 +229,23 @@ pub enum DeploymentBundle {
     Staged(StagedBundle),
 }
 
+/// Authoritative deployment content; assets-only never fabricates a Worker bundle.
+#[derive(Clone, Debug)]
+pub enum DeploymentContent {
+    /// Executable Worker with optional static assets.
+    Worker {
+        /// Canonical Worker bundle.
+        bundle: DeploymentBundle,
+        /// Optional static assets frozen with the code.
+        assets: Option<DeploymentAssets>,
+    },
+    /// Static assets without executable tenant code.
+    AssetsOnly {
+        /// Required immutable static assets.
+        assets: DeploymentAssets,
+    },
+}
+
 impl From<Vec<u8>> for DeploymentBundle {
     fn from(value: Vec<u8>) -> Self {
         Self::Bytes(value)
@@ -236,6 +256,66 @@ impl From<Vec<u8>> for DeploymentBundle {
 enum PreparedBundle {
     Memory(CanonicalBundle),
     Staged(StagedBundle),
+}
+
+#[derive(Clone, Debug)]
+enum PreparedContent {
+    Worker {
+        bundle: PreparedBundle,
+        assets: Option<DeploymentAssets>,
+    },
+    AssetsOnly {
+        assets: DeploymentAssets,
+    },
+}
+
+impl PreparedContent {
+    fn prepare(input: &DeploymentContent, limits: BundleLimits) -> Result<Self, PlatformError> {
+        match input {
+            DeploymentContent::Worker { bundle, assets } => Ok(Self::Worker {
+                bundle: PreparedBundle::prepare(bundle, limits)?,
+                assets: assets.clone(),
+            }),
+            DeploymentContent::AssetsOnly { assets } => Ok(Self::AssetsOnly {
+                assets: assets.clone(),
+            }),
+        }
+    }
+
+    const fn kind(&self) -> DeploymentContentKind {
+        match self {
+            Self::Worker { .. } => DeploymentContentKind::Worker,
+            Self::AssetsOnly { .. } => DeploymentContentKind::AssetsOnly,
+        }
+    }
+
+    const fn bundle(&self) -> Option<&PreparedBundle> {
+        match self {
+            Self::Worker { bundle, .. } => Some(bundle),
+            Self::AssetsOnly { .. } => None,
+        }
+    }
+
+    const fn assets(&self) -> Option<&DeploymentAssets> {
+        match self {
+            Self::Worker { assets, .. } => assets.as_ref(),
+            Self::AssetsOnly { assets } => Some(assets),
+        }
+    }
+
+    fn admission_bytes(&self) -> Result<u64, PlatformError> {
+        let manifest_size = self
+            .assets()
+            .map(|assets| assets.manifest.canonical_bytes())
+            .transpose()?
+            .map_or(0, |bytes| bytes.len() as u64);
+        self.bundle()
+            .map(PreparedBundle::admission_bytes)
+            .transpose()?
+            .unwrap_or(64 * 1024)
+            .checked_add(manifest_size)
+            .ok_or_else(invariant)
+    }
 }
 
 impl PreparedBundle {
@@ -381,24 +461,46 @@ impl<'a> DeploymentController<'a> {
         &self,
         request: CreateDeploymentRequest,
     ) -> Result<CreateDeploymentOutcome, PlatformError> {
+        self.create_deployment_with_id(request, None).await
+    }
+
+    /// Finalize a resumable upload using the deployment identity persisted before validation.
+    pub async fn finalize_upload(
+        &self,
+        request: CreateDeploymentRequest,
+        deployment_id: DeploymentId,
+    ) -> Result<CreateDeploymentOutcome, PlatformError> {
+        self.create_deployment_with_id(request, Some(deployment_id))
+            .await
+    }
+
+    async fn create_deployment_with_id(
+        &self,
+        request: CreateDeploymentRequest,
+        deployment_id: Option<DeploymentId>,
+    ) -> Result<CreateDeploymentOutcome, PlatformError> {
         validate_idempotency_key(&request.idempotency_key)?;
-        let bundle = PreparedBundle::prepare(&request.bundle, self.bundle_limits)?;
+        let content = PreparedContent::prepare(&request.content, self.bundle_limits)?;
         let (canonical_vars, stored_vars) =
             canonicalize_vars(request.vars.clone(), MAX_VARS, MAX_ENV_BYTES)?;
         validate_secret_set(&request.secrets, &canonical_vars)?;
         validate_binding_set(&request.bindings, &canonical_vars, &request.secrets)?;
-        validate_injection_module_collisions(bundle.manifest())?;
+        if let Some(bundle) = content.bundle() {
+            validate_injection_module_collisions(bundle.manifest())?;
+        }
+        validate_asset_content(&request, &content, &canonical_vars)?;
         validate_product_counts(&request)?;
         let repo = WorkerRepository::new(self.storage.db());
         // Authentication/account scoping happens before reserving a key, so a
         // nonexistent target cannot strand a running idempotency row.
         repo.get_worker(request.account_id, request.worker_id)?;
-        let fingerprint_input = request_fingerprint(&request, &bundle, &canonical_vars)?;
+        let fingerprint_input =
+            request_fingerprint(&request, &content, &canonical_vars, deployment_id)?;
         let fingerprint = self
             .storage
             .crypto()
             .fingerprint_request(&fingerprint_input);
-        match repo.reserve_idempotency(
+        let reservation = repo.reserve_idempotency(
             request.account_id,
             "deployment.create",
             &request.idempotency_key,
@@ -406,11 +508,13 @@ impl<'a> DeploymentController<'a> {
             &fingerprint,
             request.now_ms,
             request.now_ms.saturating_add(IDEMPOTENCY_TTL_MS),
-        )? {
+        )?;
+        let recover_running = matches!(reservation, IdempotencyReservation::Running);
+        match reservation {
             IdempotencyReservation::Complete(response) => {
                 return Ok(CreateDeploymentOutcome::Replay(response));
             }
-            IdempotencyReservation::Running => {
+            IdempotencyReservation::Running if deployment_id.is_none() => {
                 return Err(PlatformError::new(
                     ErrorCode::IdempotencyConflict,
                     "the same idempotent operation is still running",
@@ -424,12 +528,29 @@ impl<'a> DeploymentController<'a> {
                     "idempotent deployment operation previously failed",
                 ));
             }
-            IdempotencyReservation::Reserved => {}
+            IdempotencyReservation::Running | IdempotencyReservation::Reserved => {}
         }
 
-        let operation = self
-            .create_reserved(&request, bundle, canonical_vars, stored_vars)
-            .await;
+        let fixed_deployment_id = deployment_id.unwrap_or_else(DeploymentId::generate);
+        let operation = if recover_running {
+            self.resume_reserved(
+                &request,
+                content,
+                canonical_vars,
+                stored_vars,
+                fixed_deployment_id,
+            )
+            .await
+        } else {
+            self.create_reserved(
+                &request,
+                content,
+                canonical_vars,
+                stored_vars,
+                fixed_deployment_id,
+            )
+            .await
+        };
         match operation {
             Ok(result) => {
                 let response = serde_json::to_vec(&result).map_err(|_| invariant())?;
@@ -469,13 +590,13 @@ impl<'a> DeploymentController<'a> {
     async fn create_reserved(
         &self,
         request: &CreateDeploymentRequest,
-        bundle: PreparedBundle,
+        content: PreparedContent,
         canonical_vars: BTreeMap<String, serde_json::Value>,
         stored_vars: BTreeMap<String, Vec<u8>>,
+        deployment_id: DeploymentId,
     ) -> Result<CreateDeploymentResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
-        let _admission = self.storage.reserve_mutation(bundle.admission_bytes()?)?;
-        let deployment_id = DeploymentId::generate();
+        let _admission = self.storage.reserve_mutation(content.admission_bytes()?)?;
         let (stored_secrets, secret_descriptors) = self.encrypt_secrets(
             request.account_id,
             request.worker_id,
@@ -497,8 +618,12 @@ impl<'a> DeploymentController<'a> {
             request.account_id,
             request.worker_id,
             deployment_id,
-            bundle.sha256(),
-            bundle.manifest(),
+            content
+                .bundle()
+                .map(|bundle| (bundle.sha256(), bundle.manifest())),
+            content
+                .assets()
+                .map(|assets| (&assets.manifest, &assets.routing)),
             request.compatibility_date.clone(),
             request.compatibility_flags.clone(),
             canonical_vars,
@@ -510,24 +635,33 @@ impl<'a> DeploymentController<'a> {
             u32::try_from(LOADER_SCHEMA_VERSION).map_err(|_| invariant())?,
         )?;
         let descriptor_hash = descriptor.sha256()?;
-        let size = bundle.size()?;
         let artifact_reservation = self.artifacts.reserve_deployment_artifact().await;
-        let artifact = bundle.store(&self.artifacts).await?;
-        if artifact.sha256_bytes() != &bundle.sha256() || artifact.size() != size {
-            return Err(PlatformError::new(
-                ErrorCode::ArtifactIntegrityError,
-                "ArtifactStore returned a different immutable artifact",
-            ));
-        }
-        let mut deployment = repo.insert_staging_deployment(
+        let bundle_identity = if let Some(bundle) = content.bundle() {
+            let size = bundle.size()?;
+            let artifact = bundle.store(&self.artifacts).await?;
+            if artifact.sha256_bytes() != &bundle.sha256() || artifact.size() != size {
+                return Err(PlatformError::new(
+                    ErrorCode::ArtifactIntegrityError,
+                    "ArtifactStore returned a different immutable artifact",
+                ));
+            }
+            Some((bundle.sha256(), size, bundle.manifest().main_module.clone()))
+        } else {
+            None
+        };
+        let prepared_assets = self.prepare_assets(content.assets()).await?;
+        let deployment = repo.insert_staging_deployment(
             &NewDeployment {
                 id: deployment_id,
                 account_id: request.account_id,
                 worker_id: request.worker_id,
-                artifact_sha256: bundle.sha256(),
-                artifact_size: size,
-                artifact_schema_version: WORKER_BUNDLE_SCHEMA_VERSION,
-                main_module: bundle.manifest().main_module.clone(),
+                content_kind: content.kind(),
+                artifact_sha256: bundle_identity.as_ref().map(|value| value.0),
+                artifact_size: bundle_identity.as_ref().map(|value| value.1),
+                artifact_schema_version: bundle_identity
+                    .as_ref()
+                    .map(|_| WORKER_BUNDLE_SCHEMA_VERSION),
+                main_module: bundle_identity.as_ref().map(|value| value.2.clone()),
                 compatibility_date: request.compatibility_date.clone(),
                 compatibility_flags: descriptor.compatibility_flags.clone(),
                 limits: request.limits.clone(),
@@ -538,27 +672,126 @@ impl<'a> DeploymentController<'a> {
                 now_ms: request.now_ms,
             },
             &open_compute_storage::NewDeploymentProducts {
+                assets: prepared_assets.as_ref().map(|value| &value.0),
+                asset_object_refs: prepared_assets
+                    .as_ref()
+                    .map_or(&[], |value| value.1.as_slice()),
                 bindings: &stored_bindings,
                 queue_bindings: &stored_queue_bindings,
                 workflow_bindings: &stored_workflow_bindings,
                 queue_consumers: &queue_consumers,
-                cron: Some(&cron),
+                cron: (content.kind() == DeploymentContentKind::Worker).then_some(&cron),
             },
             self.storage.hardening().max_deployments_per_worker,
         )?;
         drop(artifact_reservation);
-        repo.begin_validation(deployment_id)?;
+        let queue_entrypoints = queue_consumers
+            .iter()
+            .map(|consumer| consumer.entrypoint.clone())
+            .collect();
+        self.finish_reserved(
+            request,
+            deployment,
+            durable_object_classes,
+            queue_entrypoints,
+        )
+        .await
+    }
+
+    async fn resume_reserved(
+        &self,
+        request: &CreateDeploymentRequest,
+        content: PreparedContent,
+        canonical_vars: BTreeMap<String, serde_json::Value>,
+        stored_vars: BTreeMap<String, Vec<u8>>,
+        deployment_id: DeploymentId,
+    ) -> Result<CreateDeploymentResult, PlatformError> {
+        let repo = WorkerRepository::new(self.storage.db());
+        let deployment =
+            match repo.get_deployment(request.account_id, request.worker_id, deployment_id) {
+                Ok(deployment) => deployment,
+                Err(error) if error.code() == ErrorCode::DeploymentNotFound => {
+                    return self
+                        .create_reserved(
+                            request,
+                            content,
+                            canonical_vars,
+                            stored_vars,
+                            deployment_id,
+                        )
+                        .await;
+                }
+                Err(error) => return Err(error),
+            };
+        if deployment.content_kind != content.kind() || deployment.deleted_at_ms.is_some() {
+            return Err(invariant());
+        }
+        let mut durable_object_classes = Vec::new();
+        for binding in
+            BindingRepository::new(self.storage.db()).deployment_bindings(deployment_id)?
+        {
+            if binding.kind == BindingKind::DoNamespace {
+                let namespace = DurableObjectRepository::new(self.storage)
+                    .get_namespace(request.account_id, binding.resource_id)?;
+                durable_object_classes.push(namespace.class_name);
+            }
+        }
+        durable_object_classes.sort();
+        durable_object_classes.dedup();
+        let queue_entrypoints = QueueConsumerRepository::new(self.storage.db())
+            .deployment_declarations(deployment_id)?
+            .into_iter()
+            .map(|consumer| consumer.entrypoint)
+            .collect();
+        self.finish_reserved(
+            request,
+            deployment,
+            durable_object_classes,
+            queue_entrypoints,
+        )
+        .await
+    }
+
+    async fn finish_reserved(
+        &self,
+        request: &CreateDeploymentRequest,
+        mut deployment: DeploymentRecord,
+        durable_object_classes: Vec<String>,
+        queue_entrypoints: Vec<Option<String>>,
+    ) -> Result<CreateDeploymentResult, PlatformError> {
+        let repo = WorkerRepository::new(self.storage.db());
+        if deployment.state == DeploymentState::Rejected {
+            let code = deployment
+                .rejection_code
+                .as_deref()
+                .and_then(ErrorCode::from_stable_str)
+                .unwrap_or(ErrorCode::BundleRuntimeInvalid);
+            return Err(PlatformError::new(
+                code,
+                "deployment validation previously failed",
+            ));
+        }
+        if deployment.state == DeploymentState::Staging {
+            repo.begin_validation(deployment.id)?;
+            deployment.state = DeploymentState::Validating;
+        }
         let candidate = ValidationCandidate {
             account_id: request.account_id,
             worker_id: request.worker_id,
-            deployment_id,
-            worker_code_sha256: descriptor_hash,
+            deployment_id: deployment.id,
+            worker_code_sha256: deployment.worker_code_sha256,
         };
-        let validation = self.validator.validate(candidate.clone()).await;
+        let validation = if deployment.state == DeploymentState::Validating
+            && deployment.content_kind == DeploymentContentKind::Worker
+        {
+            self.validator.validate(candidate.clone()).await
+        } else {
+            Ok(())
+        };
         if let Err(err) = validation {
             let code = stable_validation_code(&err);
             repo.mark_rejected(
-                deployment_id,
+                deployment.id,
                 DeploymentState::Validating,
                 code,
                 request.now_ms,
@@ -569,6 +802,9 @@ impl<'a> DeploymentController<'a> {
             ));
         }
         for class_name in durable_object_classes {
+            if deployment.state != DeploymentState::Validating {
+                break;
+            }
             if let Err(error) = self
                 .validator
                 .validate_durable_object_class(candidate.clone(), class_name)
@@ -580,7 +816,7 @@ impl<'a> DeploymentController<'a> {
                     stable_validation_code(&error)
                 };
                 repo.mark_rejected(
-                    deployment_id,
+                    deployment.id,
                     DeploymentState::Validating,
                     code,
                     request.now_ms,
@@ -591,8 +827,9 @@ impl<'a> DeploymentController<'a> {
                 ));
             }
         }
-        for consumer in &queue_consumers {
-            if let Some(entrypoint) = &consumer.entrypoint
+        for entrypoint in &queue_entrypoints {
+            if deployment.state == DeploymentState::Validating
+                && let Some(entrypoint) = entrypoint
                 && let Err(error) = self
                     .validator
                     .validate_entrypoint(candidate.clone(), entrypoint.clone())
@@ -600,7 +837,7 @@ impl<'a> DeploymentController<'a> {
             {
                 let code = stable_validation_code(&error);
                 repo.mark_rejected(
-                    deployment_id,
+                    deployment.id,
                     DeploymentState::Validating,
                     code,
                     request.now_ms,
@@ -611,11 +848,19 @@ impl<'a> DeploymentController<'a> {
                 ));
             }
         }
-        repo.mark_ready(deployment_id, request.now_ms)?;
-        deployment.state = DeploymentState::Ready;
-        deployment.ready_at_ms = Some(request.now_ms);
+        if deployment.state == DeploymentState::Validating {
+            repo.mark_ready(deployment.id, request.now_ms)?;
+            deployment.state = DeploymentState::Ready;
+            deployment.ready_at_ms = Some(request.now_ms);
+        }
         if request.promote {
             let worker = repo.get_worker(request.account_id, request.worker_id)?;
+            if worker.active_deployment_id == Some(deployment.id) {
+                return Ok(CreateDeploymentResult {
+                    deployment,
+                    promoted: true,
+                });
+            }
             for route in repo.list_routes(request.account_id, request.worker_id)? {
                 if let Some(entrypoint) = route.entrypoint {
                     self.validator
@@ -628,12 +873,12 @@ impl<'a> DeploymentController<'a> {
                     .promote(ProductPromotionRequest {
                         account_id: request.account_id,
                         worker_id: request.worker_id,
-                        deployment_id,
+                        deployment_id: deployment.id,
                         request_id: request.request_id,
                         now_ms: request.now_ms,
                     })
                     .await?;
-            } else if !queue_consumers.is_empty() || request.crons.is_some() {
+            } else if !queue_entrypoints.is_empty() || request.crons.is_some() {
                 return Err(PlatformError::new(
                     ErrorCode::QueueConsumerProjectionPending,
                     "Queue/Cron promotion coordinator is unavailable",
@@ -642,7 +887,7 @@ impl<'a> DeploymentController<'a> {
                 repo.promote_checked(
                     request.account_id,
                     request.worker_id,
-                    deployment_id,
+                    deployment.id,
                     None,
                     Some(worker.route_generation),
                     request.request_id,
@@ -655,6 +900,75 @@ impl<'a> DeploymentController<'a> {
             promoted: request.promote,
         };
         Ok(result)
+    }
+
+    async fn prepare_assets(
+        &self,
+        assets: Option<&DeploymentAssets>,
+    ) -> Result<Option<(NewDeploymentAssets, Vec<NewDeploymentObjectRef>)>, PlatformError> {
+        let Some(assets) = assets else {
+            return Ok(None);
+        };
+        assets.manifest.validate()?;
+        assets.routing.validate()?;
+        let manifest_bytes = assets.manifest.canonical_bytes()?;
+        let manifest_digest: [u8; 32] = Sha256::digest(&manifest_bytes).into();
+        let manifest_ref = self
+            .artifacts
+            .put_verified(
+                stream::once(async {
+                    Ok::<Bytes, std::io::Error>(Bytes::from(manifest_bytes.clone()))
+                }),
+                &hex::encode(manifest_digest),
+                manifest_bytes.len() as u64,
+            )
+            .await
+            .map_err(|error| map_asset_store_error(&error))?;
+        if manifest_ref.sha256_bytes() != &manifest_digest {
+            return Err(PlatformError::new(
+                ErrorCode::AssetIntegrityError,
+                "asset manifest identity changed during upload",
+            ));
+        }
+        let mut refs = vec![NewDeploymentObjectRef {
+            kind: DeploymentObjectKind::AssetManifest,
+            sha256: manifest_digest,
+            size: manifest_bytes.len() as u64,
+        }];
+        let mut seen = BTreeMap::<[u8; 32], u64>::new();
+        for entry in &assets.manifest.entries {
+            let object = entry.artifact_ref()?;
+            if let Some(size) = seen.insert(*object.sha256_bytes(), object.size()) {
+                if size != object.size() {
+                    return Err(PlatformError::new(
+                        ErrorCode::AssetManifestInvalid,
+                        "one asset digest declares conflicting lengths",
+                    ));
+                }
+                continue;
+            }
+            self.artifacts
+                .download_verified(&object, &mut std::io::sink())
+                .await
+                .map_err(|error| map_asset_store_error(&error))?;
+            refs.push(NewDeploymentObjectRef {
+                kind: DeploymentObjectKind::AssetBlob,
+                sha256: *object.sha256_bytes(),
+                size: object.size(),
+            });
+        }
+        Ok(Some((
+            NewDeploymentAssets {
+                manifest_sha256: manifest_digest,
+                manifest_json: manifest_bytes,
+                routing_config_json: assets.routing.canonical_bytes()?,
+                binding_name: assets.routing.binding.clone(),
+                logical_file_count: u32::try_from(assets.manifest.entries.len())
+                    .map_err(|_| invariant())?,
+                logical_total_bytes: assets.manifest.total_bytes()?,
+            },
+            refs,
+        )))
     }
 
     fn encrypt_secrets(
@@ -698,6 +1012,65 @@ impl<'a> DeploymentController<'a> {
             );
         }
         Ok((stored, descriptors))
+    }
+}
+
+fn validate_asset_content(
+    request: &CreateDeploymentRequest,
+    content: &PreparedContent,
+    vars: &BTreeMap<String, serde_json::Value>,
+) -> Result<(), PlatformError> {
+    let Some(assets) = content.assets() else {
+        return Ok(());
+    };
+    assets.manifest.validate()?;
+    assets.routing.validate()?;
+    if let Some(binding) = assets.routing.binding.as_deref()
+        && (vars.contains_key(binding)
+            || request.secrets.contains_key(binding)
+            || request.bindings.contains_key(binding))
+    {
+        return Err(PlatformError::new(
+            ErrorCode::BindingTypeMismatch,
+            "asset binding conflicts with another deployment env name",
+        ));
+    }
+    if content.kind() == DeploymentContentKind::AssetsOnly
+        && (!vars.is_empty()
+            || !request.secrets.is_empty()
+            || !request.bindings.is_empty()
+            || !request.queue_consumers.is_empty()
+            || request
+                .crons
+                .as_ref()
+                .is_some_and(|values| !values.is_empty())
+            || matches!(
+                assets.routing.run_worker_first,
+                RunWorkerFirst::All(true) | RunWorkerFirst::Rules(_)
+            ))
+    {
+        return Err(PlatformError::new(
+            ErrorCode::AssetConfigUnsupported,
+            "assets-only deployments cannot declare an execution environment",
+        ));
+    }
+    Ok(())
+}
+
+fn map_asset_store_error(error: &PlatformError) -> PlatformError {
+    match error.code() {
+        ErrorCode::ArtifactIntegrityError | ErrorCode::CacheEntryCorrupt => PlatformError::new(
+            ErrorCode::AssetIntegrityError,
+            "static asset failed integrity verification",
+        ),
+        ErrorCode::LimitInvalid => PlatformError::new(
+            ErrorCode::AssetLimitExceeded,
+            "static asset exceeds the configured object limit",
+        ),
+        _ => PlatformError::new(
+            ErrorCode::AssetStorageUnavailable,
+            "static asset provider is unavailable",
+        ),
     }
 }
 
