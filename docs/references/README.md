@@ -5,22 +5,23 @@
 
 仓库的产品目标是一个可单机部署的 Cloudflare Workers Platform 兼容基础设施。公开能力以
 capability、deviation、固定 Cloudflare contract 和真实产品 Gate 为准；vinext 等框架只提供应用
-qualification。总体架构与完成标准见[平台总方案](../open-compute-workerd-platform.md)，契约目录、
-portable differential 和双 verdict 规则见[P3.4 方案](../p3-4-cloudflare-conformance.md)。
+qualification。目标产品、upstream types、single-latest runtime 和管理面边界由
+[Cloudflare Worker Runtime 全量兼容目标](../cloudflare-runtime-compatibility.md)定义；总体架构见
+[平台总方案](../open-compute-workerd-platform.md)，契约目录、portable differential 和双 verdict
+规则见[P3.4 方案](../p3-4-cloudflare-conformance.md)。
 
 ## 开发与接口
 
 | 文档 | 用途 |
 | --- | --- |
 | [测试节奏](testing.md) | 默认完整一轮；最终完整一轮 + 时序补两轮，用例清单校验、并行/独占与覆盖率；[原布局实测](../implemented/runtime-and-test-layout-results.md) |
+| [Cloudflare 兼容矩阵](cloudflare-compatibility.md) | 当前实现 capability、方法、目标缺口、非目标产品、deviation 与 conformance verdict |
 | [能力偏差](p1-deviations.md) | 当前 capability deviation ID 与实际支持边界 |
 | [Fuzz 所有权](p1-fuzz-ownership.md) | 各类输入的测试归属和回归要求 |
 | [单二进制分发与部署](single-binary.md) | 构建输入、离线启动、资源物化和发行契约 |
 
 P0.2 的阶段性支持范围见归档的 [API 矩阵](../implemented/p0-2-api-matrix.md)；
 不要用该阶段“尚未接入产品绑定”的描述替代当前平台的 capability 输出。
-当前尚未生成 P3.4 规划的 `cloudflare-compatibility.md`；在机器可读 catalog 和实际证据落地前，
-不得手工维护一份看似完整的兼容矩阵。
 
 ## 运维手册
 

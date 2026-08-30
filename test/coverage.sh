@@ -6,7 +6,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 report_dir="$root/target/llvm-cov"
 # Dedicated tests and explicit test-support fixtures are not production Rust.
 # Production modules must never be placed behind one of these filename rules.
-ignore_filename_regex='/rustlib/src/rust/|/tests?/|/src/tests\.rs$|/src/.*_tests\.rs$|/src/mock_s3\.rs$|/src/bin/supervisor_fixture\.rs$'
+ignore_filename_regex='/rustlib/src/rust/|/tests?/|/src/tests\.rs$|/src/.*_tests\.rs$|/src/mock_s3\.rs$|/src/bin/(s3_fixture|supervisor_fixture)\.rs$'
 minimum_lines=90.00
 workerd=${OPEN_COMPUTE_TEST_WORKERD:-}
 cargo_bin=${CARGO:-cargo}

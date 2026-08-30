@@ -392,7 +392,9 @@ fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
         .unwrap();
     assert_eq!(registry.counts(), (1, 1, 1));
 
-    registry.clear_generation("generation-a");
+    registry.clear_generation("unrelated-private-claim");
+    assert_eq!(registry.counts(), (1, 1, 1));
+    registry.clear_after_child_exit();
 
     assert_eq!(registry.counts(), (0, 0, 0));
     assert_eq!(pins.count(fixture.caller_deployment), 0);

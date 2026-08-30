@@ -627,11 +627,13 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
     assert_eq!(pins.count(deployment), 1);
     assert!(!response.body().is_end_stream());
     assert_eq!(response.body().size_hint().exact(), Some(4));
+    let mut body = response.into_body();
     assert_eq!(
-        to_bytes(response.into_body(), 16).await.unwrap(),
+        body.frame().await.unwrap().unwrap().into_data().unwrap(),
         Bytes::from_static(b"body")
     );
     assert_eq!(pins.count(deployment), 0);
+    assert!(body.frame().await.is_none());
 }
 
 #[test]

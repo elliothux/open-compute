@@ -1,8 +1,10 @@
 # P3.1：Static Assets 与框架产物导入
 
-状态（2026-08-29）：**平台核心实现完成，Cloudflare conformance qualification 待完成**。
-当前维护 Gate 已覆盖声明的本地产品矩阵；P3.4 所需的固定 Cloudflare contract catalog、portable
-fixture 与 differential 尚未执行，因此不能给最终 Platform Go。vinext App/Pages、真实浏览器
+状态（2026-08-30）：**声明支持面的本地 Contract Gate 已完成；Assets 直接 Cloudflare
+differential 尚未执行**。
+当前维护 Gate 已覆盖声明的本地产品矩阵；Static Assets 已映射到 P3.4 固定 catalog、capability、
+deviation 和 contract report。共享 runner 已在真实 Cloudflare 上完成一项 Cache API fixture，但该
+结果不覆盖 Assets routing/binding，因此不能给扩展目标的最终 Platform Go。vinext App/Pages、真实浏览器
 hydration 与框架产物报告未运行，只影响独立 Application verdict，不否定或替代平台核心证据。
 
 本阶段把静态文件纳入现有不可变 deployment：框架构建产物经过导入、校验和上传后，代码、
@@ -516,8 +518,10 @@ deploy 协议，受信任默认 HTTP router 与显式 assets binding，以及 de
   HTML/redirect/404、Worker-first 规则、显式 binding、伪造内部 header、跨版本不可变性和
   删除存活围栏。
 
-仍未执行新的 SA-0/SA-5 conformance qualification：仓库尚无 P3.4 定义的 contract catalog、portable
-fixture 和真实 Cloudflare 对照证据，因此本文保持在 `docs/`，不归档到 `docs/implemented/`。
+SA-0/SA-5 的本地 conformance qualification 已完成：仓库已有 P3.4 固定 contract catalog、能力与
+deviation 双射，`assets.binding.routing` 在最终 contract report 中由真实 `p3-assets` 产品 Gate
+证明通过。共享 portable runner 已实现并取得 Cache API 对照证据，但尚无 Assets routing/binding
+直接对照，因此本文保持在 `docs/`，不归档到 `docs/implemented/`。
 vinext/React/Vite/RSC/browser 的独立应用输入元组也不存在，Application verdict 为“未评估”；它
 不是 Platform Go 的前置条件。上述两项都不否定当前平台实现和维护 Gate，也不能由这些 Gate 推导为
 Cloudflare differential 或真实框架浏览器验收已经完成。

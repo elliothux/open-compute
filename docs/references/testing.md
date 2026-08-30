@@ -4,9 +4,10 @@
 最后执行**完整一轮 + 时序用例补两轮**。确定性用例总计一次，时序用例总计三次。
 失败停止，不自动重试；coverage 不代替未插桩的进程验收。
 
-该入口默认验收本地平台 contract/product，不以第三方框架测试定义支持面。P3.4 规划的应用
-qualification 和真实 Cloudflare differential 必须显式选择、独立报告；它们在 runner 落地前不是
-现有命令，也不能暗中加入普通 `--workspace`。
+该入口默认验收本地平台 contract/product，不以第三方框架测试定义支持面。P3.4 的 typed target
+与 Cargo target 使用同一 discovery、精确 case、分轮、环境 allowlist、超时、清理和报告协议。
+应用 qualification 和真实 Cloudflare differential 必须显式选择、独立报告，不能暗中加入普通
+`--workspace`。
 
 ## 显式准备输入
 
@@ -34,6 +35,11 @@ export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
 ./test/gate.py p0-2
 ./test/gate.py p0-2 p2-3 --jobs 2
 ./test/gate.py workflow --list
+./test/gate.py p3-contract
+# 外部写入；仅在明确授权、预置账号与 Wrangler OAuth/token credential 后选择：
+./test/gate.py p3-cf-diff
+# 在同一个冻结报告中合成本地 contract 与 remote qualification：
+./test/gate.py p3 p3-cf-diff
 OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py all --jobs 2
 OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
 ```
@@ -56,9 +62,19 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
 | `workflow-recovery` | 当前 Workflow 的 snapshot、进程恢复、transport fault 与产品 binding 路径 |
 | `workflow-product` | 当前 durable execution 与大结果/批次边界 |
 | `workflow` | 上述三个 Workflow 目标；`p2` 也包含它们 |
-| `p3-assets`、`p3-services`、`p3-cache-images` | 对应静态资产、Service binding、Cache/Images 真实 runtime 产品矩阵；`p3` 包含全部 P3 目标 |
+| `p3-contract` | baseline/catalog、capability/type/config/deviation/case/source 双射；无 workerd、网络或外部 mutation |
+| `p3-assets`、`p3-services`、`p3-cache-images` | 对应静态资产、Service binding（含事件源与 SIGKILL cleanup）、Cache/Images 真实 runtime 产品矩阵 |
+| `p3-isolation`、`p3-recovery` | 两账户 fail-closed 与 P3 产品隔离；进程/快照/跨产品 crash recovery 与清理 |
+| `p3` | `p3-contract`、P0/P1/P2/Workflow 与全部 P3/L6 本地目标，不含外部 differential |
+| `p3-cf-diff` | 显式真实 Cloudflare portable differential；不属于 `all` 或 `--workspace` |
 | `runtime`、`single-binary` | supervisor、单文件离线首启/重启/损坏路径 |
 | `p0`、`p1`、`p2`、`all` | 对应集合；多个选择取并集，首轮完整，后两轮仅时序用例 |
+
+`p3-cf-diff` 每次只使用随机 `oc-p34-*` Worker 名与 workers.dev endpoint；当前 Cache fixture 不创建
+route、service binding、KV、R2、D1、Queue 或其他共享资源。runner 在 mutation 前验证目标账号和
+同名资源不存在，只对只读部署状态做有界传播等待，不重试写操作；cleanup 使用精确名称且禁止
+`--force`，再以只读查询确认 absent。任何清理失败都使 Gate 失败并保留 inventory，不得扩大到账号
+级批量删除或触碰其他服务。
 
 ## 哪些用例重复
 
@@ -90,7 +106,8 @@ metadata 声明且 discovery 确认为零用例的 workspace binary harness。
 故障点覆盖，不用重复次数弥补缺少断言。拆分混合测试时要实测，避免为每个断言重复启动整套系统。
 
 调度器一次 `cargo test --no-run --all-features`，根据 Cargo JSON 的精确 executable 路径运行测试，
-不搜索可能过期的哈希文件；后续各轮不再调用 Cargo，也不重建 JS。正确 keyed 的 `target/`、
+不搜索可能过期的哈希文件；typed target 则校验 tracked source/executable identity，并通过自身 JSON
+discovery 枚举精确 case。后续各轮不再调用 Cargo，也不重建 JS。正确 keyed 的 `target/`、
 `node_modules/`、正式 immutable 输入可复用，不清缓存、不下载。库单测、类型检查与 coverage
 由下面的完整检查负责，不能塞回 Gate 循环。load/soak/fuzz 和正式打包保留独立显式入口。
 
@@ -162,7 +179,10 @@ coverage 使用 cargo-llvm-cov `show-env --sh` 的外部运行器接口和相同
 调度报告位于 `.temp/gate-run/<run-id>/report.json`，包括源码/输入/测试可执行文件摘要、
 revision、工具链、目标集合、轮数、并发度、一次构建耗时、每目标耗时、总墙钟和子进程 CPU 时间。
 另列分轮策略、每轮精确用例、已验证 inventory、计划用例数与实际通过数；不能只用目标个数
-推断覆盖完整。旧“全部三轮”的历史记录保留原样，不改写成新策略的实测。
+推断覆盖完整。P3 运行另写 `contract-report.json`，列出 baseline/catalog digest、逐 contract
+状态/case/deviation、L0–L3/L6 结果、Cloudflare qualification 与 Platform verdict。显式
+`p3-cf-diff` 写去 credential 的 `diff-report.json` 和 cleanup inventory；未选择应用时不伪造
+`application-report.json`。旧“全部三轮”的历史记录保留原样，不改写成新策略的实测。
 源码冻结包含所有仓库代码、配置、测试及 `docs/references/`（内嵌 runbooks 与 conformance
 输入），不包含没有代码消费者的 `docs/` 规划和 `docs/implemented/` 历史记录；并行编写规划
 不会中止测试。报告声明此范围；代码、维护参考文档、正式 pin 或资产变化仍会失败。

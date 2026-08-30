@@ -48,6 +48,8 @@ pub struct HttpState {
     metrics_enabled: bool,
     admin_secret: Option<Arc<SecretString>>,
     supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
+    #[cfg(any(test, feature = "test-support"))]
+    test_runtime_restart: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     worker_api: Option<Arc<WorkerApiState>>,
     kv_api: Option<Arc<KvApiState>>,
     r2_api: Option<Arc<R2ApiState>>,
@@ -64,6 +66,10 @@ impl std::fmt::Debug for HttpState {
         f.debug_struct("HttpState")
             .field("metrics_enabled", &self.metrics_enabled)
             .field("admin_auth", &self.admin_secret.is_some())
+            .field(
+                "test_runtime_restart",
+                &cfg!(any(test, feature = "test-support")),
+            )
             .field("worker_api", &self.worker_api.is_some())
             .field("kv_api", &self.kv_api.is_some())
             .field("r2_api", &self.r2_api.is_some())
@@ -117,6 +123,8 @@ impl HttpState {
             metrics_enabled,
             admin_secret,
             supervisor,
+            #[cfg(any(test, feature = "test-support"))]
+            test_runtime_restart: None,
             worker_api: None,
             kv_api: None,
             r2_api: None,
@@ -143,6 +151,7 @@ impl HttpState {
             metrics_enabled,
             admin_secret: admin_secret.map(Arc::new),
             supervisor: Arc::new(|| None),
+            test_runtime_restart: None,
             worker_api: None,
             kv_api: None,
             r2_api: None,
@@ -159,6 +168,17 @@ impl HttpState {
     #[must_use]
     pub fn with_worker_api(mut self, worker_api: WorkerApiState) -> Self {
         self.worker_api = Some(Arc::new(worker_api));
+        self
+    }
+
+    /// Attach a generic supervised-runtime restart hook to test-support builds.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub(crate) fn with_test_runtime_restart(
+        mut self,
+        restart: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.test_runtime_restart = Some(restart);
         self
     }
 
@@ -312,6 +332,7 @@ pub fn admin_router(state: HttpState) -> Router {
     router = router.merge(queue_http::control_router());
     router = router.merge(workflow_http::control_router());
     router = router.merge(cache_images_http::control_router());
+    router = router.merge(test_control_router());
     router
         .fallback(fallback)
         .layer(axum::middleware::from_fn_with_state(
@@ -342,6 +363,7 @@ pub fn merged_router(state: HttpState) -> Router {
         .merge(queue_http::control_router())
         .merge(workflow_http::control_router())
         .merge(cache_images_http::control_router())
+        .merge(test_control_router())
         .fallback(workers_http::public_ingress)
         .layer(axum::middleware::from_fn_with_state(
             middleware_state,
@@ -391,6 +413,37 @@ async fn metrics_handler(State(state): State<HttpState>, request: Request) -> Re
         body,
     )
         .into_response()
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn test_control_router() -> Router<HttpState> {
+    Router::new().route(
+        "/__test/runtime/restart",
+        axum::routing::post(test_runtime_restart),
+    )
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn test_control_router() -> Router<HttpState> {
+    Router::new()
+}
+
+#[cfg(any(test, feature = "test-support"))]
+async fn test_runtime_restart(State(state): State<HttpState>, request: Request) -> StatusCode {
+    if !authorize(&state, &request) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    if request
+        .headers()
+        .get("x-open-compute-test-ack")
+        .is_none_or(|value| value != "restart-generation")
+    {
+        return StatusCode::BAD_REQUEST;
+    }
+    match &state.test_runtime_restart {
+        Some(restart) if restart() => StatusCode::ACCEPTED,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
 }
 
 pub(crate) fn authorize(state: &HttpState, request: &Request) -> bool {

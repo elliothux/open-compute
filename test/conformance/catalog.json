@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "contracts": [
+    {
+      "id": "workers.runtime.common",
+      "product": "workers",
+      "surface": "modules/fetch/rpc/streams/websocket/outbound-fetch",
+      "status": "supported",
+      "methods": ["fetch", "rpc", "streams", "websocket", "outbound_fetch"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[], ["nodejs_compat"], ["rpc"], ["nodejs_compat", "rpc"]] },
+      "sources": [
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/runtime-apis/handlers/fetch.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/runtime-apis/handlers/fetch.mdx", "sha256": "cbef98d280e58f26e48b04e212e862764cadc18a6e7e5b1c3566a60e59a76985" },
+        { "kind": "workerd-test", "revision": "c28fa55802436ce0ce3f3b0255598fb504817f27", "path": "src/workerd/api/tests", "sha256": "ba93a203fa882db417918ea09dd084619a578481e605abcbb95a49410d1642fa" }
+      ],
+      "positiveCases": ["p0-2::p0_2_real_worker_create_validate_dispatch_promote_rollback_restart"],
+      "negativeCases": ["p0-2::p0_2_real_worker_create_validate_dispatch_promote_rollback_restart"],
+      "deviations": [],
+      "typeInterfaces": ["ExecutionContext", "ExportedHandler", "Fetcher"]
+    },
+    {
+      "id": "deployments.immutable.lifecycle",
+      "product": "deployments",
+      "surface": "versions/deployments/promote/rollback/routes/vars/secrets",
+      "status": "supported_with_deviation",
+      "methods": ["create", "validate", "stage", "ready", "promote", "rollback", "route", "delete", "vars", "secrets"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/versions-and-deployments/index.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/versions-and-deployments/index.mdx", "sha256": "991cfe189afaac31c5aa7838e2d36a5b72bfe62f98bcd98e1fb27d33e6aaf820" },
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/versions-and-deployments/rollbacks.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/versions-and-deployments/rollbacks.mdx", "sha256": "8ebdf076e6c54cd4aa9f4a0e28c7383ebfacb1f3ba300b3b484828abe71bd114" }
+      ],
+      "positiveCases": ["p0-2::p0_2_real_worker_create_validate_dispatch_promote_rollback_restart", "p0-exit::p0_real_combined_exit_matrix"],
+      "negativeCases": ["p0-2::p0_2_real_worker_create_validate_dispatch_promote_rollback_restart"],
+      "deviations": ["OC-DEPLOY-001"],
+      "typeInterfaces": []
+    },
+    {
+      "id": "assets.binding.routing",
+      "product": "static_assets",
+      "surface": "ASSETS.fetch/routing/http/immutable-publish",
+      "status": "supported_with_deviation",
+      "methods": ["binding.fetch", "routing", "http", "publish", "rollback"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[], ["assets_navigation_has_no_effect"], ["assets_navigation_prefers_asset_serving"]] },
+      "sources": [
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/static-assets/binding.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/static-assets/binding.mdx", "sha256": "8fe515eeb3bc62595f7bc2d4c6cb1692944a82f6b4b69c8812e0c6c128e2f2d8" },
+        { "kind": "workers-sdk", "revision": "296a1a7c97e027a308740e1eaaa6d904dec8f102", "path": "packages/workers-shared/asset-worker/src/handler.ts", "sha256": "4d77c2bff3d869c0bab2703e9f1bb673d597994831051c0691100a637cf9d2ad" }
+      ],
+      "positiveCases": ["p3-assets::p3_assets_real_runtime_routing_binding_immutability_and_lifecycle"],
+      "negativeCases": ["p3-assets::p3_assets_real_runtime_routing_binding_immutability_and_lifecycle"],
+      "deviations": ["OC-ASSETS-001"],
+      "typeInterfaces": ["Fetcher"]
+    },
+    {
+      "id": "services.fetch.rpc",
+      "product": "service_bindings",
+      "surface": "default/named/self fetch and RPC",
+      "status": "supported_with_deviation",
+      "methods": ["fetch", "rpc", "named_entrypoint", "self", "lifecycle"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[], ["rpc"]] },
+      "sources": [
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/runtime-apis/bindings/service-bindings/index.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/runtime-apis/bindings/service-bindings/index.mdx", "sha256": "34c864a6a0db0cd584d005678235f0c774832b97f27e9c6ba83c24991bc27271" },
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/runtime-apis/bindings/service-bindings/rpc.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/runtime-apis/bindings/service-bindings/rpc.mdx", "sha256": "e9baa44a80f2b1af4541e57d63dac69155cd61a62d822773bfe88ad82c836bde" }
+      ],
+      "positiveCases": ["p3-services-hard::p3_services_native_rpc_type_pipeline_and_lifecycle_matrix", "p3-services-product::p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix", "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources", "p3-services-recovery::p3_service_generation_exit_releases_inflight_handles_and_pins"],
+      "negativeCases": ["p3-services-hard::p3_services_native_rpc_type_pipeline_and_lifecycle_matrix"],
+      "deviations": ["OC-SERVICE-001"],
+      "typeInterfaces": ["Fetcher"]
+    },
+    {
+      "id": "kv.namespace.methods",
+      "product": "kv",
+      "surface": "KVNamespace",
+      "status": "supported_with_deviation",
+      "methods": ["get", "getWithMetadata", "put", "delete", "list"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/kv/api/read-key-value-pairs.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/kv/api/read-key-value-pairs.mdx", "sha256": "81d4187a79342f32ddd4a58a200cb8b70e4de48dc94bffa0dd5c51a953ccfbd0" },
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/kv/api/write-key-value-pairs.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/kv/api/write-key-value-pairs.mdx", "sha256": "37127c41039f97caaa31124504e811d4f83be163d2c192b1ebad14108f8bcdd2" }
+      ],
+      "positiveCases": ["p0-4::p0_4_real_kv_matrix"],
+      "negativeCases": ["p0-4::p0_4_real_kv_matrix"],
+      "deviations": ["OC-KV-001"],
+      "typeInterfaces": ["KVNamespace"]
+    },
+    {
+      "id": "r2.bucket.methods",
+      "product": "r2",
+      "surface": "R2Bucket",
+      "status": "supported_with_deviation",
+      "methods": ["head", "get", "put", "delete", "list"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/r2/api/workers/workers-api-reference.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/r2/api/workers/workers-api-reference.mdx", "sha256": "9b9b8ba7b9043c9fea086118c29152a1ad8d0deb5025b29b135413cc12d6d041" }],
+      "positiveCases": ["p0-5::p0_5_real_r2_facade_matrix"],
+      "negativeCases": ["p0-5::p0_5_real_r2_facade_matrix"],
+      "deviations": ["OC-R2-001"],
+      "typeInterfaces": ["R2Bucket"]
+    },
+    {
+      "id": "d1.binding.methods",
+      "product": "d1",
+      "surface": "D1Database/D1PreparedStatement",
+      "status": "supported_with_deviation",
+      "methods": ["prepare", "batch", "exec", "withSession", "run", "all", "first", "raw"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/d1/worker-api/d1-database.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/d1/worker-api/d1-database.mdx", "sha256": "bd2bf326bc46950f1d48e52be3c3ed87614a4cb9403398337065572180c53790" },
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/d1/worker-api/prepared-statements.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/d1/worker-api/prepared-statements.mdx", "sha256": "1666e2354219c91a210c924db4577b847999a9850f120daf215866113bc7f33d" }
+      ],
+      "positiveCases": ["p0-6::p0_6_real_d1_facade_and_backend_matrix"],
+      "negativeCases": ["p0-6::p0_6_real_d1_facade_and_backend_matrix"],
+      "deviations": ["OC-D1-001"],
+      "typeInterfaces": ["D1Database", "D1PreparedStatement"]
+    },
+    {
+      "id": "durable-objects.namespace.storage",
+      "product": "durable_objects",
+      "surface": "namespace/id/stub/fetch/rpc/storage/transaction/basic-websocket",
+      "status": "supported_with_deviation",
+      "methods": ["idFromName", "newUniqueId", "idFromString", "get", "getByName", "fetch", "rpc", "storage.get", "storage.put", "storage.delete", "storage.list", "storage.transaction"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[], ["rpc"]] },
+      "sources": [
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/durable-objects/api/namespace.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/durable-objects/api/namespace.mdx", "sha256": "11a6e6f3c109a7a7f46f33fd4964224f04d53f09ecbb925186696ff97a476f7d" },
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/durable-objects/api/state.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/durable-objects/api/state.mdx", "sha256": "a0dd0ad1d242ee5ede5dd1a855fccce5431963519efbf8894d7bd22670ff4aa2" }
+      ],
+      "positiveCases": ["p0-7::p0_7_real_durable_objects_matrix"],
+      "negativeCases": ["p0-7::p0_7_real_durable_objects_matrix"],
+      "deviations": ["OC-DO-001", "OC-WS-001"],
+      "typeInterfaces": ["DurableObjectNamespace", "DurableObjectStub", "DurableObjectStorage"]
+    },
+    {
+      "id": "durable-objects.alarms",
+      "product": "alarms",
+      "surface": "DurableObjectStorage alarm API and alarm handler",
+      "status": "supported",
+      "methods": ["getAlarm", "setAlarm", "deleteAlarm", "alarm"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/durable-objects/api/alarms.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/durable-objects/api/alarms.mdx", "sha256": "063f8929d14c667be965d3834e7aecdaa1f91cca11f4537fda4587ecd5737b3f" }],
+      "positiveCases": ["p0-8::p0_8_real_scheduler_alarm_matrix"],
+      "negativeCases": ["p0-8::p0_8_real_scheduler_alarm_matrix"],
+      "deviations": [],
+      "typeInterfaces": ["DurableObjectStorage"]
+    },
+    {
+      "id": "queues.push.methods",
+      "product": "queues",
+      "surface": "producer/push-consumer/ack/retry/delay/DLQ",
+      "status": "supported_with_deviation",
+      "methods": ["send", "sendBatch", "metrics", "queue", "ack", "retry", "ackAll", "retryAll"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/queues/configuration/javascript-apis.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/queues/configuration/javascript-apis.mdx", "sha256": "eeedf4d9a7e1c522915f583012bb5edfdbd8b02b5545654c7011b389270b425b" }],
+      "positiveCases": ["p2-2::p2_2_real_queue_producer_matrix"],
+      "negativeCases": ["p2-2::p2_2_real_queue_producer_matrix", "p2-2::commit_crash::p2_2_sigkill_after_commit_preserves_message_and_counters"],
+      "deviations": ["OC-QUEUE-001"],
+      "typeInterfaces": ["Queue", "Message", "MessageBatch"]
+    },
+    {
+      "id": "cron.scheduled.handler",
+      "product": "cron",
+      "surface": "scheduled/noRetry/local recovery",
+      "status": "supported_with_deviation",
+      "methods": ["scheduled", "noRetry"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/runtime-apis/handlers/scheduled.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/runtime-apis/handlers/scheduled.mdx", "sha256": "fbe219727e9f1bd3dedea88bddc3639565f666467368a68e105f5bb8e3da1fc1" }],
+      "positiveCases": ["p2-1::p2_1_five_fresh_process_crash_boundaries_recover_exactly"],
+      "negativeCases": ["p2-1::p2_1_schema_and_product_scope_remain_frozen"],
+      "deviations": ["OC-CRON-001"],
+      "typeInterfaces": ["ScheduledController"]
+    },
+    {
+      "id": "workflows.current.subset",
+      "product": "workflows",
+      "surface": "create/status/steps/waits/events/lifecycle/replay",
+      "status": "supported_with_deviation",
+      "methods": ["create", "get", "id", "status", "step.do", "step.sleep", "step.sleepUntil", "step.waitForEvent", "sendEvent", "pause", "resume", "terminate", "restart"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workflows/build/workers-api.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workflows/build/workers-api.mdx", "sha256": "b61099521ac63f5a2db6cca9dd8152951cb5f2d87096dbce77ed305ab364b180" },
+        { "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workflows/build/step-context.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workflows/build/step-context.mdx", "sha256": "a934968a160eee5c0b0e967ebc029fd9af9ea65b1dbc9579c30874772b2cdfc3" }
+      ],
+      "positiveCases": ["workflow-runtime::workflow_runtime_suspension_timeout_parallel_and_native_errors", "workflow-product::durable_execution::production_driver_replays_waits_retries_and_events_after_runtime_restart"],
+      "negativeCases": ["workflow-runtime::output_gate::workflow_do_mutation_fails_closed_after_native_output_gate_probe", "workflow-recovery::transport_faults::workflow_production_step_http_known_unknown_commit_matrix"],
+      "deviations": ["OC-WORKFLOW-001", "OC-WORKFLOW-002"],
+      "typeInterfaces": ["Workflow", "WorkflowInstance", "WorkflowStep", "WorkflowEntrypoint", "WorkflowEvent"]
+    },
+    {
+      "id": "cache.workers.response",
+      "product": "workers_cache",
+      "surface": "response cache HIT/STALE/revalidation/purge/version",
+      "status": "supported_with_deviation",
+      "methods": ["fetch", "purge"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/cache/configuration.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/cache/configuration.mdx", "sha256": "cee1fabdc7dd173b0c1613446ff950282328535d7c93969b21ac588fab9e3a63" }],
+      "positiveCases": ["p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"],
+      "negativeCases": ["p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"],
+      "deviations": ["OC-CACHE-001", "OC-CACHE-002"],
+      "typeInterfaces": ["OpenComputeExecutionContext"]
+    },
+    {
+      "id": "cache.api.methods",
+      "product": "cache_api",
+      "surface": "caches.default/open/put/match/delete",
+      "status": "supported_with_deviation",
+      "methods": ["default", "open", "put", "match", "delete"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/runtime-apis/cache.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/runtime-apis/cache.mdx", "sha256": "c94076aec28a33b0cc7725ebd749530c233a559c90167d32a2d1ca4db8607d60" }],
+      "positiveCases": ["p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"],
+      "negativeCases": ["p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"],
+      "deviations": ["OC-CACHE-001", "OC-CACHE-002"],
+      "typeInterfaces": ["OpenComputeCacheStorage", "OpenComputeCache"]
+    },
+    {
+      "id": "images.binding.transform",
+      "product": "images",
+      "surface": "ImagesBinding input/info/transform/draw/output",
+      "status": "supported_with_deviation",
+      "methods": ["input", "info", "transform", "draw", "output", "response", "contentType", "image"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/runtime-apis/bindings/images.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/runtime-apis/bindings/images.mdx", "sha256": "18294e9cfb81a8ea121481cda079ec04639936ee83b11060a5f0100c23eb353d" }],
+      "positiveCases": ["p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"],
+      "negativeCases": ["p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"],
+      "deviations": ["OC-IMAGES-001"],
+      "typeInterfaces": ["ImagesBinding", "ImageTransformer", "ImageTransformationResult"]
+    },
+    {
+      "id": "version-metadata.binding",
+      "product": "version_metadata",
+      "surface": "CF_VERSION_METADATA",
+      "status": "supported",
+      "methods": ["id", "tag", "timestamp"],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/runtime-apis/bindings/version-metadata.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/runtime-apis/bindings/version-metadata.mdx", "sha256": "2afff51187cf44125390a210679ff9f68343c232234fccca272a6b9685c9aadb" }],
+      "positiveCases": ["p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"],
+      "negativeCases": ["p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix"],
+      "deviations": [],
+      "typeInterfaces": ["VersionMetadata"]
+    },
+    {
+      "id": "unsupported.bindings.fail-closed",
+      "product": "websocket_hibernation",
+      "additionalProducts": ["analytics_engine", "ai", "browser_rendering", "vectorize", "hyperdrive", "mtls", "rate_limiting", "workers_for_platforms"],
+      "surface": "unsupported binding and optional runtime surface",
+      "status": "unsupported",
+      "methods": [],
+      "compatibility": { "from": "2022-01-01", "to": "2026-08-26", "flags": [[]] },
+      "sources": [{ "kind": "cloudflare-doc", "url": "https://github.com/cloudflare/cloudflare-docs/blob/3feb9a48ac3b20803e7d672f546bebf4b5b65a30/src/content/docs/workers/wrangler/configuration.mdx", "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30", "path": "src/content/docs/workers/wrangler/configuration.mdx", "sha256": "d9a095ac1d1c7fe793db10c9cc7222f7126984688d0c5401ea3e81a997c3db8b" }],
+      "positiveCases": [],
+      "negativeCases": ["p3-contract::unsupported-config-rejection"],
+      "deviations": [],
+      "typeInterfaces": [],
+      "forbiddenTypes": ["AnalyticsEngineDataset", "Ai", "BrowserRendering", "VectorizeIndex", "Hyperdrive", "FetcherMtls", "RateLimit", "WorkerLoader"]
+    }
+  ]
+}

@@ -6,6 +6,9 @@ P3 conformance must audit every advertised capability against this registry; pla
 remain unadvertised or blocked rather than receiving speculative deviation IDs.
 
 - `OC-KV-001`: KV is single-node SQLite authority; it does not claim Cloudflare global replication or propagation timing.
+- `OC-DEPLOY-001`: Deployments, routes, promotion, and rollback use one local SQLite authority and one supervised runtime generation. The platform does not claim Cloudflare's global rollout, placement, traffic-splitting, account-management, or billing control planes.
+- `OC-ASSETS-001`: Static Assets are immutable S3-backed deployment content served by the single-node platform. Routing and binding behavior are covered, but Cloudflare's global CDN placement, replication, purge propagation, and product quotas are not provided.
+- `OC-SERVICE-001`: Service Bindings provide default/named fetch and RPC within one platform authority. They do not claim Cloudflare cross-region placement or global service discovery; target admission, deployment pins, capability lifetime, and recovery are local and fail closed.
 - `OC-R2-001`: R2 is backed by the configured S3 authority; a full platform snapshot records bucket identity but does not provide R2 point-in-time recovery.
 - `OC-D1-001`: D1 session constraints and bookmark replication are not implemented; `withSession()` only exposes the explicitly documented local behavior.
 - `OC-DO-001`: Durable Objects are placed on the single local workerd process; placement hints and global migration are unsupported.

@@ -1,4 +1,5 @@
 use super::*;
+use open_compute_core::CapabilityStatus;
 
 #[test]
 fn snapshot_policy_covers_the_current_workflow_configuration() {
@@ -39,9 +40,12 @@ fn snapshot_policy_covers_the_current_workflow_configuration() {
 
 #[test]
 fn workflow_capabilities_report_current_model_and_operator_limits() {
-    let products = product_registry();
+    let products = product_registry().unwrap();
     for product in products.values() {
-        if product.status == CapabilityStatus::Supported {
+        if matches!(
+            product.status,
+            CapabilityStatus::Supported | CapabilityStatus::SupportedWithDeviation
+        ) {
             assert_eq!(product.capability_version, Some(1));
         }
     }
@@ -56,6 +60,10 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
         ["OC-CACHE-001", "OC-CACHE-002"]
     );
     assert_eq!(products["images"].deviations, ["OC-IMAGES-001"]);
+    assert_eq!(
+        products["service_bindings"].status,
+        CapabilityStatus::SupportedWithDeviation
+    );
     let mut loaded = LoadedConfig {
         path: "/unused/policy.toml".into(),
         config: PlatformConfig::from_toml_str("").unwrap(),

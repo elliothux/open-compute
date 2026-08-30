@@ -39,5 +39,12 @@ zeroize.workspace = true
 open-compute-core = { path = "../core", features = ["test-support"] }
 tempfile = "3.20.0"
 
+[[bin]]
+name = "open-compute-s3-fixture"
+path = "src/bin/s3_fixture.rs"
+required-features = ["test-support"]
+test = false
+bench = false
+
 [lints]
 workspace = true

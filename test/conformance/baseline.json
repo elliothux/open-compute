@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "openComputeRevision": "bb89075255c31fe734ebd47360ab8f054150deb9e2a10d2d8dbcf4cd37a81bae",
+  "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes test/conformance/baseline.json and non-reference docs",
+  "workerdLockSha256": "d3614a6394cf85e24704954d9e7a9585fb38a2107e8eb73a02519e39add14d2e",
+  "workerd": {
+    "release": "v1.20260826.1",
+    "revision": "c28fa55802436ce0ce3f3b0255598fb504817f27",
+    "treeSha256": "ba93a203fa882db417918ea09dd084619a578481e605abcbb95a49410d1642fa"
+  },
+  "compatibilityDates": ["2022-01-01", "2026-08-22", "2026-08-26"],
+  "compatibilityFlags": [
+    [],
+    ["nodejs_compat"],
+    ["rpc"],
+    ["nodejs_compat", "rpc"],
+    ["assets_navigation_has_no_effect"],
+    ["assets_navigation_prefers_asset_serving"]
+  ],
+  "cloudflareDocs": {
+    "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30",
+    "treeSha256": "7ca53a3df0bc12cb183d2d9f2ff4755dcfbf51e923b5b97396c2744717035f08",
+    "treeDigestAlgorithm": "sha256(git-ls-tree-r-full-tree)"
+  },
+  "workersTypes": {
+    "version": "5.20260826.1",
+    "lockSha256": "9f5d1a13af3af5f01f9d067bfa4e7211a1fc971830d3d445e9af751fd997d024",
+    "packageSha256": "6663169b7276d683080a9c0f82da09a29116a92983c2f0e84208e12e1e12738d",
+    "indexSha256": "8aade9309432ba26420540b0cfa435ce2a945c0a563cc20bf2537a221f2c98c1"
+  },
+  "workersSdk": {
+    "revision": "296a1a7c97e027a308740e1eaaa6d904dec8f102",
+    "lockSha256": "b011dee793fc3db7a05a8279f2d77460d2b92f8384653f455ed20a5a4652b1ff",
+    "treeSha256": "4d77c2bff3d869c0bab2703e9f1bb673d597994831051c0691100a637cf9d2ad"
+  },
+  "wrangler": { "version": "4.125.0" },
+  "vitePlugin": { "version": "1.53.1" },
+  "toolchain": {
+    "bun": "1.3.14",
+    "typescript": "7.0.2",
+    "rolldown": "1.2.6"
+  }
+}

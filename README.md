@@ -27,8 +27,9 @@ Worker、KV、R2、D1、Durable Objects、Queues、Cron、Workflows、Cache 和 
 Gate 判定。高风险行为使用同一 portable fixture 对比 open-compute 与真实 Cloudflare Workers；
 第三方框架只是组合 workload。固定 vinext 可以检验 SSR/RSC、Assets、Service、KV、Cache 与
 Images，但 vinext/Next.js 自身缺口不进入平台 schema 或专用分支，vinext 全绿也不能替代 Platform
-verdict。完整规则见[平台总方案](docs/open-compute-workerd-platform.md)；P3.4 conformance 尚未纳入
-本次实现与验收。
+verdict。完整规则见[平台总方案](docs/open-compute-workerd-platform.md)；P3.4 已有原常用子集的
+catalog/product/local Gate 与一项受控 Cache API portable differential，但扩展后的完整 stable tenant
+API 目标仍未完成。
 
 ## Architecture
 
@@ -55,10 +56,10 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 | P0：Workers/KV/R2/D1/DO/Alarms | 已实现并有归档 Gate；精确支持面仍以 capability/deviation 为准 |
 | P1：兼容性/可靠性/单文件 | 核心与本机 Gate 已完成；跨平台发行和长时 soak 仍有 active acceptance |
 | P2：Queues/Cron/Workflows | 已实现声明子集并通过 P2 Exit；DO output-gate 等限制仍保留 |
-| P3.1：Static Assets | 平台核心与维护 Gate 完成；portable contract/differential qualification 待完成，应用未评估 |
-| P3.2：Service Binding | 核心 Conditional Go；事件源调用、真实 crash 与 contract qualification 待补齐，应用未评估 |
-| P3.3：Cache/Images | [声明的单节点支持面已实现并通过最终验收](docs/implemented/p3-3-workers-cache-images.md)；Cloudflare conformance 与应用 qualification 不在该结论内 |
-| P3.4：Cloudflare conformance | 尚未纳入本次实现与验收 |
+| P3.1：Static Assets | 平台核心与本地 contract/product Gate 完成；当前 remote fixture 只覆盖 Cache API，Assets 直接 differential 与应用 qualification 未评估 |
+| P3.2：Service Binding | 本地 hard/product/event-source/SIGKILL recovery 与 contract Gate 完成；当前 remote fixture 只覆盖 Cache API，Service 直接 differential 与应用 qualification 未评估 |
+| P3.3：Cache/Images | [声明的单节点支持面已实现并通过最终验收](docs/implemented/p3-3-workers-cache-images.md)；Cache API portable differential 已受控通过，完整 Cloudflare conformance 与应用 qualification 不在该结论内 |
+| P3.4：Cloudflare conformance | 原常用子集 baseline/catalog/harness/local Gate 与一项 Cache API differential 已完成；[扩展后的全量 stable tenant API 目标](docs/cloudflare-runtime-compatibility.md)仍为 active/blocked |
 
 历史设计和结果只证明对应 revision/输入下的范围。当前 dirty working tree、未运行 target 或 active
 计划不能从历史 PASS 推导为已验收。
@@ -80,8 +81,10 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 | `scripts/` | Local development and release packaging launchers |
 
 未完成的实施与验收方案放在 `docs/`；当前入口包括
+[Cloudflare Runtime 全量兼容目标](docs/cloudflare-runtime-compatibility.md)、
 [P3.1 Static Assets](docs/p3-1-static-assets.md)、
-[P3.2 Service Binding](docs/p3-2-service-bindings.md)。已完成的
+[P3.2 Service Binding](docs/p3-2-service-bindings.md)与
+[P3.4 Cloudflare conformance](docs/p3-4-cloudflare-conformance.md)。已完成的
 [P3.3 Cache/Images](docs/implemented/p3-3-workers-cache-images.md)设计与结果，以及其他已完成阶段见
 [docs/implemented](docs/implemented/README.md)，持续维护的 API、测试、部署及运维资料见
 [docs/references](docs/references/README.md)。归档不代表对当前工作树重新执行了验收。

@@ -1,0 +1,7 @@
+interface:
+  display_name: "CF Compatibility Check"
+  short_description: "Review CF behavior with self-host exclusions"
+  default_prompt: "Use $cf-compatibility-check to review this branch's Cloudflare API, type, and runtime behavior while excluding global edge and multi-region properties outside the single-host target."
+
+policy:
+  allow_implicit_invocation: true

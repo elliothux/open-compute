@@ -2105,7 +2105,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     assert_eq!(
         capabilities.products["queues"].status,
-        open_compute_core::CapabilityStatus::Supported
+        open_compute_core::CapabilityStatus::SupportedWithDeviation
     );
     assert_eq!(
         capabilities.products["queues"].deviations,
@@ -2113,7 +2113,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     assert_eq!(
         capabilities.products["cron"].status,
-        open_compute_core::CapabilityStatus::Supported
+        open_compute_core::CapabilityStatus::SupportedWithDeviation
     );
     assert_eq!(
         capabilities.products["cron"].deviations,
@@ -2121,7 +2121,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     assert_eq!(
         capabilities.products["workflows"].status,
-        open_compute_core::CapabilityStatus::Supported
+        open_compute_core::CapabilityStatus::SupportedWithDeviation
     );
     assert_eq!(
         capabilities.products["workflows"].deviations,

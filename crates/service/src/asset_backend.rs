@@ -236,7 +236,7 @@ pub(crate) async fn serve_asset_plan(
 
 struct PinnedBody {
     inner: Body,
-    _pin: DeploymentPin,
+    pin: Option<DeploymentPin>,
 }
 
 impl HttpBody for PinnedBody {
@@ -247,7 +247,16 @@ impl HttpBody for PinnedBody {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        Pin::new(&mut self.inner).poll_frame(cx)
+        let frame = Pin::new(&mut self.inner).poll_frame(cx);
+        let finished = match &frame {
+            Poll::Ready(None | Some(Err(_))) => true,
+            Poll::Ready(Some(Ok(_))) => self.inner.is_end_stream(),
+            Poll::Pending => false,
+        };
+        if finished {
+            self.pin.take();
+        }
+        frame
     }
 
     fn is_end_stream(&self) -> bool {
@@ -265,7 +274,7 @@ pub(crate) fn pin_response(response: Response, pin: DeploymentPin) -> Response {
         parts,
         Body::new(PinnedBody {
             inner: body,
-            _pin: pin,
+            pin: Some(pin),
         }),
     )
 }

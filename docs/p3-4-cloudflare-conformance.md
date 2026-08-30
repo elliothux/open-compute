@@ -1,10 +1,18 @@
 # P3.4：Cloudflare 能力对齐、隔离与恢复 Day1 方案
 
-状态：待实现。2026-08-30。
+状态（2026-08-30）：**原常用子集的 Day1 实现与本地 Contract Gate 已完成；全量兼容目标已扩大，
+重新进入 active**。固定 baseline/catalog、typed runner、portable fixture、P3.1–P3.3 产品证据、
+两账户隔离与 crash/recovery 已进入当前实现，完整 workspace 最终验收与 90% 覆盖率门槛曾对原子集
+通过；这些证据不证明新的全量目标。一项受控 Cache API portable differential 已在真实 Cloudflare
+Workers 与 open-compute 上得到相同观察并完成精确清理；它只 qualification 该 fixture，不满足扩展后
+覆盖全部目标产品高风险行为的 `CF-TEST-03`，全量目标仍为 active/blocked。
+P1 长时 soak 与正式发行演练继续由独立的[P1 剩余验收计划](p1-release-acceptance.md)跟踪。
 
-P3.4 的目标不是实现 Next.js，也不是让某个 vinext revision 的全部 API 或测试无条件变绿；目标是
-让 open-compute **声明支持的常用 Cloudflare Workers 平台能力**具有可追溯契约、真实 stock
-workerd 证据、与 Cloudflare 的差异记录，以及单节点 self-host 场景的隔离和恢复保证。
+P3.4 的目标不是实现 Next.js，也不是让某个 vinext revision 的全部 API 或测试无条件变绿；目标由
+[Cloudflare Worker Runtime 全量兼容目标](cloudflare-runtime-compatibility.md)定义：让 open-compute
+对固定 baseline 的 latest stable Workers runtime，以及 Workers、Durable Objects、Queues、
+Workflows、R2、D1、KV 的完整 tenant API 具有可追溯契约、真实 stock workerd 证据、与 Cloudflare
+的差异记录，以及单节点 self-host 场景的隔离和恢复保证。
 
 vinext 是第三方应用检验手段之一。它能同时覆盖多环境构建、SSR/RSC、Static Assets、Service
 Binding、KV、Workers Cache、Version Metadata 和 Images，但它自己的 Next.js 兼容缺口不属于
@@ -21,8 +29,8 @@ Binding、KV、Workers Cache、Version Metadata 和 Images，但它自己的 Nex
 
 出现冲突时按以下顺序判断：
 
-1. Cloudflare 官方 API/配置文档中适用于固定 compatibility date/flag 的公开契约；
-2. 正式 pin 对应的 upstream workerd 类型、源码、WPT/单元测试和真实 binary 行为；
+1. 固定版本 `@cloudflare/workers-types` stable 入口，以及匹配 pin 的 upstream workerd generated types；
+2. Cloudflare 官方 runtime/binding 文档和正式 pin 的源码、WPT/单元测试、真实 binary 行为；
 3. 同一 portable fixture 在真实 Cloudflare Workers 上的冻结观察结果；
 4. open-compute 已声明的单节点 deviation 与安全/资源边界；
 5. workers-sdk、Miniflare、Wrangler、Vite plugin 等工具的集成行为；
@@ -34,17 +42,18 @@ Cloudflare 通过、open-compute 失败，才是平台差距。
 
 ### 1.2 “贴近 Cloudflare”的含义
 
-本项目不声称完整 Cloudflare parity。每项能力只能处于：
+本项目不声称 Cloudflare 全产品、管理 API 或全球 edge parity。目标范围内每项能力只能处于：
 
 | 状态 | 含义 |
 | --- | --- |
-| `supported` | API shape、成功/失败、可见副作用与固定 date/flag 行为在声明矩阵内通过 |
-| `supported_with_deviation` | 常用 API 可用，但单节点/配额/一致性等差异有稳定 ID、文档和负向测试 |
-| `unsupported` | 不广告类型/能力；配置或调用在 authority 边界明确拒绝 |
+| `supported` | API shape、成功/失败、可见副作用与固定 single-latest runtime contract 行为通过 |
+| `supported_with_deviation` | upstream stable API 完整可用，仅单节点拓扑差异有稳定 ID、文档和负向测试 |
+| `unsupported` | 只用于全量目标文档明确列出的非目标，不得用于七项产品内的 stable API |
 | `blocked` | 目标支持但缺正式输入、runtime primitive 或验收证据；不能发布成 supported |
 
-不得使用“部分支持”而不列方法，也不得用产品名相同推导兼容。`platformd capabilities --json`、
-类型声明、工具链接受的配置、文档和 conformance catalog 必须一致。
+不得使用“部分支持”而不列方法，也不得用产品名相同推导兼容。完整 upstream 类型可以包含未绑定
+产品的 type name；实际 `Env`、runtime availability、`platformd capabilities --json`、文档和
+conformance catalog 必须一致。目标 stable API 未实现时是 `blocked`，不能从类型中删除。
 
 单节点差异可以接受：没有 edge placement、跨地域复制、全球 cache、D1 replica、DO 全球迁移、
 Queue exactly-once 或 Cloudflare 管理/计费面。安全边界、事务原子性、不可变 deployment、明确错误、
@@ -60,36 +69,45 @@ P3.4 有两个独立结论：
 应用通过不能让 Platform Go，应用失败也不一定让 Platform No-Go。只有失败被映射到一个声明
 supported 的平台契约，或目标 workload 明确属于本阶段承诺，才阻塞对应结论。
 
-## 2. 固定输入与 P3.0 债务
+## 2. 固定输入与 P3.0 迁移
 
-P3.0 尚未产出可复现输入。P3.4-0 先完成 Cloudflare 平台契约基线；第三方应用基线另行登记，
-不作为 Platform Go 的隐含前置条件。正式平台 manifest 至少包含：
+当前工作树已有 `test/conformance/baseline.json` 和 catalog 草案，但它们固定的是原方法子集、多个
+tenant date 和 flag 组合，且尚未成为本目标的 committed authority，不能证明新的全量 single-latest
+目标。P3.4-0 直接把该 authority 更新为全量目标基线；第三方应用基线仍另行登记，不作为 Platform
+Go 的隐含前置条件。迁移后的正式 platform manifest 至少包含：
 
 ```json
 {
   "schemaVersion": 1,
   "openComputeRevision": "<source-tree-digest>",
   "workerdLockSha256": "<sha256>",
-  "compatibilityDates": ["<tested-date>"],
-  "compatibilityFlags": ["<tested-flag-set>"],
+  "effectiveCompatibilityDate": "<pinned-latest-date>",
+  "requiredCompatibilityFlags": ["<platform-internal-flag>"],
   "cloudflareDocs": { "revision": "<commit>", "treeSha256": "<sha256>" },
-  "workersTypes": { "version": "<pinned>", "lockSha256": "<sha256>" },
+  "workersTypes": {
+    "source": "@cloudflare/workers-types",
+    "version": "<pinned>",
+    "packageSha256": "<sha256>",
+    "astSha256": "<sha256>"
+  },
   "workersSdk": { "revision": "<commit>", "lockSha256": "<sha256>" },
   "wrangler": { "version": "<pinned>" },
   "vitePlugin": { "version": "<pinned>" }
 }
 ```
 
-字段示意不代表文件已存在。最终由 tracked `test/conformance/baseline.json` 保存；所有 sha 必须来自
-实际准备的 immutable 输入。不能写浮动 `latest`，也不能在生产启动或 Gate 中隐式 clone、安装、
-下载浏览器或更新 runtime。
+字段是目标 schema 示意，不表示当前文件已经迁移。权威结果仍由 tracked
+`test/conformance/baseline.json` 保存；所有 sha 必须来自实际准备的 immutable 输入。不能写浮动
+`latest`，也不能在生产启动或 Gate 中隐式 clone、安装、下载浏览器或更新 runtime。
 
 应用验收在 `test/conformance/applications/<name>.json` 固定 repository revision、lock、构建器、浏览器
 和选定 workload。没有该文件只表示对应 Application verdict 未评估，不会把已具备完整平台证据的
 contract 降为 blocked。反过来，应用文件存在也不能替代平台 baseline 或 contract case。
 
-基线变更是协调更新：重新发现契约/用例，审查新增、删除、默认 date/flag 行为与 expected result，
-更新 catalog、类型、deviation 和证据。不能只改 package version 后沿用旧 PASS。
+tenant schema 和 deployment request 不包含 `compatibility_date` 或 `compatibility_flags`。上面的 date/flags
+是平台构建期输入：date 固定为 pinned workerd 在本次 coordinated update 中支持的最新 stable 行为，
+flags 只允许启用该行为所需的平台内部项。基线变更必须重新发现契约/用例，审查 API 增删、默认行为
+和 expected result，更新 catalog、类型、deviation 和证据；不能只改 package version 后沿用旧 PASS。
 
 ## 3. 契约目录
 
@@ -99,7 +117,7 @@ contract 降为 blocked。反过来，应用文件存在也不能替代平台 ba
 发现与展示，不单独充当可复现内容。若某页没有可固定的源码路径，catalog 保存相关字段/行为的
 最小事实摘要及其 digest，不 vendoring 整页内容。
 
-新增 `test/conformance/catalog.json`，每条记录具有稳定 ID：
+扩展现有 `test/conformance/catalog.json`，使 upstream stable AST 的每个目标成员都有稳定 ID：
 
 ```json
 {
@@ -107,7 +125,7 @@ contract 降为 blocked。反过来，应用文件存在也不能替代平台 ba
   "product": "cache_api",
   "surface": "caches.default.match",
   "status": "supported",
-  "compatibility": { "from": "<date>", "flags": [] },
+  "runtimeContract": "<baseline-digest>",
   "sources": [
     { "kind": "cloudflare-doc", "url": "https://...", "revision": "<commit>", "path": "<path>", "sha256": "<digest>" },
     { "kind": "workerd-test", "path": "references/workerd/...", "revision": "<lock revision>" }
@@ -127,45 +145,53 @@ deviation truth。
 - 每个 `supported` 方法至少一个正向、一个关键负向或拒绝 case；
 - 每个 deviation ID 在 registry、文档和 case 中均被引用，且不存在孤儿；
 - 每个 capability method 能回指 catalog，catalog 的 product/method 也存在 capability；
-- 类型声明不包含 unsupported binding/method；配置 parser 不接受 unsupported 字段；
-- compatibility date/flag 区间与实际测试组合一致，不广告只由 workerd 接受但 facade 未验证的日期；
+- upstream stable 类型 package 未被裁剪或重写；目标 API 缺实现时登记 `blocked`，非目标 binding 不进入
+  generated `Env`；
+- 配置 parser 不接受非目标产品字段，也不接受 tenant `compatibility_date`/`compatibility_flags`；
+- 唯一 `effectiveCompatibilityDate`、内部 required flags、workerd、workers-types 与实际测试基线一致；
 - case/source ID 唯一，删除或改名需要显式 baseline diff，不能用数量变化掩盖遗漏。
 
-### 3.2 首轮产品清单
+### 3.2 全量目标清单
 
-P3.4 审计当前已承诺的所有产品，不只 P3 新增项：
+P3.4 以 upstream stable 类型 AST 发现目标成员，不以当前 registry 的方法子集反推范围：
 
-| 领域 | 主要契约 |
+| 领域 | 必须覆盖的 tenant contract |
 | --- | --- |
-| Workers runtime | modules、fetch、Request/Response/Streams、WebSocket、RPC、scheduled、显式 Node compatibility |
-| Deployments | immutable version、promote/rollback、vars/secrets、Version Metadata、route |
-| KV / R2 / D1 | registry 中已列的方法、stream/metadata/conditional/session deviation |
-| Durable Objects | namespace/ID/fetch/RPC/storage/transaction/alarm/basic WebSocket 与已声明限制 |
-| Queues / Cron | producer/consumer/ack/retry/delay/DLQ、cron 与本地恢复 deviation |
-| Workflows | 当前 create/status/step/wait/event/lifecycle/replay 子集与 output-gate deviation |
-| Static Assets | binding、default routing、HTTP、不可变发布/rollback |
-| Service Binding | default/named fetch/RPC、native types、target pin/lifecycle |
-| Cache / Images | P3.3 声明的 Workers Cache、Cache API、Images、purge/version 行为 |
+| Workers runtime | stable globals、Web APIs、modules/handlers、fetch、Request/Response/Streams、WebSocket、Crypto、HTMLRewriter、Cache API、scheduled、TCP sockets、RPC、ExecutionContext，以及匹配最新 date 的默认 Node.js surface |
+| KV | 完整 `KVNamespace` interface、全部 overload、metadata、stream、list 与 cache-status shape |
+| R2 | 完整 Worker R2 binding/object/body/multipart/options/checksum/SSE-C/storage-class surface |
+| D1 | 完整 database/session/prepared-statement/result/meta surface，包括 bookmark 和单机 session 顺序语义 |
+| Durable Objects | 完整 namespace/ID/stub/RPC/state/storage/SQL/sync KV/transaction/alarm/hibernatable WebSocket surface |
+| Queues | 完整 producer/push-consumer/message/batch/ack/retry/metrics/delay/content-type surface，包括 `v8` |
+| Workflows | 完整 binding/instance/batch/delete/lifecycle/step/context/parallel/event/restart-from-step/rollback surface |
 
-Wrangler 的全部账号管理命令、Cloudflare zone/DNS/WAF/CDN rules、Analytics Engine、AI、Browser、
-Vectorize、Hyperdrive、MTLS、Rate Limiting、Workers for Platforms 等不因 workers-types 中出现就进入
-Day1。未支持 binding 的配置必须 fail closed；能力列表明确 unsupported，而不是 importer 把字段
-丢掉后继续部署。
+Static Assets、Service Binding、Cache API、scheduled handler 和 Version Metadata 中属于 stable Workers
+tenant API 的部分随 Workers runtime 验收。open-compute 自己的 deployment/promote/rollback/route 是
+本地管理面，不以 Cloudflare 管理 API parity 验收。Images 等现有相邻能力继续按自身 capability 回归，
+但不因已经实现而扩大本文七项产品范围，也不能替代目标 contract。
 
-### 3.3 compatibility date 与 flag
+Wrangler 的账号/资源管理命令、Cloudflare `/client/v4`、zone/DNS/WAF/CDN rules，以及 Analytics
+Engine、AI、Browser、Vectorize、Hyperdrive、mTLS、Rate Limiting、Workers for Platforms 等非目标
+产品不因 workers-types 中出现 type name 就进入 Day1。它们不能进入 generated `Env`，对应配置必须
+fail closed；但不得裁剪上游类型 package 来伪造边界。
 
-workerd 负责大部分 Web/Node runtime date behavior，但 open-compute 的 facade、配置和 system Worker
-也可能有 date-sensitive contract。每个允许的 date/flag 必须经过：
+### 3.3 single-latest runtime contract
 
-1. deploy parser 与 canonical descriptor；
-2. WorkerLoader 原样传递；
-3. native runtime probe；
-4. 受影响 facade/产品 case；
-5. capability 输出和 negative flag rejection。
+open-compute 不向 tenant 提供 compatibility date 或 flag 选择。所有 deployment 使用 baseline 中唯一的
+`effectiveCompatibilityDate` 和平台内部 required flags；loader、facade 和各产品不得再按 tenant date
+维护行为分支。
 
-如果无法覆盖当前声明的 date range，应直接缩小 authoritative allowlist，不保留“workerd 可能支持”
-的宽范围。仅在官方契约要求时实现 date/flag branch，并记录 source/范围；不为旧 open-compute 私有
-行为增加兼容分支。
+每次更新先选择当时最新 stable `@cloudflare/workers-types`，再固定能提供同一 surface 的 workerd
+release、最新非未来 stable date、必要内部 flags、workers-sdk 和文档 revision。该元组必须经过：
+
+1. upstream types digest、AST 和 compile fixture；
+2. workerd config 编译、native runtime probe 与 WorkerLoader 传递；
+3. 受影响 facade、产品、failure/restart 和 differential case；
+4. capability/catalog/generated `Env` 双向完整性检查；
+5. tenant date/flag 输入的明确拒绝测试。
+
+生产启动不联网计算 latest。完成新的 coordinated update 后直接替换旧 contract，不保留旧 date range、
+历史 flag 组合、双路径或 open-compute 私有兼容分支。
 
 ## 4. Portable conformance fixture
 
@@ -195,23 +221,46 @@ Cloudflare 专属观测 header。不能删除 status、body、错误类别、cac
 ### 4.2 Remote differential 的授权边界
 
 部署到 Cloudflare 是外部写入、可能计费并需要 credential，不属于普通开发 Gate。只有显式选择
-`p3-cf-diff` 且提供预置 token/account 才执行；runner 在 mutation 前输出 source revision、目标
+`p3-cf-diff` 且提供预置 account 与 Wrangler OAuth/token credential 才执行；runner 在 mutation 前输出 source revision、目标
 account、资源前缀、预计 fixture 数和清理计划，并遵循操作授权。
 
-token 只从环境/文件引用读取，不写报告、argv、源码或 artifact。每轮使用唯一、有界前缀；finally
+credential 只由 Wrangler 或环境/文件引用读取，不写报告、argv、源码或 artifact。每轮使用唯一、有界前缀；finally
 删除 Worker、KV/R2/D1/Queue 等本轮资源并二次枚举。清理失败使 qualification 失败并输出不含
 credential 的资源清单，不能把孤儿留到“以后自动处理”。
 
-Cloudflare observation 是某日、某账号、某 compatibility date 的证据，不是永久真值。结果以
-source/baseline digest 冻结；官方契约后来变化时重新运行，不能自动改本平台行为追随 latest。
+当前 Cache API fixture 只创建随机 `oc-p34-*` workers.dev Worker，不配置 route、service binding、
+KV、R2、D1、Queue 或共享资源；删除使用精确名称且禁止 `--force`。这项安全边界属于该 fixture 的
+qualification 条件，不授权 runner 枚举、修改或清理账号中的其他服务。
 
-### 4.3 无 Cloudflare 凭据时的结论
+Cloudflare observation 是某日、某账号、某 effective compatibility date 的证据，不是永久真值。
+结果以 source/baseline digest 冻结；官方契约后来变化时通过 coordinated update 重新运行，生产
+runtime 不能自动追随网络上的 latest。
+
+### 4.3 已运行的 Cache API differential（2026-08-30）
+
+显式运行 `p3-cf-diff` 的现有报告为
+`.temp/gate-run/20260830T203754-3e933947/report.json`，冻结源码摘要为
+`0ac241b80a1bf4874c00925825f69e292f9dde801ffc85b6ad0ea34bcdb6943f`，baseline 摘要为
+`9cc0058c58cc085f8476d226d1b9b3dd520b86cf0aed656142615a9a1ac6ff5d`。唯一 case
+`cache-api/portable/cache-hit` 在账号别名 `personal-cf-account` 上使用 Worker
+`oc-p34-mtfsotc3-3600aaa9-0`，Cloudflare 与 open-compute 的三项观察完全相同：
+
+1. `/reset`：`200 {"reset":true}`；
+2. 首次 `/probe`：`200 {"cache":"MISS","body":"portable-cache-v1"}`；
+3. 第二次 `/probe`：`200 {"cache":"HIT","body":"portable-cache-v1"}`。
+
+报告中的 Cloudflare cleanup 与 open-compute cleanup 都是 `deleted=true,status=absent`；本地 cleanup
+另记录 generation restart。随后用 Wrangler 对该精确名称执行独立只读 `deployments list`，返回
+Cloudflare `10007`（Worker 不存在）。这证明该随机 Worker 已清理，不证明账号其他服务曾被枚举或
+变更。本节记录已经完成的冻结运行，不把后续文档维护表述成重新执行。
+
+### 4.4 无 Cloudflare 凭据时的结论
 
 本地/CI mandatory suite 不依赖 Cloudflare 账号，使用官方契约、正式 workerd 与真实平台产品 Gate。
 它可以给出 “contract Go”。缺 remote differential 时，报告必须写“Cloudflare differential 未
-qualification”，不能写“与 Cloudflare 实测完全一致”。正式 P3.4 Platform Go 需要在冻结输入上
-完成一次受控 differential；若项目决定不承担这项外部验收，则最终只能是有此限制的
-Conditional Go。
+qualification”，不能写“与 Cloudflare 实测完全一致”。现有 Cache API 对照只能解除该 fixture 的
+qualification 缺口；正式 P3.4 Platform Go 仍需在冻结输入上完成扩展后的高风险 differential 集合。
+若项目决定不承担其余外部验收，则最终只能是带明确未覆盖范围的 Conditional Go。
 
 ## 5. 分层测试模型
 
@@ -396,17 +445,18 @@ port/browser profile 隔离的目标；resource-heavy browser/images/recovery �
 | 包 | 内容 | 完成判据 |
 | --- | --- | --- |
 | P3.4-0 | 固定平台契约与工具链 baseline | tracked manifest、全部平台 digest、无浮动输入 |
-| P3.4-1 | catalog、capability/type/config/deviation 审计 | L0 双向完整性检查通过，unsupported fail closed |
+| P3.4-1 | upstream types、catalog、capability/config/deviation 审计 | L0 AST/compile 与双向完整性检查通过；目标缺口为 blocked，非目标 fail closed |
 | P3.4-2 | typed runner 与 portable fixture harness | offline list、两个 deploy adapter、结果/清理模型通过 |
 | P3.4-3 | 补齐 P3.1/P3.2/P3.3 残项 | 各阶段独立 Go，不靠应用 smoke |
-| P3.4-4 | 全产品 contract/product 回归 | 所有 supported contract 有真实 workerd/platform evidence |
+| P3.4-4 | 全量目标 contract/product 回归 | 全部目标 stable API 有真实 workerd/platform evidence，blocked 为零 |
 | P3.4-5 | vinext 等可选应用 qualification | 独立 application manifest；正常 build/deploy/browser；失败按 contract 分类 |
 | P3.4-6 | 两账户隔离与故障恢复 | L6 矩阵、resource/pin/process/temp cleanup 通过 |
 | P3.4-7 | Cloudflare differential qualification | 冻结 fixture、受控账号、无未解释差异/孤儿资源 |
 | P3.4-8 | P3 Exit 与报告/归档 | 静态检查、coverage、最终轮次、verdict 与限制完整 |
 
-P3.4-0/1/2 可在 P3.3 实现期间推进；P3.4-4 依赖各产品冻结；P3.4-5 不阻塞 Platform Go，
-但不能在 P3.1–P3.3 未完成时给出组合应用 Go；P3.4-7 必须在源码和 inputs 冻结后进行。
+原 P3.4-0/1/2 的子集实现保留为迁移基础，但需要按新的 upstream AST 和 single-latest contract 重做
+完整性判定；P3.4-4 依赖目标产品冻结。P3.4-5 不阻塞 Platform Go，但不能在对应平台 contract 未完成
+时给出组合应用 Go；P3.4-7 必须在源码和 inputs 冻结后进行。
 
 ## 12. P3 Exit
 
@@ -414,8 +464,9 @@ P3.4-0/1/2 可在 P3.3 实现期间推进；P3.4-4 依赖各产品冻结；P3.4-
 
 只有同时满足以下条件才能宣布“open-compute 在声明范围内贴近 Cloudflare Workers”：
 
-1. baseline/catalog 固定，所有 advertised product/method/date/flag 都有 source、case 和实际结果；
-2. capability JSON、类型、配置 parser、descriptor、文档与测试支持面完全一致；
+1. baseline/catalog 固定，upstream stable types 的目标 AST 与 workerd、唯一 effective date、内部 flags
+   均有 source、digest、case 和实际结果；
+2. upstream 类型、capability JSON、generated `Env`、配置 parser、descriptor、文档与测试支持面完全一致；
 3. 所有 `supported` case 通过；所有 deviation 有稳定 ID 和回归；unsupported 输入明确拒绝；blocked
    为零；
 4. P3.1 Static Assets、P3.2 Service Binding、P3.3 Cache/Images 各自完成未决真实平台 Gate；
@@ -432,9 +483,9 @@ P3.4-0/1/2 可在 P3.3 实现期间推进；P3.4-4 依赖各产品冻结；P3.4-
 
 结论文字应类似：
 
-> open-compute 对 catalog `<digest>` 声明的 Cloudflare Workers 常用 API 达到 Go；单节点差异见
-> `OC-*` 清单，未支持产品另列。结果固定于 workerd/baseline `<digest>`，不代表完整 Cloudflare
-> 平台兼容。
+> open-compute 对 baseline/catalog `<digest>` 固定的 latest stable Workers runtime，以及 Durable
+> Objects、Queues、Workflows、R2、D1、KV tenant API 达到 Go；单节点差异见 `OC-*` 清单。结果不包含
+> Cloudflare 管理 API、其他产品或全球 edge 基础设施。
 
 ### 12.2 Application Go
 

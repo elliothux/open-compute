@@ -6,6 +6,14 @@ fn capability_status_serialization_and_contract_are_strict() {
         serde_json::to_string(&CapabilityStatus::Supported).unwrap(),
         "\"supported\""
     );
+    assert_eq!(
+        serde_json::to_string(&CapabilityStatus::SupportedWithDeviation).unwrap(),
+        "\"supported_with_deviation\""
+    );
+    assert_eq!(
+        serde_json::to_string(&CapabilityStatus::Blocked).unwrap(),
+        "\"blocked\""
+    );
     let product = ProductCapabilityV1 {
         status: CapabilityStatus::Unsupported,
         capability_version: None,
@@ -33,6 +41,9 @@ fn capability_status_serialization_and_contract_are_strict() {
     let mut products = BTreeMap::new();
     for name in [
         "workers",
+        "deployments",
+        "static_assets",
+        "service_bindings",
         "kv",
         "r2",
         "d1",
@@ -41,7 +52,19 @@ fn capability_status_serialization_and_contract_are_strict() {
         "queues",
         "cron",
         "workflows",
+        "workers_cache",
+        "cache_api",
+        "images",
+        "version_metadata",
         "websocket_hibernation",
+        "analytics_engine",
+        "ai",
+        "browser_rendering",
+        "vectorize",
+        "hyperdrive",
+        "mtls",
+        "rate_limiting",
+        "workers_for_platforms",
     ] {
         products.insert(name.to_owned(), product.clone());
     }
@@ -65,4 +88,35 @@ fn capability_status_serialization_and_contract_are_strict() {
         .unwrap()
         .capability_version = Some(1);
     assert!(!capabilities.validate());
+
+    capabilities.products.get_mut("queues").unwrap().status = CapabilityStatus::Blocked;
+    capabilities
+        .products
+        .get_mut("queues")
+        .unwrap()
+        .capability_version = None;
+    assert!(capabilities.validate());
+    capabilities
+        .products
+        .get_mut("queues")
+        .unwrap()
+        .methods
+        .push("send".to_owned());
+    assert!(!capabilities.validate());
+    capabilities
+        .products
+        .get_mut("queues")
+        .unwrap()
+        .methods
+        .clear();
+    capabilities
+        .products
+        .get_mut("queues")
+        .unwrap()
+        .basic_websocket = Some(CapabilityStatus::Supported);
+    assert!(!capabilities.validate());
+    assert!(
+        serde_json::from_str::<ProductCapabilityV1>(r#"{"status":"unsupported","unknown":true}"#)
+            .is_err()
+    );
 }

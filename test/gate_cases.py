@@ -7,6 +7,19 @@ losing assertions. Discovery rejects missing, extra, and overlapping registratio
 """
 
 ONCE = {
+    'p3-contract': (
+        'baseline-identity',
+        'catalog-schema',
+        'capability-catalog-bijection',
+        'case-registry-mapping',
+        'deviation-bijection',
+        'compatibility-coverage',
+        'public-types-surface',
+        'unsupported-config-rejection',
+        'portable-fixture-inventory',
+        'cloudflare-runner-safety',
+    ),
+    'p3-cf-diff': ('cache-api/portable/cache-hit',),
     # Fixed listener ordering, not a startup race.
     'p0-1': ('public_health_port_ignores_private_listener_that_appears_first',),
     # The capability case already compares two fresh CLI processes in one invocation.
@@ -19,6 +32,9 @@ ONCE = {
     'p1-snapshot': ('p1_full_snapshot_retention_and_fresh_host_restore_are_fail_closed',),
     'p3-assets': ('p3_assets_real_runtime_routing_binding_immutability_and_lifecycle',),
     'p3-services-hard': ('p3_services_native_rpc_type_pipeline_and_lifecycle_matrix',),
+    'p3-services-events': (
+        'p3_service_calls_from_queue_cron_do_and_workflow_event_sources',
+    ),
     # Every fault point still gets its own real child; SIGKILL follows a state marker.
     'p2-1': (
         'p2_1_fault_child',
@@ -72,6 +88,9 @@ TIMING = {
     'p2-exit': ('p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_sigkill',),
     'p3-services-product': (
         'p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix',
+    ),
+    'p3-services-recovery': (
+        'p3_service_generation_exit_releases_inflight_handles_and_pins',
     ),
     # Owns background cache commits, refresh/purge fencing, and native transform admission.
     'p3-cache-images': (

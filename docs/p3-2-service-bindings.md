@@ -1,11 +1,15 @@
 # P3.2：Service Binding 与原生 Worker 调用
 
-状态（2026-08-30）：平台核心实现为 **Conditional Go**。SB-0 至 SB-4 已落到当前
-Day1 schema、工具链、stock workerd 原生 RPC、调用预算、deployment pin、generation 回收与
-有界指标；`p3-services-hard` 和 `p3-services-product` 单轮开发 Gate 已通过。事件源实际调用矩阵、
-真实 workerd crash handle 回收，以及 P3.4 contract/portable differential 尚未完成，因此不能给最终
-Platform Go。选定 vinext workload 未固定，只表示 Application verdict 未评估，不是平台阻塞项。
-本文保持 active，不归档，也不把核心 Gate 通过写成 P3 conformance 已完成。
+状态（2026-08-30）：**声明支持面的本地 Contract Gate 已完成；Service 直接 Cloudflare
+differential 尚未执行**。
+SB-0 至 SB-5 的本地部分已落到当前 Day1 schema、工具链、stock workerd 原生 RPC、调用预算、
+deployment pin、generation 回收与有界指标；`p3-services-hard`、`p3-services-product`、
+`p3-services-events` 和 `p3-services-recovery` 均已通过。事件源矩阵实际覆盖 Queue、Cron、Durable
+Object 与 Workflow 内的 Service 调用；独立进程 Gate 以 SIGKILL 证明真实 workerd 退出后在途
+handle/pin 回收和替换进程恢复。Service contract 已进入 P3.4 catalog；共享 runner 已在真实
+Cloudflare 上完成一项 Cache API fixture，但它不覆盖 Service fetch/RPC/event-source/lifecycle，
+因此不能给扩展目标的最终 Platform Go。选定 vinext workload 未固定，
+只表示 Application verdict 未评估，不是平台阻塞项。本文保持 active，等待共同 qualification 后归档。
 
 本阶段让 Worker 通过声明的 binding 调用同账户其他 Worker 或自己，支持默认/命名入口的
 fetch 与原生 RPC。绑定冻结目标 Worker ID；每次新的 service 调用解析目标当前 active
@@ -35,21 +39,24 @@ WebSocket、`waitUntil` 和 capability 分别以可观察的 drain/close/dispose
 
 | 证据 | 已验证内容 |
 | --- | --- |
-| `bun run build && bun run typecheck && bun run test:js` | 63 个 JS 测试；Service facade、默认 object/function env、动态 waitUntil、DO/Workflow root scope、工具链解析与生成资产 |
+| `bun run build` | TypeScript 7 strict typecheck、runtime/toolchain/types 构建；Service facade、默认 object/function env、动态 waitUntil、DO/Workflow root scope 与工具链解析 |
 | `cargo test -p open-compute-service --lib service_invocations::tests` | 5 个 registry 测试；返回 capability pin、深度/并发/总量预算、跨 root 隔离、generation 失效 |
-| `./test/gate.py p3-services` | hard/product 共 2 个 stock-workerd case；最近通过报告为 `.temp/gate-run/20260830T023135-01e16edc/report.json` |
-| `./test/coverage.sh` | 完整 workspace 单轮 Gate 通过，Rust line coverage 为 90.01%；报告为 `.temp/gate-run/20260830T030034-3820ad3e/report.json` 与 `target/llvm-cov/summary.json` |
+| `./test/gate.py p3-services` | hard/product/events/recovery 共 4 个 stock-workerd target 通过；报告为 `.temp/gate-run/20260830T162132-c3d07c73/report.json` |
+| `./test/coverage.sh` | 完整 workspace 单轮 Gate 通过，Rust line coverage 为 90.11%；报告为 `.temp/gate-run/20260830T170738-1521145b/report.json` 与 `target/llvm-cov/summary.json` |
+| `OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace` | 原生 inventory 校验通过，完整第一轮与两个 fresh-process TIMING 附加轮共 834/834 case 通过；报告为 `.temp/gate-run/20260830T171917-ab19b6a0/report.json` |
+| `contract-report.json` | `services.fetch.rpc` 的 hard/product/events/recovery 证据及 `OC-SERVICE-001` 映射全部通过；本地结论为 `contract_go` |
 | `p3-services-hard` | primitive/结构化值、TypedArray、Date、Request/Response、Readable/WritableStream、WebSocket、函数 callback、RpcTarget、getter、pipeline、dup/dispose；WeakMap 明确拒绝 |
 | `p3-services-product` | 默认/命名 fetch 与 RPC、object-style 默认 fetch、Assets/Assets-only、业务异常、waitUntil、返回/嵌套 capability、callback、self 深度限制、b1 在途固定与后续 b2 动态解析、最终 drain |
+| `p3-services-events` | Queue、Cron、Durable Object、Workflow 四类真实事件源调用，保持各自 root/attempt/ack 生命周期 |
+| `p3-services-recovery` | 持有 RPC capability/stream 后 SIGKILL workerd，证明退出边界清除 registry 与 deployment pin，替换 generation 的新调用成功 |
 
 仍未完成的 qualification 项目：
 
-- P3.4 尚未提供固定 Service Binding contract catalog、portable fixture 与 Cloudflare differential，
-  因此当前产品 Gate 不能单独给最终 Platform Go。
-- Queue/Cron/DO/Workflow adapter 已统一建立 root scope，现有产品回归与 wrapper 单测可证明
-  非 Service 行为及 scope wiring；但这些事件源内“实际调用 Service”的独立 stock-workerd
-  产品矩阵尚未登记。真实 workerd crash 中的在途 Service handle 回收也只有生产 watcher 与
-  generation 单测证据，尚无独立进程 Gate。两项在补齐前都不能标成 S14/S15 完整验收。
+- P3.4 已提供固定 Service Binding contract catalog、能力/类型映射和本地产品证据；共享 portable
+  runner 的 Cache API 对照不覆盖 Service Binding，仍需直接 differential qualification，因此当前
+  产品 Gate 不能单独给最终 Platform Go。
+- S14/S15 的本地缺口已经由 `p3-services-recovery` 与 `p3-services-events` 补齐；两项都使用正式
+  stock workerd 与生产 authority 路径，不再以 watcher 单测或 scope wiring 间接代替实际行为。
 - vinext 应用产物、选定 workload 断言和浏览器输入尚未固定；不能自造 fixture 数量或用改框架/
   关闭功能代替。该项只阻止对应 Application Go，不阻止通过独立 contract 证据给出 Platform verdict。
 

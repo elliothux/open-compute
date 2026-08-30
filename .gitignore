@@ -5,6 +5,7 @@
 **/*.rs.bk
 *.pdb
 *.profraw
+.DS_Store
 
 # Bun workspace dependencies and developer-tool build output.
 node_modules/

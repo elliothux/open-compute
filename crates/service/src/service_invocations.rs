@@ -551,11 +551,7 @@ impl ServiceInvocationRegistry {
         }
     }
 
-    /// Drop every invocation, capability, frame, and deployment pin after workerd exits.
-    ///
-    /// The supervisor watcher calls this only after the owning child is confirmed gone. A new
-    /// generation therefore cannot reuse an old handle, and crashed tenant code cannot leave a
-    /// process-lifetime deletion fence behind.
+    /// Drop state only when it still belongs to the named private-protocol generation.
     pub fn clear_generation(&self, generation: &str) {
         let mut inner = self
             .inner
@@ -564,6 +560,19 @@ impl ServiceInvocationRegistry {
         if inner.generation.as_deref() == Some(generation) {
             *inner = Inner::default();
         }
+    }
+
+    /// Drop every invocation, capability, frame, and deployment pin after workerd exits.
+    ///
+    /// The process supervisor owns this unconditional transition and calls it only after the
+    /// previously running child is confirmed absent, or immediately before admitting a known
+    /// replacement child. The private protocol generation is intentionally not exposed through
+    /// the supervisor snapshot.
+    pub fn clear_after_child_exit(&self) {
+        *self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Inner::default();
     }
 
     fn resolve_and_pin(

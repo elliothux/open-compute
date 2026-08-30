@@ -37,6 +37,7 @@ mod r2_protocol;
 mod resources;
 pub mod run;
 pub mod runtime_bridge;
+pub mod runtime_generation;
 pub mod scheduler;
 pub mod scheduler_http;
 pub mod service_invocations;

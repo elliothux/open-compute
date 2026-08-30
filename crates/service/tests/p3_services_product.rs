@@ -1,40 +1,26 @@
 //! Real pinned-workerd P3.2 Service Binding authority, routing, and lifecycle gate.
 
+mod p3_services_support;
+
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use bytes::Bytes;
 use futures::{StreamExt, stream};
-use open_compute_artifacts::{
-    ArtifactCache, ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
-};
-use open_compute_core::{
-    CacheConfig, PlatformConfig, Redactor, RequestId, RuntimeConfig, StartupId, StorageConfig,
-    SystemClock,
-};
-use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, verify_runtime_binary,
-};
-use open_compute_service::asset_backend::AssetBindingService;
-use open_compute_service::runtime_bridge::{
-    DispatchTarget, WorkerdTransport, bind_runtime_source, serve_runtime_source,
-};
+use open_compute_artifacts::ArtifactStore;
+use open_compute_core::RequestId;
+use open_compute_service::runtime_bridge::{DispatchTarget, WorkerdTransport};
 use open_compute_service::service_invocations::ServiceInvocationRegistry;
-use open_compute_service::{
-    SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_assets,
-};
-use open_compute_storage::{PlatformStorage, WorkerRepository};
+use open_compute_storage::WorkerRepository;
 use open_compute_workers::{
     AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, BundleLimits, CanonicalBundle,
     CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentAssets, DeploymentContent,
     DeploymentController, DeploymentPins, DeploymentServiceInput, HtmlHandling, ModuleInput,
-    ModuleType, NotFoundHandling, ResourcePins, RunWorkerFirst, RuntimeSource, RuntimeValidator,
+    ModuleType, NotFoundHandling, RunWorkerFirst, RuntimeValidator,
 };
+use p3_services_support::Harness;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const CALLER_SOURCE: &str = r#"
@@ -101,140 +87,13 @@ export default class Caller extends WorkerEntrypoint {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix() {
-    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
-        .map(PathBuf::from)
-        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
-    let root = repo_root();
-    let lock = root.join("packages/runtime/workerd.lock.json");
-    let temp = tempfile::tempdir().unwrap();
-    let storage = Arc::new(
-        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
-            .unwrap(),
-    );
-    let mock = MockS3::spawn("open-compute").await;
-    let artifacts = artifact_store(&mock);
-    let cache = Arc::new(
-        ArtifactCache::open(
-            storage.data_dir().artifact_cache_dir(),
-            CacheConfig::default(),
-            StartupId::generate(),
-        )
-        .unwrap(),
-    );
-    let runtime = verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
-        .await
-        .expect("formal pinned runtime");
-    let source_auth = GenerationAuthRegistry::new();
-    let binding_auth = GenerationAuthRegistry::new();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let source_addr = source_listener.local_addr().unwrap();
-    let binding_listener = bind_binding_backend().await.unwrap();
-    let binding_addr = binding_listener.local_addr().unwrap();
-    let deployment_pins = DeploymentPins::new();
-    let service_invocations = Arc::new(ServiceInvocationRegistry::new(
-        storage.clone(),
-        deployment_pins.clone(),
-    ));
-    let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
-    let mut binding_shutdown = shutdown.subscribe();
-    let source_task = tokio::spawn({
-        let source =
-            RuntimeSource::new(storage.clone(), artifacts.clone(), BundleLimits::default());
-        let auth = source_auth.clone();
-        async move {
-            serve_runtime_source(source_listener, source, auth, async move {
-                let _ = source_shutdown.changed().await;
-            })
-            .await
-        }
-    });
-    let binding_task = tokio::spawn({
-        let storage = storage.clone();
-        let auth = binding_auth.clone();
-        let pins = deployment_pins.clone();
-        let service_invocations = service_invocations.clone();
-        let asset_service = Arc::new(AssetBindingService::new(
-            storage.clone(),
-            artifacts.clone(),
-            cache,
-            pins.clone(),
-        ));
-        async move {
-            serve_binding_backend_with_assets(
-                binding_listener,
-                storage.clone(),
-                auth,
-                ResourcePins::new(),
-                Arc::new(SqliteKvBindingExecutor::new(
-                    storage.clone(),
-                    Arc::new(SystemClock),
-                )),
-                None,
-                None,
-                None,
-                open_compute_core::DurableObjectsConfig::default(),
-                open_compute_core::QueuesConfig::default(),
-                open_compute_core::WorkflowsConfig::default(),
-                None,
-                asset_service,
-                service_invocations,
-                None,
-                None,
-                async move {
-                    let _ = binding_shutdown.changed().await;
-                },
-            )
-            .await
-        }
-    });
-    let compiler = StaticConfigCompiler::new(
-        runtime.clone(),
-        lock,
-        root.join("packages/runtime"),
-        storage.data_dir().runtime_dir(),
-        PlatformReleaseMeta {
-            version: "p3-services-product".to_owned(),
-        },
-        Duration::from_secs(20),
-        Redactor::new(),
-    )
-    .with_generation_auth(source_auth.clone())
-    .with_binding_generation_auth(binding_auth.clone());
-    let supervisor_slot = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_deployment_pins(deployment_pins.clone());
-    let do_storage = storage
-        .data_dir()
-        .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
-            runtime.version_output(),
-        )
-        .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new(
-        WorkerdSupervisorOptions {
-            runtime,
-            compiler,
-            config: runtime_config(),
-            clock: Arc::new(SystemClock),
-            jitter: Arc::new(OsJitter),
-            redactor: Redactor::new(),
-            lease_path: Some(
-                storage
-                    .data_dir()
-                    .runtime_dir()
-                    .join("p3-services-product.lease"),
-            ),
-        },
-        vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-        ],
-        vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-        vec![source_auth, binding_auth],
-    ));
-    *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
-    supervisor.start();
-    wait_running(&supervisor, Duration::from_secs(30)).await;
+    let harness = Harness::start("p3-services-product").await;
+    let storage = harness.storage.clone();
+    let artifacts = harness.artifacts.clone();
+    let transport = harness.transport.clone();
+    let supervisor = harness.supervisor.clone();
+    let deployment_pins = harness.deployment_pins.clone();
+    let service_invocations = harness.service_invocations.clone();
 
     let account = storage.identity().default_account_id;
     let repository = WorkerRepository::new(storage.db());
@@ -613,11 +472,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
     wait_service_counts(&service_invocations, (0, 0, 0)).await;
     assert!(deployment_pins.count(asset_deployment.id) <= 1);
 
-    supervisor.shutdown().await;
-    assert_eq!(supervisor.owner_registry_len(), 0);
-    let _ = shutdown.send(true);
-    source_task.await.unwrap().unwrap();
-    binding_task.await.unwrap().unwrap();
+    harness.stop().await;
 }
 
 fn target_source(version: &str) -> String {
@@ -859,84 +714,4 @@ async fn wait_service_counts(
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-}
-
-async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    let mut rx = supervisor.subscribe();
-    loop {
-        let snapshot = rx.borrow().clone();
-        if snapshot.state == SupervisorState::Running {
-            return;
-        }
-        assert!(
-            snapshot.state != SupervisorState::Failed,
-            "supervisor failed: {snapshot:?}"
-        );
-        assert!(Instant::now() < deadline, "supervisor did not become ready");
-        tokio::time::timeout(Duration::from_millis(250), rx.changed())
-            .await
-            .ok();
-    }
-}
-
-fn runtime_config() -> RuntimeConfig {
-    RuntimeConfig {
-        startup_timeout_ms: 20_000,
-        shutdown_grace_ms: 500,
-        drain_timeout_ms: 500,
-        kill_timeout_ms: 500,
-        restart_budget: 3,
-        restart_window_ms: 60_000,
-        restart_backoff_initial_ms: 10,
-        restart_backoff_max_ms: 100,
-    }
-}
-
-fn storage_config(root: &Path) -> StorageConfig {
-    StorageConfig {
-        data_dir: root.to_owned(),
-        master_key_file: root.join("keys/master.key"),
-        master_key_env: None,
-        sqlite_busy_timeout_ms: 5_000,
-        free_space_soft_bytes: 1_073_741_824,
-        free_space_hard_bytes: 268_435_456,
-    }
-}
-
-fn artifact_store(mock: &MockS3) -> ArtifactStore {
-    let config = PlatformConfig::from_toml_str(&format!(
-        r#"
-[s3]
-endpoint = "{}"
-region = "us-east-1"
-bucket = "open-compute"
-force_path_style = true
-access_key_id_env = "S3_ACCESS_KEY_ID"
-secret_access_key_env = "S3_SECRET_ACCESS_KEY"
-prefix = "system/"
-max_retries = 1
-retry_backoff_ms = 10
-connect_timeout_ms = 500
-request_timeout_ms = 3000
-"#,
-        mock.endpoint,
-    ))
-    .unwrap()
-    .s3;
-    let env = MapEnv::new()
-        .with("S3_ACCESS_KEY_ID", "AKIAEXAMPLEKEYID01")
-        .with(
-            "S3_SECRET_ACCESS_KEY",
-            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-        );
-    let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
-    ArtifactStore::new(S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap())
-}
-
-fn repo_root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
 }

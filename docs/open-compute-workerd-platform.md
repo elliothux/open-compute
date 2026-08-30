@@ -1,9 +1,13 @@
 # 单机 Cloudflare Workers Platform 兼容基础设施方案
 
-> 状态：实施设计；2026-08-30 更新 P3 交付目标。Cloudflare conformance 尚未完成平台验收。
+> 状态：实施设计；2026-08-30 的原 P3 方法子集 Day1 本地实现与 Contract Gate 已完成，一项
+> Cache API portable differential 已在真实 Cloudflare 与 open-compute 间受控通过并精确清理。
+> 新扩大的全量目标尚未完成，该单项证据不能给出新目标的 Platform Go。
 >
-> 当前目标是让 open-compute 在明确声明的常用 API 范围内贴近 Cloudflare Workers 平台，
-> 并以固定契约、真实 stock workerd 和 Cloudflare differential 验收；第三方应用 workload 独立取证。
+> 当前目标是让 open-compute 对齐最新 stable Cloudflare Worker runtime，以及 Workers、Durable
+> Objects、Queues、Workflows、R2、D1、KV 的完整 tenant Worker API；具体类型、单一 latest runtime
+> 语义、非目标和完成门槛由[全量兼容目标](cloudflare-runtime-compatibility.md)定义。第三方应用
+> workload 独立取证。
 > vinext 是组合检验手段，不是平台规格；不要求补齐 vinext 或 Next.js 自身尚未实现的能力。
 > 本文只约束本仓库，不改变父项目边界；已有 P0–P2 记录不构成 P3 conformance 已通过的证据。
 
@@ -22,20 +26,21 @@ workerd + workerLoader
 + external S3-compatible storage
 ```
 
-对外尽量还原常用 Cloudflare Workers 编程模型：
+对外完整还原目标范围内的 stable Cloudflare tenant Worker 编程模型：
 
-- Workers；
+- Workers runtime，以及其中的 Cron Trigger、Static Assets、Service Binding、Workers Cache、Cache
+  API 和 Version Metadata tenant surface；
 - D1；
 - Durable Objects；
 - KV；
 - R2；
 - Queues；
-- Workflows；
-- Cron Triggers 和 Durable Object alarms；
-- Static Assets、Service Binding、Workers Cache、Cache API、Images 和 Version Metadata。
+- Workflows。
 
-方案不追求 Cloudflare 的边缘调度、跨地域复制、多副本高可用和完整管理面行为。它提供的
-是单节点、强本地一致性、可恢复、常用 API 兼容的运行环境。
+Images 是当前实现继续维护的相邻 capability，但不进入这七项产品兼容目标的 pass denominator。
+
+方案不追求 Cloudflare 的边缘调度、跨地域复制、多副本高可用和管理 API parity。它提供的是
+单节点、强本地一致性、可恢复、目标 runtime/binding API 完整兼容的运行环境。
 
 结构化状态只使用 SQLite。对象字节、Worker bundle 和静态产物使用同一个外部
 S3-compatible provider 的隔离前缀。平台不依赖 Redis、Postgres、Kafka 或独立网关。
@@ -49,8 +54,8 @@ vinext 的 Next.js 适配细节设计平台。基线、映射与判定见第 18 
 
 ### 2.1 目标
 
-- 建立 Cloudflare 常用 API 的机器可读契约目录；每个 advertised 方法都有官方来源、date/flag、
-  stock-workerd/product Gate 和稳定 deviation；
+- 建立目标范围内全部 stable Cloudflare Worker API 的机器可读契约目录；每个 upstream 成员都有
+  官方来源、匹配 latest runtime baseline、stock-workerd/product Gate 和稳定 deviation；
 - 使用同一 portable fixture 对比 open-compute 与真实 Cloudflare Workers 的高风险行为；
 - 可选使用固定 vinext Cloudflare workload 做应用 qualification；只适配构建、部署和宿主连接，不
   改写应用逻辑或降低断言，也不把该应用结果作为 Platform Go 前置条件；
@@ -65,7 +70,7 @@ vinext 的 Next.js 适配细节设计平台。基线、映射与判定见第 18 
   思路；
 - 参考 Miniflare 的 workerd 子进程管理、config/plugin 装配、embedded system Worker 和
   本地 persistence 组织方式；
-- 常用 Workers API 能够运行现有中小型应用；
+- 最新 stable Workers runtime 与七项产品的完整 tenant API 能够运行现有中小型应用；
 - 进程崩溃后 Queue、Workflow 和 alarm 能自动恢复；
 - 资源可以独立创建、绑定、重命名、备份和删除。
 
@@ -75,17 +80,17 @@ vinext 与 Cloudflare 同时缺失的 Next.js 行为不得在平台层补成专�
 
 ### 2.2 非目标
 
-- 完整 Cloudflare 全产品、管理面、套餐限制和内部 edge 行为兼容；
+- Cloudflare 全产品、管理 API、套餐/计费和内部 edge 行为兼容；
 - 原版 Next.js 或 vinext 的全 API、全测试集和全部部署模式兼容；
 - 完整 PPR/Cache Components、Vercel 专属服务、webpack/Turbopack 或 OpenNext 专用行为；
 - Cloudflare Edge 或 Anycast；
 - 跨节点、跨地域同步；
 - 多副本同时写入同一份 SQLite；
 - Cloudflare KV 的全球 eventual consistency 和 edge cache；
-- D1 read replica、bookmark 和完整 PITR；
+- D1 read replica 的跨地域/多副本行为；
 - Durable Object 全球唯一放置与跨节点迁移；
 - Queue exactly-once；
-- Cloudflare Workflows 的全部限制、管理 API 和可观测性细节；
+- Cloudflare Workflows 的管理 API、Dashboard 和全球 placement/可观测性基础设施；
 - 完整 Wrangler 管理面兼容；
 - Kubernetes 和独立微服务拆分。
 
@@ -100,19 +105,19 @@ stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平
 
 | 范围 | 当前基础 | 目标仍需完成 |
 | --- | --- | --- |
-| Worker 执行 | workerd、WorkerLoader、Fetch/Streams、显式 `nodejs_compat` 与产品 bindings | declared runtime/date/flag 契约、portable fixtures 与资源预算验证 |
+| Worker 执行 | workerd、WorkerLoader、Fetch/Streams、显式 `nodejs_compat` 与产品 bindings | upstream stable types、single-latest runtime contract、portable fixtures 与资源预算验证 |
 | TS 工具链 | TS7/Rolldown、框架产物导入、Static Assets 与 Service 声明 | Cloudflare-style config 支持面/catalog 双向完整性 |
-| 资源与绑定 | KV/R2/D1/DO、Queues/Cron/Workflows 的已声明子集 | capability/type/config/contract 双向完整性与产品回归 |
-| Static Assets | manifest/上传/路由、`ASSETS.fetch()`、不可变发布与维护 Gate | Cloudflare contract/differential qualification |
-| Service Binding | 跨 Worker/自绑定、默认/命名 fetch/RPC、预算与 pin；核心 Conditional Go | 事件源调用、真实 crash handle 回收和 contract qualification |
+| 资源与绑定 | KV/R2/D1/DO、Queues/Cron/Workflows 的已声明子集 | 七项目标产品完整 stable type/runtime surface、capability/contract 双向完整性与产品回归 |
+| Static Assets | manifest/上传/路由、`ASSETS.fetch()`、不可变发布、catalog 与维护 Gate | Assets routing/binding 直接 Cloudflare differential qualification |
+| Service Binding | 跨 Worker/自绑定、默认/命名 fetch/RPC、事件源调用、预算/pin、真实 crash handle 回收与恢复 | Service fetch/RPC/lifecycle 直接 Cloudflare differential qualification |
 | Cache 与 Images | Workers Cache、Cache API、Images、Version Metadata 的声明单节点支持面已实现并通过 P3.3 最终 Gate | Cloudflare contract/differential qualification |
-| 验收 | 已有 P0–P2、P3.1/P3.2 产品 Gate 与 P3.3 完整本地验收 | P3.4 contract catalog、Cloudflare differential、隔离/恢复；应用 qualification 独立可选 |
+| 验收 | 已有 P0–P2、P3.1–P3.3、原方法子集 P3.4 本地 Gate与一项 Cache API remote differential | 将 catalog/type Gate 扩展到全量 upstream surface、迁移 single-latest contract、扩大 Cloudflare differential；应用 qualification 独立可选 |
 
 实现依据包括 [工具链](../packages/toolchain/src/build-worker.ts)、
 [绑定类型](../crates/core/src/resource.rs)、[RuntimeSource](../crates/workers/src/runtime_source.rs)
 和[能力注册表](../crates/service/src/capabilities.rs)。P3.3 的 90.10% workspace Rust 行覆盖率与最终
-三轮 Gate 证据见[归档方案](implemented/p3-3-workers-cache-images.md)；P3.4 尚未执行，不将其差距
-标为已完成。
+三轮 Gate 证据见[归档方案](implemented/p3-3-workers-cache-images.md)；P3.4 原子集的本地证据不证明
+新的全量目标，不将扩展后的差距标为已完成。
 
 ### 2.4 Day1 约束
 
@@ -120,8 +125,9 @@ stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平
 版本的双读写、迁移回退或旧引擎。现有阶段编号、V1/V2 名称和历史验证记录不产生兼容义务；
 已识别的历史路径已按归档的 [Day1 架构清理](./implemented/day1-architecture-cleanup.md) 收敛。
 
-只有声明支持范围内、Cloudflare 官方 API 要求的兼容日期/flag 行为可作为兼容例外，并需记录
-来源、适用范围、workerd pin 和回归测试。跟踪 vinext 的版本是固定依赖与测试基线，不是保留
+只有目标范围内、Cloudflare 官方 API 在 pinned latest contract 中要求的行为可作为兼容例外，并需
+记录来源、唯一 effective date/required flags、workerd pin 和回归测试。tenant 不选择历史 date/flag，
+也不因此保留多套行为。跟踪 vinext 的版本是固定依赖与测试基线，不是保留
 多套 open-compute 历史实现。任何调整仍须保留隔离、完整性、不可变部署和当前状态的崩溃恢复。
 
 ## 3. 部署单元
@@ -399,7 +405,7 @@ CREATE TABLE worker_deployments (
   version_number        INTEGER NOT NULL,
   bundle_sha256         BLOB NOT NULL,
   bundle_ref            TEXT NOT NULL,
-  compatibility_date    TEXT NOT NULL,
+  runtime_contract_revision TEXT NOT NULL,
   metadata_json         BLOB NOT NULL,
   state                 TEXT NOT NULL,
   created_at_ms         INTEGER NOT NULL,
@@ -551,7 +557,7 @@ WHERE expires_at_ms IS NOT NULL;
 `key` 保存用户字符串的 UTF-8 bytes。BLOB 排序可以实现按 UTF-8 bytes 的字典序 list，
 避免依赖 locale collation。
 
-### 8.2 常用操作
+### 8.2 核心操作
 
 ```sql
 -- get
@@ -1085,33 +1091,36 @@ prefix，但不保存 credential。
 
 ### 18.1 平台能力范围
 
-下表是产品边界，不是“全部已经实现”的声明。Platform 完成标准由固定 contract、
-capability/deviation、stock-workerd/product Gate 和受控 Cloudflare differential 定义；应用
-workload 只产生独立 qualification。不能仅根据 registry 中存在同名 capability 判定通过。
+本节由[Cloudflare Worker Runtime 全量兼容目标](cloudflare-runtime-compatibility.md)细化。下表是目标，
+不是“全部已经实现”的声明。Platform 完成标准由 upstream stable types、固定 single-latest runtime
+contract、capability/deviation、stock-workerd/product Gate 和受控 Cloudflare differential 定义；
+应用 workload 只产生独立 qualification。
 
 | 产品 | 目标能力 | 不扩展为 |
 | --- | --- | --- |
-| Workers | modules、fetch、scheduled、bindings、声明 date/flag 下的常用 Web/Node API | Edge placement、完整 Node/Workers 全 API |
+| Workers | 匹配 upstream stable types 的完整 core runtime：Web APIs、modules/handlers、Fetch/Streams/WebSocket/Crypto、Cache API、scheduled、TCP、RPC、ExecutionContext、Service/Assets/Version Metadata tenant surface 与 latest default Node.js surface | Edge/colo/Anycast、其他 Cloudflare 产品 binding、experimental/Python runtime |
 | Static Assets | 不可变资源集、`ASSETS.fetch()`、路由、HTTP 响应与发布一致性 | Cloudflare 全球 CDN 基础设施 |
-| Service Binding | 默认/具名入口、跨 Worker 与自绑定、原生 fetch/RPC | 完整 Cloudflare 部署管理面 |
+| Service Binding | 默认/具名入口、跨 Worker 与自绑定、原生 fetch/RPC | Cloudflare 部署管理 API |
 | Cache | Workers Cache、Cache API、Version Metadata、命中/失效/版本隔离 | 全球/tiered cache、Cache Rules 与计费系统 |
 | Images | raw-byte binding 的常用 input/info/transform/draw/output 子集 | hosted Images、URL transform、完整 Cloudflare 图片产品 |
-| KV | get、getWithMetadata、put、delete、list、batch get | global cache/eventual consistency |
-| D1 | prepare、bind、run、first、all、raw、batch、exec | replicas、bookmark、完整 admin API |
-| DO | fetch/RPC、SQLite/KV storage、transaction、alarm | 跨节点迁移、完整 PITR；WebSocket hibernation 后置 |
-| R2 | head、get、put、delete、list、range、条件请求 | multipart、完整 checksum/SSE-C |
-| Queues | send、sendBatch、batch consume、ack/retry、delay、DLQ | pull consumer、严格顺序、exactly-once |
-| Workflows | create/status、step.do、sleep、sleepUntil、waitForEvent、sendEvent、retry | 全部管理 API 和 Cloudflare limits parity |
+| KV | upstream `KVNamespace` stable surface 的全部 overload、metadata、stream、list/cache status | global cache/eventual consistency |
+| D1 | upstream D1 Worker Binding stable surface，包括 session、bookmark、完整 result/meta shape | read replica/region routing、admin API |
+| DO | upstream namespace/ID/stub/RPC/state/storage/SQL/sync KV/transaction/alarm/hibernatable WebSocket stable surface | 跨节点 placement/migration、Cloudflare 管理 API |
+| R2 | upstream R2 Worker Binding stable surface，包括 multipart、checksum、SSE-C、storage class、range/condition | R2 S3 endpoint、全球 placement/replication |
+| Queues | upstream Worker producer/push-consumer/message/batch/metrics/delay/content-type stable surface，包括 `v8` | Queue pull HTTP API、全球扩缩容、严格 FIFO、exactly-once |
+| Workflows | upstream Worker binding、instance/batch/delete/lifecycle、step config/context、parallel/event/restart/rollback stable surface | 管理 API、Dashboard、全球 placement/observability infrastructure |
 
-兼容层必须维护独立 conformance catalog/suite。每个 advertised method 都要有官方来源、适用
-compatibility date/flag、真实运行证据和稳定 deviation；不把“能运行一个 demo”当作兼容完成。
+兼容层必须维护独立 conformance catalog/suite。upstream stable AST 中属于目标范围的每个成员都要有
+官方来源、匹配 single-latest runtime baseline、真实运行证据和稳定 deviation；不把“能运行一个
+demo”或“删掉未实现类型”当作兼容完成。
 
 ### 18.2 固定平台契约与第三方应用基线
 
-正式 Platform baseline 必须固定 open-compute revision、workerd lock、compatibility date/flags、
-workers-types、workers-sdk 与 Wrangler/Vite plugin。具体 manifest、catalog 与 differential 规则由
-后续 P3.4 确定。不使用浮动 `latest`；任一基线升级都重新审查
-官方契约、workerd 行为、类型/config、用例和 deviation。
+正式 Platform baseline 必须固定 open-compute revision、workerd lock、内部
+`effectiveCompatibilityDate`/required flags、upstream workers-types、workers-sdk 与 Wrangler/Vite
+plugin。tenant 不选择 compatibility date/flags；平台只提供本次 coordinated update 固定的 latest
+stable contract。生产不使用浮动 `latest`；任一基线升级都重新审查官方契约、workerd 行为、类型、
+用例和 deviation，并在同一 Day1 变更中直接替换旧 contract。
 
 其中一项 application baseline 是 vinext repository commit
 [`5d0b53088c689b75d63672eab6ff66434afa5b3b`](https://github.com/cloudflare/vinext/tree/5d0b53088c689b75d63672eab6ff66434afa5b3b)，
@@ -1249,7 +1258,7 @@ platform gc
 P0：Workers + KV + R2 + D1 + Durable Objects
 P1：P0 兼容性、可靠性和运维加固
 P2：Queues + Cron + Workflows
-P3：Cloudflare 常用能力对齐与真实平台验收
+P3：Cloudflare latest stable runtime/七项产品全量 API 对齐与真实平台验收
 ```
 
 以下 P0–P2 分解与具名验证记录保留其历史用途，不要求重新实现已有能力，也不要求保留旧格式、
@@ -1622,17 +1631,19 @@ HTTP -> Queue -> Consumer -> Workflow
 在每个 transaction/dispatch 边界注入 process crash，要求 Queue 不丢消息、Workflow
 拒绝 stale commit、冻结版本正确、所有 due work 在 restart 后恢复。
 
-### P3.0：Cloudflare 契约基线与可选应用基线
+### P3.0：Cloudflare single-latest 契约基线与可选应用基线
 
-- 固化第 18.2 节的 workerd/date/flags、workers-sdk/types 与 Wrangler/Vite 平台验收元组；
-- 建立 advertised Cloudflare API 的 contract/source/case/deviation catalog；
+- 固化第 18.2 节的 workerd、内部 `effectiveCompatibilityDate`/required flags、upstream
+  workers-types、workers-sdk 与 Wrangler/Vite 平台验收元组；tenant metadata 不再选择 date/flags；
+- 从 upstream stable types AST 建立目标范围内全部 Cloudflare API 的
+  contract/source/case/deviation catalog；
 - 应用 qualification 需要时，再单独固定浏览器和 vinext 等应用输入，发现其上游测试并登记映射到
   platform contract 的选定 workload；
 - 为 portable fixture 提供真实 Cloudflare 与真实 platformd 两个 adapter，分开工具链和应用结果；
 - 盘点每个 fixture 需要的模块、Node API、bindings、缓存、图片、配置与资源限额；
 - 测试依赖、浏览器及 runtime 必须预置或显式授权准备，不由生产启动或缺依赖的 Gate 隐式下载。
 
-Platform 交付物是可复现平台基线、contract 清单和差距报告，不是“完整 Cloudflare 已支持”；
+Platform 交付物是可复现平台基线、全量目标 contract 清单和差距报告，不是“完整 Cloudflare 全产品已支持”；
 application 清单和报告是独立 qualification 产物，不是 Platform Go 的前置条件。
 vinext 或 Next.js 上游缺口不加入平台需求，已声明 supported 的 Cloudflare contract 也不能因应用
 未覆盖而跳过。
@@ -1683,13 +1694,15 @@ adapter 只验证组合，不能进入生产命名或逻辑；PPR/Cache Componen
 ### P3.4：Cloudflare 对齐、隔离与恢复
 
 真值优先级、contract catalog、portable Cloudflare differential、application workload、两账户
-隔离、故障恢复、typed Gate runner、工作包和双 verdict 由后续 P3.4 Cloudflare conformance
-阶段负责；该阶段尚未纳入本次实现与验收。
+隔离、故障恢复、typed Gate runner、工作包和双 verdict 由 P3.4 Cloudflare conformance 阶段负责。
+原方法子集的本地实现与 Gate 已有证据；新的全量 upstream surface、single-latest runtime contract
+和扩大的真实 Cloudflare differential 仍是 active 工作。现有 Cache API fixture 的 remote PASS 只
+证明该 fixture，旧 PASS 不能迁移成新目标 PASS。
 
-平台先对齐明确声明的 Cloudflare API，再用 vinext 等第三方应用验证组合行为。vinext 全部上游 API/
-测试不再等同于 Platform Go；Cloudflare pass/open-compute fail 的 supported contract 才是平台
-阻塞。能力仍按 toolchain/workers/storage/artifacts/service/runtime 的所有权组织，禁止框架分支、
-test-only 条件或手改生成 JS。
+平台先按 upstream stable types 补齐 Workers runtime 与七项目标产品的全部 tenant API，再用 vinext
+等第三方应用验证组合行为。vinext 全部上游 API/测试不再等同于 Platform Go；Cloudflare pass/
+open-compute fail 的 supported contract 才是平台阻塞。能力仍按 toolchain/workers/storage/
+artifacts/service/runtime 的所有权组织，禁止框架分支、test-only 条件或手改生成 JS。
 
 ### P3 Exit Gate
 
@@ -1697,8 +1710,9 @@ test-only 条件或手改生成 JS。
 基线、全量 contract/product 矩阵与相关真实运行时 Gate：确定性用例完整一轮，审查登记的时序用例
 补两轮；
 重复轮使用新进程和隔离数据目录，保留场景内正常运行与重启恢复。P3.1 至 P3.3 的目标及其用例
-分类已经实现；P3.3 的最终本地验收见归档方案。P3.4 contract catalog、Cloudflare differential
-和应用 qualification 仍待后续独立执行。
+分类已经实现；P3.3 的最终本地验收见归档方案。P3.4 原子集已有 catalog/Gate，但全量类型与
+runtime contract 迁移、覆盖全部目标产品高风险行为的 Cloudflare differential 和可选应用
+qualification 仍待执行；已经通过的单个 Cache API fixture 不满足扩展后的 `CF-TEST-03`。
 
 执行完整 Rust/TS 检查、依赖边界和既有 coverage 要求，Rust 行覆盖率不得低于 90.00%。相关
 G0/P0/P2 回归按影响范围执行，不在每个中间步骤递归重跑所有历史 aggregate。
@@ -1735,8 +1749,9 @@ lease expiry 和 version retention 都需要独立状态机与大量 crash-point
 
 ### 23.6 契约漂移与应用上游缺口
 
-Cloudflare 文档、compatibility date、workerd、workers-sdk 和 vinext 都会变化。以固定 baseline/
-catalog 为准，升级时审查契约、类型、配置、用例和 deviation 差异；不自动追随 latest。vinext 的
+Cloudflare 文档、stable runtime surface、workerd、workers-types、workers-sdk 和 vinext 都会变化。
+以固定 baseline/catalog 为准；每次 coordinated update 重新解析当时的 latest，并审查契约、类型、
+用例和 deviation 差异，生产运行时不自动追随网络上的 latest。vinext 的
 PPR/Cache Components 缺口不记为平台 PASS，也不能借其 beta 状态接受 supported contract 回归。
 
 ### 23.7 框架产物与执行预算
@@ -1765,22 +1780,25 @@ PPR/Cache Components 缺口不记为平台 PASS，也不能借其 beta 状态接
 11. 完整 backup/restore 在全新主机上通过；
 12. 一条命令或一次安装操作可以启动并通过 doctor/smoke。
 
-### 24.2 当前交付目标：声明范围内对齐 Cloudflare Workers
+### 24.2 当前交付目标：全量对齐 single-latest Cloudflare Worker runtime
 
 只有同时满足以下条件，才能宣布本阶段完成：
 
-1. 固定且可复现的 workerd/date/flags、workers-sdk/types 和工具链 Platform baseline；
-2. advertised API 的 contract catalog 完整，capability/type/config/deviation/case 双向一致；
+1. 固定且可复现的 workerd、内部 `effectiveCompatibilityDate`/required flags、upstream
+   workers-types、workers-sdk 和工具链 Platform baseline；
+2. upstream stable AST 中属于目标范围的 API contract catalog 完整，capability/generated
+   Env/runtime/deviation/case 双向一致；
 3. 全部 supported contract 在真实 stock workerd/platformd 产品路径通过，blocked 为零；
 4. 高风险 portable fixture 的真实 Cloudflare differential 没有未解释的“CF pass / OC fail”；
 5. Static Assets、Service Binding、Cache API、Workers Cache、Images 不是 mock/fallback；
 6. 多租户、secret/client、不可变 deployment、rollback、S3/SQLite/process 故障恢复通过；
 7. P3 最终验收按完整确定性一轮、时序用例额外两轮执行，报告保留逐轮结果与无遗留资源证据。
 
-结论只能写“对 catalog `<digest>` 声明的 Cloudflare Workers 常用 API 达到 Go，单节点 deviation
-另列”，不能写“完整兼容 Cloudflare Workers”。vinext 另给 Application verdict，不能替代 Platform
-verdict。应用 qualification 未运行时只写“未评估”，不降低已有完整平台证据。当前未执行上述 P3
-Platform 验收，状态仍为未完成。
+结论只能写“对 baseline `<digest>` 固定的 latest stable Worker runtime 与七项产品 tenant API 达到
+Go，单节点 deviation 另列”，不能写“兼容 Cloudflare 全产品、管理 API 或全球 edge 基础设施”。
+vinext 另给 Application verdict，不能替代 Platform verdict。应用 qualification 未运行时只写
+“未评估”，不降低已有完整平台证据。当前只完成原常用子集的本地证据与一项 Cache API remote
+fixture；尚未执行上述扩展后完整 P3 Platform 验收，状态仍为未完成。
 
 ## 25. 参考资料
 

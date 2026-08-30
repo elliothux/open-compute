@@ -3,6 +3,7 @@ use axum::body::to_bytes;
 use open_compute_core::config::{MetricsConfig, SecretReference};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 use tower::ServiceExt;
 
@@ -125,6 +126,58 @@ async fn product_error_extension_updates_admission_metrics_without_tenant_labels
     let rendered = registry.render(&HealthCoordinator::new().snapshot());
     assert!(rendered.contains("platform_admission_total{operation=\"kv\",outcome=\"quota\"} 1"));
     assert!(rendered.contains("platform_quota_reject_total{product=\"kv\"} 1"));
+}
+
+#[tokio::test]
+async fn test_support_runtime_restart_requires_auth_ack_and_an_attached_hook() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let hook_calls = calls.clone();
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        false,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_test_runtime_restart(Arc::new(move || {
+        hook_calls.fetch_add(1, Ordering::Relaxed);
+        true
+    }));
+    let router = admin_router(state);
+    let request = |auth: bool, acknowledge: bool| {
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri("/__test/runtime/restart");
+        if auth {
+            request = request.header(header::AUTHORIZATION, "Bearer admin-secret");
+        }
+        if acknowledge {
+            request = request.header("x-open-compute-test-ack", "restart-generation");
+        }
+        request.body(Body::empty()).unwrap()
+    };
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(false, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(true, false))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        router.oneshot(request(true, true)).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]

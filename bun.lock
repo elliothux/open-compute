@@ -5,6 +5,7 @@
     "": {
       "name": "open-compute",
       "devDependencies": {
+        "@open-compute/workers-types": "workspace:*",
         "@types/node": "catalog:",
         "typescript": "catalog:",
       },
@@ -12,7 +13,7 @@
     "examples/hello-worker": {
       "name": "@open-compute/example-hello-worker",
       "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
+        "@open-compute/workers-types": "workspace:*",
       },
     },
     "packages/runtime": {
@@ -35,6 +36,10 @@
         "@types/node": "catalog:",
       },
     },
+    "packages/types": {
+      "name": "@open-compute/workers-types",
+      "version": "0.1.0",
+    },
   },
   "catalog": {
     "@cloudflare/workers-types": "5.20260826.1",
@@ -50,6 +55,8 @@
     "@open-compute/runtime": ["@open-compute/runtime@workspace:packages/runtime"],
 
     "@open-compute/toolchain": ["@open-compute/toolchain@workspace:packages/toolchain"],
+
+    "@open-compute/workers-types": ["@open-compute/workers-types@workspace:packages/types"],
 
     "@oxc-project/types": ["@oxc-project/types@0.147.0", "", {}, "sha512-IJ3s6ltHLp45S0bh7phkX+gJO7A1Wuz2EaqpAhb8WjqDwbzMiWKHhyyT42tskaWjEYXtHtVCPpnBJVT9+dcRLg=="],
 

@@ -84,6 +84,8 @@ class GateTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temp, \
                  patch.object(gate, 'ROOT', Path(temp)), \
                  patch.object(gate, 'verify_inputs', return_value={}), \
+                 patch.object(gate, 'validate_contract_case_mapping'), \
+                 patch.object(gate, 'write_contract_report'), \
                  patch.object(gate, 'source_identity', return_value='unchanged'), \
                  patch.object(gate, 'resolve_targets', return_value=self.targets(['p0-2'])), \
                  patch.object(gate, 'build_targets', return_value=({}, {'invocations': 1})), \
@@ -186,11 +188,12 @@ class GateTests(unittest.TestCase):
             'manifest_path': '/repo/crates/runtime/Cargo.toml',
             'targets': [{'name': 'open_compute_runtime', 'kind': ['lib'], 'test': True}]}]}
         with patch.object(gate.subprocess, 'check_output', return_value=json.dumps(metadata)), \
-             patch.object(gate, 'TARGETS', {'p0-2': gate.TARGETS['p0-2']}):
+             patch.object(gate, 'CARGO_TARGETS', {'p0-2': gate.CARGO_TARGETS['p0-2']}):
             targets = gate.resolve_targets([], True)
         self.assertEqual({target.name for target in targets.values()},
                          {'cli', 'open_compute_service', 'open_compute_runtime',
-                          'p0_2_runtime_gate', 'new_test', 'platformd'})
+                          'p0_2_runtime_gate', 'new_test', 'platformd', 'p3-contract'})
+        self.assertNotIn('p3-cf-diff', targets)
         self.assertEqual(next(iter(targets)), 'open-compute-service.test.cli')
         self.assertTrue(targets['open-compute-service.test.cli'].exclusive)
         self.assertFalse(targets['open-compute-service.lib.open_compute_service'].exclusive)
@@ -238,6 +241,8 @@ class GateTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temp, \
                  patch.object(gate, 'ROOT', Path(temp)), \
                  patch.object(gate, 'verify_inputs', return_value={}), \
+                 patch.object(gate, 'validate_contract_case_mapping'), \
+                 patch.object(gate, 'write_contract_report'), \
                  patch.object(gate, 'source_identity', return_value='unchanged'), \
                  patch.object(gate, 'resolve_targets', return_value=targets), \
                  patch.object(gate, 'build_targets', return_value=({}, {})), \
@@ -261,6 +266,8 @@ class GateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, \
              patch.object(gate, 'ROOT', Path(temp)), \
              patch.object(gate, 'verify_inputs', return_value={}), \
+             patch.object(gate, 'validate_contract_case_mapping'), \
+             patch.object(gate, 'write_contract_report'), \
              patch.object(gate, 'source_identity', return_value='unchanged'), \
              patch.object(gate, 'resolve_targets', return_value=self.targets(['p0-2'])), \
              patch.object(gate, 'build_targets', return_value=({}, {})), \
@@ -332,6 +339,8 @@ class GateTests(unittest.TestCase):
                 resolve.assert_not_called()
 
     def test_coverage_rejects_extra_rounds_before_tool_checks_or_cleanup(self):
+        source = (gate.ROOT/'test/coverage.sh').read_text()
+        self.assertIn('/src/bin/(s3_fixture|supervisor_fixture)\\.rs$', source)
         result = subprocess.run([str(gate.ROOT/'test/coverage.sh')], capture_output=True,
                                 env={'OPEN_COMPUTE_GATE_ROUNDS': '3', 'PATH': '/usr/bin:/bin'},
                                 timeout=10)
@@ -343,7 +352,8 @@ class GateTests(unittest.TestCase):
                  'docs/plan.md', 'docs/implemented/report.md']
         with tempfile.TemporaryDirectory() as temp, \
              patch.object(gate, 'ROOT', Path(temp)), \
-             patch.object(gate.subprocess, 'check_output', return_value='\0'.join(names).encode()):
+             patch.object(gate.subprocess, 'check_output',
+                          return_value='\0'.join(names).encode()) as discovery:
             for name in names:
                 path = Path(temp)/name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -356,6 +366,7 @@ class GateTests(unittest.TestCase):
                 (Path(temp)/name).write_text('changed runtime input')
                 self.assertNotEqual(gate.source_identity(), baseline)
                 (Path(temp)/name).write_text('original')
+            self.assertEqual(discovery.call_args.args[0][1:3], ['-c', 'core.excludesFile=/dev/null'])
 
     def test_build_matches_package_and_kind_and_rejects_missing_executables(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -365,9 +376,12 @@ class GateTests(unittest.TestCase):
             targets = {'first': gate.Target('one', 'same', 'lib', temp, False),
                        'second': gate.Target('two', 'same', 'test', temp, False)}
             messages = [{'reason': 'compiler-artifact', 'package_id': target.package_id,
-                         'target': {'name': target.name, 'kind': [target.kind]},
+                         'target': {'name': target.name, 'kind': [target.kind], 'test': True},
                          'profile': {'test': True}, 'executable': str(binary)}
                         for target in targets.values()]
+            messages.append({'reason': 'compiler-artifact', 'package_id': 'fixture-package',
+                             'target': {'name': 'fixture', 'kind': ['bin'], 'test': False},
+                             'profile': {'test': True}, 'executable': str(binary)})
             result = SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, messages)))
             with patch.object(gate.subprocess, 'run', return_value=result) as run:
                 artifacts, build = gate.build_targets(targets, root, True)
@@ -380,6 +394,92 @@ class GateTests(unittest.TestCase):
             with patch.object(gate.subprocess, 'run', return_value=result):
                 with self.assertRaisesRegex(RuntimeError, 'did not produce'):
                     gate.build_targets(targets, missing, True)
+            unplanned = root / 'unplanned'
+            unplanned.mkdir()
+            result.stdout = json.dumps({
+                'reason': 'compiler-artifact', 'package_id': 'fixture-package',
+                'target': {'name': 'fixture', 'kind': ['bin'], 'test': True},
+                'profile': {'test': True}, 'executable': str(binary),
+            })
+            with patch.object(gate.subprocess, 'run', return_value=result):
+                with self.assertRaisesRegex(RuntimeError, 'unplanned test executable'):
+                    gate.build_targets(targets, unplanned, True)
+
+    def test_typed_discovery_and_exact_execution_use_strict_json_and_environment(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
+            log = Path(temp) / 'typed.log'
+            log.write_text('{"schemaVersion":1,"cases":["second","first"]}\n')
+            self.assertEqual(gate.discovered_cases(log, 'bun-test'), ('first', 'second'))
+            for value in ['', '[]', '{"schemaVersion":1,"cases":[]}',
+                          '{"schemaVersion":1,"cases":["same","same"]}', 'not-json']:
+                log.write_text(value)
+                with self.assertRaisesRegex(ValueError, 'typed target inventory'):
+                    gate.discovered_cases(log, 'bun-test')
+
+            target = gate.TypedTarget(
+                None, 'p3-contract', 'bun-test', temp, False, ('first', 'second'),
+                '/usr/bin/bun', ('/repo/check.ts',), ('--list',), ('PATH', 'ALLOWED'),
+                30, 'light', 'contract-checker')
+
+            def execute(command, **kwargs):
+                self.assertEqual(command, ['/usr/bin/bun', '/repo/check.ts',
+                                           '--case', 'first', '--case', 'second'])
+                self.assertEqual(kwargs['env']['ALLOWED'], 'yes')
+                self.assertNotIn('SECRET', kwargs['env'])
+                kwargs['stdout'].write(json.dumps({
+                    'schemaVersion': 1,
+                    'status': 'passed',
+                    'cases': [
+                        {'id': 'first', 'status': 'passed'},
+                        {'id': 'second', 'status': 'passed'},
+                    ],
+                }) + '\n')
+                return SimpleNamespace(returncode=0)
+
+            with patch.dict(os.environ, {'PATH': '/usr/bin', 'ALLOWED': 'yes',
+                                          'SECRET': 'must-not-pass'}, clear=True), \
+                 patch.object(gate.subprocess, 'run', side_effect=execute):
+                result = gate.execute_target(
+                    'p3-contract', '/usr/bin/bun', Path(temp) / 'execute', target)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(result['cases_passed'], 2)
+
+    def test_contract_report_keeps_local_and_remote_verdicts_separate(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
+            root = Path(temp)
+            (root / 'test/conformance').mkdir(parents=True)
+            (root / 'test/conformance/baseline.json').write_text('{}')
+            (root / 'test/conformance/catalog.json').write_text(json.dumps({
+                'schemaVersion': 1,
+                'contracts': [{
+                    'id': 'contract', 'product': 'workers', 'status': 'supported',
+                    'positiveCases': ['local::positive'],
+                    'negativeCases': ['local::negative'], 'deviations': [],
+                }],
+            }))
+            report = {
+                'source_sha256': 'source',
+                'results': [{'targets': [{
+                    'target': 'local', 'exit_code': 0,
+                    'cases': ['positive', 'negative'],
+                }]}],
+            }
+            gate.write_contract_report(root, report)
+            contract = json.loads((root / 'contract-report.json').read_text())
+            self.assertEqual(contract['localVerdict'], 'contract_go')
+            self.assertEqual(contract['cloudflareDifferential'], 'not_qualified')
+            self.assertEqual(contract['platformVerdict'], 'conditional_go')
+
+            diff = root / 'diff-report.json'
+            diff.write_text('{"schemaVersion":1,"status":"passed"}')
+            report['results'][0]['targets'].append({
+                'target': 'p3-cf-diff', 'exit_code': 0, 'cases': ['portable'],
+                'diff_report': str(diff),
+            })
+            gate.write_contract_report(root, report)
+            contract = json.loads((root / 'contract-report.json').read_text())
+            self.assertEqual(contract['cloudflareDifferential'], 'qualified')
+            self.assertEqual(contract['platformVerdict'], 'go')
 
 
 if __name__ == '__main__':

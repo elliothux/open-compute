@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "@cloudflare/workers-types": "catalog:"
+    "@open-compute/workers-types": "workspace:*"
   }
 }

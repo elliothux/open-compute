@@ -87,26 +87,42 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         first["release"]["workerd_lock_sha256"]
     );
     let products = first["products"].as_object().expect("products");
+    for name in ["workers", "alarms", "version_metadata"] {
+        assert_eq!(products[name]["status"], "supported", "{name}");
+        assert_eq!(products[name]["capability_version"], 1, "{name}");
+    }
     for name in [
-        "workers",
+        "deployments",
+        "static_assets",
+        "service_bindings",
         "kv",
         "r2",
         "d1",
         "durable_objects",
-        "alarms",
         "queues",
         "cron",
         "workflows",
         "workers_cache",
         "cache_api",
         "images",
-        "version_metadata",
     ] {
-        assert_eq!(products[name]["status"], "supported", "{name}");
+        assert_eq!(
+            products[name]["status"], "supported_with_deviation",
+            "{name}"
+        );
         assert_eq!(products[name]["capability_version"], 1, "{name}");
     }
-    {
-        let name = "websocket_hibernation";
+    for name in [
+        "websocket_hibernation",
+        "analytics_engine",
+        "ai",
+        "browser_rendering",
+        "vectorize",
+        "hyperdrive",
+        "mtls",
+        "rate_limiting",
+        "workers_for_platforms",
+    ] {
         assert_eq!(products[name]["status"], "unsupported", "{name}");
         assert!(products[name].get("capability_version").is_none(), "{name}");
     }
@@ -114,6 +130,21 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         (
             "workers",
             vec!["fetch", "rpc", "streams", "websocket", "outbound_fetch"],
+        ),
+        (
+            "deployments",
+            vec![
+                "create", "validate", "stage", "ready", "promote", "rollback", "route", "delete",
+                "vars", "secrets",
+            ],
+        ),
+        (
+            "static_assets",
+            vec!["binding.fetch", "routing", "http", "publish", "rollback"],
+        ),
+        (
+            "service_bindings",
+            vec!["fetch", "rpc", "named_entrypoint", "self", "lifecycle"],
         ),
         (
             "kv",
@@ -143,6 +174,11 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
                 "getByName",
                 "fetch",
                 "rpc",
+                "storage.get",
+                "storage.put",
+                "storage.delete",
+                "storage.list",
+                "storage.transaction",
             ],
         ),
         (

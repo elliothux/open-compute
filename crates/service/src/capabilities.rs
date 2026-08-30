@@ -2,8 +2,8 @@
 
 use crate::config_load::LoadedConfig;
 use open_compute_core::{
-    CacheConfig, CapabilityStatus, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig,
-    KvConfig, PlatformCapabilitiesV1, PlatformConfig, PlatformError, PlatformReleaseIdentityV1,
+    CacheConfig, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig, KvConfig,
+    PlatformCapabilitiesV1, PlatformConfig, PlatformError, PlatformReleaseIdentityV1,
     PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config, ReleaseSchemaDefinitionV1,
     RuntimeCapabilityV1, SchedulerConfig, WorkersConfig,
 };
@@ -70,7 +70,7 @@ pub fn platform_capabilities(
         snapshot_format_version: SNAPSHOT_FORMAT_VERSION,
         compatibility_policy_sha256,
     };
-    let products = product_registry();
+    let products = product_registry()?;
     let limits = limit_registry(config);
     let capabilities = PlatformCapabilitiesV1 {
         schema_version: 1,
@@ -199,155 +199,15 @@ pub fn write_capabilities(
     Ok(())
 }
 
-fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
-    let mut products = BTreeMap::new();
-    products.insert(
-        "workers".to_owned(),
-        supported(
-            &["fetch", "rpc", "streams", "websocket", "outbound_fetch"],
-            &[],
-        ),
-    );
-    products.insert(
-        "kv".to_owned(),
-        supported(
-            &["get", "getWithMetadata", "put", "delete", "list"],
-            &["OC-KV-001"],
-        ),
-    );
-    products.insert(
-        "r2".to_owned(),
-        supported(&["head", "get", "put", "delete", "list"], &["OC-R2-001"]),
-    );
-    products.insert(
-        "d1".to_owned(),
-        supported(
-            &[
-                "prepare",
-                "batch",
-                "exec",
-                "withSession",
-                "run",
-                "all",
-                "first",
-                "raw",
-            ],
-            &["OC-D1-001"],
-        ),
-    );
-    let mut durable_objects = supported(
-        &[
-            "idFromName",
-            "newUniqueId",
-            "idFromString",
-            "get",
-            "getByName",
-            "fetch",
-            "rpc",
-        ],
-        &["OC-DO-001", "OC-WS-001"],
-    );
-    durable_objects.basic_websocket = Some(CapabilityStatus::Supported);
-    durable_objects.hibernatable_websocket = Some(CapabilityStatus::Unsupported);
-    products.insert("durable_objects".to_owned(), durable_objects);
-    products.insert(
-        "alarms".to_owned(),
-        supported(&["getAlarm", "setAlarm", "deleteAlarm", "alarm"], &[]),
-    );
-    products.insert(
-        "queues".to_owned(),
-        supported(
-            &[
-                "send",
-                "sendBatch",
-                "metrics",
-                "queue",
-                "ack",
-                "retry",
-                "ackAll",
-                "retryAll",
-            ],
-            &["OC-QUEUE-001"],
-        ),
-    );
-    products.insert(
-        "cron".to_owned(),
-        supported(&["scheduled", "noRetry"], &["OC-CRON-001"]),
-    );
-    let workflows = supported(
-        &[
-            "create",
-            "get",
-            "id",
-            "status",
-            "step.do",
-            "step.sleep",
-            "step.sleepUntil",
-            "step.waitForEvent",
-            "sendEvent",
-            "pause",
-            "resume",
-            "terminate",
-            "restart",
-        ],
-        &["OC-WORKFLOW-001", "OC-WORKFLOW-002"],
-    );
-    products.insert("workflows".to_owned(), workflows);
-    products.insert(
-        "workers_cache".to_owned(),
-        supported(&["fetch", "purge"], &["OC-CACHE-001", "OC-CACHE-002"]),
-    );
-    products.insert(
-        "cache_api".to_owned(),
-        supported(
-            &["default", "open", "put", "match", "delete"],
-            &["OC-CACHE-001", "OC-CACHE-002"],
-        ),
-    );
-    products.insert(
-        "images".to_owned(),
-        supported(
-            &[
-                "input",
-                "info",
-                "transform",
-                "draw",
-                "output",
-                "response",
-                "contentType",
-                "image",
-            ],
-            &["OC-IMAGES-001"],
-        ),
-    );
-    products.insert(
-        "version_metadata".to_owned(),
-        supported(&["id", "tag", "timestamp"], &[]),
-    );
-    products.insert("websocket_hibernation".to_owned(), unsupported());
-    products
-}
-
-fn supported(methods: &[&str], deviations: &[&str]) -> ProductCapabilityV1 {
-    ProductCapabilityV1 {
-        status: CapabilityStatus::Supported,
-        capability_version: Some(FACADE_CAPABILITY_VERSION),
-        methods: methods.iter().map(ToString::to_string).collect(),
-        deviations: deviations.iter().map(ToString::to_string).collect(),
-        basic_websocket: None,
-        hibernatable_websocket: None,
+fn product_registry() -> Result<BTreeMap<String, ProductCapabilityV1>, PlatformError> {
+    let products: BTreeMap<String, ProductCapabilityV1> = serde_json::from_slice(include_bytes!(
+        "../../../share/cloudflare-capabilities.json"
+    ))
+    .map_err(|_| capability_invalid())?;
+    if !products.values().all(ProductCapabilityV1::validate) {
+        return Err(capability_invalid());
     }
-}
-
-fn unsupported() -> ProductCapabilityV1 {
-    ProductCapabilityV1 {
-        status: CapabilityStatus::Unsupported,
-        capability_version: None,
-        methods: Vec::new(),
-        deviations: Vec::new(),
-        basic_websocket: None,
-        hibernatable_websocket: None,
-    }
+    Ok(products)
 }
 
 fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {

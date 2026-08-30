@@ -1,0 +1,106 @@
+{
+  "workers": {
+    "status": "supported",
+    "capability_version": 1,
+    "methods": ["fetch", "rpc", "streams", "websocket", "outbound_fetch"]
+  },
+  "deployments": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["create", "validate", "stage", "ready", "promote", "rollback", "route", "delete", "vars", "secrets"],
+    "deviations": ["OC-DEPLOY-001"]
+  },
+  "static_assets": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["binding.fetch", "routing", "http", "publish", "rollback"],
+    "deviations": ["OC-ASSETS-001"]
+  },
+  "service_bindings": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["fetch", "rpc", "named_entrypoint", "self", "lifecycle"],
+    "deviations": ["OC-SERVICE-001"]
+  },
+  "kv": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["get", "getWithMetadata", "put", "delete", "list"],
+    "deviations": ["OC-KV-001"]
+  },
+  "r2": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["head", "get", "put", "delete", "list"],
+    "deviations": ["OC-R2-001"]
+  },
+  "d1": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["prepare", "batch", "exec", "withSession", "run", "all", "first", "raw"],
+    "deviations": ["OC-D1-001"]
+  },
+  "durable_objects": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["idFromName", "newUniqueId", "idFromString", "get", "getByName", "fetch", "rpc", "storage.get", "storage.put", "storage.delete", "storage.list", "storage.transaction"],
+    "deviations": ["OC-DO-001", "OC-WS-001"],
+    "basic_websocket": "supported",
+    "hibernatable_websocket": "unsupported"
+  },
+  "alarms": {
+    "status": "supported",
+    "capability_version": 1,
+    "methods": ["getAlarm", "setAlarm", "deleteAlarm", "alarm"]
+  },
+  "queues": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["send", "sendBatch", "metrics", "queue", "ack", "retry", "ackAll", "retryAll"],
+    "deviations": ["OC-QUEUE-001"]
+  },
+  "cron": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["scheduled", "noRetry"],
+    "deviations": ["OC-CRON-001"]
+  },
+  "workflows": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["create", "get", "id", "status", "step.do", "step.sleep", "step.sleepUntil", "step.waitForEvent", "sendEvent", "pause", "resume", "terminate", "restart"],
+    "deviations": ["OC-WORKFLOW-001", "OC-WORKFLOW-002"]
+  },
+  "workers_cache": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["fetch", "purge"],
+    "deviations": ["OC-CACHE-001", "OC-CACHE-002"]
+  },
+  "cache_api": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["default", "open", "put", "match", "delete"],
+    "deviations": ["OC-CACHE-001", "OC-CACHE-002"]
+  },
+  "images": {
+    "status": "supported_with_deviation",
+    "capability_version": 1,
+    "methods": ["input", "info", "transform", "draw", "output", "response", "contentType", "image"],
+    "deviations": ["OC-IMAGES-001"]
+  },
+  "version_metadata": {
+    "status": "supported",
+    "capability_version": 1,
+    "methods": ["id", "tag", "timestamp"]
+  },
+  "websocket_hibernation": { "status": "unsupported" },
+  "analytics_engine": { "status": "unsupported" },
+  "ai": { "status": "unsupported" },
+  "browser_rendering": { "status": "unsupported" },
+  "vectorize": { "status": "unsupported" },
+  "hyperdrive": { "status": "unsupported" },
+  "mtls": { "status": "unsupported" },
+  "rate_limiting": { "status": "unsupported" },
+  "workers_for_platforms": { "status": "unsupported" }
+}

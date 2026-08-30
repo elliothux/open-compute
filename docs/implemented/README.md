@@ -47,8 +47,11 @@
 - [平台方案](../open-compute-workerd-platform.md)：单机 Cloudflare Workers Platform 兼容目标尚未完成
   P3 conformance；vinext 只是独立应用 qualification，不定义平台完成状态。
 - [P3.1 Static Assets](../p3-1-static-assets.md)与[P3.2 Service Binding](../p3-2-service-bindings.md)：
-  核心实现已有证据，剩余资格验收仍在各自文档中维护。
-- P3.4 Cloudflare conformance：尚未纳入本次实现与验收；不能从已归档的 P3.3 推导完整兼容结论。
+  本地 contract/product、事件源和真实 crash recovery 已有证据；Assets/Service 直接 remote
+  differential 与各自应用 qualification 仍在对应文档中维护。
+- [P3.4 Cloudflare conformance](../p3-4-cloudflare-conformance.md)：原常用子集及一项 Cache API
+  portable differential 已有证据；扩展后的全量 stable tenant API 目标仍为 active/blocked，不能从
+  已归档 P3.3 或单个 remote fixture 推导完整兼容结论。
 - [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 

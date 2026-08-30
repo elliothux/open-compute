@@ -15,12 +15,13 @@
   },
   "scripts": {
     "oc": "bun packages/toolchain/src/bin.ts",
-    "build": "bun run --filter @open-compute/toolchain build && bun run --filter @open-compute/runtime build && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit",
-    "typecheck": "bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit",
+    "build": "bun run --filter @open-compute/toolchain build && bun run --filter @open-compute/runtime build && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
+    "typecheck": "bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
     "test:js": "node --test 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs'",
     "check:generated": "bun run --filter @open-compute/runtime check:generated"
   },
   "devDependencies": {
+    "@open-compute/workers-types": "workspace:*",
     "typescript": "catalog:",
     "@types/node": "catalog:"
   }
