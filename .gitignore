@@ -18,3 +18,7 @@ node_modules/
 
 # Local source checkouts used only as implementation references.
 /references/
+
+# VitePress generated site output.
+/packages/docs/.vitepress/cache/
+/packages/docs/.vitepress/dist/
