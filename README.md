@@ -75,6 +75,7 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 | `crates/service` | `platformd` CLI、health、control/data plane、workerd bridge |
 | `packages/runtime/` | Formal `workerd.lock.json`, Cap'n Proto, system workers |
 | `packages/toolchain` | Rolldown + TS7 Worker build/run/deploy CLI |
+| `packages/docs` | platformd 运维站点（VitePress；中文默认，英文 `/en/`） |
 | `examples/` | Container, systemd, launchd, TypeScript Worker |
 | `test/` | Repository test/Gate launchers, coverage, load/soak, fixtures, and fuzz |
 | `scripts/` | Local development and release packaging launchers |
@@ -84,7 +85,7 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 [P3.2 Service Binding](docs/p3-2-service-bindings.md)。已完成的
 [P3.3 Cache/Images](docs/implemented/p3-3-workers-cache-images.md)设计与结果，以及其他已完成阶段见
 [docs/implemented](docs/implemented/README.md)，持续维护的 API、测试、部署及运维资料见
-[docs/references](docs/references/README.md)。归档不代表对当前工作树重新执行了验收。
+[docs/references](docs/references/README.md)。面向 platformd 运维的站点源码在 [packages/docs](packages/docs)。归档不代表对当前工作树重新执行了验收。
 
 ## Prerequisites
 

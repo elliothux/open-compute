@@ -1,0 +1,14 @@
+{
+  "name": "@open-compute/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev --host 0.0.0.0 --port 5173",
+    "build": "vitepress build",
+    "preview": "vitepress preview --host 0.0.0.0 --port 4173"
+  },
+  "devDependencies": {
+    "vitepress": "catalog:"
+  }
+}
