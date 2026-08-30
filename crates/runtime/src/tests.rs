@@ -53,6 +53,26 @@ fn write_exec(path: &Path, body: &str) {
     fs::set_permissions(path, perms).expect("chmod");
 }
 
+async fn read_pid_file(path: &Path, timeout: Duration) -> i32 {
+    let started = std::time::Instant::now();
+    loop {
+        match fs::read_to_string(path) {
+            Ok(value) => {
+                return value
+                    .trim()
+                    .parse()
+                    .expect("pid file must contain an integer");
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound && started.elapsed() < timeout =>
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(error) => panic!("failed to read {}: {error}", path.display()),
+        }
+    }
+}
+
 fn host_target() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "darwin-arm64",
@@ -1380,23 +1400,8 @@ wait
         Duration::from_secs(30),
     )));
     let wait_pid = async {
-        let started = std::time::Instant::now();
-        while !pid_file.exists() && started.elapsed() < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        let pid: i32 = fs::read_to_string(&pid_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        while !child_file.exists() && started.elapsed() < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        let child: i32 = fs::read_to_string(&child_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let pid = read_pid_file(&pid_file, Duration::from_secs(10)).await;
+        let child = read_pid_file(&child_file, Duration::from_secs(10)).await;
         (pid, child)
     };
     let (pid, child) = tokio::select! {
@@ -2201,23 +2206,8 @@ while true; do sleep 0.05; done
         Duration::from_secs(30),
     )));
     let wait_pid = async {
-        let started = std::time::Instant::now();
-        while !pid_file.exists() && started.elapsed() < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        let pid: i32 = fs::read_to_string(&pid_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        while !child_file.exists() && started.elapsed() < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        let child: i32 = fs::read_to_string(&child_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        let pid = read_pid_file(&pid_file, Duration::from_secs(10)).await;
+        let child = read_pid_file(&child_file, Duration::from_secs(10)).await;
         (pid, child)
     };
     let (pid, child) = tokio::select! {

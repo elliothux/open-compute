@@ -36,6 +36,10 @@ pub struct PlatformConfig {
     pub runtime: RuntimeConfig,
     /// Local artifact cache.
     pub cache: CacheConfig,
+    /// Workers Cache and Cache API authority limits.
+    pub response_cache: ResponseCacheConfig,
+    /// Native Images binding execution limits.
+    pub images: ImagesConfig,
     /// Bounded metrics export.
     pub metrics: MetricsConfig,
     /// P1 platform-wide admission, resource-count, snapshot, and recovery limits.
@@ -75,6 +79,8 @@ impl PlatformConfig {
         self.s3.validate()?;
         self.runtime.validate()?;
         self.cache.validate()?;
+        self.response_cache.validate()?;
+        self.images.validate()?;
         self.metrics.validate()?;
         self.hardening.validate()?;
         if self.hardening.emergency_reserve_bytes >= self.storage.free_space_hard_bytes {
@@ -552,6 +558,218 @@ impl CacheConfig {
             return Err(PlatformError::new(
                 ErrorCode::CacheBoundsInvalid,
                 "cache.max_artifact_bytes must be <= cache.max_bytes",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Workers Cache and Cache API bounds for the single-node authority.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct ResponseCacheConfig {
+    /// Maximum body bytes admitted for one cache entry.
+    pub max_object_bytes: u64,
+    /// Maximum logical body bytes retained by one Worker.
+    pub max_bytes_per_worker: u64,
+    /// Maximum canonical response-header bytes retained by one entry.
+    pub max_header_bytes: u32,
+    /// Maximum variants retained for one logical cache key.
+    pub max_variants_per_key: u16,
+    /// Maximum canonical tags retained by one entry.
+    pub max_tags_per_entry: u16,
+    /// Maximum UTF-8 bytes in one named-cache namespace.
+    pub max_cache_name_bytes: u16,
+    /// Maximum canonical URL bytes accepted as a cache key.
+    pub max_url_bytes: u32,
+    /// Maximum simultaneously open per-Worker cache databases.
+    pub max_connections: u32,
+    /// SQLite busy timeout in milliseconds.
+    pub busy_timeout_ms: u64,
+    /// Private backend request deadline in milliseconds.
+    pub request_timeout_ms: u64,
+    /// Refresh lease duration in milliseconds.
+    pub refresh_lease_ms: u64,
+    /// Maximum accepted freshness or stale lifetime in seconds.
+    pub max_ttl_seconds: u64,
+    /// Whether automatic-cache availability failures bypass to tenant code.
+    pub fail_open: bool,
+}
+
+impl Default for ResponseCacheConfig {
+    fn default() -> Self {
+        Self {
+            max_object_bytes: 16 * 1024 * 1024,
+            max_bytes_per_worker: 1024 * 1024 * 1024,
+            max_header_bytes: 32 * 1024,
+            max_variants_per_key: 32,
+            max_tags_per_entry: 64,
+            max_cache_name_bytes: 128,
+            max_url_bytes: 8 * 1024,
+            max_connections: 128,
+            busy_timeout_ms: 250,
+            request_timeout_ms: 5_000,
+            refresh_lease_ms: 30_000,
+            max_ttl_seconds: 7 * 24 * 60 * 60,
+            fail_open: true,
+        }
+    }
+}
+
+impl ResponseCacheConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        for (value, name) in [
+            (self.max_object_bytes, "response_cache.max_object_bytes"),
+            (
+                self.max_bytes_per_worker,
+                "response_cache.max_bytes_per_worker",
+            ),
+            (
+                u64::from(self.max_header_bytes),
+                "response_cache.max_header_bytes",
+            ),
+            (
+                u64::from(self.max_variants_per_key),
+                "response_cache.max_variants_per_key",
+            ),
+            (
+                u64::from(self.max_tags_per_entry),
+                "response_cache.max_tags_per_entry",
+            ),
+            (
+                u64::from(self.max_cache_name_bytes),
+                "response_cache.max_cache_name_bytes",
+            ),
+            (
+                u64::from(self.max_url_bytes),
+                "response_cache.max_url_bytes",
+            ),
+            (
+                u64::from(self.max_connections),
+                "response_cache.max_connections",
+            ),
+            (self.busy_timeout_ms, "response_cache.busy_timeout_ms"),
+            (self.request_timeout_ms, "response_cache.request_timeout_ms"),
+            (self.refresh_lease_ms, "response_cache.refresh_lease_ms"),
+            (self.max_ttl_seconds, "response_cache.max_ttl_seconds"),
+        ] {
+            require_nonzero(value, name)?;
+        }
+        if self.max_object_bytes > self.max_bytes_per_worker
+            || self.max_object_bytes > 64 * 1024 * 1024
+            || self.max_bytes_per_worker > 1024 * 1024 * 1024 * 1024
+            || self.max_header_bytes > 64 * 1024
+            || self.max_variants_per_key > 256
+            || self.max_tags_per_entry > 256
+            || self.max_cache_name_bytes > 256
+            || self.max_url_bytes > 32 * 1024
+            || self.max_connections > 1024
+            || self.busy_timeout_ms > 5_000
+            || self.request_timeout_ms > 60_000
+            || self.refresh_lease_ms > 10 * 60 * 1_000
+            || self.max_ttl_seconds > 365 * 24 * 60 * 60
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "response_cache limits are outside the supported bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Bounded native Images binding execution policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct ImagesConfig {
+    /// Maximum bytes accepted for each image input.
+    pub max_input_bytes: u64,
+    /// Maximum encoded output bytes.
+    pub max_output_bytes: u64,
+    /// Maximum decoded pixels in one input or output image.
+    pub max_pixels: u64,
+    /// Maximum width or height in pixels.
+    pub max_dimension: u32,
+    /// Maximum transform operations in one chain.
+    pub max_operations: u16,
+    /// Maximum overlay images in one chain.
+    pub max_overlays: u16,
+    /// Maximum decoded frames; Day1 supports only non-animated raster inputs.
+    pub max_frames: u16,
+    /// Maximum in-flight image sessions retained by the process.
+    pub max_sessions: u16,
+    /// Maximum bytes retained across all in-flight image sessions.
+    pub max_temp_bytes: u64,
+    /// Idle image-session lifetime in milliseconds.
+    pub session_ttl_ms: u64,
+    /// Maximum concurrent transforms for the process.
+    pub max_concurrency: u16,
+    /// Maximum concurrent transforms for one account.
+    pub max_concurrency_per_account: u16,
+    /// End-to-end transform deadline in milliseconds.
+    pub request_timeout_ms: u64,
+}
+
+impl Default for ImagesConfig {
+    fn default() -> Self {
+        Self {
+            max_input_bytes: 20 * 1024 * 1024,
+            max_output_bytes: 20 * 1024 * 1024,
+            max_pixels: 40_000_000,
+            max_dimension: 12_000,
+            max_operations: 16,
+            max_overlays: 8,
+            max_frames: 1,
+            max_sessions: 64,
+            max_temp_bytes: 128 * 1024 * 1024,
+            session_ttl_ms: 60_000,
+            max_concurrency: 4,
+            max_concurrency_per_account: 2,
+            request_timeout_ms: 10_000,
+        }
+    }
+}
+
+impl ImagesConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        for (value, name) in [
+            (self.max_input_bytes, "images.max_input_bytes"),
+            (self.max_output_bytes, "images.max_output_bytes"),
+            (self.max_pixels, "images.max_pixels"),
+            (u64::from(self.max_dimension), "images.max_dimension"),
+            (u64::from(self.max_operations), "images.max_operations"),
+            (u64::from(self.max_overlays), "images.max_overlays"),
+            (u64::from(self.max_frames), "images.max_frames"),
+            (u64::from(self.max_sessions), "images.max_sessions"),
+            (self.max_temp_bytes, "images.max_temp_bytes"),
+            (self.session_ttl_ms, "images.session_ttl_ms"),
+            (u64::from(self.max_concurrency), "images.max_concurrency"),
+            (
+                u64::from(self.max_concurrency_per_account),
+                "images.max_concurrency_per_account",
+            ),
+            (self.request_timeout_ms, "images.request_timeout_ms"),
+        ] {
+            require_nonzero(value, name)?;
+        }
+        if self.max_input_bytes > 20 * 1024 * 1024
+            || self.max_output_bytes > 64 * 1024 * 1024
+            || self.max_pixels > 100_000_000
+            || self.max_dimension > 20_000
+            || self.max_operations > 64
+            || self.max_overlays > 32
+            || self.max_frames != 1
+            || self.max_sessions > 1024
+            || self.max_temp_bytes > 4 * 1024 * 1024 * 1024
+            || self.max_temp_bytes < self.max_input_bytes
+            || self.session_ttl_ms > 10 * 60 * 1_000
+            || self.max_concurrency > 256
+            || self.max_concurrency_per_account > self.max_concurrency
+            || self.request_timeout_ms > 120_000
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "images limits are outside the supported bounds",
             ));
         }
         Ok(())

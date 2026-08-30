@@ -56,6 +56,7 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
 | `workflow-recovery` | 当前 Workflow 的 snapshot、进程恢复、transport fault 与产品 binding 路径 |
 | `workflow-product` | 当前 durable execution 与大结果/批次边界 |
 | `workflow` | 上述三个 Workflow 目标；`p2` 也包含它们 |
+| `p3-assets`、`p3-services`、`p3-cache-images` | 对应静态资产、Service binding、Cache/Images 真实 runtime 产品矩阵；`p3` 包含全部 P3 目标 |
 | `runtime`、`single-binary` | supervisor、单文件离线首启/重启/损坏路径 |
 | `p0`、`p1`、`p2`、`all` | 对应集合；多个选择取并集，首轮完整，后两轮仅时序用例 |
 
@@ -134,7 +135,7 @@ core/storage/artifacts/workers/service 五个库的故障钩子均
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
 RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
 cargo +1.98.0 check --workspace --all-targets
 cargo metadata --no-deps --format-version 1

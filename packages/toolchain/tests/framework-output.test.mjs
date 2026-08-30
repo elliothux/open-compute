@@ -29,6 +29,9 @@ async function fixture(t) {
   return {
     project: root, name: "framework", compatibilityDate: "2026-08-22",
     compatibilityFlags: ["nodejs_compat"], services: {}, frameworkOutput: ".wrangler/deploy/config.json",
+    runtimeFeatures: {
+      cache: { enabled: false, crossVersionCache: false, entrypoints: {} },
+    },
   };
 }
 

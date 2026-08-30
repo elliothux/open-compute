@@ -46,11 +46,29 @@ Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不
 默认平台地址为 `http://127.0.0.1:8787`；支持 `endpoint` / `--endpoint` 覆盖。
 默认账户由经过身份验证的 `GET /v1/account` 返回，也可用 `accountId` / `--account` 明确指定。
 
-其他字段是 `compatibilityFlags`、`vars`、`secrets`、`bindings`、`services` 和 `assets`。普通产品
+其他字段是 `compatibilityFlags`、`vars`、`secrets`、`bindings`、`services`、`assets`、`cache`、
+`exports`、`images` 和 `version_metadata`。普通产品
 binding 使用 `{type, id, permissions?}`；Service Binding 使用
 `[{binding, service, entrypoint?}]`，部署时把同账户 Worker 名解析并冻结为目标 ID。Assets 支持
 `directory`、`binding`、`run_worker_first`、`html_handling`、`not_found_handling` 和
 `publish_source_maps`；精确支持值由 parser 与 Static Assets 文档共同约束。
+`cache` 接受 `enabled` 与 `cross_version_cache`；`exports.<name>` 只接受
+`{"type":"worker","cache":{...}}`，用于覆盖具名 Worker entrypoint 的缓存策略。Images 和
+Version Metadata 是平台内建 binding，不引用资源 ID，例如：
+
+```json
+{
+  "cache": { "enabled": true, "cross_version_cache": false },
+  "exports": {
+    "Admin": { "type": "worker", "cache": { "enabled": false } }
+  },
+  "images": { "binding": "IMAGES" },
+  "version_metadata": { "binding": "VERSION", "tag": "release-1" }
+}
+```
+
+所有 binding 名共用同一环境命名空间；未知字段、非 Worker export、重名或非法 tag 在读取配置时
+直接拒绝。
 密钥配置只能引用环境变量，例如 `"secrets": {"TOKEN": {"env": "MY_TOKEN"}}`；
 只有 `run` / `deploy` 才读取其值，离线 bundle 不包含配置变量和密钥。
 管理令牌从 `OPEN_COMPUTE_ADMIN_TOKEN` 读取，或通过 `--token-env` 指定另一个变量名。
@@ -58,8 +76,8 @@ binding 使用 `{type, id, permissions?}`；Service Binding 使用
 
 ESM 静态依赖、动态 import 的 chunks 和具名导出会保留；`node:` 导入需要显式启用
 `nodejs_compat`。工具链不提供 Node 运行环境、不填补未实现的产品 API，也不下载远程 import。
-运行时仍按平台当前的兼容性日期、capability/deviation 与资源限制校验产物。当前配置没有
-Cache/Images 字段；规划中的能力在实现、Gate 和 capability 广告完成前不得写进项目配置示例。
+运行时仍按平台当前的兼容性日期、capability/deviation 与资源限制校验产物。Cache/Images 的精确
+支持面、单节点限制与资源预算见 P3.3 文档和 `platformd capabilities --json`。
 
 ## 检查
 

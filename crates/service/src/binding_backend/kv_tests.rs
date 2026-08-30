@@ -474,6 +474,8 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
             workflow: None,
             assets: None,
             services: None,
+            cache: None,
+            images: None,
         };
         dispatch(
             state,

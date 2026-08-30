@@ -94,6 +94,8 @@ pub struct PlatformSnapshotManifestV1 {
     pub r2_prefix_fingerprint: String,
     /// SHA-256 of the redacted storage/product/hardening policy required for restore.
     pub config_policy_sha256: String,
+    /// Explicit local performance or in-flight state excluded from this authority snapshot.
+    pub excluded_local_state: Vec<String>,
     /// External immutable objects that must remain pinned.
     pub immutable_references: Vec<SnapshotImmutableReferenceV1>,
     /// Local authority objects owned by this snapshot.
@@ -117,6 +119,7 @@ struct UnsignedManifest<'a> {
     s3_authority_fingerprint: &'a str,
     r2_prefix_fingerprint: &'a str,
     config_policy_sha256: &'a str,
+    excluded_local_state: &'a [String],
     immutable_references: &'a [SnapshotImmutableReferenceV1],
     files: &'a [SnapshotFileV1],
     totals: SnapshotTotalsV1,
@@ -137,6 +140,7 @@ impl PlatformSnapshotManifestV1 {
             s3_authority_fingerprint: &self.s3_authority_fingerprint,
             r2_prefix_fingerprint: &self.r2_prefix_fingerprint,
             config_policy_sha256: &self.config_policy_sha256,
+            excluded_local_state: &self.excluded_local_state,
             immutable_references: &self.immutable_references,
             files: &self.files,
             totals: self.totals,
@@ -163,6 +167,7 @@ impl PlatformSnapshotManifestV1 {
             || !is_sha256(&self.s3_authority_fingerprint)
             || !is_sha256(&self.r2_prefix_fingerprint)
             || !is_sha256(&self.config_policy_sha256)
+            || self.excluded_local_state != ["images_sessions", "response_cache", "runtime_cache"]
             || !is_sha256(&self.manifest_mac)
             || self.files.is_empty()
             || self.files.len() > max_files as usize

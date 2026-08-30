@@ -57,6 +57,16 @@ export interface RuntimeSnapshot {
   env: Record<string, unknown>;
   bindings: RuntimeBinding[];
   services: RuntimeServiceBinding[];
+  cachePolicy: {
+    enabled: boolean;
+    crossVersionCache: boolean;
+    failOpen: boolean;
+    entrypoints: Record<string, { enabled: boolean; crossVersionCache: boolean }>;
+  };
+  imagesBinding?: { name: string; descriptorSha256: string };
+  versionMetadataBinding?: {
+    name: string; id: string; tag?: string; timestampMs: number; descriptorSha256: string;
+  };
   assetBinding?: { name: string };
   assets?: RuntimeAssets;
   limits: unknown;

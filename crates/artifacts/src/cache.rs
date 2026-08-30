@@ -15,8 +15,11 @@ use std::io::{Read, Seek};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
+use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::{Mutex as AsyncMutex, OnceCell};
 
 const FILE_MODE: u32 = 0o600;
@@ -26,6 +29,23 @@ const FILE_MODE: u32 = 0o600;
 pub struct PinnedArtifact {
     file: File,
     _pin: Arc<()>,
+}
+
+/// Asynchronous reader that keeps its verified cache entry pinned until body completion.
+#[derive(Debug)]
+pub struct PinnedArtifactReader {
+    file: tokio::fs::File,
+    _pin: Arc<()>,
+}
+
+impl AsyncRead for PinnedArtifactReader {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.file).poll_read(context, buffer)
+    }
 }
 
 impl PinnedArtifact {
@@ -43,6 +63,15 @@ impl PinnedArtifact {
         })?;
         let _ = self.file.rewind();
         Ok(buf)
+    }
+
+    /// Convert into an async reader while preserving the eviction pin.
+    #[must_use]
+    pub fn into_async_reader(self) -> PinnedArtifactReader {
+        PinnedArtifactReader {
+            file: tokio::fs::File::from_std(self.file),
+            _pin: self._pin,
+        }
     }
 }
 

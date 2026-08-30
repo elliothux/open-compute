@@ -97,6 +97,10 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         "queues",
         "cron",
         "workflows",
+        "workers_cache",
+        "cache_api",
+        "images",
+        "version_metadata",
     ] {
         assert_eq!(products[name]["status"], "supported", "{name}");
         assert_eq!(products[name]["capability_version"], 1, "{name}");
@@ -177,6 +181,25 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
                 "restart",
             ],
         ),
+        ("workers_cache", vec!["fetch", "purge"]),
+        (
+            "cache_api",
+            vec!["default", "open", "put", "match", "delete"],
+        ),
+        (
+            "images",
+            vec![
+                "input",
+                "info",
+                "transform",
+                "draw",
+                "output",
+                "response",
+                "contentType",
+                "image",
+            ],
+        ),
+        ("version_metadata", vec!["id", "tag", "timestamp"]),
     ]);
     for (product, methods) in expected_methods {
         assert_eq!(

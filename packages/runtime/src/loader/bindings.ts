@@ -42,7 +42,8 @@ function makeBinding(ctx: BindingContext, descriptor: RuntimeBinding, deployment
 }
 
 export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext, deploymentId: string,
-  policy: DoPolicy, durableObject = false): Record<string, unknown> {
+  policy: DoPolicy, durableObject = false, builtinFeatures = true,
+  currentEntrypoint = "default"): Record<string, unknown> {
   const env = { ...snapshot.env };
   const [accountId, workerId] = snapshot.loaderKey.split("/");
   if (!accountId || !workerId) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
@@ -67,6 +68,48 @@ export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext, deploy
       descriptorSha256: service.descriptorSha256,
       ...(service.entrypoint === undefined ? {} : { entrypoint: service.entrypoint }),
     }) });
+  }
+  if (builtinFeatures && !durableObject) {
+    const cacheTransports: Record<string, unknown> = {};
+    const defaultCachePolicy = {
+      enabled: snapshot.cachePolicy.enabled,
+      crossVersionCache: snapshot.cachePolicy.crossVersionCache,
+    };
+    for (const [cacheEntrypoint, selected] of Object.entries({
+      default: defaultCachePolicy,
+      ...snapshot.cachePolicy.entrypoints,
+      [currentEntrypoint]: snapshot.cachePolicy.entrypoints[currentEntrypoint] ?? defaultCachePolicy,
+    })) {
+      cacheTransports[cacheEntrypoint] = ctx.exports.CacheTransport({ props: Object.freeze({
+        accountId, workerId, deploymentId, entrypoint: cacheEntrypoint,
+        descriptorSha256: snapshot.workerCodeSha256,
+        automaticEnabled: selected.enabled,
+        crossVersionCache: selected.crossVersionCache,
+      }) });
+    }
+    Object.defineProperty(env, "__OPEN_COMPUTE_PRIVATE_CACHE", {
+      value: Object.freeze(cacheTransports),
+      enumerable: true,
+      configurable: true,
+      writable: false,
+    });
+    if (snapshot.imagesBinding) {
+      const { name, descriptorSha256 } = snapshot.imagesBinding;
+      if (Object.prototype.hasOwnProperty.call(env, name)) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+      env[name] = ctx.exports.ImageTransport({ props: Object.freeze({
+        accountId, workerId, deploymentId, descriptorSha256,
+      }) });
+    }
+    if (snapshot.versionMetadataBinding) {
+      const metadata = snapshot.versionMetadataBinding;
+      if (Object.prototype.hasOwnProperty.call(env, metadata.name)) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+      const timestamp = new Date(metadata.timestampMs).toISOString();
+      env[metadata.name] = Object.freeze({
+        id: metadata.id,
+        tag: metadata.tag ?? "",
+        timestamp,
+      });
+    }
   }
   return env;
 }

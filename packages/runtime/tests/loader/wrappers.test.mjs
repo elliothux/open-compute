@@ -53,11 +53,11 @@ const { wrapDurableObject } = await importRuntime("loader/wrappers/durable-objec
 });
 const generator = await importRuntime("loader/wrappers/generator.ts");
 
-test("env capabilities wrap once, preserve JSON keys, and never expose the private alarm index", () => {
+test("env capabilities wrap once and remove every private host capability", () => {
   const calls = [];
   class Capability { constructor(raw, durableObject) { calls.push([raw, durableObject]); this.raw = raw; } }
   const wrap = createEnvironment([{ names: ["DB"], create: Capability }], true);
-  const env = JSON.parse('{"DB":"raw","__proto__":{"safe":true},"__OPEN_COMPUTE_PRIVATE_ALARM_INDEX":"private"}');
+  const env = JSON.parse('{"DB":"raw","__proto__":{"safe":true},"__OPEN_COMPUTE_PRIVATE_ALARM_INDEX":"private","__OPEN_COMPUTE_PRIVATE_CACHE":"cache"}');
   const wrapped = wrap(env);
   assert.equal(Object.getPrototypeOf(wrapped), Object.prototype);
   assert.deepEqual(Object.getOwnPropertyDescriptor(wrapped, "__proto__").value, { safe: true });
@@ -65,7 +65,9 @@ test("env capabilities wrap once, preserve JSON keys, and never expose the priva
   assert.equal(wrap(wrapped), wrapped);
   assert.equal(calls.length, 1);
   assert.equal("__OPEN_COMPUTE_PRIVATE_ALARM_INDEX" in wrapped, false);
+  assert.equal("__OPEN_COMPUTE_PRIVATE_CACHE" in wrapped, false);
   assert.equal(env.__OPEN_COMPUTE_PRIVATE_ALARM_INDEX, "private");
+  assert.equal(env.__OPEN_COMPUTE_PRIVATE_CACHE, "cache");
 });
 
 test("object and function handlers restore async env scope and preserve event receivers", async () => {
@@ -267,4 +269,18 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
     assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   }
   assert.deepEqual(parseSync("validation.js", generator.generateValidationWrapper("Named"), { sourceType: "module" }).errors, []);
+});
+
+test("default bridge wraps every enabled ctx.exports cache entrypoint", () => {
+  const code = generator.generateBindingWrapper({
+    mainModule: "index.js", bindings: [], services: [], durableObject: false,
+    cacheAvailable: true, automaticCacheEnabled: true, cacheFailOpen: true,
+    automaticCacheEntrypoints: ["Named", "Api"],
+  });
+  assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
+  assert.match(code, /createCacheRuntime\(true, true, "default"\)/);
+  assert.match(code, /createCacheRuntime\(true, true, "Named"\)/);
+  assert.match(code, /createCacheRuntime\(true, true, "Api"\)/);
+  assert.match(code, /as Named/);
+  assert.match(code, /as Api/);
 });

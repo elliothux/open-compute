@@ -178,6 +178,8 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
                 None,
                 asset_service,
                 service_invocations,
+                None,
+                None,
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -682,6 +684,7 @@ fn worker_request(
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: options.services,
+        runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile":"default"}),
@@ -717,6 +720,7 @@ fn assets_request(
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
+        runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile":"default"}),

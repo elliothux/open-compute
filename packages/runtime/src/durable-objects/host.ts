@@ -217,7 +217,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
       compatibilityFlags: tenantCompatibilityFlags(snapshot.compatibilityFlags),
       mainModule: built.mainModule,
       modules: built.modules,
-      env: tenantEnv(snapshot, this.ctx, authority.deploymentId, doPolicy(this.env), true),
+      env: tenantEnv(snapshot, this.ctx, authority.deploymentId, doPolicy(this.env), true, false),
       globalOutbound: this.ctx.exports.OutboundGateway({
         props: { deploymentId: authority.deploymentId, policyVersion: 1 },
       }),

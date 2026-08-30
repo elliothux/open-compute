@@ -22,7 +22,26 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
       || (value.contentKind === "assets_only" && value.mainModule !== undefined)
       || typeof value.compatibilityDate !== "string"
       || !strings(value.compatibilityFlags) || !Array.isArray(value.modules)
-      || !record(value.env) || !Array.isArray(value.bindings) || !Array.isArray(value.services)) invalid();
+      || !record(value.env) || !Array.isArray(value.bindings) || !Array.isArray(value.services)
+      || !record(value.cachePolicy) || typeof value.cachePolicy.enabled !== "boolean"
+      || typeof value.cachePolicy.failOpen !== "boolean"
+      || typeof value.cachePolicy.crossVersionCache !== "boolean"
+      || !record(value.cachePolicy.entrypoints)) invalid();
+  for (const policy of Object.values(value.cachePolicy.entrypoints as Record<string, unknown>)) {
+    if (!record(policy) || typeof policy.enabled !== "boolean"
+        || typeof policy.crossVersionCache !== "boolean") invalid();
+  }
+  if (value.imagesBinding !== undefined
+      && (!record(value.imagesBinding) || typeof value.imagesBinding.name !== "string"
+        || typeof value.imagesBinding.descriptorSha256 !== "string")) invalid();
+  if (value.versionMetadataBinding !== undefined
+      && (!record(value.versionMetadataBinding) || typeof value.versionMetadataBinding.name !== "string"
+        || typeof value.versionMetadataBinding.id !== "string"
+        || typeof value.versionMetadataBinding.timestampMs !== "number"
+        || !Number.isSafeInteger(value.versionMetadataBinding.timestampMs)
+        || typeof value.versionMetadataBinding.descriptorSha256 !== "string"
+        || (value.versionMetadataBinding.tag !== undefined
+          && typeof value.versionMetadataBinding.tag !== "string"))) invalid();
   if (value.assetBinding !== undefined
       && (!record(value.assetBinding) || typeof value.assetBinding.name !== "string")) invalid();
   if (value.assets !== undefined) {

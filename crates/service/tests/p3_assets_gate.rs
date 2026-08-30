@@ -132,6 +132,8 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
                 None,
                 asset_service,
                 service_invocations,
+                None,
+                None,
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -584,6 +586,7 @@ fn deployment_request(
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
+        runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile":"default"}),

@@ -16,6 +16,9 @@ const project = {
   compatibilityDate: "2026-08-22", compatibilityFlags: [], vars: { GREETING: "你好 🌍" },
   secrets: { TOKEN: { env: "WORKER_TOKEN" } }, bindings: {},
   services: { SELF: { service: "hello" } }, endpoint: "http://127.0.0.1:1",
+  runtimeFeatures: {
+    cache: { enabled: false, crossVersionCache: false, entrypoints: {} },
+  },
 };
 
 async function platform(t, handler) {
@@ -63,6 +66,9 @@ test("uses the authoritative account and route and sends secrets only in authent
   assert.deepEqual(metadata.vars, project.vars);
   assert.deepEqual(metadata.secrets, { TOKEN: options.env.WORKER_TOKEN });
   assert.deepEqual(metadata.services, { SELF: { targetWorkerId: worker } });
+  assert.deepEqual(metadata.cache, {
+    enabled: false, crossVersionCache: false, entrypoints: {},
+  });
   assert.equal(metadata.promote, true);
 });
 

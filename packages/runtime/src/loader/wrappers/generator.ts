@@ -14,6 +14,8 @@ export const WORKFLOW_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}workflows/facade
 export const ASSET_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}assets/facade.js`;
 export const SERVICE_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}services/facade.js`;
 export const SERVICE_SCOPE_MODULE = `${INTERNAL_MODULE_PREFIX}services/scope.js`;
+export const CACHE_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}cache/facade.js`;
+export const IMAGES_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}images/facade.js`;
 export const WRAPPER_RUNTIME_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/runtime.js`;
 export const DO_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/durable-object.js`;
 export const WORKFLOW_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/workflow.js`;
@@ -28,22 +30,33 @@ export interface WrapperOptions {
   durableObject: boolean;
   workflow?: boolean | undefined;
   assetBindingName?: string | undefined;
+  imagesBindingName?: string | undefined;
+  cacheAvailable: boolean;
+  automaticCacheEnabled: boolean;
+  cacheFailOpen: boolean;
+  automaticCacheEntrypoints?: readonly string[] | undefined;
 }
 
 function fromWrapper(module: string): string { return JSON.stringify(`./${module.slice(INTERNAL_MODULE_PREFIX.length)}`); }
 
 /** Only module wiring and validated data are generated; behavior lives in TS modules. */
 export function generateBindingWrapper(options: WrapperOptions): string {
-  const { mainModule, bindings, services, entrypointName, durableObject, workflow = false, assetBindingName } = options;
+  const { mainModule, bindings, services, entrypointName, durableObject, workflow = false,
+    assetBindingName, imagesBindingName, cacheAvailable, automaticCacheEnabled,
+    cacheFailOpen, automaticCacheEntrypoints = [] } = options;
   if (entrypointName !== undefined && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypointName)) {
     throw new Error("invalid entrypoint name");
   }
   if ((workflow || durableObject) && entrypointName === undefined) throw new Error("missing entrypoint");
   const main = JSON.stringify(`../${mainModule}`);
-  const lines = [
+  const lines: string[] = [];
+  if (cacheAvailable) {
+    lines.push(`import { createCacheRuntime } from ${fromWrapper(CACHE_FACADE_MODULE)};`);
+  }
+  lines.push(
     `import * as tenant from ${main};`, `export * from ${main};`,
     `import { createEnvironment, wrapDefault, wrapDefaultService, wrapEntrypoint } from ${fromWrapper(WRAPPER_RUNTIME_MODULE)};`,
-  ];
+  );
   const factories: string[] = [];
   if (assetBindingName !== undefined) {
     lines.push(`import { AssetsBinding } from ${fromWrapper(ASSET_FACADE_MODULE)};`);
@@ -52,6 +65,10 @@ export function generateBindingWrapper(options: WrapperOptions): string {
   if (services.length > 0) {
     lines.push(`import { ServiceBinding } from ${fromWrapper(SERVICE_FACADE_MODULE)};`);
     factories.push(`{ names: ${JSON.stringify(services.map(service => service.name))}, create: ServiceBinding }`);
+  }
+  if (imagesBindingName !== undefined) {
+    lines.push(`import { ImagesBinding } from ${fromWrapper(IMAGES_FACADE_MODULE)};`);
+    factories.push(`{ names: ${JSON.stringify([imagesBindingName])}, create: ImagesBinding }`);
   }
   for (const [kind, version, module, exported] of [
     ["r2_bucket", 1, R2_FACADE_MODULE, "R2Bucket"],
@@ -66,6 +83,7 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     factories.push(`{ names: ${JSON.stringify(names)}, create: ${exported} }`);
   }
   lines.push(`const wrapEnv = createEnvironment([${factories.join(",")}], ${durableObject});`);
+  lines.push(`const cacheRuntime = ${cacheAvailable ? `createCacheRuntime(${automaticCacheEnabled}, ${cacheFailOpen}, ${JSON.stringify(entrypointName ?? "default")})` : "undefined"};`);
   if (workflow) {
     lines.push(`import { createWorkflowEntrypoint } from ${fromWrapper(WORKFLOW_WRAPPER_MODULE)};`);
     lines.push(`import { runWorkflow, validateWorkflowClass } from ${fromWrapper(WORKFLOW_RUNNER_MODULE)};`);
@@ -74,14 +92,23 @@ export function generateBindingWrapper(options: WrapperOptions): string {
   } else if (entrypointName !== undefined && (durableObject || entrypointName !== "default")) {
     const factory = durableObject ? "wrapDurableObject" : "wrapEntrypoint";
     if (durableObject) lines.push(`import { wrapDurableObject } from ${fromWrapper(DO_WRAPPER_MODULE)};`);
-    lines.push(`const NamedWrapped = ${factory}(tenant[${JSON.stringify(entrypointName)}], wrapEnv, ${JSON.stringify(entrypointName)});`);
+    lines.push(`const NamedWrapped = ${factory}(tenant[${JSON.stringify(entrypointName)}], wrapEnv, ${JSON.stringify(entrypointName)}, cacheRuntime);`);
     lines.push(`export { NamedWrapped as ${entrypointName} };`);
+  } else if (entrypointName === undefined) {
+    for (const [index, name] of automaticCacheEntrypoints.entries()) {
+      if (!/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(name) || name === "default") {
+        throw new Error("invalid entrypoint name");
+      }
+      const local = `__OpenComputeCachedEntrypoint${index}`;
+      lines.push(`const ${local} = wrapEntrypoint(tenant[${JSON.stringify(name)}], wrapEnv, ${JSON.stringify(name)}, createCacheRuntime(true, ${cacheFailOpen}, ${JSON.stringify(name)}));`);
+      lines.push(`export { ${local} as ${name} };`);
+    }
   }
   if (!durableObject && !workflow) {
-    lines.push("const __OpenComputeDefaultService = wrapDefaultService(tenant.default, wrapEnv);");
+    lines.push("const __OpenComputeDefaultService = wrapDefaultService(tenant.default, wrapEnv, cacheRuntime);");
     lines.push("export { __OpenComputeDefaultService };");
   }
-  if (!(durableObject && entrypointName === "default")) lines.push("export default wrapDefault(tenant.default, wrapEnv);");
+  if (!(durableObject && entrypointName === "default")) lines.push("export default wrapDefault(tenant.default, wrapEnv, cacheRuntime);");
   return lines.join("\n");
 }
 

@@ -160,6 +160,10 @@ pub(super) fn request_fingerprint(
     )?;
     frame(
         &mut canonical,
+        &serde_json::to_vec(&request.runtime_features).map_err(|_| invariant())?,
+    )?;
+    frame(
+        &mut canonical,
         &serde_json::to_vec(&request.queue_consumers).map_err(|_| invariant())?,
     )?;
     frame(

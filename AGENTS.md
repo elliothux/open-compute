@@ -34,6 +34,7 @@
 - Explicitly run `bun run build` before Cargo consumes runtime assets. Cargo builds and checks require `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` to name an absolute, formally pinned archive for the target platform; real-runtime tests also require the verified `OPEN_COMPUTE_TEST_WORKERD` binary. Prepare these inputs explicitly as documented in `docs/references/single-binary.md`; never download a runtime as an implicit validation step.
 - Format: `cargo fmt --all --check`
 - Lint: `cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings` (always use `--keep-going` so one run collects diagnostics from every reachable target before fixes)
+- Clippy workflow: run the canonical command once on the current source, collect the complete reachable diagnostic set, fix that set as one batch, then rerun once for verification. Do not rerun Clippy after each individual warning; start another fix batch only when clearing compile blockers exposes diagnostics that the prior run could not reach.
 - Test: `./test/gate.py --workspace` (all Cargo workspace/all-targets/all-features test executables once, audited process parallelism, `--test-threads=1` within each process)
 - No-default-features check: `RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features`
 - MSRV check: `cargo +1.98.0 check --workspace --all-targets`

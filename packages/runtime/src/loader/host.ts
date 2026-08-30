@@ -22,6 +22,8 @@ export {
   bindingError, currentStartupGeneration, doPolicy, PROFILE, resolveSnapshot,
 } from "./shared.js";
 export { ServiceTransport } from "../services/transport.js";
+export { CacheTransport } from "../cache/host.js";
+export { ImageTransport } from "../images/host.js";
 
 const MAX_QUEUE_MESSAGES = 100;
 const MAX_QUEUE_BODY_BYTES = 128 * 1024;
@@ -425,7 +427,9 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
         compatibilityFlags: snapshot.compatibilityFlags,
         mainModule: built.mainModule,
         modules: built.modules,
-        env: validation ? {} : tenantEnv(snapshot, ctx, deploymentId, doPolicy(env)),
+        env: validation ? {} : tenantEnv(
+          snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
+        ),
         globalOutbound: validation ? null : ctx.exports.OutboundGateway({
           props: { deploymentId, policyVersion: 1 },
         }),
@@ -519,7 +523,9 @@ async function customEventTarget(request: Request, env: LoaderEnv, ctx: Executio
       compatibilityFlags: snapshot.compatibilityFlags,
       mainModule: built.mainModule,
       modules: built.modules,
-      env: tenantEnv(snapshot, ctx, deploymentId, doPolicy(env)),
+      env: tenantEnv(
+        snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
+      ),
       globalOutbound: ctx.exports.OutboundGateway({
         props: { deploymentId, policyVersion: 1 },
       }),

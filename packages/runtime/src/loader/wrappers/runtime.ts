@@ -15,6 +15,13 @@ export interface BindingFactory {
   names: readonly string[];
   create: new(raw: unknown, durableObject: boolean) => object;
 }
+export interface CacheRuntime {
+  readonly context: object;
+  dispatch(origin: () => unknown, request: Request, ctx: ExecutionContext): Promise<Response>;
+}
+export interface CacheRuntimeFactory {
+  bind(environment: Environment): CacheRuntime | undefined;
+}
 interface TenantConstructor {
   new(ctx: unknown, env: Environment): object;
   readonly prototype: object;
@@ -33,6 +40,7 @@ export interface TrackedContext<Context extends object = object> {
 }
 type Callable = (this: unknown, ...args: unknown[]) => unknown;
 const PRIVATE_ALARM_INDEX = "__OPEN_COMPUTE_PRIVATE_ALARM_INDEX";
+const PRIVATE_CACHE = "__OPEN_COMPUTE_PRIVATE_CACHE";
 const SERVICE_RPC = "__openComputeServiceRpc";
 const SERVICE_FETCH = "__openComputeServiceFetch";
 const SERVICE_GET = "__openComputeServiceGet";
@@ -42,6 +50,7 @@ const RESERVED_METHODS = new Set([
 ]);
 const trackedInstances = new WeakMap<object, TrackedContext>();
 const instanceEnvironments = new WeakMap<object, Environment>();
+const instanceCaches = new WeakMap<object, CacheRuntime>();
 
 function callable(value: unknown): value is Callable { return typeof value === "function"; }
 
@@ -78,7 +87,7 @@ export function createEnvironment(factories: readonly BindingFactory[], durableO
     if (wrapped.has(env)) return env;
     const out: Environment = {};
     for (const [key, value] of Object.entries(env)) {
-      if (key !== PRIVATE_ALARM_INDEX) Object.defineProperty(out, key, {
+      if (key !== PRIVATE_ALARM_INDEX && key !== PRIVATE_CACHE) Object.defineProperty(out, key, {
         value, enumerable: true, configurable: true, writable: true,
       });
     }
@@ -91,7 +100,10 @@ export function createEnvironment(factories: readonly BindingFactory[], durableO
 }
 
 /** Track waitUntil work while preserving the native execution-context receiver. */
-export function trackExecutionContext<Context extends object>(ctx: Context): TrackedContext<Context> {
+export function trackExecutionContext<Context extends object>(
+  ctx: Context,
+  cacheContext?: object,
+): TrackedContext<Context> {
   const tasks: Promise<unknown>[] = [];
   const nativeWaitUntil: unknown = Reflect.get(ctx, "waitUntil", ctx);
   const extendLifetime = callable(nativeWaitUntil)
@@ -99,6 +111,7 @@ export function trackExecutionContext<Context extends object>(ctx: Context): Tra
     : (promise: Promise<unknown>) => { waitUntil(promise); };
   const context = new Proxy(ctx, {
     get(target, property) {
+      if (property === "cache" && cacheContext !== undefined) return cacheContext;
       if (property === "waitUntil") return (promise: Promise<unknown>) => {
         const tracked = Promise.resolve(promise);
         tasks.push(tracked);
@@ -335,12 +348,14 @@ async function fetchService(
   _reporter: CompletionReporter,
   tracked: TrackedContext,
   objectHandler: boolean,
+  cache?: CacheRuntime,
 ): Promise<unknown> {
   try {
-    const value = await withServiceScope(env, frame, scoped => withEnv(scoped, () =>
-      Reflect.apply(fn, owner, objectHandler
-        ? [request, scoped, tracked.context]
-        : [request])));
+    const invokeOrigin = () => withServiceScope(env, frame, scoped => withEnv(scoped, () =>
+      Reflect.apply(fn, owner, objectHandler ? [request, scoped, tracked.context] : [request])));
+    const value = await (cache === undefined
+      ? invokeOrigin()
+      : cache.dispatch(invokeOrigin, request, tracked.context as ExecutionContext));
     return serviceSuccess(value, tracked);
   } catch (error) {
     return serviceFailure(error, tracked);
@@ -352,6 +367,7 @@ export function wrapInstance<T extends object>(
   instance: T,
   env: Environment,
   tracked?: TrackedContext,
+  cache?: CacheRuntime,
 ): T {
   if (tracked) {
     trackedInstances.set(instance, tracked);
@@ -360,7 +376,18 @@ export function wrapInstance<T extends object>(
   return new Proxy(instance, {
     get(target, property) {
       const value: unknown = Reflect.get(target, property, target);
-      return callable(value) ? (...args: unknown[]) => invoke(target, value, args, env) : value;
+      if (!callable(value)) return value;
+      return (...args: unknown[]) => {
+        if (property === "fetch" && cache !== undefined && args[0] instanceof Request && tracked) {
+          const operation: Callable = () => cache.dispatch(
+            () => Reflect.apply(value, target, args),
+            args[0] as Request,
+            tracked.context as ExecutionContext,
+          );
+          return invoke(target, operation, [], env, tracked);
+        }
+        return invoke(target, value, args, env, tracked);
+      };
     },
   });
 }
@@ -388,26 +415,38 @@ function normalizedEvent(kind: string, event: unknown): unknown {
   });
 }
 
-function wrapHandler(owner: unknown, fn: Callable, kind: string, wrapEnv: EnvironmentWrapper) {
+function wrapHandler(owner: unknown, fn: Callable, kind: string, wrapEnv: EnvironmentWrapper,
+  cache?: CacheRuntimeFactory) {
   return (event: unknown, env: Environment, ctx: ExecutionContext): unknown => {
+    const boundCache = cache?.bind(env);
     const wrapped = wrapEnv(env);
-    const tracked = trackExecutionContext(ctx);
-    return invoke(owner, fn, [normalizedEvent(kind, event), wrapped, tracked.context], wrapped, tracked);
+    const tracked = trackExecutionContext(ctx, boundCache?.context);
+    const args = [normalizedEvent(kind, event), wrapped, tracked.context];
+    if (kind === "fetch" && boundCache !== undefined && event instanceof Request) {
+      const operation: Callable = () => boundCache.dispatch(
+        () => Reflect.apply(fn, owner, args), event, tracked.context as ExecutionContext,
+      );
+      return invoke(owner, operation, [], wrapped, tracked);
+    }
+    return invoke(owner, fn, args, wrapped, tracked);
   };
 }
 
 /** Wrap class entrypoints without replacing their native inheritance chain. */
-export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, name?: string): TenantConstructor {
+export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, name?: string,
+  cache?: CacheRuntimeFactory): TenantConstructor {
   const Base = tenantConstructor(target);
   const Wrapped = class extends Base {
     constructor(ctx: unknown, env: Environment) {
+      const boundCache = cache?.bind(env);
       const wrapped = wrapEnv(env);
       if (ctx === null || typeof ctx !== "object") throw new Error("invalid execution context");
-      const tracked = trackExecutionContext(ctx as ExecutionContext);
+      const tracked = trackExecutionContext(ctx as ExecutionContext, boundCache?.context);
       super(tracked.context, wrapped);
       trackedInstances.set(this, tracked);
       instanceEnvironments.set(this, wrapped);
-      return wrapInstance(this, wrapped);
+      if (boundCache !== undefined) instanceCaches.set(this, boundCache);
+      return wrapInstance(this, wrapped, tracked, boundCache);
     }
 
     [SERVICE_RPC](scopeId: string, frame: string, reporter: CompletionReporter, method: string, args: unknown[]) {
@@ -434,8 +473,8 @@ export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, nam
       const environment = instanceEnvironments.get(this);
       if (!environment) throw new Error("SERVICE_BINDING_DENIED");
       try {
-        return fetchService(this, serviceMethod(this, "fetch"), request, environment,
-          childServiceFrame(scopeId, frame), reporter, tracked, false);
+      return fetchService(this, serviceMethod(this, "fetch"), request, environment,
+          childServiceFrame(scopeId, frame), reporter, tracked, false, instanceCaches.get(this));
       } catch (error) {
         return serviceFailure(error, tracked);
       }
@@ -446,21 +485,25 @@ export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, nam
 }
 
 /** Give object/function-style defaults an env-aware private Service fetch entrypoint. */
-export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper): TenantConstructor {
+export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper,
+  cache?: CacheRuntimeFactory): TenantConstructor {
   if (callable(raw) && /^\s*class\b/.test(Function.prototype.toString.call(raw))) {
-    return wrapEntrypoint(raw, wrapEnv, "__OpenComputeDefaultService");
+    return wrapEntrypoint(raw, wrapEnv, "__OpenComputeDefaultService", cache);
   }
   const owner = raw !== null && typeof raw === "object" ? raw : undefined;
   const fetch = owner === undefined ? raw : Reflect.get(owner, "fetch");
   return class OpenComputeDefaultService extends WorkerEntrypoint<Environment> {
     readonly #environment: Environment;
     readonly #tracked: TrackedContext;
+    readonly #cache: CacheRuntime | undefined;
 
     constructor(ctx: unknown, env: Environment) {
       if (ctx === null || typeof ctx !== "object") throw new Error("invalid execution context");
+      const boundCache = cache?.bind(env);
       const wrapped = wrapEnv(env);
-      const tracked = trackExecutionContext(ctx as ExecutionContext);
+      const tracked = trackExecutionContext(ctx as ExecutionContext, boundCache?.context);
       super(tracked.context, wrapped);
+      this.#cache = boundCache;
       this.#environment = wrapped;
       this.#tracked = tracked;
     }
@@ -473,32 +516,33 @@ export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper): T
     ): unknown {
       if (!callable(fetch)) return serviceFailure(new Error("SERVICE_ENTRYPOINT_NOT_FOUND"), this.#tracked);
       return fetchService(owner, fetch, request, this.#environment,
-        childServiceFrame(scopeId, frame), reporter, this.#tracked, true);
+        childServiceFrame(scopeId, frame), reporter, this.#tracked, true, this.#cache);
     }
   };
 }
 
 /** Preserve object handlers, function-style fetch, and class-style Workers. */
-export function wrapDefault(raw: unknown, wrapEnv: EnvironmentWrapper): unknown {
+export function wrapDefault(raw: unknown, wrapEnv: EnvironmentWrapper, cache?: CacheRuntimeFactory): unknown {
   if (raw !== null && typeof raw === "object") {
     const result: Environment = { ...raw };
     for (const key of ["fetch", "scheduled", "queue", "tail"]) {
       const handler: unknown = Reflect.get(raw, key);
-      if (callable(handler)) result[key] = wrapHandler(raw, handler, key, wrapEnv);
+      if (callable(handler)) result[key] = wrapHandler(raw, handler, key, wrapEnv, cache);
     }
     const fetch: unknown = Reflect.get(raw, "fetch");
     if (callable(fetch)) result[SERVICE_FETCH] = (
       scopeId: string, frame: string, reporter: CompletionReporter, request: Request,
     ) => {
       const tracked = trackExecutionContext(syntheticContext());
-      return fetchService(raw, fetch, request, result, childServiceFrame(scopeId, frame), reporter, tracked, true);
+      return fetchService(raw, fetch, request, result, childServiceFrame(scopeId, frame), reporter,
+        tracked, true);
     };
     return result;
   }
   if (callable(raw)) {
     return /^\s*class\b/.test(Function.prototype.toString.call(raw))
-      ? wrapEntrypoint(raw, wrapEnv)
-      : { fetch: wrapHandler(undefined, raw, "fetch", wrapEnv) };
+      ? wrapEntrypoint(raw, wrapEnv, undefined, cache)
+      : { fetch: wrapHandler(undefined, raw, "fetch", wrapEnv, cache) };
   }
   return raw;
 }

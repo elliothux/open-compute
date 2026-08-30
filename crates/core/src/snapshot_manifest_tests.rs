@@ -38,6 +38,11 @@ fn manifest() -> PlatformSnapshotManifestV1 {
         s3_authority_fingerprint: "5".repeat(64),
         r2_prefix_fingerprint: "6".repeat(64),
         config_policy_sha256: "b".repeat(64),
+        excluded_local_state: vec![
+            "images_sessions".to_owned(),
+            "response_cache".to_owned(),
+            "runtime_cache".to_owned(),
+        ],
         immutable_references: vec![SnapshotImmutableReferenceV1 {
             role: "deployment_artifact".to_owned(),
             sha256: "7".repeat(64),
@@ -109,6 +114,9 @@ fn manifest_paths_caps_and_uniqueness_are_strict() {
         *bad_schema.source_schemas.get_mut(owner).unwrap() += 1;
         assert!(bad_schema.validate(10, 100, 100).is_err(), "{owner}");
     }
+    let mut omitted_exclusion = value.clone();
+    omitted_exclusion.excluded_local_state.pop();
+    assert!(omitted_exclusion.validate(10, 100, 100).is_err());
     let mut traversal = value;
     traversal.files[0].restore_path = "do/../control.sqlite".to_owned();
     assert!(traversal.validate(10, 100, 100).is_err());

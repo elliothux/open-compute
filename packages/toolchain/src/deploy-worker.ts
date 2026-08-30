@@ -150,7 +150,13 @@ export async function deployProject(
     ...(artifact === undefined ? {} : { mainModule: artifact.mainModule }),
     compatibilityDate: project.compatibilityDate,
     compatibilityFlags: project.compatibilityFlags, vars: project.vars, secrets,
-    bindings: project.bindings, services, promote: true,
+    bindings: project.bindings, services,
+    cache: project.runtimeFeatures.cache,
+    ...(project.runtimeFeatures.images === undefined ? {} : { images: project.runtimeFeatures.images }),
+    ...(project.runtimeFeatures.versionMetadata === undefined ? {} : {
+      versionMetadata: project.runtimeFeatures.versionMetadata,
+    }),
+    promote: true,
   }).replace(/[^\x20-\x7e]/g, value => `\\u${value.charCodeAt(0).toString(16).padStart(4, "0")}`);
   if (metadata.length > 1024 * 1024) throw new Error("deployment metadata exceeds 1 MiB");
   let result: unknown;
@@ -255,6 +261,11 @@ async function deployAssets(
       secrets,
       bindings: project.bindings,
       services,
+      cache: project.runtimeFeatures.cache,
+      ...(project.runtimeFeatures.images === undefined ? {} : { images: project.runtimeFeatures.images }),
+      ...(project.runtimeFeatures.versionMetadata === undefined ? {} : {
+        versionMetadata: project.runtimeFeatures.versionMetadata,
+      }),
       promote: true,
     }),
     { "content-type": "application/json" },

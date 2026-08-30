@@ -34,20 +34,22 @@ pub use bundle::{
 };
 pub use d1::D1ResourceDriver;
 pub use descriptor::{
-    AssetDescriptorV1, BindingDescriptorV1, COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN,
-    COMPATIBILITY_FLAGS_ALLOWED, GLOBAL_OUTBOUND_POLICY_VERSION, QueueProducerBindingDescriptorV1,
-    SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1,
-    canonicalize_vars, ciphertext_sha256, loader_key, parse_loader_key, validate_compatibility,
-    validate_env_name,
+    AssetDescriptorV1, BindingDescriptorV1, BuiltinBindingDescriptorKindV1,
+    BuiltinBindingDescriptorV1, COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN,
+    COMPATIBILITY_FLAGS_ALLOWED, CacheEntrypointPolicyV1, CachePolicyDescriptorV1,
+    GLOBAL_OUTBOUND_POLICY_VERSION, QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX,
+    SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1, canonicalize_vars,
+    ciphertext_sha256, loader_key, parse_loader_key, validate_compatibility, validate_env_name,
 };
 pub use durable_objects::DurableObjectResourceDriver;
 pub use kv::KvResourceDriver;
 pub use pins::{DeploymentPin, DeploymentPins};
 pub use pipeline::{
     CreateDeploymentOutcome, CreateDeploymentRequest, CreateDeploymentResult,
-    DeploymentBindingInput, DeploymentBundle, DeploymentContent, DeploymentController,
-    DeploymentServiceInput, ProductPromotionCoordinator, ProductPromotionRequest,
-    QueueConsumerInput, RuntimeValidator, ValidationCandidate,
+    DeploymentBindingInput, DeploymentBundle, DeploymentCacheInput, DeploymentCachePolicyInput,
+    DeploymentContent, DeploymentController, DeploymentImagesInput, DeploymentRuntimeFeatures,
+    DeploymentServiceInput, DeploymentVersionMetadataInput, ProductPromotionCoordinator,
+    ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, ValidationCandidate,
 };
 pub use queue_lifecycle::{
     CreateQueueOutcome, CreateQueueRequest, CreateQueueResult, DeleteQueueResult, QueueController,
@@ -59,9 +61,10 @@ pub use resource_lifecycle::{
 };
 pub use resource_pins::{ResourcePin, ResourcePins};
 pub use runtime_source::{
-    DurableObjectFacadeIdentity, RuntimeAssetBinding, RuntimeAssets, RuntimeBinding, RuntimeModule,
-    RuntimePayload, RuntimeQueueBinding, RuntimeScope, RuntimeServiceBinding, RuntimeSnapshot,
-    RuntimeSource,
+    DurableObjectFacadeIdentity, RuntimeAssetBinding, RuntimeAssets, RuntimeBinding,
+    RuntimeCachePolicy, RuntimeImagesBinding, RuntimeModule, RuntimePayload, RuntimeQueueBinding,
+    RuntimeScope, RuntimeServiceBinding, RuntimeSnapshot, RuntimeSource,
+    RuntimeVersionMetadataBinding,
 };
 
 #[cfg(test)]

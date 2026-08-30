@@ -4,6 +4,7 @@
 
 pub mod assets;
 pub mod bindings;
+pub mod cache;
 pub mod control_db;
 pub mod cron;
 pub mod crypto;
@@ -26,6 +27,7 @@ pub mod r2;
 pub mod r2_staging;
 pub mod resources;
 mod restore_cleanup;
+pub mod runtime_features;
 pub mod scheduler;
 mod schema_inspection;
 pub mod services;
@@ -49,6 +51,11 @@ pub use assets::{
 };
 pub use bindings::{
     AuthorizedBinding, BindingRepository, DeploymentBindingRecord, NewDeploymentBinding,
+};
+pub use cache::{
+    CACHE_DATABASE_SCHEMA_VERSION, CacheBodyRef, CacheEngine, CacheHeader, CacheIdentity,
+    CacheLookup, CacheLookupStatus, CacheManager, CacheMethod, CachePaths, CachePurge, CachePut,
+    CacheStats, CacheStoredResponse, CacheSurface,
 };
 pub use control_db::ControlDb;
 pub use cron::{
@@ -123,6 +130,10 @@ pub use resources::{
     ResourceDeleteReservation, ResourceRecord, ResourceReferrer, ResourceRepository,
 };
 pub use restore_cleanup::{RestoreStagingCleanup, cleanup_restore_staging};
+pub use runtime_features::{
+    BuiltinBindingKind, DeploymentBuiltinBindingRecord, DeploymentCachePolicyRecord,
+    deployment_runtime_features,
+};
 pub use scheduler::{
     AlarmProjection, ClaimResult, ClaimedCronRun, ClaimedJob, ClaimedQueueBatch,
     ClaimedQueueMessage, CronCompletion, CronCompletionResult, CronInspectionSummary,

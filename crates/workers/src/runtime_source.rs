@@ -3,15 +3,17 @@
 use crate::assets::{AssetManifestV1, AssetRoutingConfigV1};
 use crate::bundle::{BundleLimits, CanonicalBundle, ModuleType};
 use crate::descriptor::{
-    BindingDescriptorV1, QueueProducerBindingDescriptorV1, SecretDescriptor, ServiceDescriptorV1,
-    WorkerCodeDescriptorV1, ciphertext_sha256, parse_loader_key,
+    BindingDescriptorV1, BuiltinBindingDescriptorKindV1, BuiltinBindingDescriptorV1,
+    CacheEntrypointPolicyV1, CachePolicyDescriptorV1, QueueProducerBindingDescriptorV1,
+    SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1, ciphertext_sha256,
+    parse_loader_key,
 };
 use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
 use open_compute_core::{BindingKind, ErrorCode, PlatformError, SecretString};
 use open_compute_storage::{
-    DeploymentContentKind, DeploymentState, DurableObjectRepository, PlatformStorage,
-    WorkerRepository,
+    BuiltinBindingKind, DeploymentContentKind, DeploymentState, DurableObjectRepository,
+    PlatformStorage, WorkerRepository,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -25,7 +27,7 @@ pub enum RuntimeScope {
     Runtime,
     /// Only a currently validating deployment; secrets are omitted.
     Validation,
-    /// Only a ready deployment used to prove a named export; secrets are omitted.
+    /// A validating or ready deployment used to prove a named export; secrets are omitted.
     Probe,
 }
 
@@ -119,6 +121,47 @@ pub struct RuntimeServiceBinding {
     pub descriptor_sha256: String,
 }
 
+/// Verified automatic response-cache policy projected to the loaded isolate wrapper.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCachePolicy {
+    /// Default export policy.
+    pub enabled: bool,
+    /// Default cross-version cache scope.
+    pub cross_version_cache: bool,
+    /// Whether automatic lookup availability failures bypass to tenant code.
+    pub fail_open: bool,
+    /// Named entrypoint overrides.
+    pub entrypoints: BTreeMap<String, CacheEntrypointPolicyV1>,
+}
+
+/// Verified platform-provided Images binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeImagesBinding {
+    /// Tenant environment name.
+    pub name: String,
+    /// Independently verified canonical descriptor digest.
+    pub descriptor_sha256: String,
+}
+
+/// Verified immutable deployment Version Metadata binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeVersionMetadataBinding {
+    /// Tenant environment name.
+    pub name: String,
+    /// Immutable deployment ID.
+    pub id: String,
+    /// Optional application release tag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Immutable deployment creation timestamp in Unix milliseconds.
+    pub timestamp_ms: i64,
+    /// Independently verified canonical descriptor digest.
+    pub descriptor_sha256: String,
+}
+
 /// Optional static-assets fetch capability exposed under one declared env name.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -168,6 +211,12 @@ pub struct RuntimeSnapshot {
     pub workflow_bindings: Vec<RuntimeWorkflowBinding>,
     /// Verified lazy Service declarations.
     pub services: Vec<RuntimeServiceBinding>,
+    /// Verified automatic response-cache policy.
+    pub cache_policy: RuntimeCachePolicy,
+    /// Optional local Images capability.
+    pub images_binding: Option<RuntimeImagesBinding>,
+    /// Optional immutable Version Metadata environment object.
+    pub version_metadata_binding: Option<RuntimeVersionMetadataBinding>,
     /// Optional deployment-scoped static-assets fetch capability.
     pub asset_binding: Option<RuntimeAssetBinding>,
     /// Optional verified static assets used by the trusted default HTTP router.
@@ -189,6 +238,12 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("queue_binding_count", &self.queue_bindings.len())
             .field("workflow_binding_count", &self.workflow_bindings.len())
             .field("service_count", &self.services.len())
+            .field("cache_enabled", &self.cache_policy.enabled)
+            .field("images_binding", &self.images_binding.is_some())
+            .field(
+                "version_metadata_binding",
+                &self.version_metadata_binding.is_some(),
+            )
             .field("asset_binding", &self.asset_binding.is_some())
             .finish_non_exhaustive()
     }
@@ -227,6 +282,7 @@ pub struct RuntimeSource {
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     cache: Option<Arc<ArtifactCache>>,
+    cache_fail_open: bool,
     limits: BundleLimits,
 }
 
@@ -252,6 +308,7 @@ impl RuntimeSource {
             storage,
             artifacts,
             cache: None,
+            cache_fail_open: true,
             limits,
         }
     }
@@ -260,6 +317,13 @@ impl RuntimeSource {
     #[must_use]
     pub fn with_cache(mut self, cache: Arc<ArtifactCache>) -> Self {
         self.cache = Some(cache);
+        self
+    }
+
+    /// Apply the operator-owned automatic-cache availability policy.
+    #[must_use]
+    pub const fn with_cache_fail_open(mut self, fail_open: bool) -> Self {
+        self.cache_fail_open = fail_open;
         self
     }
 
@@ -283,7 +347,7 @@ impl RuntimeSource {
             account_id,
             worker_id,
             deployment_id,
-            scope == RuntimeScope::Validation,
+            matches!(scope, RuntimeScope::Validation | RuntimeScope::Probe),
         )?;
         match scope {
             RuntimeScope::Runtime if snapshot.deployment.state != DeploymentState::Ready => {
@@ -294,7 +358,12 @@ impl RuntimeSource {
             {
                 return Err(not_ready());
             }
-            RuntimeScope::Probe if snapshot.deployment.state != DeploymentState::Ready => {
+            RuntimeScope::Probe
+                if !matches!(
+                    snapshot.deployment.state,
+                    DeploymentState::Validating | DeploymentState::Ready
+                ) =>
+            {
                 return Err(not_ready());
             }
             RuntimeScope::Runtime | RuntimeScope::Validation | RuntimeScope::Probe => {}
@@ -468,10 +537,65 @@ impl RuntimeSource {
                 descriptor_sha256: hex::encode(digest),
             });
         }
+        let mut cache_policy = CachePolicyDescriptorV1::default();
+        for policy in &snapshot.cache_policies {
+            match &policy.entrypoint {
+                None => {
+                    cache_policy.enabled = policy.enabled;
+                    cache_policy.cross_version_cache = policy.cross_version_cache;
+                }
+                Some(name) => {
+                    cache_policy.entrypoints.insert(
+                        name.clone(),
+                        CacheEntrypointPolicyV1 {
+                            enabled: policy.enabled,
+                            cross_version_cache: policy.cross_version_cache,
+                        },
+                    );
+                }
+            }
+        }
+        cache_policy.validate()?;
+        let mut builtin_descriptors = Vec::with_capacity(snapshot.builtin_bindings.len());
+        let mut images_binding = None;
+        let mut version_metadata_binding = None;
+        for binding in &snapshot.builtin_bindings {
+            let kind = match binding.kind {
+                BuiltinBindingKind::Images => BuiltinBindingDescriptorKindV1::Images,
+                BuiltinBindingKind::VersionMetadata => {
+                    BuiltinBindingDescriptorKindV1::VersionMetadata
+                }
+            };
+            let descriptor =
+                BuiltinBindingDescriptorV1::new(binding.name.clone(), kind, binding.tag.clone())?;
+            let digest = descriptor.sha256()?;
+            if digest != binding.descriptor_sha256 {
+                return Err(invariant());
+            }
+            match binding.kind {
+                BuiltinBindingKind::Images => {
+                    images_binding = Some(RuntimeImagesBinding {
+                        name: binding.name.clone(),
+                        descriptor_sha256: hex::encode(digest),
+                    });
+                }
+                BuiltinBindingKind::VersionMetadata => {
+                    version_metadata_binding = Some(RuntimeVersionMetadataBinding {
+                        name: binding.name.clone(),
+                        id: deployment_id.to_string(),
+                        tag: binding.tag.clone(),
+                        timestamp_ms: snapshot.deployment.created_at_ms,
+                        descriptor_sha256: hex::encode(digest),
+                    });
+                }
+            }
+            builtin_descriptors.push(descriptor);
+        }
         let descriptor = WorkerCodeDescriptorV1::new(
             account_id,
             worker_id,
             deployment_id,
+            snapshot.deployment.created_at_ms,
             bundle
                 .as_ref()
                 .map(|bundle| (bundle.sha256(), bundle.manifest())),
@@ -486,6 +610,8 @@ impl RuntimeSource {
             queue_binding_descriptors,
             workflow_binding_descriptors,
             service_descriptors,
+            cache_policy.clone(),
+            builtin_descriptors,
             snapshot.deployment.limits.clone(),
             snapshot.deployment.loader_schema_version,
         )?;
@@ -545,6 +671,14 @@ impl RuntimeSource {
             queue_bindings: runtime_queue_bindings,
             workflow_bindings: runtime_workflow_bindings,
             services: runtime_services,
+            cache_policy: RuntimeCachePolicy {
+                enabled: cache_policy.enabled,
+                cross_version_cache: cache_policy.cross_version_cache,
+                fail_open: self.cache_fail_open,
+                entrypoints: cache_policy.entrypoints,
+            },
+            images_binding,
+            version_metadata_binding,
             asset_binding,
             assets: assets.map(|(manifest, routing)| RuntimeAssets { manifest, routing }),
             limits: snapshot.deployment.limits,
@@ -577,6 +711,11 @@ impl RuntimeSource {
             env: BTreeMap<&'a str, serde_json::Value>,
             bindings: Vec<BindingPayload<'a>>,
             services: &'a [RuntimeServiceBinding],
+            cache_policy: &'a RuntimeCachePolicy,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            images_binding: Option<&'a RuntimeImagesBinding>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            version_metadata_binding: Option<&'a RuntimeVersionMetadataBinding>,
             #[serde(skip_serializing_if = "Option::is_none")]
             asset_binding: Option<&'a RuntimeAssetBinding>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -671,6 +810,9 @@ impl RuntimeSource {
             env,
             bindings,
             services: &snapshot.services,
+            cache_policy: &snapshot.cache_policy,
+            images_binding: snapshot.images_binding.as_ref(),
+            version_metadata_binding: snapshot.version_metadata_binding.as_ref(),
             asset_binding: snapshot.asset_binding.as_ref(),
             assets: snapshot.assets.as_ref(),
             limits: &snapshot.limits,

@@ -1,8 +1,9 @@
-# P3.1：框架产物导入与 Static Assets
+# P3.1：Static Assets 与框架产物导入
 
-状态：平台实现与维护 Gate 已完成，阶段仍未完成。2026-08-29。SA-0/SA-5 所需的 P3.0
-固定输入元组尚不存在，因此 vinext App/Pages、真实浏览器 hydration 与框架产物报告未运行，
-不能据本次平台验收声称 vinext 已通过。
+状态（2026-08-29）：**平台核心实现完成，Cloudflare conformance qualification 待完成**。
+当前维护 Gate 已覆盖声明的本地产品矩阵；P3.4 所需的固定 Cloudflare contract catalog、portable
+fixture 与 differential 尚未执行，因此不能给最终 Platform Go。vinext App/Pages、真实浏览器
+hydration 与框架产物报告未运行，只影响独立 Application verdict，不否定或替代平台核心证据。
 
 本阶段把静态文件纳入现有不可变 deployment：框架构建产物经过导入、校验和上传后，代码、
 资源 manifest、路由配置一起 ready、promote、rollback。请求仍由一个 `platformd` 和一个
@@ -10,7 +11,7 @@
 
 本文细化[总方案](open-compute-workerd-platform.md)的 P3.1，向
 [Service Binding 方案](p3-2-service-bindings.md)提供统一的默认 HTTP 路由。P3.2 的 Node API
-适配、P3.3 的框架缓存/Images 和 P3.4 的全量 vinext 对齐仍是独立工作，不以本阶段通过代替。
+适配、P3.3 的通用 Cache/Images 和 P3.4 的 Cloudflare conformance 仍是独立工作，不以本阶段通过代替。
 
 ## 1. 基线与进入条件
 
@@ -32,13 +33,18 @@
 当前源码仍有历史命名不意味着新增实现应复制这些模式。平台 SQL 按当前模型整理，并同步
 校验和、装配和测试；不自动重置使用者的数据目录。
 
-### 1.2 固定输入
+### 1.2 平台契约与应用样本
 
-沿用总方案的 vinext 源码基线
+平台验收首先固定 Cloudflare Static Assets 官方配置/HTTP 契约、workers-sdk asset/router worker
+revision、正式 workerd pin、compatibility date/flags 与 portable fixtures；具体 catalog 和双端 adapter
+由后续 P3.4 统一拥有。不能从一个框架产物能否运行反推 Static Assets
+支持范围。
+
+应用 qualification 可以沿用总方案已勘察的 vinext 源码基线
 [`5d0b53088c689b75d63672eab6ff66434afa5b3b`](https://github.com/cloudflare/vinext/tree/5d0b53088c689b75d63672eab6ff66434afa5b3b)：
-`vinext 1.0.0-beta.8`、`@vinext/cloudflare 1.0.0-beta.6`。它只是已勘察基线。
-开始框架验收前，P3.0 必须补齐包锁、React/Vite/RSC 插件、浏览器、构建工具、用例清单及
-open-compute revision 的完整输入元组，不能声称已经安装或运行。
+`vinext 1.0.0-beta.8`、`@vinext/cloudflare 1.0.0-beta.6`。它只是可选应用样本，不是平台
+规范。开始该应用验收前，必须另行补齐包锁、React/Vite/RSC 插件、浏览器、构建工具、用例清单
+及 open-compute revision 的完整输入元组，不能声称已经安装或运行。
 
 正式运行时使用 [workerd lock](../packages/runtime/workerd.lock.json)；当前为
 `v1.20260826.1`。本阶段不隐式升级或下载运行时。接入点按
@@ -64,8 +70,8 @@ Wrangler 管理 API。资源缓存不是 `caches.default`，也不是 vinext 的
 
 Range、预压缩变体、图片转换没有因为“静态服务器通常有”就自动成为承诺。当前参考
 asset-worker handler 不提供一个可直接照搬的完整 Range 实现：首版可以按该基线忽略 Range
-返回完整 200，不能伪造 206/416 或 `Accept-Ranges: bytes`。若 P3.0 的启用用例要求这些能力，
-应补充实现与对应矩阵后才算相关用例通过，不能改断言绕过。
+返回完整 200，不能伪造 206/416 或 `Accept-Ranges: bytes`。若 contract catalog 把这些能力标成
+supported，应补充实现与对应矩阵后才算相关用例通过，不能改断言绕过。
 
 ## 3. 组件与请求路径
 
@@ -186,8 +192,9 @@ manifest 不含本机绝对路径、S3 endpoint/key、访问 token、secret 或 
 | 上传会话 | 2 / Worker，24 小时有效 | 到期不删除 ready deployment 引用 |
 | 路由规则 | Worker-first 100 条 | 解析复杂度、单条长度另有限制 |
 
-`_headers`、`_redirects` 的规则数、行长沿用固定上游 parser 限制。执行 SA-0 时以真实 vinext
-产物确认以上默认值；调整进入普通 operator 配置与边界测试，不为 fixture 放宽，不关掉限制。
+`_headers`、`_redirects` 的规则数、行长沿用固定上游 parser 限制。执行 SA-0 时以 portable asset
+corpus 确认以上默认值；可选应用样本只提供额外分布观察，不定义平台限额。调整进入普通 operator
+配置与边界测试，不为 fixture 放宽，不关掉限制。
 
 ## 5. SQLite、对象引用与上传协议
 
@@ -414,21 +421,24 @@ GC 随后删除，接着 ready”的竞态。缓存淘汰单独管理，不得�
 
 | 顺序 | 工作包 | 必须先有 | 交付与退出条件 |
 | --- | --- | --- | --- |
-| SA-0 | 真实产物清点与 HTTP 契约 | P3.0 输入元组 | App/Pages/static-export 产物报告、模块/资源界限、配额样本、固定上游路由矩阵 |
-| SA-1 | domain/schema/descriptor | SA-0 | 三种 deployment 类型、统一 binding 名检查、对象引用与会话状态机的事务测试 |
+| SA-0 | Static Assets contract 与 portable fixture | P3.0 平台输入 | 官方配置/HTTP/source 映射、模块/资源界限、配额样本、固定上游路由矩阵 |
+| SA-1 | domain/schema/descriptor | SA-0 契约范围 | 三种 deployment 类型、统一 binding 名检查、对象引用与会话状态机的事务测试 |
 | SA-2 | 上传、导入与 ready | SA-1 | importer/CLI、流式上传、摘要校验、幂等 resume、静态部署和正常 Worker validation |
 | SA-3 | 资源 handler 与默认路由 | SA-2 | 同一份匹配/响应逻辑；public/ASSETS；HTML/SPA/rules 与冷暖一致性 |
 | SA-4 | 生命周期与运维 | SA-3、共同存活期证明 | publish/rollback、后台任务、GC/备份、故障/取消/重启矩阵 |
-| SA-5 | 产品与框架中间验收 | SA-4 | 真实 JS/CSS/fonts、hydration、静态导出及阶段结果文档 |
+| SA-5 | 产品 conformance qualification | SA-4、P3.4 harness | portable fixture 在 platformd/Cloudflare 的结果、deviation 与阶段报告 |
+| SA-A1 | 可选应用 qualification | SA-5、独立应用 baseline | 选定 App/Pages/static-export workload 的 JS/CSS/fonts、hydration 和应用报告 |
 
 SA-0 是产品测试和源码契约工作，不恢复已退役的 `/poc` 工程。Service 的 SB-0 可提前验证
 共同存活期风险；实现顺序以依赖为准，不要求把所有资产功能做完才发现 pin 协议不成立。
+当前 SA-1 至 SA-4 的实现早于正式 P3.4 catalog；这些 Gate 仍是有效核心证据，但必须由 SA-0/SA-5
+反向映射和补差，不能因为代码已经存在就跳过 contract qualification。
 
 ### 10.2 最小测试矩阵
 
 | Gate 类别 | 必须观察的结果 |
 | --- | --- |
-| 导入 | App/Pages 输出可导入；server/client 隔离；hash chunk/dynamic import 保持；static export 无伪 Worker |
+| 导入 | 普通 Worker + Assets、Assets-only 与固定多图产物可导入；server/client 隔离；hash chunk/dynamic import 保持；static export 无伪 Worker |
 | 扫描 | ignore、链接替换/逃逸、重名、特殊文件、超限、坏 MIME/CRLF、secret canary 正确拒绝或隔离 |
 | 部署 | 新增/修改/删除资源改变 descriptor；上传缺块/错 hash 不 ready；幂等冲突和 resume 不多造部署 |
 | 基本 HTTP | GET/HEAD、MIME、ETag/304、无 body、缺失响应、显式 Range 策略与已声明配置一致 |
@@ -438,12 +448,13 @@ SA-0 是产品测试和源码契约工作，不恢复已退役的 `/poc` 工程�
 | 一致性 | 请求途中 promote/rollback 不混资源；旧 Worker 的 ASSETS 保持旧版；跨请求切换边界单列 |
 | 流与清理 | 慢读、取消、半包、S3 超时/损坏、磁盘满、waitUntil；已开始执行与 pin 释放有实际证据 |
 | GC/恢复 | 上传与 GC 并发、保留旧部署/备份、删除共享对象拒绝、两进程 crash/restart 后引用不丢 |
-| 框架 | 浏览器确实下载 JS/CSS/fonts 并 hydration，无 console/network 错误；不是只断言 HTML 200 |
+| 可选应用 | 浏览器确实下载 JS/CSS/fonts 并 hydration，无 console/network 错误；不是只断言 HTML 200；结果只进入 Application verdict |
 
 全部对照使用固定上游测试名称/断言与输入身份，不依赖网页截图判断行为。对失败要区分
 上游本来未启用、平台错误、尚未执行和外部条件；新的 skip/fixme 或平台失败不能算通过。
 S3 协议夹具用于确定故障时序，实际配置的 provider 另有集成验证，不把 mock 成功写成 provider
-已通过。旧 G0 `D-abort` 仅保留既有边界，不豁免上传中断、流错误、pin 和框架测试。
+已通过。旧 G0 `D-abort` 仅保留既有边界，不豁免上传中断、流错误、pin 或已声明平台 contract；
+应用失败另按 Application verdict 分类。
 
 ### 10.3 文件与测试入口
 
@@ -466,7 +477,8 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py p3-assets
 Rust 静态检查与 coverage（保持 90% 门槛），最后统一验收：完整 workspace 一轮、登记的时序
 用例补两轮。新增 Gate 同时登记完整用例及重复归属；固定协议/路径矩阵不机械重复。一次构建、目标去重，
 新增目标经隔离审查后才并行；不递归调用旧 `test-p*.sh`，不要求重跑已退役 POC。
-真实浏览器/框架测试单独接入同一证据清单，不能因 Rust Gate 通过就标为已运行。
+真实浏览器/框架测试使用独立 application manifest 和报告，不能因 Rust Gate 通过就标为已运行，
+也不能因它未运行就抹去已有平台产品 Gate。
 
 阶段报告记录固定输入、逐项用例结果、失败/未运行项、配额测量、cold/warm 延迟、字节与
 内存/磁盘峰值、GC/恢复证据和来源许可证。完成后再把设计与结果归档 `docs/implemented/`。
@@ -504,6 +516,8 @@ deploy 协议，受信任默认 HTTP router 与显式 assets binding，以及 de
   HTML/redirect/404、Worker-first 规则、显式 binding、伪造内部 header、跨版本不可变性和
   删除存活围栏。
 
-仍未执行 SA-0/SA-5：仓库没有 P3.0 定义的 vinext/React/Vite/RSC/browser 固定输入元组，且本次
-未获授权下载这些运行时依赖。因此本文保持在 `docs/`，不归档到 `docs/implemented/`。这不否定
-上述平台实现和维护 Gate 结果，也不把它们扩写成真实框架或浏览器验收。
+仍未执行新的 SA-0/SA-5 conformance qualification：仓库尚无 P3.4 定义的 contract catalog、portable
+fixture 和真实 Cloudflare 对照证据，因此本文保持在 `docs/`，不归档到 `docs/implemented/`。
+vinext/React/Vite/RSC/browser 的独立应用输入元组也不存在，Application verdict 为“未评估”；它
+不是 Platform Go 的前置条件。上述两项都不否定当前平台实现和维护 Gate，也不能由这些 Gate 推导为
+Cloudflare differential 或真实框架浏览器验收已经完成。

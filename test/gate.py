@@ -53,6 +53,7 @@ TARGETS = {
     'p3-assets': ('open-compute-service', 'p3_assets_gate', False),
     'p3-services-hard': ('open-compute-service', 'p3_services_hard', False),
     'p3-services-product': ('open-compute-service', 'p3_services_product', False),
+    'p3-cache-images': ('open-compute-service', 'p3_cache_images_gate', False),
     # Finish independent work together before the remaining exclusive barriers.
     'workflow-product': ('open-compute-service', 'workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),

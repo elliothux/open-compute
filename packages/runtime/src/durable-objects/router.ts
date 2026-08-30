@@ -4,9 +4,11 @@ import type { DoHostEnv, DoPolicy, DoPolicyEnv, ResolvedDoAuthority } from "./pr
 export {
   AlarmIndex,
   AssetTransport,
+  CacheTransport,
   D1Transport,
   DoTransport,
   KVNamespace,
+  ImageTransport,
   OutboundGateway,
   QueueTransport,
   R2Transport,

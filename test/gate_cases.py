@@ -73,6 +73,10 @@ TIMING = {
     'p3-services-product': (
         'p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix',
     ),
+    # Owns background cache commits, refresh/purge fencing, and native transform admission.
+    'p3-cache-images': (
+        'p3_cache_images_real_runtime_semantics_and_lifecycle_matrix',
+    ),
     'runtime': (
         'argv_exact_stdin_fd3_and_auth_probe',
         'compile_failure_does_not_inherit_prior_exit',

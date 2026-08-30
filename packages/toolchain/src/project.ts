@@ -18,6 +18,16 @@ export interface WorkerService {
   entrypoint?: string;
 }
 
+export interface RuntimeFeatures {
+  cache: {
+    enabled: boolean;
+    crossVersionCache: boolean;
+    entrypoints: Record<string, { enabled: boolean; crossVersionCache: boolean }>;
+  };
+  images?: { binding: string };
+  versionMetadata?: { binding: string; tag?: string };
+}
+
 /** Developer project configuration. Secret values never belong in this document. */
 export interface WorkerProject {
   readonly project: string;
@@ -31,6 +41,7 @@ export interface WorkerProject {
   readonly secrets: Record<string, { env: string }>;
   readonly bindings: Record<string, WorkerBinding>;
   readonly services: Record<string, WorkerService>;
+  readonly runtimeFeatures: RuntimeFeatures;
   readonly assets?: AssetsProject;
   readonly accountId?: string;
   readonly endpoint: string;
@@ -58,6 +69,60 @@ function knownKeys(value: Record<string, unknown>, allowed: readonly string[], l
   if (Object.keys(value).some(key => !allowed.includes(key))) throw new Error(`unknown ${label} field`);
 }
 
+function cachePolicy(value: unknown, inherited?: { enabled: boolean; crossVersionCache: boolean }) {
+  if (value === undefined) return inherited ?? { enabled: false, crossVersionCache: false };
+  if (!record(value)) throw new Error("invalid cache policy");
+  knownKeys(value, ["enabled", "cross_version_cache"], "cache policy");
+  const enabled = value.enabled ?? inherited?.enabled ?? false;
+  const crossVersionCache = value.cross_version_cache ?? inherited?.crossVersionCache ?? false;
+  if (typeof enabled !== "boolean" || typeof crossVersionCache !== "boolean") throw new Error("invalid cache policy");
+  return { enabled, crossVersionCache };
+}
+
+/** Parse the one shared runtime-feature grammar used by projects and framework output. */
+export function parseRuntimeFeatures(
+  value: Record<string, unknown>,
+  occupied: ReadonlySet<string> = new Set(),
+): RuntimeFeatures {
+  let defaultPolicy = cachePolicy(value.cache);
+  const entrypoints: Record<string, { enabled: boolean; crossVersionCache: boolean }> = {};
+  if (value.exports !== undefined) {
+    if (!record(value.exports) || Object.keys(value.exports).length > 128) throw new Error("invalid Worker exports");
+    for (const [name, raw] of Object.entries(value.exports)) {
+      if (!record(raw)) throw new Error("invalid Worker export");
+      knownKeys(raw, ["type", "cache"], "Worker export");
+      if (raw.type !== "worker" || !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(name)) {
+        throw new Error("invalid Worker export");
+      }
+      const policy = cachePolicy(raw.cache, defaultPolicy);
+      if (name === "default") defaultPolicy = policy;
+      else Object.defineProperty(entrypoints, name, { value: policy, enumerable: true });
+    }
+  }
+  const binding = (raw: unknown, label: string, tag = false) => {
+    if (raw === undefined) return undefined;
+    if (!record(raw)) throw new Error(`invalid ${label}`);
+    knownKeys(raw, tag ? ["binding", "tag"] : ["binding"], label);
+    const name = string(raw.binding, `${label} binding`);
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name) || occupied.has(name)) {
+      throw new Error(`${label} binding conflicts with another environment name`);
+    }
+    if (tag && raw.tag !== undefined && (typeof raw.tag !== "string" || !raw.tag.length
+        || raw.tag.length > 128 || /[\u0000-\u001f\u007f]/.test(raw.tag))) throw new Error("invalid version metadata tag");
+    return { binding: name, ...(tag && raw.tag !== undefined ? { tag: raw.tag as string } : {}) };
+  };
+  const images = binding(value.images, "images");
+  const versionMetadata = binding(value.version_metadata, "version metadata", true);
+  if (images && versionMetadata && images.binding === versionMetadata.binding) {
+    throw new Error("platform binding names conflict");
+  }
+  return {
+    cache: { ...defaultPolicy, entrypoints },
+    ...(images === undefined ? {} : { images }),
+    ...(versionMetadata === undefined ? {} : { versionMetadata }),
+  };
+}
+
 /** Load bounded JSON without evaluating a project-supplied configuration module. */
 export async function loadProject(path: string): Promise<WorkerProject> {
   const filename = resolve(path);
@@ -80,7 +145,7 @@ export async function loadProject(path: string): Promise<WorkerProject> {
   try { value = JSON.parse(content); }
   catch { throw new Error("project config must be valid JSON"); }
   if (!record(value)) throw new Error("project config must be an object");
-  knownKeys(value, ["main", "frameworkOutput", "name", "tsconfig", "compatibilityDate", "compatibilityFlags", "vars", "secrets", "bindings", "services", "assets", "accountId", "endpoint"], "project");
+  knownKeys(value, ["main", "frameworkOutput", "name", "tsconfig", "compatibilityDate", "compatibilityFlags", "vars", "secrets", "bindings", "services", "assets", "cache", "exports", "images", "version_metadata", "accountId", "endpoint"], "project");
   const name = string(value.name, "name");
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) throw new Error("invalid Worker name");
   const compatibilityDate = string(value.compatibilityDate, "compatibilityDate");
@@ -194,6 +259,10 @@ export async function loadProject(path: string): Promise<WorkerProject> {
       publishSourceMaps: value.assets.publish_source_maps === true,
     };
   }
+  const runtimeFeatures = parseRuntimeFeatures(value, new Set([
+    ...Object.keys(variables), ...Object.keys(secrets), ...Object.keys(bindings),
+    ...Object.keys(services), ...(assets?.binding === undefined ? [] : [assets.binding]),
+  ]));
   const main = value.main === undefined ? undefined : string(value.main, "main");
   const frameworkOutput = value.frameworkOutput === undefined
     ? undefined : string(value.frameworkOutput, "frameworkOutput");
@@ -206,6 +275,8 @@ export async function loadProject(path: string): Promise<WorkerProject> {
   if (main === undefined && assets !== undefined
       && (Object.keys(variables).length || Object.keys(secrets).length || Object.keys(bindings).length
         || Object.keys(services).length
+        || runtimeFeatures.cache.enabled || Object.keys(runtimeFeatures.cache.entrypoints).length
+        || runtimeFeatures.images !== undefined || runtimeFeatures.versionMetadata !== undefined
         || runWorkerFirstRequiresCode(assets.runWorkerFirst))) {
     throw new Error("assets-only projects cannot declare an execution environment");
   }
@@ -214,6 +285,7 @@ export async function loadProject(path: string): Promise<WorkerProject> {
     ...(frameworkOutput === undefined ? {} : { frameworkOutput }), name,
     tsconfig: value.tsconfig === undefined ? "tsconfig.json" : string(value.tsconfig, "tsconfig"),
     compatibilityDate, compatibilityFlags: flags, vars: variables, secrets, bindings, services,
+    runtimeFeatures,
     ...(assets === undefined ? {} : { assets }),
     ...(value.accountId === undefined ? {} : { accountId: string(value.accountId, "accountId") }),
     endpoint: value.endpoint === undefined ? "http://127.0.0.1:8787" : string(value.endpoint, "endpoint"),

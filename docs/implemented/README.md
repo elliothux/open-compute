@@ -38,6 +38,7 @@
 | 2026-08-29 | [Runtime 包与测试流程整理](runtime-and-test-layout.md) | [实测与验收](runtime-and-test-layout-results.md)：未跟踪 dist 可复现构建、POC 收敛、统一并行调度；六目标串行/四并行 148.10/70.98 秒，workspace 690 用例、90.16% 覆盖率、最终 23 目标各三轮通过；跨平台和正式发行未验证 |
 | 2026-08-29 | [按用例选择验收轮数](test-repetition.md) | 完整 workspace 690 用例一次、43 个时序用例追加两次，70 个宿主执行/776 次用例全部通过；90.15% 行覆盖率，同条件追加轮墙钟减少 16.85%；重启后 macOS 签名服务仍崩溃一次并自行恢复，系统缺陷未根治，跨平台和正式发行未验证 |
 | 2026-08-29 | [Day1 架构清理](day1-architecture-cleanup.md) | [验收记录](day1-architecture-cleanup-results.md)：清单 1–17 与 artifact GC 完成；coverage 32 目标通过、90.02% 行覆盖率；最终完整 32 目标 / 662 用例一轮及 17 目标 / 42 个时序用例追加两轮全部通过 |
+| 2026-08-30 | [P3.3 Workers Cache、Cache API 与 Images](p3-3-workers-cache-images.md) | 声明的单节点支持面 Platform Go：完整 37 目标 coverage 通过、Rust 行覆盖率 90.10%，最终完整 37 目标一轮及 19 个登记时序目标追加两轮全部通过；Cloudflare differential、跨平台发行与第三方应用 qualification 未纳入结论 |
 
 ## 仍在维护或尚未完成
 
@@ -45,9 +46,9 @@
   不把已完成的 P1 核心实现重新列为待实现。
 - [平台方案](../open-compute-workerd-platform.md)：单机 Cloudflare Workers Platform 兼容目标尚未完成
   P3 conformance；vinext 只是独立应用 qualification，不定义平台完成状态。
-- [P3.1 Static Assets](../p3-1-static-assets.md)、[P3.2 Service Binding](../p3-2-service-bindings.md)、
-  [P3.3 Cache/Images](../p3-3-workers-cache-images.md)与
-  [P3.4 Cloudflare conformance](../p3-4-cloudflare-conformance.md)：仍在实施或资格验收，未归档。
+- [P3.1 Static Assets](../p3-1-static-assets.md)与[P3.2 Service Binding](../p3-2-service-bindings.md)：
+  核心实现已有证据，剩余资格验收仍在各自文档中维护。
+- P3.4 Cloudflare conformance：尚未纳入本次实现与验收；不能从已归档的 P3.3 推导完整兼容结论。
 - [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 

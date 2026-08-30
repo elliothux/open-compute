@@ -191,6 +191,10 @@ pub struct DeploymentSnapshot {
     pub workflow_bindings: Vec<crate::WorkflowBindingRecord>,
     /// Immutable cross-Worker Service declarations ordered by env name.
     pub services: Vec<crate::DeploymentServiceRecord>,
+    /// Immutable default and named-entrypoint automatic-cache policies.
+    pub cache_policies: Vec<crate::DeploymentCachePolicyRecord>,
+    /// Immutable platform-provided environment bindings.
+    pub builtin_bindings: Vec<crate::DeploymentBuiltinBindingRecord>,
 }
 
 /// Route kind supported by P0.2.
@@ -729,6 +733,14 @@ impl<'a> WorkerRepository<'a> {
                     deployment_id,
                 )?,
                 services: crate::services::read_deployment_services_conn(conn, deployment_id)?,
+                cache_policies: crate::runtime_features::read_cache_policies_conn(
+                    conn,
+                    deployment_id,
+                )?,
+                builtin_bindings: crate::runtime_features::read_builtin_bindings_conn(
+                    conn,
+                    deployment_id,
+                )?,
             })
         })
     }

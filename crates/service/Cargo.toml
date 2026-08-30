@@ -27,10 +27,12 @@ futures.workspace = true
 hex.workspace = true
 md-5.workspace = true
 http-body-util.workspace = true
+httpdate.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 open-compute-artifacts = { path = "../artifacts" }
 open-compute-core = { path = "../core" }
+open-compute-images = { path = "../images" }
 open-compute-runtime = { path = "../runtime" }
 open-compute-storage = { path = "../storage" }
 open-compute-workers = { path = "../workers" }
@@ -52,6 +54,7 @@ base64.workspace = true
 futures.workspace = true
 hex.workspace = true
 hmac.workspace = true
+image.workspace = true
 open-compute-artifacts = { path = "../artifacts", features = ["test-support"] }
 open-compute-core = { path = "../core", features = ["test-support"] }
 open-compute-runtime = { path = "../runtime", features = ["test-support"] }

@@ -685,6 +685,7 @@ fn descriptor_binds_every_runtime_effective_input() {
         account,
         worker,
         deployment,
+        0,
         Some((bundle.sha256(), bundle.manifest())),
         None,
         "2026-08-22".to_owned(),
@@ -694,6 +695,8 @@ fn descriptor_binds_every_runtime_effective_input() {
         Vec::new(),
         Vec::new(),
         Vec::new(),
+        Vec::new(),
+        CachePolicyDescriptorV1::default(),
         Vec::new(),
         serde_json::json!({"profile": "default"}),
         1,
@@ -831,6 +834,7 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             account,
             worker,
             deployment,
+            0,
             Some((bundle.sha256(), bundle.manifest())),
             None,
             "2026-08-22".to_owned(),
@@ -840,6 +844,8 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
+            CachePolicyDescriptorV1::default(),
             Vec::new(),
             limits,
             1,
@@ -1161,6 +1167,7 @@ fn deployment_request(
         secrets,
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
+        runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile": "default"}),
@@ -1204,6 +1211,13 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
         DeploymentServiceInput {
             target_worker_id: target.id,
             entrypoint: Some("CatalogApi".to_owned()),
+        },
+    );
+    request.runtime_features.cache.entrypoints.insert(
+        "CachedApi".to_owned(),
+        DeploymentCachePolicyInput {
+            enabled: true,
+            cross_version_cache: false,
         },
     );
     let first = controller.create_deployment(request.clone()).await.unwrap();
@@ -1444,6 +1458,15 @@ async fn fixed_upload_finalize_resumes_one_cancelled_validating_deployment() {
         .get_deployment(account, worker.id, deployment_id)
         .unwrap();
     assert_eq!(stranded.state, DeploymentState::Validating);
+    let probe = RuntimeSource::new(storage.clone(), artifacts.clone(), BundleLimits::default())
+        .resolve(
+            &loader_key(account, worker.id, deployment_id),
+            &hex::encode(stranded.worker_code_sha256),
+            RuntimeScope::Probe,
+        )
+        .await
+        .unwrap();
+    assert!(probe.secrets.is_empty());
 
     let recovered = DeploymentController::new(
         &storage,
@@ -1531,6 +1554,7 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
+        runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({"profile": "default"}),

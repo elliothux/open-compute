@@ -14,6 +14,21 @@ export interface AssetBindingProps {
   deploymentId: string;
   descriptorSha256: string;
 }
+export interface CacheTransportProps {
+  accountId: string;
+  workerId: string;
+  deploymentId: string;
+  entrypoint: string;
+  descriptorSha256: string;
+  automaticEnabled: boolean;
+  crossVersionCache: boolean;
+}
+export interface ImageTransportProps {
+  accountId: string;
+  workerId: string;
+  deploymentId: string;
+  descriptorSha256: string;
+}
 export interface ServiceBindingProps {
   deploymentId: string;
   bindingName: string;

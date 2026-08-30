@@ -20,9 +20,10 @@ use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
 use crate::descriptor::{
-    BindingDescriptorV1, QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX, SecretDescriptor,
-    ServiceDescriptorV1, WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256,
-    validate_env_name,
+    BindingDescriptorV1, BuiltinBindingDescriptorKindV1, BuiltinBindingDescriptorV1,
+    CacheEntrypointPolicyV1, CachePolicyDescriptorV1, QueueProducerBindingDescriptorV1,
+    SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1,
+    canonicalize_vars, ciphertext_sha256, validate_env_name,
 };
 use bytes::Bytes;
 use futures::stream;
@@ -33,7 +34,8 @@ use open_compute_core::{
     QueueId, RequestId, ResourceId, ResourceState, SecretBytes, SecretString, WorkerId,
 };
 use open_compute_storage::{
-    BindingRepository, CRON_PARSER_VERSION, CronDeclarationMode, DeploymentContentKind,
+    BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, CronDeclarationMode,
+    DeploymentBuiltinBindingRecord, DeploymentCachePolicyRecord, DeploymentContentKind,
     DeploymentObjectKind, DeploymentRecord, DeploymentState, DurableObjectRepository,
     IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration,
     NewDeployment, NewDeploymentAssets, NewDeploymentBinding, NewDeploymentObjectRef,
@@ -86,6 +88,64 @@ pub struct DeploymentServiceInput {
     /// Optional named `WorkerEntrypoint` export.
     #[serde(default)]
     pub entrypoint: Option<String>,
+}
+
+/// Automatic response-cache policy on the default or a named Worker entrypoint.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentCachePolicyInput {
+    /// Whether automatic response caching is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Whether automatic entries are shared across deployment versions.
+    #[serde(default)]
+    pub cross_version_cache: bool,
+}
+
+/// Deployment-wide automatic-cache configuration and named-entrypoint overrides.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentCacheInput {
+    /// Default export policy.
+    #[serde(flatten)]
+    pub default: DeploymentCachePolicyInput,
+    /// Named Worker entrypoint policy overrides.
+    #[serde(default)]
+    pub entrypoints: BTreeMap<String, DeploymentCachePolicyInput>,
+}
+
+/// One platform-provided Images binding declaration.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentImagesInput {
+    /// Tenant environment binding name.
+    pub binding: String,
+}
+
+/// One immutable deployment Version Metadata binding declaration.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentVersionMetadataInput {
+    /// Tenant environment binding name.
+    pub binding: String,
+    /// Optional application-supplied immutable release tag.
+    #[serde(default)]
+    pub tag: Option<String>,
+}
+
+/// Platform-provided runtime capabilities frozen with one deployment.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentRuntimeFeatures {
+    /// Automatic response-cache policy.
+    #[serde(default)]
+    pub cache: DeploymentCacheInput,
+    /// Optional local Images binding.
+    #[serde(default)]
+    pub images: Option<DeploymentImagesInput>,
+    /// Optional frozen Version Metadata binding.
+    #[serde(default)]
+    pub version_metadata: Option<DeploymentVersionMetadataInput>,
 }
 
 /// Immutable Queue push-consumer declaration supplied with a deployment.
@@ -220,6 +280,8 @@ pub struct CreateDeploymentRequest {
     pub bindings: BTreeMap<String, DeploymentBindingInput>,
     /// Immutable Service declarations keyed by tenant environment name.
     pub services: BTreeMap<String, DeploymentServiceInput>,
+    /// Platform-provided runtime capabilities.
+    pub runtime_features: DeploymentRuntimeFeatures,
     /// Immutable Queue push-consumer declarations.
     pub queue_consumers: Vec<QueueConsumerInput>,
     /// Omitted inherits the current Cron set; present replaces it, including an empty set.
@@ -636,10 +698,13 @@ impl<'a> DeploymentController<'a> {
         } = self.prepare_bindings(request, deployment_id)?;
         let queue_consumers = self.prepare_queue_consumers(request)?;
         let cron = prepare_cron_config(request)?;
+        let (cache_policy, mut cache_rows, builtin_descriptors, builtin_rows) =
+            prepare_runtime_features(&request.runtime_features)?;
         let descriptor = WorkerCodeDescriptorV1::new(
             request.account_id,
             request.worker_id,
             deployment_id,
+            request.now_ms,
             content
                 .bundle()
                 .map(|bundle| (bundle.sha256(), bundle.manifest())),
@@ -654,9 +719,14 @@ impl<'a> DeploymentController<'a> {
             queue_binding_descriptors,
             workflow_binding_descriptors,
             service_descriptors,
+            cache_policy,
+            builtin_descriptors,
             request.limits.clone(),
             u32::try_from(LOADER_SCHEMA_VERSION).map_err(|_| invariant())?,
         )?;
+        if content.kind() == DeploymentContentKind::AssetsOnly {
+            cache_rows.clear();
+        }
         let descriptor_hash = descriptor.sha256()?;
         let artifact_reservation = self.artifacts.reserve_deployment_artifact().await;
         let bundle_identity = if let Some(bundle) = content.bundle() {
@@ -703,21 +773,36 @@ impl<'a> DeploymentController<'a> {
                 queue_bindings: &stored_queue_bindings,
                 workflow_bindings: &stored_workflow_bindings,
                 services: &service_rows,
+                cache_policies: &cache_rows,
+                builtin_bindings: &builtin_rows,
                 queue_consumers: &queue_consumers,
                 cron: (content.kind() == DeploymentContentKind::Worker).then_some(&cron),
             },
             self.storage.hardening().max_deployments_per_worker,
         )?;
         drop(artifact_reservation);
-        let queue_entrypoints = queue_consumers
+        let requires_product_promoter = !queue_consumers.is_empty() || request.crons.is_some();
+        let queue_entrypoints: Vec<Option<String>> = queue_consumers
             .iter()
             .map(|consumer| consumer.entrypoint.clone())
+            .collect();
+        let cache_entrypoints = request
+            .runtime_features
+            .cache
+            .entrypoints
+            .iter()
+            .filter(|(_, policy)| policy.enabled)
+            .map(|(name, _)| Some(name.clone()));
+        let queue_entrypoints = queue_entrypoints
+            .into_iter()
+            .chain(cache_entrypoints)
             .collect();
         self.finish_reserved(
             request,
             deployment,
             durable_object_classes,
             queue_entrypoints,
+            requires_product_promoter,
         )
         .await
     }
@@ -762,16 +847,27 @@ impl<'a> DeploymentController<'a> {
         }
         durable_object_classes.sort();
         durable_object_classes.dedup();
-        let queue_entrypoints = QueueConsumerRepository::new(self.storage.db())
-            .deployment_declarations(deployment_id)?
+        let queue_declarations = QueueConsumerRepository::new(self.storage.db())
+            .deployment_declarations(deployment_id)?;
+        let requires_product_promoter = !queue_declarations.is_empty() || request.crons.is_some();
+        let mut queue_entrypoints = queue_declarations
             .into_iter()
             .map(|consumer| consumer.entrypoint)
-            .collect();
+            .collect::<Vec<_>>();
+        let (cache_policies, _) =
+            open_compute_storage::deployment_runtime_features(self.storage.db(), deployment_id)?;
+        queue_entrypoints.extend(
+            cache_policies
+                .into_iter()
+                .filter(|policy| policy.enabled && policy.entrypoint.is_some())
+                .map(|policy| policy.entrypoint),
+        );
         self.finish_reserved(
             request,
             deployment,
             durable_object_classes,
             queue_entrypoints,
+            requires_product_promoter,
         )
         .await
     }
@@ -782,6 +878,7 @@ impl<'a> DeploymentController<'a> {
         mut deployment: DeploymentRecord,
         durable_object_classes: Vec<String>,
         queue_entrypoints: Vec<Option<String>>,
+        requires_product_promoter: bool,
     ) -> Result<CreateDeploymentResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
         if deployment.state == DeploymentState::Rejected {
@@ -868,7 +965,7 @@ impl<'a> DeploymentController<'a> {
                 )?;
                 return Err(PlatformError::new(
                     code,
-                    "real workerd validation rejected a Queue consumer entrypoint",
+                    "real workerd validation rejected a named entrypoint",
                 ));
             }
         }
@@ -902,7 +999,7 @@ impl<'a> DeploymentController<'a> {
                         now_ms: request.now_ms,
                     })
                     .await?;
-            } else if !queue_entrypoints.is_empty() || request.crons.is_some() {
+            } else if requires_product_promoter {
                 return Err(PlatformError::new(
                     ErrorCode::QueueConsumerProjectionPending,
                     "Queue/Cron promotion coordinator is unavailable",
@@ -1037,6 +1134,84 @@ impl<'a> DeploymentController<'a> {
         }
         Ok((stored, descriptors))
     }
+}
+
+#[allow(clippy::type_complexity)]
+fn prepare_runtime_features(
+    input: &DeploymentRuntimeFeatures,
+) -> Result<
+    (
+        CachePolicyDescriptorV1,
+        Vec<DeploymentCachePolicyRecord>,
+        Vec<BuiltinBindingDescriptorV1>,
+        Vec<DeploymentBuiltinBindingRecord>,
+    ),
+    PlatformError,
+> {
+    let cache_policy = CachePolicyDescriptorV1 {
+        enabled: input.cache.default.enabled,
+        cross_version_cache: input.cache.default.cross_version_cache,
+        entrypoints: input
+            .cache
+            .entrypoints
+            .iter()
+            .map(|(name, policy)| {
+                (
+                    name.clone(),
+                    CacheEntrypointPolicyV1 {
+                        enabled: policy.enabled,
+                        cross_version_cache: policy.cross_version_cache,
+                    },
+                )
+            })
+            .collect(),
+    };
+    cache_policy.validate()?;
+    let mut cache_rows = vec![DeploymentCachePolicyRecord {
+        entrypoint: None,
+        enabled: cache_policy.enabled,
+        cross_version_cache: cache_policy.cross_version_cache,
+    }];
+    cache_rows.extend(cache_policy.entrypoints.iter().map(|(name, policy)| {
+        DeploymentCachePolicyRecord {
+            entrypoint: Some(name.clone()),
+            enabled: policy.enabled,
+            cross_version_cache: policy.cross_version_cache,
+        }
+    }));
+    let mut descriptors = Vec::new();
+    if let Some(images) = &input.images {
+        descriptors.push(BuiltinBindingDescriptorV1::new(
+            images.binding.clone(),
+            BuiltinBindingDescriptorKindV1::Images,
+            None,
+        )?);
+    }
+    if let Some(metadata) = &input.version_metadata {
+        descriptors.push(BuiltinBindingDescriptorV1::new(
+            metadata.binding.clone(),
+            BuiltinBindingDescriptorKindV1::VersionMetadata,
+            metadata.tag.clone(),
+        )?);
+    }
+    descriptors.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+    let rows = descriptors
+        .iter()
+        .map(|descriptor| {
+            Ok(DeploymentBuiltinBindingRecord {
+                name: descriptor.name.clone(),
+                kind: match descriptor.kind {
+                    BuiltinBindingDescriptorKindV1::Images => BuiltinBindingKind::Images,
+                    BuiltinBindingDescriptorKindV1::VersionMetadata => {
+                        BuiltinBindingKind::VersionMetadata
+                    }
+                },
+                tag: descriptor.tag.clone(),
+                descriptor_sha256: descriptor.sha256()?,
+            })
+        })
+        .collect::<Result<Vec<_>, PlatformError>>()?;
+    Ok((cache_policy, cache_rows, descriptors, rows))
 }
 
 fn validate_asset_content(

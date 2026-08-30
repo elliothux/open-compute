@@ -31,6 +31,40 @@ test("loads project-relative inputs and preserves JSON without reading secret va
   assert.deepEqual(result.secrets, { TOKEN: { env: "ABSENT_PROJECT_SECRET" } });
   assert.equal(result.bindings.DB.permissions.write, false);
   assert.deepEqual(result.services, { CATALOG: { service: "catalog", entrypoint: "CatalogApi" } });
+  assert.deepEqual(result.runtimeFeatures, {
+    cache: { enabled: false, crossVersionCache: false, entrypoints: {} },
+  });
+});
+
+test("parses cache, entrypoint, Images, and Version Metadata as one strict runtime contract", async t => {
+  const result = await loadProject(await fixture(t, {
+    ...config,
+    cache: { enabled: true, cross_version_cache: true },
+    exports: {
+      default: { type: "worker", cache: { enabled: false } },
+      Admin: { type: "worker", cache: { enabled: true, cross_version_cache: false } },
+    },
+    images: { binding: "IMAGES" },
+    version_metadata: { binding: "VERSION", tag: "release-1" },
+  }));
+  assert.deepEqual(result.runtimeFeatures, {
+    cache: {
+      enabled: false,
+      crossVersionCache: true,
+      entrypoints: { Admin: { enabled: true, crossVersionCache: false } },
+    },
+    images: { binding: "IMAGES" },
+    versionMetadata: { binding: "VERSION", tag: "release-1" },
+  });
+  for (const invalid of [
+    { cache: { enabled: true, unknown: true } },
+    { exports: { Bad: { type: "durable_object", cache: { enabled: true } } } },
+    { images: { binding: "1BAD" } },
+    { images: { binding: "SAME" }, version_metadata: { binding: "SAME" } },
+    { version_metadata: { binding: "VERSION", tag: "" } },
+  ]) {
+    await assert.rejects(loadProject(await fixture(t, { ...config, ...invalid })));
+  }
 });
 
 test("malformed config and plaintext secrets fail without echoing their contents", async t => {

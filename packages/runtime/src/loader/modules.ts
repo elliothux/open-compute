@@ -14,10 +14,12 @@ import workflowWrapperSource from "workflow-wrapper-source";
 import assetFacadeSource from "assets-facade-source";
 import serviceFacadeSource from "service-facade-source";
 import serviceScopeSource from "service-scope-source";
+import cacheFacadeSource from "cache-facade-source";
+import imagesFacadeSource from "images-facade-source";
 import {
-  ASSET_FACADE_MODULE, D1_FACADE_MODULE, DO_ALARM_SHIM_MODULE, DO_FACADE_MODULE, DO_ID_CODEC_MODULE,
+  ASSET_FACADE_MODULE, CACHE_FACADE_MODULE, D1_FACADE_MODULE, DO_ALARM_SHIM_MODULE, DO_FACADE_MODULE, DO_ID_CODEC_MODULE,
   DO_WRAPPER_MODULE, INTERNAL_MODULE_PREFIX, LOADED_ISOLATE_WRAPPER_MODULE,
-  QUEUE_FACADE_MODULE, R2_FACADE_MODULE, SERVICE_FACADE_MODULE, SERVICE_SCOPE_MODULE,
+  IMAGES_FACADE_MODULE, QUEUE_FACADE_MODULE, R2_FACADE_MODULE, SERVICE_FACADE_MODULE, SERVICE_SCOPE_MODULE,
   VALIDATION_MODULE, WORKFLOW_FACADE_MODULE,
   WORKFLOW_JSON_MODULE, WORKFLOW_RUNNER_MODULE, WORKFLOW_WRAPPER_MODULE,
   WRAPPER_RUNTIME_MODULE, generateBindingWrapper, generateValidationWrapper,
@@ -76,6 +78,9 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   if (has("queue_producer")) modules[QUEUE_FACADE_MODULE] = { js: queueFacadeSource };
   if (has("workflow")) modules[WORKFLOW_FACADE_MODULE] = { js: workflowFacadeSource };
   if (snapshot.assetBinding) modules[ASSET_FACADE_MODULE] = { js: assetFacadeSource };
+  const cacheAvailable = !durableObject && !workflow;
+  if (cacheAvailable) modules[CACHE_FACADE_MODULE] = { js: cacheFacadeSource };
+  if (snapshot.imagesBinding && cacheAvailable) modules[IMAGES_FACADE_MODULE] = { js: imagesFacadeSource };
   modules[SERVICE_FACADE_MODULE] = { js: serviceFacadeSource };
   if (workflow || has("workflow")) modules[WORKFLOW_JSON_MODULE] = { js: workflowJsonSource };
   if (workflow) {
@@ -90,6 +95,17 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
     js: generateBindingWrapper({
       mainModule: snapshot.mainModule, bindings: snapshot.bindings, services: snapshot.services,
       entrypointName, durableObject, workflow, assetBindingName: snapshot.assetBinding?.name,
+      imagesBindingName: cacheAvailable ? snapshot.imagesBinding?.name : undefined,
+      cacheAvailable,
+      cacheFailOpen: snapshot.cachePolicy.failOpen,
+      automaticCacheEntrypoints: entrypointName === undefined
+        ? Object.entries(snapshot.cachePolicy.entrypoints)
+          .filter(([, policy]) => policy.enabled)
+          .map(([name]) => name)
+        : [],
+      automaticCacheEnabled: !validation && cacheAvailable && (entrypointName === undefined
+        ? snapshot.cachePolicy.enabled
+        : (snapshot.cachePolicy.entrypoints[entrypointName]?.enabled ?? snapshot.cachePolicy.enabled)),
     }),
   };
   if (validation) {

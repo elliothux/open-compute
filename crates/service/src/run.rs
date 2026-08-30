@@ -2,6 +2,8 @@
 
 use crate::asset_backend::AssetBindingService;
 use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_assets};
+use crate::cache_backend::CacheBindingService;
+use crate::cache_images_http::CacheImagesApiState;
 use crate::capabilities::{platform_capabilities, platform_release_metadata};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
@@ -9,6 +11,7 @@ use crate::d1_http::D1ApiState;
 use crate::do_http::DoApiState;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState, SanitizedSupervisor};
+use crate::images_backend::ImageBindingService;
 use crate::kv_backend::SqliteKvBindingExecutor;
 use crate::kv_http::KvApiState;
 use crate::metrics::{
@@ -41,7 +44,9 @@ use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
     PlatformReleaseMeta, StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions,
 };
-use open_compute_storage::{DurableObjectRepository, PlatformStorage, WorkerRepository};
+use open_compute_storage::{
+    CacheManager, DurableObjectRepository, PlatformStorage, WorkerRepository,
+};
 use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins, RuntimeSource};
 use p1::{
     load_offline_metrics_receipts, refresh_metrics as refresh_p1_metrics,
@@ -352,6 +357,20 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             return Err(err);
         }
     };
+    let response_cache = Arc::new(
+        CacheBindingService::new(
+            storage.clone(),
+            store.clone(),
+            cache.clone(),
+            loaded.config.response_cache.clone(),
+        )?
+        .with_metrics(metrics.clone()),
+    );
+    let response_cache_manager = response_cache.manager();
+    let images = Arc::new(
+        ImageBindingService::new(storage.clone(), loaded.config.images.clone())
+            .with_metrics(metrics.clone()),
+    );
     metrics.set_cache(cache.total_bytes().await, cache.entry_count(), 0, 0);
     record(&opts, "cache");
     if let Err(err) = fail_after(&opts, FailAfterDummy::Cache, &metrics, StartStage::Cache) {
@@ -511,6 +530,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
     .with_cache(cache.clone())
+    .with_response_cache(response_cache_manager.clone())
     .with_queue_consumer_limit(loaded.config.queues.max_consumer_concurrency)
     .with_product_promoter(Arc::new(P23PromotionCoordinator::new(
         storage.clone(),
@@ -546,7 +566,16 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     .with_do_api(do_api)
     .with_queue_api(Some(queue_api))
     .with_workflow_api(Some(workflow_api))
-    .with_scheduler(Some(scheduler_service.clone()));
+    .with_scheduler(Some(scheduler_service.clone()))
+    .with_cache_images_api(CacheImagesApiState::new(
+        storage.clone(),
+        response_cache_manager.clone(),
+        images.clone(),
+        store.clone(),
+        loaded.config.workers.clone(),
+        snapshot_pins.clone(),
+        metrics.clone(),
+    ));
 
     let public_listener = match http::bind(public_addr).await {
         Ok(l) => l,
@@ -591,6 +620,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let maintenance_storage = storage.clone();
     let maintenance_store = store.clone();
     let maintenance_cache = cache.clone();
+    let maintenance_response_cache = response_cache_manager.clone();
     let maintenance_config = loaded.config.workers.clone();
     let maintenance_kv_config = loaded.config.kv.clone();
     let maintenance_r2_config = loaded.config.r2.clone();
@@ -616,9 +646,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                         &maintenance_storage,
                         &maintenance_store,
                         &maintenance_cache,
+                        &maintenance_response_cache,
                         &maintenance_pins,
                         &maintenance_config,
                         &maintenance_snapshot_pins,
+                        &maintenance_metrics,
                     ).await;
                     run_kv_maintenance(
                         &maintenance_storage,
@@ -658,8 +690,9 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             }
         }
     });
-    let runtime_source =
-        RuntimeSource::new(storage.clone(), store.clone(), bundle_limits).with_cache(cache.clone());
+    let runtime_source = RuntimeSource::new(storage.clone(), store.clone(), bundle_limits)
+        .with_cache(cache.clone())
+        .with_cache_fail_open(loaded.config.response_cache.fail_open);
     let mut shutdown_source = shutdown_rx.clone();
     let source_auth = generation_auth.clone();
     let runtime_source_task = tokio::spawn(async move {
@@ -699,6 +732,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         deployment_pins.clone(),
     ));
     let binding_service_invocations = service_invocations.clone();
+    let binding_images = images.clone();
     let binding_backend_task = tokio::spawn(async move {
         serve_binding_backend_with_assets(
             binding_backend_listener,
@@ -715,6 +749,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             Some(scheduler_store),
             binding_assets,
             binding_service_invocations,
+            Some(response_cache),
+            Some(binding_images),
             async move {
                 let _ = shutdown_binding.changed().await;
             },
@@ -782,6 +818,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let storage_watch = storage.clone();
     let service_invocations_watch = service_invocations;
     let deployment_pins_watch = deployment_pins.clone();
+    let images_watch = images;
     tokio::spawn(async move {
         let mut running_pid = None;
         let mut running_generation = None;
@@ -806,6 +843,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                     }
                     deployment_pins_watch.clear_generation_retentions();
                     metrics_watch.set_service_invocation_counts(0, 0, 0);
+                    if let Err(error) = images_watch.clear_sessions() {
+                        tracing::error!(
+                            code = error.code().as_str(),
+                            "failed to clear image sessions after runtime generation change"
+                        );
+                    }
                 }
                 running_pid = snap.pid;
                 running_generation = next_generation;
@@ -823,6 +866,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                 }
                 deployment_pins_watch.clear_generation_retentions();
                 metrics_watch.set_service_invocation_counts(0, 0, 0);
+                if let Err(error) = images_watch.clear_sessions() {
+                    tracing::error!(
+                        code = error.code().as_str(),
+                        "failed to clear image sessions after runtime stop"
+                    );
+                }
                 running_pid = None;
                 running_generation = None;
             }
@@ -1012,13 +1061,16 @@ fn join_scheduler(res: Result<Result<(), PlatformError>, tokio::task::JoinError>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_worker_maintenance(
     storage: &Arc<PlatformStorage>,
     store: &ArtifactStore,
     cache: &Arc<ArtifactCache>,
+    response_cache: &Arc<CacheManager>,
     pins: &DeploymentPins,
     config: &open_compute_core::WorkersConfig,
     snapshot_pins: &SnapshotPins,
+    metrics: &Arc<MetricsRegistry>,
 ) {
     let now = unix_ms();
     let storage_for_db = storage.clone();
@@ -1094,12 +1146,32 @@ async fn run_worker_maintenance(
             tracing::warn!("Worker retention finalization failed");
         }
     }
-    gc_worker_artifacts(storage, store, config, snapshot_pins).await;
+    if let Err(error) = gc_worker_artifacts(
+        storage,
+        store,
+        config,
+        snapshot_pins,
+        Some(response_cache.clone()),
+    )
+    .await
+    {
+        tracing::warn!(
+            code = error.code().as_str(),
+            "Worker artifact GC pass failed"
+        );
+    }
     if let Err(error) = cache.evict_if_needed().await {
         tracing::warn!(
             code = error.code().as_str(),
             "Worker cache eviction pass failed"
         );
+    }
+    match response_cache.stats(unix_ms()) {
+        Ok(stats) => metrics.set_response_cache_stats(stats),
+        Err(error) => tracing::warn!(
+            code = error.code().as_str(),
+            "Response cache metrics inspection failed"
+        ),
     }
 }
 
@@ -1108,7 +1180,8 @@ pub(crate) async fn gc_worker_artifacts(
     store: &ArtifactStore,
     config: &open_compute_core::WorkersConfig,
     snapshot_pins: &SnapshotPins,
-) {
+    response_cache: Option<Arc<CacheManager>>,
+) -> Result<u64, PlatformError> {
     let gc_fence = store.fence_deployment_gc().await;
     let storage_for_refs = storage.clone();
     let references = match tokio::task::spawn_blocking(move || {
@@ -1117,16 +1190,12 @@ pub(crate) async fn gc_worker_artifacts(
     .await
     {
         Ok(Ok(references)) => references,
-        Ok(Err(error)) => {
-            tracing::warn!(
-                code = error.code().as_str(),
-                "Worker artifact GC skipped because the final reference snapshot failed"
-            );
-            return;
-        }
+        Ok(Err(error)) => return Err(error),
         Err(_) => {
-            tracing::warn!("Worker artifact GC skipped because the final reference task failed");
-            return;
+            return Err(PlatformError::new(
+                ErrorCode::ArtifactUnavailable,
+                "artifact reference inspection failed",
+            ));
         }
     };
     let mut retained = HashSet::new();
@@ -1135,23 +1204,32 @@ pub(crate) async fn gc_worker_artifacts(
             retained.insert(reference);
         }
     }
-    match snapshot_pins.extend_artifacts(&mut retained) {
-        Ok(()) => {
-            let grace = SystemTime::now()
-                .checked_sub(Duration::from_millis(config.artifact_gc_grace_ms))
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            if let Err(error) = store.gc_unreferenced(&gc_fence, &retained, grace).await {
-                tracing::warn!(
-                    code = error.code().as_str(),
-                    "Worker artifact GC pass failed"
-                );
+    if let Some(response_cache) = response_cache {
+        let cache_references =
+            match tokio::task::spawn_blocking(move || response_cache.referenced_bodies()).await {
+                Ok(Ok(references)) => references,
+                Ok(Err(error)) => return Err(error),
+                Err(_) => {
+                    return Err(PlatformError::new(
+                        ErrorCode::CacheUnavailable,
+                        "cache reference inspection failed",
+                    ));
+                }
+            };
+        for body in cache_references {
+            match ArtifactRef::new(ARTIFACT_KEY_VERSION, &body.sha256, body.size) {
+                Ok(reference) => {
+                    retained.insert(reference);
+                }
+                Err(error) => return Err(error),
             }
         }
-        Err(error) => tracing::warn!(
-            code = error.code().as_str(),
-            "Worker artifact GC skipped because snapshot pins are unavailable"
-        ),
     }
+    snapshot_pins.extend_artifacts(&mut retained)?;
+    let grace = SystemTime::now()
+        .checked_sub(Duration::from_millis(config.artifact_gc_grace_ms))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    store.gc_unreferenced(&gc_fence, &retained, grace).await
 }
 
 pub(crate) async fn run_kv_maintenance(

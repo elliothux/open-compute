@@ -43,7 +43,7 @@ export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: Exec
         compatibilityDate: snapshot.compatibilityDate,
         compatibilityFlags: snapshot.compatibilityFlags,
         mainModule: built.mainModule, modules: built.modules,
-        env: validation ? {} : tenantEnv(snapshot, ctx, deploymentId, doPolicy(env)),
+        env: validation ? {} : tenantEnv(snapshot, ctx, deploymentId, doPolicy(env), false, false),
         globalOutbound: validation ? null : ctx.exports.OutboundGateway({ props: { deploymentId, policyVersion: 1 } }),
         limits: PROFILE,
       };

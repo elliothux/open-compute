@@ -431,6 +431,34 @@ pub enum ErrorCode {
     WorkflowInvariantViolation,
     /// A live Workflow definition already owns the requested account-scoped name.
     WorkflowNameConflict,
+    /// A Cache API key, URL, namespace, method, or option is invalid.
+    CacheKeyInvalid,
+    /// Cache API rejected a response that cannot be stored.
+    CachePutRejected,
+    /// A cache body, header, variant, tag, or quota limit was exceeded.
+    CacheLimitExceeded,
+    /// The cache metadata or body authority is temporarily unavailable.
+    CacheUnavailable,
+    /// A per-Worker cache database or entry failed integrity validation.
+    CacheCorrupt,
+    /// The private cache facade protocol was malformed.
+    CacheProtocolError,
+    /// A cache mutation may have committed before its result was observed.
+    CacheResultUnknown,
+    /// Image bytes are malformed, truncated, or not a supported raster image.
+    ImageInputInvalid,
+    /// The requested image input or output codec is unsupported.
+    ImageFormatUnsupported,
+    /// The requested image transform option is unsupported or invalid.
+    ImageOptionUnsupported,
+    /// Image bytes, dimensions, pixels, operations, overlays, or concurrency exceeded a limit.
+    ImageLimitExceeded,
+    /// Image execution exceeded its bounded deadline.
+    ImageTimeout,
+    /// The native image engine or its bounded executor is unavailable.
+    ImageUnavailable,
+    /// The private Images facade protocol was malformed.
+    ImageProtocolError,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -658,6 +686,20 @@ impl ErrorCode {
             Self::WorkflowReferenced => "WORKFLOW_REFERENCED",
             Self::WorkflowInvariantViolation => "WORKFLOW_INVARIANT_VIOLATION",
             Self::WorkflowNameConflict => "WORKFLOW_NAME_CONFLICT",
+            Self::CacheKeyInvalid => "CACHE_KEY_INVALID",
+            Self::CachePutRejected => "CACHE_PUT_REJECTED",
+            Self::CacheLimitExceeded => "CACHE_LIMIT_EXCEEDED",
+            Self::CacheUnavailable => "CACHE_UNAVAILABLE",
+            Self::CacheCorrupt => "CACHE_CORRUPT",
+            Self::CacheProtocolError => "CACHE_PROTOCOL_ERROR",
+            Self::CacheResultUnknown => "CACHE_RESULT_UNKNOWN",
+            Self::ImageInputInvalid => "IMAGE_INPUT_INVALID",
+            Self::ImageFormatUnsupported => "IMAGE_FORMAT_UNSUPPORTED",
+            Self::ImageOptionUnsupported => "IMAGE_OPTION_UNSUPPORTED",
+            Self::ImageLimitExceeded => "IMAGE_LIMIT_EXCEEDED",
+            Self::ImageTimeout => "IMAGE_TIMEOUT",
+            Self::ImageUnavailable => "IMAGE_UNAVAILABLE",
+            Self::ImageProtocolError => "IMAGE_PROTOCOL_ERROR",
             Self::Internal => "INTERNAL",
         }
     }

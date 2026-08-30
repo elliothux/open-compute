@@ -282,6 +282,7 @@ request_timeout_ms = 3000
                 secrets: BTreeMap::new(),
                 bindings,
                 services: BTreeMap::new(),
+                runtime_features: Default::default(),
                 queue_consumers: Vec::new(),
                 crons: None,
                 limits: serde_json::json!({"profile":"default"}),

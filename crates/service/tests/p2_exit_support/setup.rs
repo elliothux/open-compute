@@ -206,6 +206,7 @@ pub(super) async fn prepare() -> Fixture {
             secrets: Default::default(),
             bindings: bound,
             services: Default::default(),
+            runtime_features: Default::default(),
             queue_consumers: if index == 1 {
                 vec![QueueConsumerInput {
                     queue,

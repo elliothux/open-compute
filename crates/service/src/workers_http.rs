@@ -20,8 +20,8 @@ use open_compute_storage::{
 use open_compute_workers::{
     BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBindingInput,
     DeploymentBundle, DeploymentContent, DeploymentController, DeploymentPins,
-    DeploymentServiceInput, ProductPromotionCoordinator, ProductPromotionRequest,
-    QueueConsumerInput, RuntimeValidator, StagedBundle,
+    DeploymentRuntimeFeatures, DeploymentServiceInput, ProductPromotionCoordinator,
+    ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, StagedBundle,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -57,6 +57,7 @@ pub struct WorkerApiState {
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     cache: Option<Arc<ArtifactCache>>,
+    response_cache: Option<Arc<open_compute_storage::CacheManager>>,
     transport: WorkerdTransport,
     pins: DeploymentPins,
     bundle_limits: BundleLimits,
@@ -90,6 +91,7 @@ impl WorkerApiState {
             storage,
             artifacts,
             cache: None,
+            response_cache: None,
             transport,
             pins,
             bundle_limits,
@@ -104,6 +106,16 @@ impl WorkerApiState {
     #[must_use]
     pub fn with_cache(mut self, cache: Arc<ArtifactCache>) -> Self {
         self.cache = Some(cache);
+        self
+    }
+
+    /// Attach the response-cache authority for Worker deletion fencing and cleanup.
+    #[must_use]
+    pub fn with_response_cache(
+        mut self,
+        response_cache: Arc<open_compute_storage::CacheManager>,
+    ) -> Self {
+        self.response_cache = Some(response_cache);
         self
     }
 
@@ -263,6 +275,14 @@ async fn delete_worker(
                 }
                 return Err(error);
             }
+            if let Some(cache) = &api.response_cache
+                && let Err(error) = cache.purge_worker(account_id, worker_id, now_ms())
+            {
+                for deployment in &deployments {
+                    api.pins.unfence(*deployment);
+                }
+                return Err(error);
+            }
             if let Err(error) =
                 repo.delete_worker(account_id, worker_id, &deployments, request_id, now_ms())
             {
@@ -296,6 +316,8 @@ struct DeploymentMetadata {
     bindings: BTreeMap<String, DeploymentBindingInput>,
     #[serde(default)]
     services: BTreeMap<String, DeploymentServiceInput>,
+    #[serde(flatten)]
+    runtime_features: DeploymentRuntimeFeatures,
     #[serde(default)]
     queue_consumers: Vec<QueueConsumerInput>,
     crons: Option<Vec<String>>,
@@ -396,6 +418,7 @@ async fn create_deployment(
             secrets: metadata.secrets,
             bindings: metadata.bindings,
             services: metadata.services,
+            runtime_features: metadata.runtime_features,
             queue_consumers: metadata.queue_consumers,
             crons: metadata.crons,
             limits: metadata.limits,

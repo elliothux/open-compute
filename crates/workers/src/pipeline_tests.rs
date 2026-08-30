@@ -40,6 +40,7 @@ fn assets_only_request(assets: &DeploymentAssets) -> CreateDeploymentRequest {
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
+        runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: None,
         limits: serde_json::json!({}),

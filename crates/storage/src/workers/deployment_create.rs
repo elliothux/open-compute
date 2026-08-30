@@ -18,6 +18,10 @@ pub struct NewDeploymentProducts<'a> {
     pub workflow_bindings: &'a [crate::WorkflowBindingRecord],
     /// Frozen cross-Worker Service declarations.
     pub services: &'a [crate::NewDeploymentService],
+    /// Immutable automatic-cache policies.
+    pub cache_policies: &'a [crate::DeploymentCachePolicyRecord],
+    /// Platform-provided Images and Version Metadata bindings.
+    pub builtin_bindings: &'a [crate::DeploymentBuiltinBindingRecord],
     /// Queue push-consumer declarations.
     pub queue_consumers: &'a [crate::NewQueueConsumerDeclaration],
     /// Optional immutable Cron declaration set.
@@ -167,6 +171,12 @@ impl WorkerRepository<'_> {
                 products.services,
                 input.now_ms,
             )?;
+            crate::runtime_features::insert_runtime_features(
+                tx,
+                input.id,
+                products.cache_policies,
+                products.builtin_bindings,
+            )?;
             audit(
                 tx,
                 input.account_id,
@@ -226,6 +236,8 @@ fn validate_deployment_shape(
                 || !products.queue_bindings.is_empty()
                 || !products.workflow_bindings.is_empty()
                 || !products.services.is_empty()
+                || !products.cache_policies.is_empty()
+                || !products.builtin_bindings.is_empty()
                 || !products.queue_consumers.is_empty()
                 || products.cron.is_some() =>
         {

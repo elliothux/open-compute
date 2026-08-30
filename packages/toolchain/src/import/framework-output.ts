@@ -2,8 +2,8 @@ import { constants } from "node:fs";
 import { open, opendir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CompiledModule, CompiledModuleType, CompiledWorker } from "../build-worker.ts";
-import type { WorkerProject, WorkerService } from "../project.ts";
-import { record } from "../project.ts";
+import type { RuntimeFeatures, WorkerProject, WorkerService } from "../project.ts";
+import { parseRuntimeFeatures, record } from "../project.ts";
 import type { AssetsProject } from "../assets/types.ts";
 
 const MAX_CONFIG_BYTES = 256 * 1024;
@@ -13,7 +13,7 @@ const MAX_TOTAL_MODULE_BYTES = 16 * 1024 * 1024;
 const GENERATED_BINDING_KEYS = [
   "vars", "define", "durable_objects", "kv_namespaces", "d1_databases", "r2_buckets",
   "queues", "workflows", "dispatch_namespaces", "ai", "vectorize",
-  "hyperdrive", "browser", "images", "mtls_certificates", "version_metadata", "unsafe",
+  "hyperdrive", "browser", "mtls_certificates", "unsafe",
 ] as const;
 
 interface ModuleRule {
@@ -27,6 +27,7 @@ export interface FrameworkOutput {
   readonly worker: CompiledWorker;
   readonly assets?: AssetsProject;
   readonly services: Record<string, WorkerService>;
+  readonly runtimeFeatures: RuntimeFeatures;
 }
 
 function within(root: string, value: string): boolean {
@@ -290,6 +291,22 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
     }
     Object.defineProperty(services, binding, { value: declaration, enumerable: true });
   }
+  const hasGeneratedRuntimeFeatures = ["cache", "exports", "images", "version_metadata"]
+    .some(key => config[key] !== undefined);
+  const generatedRuntimeFeatures = hasGeneratedRuntimeFeatures
+    ? parseRuntimeFeatures(config, new Set([
+      ...Object.keys(project.vars), ...Object.keys(project.secrets), ...Object.keys(project.bindings),
+      ...Object.keys(services), ...(project.assets?.binding === undefined ? [] : [project.assets.binding]),
+    ]))
+    : undefined;
+  if (generatedRuntimeFeatures !== undefined) {
+    const projectExplicit = project.runtimeFeatures.cache.enabled
+      || Object.keys(project.runtimeFeatures.cache.entrypoints).length > 0
+      || project.runtimeFeatures.images !== undefined || project.runtimeFeatures.versionMetadata !== undefined;
+    if (projectExplicit && JSON.stringify(generatedRuntimeFeatures) !== JSON.stringify(project.runtimeFeatures)) {
+      throw new Error("generated framework runtime features conflict with the project");
+    }
+  }
   const outputRoot = await realpath(dirname(configPath));
   const main = await outputPath(projectRoot, outputRoot, config.main, "generated framework main");
   let assets: AssetsProject | undefined;
@@ -302,5 +319,6 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
     assets = routing(config.assets, relativeAssets.split(sep).join("/"));
   }
   const worker = await importModules(outputRoot, configPath, main, assetsDirectory, moduleRules(config.rules));
-  return { worker, ...(assets === undefined ? {} : { assets }), services };
+  return { worker, ...(assets === undefined ? {} : { assets }), services,
+    runtimeFeatures: generatedRuntimeFeatures ?? project.runtimeFeatures };
 }

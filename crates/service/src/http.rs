@@ -1,6 +1,7 @@
 //! Fixed health/metrics HTTP surface.
 
 use crate::auth::{bearer_matches, resolve_admin_auth};
+use crate::cache_images_http::{self, CacheImagesApiState};
 use crate::d1_http::{self, D1ApiState};
 use crate::do_http::{self, DoApiState};
 use crate::health::HealthCoordinator;
@@ -55,6 +56,7 @@ pub struct HttpState {
     queue_api: Option<Arc<QueueApiState>>,
     workflow_api: Option<Arc<WorkflowApiState>>,
     scheduler: Option<Arc<SchedulerService>>,
+    cache_images_api: Option<Arc<CacheImagesApiState>>,
 }
 
 impl std::fmt::Debug for HttpState {
@@ -70,6 +72,7 @@ impl std::fmt::Debug for HttpState {
             .field("queue_api", &self.queue_api.is_some())
             .field("workflow_api", &self.workflow_api.is_some())
             .field("scheduler", &self.scheduler.is_some())
+            .field("cache_images_api", &self.cache_images_api.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -122,6 +125,7 @@ impl HttpState {
             queue_api: None,
             workflow_api: None,
             scheduler: None,
+            cache_images_api: None,
         })
     }
 
@@ -147,6 +151,7 @@ impl HttpState {
             queue_api: None,
             workflow_api: None,
             scheduler: None,
+            cache_images_api: None,
         }
     }
 
@@ -252,6 +257,19 @@ impl HttpState {
         self.scheduler.as_ref()
     }
 
+    /// Attach the P3.3 cache and Images operator authority.
+    #[must_use]
+    pub(crate) fn with_cache_images_api(mut self, api: CacheImagesApiState) -> Self {
+        self.cache_images_api = Some(Arc::new(api));
+        self
+    }
+
+    /// Borrow the optional P3.3 operator authority.
+    #[must_use]
+    pub(crate) fn cache_images_api(&self) -> Option<&Arc<CacheImagesApiState>> {
+        self.cache_images_api.as_ref()
+    }
+
     /// Borrow the fixed-series metrics registry from product control handlers.
     #[must_use]
     pub(crate) const fn metrics(&self) -> &Arc<MetricsRegistry> {
@@ -293,6 +311,7 @@ pub fn admin_router(state: HttpState) -> Router {
     router = router.merge(scheduler_http::control_router());
     router = router.merge(queue_http::control_router());
     router = router.merge(workflow_http::control_router());
+    router = router.merge(cache_images_http::control_router());
     router
         .fallback(fallback)
         .layer(axum::middleware::from_fn_with_state(
@@ -322,6 +341,7 @@ pub fn merged_router(state: HttpState) -> Router {
         .merge(scheduler_http::control_router())
         .merge(queue_http::control_router())
         .merge(workflow_http::control_router())
+        .merge(cache_images_http::control_router())
         .fallback(workers_http::public_ingress)
         .layer(axum::middleware::from_fn_with_state(
             middleware_state,

@@ -376,7 +376,9 @@ async function loadedServiceTarget(
       compatibilityFlags: snapshot.compatibilityFlags,
       mainModule: built.mainModule,
       modules: built.modules,
-      env: tenantEnv(snapshot, ctx, deploymentId, doPolicy(env)),
+      env: tenantEnv(
+        snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
+      ),
       globalOutbound: ctx.exports.OutboundGateway({ props: { deploymentId, policyVersion: 1 } }),
       limits: PROFILE,
     };

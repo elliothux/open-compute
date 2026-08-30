@@ -8,6 +8,8 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[path = "metrics_cache_images.rs"]
+mod cache_images;
 #[path = "metrics_d1.rs"]
 mod d1;
 #[path = "metrics_do.rs"]
@@ -28,6 +30,10 @@ mod scheduler;
 mod service;
 #[path = "metrics_workflow.rs"]
 mod workflow;
+use cache_images::write_cache_images_metrics;
+pub(crate) use cache_images::{
+    CacheMetricOperation, CacheS3Operation, ImageMetricOperation, ImageMetricOutcome,
+};
 use d1::write_d1_metrics;
 pub(crate) use d1::{D1Lifecycle, D1LifecycleGuard, D1Operation};
 use durable_objects::write_do_metrics;
@@ -53,7 +59,7 @@ use service::{service_operation_index, write_service_metrics};
 pub(crate) use workflow::WorkflowOutcome;
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 582;
+pub const REQUIRED_SERIES: u64 = 634;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -291,6 +297,7 @@ struct Inner {
     service_retentions: u64,
     queue: queue::QueueMetrics,
     workflow: workflow::WorkflowMetrics,
+    cache_images: cache_images::CacheImagesMetrics,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -408,6 +415,7 @@ impl MetricsRegistry {
                 service_retentions: 0,
                 queue: queue::QueueMetrics::default(),
                 workflow: workflow::WorkflowMetrics::default(),
+                cache_images: cache_images::CacheImagesMetrics::default(),
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -869,6 +877,7 @@ impl MetricsRegistry {
         write_service_metrics(&mut out, &g);
         write_queue_metrics(&mut out, &g);
         workflow::write_workflow_metrics(&mut out, &g);
+        write_cache_images_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }

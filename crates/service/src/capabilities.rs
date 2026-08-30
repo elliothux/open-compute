@@ -38,6 +38,8 @@ struct SnapshotPolicyV1<'a> {
     scheduler: &'a SchedulerConfig,
     workflows: &'a open_compute_core::WorkflowsConfig,
     cache: &'a CacheConfig,
+    response_cache: &'a open_compute_core::ResponseCacheConfig,
+    images: &'a open_compute_core::ImagesConfig,
 }
 
 /// Build the complete production capability registry from embedded release inputs.
@@ -162,6 +164,8 @@ pub fn platform_config_policy_sha256(loaded: &LoadedConfig) -> Result<String, Pl
         scheduler: &config.scheduler,
         workflows: &config.workflows,
         cache: &config.cache,
+        response_cache: &config.response_cache,
+        images: &config.images,
     })
     .map_err(|_| capability_invalid())?;
     let mut digest = Sha256::new();
@@ -289,6 +293,37 @@ fn product_registry() -> BTreeMap<String, ProductCapabilityV1> {
         &["OC-WORKFLOW-001", "OC-WORKFLOW-002"],
     );
     products.insert("workflows".to_owned(), workflows);
+    products.insert(
+        "workers_cache".to_owned(),
+        supported(&["fetch", "purge"], &["OC-CACHE-001", "OC-CACHE-002"]),
+    );
+    products.insert(
+        "cache_api".to_owned(),
+        supported(
+            &["default", "open", "put", "match", "delete"],
+            &["OC-CACHE-001", "OC-CACHE-002"],
+        ),
+    );
+    products.insert(
+        "images".to_owned(),
+        supported(
+            &[
+                "input",
+                "info",
+                "transform",
+                "draw",
+                "output",
+                "response",
+                "contentType",
+                "image",
+            ],
+            &["OC-IMAGES-001"],
+        ),
+    );
+    products.insert(
+        "version_metadata".to_owned(),
+        supported(&["id", "tag", "timestamp"], &[]),
+    );
     products.insert("websocket_hibernation".to_owned(), unsupported());
     products
 }
@@ -529,6 +564,107 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
         (
             "hardening.max_snapshot_total_bytes".to_owned(),
             config.hardening.max_snapshot_total_bytes,
+        ),
+        (
+            "response_cache.max_object_bytes".to_owned(),
+            config.response_cache.max_object_bytes,
+        ),
+        (
+            "response_cache.max_bytes_per_worker".to_owned(),
+            config.response_cache.max_bytes_per_worker,
+        ),
+        (
+            "response_cache.max_header_bytes".to_owned(),
+            u64::from(config.response_cache.max_header_bytes),
+        ),
+        (
+            "response_cache.max_variants_per_key".to_owned(),
+            u64::from(config.response_cache.max_variants_per_key),
+        ),
+        (
+            "response_cache.max_tags_per_entry".to_owned(),
+            u64::from(config.response_cache.max_tags_per_entry),
+        ),
+        (
+            "response_cache.max_cache_name_bytes".to_owned(),
+            u64::from(config.response_cache.max_cache_name_bytes),
+        ),
+        (
+            "response_cache.max_url_bytes".to_owned(),
+            u64::from(config.response_cache.max_url_bytes),
+        ),
+        (
+            "response_cache.max_connections".to_owned(),
+            u64::from(config.response_cache.max_connections),
+        ),
+        (
+            "response_cache.busy_timeout_ms".to_owned(),
+            config.response_cache.busy_timeout_ms,
+        ),
+        (
+            "response_cache.request_timeout_ms".to_owned(),
+            config.response_cache.request_timeout_ms,
+        ),
+        (
+            "response_cache.refresh_lease_ms".to_owned(),
+            config.response_cache.refresh_lease_ms,
+        ),
+        (
+            "response_cache.max_ttl_seconds".to_owned(),
+            config.response_cache.max_ttl_seconds,
+        ),
+        (
+            "response_cache.fail_open".to_owned(),
+            u64::from(config.response_cache.fail_open),
+        ),
+        (
+            "images.max_input_bytes".to_owned(),
+            config.images.max_input_bytes,
+        ),
+        (
+            "images.max_output_bytes".to_owned(),
+            config.images.max_output_bytes,
+        ),
+        ("images.max_pixels".to_owned(), config.images.max_pixels),
+        (
+            "images.max_dimension".to_owned(),
+            u64::from(config.images.max_dimension),
+        ),
+        (
+            "images.max_operations".to_owned(),
+            u64::from(config.images.max_operations),
+        ),
+        (
+            "images.max_overlays".to_owned(),
+            u64::from(config.images.max_overlays),
+        ),
+        (
+            "images.max_frames".to_owned(),
+            u64::from(config.images.max_frames),
+        ),
+        (
+            "images.max_sessions".to_owned(),
+            u64::from(config.images.max_sessions),
+        ),
+        (
+            "images.max_temp_bytes".to_owned(),
+            config.images.max_temp_bytes,
+        ),
+        (
+            "images.session_ttl_ms".to_owned(),
+            config.images.session_ttl_ms,
+        ),
+        (
+            "images.max_concurrency".to_owned(),
+            u64::from(config.images.max_concurrency),
+        ),
+        (
+            "images.max_concurrency_per_account".to_owned(),
+            u64::from(config.images.max_concurrency_per_account),
+        ),
+        (
+            "images.request_timeout_ms".to_owned(),
+            config.images.request_timeout_ms,
         ),
         (
             "hardening.snapshot_stale_after_ms".to_owned(),

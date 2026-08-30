@@ -1298,6 +1298,10 @@ fn metrics_fixed_and_limits() {
     assert!(text.contains("service_invocation_roots 2"));
     assert!(text.contains("service_invocation_operations 3"));
     assert!(text.contains("service_capability_retentions 5"));
+    assert!(text.contains("response_cache_operations_total"));
+    assert!(text.contains("response_cache_s3_duration_seconds_bucket"));
+    assert!(text.contains("images_operations_total"));
+    assert!(text.contains("images_limit_rejections_total"));
     let series = text
         .lines()
         .filter(|l| !l.starts_with('#') && !l.is_empty())
@@ -2513,6 +2517,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             secrets: std::collections::BTreeMap::new(),
             bindings: std::collections::BTreeMap::new(),
             services: std::collections::BTreeMap::new(),
+            runtime_features: Default::default(),
             queue_consumers: vec![QueueConsumerInput {
                 queue: queue_id,
                 entrypoint: None,
@@ -4345,8 +4350,10 @@ async fn worker_artifact_gc_skips_when_final_reference_snapshot_fails() {
         &store,
         &workers,
         &crate::snapshot_pins::SnapshotPins::empty(),
+        None,
     )
-    .await;
+    .await
+    .unwrap_err();
     assert_eq!(mock.object_count(), 1);
     storage.db().set_foreign_keys_for_test(true).unwrap();
 }
@@ -4405,8 +4412,10 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
             &gc_store,
             &workers,
             &crate::snapshot_pins::SnapshotPins::empty(),
+            None,
         )
-        .await;
+        .await
+        .unwrap();
     });
     assert!(
         tokio::time::timeout(Duration::from_millis(20), &mut gc)

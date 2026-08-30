@@ -14,3 +14,5 @@ declare module "workflow-wrapper-source" { const source: string; export default 
 declare module "assets-facade-source" { const source: string; export default source; }
 declare module "service-facade-source" { const source: string; export default source; }
 declare module "service-scope-source" { const source: string; export default source; }
+declare module "cache-facade-source" { const source: string; export default source; }
+declare module "images-facade-source" { const source: string; export default source; }

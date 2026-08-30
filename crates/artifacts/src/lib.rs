@@ -19,7 +19,7 @@ mod snapshot;
 mod store;
 
 pub use artifact::{ARTIFACT_KEY_VERSION, ArtifactRef};
-pub use cache::{ArtifactCache, PinnedArtifact};
+pub use cache::{ArtifactCache, PinnedArtifact, PinnedArtifactReader};
 pub use client::S3ArtifactClient;
 pub use credentials::{
     CredentialEnv, ProcessEnv, S3Credentials, StaticEnv, resolve_s3_credentials,

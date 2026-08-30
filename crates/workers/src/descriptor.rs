@@ -102,6 +102,118 @@ pub struct ServiceDescriptorV1 {
     pub policy_version: u32,
 }
 
+/// Immutable automatic response-cache policy for one deployment.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CachePolicyDescriptorV1 {
+    /// Default export policy.
+    pub enabled: bool,
+    /// Share automatic entries across deployment versions.
+    pub cross_version_cache: bool,
+    /// Named entrypoint overrides, sorted by entrypoint name.
+    #[serde(default)]
+    pub entrypoints: BTreeMap<String, CacheEntrypointPolicyV1>,
+}
+
+/// Immutable automatic-cache override for one named Worker entrypoint.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CacheEntrypointPolicyV1 {
+    /// Whether automatic response caching is enabled for the entrypoint.
+    pub enabled: bool,
+    /// Share automatic entries across deployment versions.
+    pub cross_version_cache: bool,
+}
+
+impl CachePolicyDescriptorV1 {
+    /// Validate the complete deployment cache policy.
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        for name in self.entrypoints.keys() {
+            if name == "default"
+                || name.len() > 128
+                || !name
+                    .bytes()
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$'))
+                || name
+                    .bytes()
+                    .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'_' | b'$'))
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::EntrypointNotFound,
+                    "cache policy entrypoint is invalid",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Kind of immutable platform-provided deployment binding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuiltinBindingDescriptorKindV1 {
+    /// Local Images transformation capability.
+    Images,
+    /// Frozen deployment Version Metadata object.
+    VersionMetadata,
+}
+
+/// Canonical descriptor for an Images or Version Metadata binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BuiltinBindingDescriptorV1 {
+    /// Descriptor schema version.
+    pub schema_version: u32,
+    /// Tenant environment name.
+    pub name: String,
+    /// Platform-provided binding kind.
+    pub kind: BuiltinBindingDescriptorKindV1,
+    /// Optional immutable deployment tag, only for Version Metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+}
+
+impl BuiltinBindingDescriptorV1 {
+    /// Validate and construct one immutable platform binding descriptor.
+    pub fn new(
+        name: String,
+        kind: BuiltinBindingDescriptorKindV1,
+        tag: Option<String>,
+    ) -> Result<Self, PlatformError> {
+        validate_env_name(&name)?;
+        if name.len() > 64
+            || matches!(kind, BuiltinBindingDescriptorKindV1::Images) && tag.is_some()
+            || tag.as_deref().is_some_and(|value| {
+                value.is_empty()
+                    || value.len() > 128
+                    || value.bytes().any(|byte| byte.is_ascii_control())
+            })
+        {
+            return Err(binding_invariant());
+        }
+        Ok(Self {
+            schema_version: 1,
+            name,
+            kind,
+            tag,
+        })
+    }
+
+    /// Canonical typed JSON bytes persisted and hashed at staging.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, PlatformError> {
+        if self.schema_version != 1 {
+            return Err(binding_invariant());
+        }
+        serde_json::to_vec(self).map_err(|_| binding_invariant())
+    }
+
+    /// SHA-256 of canonical descriptor bytes.
+    pub fn sha256(&self) -> Result<[u8; 32], PlatformError> {
+        Ok(Sha256::digest(self.canonical_bytes()?).into())
+    }
+}
+
 impl ServiceDescriptorV1 {
     /// Validate and build the first Service invocation policy.
     pub fn new(
@@ -281,6 +393,8 @@ pub struct WorkerCodeDescriptorV1 {
     pub schema_version: u32,
     /// Canonical three-segment loader key.
     pub loader_key: String,
+    /// Immutable deployment creation timestamp used by Version Metadata.
+    pub created_at_ms: i64,
     /// Explicit deployment content union discriminator.
     pub content_kind: open_compute_storage::DeploymentContentKind,
     /// Canonical artifact digest.
@@ -309,6 +423,10 @@ pub struct WorkerCodeDescriptorV1 {
     pub workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
     /// Canonically sorted dynamic Service declarations.
     pub service_descriptors: Vec<ServiceDescriptorV1>,
+    /// Immutable automatic response-cache policy.
+    pub cache_policy: CachePolicyDescriptorV1,
+    /// Canonically sorted platform-provided environment bindings.
+    pub builtin_binding_descriptors: Vec<BuiltinBindingDescriptorV1>,
     /// SHA-256 of the complete generated system Worker source manifest.
     pub system_worker_sources_sha256: String,
     /// Immutable limits profile document.
@@ -326,6 +444,7 @@ impl WorkerCodeDescriptorV1 {
         account_id: AccountId,
         worker_id: WorkerId,
         deployment_id: DeploymentId,
+        created_at_ms: i64,
         artifact: Option<([u8; 32], &WorkerBundleManifest)>,
         assets: Option<(&AssetManifestV1, &AssetRoutingConfigV1)>,
         compatibility_date: String,
@@ -336,10 +455,15 @@ impl WorkerCodeDescriptorV1 {
         mut queue_binding_descriptors: Vec<QueueProducerBindingDescriptorV1>,
         mut workflow_binding_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
         mut service_descriptors: Vec<ServiceDescriptorV1>,
+        cache_policy: CachePolicyDescriptorV1,
+        mut builtin_binding_descriptors: Vec<BuiltinBindingDescriptorV1>,
         limits: serde_json::Value,
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
         let compatibility_flags = validate_compatibility(&compatibility_date, compatibility_flags)?;
+        if created_at_ms < 0 {
+            return Err(binding_invariant());
+        }
         let content_kind = if artifact.is_some() {
             open_compute_storage::DeploymentContentKind::Worker
         } else {
@@ -431,6 +555,17 @@ impl WorkerCodeDescriptorV1 {
                 ));
             }
         }
+        cache_policy.validate()?;
+        builtin_binding_descriptors.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+        for binding in &builtin_binding_descriptors {
+            binding.canonical_bytes()?;
+            if !env_names.insert(&binding.name) {
+                return Err(PlatformError::new(
+                    ErrorCode::BindingTypeMismatch,
+                    "platform binding name conflicts with deployment env",
+                ));
+            }
+        }
         if let Some((manifest, routing)) = assets {
             manifest.validate()?;
             routing.validate()?;
@@ -450,6 +585,9 @@ impl WorkerCodeDescriptorV1 {
                 || !queue_binding_descriptors.is_empty()
                 || !workflow_binding_descriptors.is_empty()
                 || !service_descriptors.is_empty()
+                || cache_policy.enabled
+                || !cache_policy.entrypoints.is_empty()
+                || !builtin_binding_descriptors.is_empty()
                 || matches!(
                     assets.map(|(_, routing)| &routing.run_worker_first),
                     Some(
@@ -486,6 +624,7 @@ impl WorkerCodeDescriptorV1 {
         Ok(Self {
             schema_version: 1,
             loader_key: loader_key(account_id, worker_id, deployment_id),
+            created_at_ms,
             content_kind,
             artifact_sha256,
             artifact_schema_version,
@@ -501,6 +640,8 @@ impl WorkerCodeDescriptorV1 {
             system_worker_sources_sha256: hex::encode(Sha256::digest(SYSTEM_WORKER_MANIFEST)),
             workflow_binding_descriptors,
             service_descriptors,
+            cache_policy,
+            builtin_binding_descriptors,
             limits,
             global_outbound_policy_version: GLOBAL_OUTBOUND_POLICY_VERSION,
             loader_schema_version,

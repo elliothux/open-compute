@@ -151,6 +151,11 @@ pub fn prepare_platform_snapshot(
         s3_authority_fingerprint: request.s3_authority_fingerprint.to_owned(),
         r2_prefix_fingerprint: request.r2_prefix_fingerprint.to_owned(),
         config_policy_sha256: request.config_policy_sha256.to_owned(),
+        excluded_local_state: vec![
+            "images_sessions".to_owned(),
+            "response_cache".to_owned(),
+            "runtime_cache".to_owned(),
+        ],
         immutable_references: Vec::new(),
         files: files.iter().map(|file| file.entry.clone()).collect(),
         totals: SnapshotTotalsV1 {

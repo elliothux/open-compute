@@ -113,6 +113,8 @@ struct BackendState {
     workflow: Option<Arc<crate::workflow_backend::WorkflowBindingService>>,
     assets: Option<Arc<crate::asset_backend::AssetBindingService>>,
     services: Option<Arc<crate::service_invocations::ServiceInvocationRegistry>>,
+    cache: Option<Arc<crate::cache_backend::CacheBindingService>>,
+    images: Option<Arc<crate::images_backend::ImageBindingService>>,
 }
 
 /// Bind the private binding backend to an ephemeral IPv4 loopback port.
@@ -159,6 +161,8 @@ pub async fn serve_binding_backend(
         scheduler,
         None,
         None,
+        None,
+        None,
         shutdown,
     )
     .await
@@ -181,6 +185,8 @@ pub async fn serve_binding_backend_with_assets(
     scheduler: Option<Arc<SchedulerStore>>,
     assets: Arc<crate::asset_backend::AssetBindingService>,
     services: Arc<crate::service_invocations::ServiceInvocationRegistry>,
+    cache: Option<Arc<crate::cache_backend::CacheBindingService>>,
+    images: Option<Arc<crate::images_backend::ImageBindingService>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     serve_binding_backend_inner(
@@ -198,6 +204,8 @@ pub async fn serve_binding_backend_with_assets(
         scheduler,
         Some(assets),
         Some(services),
+        cache,
+        images,
         shutdown,
     )
     .await
@@ -219,6 +227,8 @@ async fn serve_binding_backend_inner(
     scheduler: Option<Arc<SchedulerStore>>,
     assets: Option<Arc<crate::asset_backend::AssetBindingService>>,
     services: Option<Arc<crate::service_invocations::ServiceInvocationRegistry>>,
+    cache: Option<Arc<crate::cache_backend::CacheBindingService>>,
+    images: Option<Arc<crate::images_backend::ImageBindingService>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     let (global_streams, resource_streams) = executor.stream_limits();
@@ -263,6 +273,8 @@ async fn serve_binding_backend_inner(
         workflow,
         assets,
         services,
+        cache,
+        images,
     };
     let router = Router::new().fallback(handle).with_state(state);
     axum::serve(listener, router.into_make_service())
@@ -338,6 +350,18 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
     if request.uri().path() == "/internal/assets/v1/fetch" {
         return match &state.assets {
             Some(assets) => assets.handle(request).await,
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+    if request.uri().path().starts_with("/internal/cache/v1/") {
+        return match &state.cache {
+            Some(cache) => cache.handle(request).await,
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+    if request.uri().path().starts_with("/internal/images/v1/") {
+        return match &state.images {
+            Some(images) => images.handle(request).await,
             None => StatusCode::NOT_FOUND.into_response(),
         };
     }

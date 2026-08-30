@@ -1,16 +1,17 @@
-# SQLite-only workerd 平台方案
+# 单机 Cloudflare Workers Platform 兼容基础设施方案
 
-> 状态：实施设计；2026-08-28 更新交付目标。Next.js/vinext 尚未完成平台验收。
+> 状态：实施设计；2026-08-30 更新 P3 交付目标。Cloudflare conformance 尚未完成平台验收。
 >
-> 当前目标是在 open-compute 上跑通 Cloudflare 官方 Next.js 指南采用的 vinext 路径，
-> 与固定版本 vinext 的行为和完整用例集对齐，包括 SSR、CSR、RSC、PPR 等已实现特性。
-> 不要求完整兼容官方 Next.js，也不要求补齐 vinext 上游尚未实现的 Next.js 能力。
-> 本文只约束本仓库，不改变父项目边界；已有 P0–P2 记录不构成 vinext 已通过的证据。
+> 当前目标是让 open-compute 在明确声明的常用 API 范围内贴近 Cloudflare Workers 平台，
+> 并以固定契约、真实 stock workerd 和 Cloudflare differential 验收；第三方应用 workload 独立取证。
+> vinext 是组合检验手段，不是平台规格；不要求补齐 vinext 或 Next.js 自身尚未实现的能力。
+> 本文只约束本仓库，不改变父项目边界；已有 P0–P2 记录不构成 P3 conformance 已通过的证据。
 
 ## 1. 结论
 
-平台继续面向单机、SMB self-deploy 场景；下一阶段以完整 vinext 应用和测试矩阵作为交付标准，
-不能仅以基础 Worker 或一个 SSR demo 能返回 HTML 判断完成。
+平台继续面向单机、SMB self-deploy 场景；下一阶段以 Cloudflare 契约目录、真实产品矩阵和隔离/
+恢复作为 Platform 交付标准，第三方应用组合另行给出 qualification。不能仅以基础 Worker 或一个
+SSR demo 返回 HTML 判断完成。
 
 推荐的核心组合是：
 
@@ -31,7 +32,7 @@ workerd + workerLoader
 - Queues；
 - Workflows；
 - Cron Triggers 和 Durable Object alarms；
-- Static Assets、Service Binding，以及 vinext 用例实际依赖的缓存和图片处理能力。
+- Static Assets、Service Binding、Workers Cache、Cache API、Images 和 Version Metadata。
 
 方案不追求 Cloudflare 的边缘调度、跨地域复制、多副本高可用和完整管理面行为。它提供的
 是单节点、强本地一致性、可恢复、常用 API 兼容的运行环境。
@@ -40,19 +41,21 @@ workerd + workerLoader
 S3-compatible provider 的隔离前缀。平台不依赖 Redis、Postgres、Kafka 或独立网关。
 
 [Cloudflare 官方 Next.js 指南](https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/)
-当前推荐 vinext。它通过 Vite 实现 Next.js API，而非消费原版 `next build` 产物；因此本阶段
-以 vinext 为行为基准，OpenNext 或原版 Next.js 的结果不能代替 vinext 验收。具体基线、特性边界
-与“全部用例通过”的含义见第 18 节，交付顺序和最终门槛见第 22、24 节。
+当前推荐 vinext。它通过 Vite 实现 Next.js API，并能同时压测本平台多项能力，因此保留为固定
+application workload；但 Cloudflare 官方 API/配置契约与正式 workerd 行为优先，不能反过来为
+vinext 的 Next.js 适配细节设计平台。基线、映射与判定见第 18 节，交付顺序和门槛见第 22、24 节。
 
 ## 2. 目标与非目标
 
 ### 2.1 目标
 
-- 跑通官方指南中的 vinext Cloudflare 构建路径，将应用产物部署到 open-compute；只适配
-  构建、部署和宿主连接，不以改写应用逻辑或降低断言来取得通过；
-- 固定 vinext 基线的全部启用用例按原语义通过，并完整登记上游已有的 skip/fixme/todo；
-- 覆盖 SSR、流式 SSR、CSR/hydration、RSC、Server Actions、SSG、ISR、PPR、Cache
-  Components、路由、middleware、静态资源和绑定；每项以 vinext 已实现的范围为准；
+- 建立 Cloudflare 常用 API 的机器可读契约目录；每个 advertised 方法都有官方来源、date/flag、
+  stock-workerd/product Gate 和稳定 deviation；
+- 使用同一 portable fixture 对比 open-compute 与真实 Cloudflare Workers 的高风险行为；
+- 可选使用固定 vinext Cloudflare workload 做应用 qualification；只适配构建、部署和宿主连接，不
+  改写应用逻辑或降低断言，也不把该应用结果作为 Platform Go 前置条件；
+- 用独立 contract fixtures 覆盖 Workers、Static Assets、Service Binding、KV、Workers Cache、
+  Images 等平台能力；SSR、RSC、Actions、SSG/ISR 等仅属于对应应用 workload 的组合证据；
 - 一个安装包或一个容器即可部署；
 - 容器外可以作为一个 systemd、launchd 或普通前台服务运行；
 - 一个数据目录保存所有本地持久状态；
@@ -66,15 +69,15 @@ S3-compatible provider 的隔离前缀。平台不依赖 Redis、Postgres、Kafk
 - 进程崩溃后 Queue、Workflow 和 alarm 能自动恢复；
 - 资源可以独立创建、绑定、重命名、备份和删除。
 
-“与 vinext 对齐”包括其正确拒绝不支持输入的行为，不意味着所有输入都应成功。上游尚未实现
-的完整 Next.js PPR、Cache Components 或其他能力不自动转为本平台补齐 Next.js 的任务；
-但上游已通过而本平台失败、跳过或未运行的用例，仍然阻塞交付。
+第三方应用的正确拒绝也属于 workload 证据，但只有映射到 declared Cloudflare contract 的差异才
+决定 Platform verdict。Cloudflare pass 而 open-compute fail 的 supported contract 阻塞交付；
+vinext 与 Cloudflare 同时缺失的 Next.js 行为不得在平台层补成专用实现。
 
 ### 2.2 非目标
 
-- 原版 Next.js 全 API、全测试集和全部部署模式兼容；
-- 超出所选 vinext 基线的完整 PPR/Cache Components、Vercel 专属服务、webpack/Turbopack
-  或 OpenNext 专用行为；
+- 完整 Cloudflare 全产品、管理面、套餐限制和内部 edge 行为兼容；
+- 原版 Next.js 或 vinext 的全 API、全测试集和全部部署模式兼容；
+- 完整 PPR/Cache Components、Vercel 专属服务、webpack/Turbopack 或 OpenNext 专用行为；
 - Cloudflare Edge 或 Anycast；
 - 跨节点、跨地域同步；
 - 多副本同时写入同一份 SQLite；
@@ -86,29 +89,30 @@ S3-compatible provider 的隔离前缀。平台不依赖 Redis、Postgres、Kafk
 - 完整 Wrangler 管理面兼容；
 - Kubernetes 和独立微服务拆分。
 
-这些非目标不能用于豁免 vinext 已启用的用例。若实际用例暴露新的平台依赖，应补齐该依赖或
-明确报告阻塞，不能缩小测试清单后仍宣称“全部通过”。Node/Vite 开发与构建工具可用于构建、
-基线测试和 HMR 验证；生产请求必须由 `platformd` 与 verified stock workerd 承担，不新增
-Node SSR 服务，也不以 Miniflare 代替平台运行时。
+这些非目标不能用于豁免已声明 supported 的 contract。应用用例暴露新依赖时，先判断它是否属于
+平台既定支持面；属于则补齐或报告 blocked，不属于则登记 application incompatibility，不能通过
+框架专用后端扩大平台。Node/Vite 可用于构建、基线和 HMR；生产请求仍只由 `platformd` 与 verified
+stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平台运行时。
 
 ### 2.3 当前实现与目标的差距
 
-以下为 2026-08-28 源码观察，包含当前工作树，不是本次重新执行的验收结果：
+以下为 2026-08-30 冻结源码与现有验收记录：
 
 | 范围 | 当前基础 | 目标仍需完成 |
 | --- | --- | --- |
-| Worker 执行 | workerd、WorkerLoader、Fetch/Streams、显式 `nodejs_compat` | vinext 真实产物、所需 Node API 与资源预算验证 |
-| TS 工具链 | TS7 类型检查、Rolldown 普通 Worker 打包 | vinext/Vite 的 RSC、SSR、client 多环境构建及产物导入 |
-| 资源与绑定 | KV/R2/D1/DO、Queues/Cron/Workflows 的已声明子集 | 逐项验证 vinext 依赖，不能由产品名称推导完整兼容 |
-| Static Assets | S3 ArtifactStore、摘要校验、不可变部署 | 资源 manifest、上传、路由、`ASSETS.fetch()` 与原子发布 |
-| Service Binding | 原生 entrypoint stub、受限绑定装配基础 | 跨 Worker/自绑定、目标解析、fetch/RPC、生命周期与删除约束 |
-| 框架缓存与图片 | 可复用存储基础 | vinext 实际使用的缓存接口、失效语义和图片处理绑定 |
-| 验收 | 已有平台 Gate 与产品测试 | vinext 全量清单、上游对照、平台浏览器与生产构建结果 |
+| Worker 执行 | workerd、WorkerLoader、Fetch/Streams、显式 `nodejs_compat` 与产品 bindings | declared runtime/date/flag 契约、portable fixtures 与资源预算验证 |
+| TS 工具链 | TS7/Rolldown、框架产物导入、Static Assets 与 Service 声明 | Cloudflare-style config 支持面/catalog 双向完整性 |
+| 资源与绑定 | KV/R2/D1/DO、Queues/Cron/Workflows 的已声明子集 | capability/type/config/contract 双向完整性与产品回归 |
+| Static Assets | manifest/上传/路由、`ASSETS.fetch()`、不可变发布与维护 Gate | Cloudflare contract/differential qualification |
+| Service Binding | 跨 Worker/自绑定、默认/命名 fetch/RPC、预算与 pin；核心 Conditional Go | 事件源调用、真实 crash handle 回收和 contract qualification |
+| Cache 与 Images | Workers Cache、Cache API、Images、Version Metadata 的声明单节点支持面已实现并通过 P3.3 最终 Gate | Cloudflare contract/differential qualification |
+| 验收 | 已有 P0–P2、P3.1/P3.2 产品 Gate 与 P3.3 完整本地验收 | P3.4 contract catalog、Cloudflare differential、隔离/恢复；应用 qualification 独立可选 |
 
 实现依据包括 [工具链](../packages/toolchain/src/build-worker.ts)、
 [绑定类型](../crates/core/src/resource.rs)、[RuntimeSource](../crates/workers/src/runtime_source.rs)
-和[能力注册表](../crates/service/src/capabilities.rs)。本次文档更新不安装 vinext、不运行其测试，
-也不将这些差距标为已完成。
+和[能力注册表](../crates/service/src/capabilities.rs)。P3.3 的 90.10% workspace Rust 行覆盖率与最终
+三轮 Gate 证据见[归档方案](implemented/p3-3-workers-cache-images.md)；P3.4 尚未执行，不将其差距
+标为已完成。
 
 ### 2.4 Day1 约束
 
@@ -218,9 +222,10 @@ binding、直接 storage getter、remote dev proxy 和自动 config reload 不�
 尤其是其当前 Queue broker 明确使用 in-memory DO storage，因此只能参考 API/event dispatch，
 不能作为本方案 Queue durability、lease 或 crash recovery 的依据。
 
-### 4.4 vinext、Static Assets 与 Service Binding 的参考边界
+### 4.4 Cloudflare 契约、vinext 与实现参考边界
 
-- vinext 是本阶段的框架行为与用例基准，固定源码 revision，保留其 fixture 和断言来源。
+- Cloudflare 官方 API/config 与正式 workerd 是平台契约基线；workers-sdk/Miniflare/WDL 是实现参考。
+- vinext 是固定 revision 的第三方 application workload，保留其 fixture/断言来源但不定义平台 API。
 - [官方 asset-worker](../references/workers-sdk/packages/workers-shared/asset-worker/src/handler.ts)
   与 [router-worker](../references/workers-sdk/packages/workers-shared/router-worker/src/worker.ts)
   提供资源响应和分流语义；参考其算法与测试，不引入 Cloudflare 内部遥测、实验分组或账单系统。
@@ -325,7 +330,8 @@ type DispatchEnvelope = {
 目标只获得自己的 env；私有身份和 token 不从业务请求传入，也不透传调用方 secrets。每次调用
 校验绑定与目标状态，暖缓存不绕过 authority。调用预算不能每跳重置；pin 必须覆盖执行、响应流、
 WebSocket 和 RPC 对象等相应生命周期，验证 `waitUntil`、异常、递归上限、删除和进程重启行为。
-具体 Node API、原生 RPC 和绑定支持面由 vinext 用例与当前 pin 的真实 Gate 确认。
+具体 Node API、原生 RPC 和绑定支持面由 contract catalog、当前 pin 的真实 Gate 与 Cloudflare
+differential 确认；vinext 只补组合应用证据。
 
 ## 6. 数据目录与 SQLite 边界
 
@@ -1075,20 +1081,21 @@ prefix，但不保存 credential。
 恢复默认是整套恢复。部分资源 restore 必须生成新 physical resource ID，避免旧 binding
 和新数据意外混用。
 
-## 18. API 范围与 vinext 对齐基线
+## 18. API 范围与 Cloudflare conformance 基线
 
 ### 18.1 平台能力范围
 
-下表是产品边界，不是“全部已经实现”的声明。Next.js/vinext 的完成标准由第 18.2–18.4 节定义，
-不能仅根据产品 registry 中存在同名 capability 判定通过。
+下表是产品边界，不是“全部已经实现”的声明。Platform 完成标准由固定 contract、
+capability/deviation、stock-workerd/product Gate 和受控 Cloudflare differential 定义；应用
+workload 只产生独立 qualification。不能仅根据 registry 中存在同名 capability 判定通过。
 
 | 产品 | 目标能力 | 不扩展为 |
 | --- | --- | --- |
-| Workers | modules、fetch、scheduled、bindings，以及 vinext 实际需要的 Node API | Edge placement、与 vinext 无关的完整 Node compatibility matrix |
+| Workers | modules、fetch、scheduled、bindings、声明 date/flag 下的常用 Web/Node API | Edge placement、完整 Node/Workers 全 API |
 | Static Assets | 不可变资源集、`ASSETS.fetch()`、路由、HTTP 响应与发布一致性 | Cloudflare 全球 CDN 基础设施 |
 | Service Binding | 默认/具名入口、跨 Worker 与自绑定、原生 fetch/RPC | 完整 Cloudflare 部署管理面 |
-| 框架缓存 | vinext 缓存适配器使用的 API、缓存命中/失效与隔离语义 | 全球缓存复制、Cloudflare 运维和计费系统 |
-| 图片与字体 | vinext 已支持、用例实际调用的静态产物与图片处理路径 | vinext 尚未实现的完整 Next.js 构建时优化 |
+| Cache | Workers Cache、Cache API、Version Metadata、命中/失效/版本隔离 | 全球/tiered cache、Cache Rules 与计费系统 |
+| Images | raw-byte binding 的常用 input/info/transform/draw/output 子集 | hosted Images、URL transform、完整 Cloudflare 图片产品 |
 | KV | get、getWithMetadata、put、delete、list、batch get | global cache/eventual consistency |
 | D1 | prepare、bind、run、first、all、raw、batch、exec | replicas、bookmark、完整 admin API |
 | DO | fetch/RPC、SQLite/KV storage、transaction、alarm | 跨节点迁移、完整 PITR；WebSocket hibernation 后置 |
@@ -1096,34 +1103,39 @@ prefix，但不保存 credential。
 | Queues | send、sendBatch、batch consume、ack/retry、delay、DLQ | pull consumer、严格顺序、exactly-once |
 | Workflows | create/status、step.do、sleep、sleepUntil、waitForEvent、sendEvent、retry | 全部管理 API 和 Cloudflare limits parity |
 
-兼容层必须维护独立 conformance suite。测试针对 API shape 和本文承诺的行为，不把“能运行
-一个 demo”当作兼容完成。
+兼容层必须维护独立 conformance catalog/suite。每个 advertised method 都要有官方来源、适用
+compatibility date/flag、真实运行证据和稳定 deviation；不把“能运行一个 demo”当作兼容完成。
 
-### 18.2 固定 vinext 基线，不追求完整 Next.js 兼容
+### 18.2 固定平台契约与第三方应用基线
 
-2026-08-28 本次文档勘察基线为 vinext repository commit
+正式 Platform baseline 必须固定 open-compute revision、workerd lock、compatibility date/flags、
+workers-types、workers-sdk 与 Wrangler/Vite plugin。具体 manifest、catalog 与 differential 规则由
+后续 P3.4 确定。不使用浮动 `latest`；任一基线升级都重新审查
+官方契约、workerd 行为、类型/config、用例和 deviation。
+
+其中一项 application baseline 是 vinext repository commit
 [`5d0b53088c689b75d63672eab6ff66434afa5b3b`](https://github.com/cloudflare/vinext/tree/5d0b53088c689b75d63672eab6ff66434afa5b3b)，
 该 revision 的 package manifest 标记 `vinext` 为 `1.0.0-beta.8`、`@vinext/cloudflare` 为
 `1.0.0-beta.6`。这是已核对的源码基线，**不是已安装的依赖或已通过的测试结果**。
 
-P3.0 必须固化完整验收元组：vinext commit、包版本与锁文件摘要、React/Vite/RSC 插件版本、
-构建工具版本、浏览器版本、open-compute revision、workerd lock 摘要和 compatibility date/flags。
-不使用浮动 `latest`；变更基线时重新审查新增/删除/改写的用例与 upstream exclusions，再重新验收，
-不能通过换版本、删测试或扩大排除列表来隐藏平台失败。本仓库依赖仍由根 Bun workspace 管理。
+vinext qualification 另行固定它自己的 lock、React/Vite/RSC plugin、构建工具、浏览器与 workload
+清单。本仓库依赖继续由根 Bun workspace 管理；应用依赖和浏览器由对应测试准备显式提供，不由
+生产启动隐式下载。缺少应用 baseline 只表示 Application verdict 未评估，不阻塞具备完整证据的
+Platform verdict。
 
-验收对象是 **vinext 的实现和已声明行为**。官方 Next.js 文档可以帮助解释术语，但不是一份
-额外的全兼容清单；不引入原版 Next.js 全套测试，也不要求修复所有 vinext 与 Next.js 的差异。
-OpenNext 不是本阶段的替代基准。
+Platform verdict 的验收对象是 **open-compute 声明支持的 Cloudflare Workers 契约**。vinext 的
+实现和测试只判断该应用 workload；官方 Next.js 文档可以解释术语，但不是平台 API 清单，不要求
+修复 vinext 与 Next.js 的全部差异。OpenNext 或原版 Next.js 结果不能替代相同 Cloudflare contract。
 
 上游 [Project status](https://github.com/cloudflare/vinext/blob/5d0b53088c689b75d63672eab6ff66434afa5b3b/README.md#project-status)
-明确说明 Cache Components/PPR 尚有缺口。我们需要通过该基线已有的 PPR/缓存用例，包括
-`ppr-impact-demo` 对应行为；不能把它写成“完整 Next.js PPR 已实现”，也不要求在此阶段补齐
-上游没有实现的 partial shell、resume、prefetch 或其他 Cache Components 语义。
+明确说明 Cache Components/PPR 尚有缺口。选中的 workload 可以覆盖其已有 PPR/cache 行为，
+但不能把结果写成“完整 Next.js PPR 已实现”，更不能在 platformd 中补 partial shell、resume、
+prefetch 或其他框架语义。
 
-### 18.3 特性验收矩阵
+### 18.3 应用组合验收矩阵
 
-以下是必须覆盖的分类，不是用来替代或筛选上游完整用例集的白名单。每类保留上游已实现范围内
-的原始断言，并补充平台边界测试；上游尚未实现的行为按第 18.4 节单独记录。
+以下分类用于 vinext 等第三方 workload 的组合验证，不是平台 contract 白名单。平台底层 API 即使
+没有被框架调用也由独立 product Gate 验收；框架行为即使名称相同，也不能下沉为平台专用逻辑。
 
 | 特性 | 在 open-compute 上需要证明的行为 |
 | --- | --- |
@@ -1133,48 +1145,45 @@ OpenNext 不是本阶段的替代基准。
 | Server Actions | 表单与调用、参数/结果、redirect、错误和缓存失效，保持上游的请求校验与安全断言 |
 | SSG / Static export | 构建产物、动态路由预生成、资源引用、basePath/trailingSlash、404 与静态站点交付 |
 | ISR / Data Cache | 上游采用的 HIT/STALE/更新路径、时间与 tag/path 失效、并发重新生成、租户和部署隔离 |
-| PPR / Cache Components | vinext 已实现的 `use cache`、预渲染与动态内容组合及已有 PPR 用例；边界明确标为 upstream partial，不扩大为完整 Next.js PPR |
+| PPR / Cache Components | 只记录 vinext 已实现的 `use cache`、预渲染与动态内容组合；明确 upstream partial，不扩大平台范围 |
 | Routing / Middleware | App/Pages Router、Route Handlers、middleware/proxy、动态参数、重写/重定向、编码路径、cookies/headers 与错误页 |
 | 资源 / Metadata | `public/` 和客户端 chunks、CSS、fonts、metadata、vinext 已支持的图片优化及相关响应 |
 | Bindings / Context | 服务端组件、Route Handlers、Actions 使用 `cloudflare:workers` 的 env；Static Assets、Service Binding 与实际依赖的产品绑定 |
 | 开发与构建 | vinext/Vite 多环境编译、开发服务/HMR、CLI 与配置行为；与生产请求执行分开取证 |
 
-### 18.4 “vinext 用例全部通过”的定义
+### 18.4 vinext workload 的发现、映射与判定
 
-**完整清单。** 从固定 revision 的
+**先发现再选定 workload。** 从固定 revision 的
 [package scripts](https://github.com/cloudflare/vinext/blob/5d0b53088c689b75d63672eab6ff66434afa5b3b/package.json)、
 [Vitest 配置](https://github.com/cloudflare/vinext/blob/5d0b53088c689b75d63672eab6ff66434afa5b3b/vite.config.ts)、
 [Playwright 配置](https://github.com/cloudflare/vinext/blob/5d0b53088c689b75d63672eab6ff66434afa5b3b/playwright.config.ts)
 与 [CI matrix](https://github.com/cloudflare/vinext/blob/5d0b53088c689b75d63672eab6ff66434afa5b3b/.github/workflows/ci.yml)
-枚举 unit、integration、browser E2E、相关 package/scripts 测试，以及它们的 fixtures/examples。
-记录 project、mode、browser、case identity 和来源；不能只运行 `cloudflare-workers` 一个 project，
-也不能因为默认启动器选择了部分 project，就遗漏 Pages Router、生产构建、静态导出或 PPR。
-未被自动化覆盖的目标示例另补真实运行 smoke，不能代替已有断言。
+枚举 unit、integration、browser E2E、package/scripts、fixtures/examples，记录 project、mode、browser、
+case identity 和来源。随后将 case 分为：Cloudflare platform contract workload、vinext/Next.js 自身
+行为、toolchain/dev-only 和 upstream exclusion。选择/排除必须 tracked，不能在失败后临时删项。
 
-**分层执行，不缩小范围。** 上游工具链、开发服务、CLI 和 Node standalone 打包测试留在其
-对应构建/对照环境；这不要求生产引入 Node 服务。所有应用运行行为另映射到经过生产构建、
-正常部署 API、真实 `platformd -> stock workerd` 路径的测试，包括原上游以 Node `start`
-运行的 SSR/CSR/RSC/PPR 应用场景。不能把它们全部标成“Node 专属”来跳过平台验证。
-原本使用 Miniflare/Wrangler 的用例，平台验收时由测试启动器连接实际 open-compute。
+**分层执行。** 上游工具链、开发服务、CLI 和 Node standalone 测试留在相应对照环境；生产
+workload 则经过正常构建、部署 API、真实 `platformd -> stock workerd` 和 browser。原本使用
+Miniflare/Wrangler 的平台行为场景由 adapter 连接实际 open-compute；Node/Miniflare PASS 不算
+platform PASS。
 
 适配只允许改变构建/启动、部署、资源准备、base URL 等宿主连接点，并保留可审查的映射；不能
 改应用输出、fixture 业务逻辑、预期结果、断言强度或安全策略。上游 `VINEXT_E2E_BASE_URL`
 只在其已实现的 project 使用，其他 project 必须显式接入测试启动器，不能假设该变量全局生效。
 默认端口、Worker 名称、用例 ID 和结果只存在于测试夹具，不能进入生产分支。
 
-**通过与上游限制分开。** 固定基线全部启用、预期通过的用例必须执行并通过，平台新增失败、
-skip、fixme、todo、未运行或无法准备环境均阻塞交付。上游已有的 skip/fixme/todo/expected-failure
-逐项记录来源、原因及基线对照状态，不能计入 PASS，也不能用“上游存在缺口”豁免本平台新增问题。
-正确拒绝不支持输入的负向用例按原断言验收。未由上游声明、但对照运行实际失败的项先报告阻塞，
-不能临时加入上游限制表。只有明确属于 vinext 未实现范围的能力，才不要求额外补成官方 Next.js 行为。
+**按 contract 判定。** 同一 fixture 在 Cloudflare pass、open-compute fail 且映射到 supported
+contract 时，Platform No-Go。两边都 fail 且 vinext 已标 partial 的项属于应用/upstream 限制；
+明确 unsupported 的平台能力产生 application incompatibility，不得靠框架分支补齐。选定 workload
+中的新增 skip/fixme/todo/not-run 仍阻塞 Application Go，但不自动改写 Platform verdict。
 
-**原始证据。** 报告同时列出 discovered、executed、passed、failed、upstream-excluded、
-blocked/not-run，以及每个 project/mode/browser 的结果和日志位置；分片合并检查重复与遗漏，
-总量来自测试发现，不硬编码预期数量。记录原始失败与重试，不能只保留一次成功重跑。
-上游对照结果和平台结果分列，不能把 Node/Miniflare 的绿灯写成平台 PASS。
+**原始证据。** 报告列出 discovered、selected、contract-mapped、executed、passed、failed、
+upstream-excluded、application-unsupported、blocked/not-run，以及每个 project/mode/browser 的结果。
+总量来自 discovery，不硬编码；记录所有 retry。上游、Cloudflare、Node/Miniflare 和 open-compute
+结果分列。
 
-**当前状态。** 尚未生成完整用例清单，未运行上游对照或平台 vinext suite，因此总数与通过率
-均为未测，不能引用上游宣传比例或已有 P0–P2 结果代替。
+**当前状态。** contract catalog、portable differential 和 application workload 清单均未生成，
+尚未运行对应 P3 suite；不能引用 vinext 宣传比例或已有 P0–P2 结果代替。
 
 ## 19. 安全边界
 
@@ -1234,13 +1243,13 @@ platform gc
 
 ## 22. 按依赖顺序实施
 
-当前新增工作的交付主线为 P3；P0–P2 是平台基础和回归约束，不是 vinext 的完成证明：
+当前新增工作的交付主线为 P3；P0–P2 是平台基础和回归约束，不是 Cloudflare conformance 的完成证明：
 
 ```text
 P0：Workers + KV + R2 + D1 + Durable Objects
 P1：P0 兼容性、可靠性和运维加固
 P2：Queues + Cron + Workflows
-P3：vinext 全量对齐与真实平台验收
+P3：Cloudflare 常用能力对齐与真实平台验收
 ```
 
 以下 P0–P2 分解与具名验证记录保留其历史用途，不要求重新实现已有能力，也不要求保留旧格式、
@@ -1613,33 +1622,39 @@ HTTP -> Queue -> Consumer -> Workflow
 在每个 transaction/dispatch 边界注入 process crash，要求 Queue 不丢消息、Workflow
 拒绝 stale commit、冻结版本正确、所有 due work 在 restart 后恢复。
 
-### P3.0：vinext 基线与用例清单
+### P3.0：Cloudflare 契约基线与可选应用基线
 
-- 固化第 18.2 节的验收元组，发现全部上游测试、project/browser/mode 与关联示例，生成逐项映射；
-- 在独立对照环境运行上游基线，记录实际结果与上游已有排除项；不新增本平台豁免；
-- 分清工具链测试与应用运行测试，为后者接入真实 platformd 的测试启动器；
-- 盘点每个 fixture 需要的模块类型、Node API、bindings、缓存、图片、配置与资源限额；
+- 固化第 18.2 节的 workerd/date/flags、workers-sdk/types 与 Wrangler/Vite 平台验收元组；
+- 建立 advertised Cloudflare API 的 contract/source/case/deviation catalog；
+- 应用 qualification 需要时，再单独固定浏览器和 vinext 等应用输入，发现其上游测试并登记映射到
+  platform contract 的选定 workload；
+- 为 portable fixture 提供真实 Cloudflare 与真实 platformd 两个 adapter，分开工具链和应用结果；
+- 盘点每个 fixture 需要的模块、Node API、bindings、缓存、图片、配置与资源限额；
 - 测试依赖、浏览器及 runtime 必须预置或显式授权准备，不由生产启动或缺依赖的 Gate 隐式下载。
 
-交付物是可复现基线、完整清单和差距报告，不是“vinext 已支持”。上游有测试文件不等于该用例在
-所选模式已经启用或通过；上游暂缺的完整 Next.js 特性不加入本平台新增需求。
+Platform 交付物是可复现平台基线、contract 清单和差距报告，不是“完整 Cloudflare 已支持”；
+application 清单和报告是独立 qualification 产物，不是 Platform Go 的前置条件。
+vinext 或 Next.js 上游缺口不加入平台需求，已声明 supported 的 Cloudflare contract 也不能因应用
+未覆盖而跳过。
 
 ### P3.1：框架构建产物与 Static Assets
 
-详细实施与 Gate 见 [P3.1：框架产物导入与 Static Assets](p3-1-static-assets.md)。
+详细实施与 Gate 见 [P3.1：Static Assets 与框架产物导入](p3-1-static-assets.md)。
 
-沿用 vinext/Vite 的 RSC、SSR、client 多环境构建，不用普通 Worker 单入口打包替代框架编译。
-TS7 检查本项目维护的 TypeScript；构建、模块/资源校验成功后才允许部署。产物导入必须保存
-入口、模块图、静态资源、路由配置与所需 bindings，保持 server-only 与 client 输出隔离。
+平台接受普通 Worker + Assets、Assets-only 与已构建的多环境 framework output，不用普通 Worker
+单入口打包替代框架自己的编译。TS7 检查本项目维护的 TypeScript；构建、模块/资源校验成功后才
+允许部署。产物导入必须保存入口、模块图、静态资源、路由配置与所需 bindings，保持 server-only
+与 client 输出隔离。
 
 按第 7.5、11.3 节实现资源上传、manifest、路由与 `ASSETS.fetch()`，支持仅有静态产物的部署，
 不为 static export 注入伪造的租户 Worker。代码与资源一起 ready/promote/rollback；缓存与
 保留策略覆盖资源，不通过历史 manifest 搜索或把全部资源内嵌 JS 绕过产物模型。
 
-阶段验证覆盖 App/Pages Router 构建、静态导出、真实 JS/CSS 加载和 hydration，以及路径编码、
-上传中断、摘要损坏、缺失资源、部署切换和跨账户读取拒绝。这只是中间里程碑，不是全量验收。
+平台验证覆盖 Cloudflare Static Assets 契约、路径编码、上传中断、摘要损坏、缺失资源、部署切换
+和跨账户读取拒绝。App/Pages Router 构建、静态导出、真实 JS/CSS 加载和 hydration 属于另行登记的
+应用 qualification；通过或未运行都不替代平台契约验收。
 
-### P3.2：Service Binding、Node API 与流式执行
+### P3.2：Service Binding、运行时 API 与流式执行
 
 Service Binding 的实施顺序、原生 RPC 与生命周期 Gate 见
 [P3.2：Service Binding 与原生 Worker 调用](p3-2-service-bindings.md)；该子方案不代替完整 Node API 验收。
@@ -1652,46 +1667,44 @@ Request/Response/Streams、Server Actions 与 RPC。当前 CPU、子请求、mod
 真实产物和负载测试调整为明确的产品预算；不能取消预算或只给测试 fixture 放宽限制。
 
 验证 SSR/Flight 分块输出、取消与背压、错误页、递归调用、`waitUntil`、pin 释放、warm/cold
-一致性和 restart。既有 G0 `D-abort` 限制只按原精确边界记录，不自动豁免任何 vinext 用例失败。
+一致性和 restart。既有 G0 `D-abort` 限制只按原精确边界记录，不自动豁免 mapped platform
+contract 失败；其他 vinext 失败按第 18.4 节分类。
 
-### P3.3：vinext 缓存与图片依赖
+### P3.3：Workers Cache、Cache API 与 Images
 
-使用基线实际采用的接口盘点，而非假设“有 R2/Queue 就支持 ISR”。本次源码基线包含
-`kvDataAdapter()`、基于 Workers Cache 的 `cdnAdapter()` 和 `imagesOptimizer()`；需要验证
-KV 数据缓存、`ctx.cache`/tag purge 与响应缓存的协作，以及实际使用的 Images 能力。
-普通 Cache API 与 Workers Cache 不能仅因名称相似就视为同一接口。
+详细的通用 API、WorkerLoader Hard Gate、SQLite/S3 cache authority、version/entrypoint 隔离、
+purge/refresh 状态机、Images engine/session、安全预算、工作包和验收见
+[P3.3：Workers Cache、Cache API 与 Images Day1 方案](implemented/p3-3-workers-cache-images.md)。
 
-平台实现单节点的相应语义，持久状态归 SQLite/S3，租户只获得声明的能力。缓存 key、HTML/Flight
-变体、tag/path 失效、并发重新生成及部署边界必须隔离；缺少已配置的后端应报错，不能悄悄退回
-进程内缓存、关闭 ISR/PPR 或设为图片不优化来让用例通过。上游只在测试中使用的 mock 保留在
-测试/对照层，不能移入生产后端代替持久化或安全边界。
+P3.3 面向任意 Worker：实现 deployment-configured Workers Cache、显式 `caches.default/open`、
+`ctx.cache.purge()`、Images 与 Version Metadata。KV Data Cache 继续是普通 KV 用法。vinext 的三个
+adapter 只验证组合，不能进入生产命名或逻辑；PPR/Cache Components 仍由框架负责。
 
-PPR/Cache Components 按 vinext 的既有实现验收，不补齐其 README 已列明的 Next.js 缺口。
-发现其他基线用例依赖的 binding 时纳入同一盘点与实现，不将本节列出的三个适配器作为范围上限。
+### P3.4：Cloudflare 对齐、隔离与恢复
 
-### P3.4：全量对齐、隔离与恢复
+真值优先级、contract catalog、portable Cloudflare differential、application workload、两账户
+隔离、故障恢复、typed Gate runner、工作包和双 verdict 由后续 P3.4 Cloudflare conformance
+阶段负责；该阶段尚未纳入本次实现与验收。
 
-完成所有启用用例的逐项映射，覆盖上游 unit/integration 与全部浏览器 project/mode。
-应用行为在真实平台生产产物上复验；开发/HMR 与宿主工具行为单独取证，不能互相替代。
-除原始断言外，补充两个账户/部署并发、secret 与 client bundle 隔离、资源/缓存交叉读取拒绝、
-异常清理、部署回滚、S3 故障、workerd/platformd crash 与恢复测试。
-
-能力按领域组织：构建接入在 `packages/toolchain`，部署/目标解析在 `crates/workers`，schema
-在 `crates/storage`，字节与校验在 `crates/artifacts`，入口组合在 `crates/service`，资源和服务
-调用分别进入 `packages/runtime/src/assets/`、`packages/runtime/src/services/`。缓存/图片按实际所有权划分，不能
-把框架业务分支或测试条件堆入 loader host；生成 JS 由构建更新，不手改。
+平台先对齐明确声明的 Cloudflare API，再用 vinext 等第三方应用验证组合行为。vinext 全部上游 API/
+测试不再等同于 Platform Go；Cloudflare pass/open-compute fail 的 supported contract 才是平台
+阻塞。能力仍按 toolchain/workers/storage/artifacts/service/runtime 的所有权组织，禁止框架分支、
+test-only 条件或手改生成 JS。
 
 ### P3 Exit Gate
 
-按 [测试节奏](./references/testing.md)，开发期间每次迭代只跑相关单轮。源码冻结后才执行完整上游基线、
-全量平台矩阵与相关真实运行时 Gate：确定性用例完整一轮，审查登记的时序用例补两轮；
-重复轮使用新进程和隔离数据目录，保留场景内正常运行与重启恢复。新增 P3 目标及其用例分类
-尚待实现，本节不是已有可执行命令或已通过报告。
+按 [测试节奏](./references/testing.md)，开发期间每次迭代只跑相关单轮。源码冻结后才执行固定平台
+基线、全量 contract/product 矩阵与相关真实运行时 Gate：确定性用例完整一轮，审查登记的时序用例
+补两轮；
+重复轮使用新进程和隔离数据目录，保留场景内正常运行与重启恢复。P3.1 至 P3.3 的目标及其用例
+分类已经实现；P3.3 的最终本地验收见归档方案。P3.4 contract catalog、Cloudflare differential
+和应用 qualification 仍待后续独立执行。
 
 执行完整 Rust/TS 检查、依赖边界和既有 coverage 要求，Rust 行覆盖率不得低于 90.00%。相关
 G0/P0/P2 回归按影响范围执行，不在每个中间步骤递归重跑所有历史 aggregate。
-最终报告按第 18.4 节列出基线、全部 case 映射、各轮原始结果、上游限制、失败与清理证据。
-中间 SSR smoke 通过、上游 CI 绿灯或某个 browser project 通过都不能替代 P3 Exit。
+Platform 报告按第 18 节列出 contract baseline、全部 case 映射、Cloudflare differential、各轮原始
+结果、deviation、失败与清理证据。若另行运行应用 qualification，再产生独立 application baseline、
+case 映射和 upstream 限制；中间 SSR smoke、上游 CI 或单个 browser project 通过都不能替代 P3 Exit。
 
 ## 23. 主要风险
 
@@ -1720,15 +1733,15 @@ lease expiry 和 version retention 都需要独立状态机与大量 crash-point
 多个 SQLite 加 S3 无法天然获得单一原子 snapshot。V1 必须接受短 maintenance window，
 不能声称在线全局一致备份。
 
-### 23.6 vinext 基线与上游缺口
+### 23.6 契约漂移与应用上游缺口
 
-vinext 仍在快速变化，PPR/Cache Components 等范围不能根据功能名称推断。以固定 revision 的
-实现、测试和已知限制为准，升级时审查差异；不承诺完整 Next.js，不把上游限制记成本平台 PASS，
-也不能借上游 beta 状态接受平台新增回归。
+Cloudflare 文档、compatibility date、workerd、workers-sdk 和 vinext 都会变化。以固定 baseline/
+catalog 为准，升级时审查契约、类型、配置、用例和 deviation 差异；不自动追随 latest。vinext 的
+PPR/Cache Components 缺口不记为平台 PASS，也不能借其 beta 状态接受 supported contract 回归。
 
 ### 23.7 框架产物与执行预算
 
-普通 Worker 已通过不代表能承载 vinext 的模块图、client assets、RSC 流和缓存请求。
+普通 Worker contract 通过不代表能承载真实 framework 模块图、client assets、RSC 流和缓存请求。
 需要实测包大小、冷启动、CPU、内存、子请求、并发生成、缓存命中/失效和浏览器行为。
 若当前 pin 或预算无法支持基线，应报告平台差距并协调修复，不能以 Node sidecar、mock binding
 或关闭框架特性代替目标执行路径。
@@ -1752,23 +1765,22 @@ vinext 仍在快速变化，PPR/Cache Components 等范围不能根据功能名�
 11. 完整 backup/restore 在全新主机上通过；
 12. 一条命令或一次安装操作可以启动并通过 doctor/smoke。
 
-### 24.2 当前交付目标：与 vinext 全量对齐
+### 24.2 当前交付目标：声明范围内对齐 Cloudflare Workers
 
 只有同时满足以下条件，才能宣布本阶段完成：
 
-1. 固定且可复现的 vinext/工具链/浏览器/workerd 基线，以及无遗漏的上游用例与平台映射清单；
-2. 全部上游启用、预期通过的用例按其原语义执行通过，平台新增失败、跳过、未运行和环境阻塞均为零；
-3. SSR、CSR/hydration、RSC、Server Actions、SSG/ISR、PPR、路由、静态资源与绑定，分别具有
-   vinext 已实现范围内的实际证据；PPR 不以完整 Next.js 语义追加范围，也不以普通 SSR 代替；
-4. 所有应用运行场景经过正常构建、部署和真实 platformd/workerd 路径，浏览器断言实际执行；
-5. Static Assets、Service Binding、缓存和图片依赖不是 mock，不以关闭特性或降级后端取得通过；
-6. 多租户隔离、secret 边界、不可变部署、发布回滚和故障恢复通过，未弱化任何既有安全 Gate；
-7. 上游既有 exclusions 与 Next.js 差异逐项披露，不计入通过数，不扩大为本平台新增豁免；
-8. P3 最终验收（完整一轮、时序三轮）、相关平台回归与完整检查完成，报告包含逐轮实际用例、
-   原始结果、失败记录及未遗留进程/资源的证据，不自动重试到通过。
+1. 固定且可复现的 workerd/date/flags、workers-sdk/types 和工具链 Platform baseline；
+2. advertised API 的 contract catalog 完整，capability/type/config/deviation/case 双向一致；
+3. 全部 supported contract 在真实 stock workerd/platformd 产品路径通过，blocked 为零；
+4. 高风险 portable fixture 的真实 Cloudflare differential 没有未解释的“CF pass / OC fail”；
+5. Static Assets、Service Binding、Cache API、Workers Cache、Images 不是 mock/fallback；
+6. 多租户、secret/client、不可变 deployment、rollback、S3/SQLite/process 故障恢复通过；
+7. P3 最终验收按完整确定性一轮、时序用例额外两轮执行，报告保留逐轮结果与无遗留资源证据。
 
-结论应写为“与指定 vinext revision 的启用用例全部对齐，上游限制另列”，不能写成“完整兼容
-Cloudflare Workers / 官方 Next.js”。当前未执行上述 vinext 验收，状态仍为未完成。
+结论只能写“对 catalog `<digest>` 声明的 Cloudflare Workers 常用 API 达到 Go，单节点 deviation
+另列”，不能写“完整兼容 Cloudflare Workers”。vinext 另给 Application verdict，不能替代 Platform
+verdict。应用 qualification 未运行时只写“未评估”，不降低已有完整平台证据。当前未执行上述 P3
+Platform 验收，状态仍为未完成。
 
 ## 25. 参考资料
 
@@ -1776,6 +1788,10 @@ Cloudflare Workers / 官方 Next.js”。当前未执行上述 vinext 验收，�
 - [vinext 本次勘察基线](https://github.com/cloudflare/vinext/tree/5d0b53088c689b75d63672eab6ff66434afa5b3b)
 - [vinext Playwright projects 与 PPR 用例入口](https://github.com/cloudflare/vinext/blob/5d0b53088c689b75d63672eab6ff66434afa5b3b/playwright.config.ts)
 - [vinext Workers Cache 示例](https://github.com/cloudflare/vinext/tree/5d0b53088c689b75d63672eab6ff66434afa5b3b/examples/workers-cache)
+- [Cloudflare Workers Cache 配置](https://developers.cloudflare.com/workers/cache/configuration/)
+- [Cloudflare Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/)
+- [Cloudflare Images binding](https://developers.cloudflare.com/images/optimization/binding/)
+- [Cloudflare Version Metadata binding](https://developers.cloudflare.com/workers/runtime-apis/bindings/version-metadata/)
 - [Cloudflare Static Assets 配置与绑定](https://developers.cloudflare.com/workers/static-assets/binding/)
 - [Cloudflare Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/)
 - [WDL repository](https://github.com/wdl-dev/wdl)
@@ -1783,15 +1799,15 @@ Cloudflare Workers / 官方 Next.js”。当前未执行上述 vinext 验收，�
 - [WDL Queues and Cron](https://github.com/wdl-dev/wdl/blob/wdl.20260817.1/docs/modules/queues-cron.md)
 - [WDL Workflows](https://github.com/wdl-dev/wdl/blob/wdl.20260817.1/docs/modules/workflows.md)
 - [WDL Durable Objects](https://github.com/wdl-dev/wdl/blob/wdl.20260817.1/docs/modules/durable-objects.md)
-- [Miniflare repository](https://github.com/cloudflare/workers-sdk/tree/main/packages/miniflare)
-- [Miniflare workerd runtime supervisor](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/runtime/index.ts)
-- [Miniflare worker-loader plugin](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/plugins/worker-loader/index.ts)
-- [Miniflare D1 plugin](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/plugins/d1/index.ts)
-- [WDL loaded-isolate R2 facade](https://github.com/wdl-dev/wdl/blob/main/runtime/r2-client.js)
-- [WDL loaded-isolate D1 facade](https://github.com/wdl-dev/wdl/blob/main/runtime/d1-client.js)
-- [WDL host-binding wrapper generator](https://github.com/wdl-dev/wdl/blob/main/runtime/load/wrapper-generate.js)
-- [Miniflare Durable Objects plugin](https://github.com/cloudflare/workers-sdk/blob/main/packages/miniflare/src/plugins/do/index.ts)
-- [workerd WorkerLoader](https://github.com/cloudflare/workerd/blob/main/src/workerd/api/worker-loader.h)
+- [Miniflare repository（固定 workers-sdk revision）](https://github.com/cloudflare/workers-sdk/tree/296a1a7c97e027a308740e1eaaa6d904dec8f102/packages/miniflare)
+- [Miniflare workerd runtime supervisor](https://github.com/cloudflare/workers-sdk/blob/296a1a7c97e027a308740e1eaaa6d904dec8f102/packages/miniflare/src/runtime/index.ts)
+- [Miniflare worker-loader plugin](https://github.com/cloudflare/workers-sdk/blob/296a1a7c97e027a308740e1eaaa6d904dec8f102/packages/miniflare/src/plugins/worker-loader/index.ts)
+- [Miniflare D1 plugin](https://github.com/cloudflare/workers-sdk/blob/296a1a7c97e027a308740e1eaaa6d904dec8f102/packages/miniflare/src/plugins/d1/index.ts)
+- [WDL loaded-isolate R2 facade](https://github.com/wdl-dev/wdl/blob/wdl.20260817.1/runtime/r2-client.js)
+- [WDL loaded-isolate D1 facade](https://github.com/wdl-dev/wdl/blob/wdl.20260817.1/runtime/d1-client.js)
+- [WDL host-binding wrapper generator](https://github.com/wdl-dev/wdl/blob/wdl.20260817.1/runtime/load/wrapper-generate.js)
+- [Miniflare Durable Objects plugin](https://github.com/cloudflare/workers-sdk/blob/296a1a7c97e027a308740e1eaaa6d904dec8f102/packages/miniflare/src/plugins/do/index.ts)
+- [workerd WorkerLoader（正式 pin）](https://github.com/cloudflare/workerd/blob/v1.20260826.1/src/workerd/api/worker-loader.h)
 - [Cloudflare KV namespaces](https://developers.cloudflare.com/kv/concepts/kv-namespaces/)
 - [Cloudflare KV list keys](https://developers.cloudflare.com/kv/api/list-keys/)
 - [Cloudflare D1](https://developers.cloudflare.com/d1/)

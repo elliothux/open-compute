@@ -174,6 +174,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             secrets: Default::default(),
             bindings,
             services: Default::default(),
+            runtime_features: Default::default(),
             queue_consumers: vec![open_compute_workers::QueueConsumerInput {
                 queue: queue.queue.id,
                 entrypoint: None,
