@@ -18,7 +18,7 @@ inputs:
     required: false
     default: "true"
   node:
-    description: Install Node.js and cache bun via setup-node
+    description: Install Node.js (bun install cache is a separate step)
     required: false
     default: "true"
   llvm-cov:
@@ -45,11 +45,8 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: 24.10.0
-        cache: bun
-        cache-dependency-path: bun.lock
 
     - name: Cache bun install
-      if: ${{ inputs.node == 'false' }}
       uses: actions/cache@v4
       with:
         path: ~/.bun/install/cache
