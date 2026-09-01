@@ -1,9 +1,16 @@
-# Deviations
+# Behavior differences
 
-Registered ID: **`OC-KV-001`**. Meaning is owned by `docs/references/p1-deviations.md` and `ocd capabilities --json`.
+The KV Worker API matches Cloudflare. The storage topology does not.
 
-KV is single-node SQLite authority; it does not claim Cloudflare global replication or edge-cache propagation timing.
+## Compatibility
 
-That is why 52 target members are `supported_with_deviation`, not missing methods. There is no second KV deviation ID. A missing ID does not make other Cloudflare KV products (REST, jurisdiction, global purge) available.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [Cloudflare KV API](https://developers.cloudflare.com/kv/api/) | Same: `put` / `get` / `getWithMetadata` / `list` / `delete`, text / json / arrayBuffer / stream, metadata, TTL, bulk get, list cursor |
+| Replication | Global edge | Single-node SQLite on the node running ocd |
+| `cacheTtl` | Colo cache | Parameter accepted; no colo cache |
+| Jurisdictions | Available | Not provided |
+| REST / `client.v4` | Available | Not provided; use the Worker binding |
+| REST bulk write / delete | Available | Not provided |
 
 See [Compatibility](/en/platform/compatibility).

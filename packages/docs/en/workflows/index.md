@@ -1,6 +1,12 @@
 # Workflows
 
-Workflows are replayable multi-step applications. Execution authority is local SQLite. Callbacks are at-least-once until their result commits; replay skips callbacks that already committed. There is no cross-region execution and no Cloudflare dashboard / observability.
+Workflows are replayable multi-step applications. Execution authority is local SQLite on the node running ocd.
+
+For example, you can use Workflows for:
+
+- Multi-step applications with durable steps
+- Sleep and wait for events
+- Replay after interruption
 
 ```ts
 export class MyWorkflow extends WorkflowEntrypoint<Env, { hello: string }> {
@@ -20,9 +26,7 @@ export default {
 } satisfies ExportedHandler<{ FLOW: Workflow }>;
 ```
 
-## Same as Cloudflare
-
-The binding / instance API matches [Cloudflare Workflows](https://developers.cloudflare.com/workflows/): `create` / `get` / `createBatch` / `deleteBatch`, `step.do` / sleep / event, status / pause / resume / terminate / restart. 72 target members are `supported_with_deviation`.
+Bind in `open-compute.json`. Workflow bindings require `className`:
 
 ```json
 {
@@ -34,19 +38,24 @@ The binding / instance API matches [Cloudflare Workflows](https://developers.clo
 }
 ```
 
-Workflow bindings must include `className`. Optional `schedules` is a string array. Grammar: [bindings](/en/workers/configuration/bindings). Do not copy Cloudflare REST or the dashboard from this page.
+Optional `schedules` is a string array. Grammar: [bindings](/en/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## Intentional differences
+## Compatibility
 
-**`OC-WORKFLOW-001`**: Workflow execution uses local SQLite authority. Callbacks are at-least-once until their result commits; replay skips durably completed callbacks; external product effects do not roll back with Workflow snapshots. The platform does not claim cross-region execution, global placement, or Cloudflare dashboard/observability.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Binding / instance API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | Same: `create` / `get` / `createBatch` / `deleteBatch`, `step.do` / sleep / event, status / pause / resume / terminate / restart |
+| Execution | Cross-region | Local SQLite on the node running ocd |
+| Callbacks | — | At-least-once until result commit; replay skips durable-complete callbacks |
+| External side effects | — | Do not roll back with Workflow snapshots |
+| Dashboard / observability | Available | Not provided |
+| Binding | wrangler | `{ type, id, className }`; `className` required |
 
-Full text: [Deviations](/en/workflows/platform/deviations) and [Compatibility](/en/platform/compatibility).
-
-## In this section
+## Next
 
 - [Get started](/en/workflows/get-started/)
 - [Concepts](/en/workflows/concepts/)
 - [Guides](/en/workflows/guides/)
 - [Examples](/en/workflows/examples/)
 - [Limits](/en/workflows/platform/limits)
-- [Deviations](/en/workflows/platform/deviations)
+- [Behavior differences](/en/workflows/platform/deviations)

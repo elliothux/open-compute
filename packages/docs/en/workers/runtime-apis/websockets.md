@@ -1,6 +1,6 @@
 # WebSockets
 
-Standard WebSocket upgrade, plus hibernation on Durable Objects. Hibernation is `supported` in capabilities (19 members), not a deviation.
+Standard WebSocket upgrade, plus hibernation on Durable Objects.
 
 ```ts
 export default {
@@ -18,10 +18,13 @@ export default {
 
 DO hibernation: `state.acceptWebSocket`, tags, `webSocketMessage` / `webSocketClose` / `webSocketError`, serialize/deserialize attachment. See [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/) and the Durable Objects hibernation API.
 
-## Same as Cloudflare
+## Compatibility
 
-`WebSocketPair`, `accept()`, messages and close. Hibernation accept/tags/get, auto-response, and attachment reconstruction have runtime evidence.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| `WebSocketPair`, `accept()`, messages and close | Yes | Yes |
+| Hibernation: accept / tags / get, auto-response, attachment reconstruction | Yes | Yes |
+| Where connections land | Global-edge upgrade | One workerd on this node |
+| Duration billing | Yes | Not provided |
+| Durable Object placement | Global placement | This node |
 
-## Intentional delta
-
-Connections land on this machine's one workerd. No global-edge upgrade, no Cloudflare duration billing. DO placement is still `OC-DO-001`.

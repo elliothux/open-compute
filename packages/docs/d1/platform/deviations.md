@@ -1,9 +1,19 @@
-# 偏差
+# 行为差异
 
-登记 ID：**`OC-D1-001`**。
+D1 的 Worker API 与 Cloudflare 对齐；存储拓扑不同。
 
-D1 是单个本地主 SQLite authority，不声称 read replica、region routing、hosted `served_by` 身份、region/colo metadata 或 Cloudflare 计费计数。opaque bookmark 保证同一数据库的本地顺序可见性；`rows_read` / `rows_written` 是稳定的本地 SQLite 执行计数。
+## 兼容性
 
-36 个目标成员因此是 `supported_with_deviation`。`dump()` 拒绝是实现托管非 alpha 行为，不是另设偏差 ID。没有 replicas。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | 相同：`prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`、session、opaque bookmark、prepared-statement / result / meta |
+| 拓扑 | 托管 D1，含 read replica | 运行 ocd 的该节点上的本地主 SQLite |
+| Read replica | 提供 | 不提供 |
+| Region routing | 提供 | 不提供 |
+| `served_by` 地理 | region / colo metadata | 不提供；`served_by_*` 不是地理产品 |
+| Bookmark | 跨副本因果 | 同一数据库的本地顺序 |
+| `rows_read` / `rows_written` | 计费计数 | 本地 SQLite 执行计数 |
+| `dump()` | hosted 非 alpha 拒绝 | 同样拒绝（`D1_DUMP_ERROR`） |
+| REST / `client.v4` | 提供 | 不提供；使用 Worker binding |
 
-见 [Compatibility](/platform/compatibility) 与仓库 `docs/references/p1-deviations.md`。
+见 [Compatibility](/platform/compatibility)。

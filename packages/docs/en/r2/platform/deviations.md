@@ -1,9 +1,16 @@
-# Deviations
+# Behavior differences
 
-Registered ID: **`OC-R2-001`**.
+The R2 Worker API matches Cloudflare. Object bytes live on the configured S3-compatible provider.
 
-R2 object bytes are held by the configured S3-compatible provider. The platform does not claim Cloudflare global placement or replication.
+## Compatibility
 
-That is why 110 target members are `supported_with_deviation`. There is no second R2 deviation ID. A missing ID does not make Cloudflare hosted public access, jurisdiction, or global replication available.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | Same: `head` / `get` / `put` / `delete` / `list`, conditional writes, checksums, multipart, HTTP metadata |
+| Object bytes | Cloudflare R2 storage | Configured S3-compatible provider |
+| Global placement | Available | Not provided |
+| r2.dev public product | Available | Not provided |
+| Jurisdictional restrictions | Available | Not provided |
+| REST / `client.v4` | Available | Not provided; use the Worker binding or the provider S3 API |
 
-See [Compatibility](/en/platform/compatibility) and `docs/references/p1-deviations.md`.
+See [Compatibility](/en/platform/compatibility).

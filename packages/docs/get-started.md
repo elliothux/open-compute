@@ -1,10 +1,10 @@
 # 开始
 
-最短路径：`ocd` 已就绪，然后跑仓库里的 hello Worker。
+本指南把一个 hello Worker 跑到已经就绪的 `ocd` 上。
 
-## 1. ocd 已安装，且 `/health/ready`
+## 1. 安装 ocd，确认 `/health/ready`
 
-先按[安装与首次启动](/ocd/get-started)把 `ocd` 跑起来。本页假设 `GET /health/ready` 已经返回 200。`oc run` 不会再起一个 workerd，它把 Worker 激活到已经在跑的本地平台。
+先按[安装与首次启动](/ocd/get-started)把 `ocd` 跑起来。本页假设 `GET /health/ready` 已经返回 200。`oc run` 不会再启动一个 workerd；它把 Worker 激活到已经在跑的本地平台。
 
 ## 2. Hello Worker
 
@@ -41,7 +41,7 @@ export default {
 bun run oc run --config examples/hello-worker/open-compute.json --ocd <path-to-ocd>
 ```
 
-成功时打印 Worker URL。把 `<path-to-ocd>` 换成这台机器上的 `ocd` 二进制（或设 `OPEN_COMPUTE_OCD`）。
+成功时打印 Worker URL。把 `<path-to-ocd>` 换成 `ocd` 二进制的路径（或设 `OPEN_COMPUTE_OCD`）。
 
 ## `open-compute.json` 不是 `wrangler.jsonc`
 

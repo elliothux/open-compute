@@ -1,6 +1,6 @@
 # Limits
 
-Worker API shape matches the [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/). Local quotas come from `ocd` `[d1]`. **Live numbers** are `limits` from `ocd capabilities --json`. Embedded defaults include:
+Worker API shape matches the [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/). Local quotas come from `ocd` `[d1]`. Live numbers are `limits` from `ocd capabilities --json`. Embedded defaults include:
 
 | Item | Default |
 | --- | --- |
@@ -12,4 +12,4 @@ Worker API shape matches the [D1 Worker API](https://developers.cloudflare.com/d
 | `query_timeout_ms` | 30000 |
 | `batch_timeout_ms` | 30000 |
 
-No Cloudflare plan, no replica count, no per-region capacity claim.
+Cloudflare plans, replica counts, and per-region capacity are not provided.

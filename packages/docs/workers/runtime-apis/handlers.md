@@ -14,10 +14,14 @@ export default {
 
 Durable Object 的 `alarm()` 在 DO 类上，不是 default export。见 [DO Alarms](https://developers.cloudflare.com/durable-objects/api/alarms/)。
 
-## 与 Cloudflare 相同
+## 兼容性
 
-`fetch`、`scheduled`、`queue` 的参数和返回值与 [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) 相同。`ctx.waitUntil`、`ctx.passThroughOnException` 按 workerd 行为。没有 Email handler、没有 Tail handler 产品。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| `fetch`、`scheduled`、`queue` 的参数和返回值 | 是，见 [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | 是 |
+| `ctx.waitUntil`、`ctx.passThroughOnException` | 是 | 按 workerd 行为 |
+| Email handler / Tail handler | 是 | 不提供 |
+| Cron 触发 | 托管 Cron | UTC 五字段；misfire 最多投影 grace 内最新 slot，见 [Cron Triggers](/workers/configuration/cron-triggers) |
+| Queue 投递 | 全球队列语义 | 单节点 at-least-once，不是全球 FIFO |
+| 项目文件中的 `triggers.crons` / queue consumer 数组 | Wrangler | 不允许；平台部署元数据接受 `crons` 与 `queue_consumers` |
 
-## 故意不同
-
-Cron 触发语义见 [`OC-CRON-001`](/workers/configuration/cron-triggers)。Queue 投递是单节点 at-least-once（`OC-QUEUE-001`），不是全球 FIFO。`open-compute.json` 目前没有 `triggers.crons` 或 queue consumer 数组；未知字段会失败。平台部署元数据接受 `crons` 与 `queue_consumers`。

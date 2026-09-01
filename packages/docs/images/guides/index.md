@@ -19,4 +19,4 @@ return result.response({ headers: { "cache-control": "public, max-age=3600" } })
 
 `fit`：`scale-down` | `contain` | `cover` | `crop` | `pad`。未知选项抛 `IMAGE_OPTION_UNSUPPORTED`。`anim` 只能是省略或 `false`。
 
-不要使用 Cloudflare Images 的 upload API 或 signing。
+不提供 Cloudflare Images 的 upload API 或 signing。

@@ -1,6 +1,6 @@
 # 限额
 
-Worker API 形状与 [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) 对齐。本机配额来自 `ocd` 的 `[durable_objects]`，**运行中精确值**以 `ocd capabilities --json` 为准。嵌入默认包括：
+Worker API 形状与 [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) 对齐。本机配额来自 `ocd` 的 `[durable_objects]`。运行中精确值以 `ocd capabilities --json` 为准。嵌入默认包括：
 
 | 项 | 默认 |
 | --- | --- |
@@ -10,4 +10,4 @@ Worker API 形状与 [Durable Objects API](https://developers.cloudflare.com/dur
 | `dispatch_timeout_ms` | 30000 |
 | `max_in_flight_dispatches` | 256 |
 
-没有 Cloudflare 的全球并发套餐。Alarms 与 hibernation 走同一进程限额。
+不提供 Cloudflare 的全球并发套餐。Alarms 与 hibernation 走同一进程限额。

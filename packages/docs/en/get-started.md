@@ -1,6 +1,6 @@
 # Get started
 
-Shortest path: `ocd` is ready, then run the hello Worker from this repo.
+This guide runs a hello Worker on a ready `ocd`.
 
 ## 1. ocd installed, and `/health/ready`
 
@@ -41,7 +41,7 @@ From the repository root:
 bun run oc run --config examples/hello-worker/open-compute.json --ocd <path-to-ocd>
 ```
 
-On success it prints the Worker URL. Replace `<path-to-ocd>` with the `ocd` binary on this machine (or set `OPEN_COMPUTE_OCD`).
+On success it prints the Worker URL. Replace `<path-to-ocd>` with the path to the `ocd` binary (or set `OPEN_COMPUTE_OCD`).
 
 ## `open-compute.json` is not `wrangler.jsonc`
 

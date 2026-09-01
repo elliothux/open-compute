@@ -1,8 +1,8 @@
 # API 参考
 
-本页是 **generated member index** 的入口，不要在文档里手列 2,097 个成员。生成器稍后会按产品填充分页；现在只给出库存计数。
+本页是生成成员索引的入口。生成器稍后会按产品填充分页；现在列出各产品的成员计数。
 
-签名与 Cloudflare 相同的，读 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/)。本平台差异只通过 [`OC-*`](/platform/deviations) 声明。
+Worker 侧签名与 Cloudflare 文档一致的，以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。单节点拓扑与行为差异见[行为差异](/platform/deviations)。
 
 | 产品 | 成员 |
 | --- | ---: |
@@ -19,4 +19,4 @@
 | version_metadata | 3 |
 | websocket_hibernation | 19 |
 
-合计 2,097。权威仍是这台机器上的 `ocd capabilities --json`。
+合计 2,097。运行中的发行身份仍以 `ocd capabilities --json` 为准。

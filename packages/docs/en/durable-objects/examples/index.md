@@ -1,5 +1,7 @@
 # Examples
 
+The counter sample is on the [overview](/en/durable-objects/). Hibernation runs on the single local workerd.
+
 ## Counter
 
 See the `Counter` sample on the [overview](/en/durable-objects/).

@@ -2,7 +2,7 @@
 
 ## 创建 namespace
 
-见[上手](/kv/get-started/)。本机 `POST /v1/accounts/{accountId}/kv/namespaces`，body `{ "name": "..." }`，需要 `idempotency-key`。这不是 Cloudflare REST。
+见[上手](/kv/get-started/)。本平台 `POST /v1/accounts/{accountId}/kv/namespaces`，body `{ "name": "..." }`，需要 `idempotency-key`。不提供 Cloudflare REST。
 
 ## 绑定
 
@@ -12,7 +12,7 @@
 }
 ```
 
-可选 `permissions`。改完跑 `bun run oc types --config open-compute.json`。
+可选 `permissions`。改完后运行 `bun run oc types --config open-compute.json`。
 
 ## get / put / list / delete
 
@@ -30,6 +30,4 @@ await env.KV.delete("user:1");
 
 bulk get：`env.KV.get(["a", "b"])`。stream 值不要经 JSON 膨胀；上限仍是 25 MiB。完整方法见 [Cloudflare KV API](https://developers.cloudflare.com/kv/api/)。
 
-## 与 Cloudflare 相同 / 故意不同
-
-相同：上述 Worker 方法。不同：写完立刻在这一台机器上可见，没有全球传播等待；`OC-KV-001`。
+写入后立即在该节点可见。无全球传播等待。

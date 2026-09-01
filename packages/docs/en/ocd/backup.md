@@ -1,6 +1,6 @@
 # Backup and retention
 
-Trigger: a planned maintenance window, a current-release restore drill, or an RPO deadline. Blast radius is local control / KV / D1 / DO / scheduler authority. R2 is bound to the current external S3; it is **not** a point-in-time copy (`OC-R2-001`). Runtime extraction cache is not snapshot authority.
+Trigger: a planned maintenance window, a current-release restore drill, or an RPO deadline. Blast radius is local control / KV / D1 / DO / scheduler authority. R2 is bound to the current external S3; it is not a point-in-time copy. Runtime extraction cache is not snapshot authority.
 
 Backup and restore are offline: stop the service, then take the data-dir lock.
 

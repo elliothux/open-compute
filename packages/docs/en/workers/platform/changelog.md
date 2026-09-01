@@ -1,17 +1,20 @@
 # Changelog
 
-Do not invent dates or a version narrative on this page. Trust the release identity on this machine.
+Trust the release identity on the node, not prose in this file.
 
 ```sh
 ocd capabilities --json
 ```
 
-Read `release`: `platform_version`, `git_revision`, `workerd_version`, `workerd_lock_sha256`, schema versions. Repo git tags (if present) point at source; **the running contract is `capabilities.release`, not prose in this file.**
+Read `release`: `platform_version`, `git_revision`, `workerd_version`, `workerd_lock_sha256`, schema versions. Repo git tags (if present) point at source; **the running contract is `capabilities.release`.**
 
-## Same as Cloudflare
+This slot matches [Cloudflare Workers changelog](https://developers.cloudflare.com/workers/platform/changelog/). That is hosted release notes, not this binary's.
 
-This slot matches [Cloudflare Workers changelog](https://developers.cloudflare.com/workers/platform/changelog/). That is their hosted release notes, not this binary's.
+## Compatibility
 
-## Intentional delta
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Hand-written date list | Yes | Not provided |
+| workerd / types pin change | Hosted release | A dependency bump; shows up as `effective_compatibility_date` and `workerd_version` in the lock |
+| Current lock date | N/A | `2026-08-30`; if the JSON differs, trust the JSON |
 
-open-compute does not keep a hand-written date list. A workerd / types pin change is a dependency bump and shows up as `effective_compatibility_date` and `workerd_version` in the lock. The current lock date is `2026-08-30`; if the JSON differs, trust the JSON.

@@ -1,9 +1,16 @@
-# 偏差
+# 行为差异
 
-登记 ID：**`OC-DO-001`**。
+Durable Objects 的 Worker / class API 与 Cloudflare 对齐；所有对象落在本地这一个 workerd。
 
-Durable Objects 落在本地这一个 workerd 进程上。location hint、jurisdiction 和全球迁移没有地理调度效果。
+## 兼容性
 
-115 个目标成员因此是 `supported_with_deviation`（其中 112 个用 `OC-DO-001`；3 个 connect 成员额外带 `OC-WKR-TCP-001`、`OC-WKR-LIMIT-001`）。Alarms（7）和 WebSocket hibernation（19）为 `supported`，没有单独偏差 ID。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`、stub `fetch` / RPC、`state.storage` KV 与 SQL、transaction、output gate |
+| 放置 | 地理调度，`locationHint` / jurisdiction / migration | 全部对象在本地这一个 workerd；`locationHint` / jurisdiction / migration 无地理效果 |
+| Alarms | 提供 | 支持 7 个方法 |
+| Hibernation | 提供 | 支持 |
+| Binding | wrangler `durable_objects` | `{ type, id, className }`；`className` 必填 |
+| `Fetcher.connect()` | 通用出网 | 声明的 capability tunnel |
 
-见 [Compatibility](/platform/compatibility) 与 `docs/references/p1-deviations.md`。
+见 [Compatibility](/platform/compatibility)。

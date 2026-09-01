@@ -1,6 +1,6 @@
 # Limits
 
-Local quotas come from `ocd` `[images]`. **Live numbers** come from `ocd capabilities --json`. Embedded defaults include:
+Local quotas come from `ocd` `[images]`. Live numbers come from `ocd capabilities --json`. Embedded defaults include:
 
 | Item | Default |
 | --- | --- |
@@ -15,4 +15,4 @@ Local quotas come from `ocd` `[images]`. **Live numbers** come from `ocd capabil
 | `max_concurrency` | 4 |
 | `request_timeout_ms` | 10000 |
 
-These are not Cloudflare Images plan quotas. Do not cite the Cloudflare Images limits page as this machine's contract.
+These are not Cloudflare Images plan quotas.

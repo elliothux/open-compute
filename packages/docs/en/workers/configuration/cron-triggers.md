@@ -1,6 +1,6 @@
 # Cron Triggers
 
-The Cron product lives here: the Worker's `scheduled()` runs on UTC expressions. This is not the Cloudflare dashboard trigger UI.
+Cron on this platform runs the Worker's `scheduled()` on UTC expressions. This is not the Cloudflare dashboard trigger UI.
 
 ```ts
 export default {
@@ -20,12 +20,15 @@ Documented local Quartz-like extensions: `*` `,` `-` `/` `L` `W` `#`, plus case-
 
 The platform deployment metadata field is `crons: string[]`. `open-compute.json` has no Wrangler `triggers` / `triggers.crons`; adding one is an unknown field and fails. Workflow cron uses `schedules` on the workflow binding, not Worker `scheduled()`.
 
-## Same as Cloudflare
+## Compatibility
 
-The handler matches [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/). Five-field cron matches the common surface of [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/). `noRetry()` is available.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| `scheduled()` handler | Yes — [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) | Yes |
+| Five-field cron | Yes — [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | Yes; UTC only |
+| `noRetry()` | Yes | Yes |
+| `triggers.crons` in the project file | Wrangler | Not allowed; deployment metadata field is `crons: string[]` |
+| Misfire recovery | Hosted scheduler semantics | Projects at most the latest slot within grace; does not replay complete downtime history |
+| Retry on known failure | Hosted policy | Configured bounded local retry unless `noRetry()` is called |
+| Default misfire grace | Plan-dependent | `scheduler.cron_misfire_grace_ms = 300000` (five minutes); exact values from `ocd capabilities --json` `limits` |
 
-## Intentional delta: OC-CRON-001
-
-Cron is UTC-only with five fields and the documented local Quartz-like extensions. Recovery projects at most the newest slot within the configured misfire grace rather than replaying complete downtime history. Known failures use the configured bounded local retry policy unless `noRetry()` is called.
-
-Default `scheduler.cron_misfire_grace_ms = 300000` (five minutes). Exact values come from `ocd capabilities --json` `limits`. Recovering from five hours of downtime does not replay every minute of that window.

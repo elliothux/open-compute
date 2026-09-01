@@ -1,6 +1,6 @@
 # Bindings
 
-`env` 上的资源。项目里用 `bindings` 对象、`services` 数组，以及 `assets` / `images` / `version_metadata`。
+`env` 上的资源。在项目中用 `bindings` 对象、`services` 数组，以及 `assets` / `images` / `version_metadata` 声明。
 
 ```json
 {
@@ -24,18 +24,24 @@
 }
 ```
 
-`permissions` 可选 `{ "read": true, "write": false }`。Durable Object 与 Workflow 必须提供 `className`：只用于核对生成的 framework config 中 class 语义，不作为资源 ID 发给平台。Workflow 可选 `schedules` 字符串数组。
+`permissions` 可选 `{ "read": true, "write": false }`。Durable Object 与 Workflow 必须提供 `className`：只用于核对生成的 framework config 中的 class 语义，不作为资源 ID 发给平台。Workflow 可选 `schedules` 字符串数组。
 
-改完配置后重新生成类型：
+更改配置后重新生成类型：
 
 ```sh
 bun run oc types --config open-compute.json
 ```
 
-## 与 Cloudflare 相同
+运行时细节见 [Runtime APIs · bindings](/workers/runtime-apis/bindings)。
 
-租户只看见声明过的名字。KV / R2 / D1 / DO / Queue / Workflow / Service / Assets / Images / Version Metadata 的 **Worker 侧 API** 跟 [Cloudflare bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) 同一套符号。运行时细节见 [Runtime APIs · bindings](/workers/runtime-apis/bindings)。
+## 兼容性
 
-## 故意不同
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| 租户只看见声明过的名字 | 是 | 是 |
+| KV / R2 / D1 / DO / Queue / Workflow / Service / Assets / Images / Version Metadata 的 Worker 侧 API | 是，见 [Cloudflare bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | 同一套符号 |
+| 配置形态 | Wrangler 分产品顶层数组（`kv_namespaces` 等） | `bindings` 对象，值为 `{type, id, permissions?}` |
+| Service Bindings | 同账户 Worker | `services: [{binding, service, entrypoint?}]`；部署时解析同账户 Worker 名并冻结目标 ID；仅限本平台 |
+| Workers AI、Vectorize、Hyperdrive、mTLS、Rate Limiting、Secrets Store、Analytics Engine、Browser Rendering | 是 | 不提供 |
+| 写配置即创建资源 | Wrangler 可创建部分资源 | 资源必须已在平台上存在 |
 
-`bindings` 是对象不是 Wrangler 的分产品顶层键（没有 `kv_namespaces` 数组那种完整 wrangler 形态）。Service Binding 是 `services: [{binding, service, entrypoint?}]`，部署时把同账户 Worker 名解析并冻结为目标 ID（`OC-SERVICE-001`）。没有 Workers AI、Vectorize、Hyperdrive、mTLS、Rate Limiting、Secrets Store、Analytics Engine、Browser Rendering。资源必须先在平台上存在；工具链不会因为写了配置就创建 KV。

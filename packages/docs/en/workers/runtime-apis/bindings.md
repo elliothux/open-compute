@@ -22,12 +22,15 @@ export default {
 
 Service Bindings: default/named `fetch` and RPC. The target must be a uniquely resolvable Worker name in the same account; deploy time freezes a target ID. `entrypoint` is optional.
 
-## Same as Cloudflare
+Member signatures for KV / R2 / D1 / DO / Queue / Workflow / Assets / Images belong on those product pages. Config grammar: [configuration · bindings](/en/workers/configuration/bindings).
 
-`env.BINDING` types match [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) and [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/). Version Metadata fields: [version metadata](https://developers.cloudflare.com/workers/runtime-apis/bindings/version-metadata/). Member signatures for KV / R2 / D1 / DO / Queue / Workflow / Assets / Images belong on those product pages, not here.
+## Compatibility
 
-## Intentional delta: OC-SERVICE-001
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| `env.BINDING` types | Yes — [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) and [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) | Yes |
+| Version Metadata fields | Yes — [version metadata](https://developers.cloudflare.com/workers/runtime-apis/bindings/version-metadata/) | `id`, `tag`, `timestamp` |
+| Service Bindings | Cross-region placement / global service discovery | Same-platform only; default/named fetch and RPC; target admission, deployment pins, capability lifetime, and recovery are local and fail closed |
+| Workers for Platforms dispatcher / Dynamic Worker Loaders | Yes | Not provided |
+| mTLS / Rate Limit / Secrets Store / AI binding | Yes | Not provided |
 
-Service Bindings provide default/named fetch and RPC within one platform authority. They do not claim Cloudflare cross-region placement or global service discovery; target admission, deployment pins, capability lifetime, and recovery are local and fail closed.
-
-No Workers for Platforms dispatcher, no Dynamic Worker Loaders as a tenant product, no mTLS / Rate Limit / Secrets Store / AI binding.

@@ -20,12 +20,15 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-`bun run oc types` 会把字面量写进 `worker-configuration.d.ts`（例如 `GREETING: "Hello from TypeScript"`）。改 vars 后重新生成类型。离线 bundle 不包含 vars；`run` / `deploy` 才注入。
+`bun run oc types` 会把字面量写入 `worker-configuration.d.ts`（例如 `GREETING: "Hello from TypeScript"`）。更改 vars 后重新生成类型。离线 bundle 不包含 vars；`run` / `deploy` 才注入。
 
-## 与 Cloudflare 相同
+## 兼容性
 
-公开字符串/JSON 挂到 `env`，不是密钥。对照 [Environment variables](https://developers.cloudflare.com/workers/configuration/environment-variables/)。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| 公开字符串/JSON 注入 `env`，不是密钥 | 是，见 [Environment variables](https://developers.cloudflare.com/workers/configuration/environment-variables/) | 是 |
+| Wrangler `[vars]` TOML | 是 | 不提供 |
+| 控制台编辑 / Wrangler environments 产品 | 是 | 不提供 |
+| 未知顶层键 | 可能被忽略 | 整个项目配置失败 |
+| 密钥存放位置 | Secrets 产品 | [secrets](/workers/configuration/secrets)，不可放入 `vars` |
 
-## 故意不同
-
-没有 Wrangler `[vars]` TOML、没有 dashboard 编辑、没有 per-environment wrangler environments 产品。未知顶层键仍会让整个项目配置失败。密钥走 [secrets](/workers/configuration/secrets)，不要放进 `vars`。

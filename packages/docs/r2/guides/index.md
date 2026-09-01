@@ -2,7 +2,7 @@
 
 ## 创建 bucket
 
-见[上手](/r2/get-started/)。`POST /v1/accounts/{accountId}/r2/buckets`。不是 Cloudflare REST。
+见[上手](/r2/get-started/)。`POST /v1/accounts/{accountId}/r2/buckets`。不提供 Cloudflare REST。
 
 ## Worker 读写
 
@@ -19,4 +19,4 @@ await env.BUCKET.delete("notes/1.txt");
 
 ## S3-compatible
 
-对象字节在配置的 provider 上。你可以用该 provider 的 S3 SDK 对着同一 prefix 操作；那不是 Cloudflare R2 REST，也不走 Worker binding。Worker 路径才是与 CF 相同的 API。
+对象字节在配置的 provider 上。可以用该 provider 的 S3 SDK 操作同一 prefix。那不是 Cloudflare R2 REST，也不走 Worker binding。Worker 路径才是与 Cloudflare 对齐的 API。

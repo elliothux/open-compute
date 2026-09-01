@@ -1,6 +1,6 @@
 # 示例
 
-Workflow class 导出 `run`；Worker 用 binding 创建实例。外部 IO 放进 `step.do` 并做成幂等。不要依赖 Cloudflare dashboard 看实例。
+Workflow class 导出 `run`；Worker 用 binding 创建实例。外部 IO 放进 `step.do` 并做成幂等。不依赖 Cloudflare dashboard 查看实例。
 
 ```ts
 export class MyWorkflow extends WorkflowEntrypoint<Env, { hello: string }> {
@@ -30,10 +30,4 @@ export default {
 }
 ```
 
-## 与 Cloudflare 相同
-
-`create` / `get` / `step.do` / `status` 与 [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) 相同。`className` 必须有。
-
-## 故意不同：OC-WORKFLOW-001
-
-执行权威是本地 SQLite。callback 在提交前是 at-least-once；已完成的 step 在 replay 时跳过；外部副作用不会随 snapshot 回滚。创建 definition 见[上手](/workflows/get-started/)。
+`create` / `get` / `step.do` / `status` 与 [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) 对齐。`className` 必须有。执行权威是本地 SQLite。创建 definition 见[上手](/workflows/get-started/)。

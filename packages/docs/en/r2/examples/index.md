@@ -1,5 +1,7 @@
 # Examples
 
+Read and write objects through the Worker binding. Object bytes live on the configured S3-compatible provider.
+
 ```ts
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

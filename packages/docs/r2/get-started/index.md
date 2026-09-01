@@ -1,10 +1,10 @@
 # 上手
 
-`ocd` 必须已经 ready，并且配置了 S3（`[s3]` + `r2_prefix`）。`oc run` 不会再起 workerd。见 [ocd 上手](/ocd/get-started) 和 [配置](/ocd/configuration)。
+`ocd` 必须已经就绪，并且配置了 S3（`[s3]` + `r2_prefix`）。创建逻辑 bucket，在 `open-compute.json` 中绑定，再用 `oc` 运行 Worker。`oc run` 不会再起一个 workerd。见 [ocd 上手](/ocd/get-started) 和 [配置](/ocd/configuration)。
 
 ## 1. 创建逻辑 bucket
 
-本机平台控制面，不是 Cloudflare REST / `client.v4`。对象字节进你配置的 S3 prefix，不进 SQLite。
+以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。对象字节进入配置的 S3 prefix，不进入 SQLite。
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
@@ -48,10 +48,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 4. 跑起来
+## 4. 运行
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 是 `oc`，不是 Wrangler。下一步：[概念](/r2/concepts/)、[指南](/r2/guides/)。
+CLI 为 `oc`，不是 Wrangler。下一步：[概念](/r2/concepts/)、[指南](/r2/guides/)。

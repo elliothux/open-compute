@@ -1,9 +1,19 @@
-# Deviations
+# Behavior differences
 
-Registered ID: **`OC-D1-001`**.
+The D1 Worker API matches Cloudflare. The storage topology does not.
 
-D1 is a single local-primary SQLite authority. The platform does not claim read-replica/region routing, hosted `served_by` identity, region/colo metadata, or Cloudflare billing counters. Opaque bookmarks preserve same-database local sequential visibility; `rows_read` and `rows_written` are stable local SQLite execution counters.
+## Compatibility
 
-That is why 36 target members are `supported_with_deviation`. Rejecting `dump()` is hosted non-alpha behavior, not a second deviation ID. There are no replicas.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | Same: `prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`, sessions, opaque bookmarks, prepared-statement / result / meta |
+| Topology | Hosted D1 with read replicas | Local primary SQLite on the node running ocd |
+| Read replicas | Available | Not provided |
+| Region routing | Available | Not provided |
+| `served_by` geography | Region / colo metadata | Not provided; `served_by_*` is not a geography product |
+| Bookmarks | Cross-replica causality | Local ordering on the same database |
+| `rows_read` / `rows_written` | Billing counters | Local SQLite execution counts |
+| `dump()` | Rejected on hosted non-alpha | Rejected (`D1_DUMP_ERROR`) |
+| REST / `client.v4` | Available | Not provided; use the Worker binding |
 
-See [Compatibility](/en/platform/compatibility) and `docs/references/p1-deviations.md`.
+See [Compatibility](/en/platform/compatibility).

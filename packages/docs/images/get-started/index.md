@@ -1,6 +1,6 @@
 # 上手
 
-没有资源可创建：Images 是部署级 binding，不引用 namespace id。`ocd` 必须 ready。
+没有资源可创建：Images 是部署级 binding，不引用 namespace id。`ocd` 必须就绪。
 
 ## 1. 声明 binding
 
@@ -12,7 +12,7 @@
 }
 ```
 
-不要写进 `bindings`，不要给 Cloudflare Images 账户 ID。
+不要写进 `bindings`，也不要提供 Cloudflare Images 账户 ID。
 
 ```sh
 bun run oc types --config open-compute.json
@@ -35,12 +35,12 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-输入必须是请求体字节。没有 `https://imagedelivery.net/...` URL transform，没有上传/签名。
+输入必须是请求体字节。不提供 `https://imagedelivery.net/...` URL transform，也不提供上传 / 签名。
 
-## 3. 跑起来
+## 3. 运行
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 是 `oc`，不是 Wrangler。下一步：[概念](/images/concepts/)。
+CLI 为 `oc`，不是 Wrangler。下一步：[概念](/images/concepts/)。

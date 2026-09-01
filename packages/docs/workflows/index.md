@@ -1,6 +1,12 @@
 # Workflows
 
-Workflows 是可重放的多步应用。执行权威是本地 SQLite。callback 在结果提交前是 at-least-once；已耐久完成的 callback 在 replay 时跳过。没有跨地域执行，没有 Cloudflare dashboard / observability。
+Workflows 是可重放的多步应用。执行权威是该节点上的本地 SQLite。
+
+例如：
+
+- 带耐久 step 的多步应用
+- sleep 与等待事件
+- 中断后重放
 
 ```ts
 export class MyWorkflow extends WorkflowEntrypoint<Env, { hello: string }> {
@@ -20,9 +26,7 @@ export default {
 } satisfies ExportedHandler<{ FLOW: Workflow }>;
 ```
 
-## 与 Cloudflare 相同
-
-Binding / instance API 与 [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) 相同：`create` / `get` / `createBatch` / `deleteBatch`、`step.do` / sleep / event、status / pause / resume / terminate / restart。72 个目标成员为 `supported_with_deviation`。
+在 `open-compute.json` 中绑定。Workflow 必须提供 `className`：
 
 ```json
 {
@@ -34,13 +38,18 @@ Binding / instance API 与 [Cloudflare Workflows](https://developers.cloudflare.
 }
 ```
 
-Workflow 必须提供 `className`。可选 `schedules` 字符串数组。语法见 [bindings](/workers/configuration/bindings)。不要从本页抄 Cloudflare REST 或 dashboard。
+可选 `schedules` 字符串数组。语法见 [bindings](/workers/configuration/bindings)。CLI 为 `oc` / `oc run` / `oc types`。
 
-## 故意不同
+## 兼容性
 
-**`OC-WORKFLOW-001`**：Workflow 在本地 SQLite authority 上执行。callback 在结果提交前是 at-least-once；replay 会跳过已耐久完成的 callback；外部产品副作用不会随 Workflow snapshot 回滚。不声称跨地域执行、全球 placement 或 Cloudflare dashboard/observability。
-
-全文见 [偏差](/workflows/platform/deviations) 和 [Compatibility](/platform/compatibility)。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| Binding / instance API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | 相同：`create` / `get` / `createBatch` / `deleteBatch`、`step.do` / sleep / event、status / pause / resume / terminate / restart |
+| 执行 | 跨地域 | 该节点上的本地 SQLite |
+| Callback | — | 结果提交前 at-least-once；replay 跳过已耐久完成的 callback |
+| 外部副作用 | — | 不随 Workflow snapshot 回滚 |
+| Dashboard / observability | 提供 | 不提供 |
+| Binding | wrangler | `{ type, id, className }`；`className` 必填 |
 
 ## 本节
 
@@ -49,4 +58,4 @@ Workflow 必须提供 `className`。可选 `schedules` 字符串数组。语法�
 - [指南](/workflows/guides/)
 - [示例](/workflows/examples/)
 - [限制](/workflows/platform/limits)
-- [偏差](/workflows/platform/deviations)
+- [行为差异](/workflows/platform/deviations)

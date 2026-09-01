@@ -1,5 +1,7 @@
 # 示例
 
+用 Worker binding 读写对象。对象字节落在配置的 S3-compatible provider。
+
 ```ts
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

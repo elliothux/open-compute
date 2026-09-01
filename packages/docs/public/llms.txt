@@ -1,16 +1,16 @@
 # Open Compute
 
-> Developer documentation for open-compute: the declared Workers programming model on one machine. No global edge, billing, or Cloudflare dashboard.
+> Developer documentation for open-compute: a serverless platform that runs the declared Cloudflare Workers programming model on a single node (`ocd` + pinned `workerd`). No global edge, billing, or Cloudflare dashboard.
 
 Origin: https://open-compute.dev
 
-Each product below is a top-level docs URL. Compatibility and live limits come from `ocd capabilities --json` on the running binary.
+Each product below is a top-level docs URL. Live limits come from `ocd capabilities --json` on the running binary.
 
 ## Start
 
-- [Overview](https://open-compute.dev/): One-machine Workers platform
+- [Overview](https://open-compute.dev/): Single-node Workers platform
 - [Get started](https://open-compute.dev/get-started): Hello Worker on a ready ocd
-- [Directory](https://open-compute.dev/directory): Supported products and status
+- [Directory](https://open-compute.dev/directory): Product catalog
 
 ## Top-level (zh, default `/`)
 

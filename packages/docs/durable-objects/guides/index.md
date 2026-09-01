@@ -12,7 +12,7 @@ const stub = env.COUNTER.get(id);
 return stub.fetch(request);
 ```
 
-`get(id, { locationHint: "weur" })` 合法，但 hint 没有地理效果（`OC-DO-001`）。
+`get(id, { locationHint: "weur" })` 合法，但 hint 没有地理效果。
 
 ## storage
 

@@ -27,4 +27,4 @@ for (const key of page.keys) {
 }
 ```
 
-配置见[上手](/kv/get-started/)。不要把 Cloudflare geolocation / 全球 purge 示例搬过来。
+配置见[上手](/kv/get-started/)。不提供 Cloudflare geolocation 或全球 purge。

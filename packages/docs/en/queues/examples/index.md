@@ -28,10 +28,4 @@ export default {
 }
 ```
 
-## Same as Cloudflare
-
-`send` / `sendBatch`, `contentType`, `delaySeconds`, `ack` / `retry` match the [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/). Do not write Wrangler `[[queues.consumers]]`.
-
-## Intentional differences: OC-QUEUE-001
-
-Durability is single-node `scheduler.sqlite`. Delivery is at-least-once; there is no global FIFO or exactly-once. Create the queue: [Get started](/en/queues/get-started/).
+`send` / `sendBatch`, `contentType`, `delaySeconds`, `ack` / `retry` match the [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/). Durability is local `scheduler.sqlite`. Delivery is at-least-once. Global FIFO and exactly-once are not provided. Create the queue: [Get started](/en/queues/get-started/).

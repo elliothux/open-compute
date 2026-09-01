@@ -2,7 +2,7 @@
 
 ## Create a namespace
 
-See [Get started](/en/kv/get-started/). Local `POST /v1/accounts/{accountId}/kv/namespaces` with `{ "name": "..." }` and an `idempotency-key`. This is not Cloudflare REST.
+See [Get started](/en/kv/get-started/). Platform `POST /v1/accounts/{accountId}/kv/namespaces` with `{ "name": "..." }` and an `idempotency-key`. Cloudflare REST is not provided.
 
 ## Bind
 
@@ -30,6 +30,4 @@ await env.KV.delete("user:1");
 
 Bulk get: `env.KV.get(["a", "b"])`. Do not inflate stream values through JSON; the cap is still 25 MiB. Full methods: [Cloudflare KV API](https://developers.cloudflare.com/kv/api/).
 
-## Same as Cloudflare / intentional differences
-
-Same: the Worker methods above. Different: a write is immediately visible on this machine; there is no global propagation wait (`OC-KV-001`).
+A write is immediately visible on this node. There is no global propagation wait.

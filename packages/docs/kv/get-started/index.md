@@ -1,10 +1,10 @@
 # 上手
 
-先让 `ocd` 处于 ready，再创建 namespace、绑定、用 `oc` 跑 Worker。`oc run` 不会再起一个 workerd。平台还没起来时，先看 [ocd 上手](/ocd/get-started)。
+创建 namespace，在 `open-compute.json` 中绑定，再用 `oc` 运行 Worker。`oc run` 不会再起一个 workerd。若平台尚未就绪，见 [ocd 上手](/ocd/get-started)。
 
 ## 1. 创建 namespace
 
-资源必须先在平台上存在；写进 `open-compute.json` 不会创建 KV。下面是**本机平台控制面**，不是 Cloudflare REST，也不是 `client.v4`。
+资源必须先在本平台上存在；写入 `open-compute.json` 不会创建 KV。以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
@@ -29,7 +29,7 @@ curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/kv/namespaces" \
 }
 ```
 
-普通产品 binding 是 `{type, id, permissions?}`。可选 `permissions`：`{ "read": true, "write": true }`。语法见 [bindings](/workers/configuration/bindings)。
+普通产品 binding 为 `{ type, id, permissions? }`。可选 `permissions`：`{ "read": true, "write": true }`。语法见 [bindings](/workers/configuration/bindings)。
 
 ```sh
 bun run oc types --config open-compute.json
@@ -57,10 +57,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 4. 跑起来
+## 4. 运行
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 是 `oc`，不是 Wrangler。下一步：[概念](/kv/concepts/)、[指南](/kv/guides/)。
+CLI 为 `oc`，不是 Wrangler。下一步：[概念](/kv/concepts/)、[指南](/kv/guides/)。

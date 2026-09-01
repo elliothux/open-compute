@@ -1,6 +1,6 @@
 # Cron Triggers
 
-Cron 产品在这里：Worker 的 `scheduled()` 按 UTC 表达式触发。不是 Cloudflare dashboard 里的触发器 UI。
+Cron 在本平台上按 UTC 表达式触发 Worker 的 `scheduled()`。这不是 Cloudflare 控制台中的触发器界面。
 
 ```ts
 export default {
@@ -16,16 +16,19 @@ export default {
 
 只接受**五个 UTC 字段**：minute、hour、day-of-month、month、day-of-week。没有秒字段、没有 year、没有本地时区或 DST。
 
-本机文档化的 Quartz-like 扩展：`*` `,` `-` `/` `L` `W` `#`，以及大小写不敏感的三字母月份/星期名。weekday 数字按 Cloudflare fixture：`1=Sunday` … `7=Saturday`。
+本节点已文档化的 Quartz-like 扩展：`*` `,` `-` `/` `L` `W` `#`，以及大小写不敏感的三字母月份/星期名。weekday 数字按 Cloudflare fixture：`1=Sunday` … `7=Saturday`。
 
-平台部署元数据字段是 `crons: string[]`。`open-compute.json` 没有 Wrangler `triggers` / `triggers.crons`；写进去会当未知字段拒绝。Workflow 的 cron 走 binding 上的 `schedules`，不是 Worker `scheduled()`。
+平台部署元数据字段是 `crons: string[]`。`open-compute.json` 没有 Wrangler `triggers` / `triggers.crons`；写入该键会作为未知字段被拒绝。Workflow 的 cron 走 binding 上的 `schedules`，不是 Worker `scheduled()`。
 
-## 与 Cloudflare 相同
+## 兼容性
 
-handler 与 [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) 相同。五字段 cron 与 [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) 常用表面一致。`noRetry()` 可用。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| `scheduled()` handler | 是，见 [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) | 是 |
+| 五字段 cron | 是，见 [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | 是；仅 UTC |
+| `noRetry()` | 是 | 是 |
+| 项目文件中的 `triggers.crons` | Wrangler | 不允许；部署元数据字段为 `crons: string[]` |
+| misfire 恢复 | 托管调度语义 | 最多投影 grace 内最新的一个 slot，不重放完整停机历史 |
+| 已知失败重试 | 托管策略 | 配置中的有界本节点重试，除非调用了 `noRetry()` |
+| 默认 misfire grace | 套餐相关 | `scheduler.cron_misfire_grace_ms = 300000`（五分钟）；精确值以 `ocd capabilities --json` 的 `limits` 为准 |
 
-## 故意不同：OC-CRON-001
-
-Cron 只有 UTC、五个字段，以及已文档化的本机 Quartz-like 扩展。恢复时最多投影 misfire grace 内最新的一个 slot，不会重放完整停机历史。已知失败走配置里的有界本机重试，除非调用了 `noRetry()`。
-
-默认 `scheduler.cron_misfire_grace_ms = 300000`（五分钟）。精确值以 `ocd capabilities --json` 的 `limits` 为准。停机五小时再起来，不会补跑五小时里的每一分钟。

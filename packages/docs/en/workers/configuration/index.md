@@ -34,12 +34,22 @@ The Worker project file is `open-compute.json`. It must have `name` and one cont
 
 `bindings.type`: `kv_namespace`, `r2_bucket`, `d1_database`, `do_namespace`, `queue_producer`, `workflow`.
 
-## Same as Cloudflare
+## Compatibility
 
-Field names and semantics borrow common Wrangler configuration: `vars`, `secrets`, assets routing, cache enabled, service bindings. A module Worker's `main` points at a TS/JS entry. Compare [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/).
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| `vars`, secrets, assets routing, cache enabled, service-binding semantics | Yes — [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) | Field names borrow common Wrangler configuration; not a full `wrangler.jsonc` compatibility layer |
+| Module Worker `main` points at a TS/JS entry | Yes | Yes |
+| `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags` | Yes | Not allowed |
+| `workers_dev`, Custom Domains, `routes`, placement, observability, AI, vectorize | Yes | Not provided; unknown keys fail rather than being ignored |
+| Control plane | Cloudflare REST | Local `ocd` HTTP API |
 
-## Intentional delta
+## In this section
 
-This is not a full `wrangler.jsonc` compatibility layer. There is no `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags`. There is no `workers_dev`, Custom Domains, CF zone `routes`, placement, observability, AI, or vectorize. Unknown keys fail rather than being ignored. An API the platform does not advertise cannot be turned on from toolchain config.
-
-Subpages: [bindings](/en/workers/configuration/bindings), [compatibility dates](/en/workers/configuration/compatibility-dates), [compatibility flags](/en/workers/configuration/compatibility-flags), [Cron](/en/workers/configuration/cron-triggers), [vars](/en/workers/configuration/environment-variables), [secrets](/en/workers/configuration/secrets), [routing](/en/workers/configuration/routing).
+- [bindings](/en/workers/configuration/bindings)
+- [compatibility dates](/en/workers/configuration/compatibility-dates)
+- [compatibility flags](/en/workers/configuration/compatibility-flags)
+- [Cron](/en/workers/configuration/cron-triggers)
+- [vars](/en/workers/configuration/environment-variables)
+- [secrets](/en/workers/configuration/secrets)
+- [routing](/en/workers/configuration/routing)

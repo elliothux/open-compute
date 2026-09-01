@@ -1,6 +1,12 @@
 # Queues
 
-Queues deliver messages from a producer Worker to a consumer Worker. Delivery is at-least-once. Durability is single-node `scheduler.sqlite`, not Cloudflare global replication. There is no global FIFO.
+Queues deliver messages from a producer Worker to a consumer Worker. Delivery is at-least-once. Durability comes from `scheduler.sqlite` on the node running ocd.
+
+For example, you can use Queues for:
+
+- Decoupling producer and consumer Workers
+- Buffering work for asynchronous processing
+- Retrying failed deliveries
 
 ```ts
 export default {
@@ -17,9 +23,7 @@ export default {
 } satisfies ExportedHandler<{ QUEUE: Queue }>;
 ```
 
-## Same as Cloudflare
-
-Producer / consumer JavaScript APIs match [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/): `send` / `sendBatch`, `contentType` (json / text / bytes / v8), `delaySeconds`, `metrics`, consumer `MessageBatch` / `ack` / `retry`. 63 target members are `supported_with_deviation`.
+Bind a producer in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
 
 ```json
 {
@@ -31,19 +35,25 @@ Producer / consumer JavaScript APIs match [Queues JavaScript APIs](https://devel
 }
 ```
 
-A producer is an ordinary product binding `{type, id, permissions?}`. A consumer is the Worker's `queue` handler (same as Cloudflare). Do not write Wrangler `[[queues.consumers]]`. Binding grammar: [bindings](/en/workers/configuration/bindings).
+A consumer is the Worker's `queue` handler. `open-compute.json` does not use Wrangler `[[queues.consumers]]`. Binding grammar: [bindings](/en/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## Intentional differences
+## Compatibility
 
-**`OC-QUEUE-001`**: Queue producers and push consumers are backed by single-node `scheduler.sqlite` durability, not Cloudflare global replication. Delivery is at-least-once without global FIFO. An unknown native dispatch retains its lease and does not consume the tenant retry budget, so a later delivery can repeat the same attempt number.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: `send` / `sendBatch`, `contentType` (json / text / bytes / v8), `delaySeconds`, `metrics`, consumer `MessageBatch` / `ack` / `retry` |
+| Durability | Global replication | Local `scheduler.sqlite` on the node running ocd |
+| Delivery | At-least-once | At-least-once |
+| Global FIFO | Available | Not provided |
+| Unknown native dispatch | — | May retain the lease; duplicate attempt numbers possible |
+| Pull consumer | Available | Not provided |
+| Binding | wrangler `queues` | Producer `{ type, id, permissions? }`; consumer is the Worker `queue` handler |
 
-Full text: [Deviations](/en/queues/platform/deviations) and [Compatibility](/en/platform/compatibility).
-
-## In this section
+## Next
 
 - [Get started](/en/queues/get-started/)
 - [Concepts](/en/queues/concepts/)
 - [Guides](/en/queues/guides/)
 - [Examples](/en/queues/examples/)
 - [Limits](/en/queues/platform/limits)
-- [Deviations](/en/queues/platform/deviations)
+- [Behavior differences](/en/queues/platform/deviations)

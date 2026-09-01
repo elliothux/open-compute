@@ -14,10 +14,14 @@ export default {
 
 Durable Object `alarm()` lives on the DO class, not the default export. See [DO Alarms](https://developers.cloudflare.com/durable-objects/api/alarms/).
 
-## Same as Cloudflare
+## Compatibility
 
-`fetch`, `scheduled`, and `queue` arguments and return values match [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/). `ctx.waitUntil` and `ctx.passThroughOnException` follow workerd. There is no Email handler and no Tail handler product.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| `fetch`, `scheduled`, and `queue` arguments and return values | Yes — [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | Yes |
+| `ctx.waitUntil`, `ctx.passThroughOnException` | Yes | Follow workerd |
+| Email handler / Tail handler | Yes | Not provided |
+| Cron trigger | Hosted Cron | UTC five-field; misfire projects at most the latest slot in grace — [Cron Triggers](/en/workers/configuration/cron-triggers) |
+| Queue delivery | Global queue semantics | Single-node at-least-once, not global FIFO |
+| `triggers.crons` / queue-consumer array in the project file | Wrangler | Not allowed; platform deployment metadata accepts `crons` and `queue_consumers` |
 
-## Intentional delta
-
-Cron trigger semantics: [`OC-CRON-001`](/en/workers/configuration/cron-triggers). Queue delivery is single-node at-least-once (`OC-QUEUE-001`), not global FIFO. `open-compute.json` currently has no `triggers.crons` or queue-consumer array; unknown fields fail. Platform deployment metadata accepts `crons` and `queue_consumers`.

@@ -16,10 +16,14 @@ export default {
 
 The toolchain does not provide a Node runtime, does not fill in unimplemented product APIs, and does not download remote imports.
 
-## Same as Cloudflare
+## Compatibility
 
-The available `node:` modules align with pinned workerd / [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) at this compatibility date. To check a module, use the matching Cloudflare page (`buffer`, `crypto`, `path`, `stream`, `net`, …). Do not assume that a successful import means full Node.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Available `node:` modules | Yes — [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | Aligned with pinned workerd at this compatibility date |
+| Successful import means full Node | No | No |
+| Per-Worker `nodejs_compat` flag to turn off | Yes | Not provided; included in the baseline |
+| Unimplemented Node APIs | Fail or flag-gated | Fail; not silently polyfilled |
+| `node:net` outbound | Cloudflare hosted network policy | Same general outbound; see [TCP sockets](/en/workers/runtime-apis/tcp-sockets) |
+| Request-path runtime | workerd | workerd; production requests do not execute inside Bun/Node |
 
-## Intentional delta
-
-There is no per-Worker `nodejs_compat` flag to turn off. Unimplemented Node APIs fail; they are not silently polyfilled. `node:net` outbound is still [`OC-WKR-TCP-001`](/en/workers/runtime-apis/tcp-sockets). Workers do not execute inside Bun/Node; the production request path does not call Bun or Node.

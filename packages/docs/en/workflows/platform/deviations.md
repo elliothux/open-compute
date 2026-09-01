@@ -1,9 +1,18 @@
-# Deviations
+# Behavior differences
 
-Registered ID: **`OC-WORKFLOW-001`**.
+The Workflows binding / instance API matches Cloudflare. Execution authority is local SQLite on this node.
 
-Workflow execution uses local SQLite authority. Callbacks are at-least-once until their result commits; replay skips durably completed callbacks; external product effects do not roll back with Workflow snapshots. The platform does not claim cross-region execution, global placement, or Cloudflare dashboard/observability.
+## Compatibility
 
-That is why 72 target members are `supported_with_deviation`. Batch / rollback / structured-clone / parallel are implemented behavior, not deviations.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Binding / instance API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | Same: `create` / `get` / `createBatch` / `deleteBatch`, `step.do` / sleep / event, status / pause / resume / terminate / restart |
+| Execution | Cross-region | Local SQLite on the node running ocd |
+| Callbacks | — | At-least-once until result commit; replay skips durable-complete callbacks |
+| External side effects | — | Do not roll back with Workflow snapshots |
+| Dashboard / observability | Available | Not provided |
+| Binding | wrangler | `{ type, id, className }`; `className` required |
 
-See [Compatibility](/en/platform/compatibility) and `docs/references/p1-deviations.md`.
+Batch / rollback / structured-clone / parallel are implemented behavior.
+
+See [Compatibility](/en/platform/compatibility).

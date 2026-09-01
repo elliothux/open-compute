@@ -2,7 +2,7 @@
 
 ## Create a bucket
 
-See [Get started](/en/r2/get-started/). `POST /v1/accounts/{accountId}/r2/buckets`. Not Cloudflare REST.
+See [Get started](/en/r2/get-started/). `POST /v1/accounts/{accountId}/r2/buckets`. Cloudflare REST is not provided.
 
 ## Worker reads and writes
 
@@ -19,4 +19,4 @@ Full options: [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/
 
 ## S3-compatible
 
-Object bytes live on the configured provider. You can use that provider's S3 SDK against the same prefix; that is not Cloudflare R2 REST and it does not go through the Worker binding. The Worker path is the API that matches Cloudflare.
+Object bytes live on the configured provider. You can use that provider's S3 SDK against the same prefix. That is not Cloudflare R2 REST and it does not go through the Worker binding. The Worker path is the API that matches Cloudflare.

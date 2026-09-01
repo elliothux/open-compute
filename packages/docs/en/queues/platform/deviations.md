@@ -1,9 +1,17 @@
-# Deviations
+# Behavior differences
 
-Registered ID: **`OC-QUEUE-001`**.
+The Queues JavaScript API matches Cloudflare. Durability comes from `scheduler.sqlite` on this node.
 
-Queue producers and push consumers are backed by single-node `scheduler.sqlite` durability, not Cloudflare global replication. Delivery is at-least-once without global FIFO. An unknown native dispatch retains its lease and does not consume the tenant retry budget, so a later delivery can repeat the same attempt number.
+## Compatibility
 
-That is why 63 target members are `supported_with_deviation`.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: `send` / `sendBatch`, `contentType` (json / text / bytes / v8), `delaySeconds`, `metrics`, consumer `MessageBatch` / `ack` / `retry` |
+| Durability | Global replication | Local `scheduler.sqlite` on the node running ocd |
+| Delivery | At-least-once | At-least-once |
+| Global FIFO | Available | Not provided |
+| Unknown native dispatch | — | May retain the lease; duplicate attempt numbers possible |
+| Pull consumer | Available | Not provided |
+| Binding | wrangler `queues` | Producer `{ type, id, permissions? }`; consumer is the Worker `queue` handler |
 
-See [Compatibility](/en/platform/compatibility) and `docs/references/p1-deviations.md`.
+See [Compatibility](/en/platform/compatibility).

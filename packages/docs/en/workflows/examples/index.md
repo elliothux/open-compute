@@ -1,6 +1,6 @@
 # Examples
 
-Export a Workflow class with `run`; the Worker creates instances through the binding. Put external I/O in `step.do` and make it idempotent. Do not depend on a Cloudflare dashboard to inspect instances.
+Export a Workflow class with `run`; the Worker creates instances through the binding. Put external I/O in `step.do` and make it idempotent. Instance inspection does not depend on a Cloudflare dashboard.
 
 ```ts
 export class MyWorkflow extends WorkflowEntrypoint<Env, { hello: string }> {
@@ -30,10 +30,4 @@ export default {
 }
 ```
 
-## Same as Cloudflare
-
-`create` / `get` / `step.do` / `status` match [Cloudflare Workflows](https://developers.cloudflare.com/workflows/). `className` is required.
-
-## Intentional differences: OC-WORKFLOW-001
-
-Execution authority is local SQLite. Callbacks are at-least-once until commit; completed steps skip on replay; external side effects do not roll back with the snapshot. Create the definition: [Get started](/en/workflows/get-started/).
+`create` / `get` / `step.do` / `status` match [Cloudflare Workflows](https://developers.cloudflare.com/workflows/). `className` is required. Execution authority is local SQLite. Create the definition: [Get started](/en/workflows/get-started/).

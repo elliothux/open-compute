@@ -1,5 +1,7 @@
 # Examples
 
+Create a table, batch inserts, and query from a Worker. `rows_read` / `rows_written` are local SQLite execution counts.
+
 ## Create a table and query
 
 ```ts
@@ -18,4 +20,4 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-`rows_read` / `rows_written` are local counters, not a bill. Config: [Get started](/en/d1/get-started/).
+Config: [Get started](/en/d1/get-started/).

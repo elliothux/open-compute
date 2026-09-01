@@ -1,6 +1,12 @@
 # D1
 
-D1 is a SQLite SQL database bound onto Worker `env`. On this platform each database is a local-primary SQLite file on this one machine. There are no read replicas and no region routing.
+D1 is a SQLite SQL database that you query from a Worker. On this platform, each database is a local-primary SQLite file on the node running ocd.
+
+For example, you can use D1 for:
+
+- Querying relational data from a Worker
+- Importing a schema and running SQL
+- Batching statements in one transaction
 
 ```ts
 export default {
@@ -13,9 +19,7 @@ export default {
 } satisfies ExportedHandler<{ DB: D1Database }>;
 ```
 
-## Same as Cloudflare
-
-The Worker API is the [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/): `prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`, sessions, opaque bookmarks, prepared-statement / result / meta. 36 target members are `supported_with_deviation`. The current hosted non-alpha `dump()` is rejected, matching hosted behavior.
+Bind an existing database in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
 
 ```json
 {
@@ -27,19 +31,27 @@ The Worker API is the [D1 Worker API](https://developers.cloudflare.com/d1/worke
 }
 ```
 
-`id` is an already-existing database on the platform. Binding grammar: [bindings](/en/workers/configuration/bindings). Do not copy Cloudflare REST or Wrangler `d1` subcommands from this page.
+`id` is an existing database on this platform. Binding grammar: [bindings](/en/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## Intentional differences
+## Compatibility
 
-**`OC-D1-001`**: D1 is a single local-primary SQLite authority. The platform does not claim read-replica/region routing, hosted `served_by` identity, region/colo metadata, or Cloudflare billing counters. Opaque bookmarks preserve same-database local sequential visibility; `rows_read` and `rows_written` are stable local SQLite execution counters. There are no replicas; do not read `served_by_region` / `served_by_colo` as a geography product.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | Same: `prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`, sessions, opaque bookmarks, prepared-statement / result / meta |
+| Topology | Hosted D1 with read replicas | Local primary SQLite on the node running ocd |
+| Read replicas | Available | Not provided |
+| Region routing | Available | Not provided |
+| `served_by` geography | Region / colo metadata | Not provided; `served_by_*` is not a geography product |
+| Bookmarks | Cross-replica causality | Local ordering on the same database |
+| `rows_read` / `rows_written` | Billing counters | Local SQLite execution counts |
+| `dump()` | Rejected on hosted non-alpha | Rejected (`D1_DUMP_ERROR`) |
+| REST / `client.v4` | Available | Not provided; use the Worker binding |
 
-Full text: [Deviations](/en/d1/platform/deviations) and [Compatibility](/en/platform/compatibility).
-
-## In this section
+## Next
 
 - [Get started](/en/d1/get-started/)
 - [Concepts](/en/d1/concepts/)
 - [Guides](/en/d1/guides/)
 - [Examples](/en/d1/examples/)
 - [Limits](/en/d1/platform/limits)
-- [Deviations](/en/d1/platform/deviations)
+- [Behavior differences](/en/d1/platform/deviations)

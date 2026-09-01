@@ -1,8 +1,8 @@
 # Limits
 
-Worker API ceilings match Cloudflare KV (512-byte keys, 25 MiB values, 1024-byte metadata, bulk get 100, list 1000, `expirationTtl` ≥ 60s). That is API shape, not a Cloudflare plan.
+Worker API ceilings match Cloudflare KV: 512-byte keys, 25 MiB values, 1024-byte metadata, bulk get 100, list 1000, `expirationTtl` ≥ 60s. That is API shape, not a Cloudflare plan.
 
-Local quotas come from the `ocd` `[kv]` config. **Live numbers** are `limits` from `ocd capabilities --json`. Embedded defaults include:
+Local quotas come from the `ocd` `[kv]` config. Live numbers are `limits` from `ocd capabilities --json`. Embedded defaults include:
 
 | Item | Default |
 | --- | --- |
@@ -12,4 +12,4 @@ Local quotas come from the `ocd` `[kv]` config. **Live numbers** are `limits` fr
 | `max_active_streams` | 16 |
 | `operation_timeout_ms` | 30000 |
 
-No Cloudflare billing, and no plan-scaled global KV quota. Do not copy plan limits from developers.cloudflare.com onto this machine.
+Cloudflare billing and plan-scaled global KV quotas are not provided.

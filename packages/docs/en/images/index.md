@@ -1,8 +1,12 @@
 # Images
 
-Images is a bounded local raster-transform binding, **not** hosted Cloudflare Images. No URL transforms, no video, no AI upscale, no upload/signing product, no Cloudflare quota page. Do not send people to Cloudflare Images upload / signing docs as if those worked here.
+Images is a bounded local raster-transform binding. Input is request-body bytes. Transforms run on the node running ocd. This is not hosted Cloudflare Images.
 
-This is a platform product (capability `kind: platform`) with 0 target AST members. Status is `supported_with_deviation`, deviation **`OC-IMAGES-001`**.
+For example, you can use Images for:
+
+- Resizing and converting request-body images
+- Overlay and output jpeg / png / webp / avif
+- Inspecting format with `info()`
 
 ```ts
 export default {
@@ -17,9 +21,7 @@ export default {
 } satisfies ExportedHandler<{ IMAGES: ImagesBinding }>;
 ```
 
-## What matches Cloudflare
-
-The chain is `input` → `transform` / `draw` → `output` → `response()`, plus `info()`. Input is `ReadableStream` bytes, not a hosted image id. Do not document this as the full Cloudflare Images product.
+Declare it in `open-compute.json`. Images is not a resource id in `bindings`. Use top-level `"images": { "binding": "IMAGES" }` only:
 
 ```json
 {
@@ -29,19 +31,26 @@ The chain is `input` → `transform` / `draw` → `output` → `response()`, plu
 }
 ```
 
-Images is not a resource id in `bindings`. Top-level `"images": { "binding": "IMAGES" }` is enough. See [bindings](/en/workers/configuration/bindings).
+See [bindings](/en/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## Intentional differences
+## Compatibility
 
-**`OC-IMAGES-001`**: Images is a bounded local raster transform binding, not hosted Cloudflare Images. Hosted delivery/upload/signing, URL transforms, video, AI upscale, and Cloudflare product quotas are out of scope.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Binding API | Images binding chain | Same chain: `input` → `transform` / `draw` → `output` → `response()`, plus `info()` |
+| Product | Hosted Cloudflare Images | Bounded local raster binding |
+| Input | Hosted image id or URL | `ReadableStream` bytes |
+| Upload / signing | Available | Not provided |
+| URL transform | Available | Not provided |
+| Video | Available | Not provided |
+| AI upscale | Available | Not provided |
+| Binding | wrangler `images` | `"images": { "binding": "IMAGES" }` |
 
-Full text: [Deviations](/en/images/platform/deviations) and [Compatibility](/en/platform/compatibility).
-
-## In this section
+## Next
 
 - [Get started](/en/images/get-started/)
 - [Concepts](/en/images/concepts/)
 - [Guides](/en/images/guides/)
 - [Examples](/en/images/examples/)
 - [Limits](/en/images/platform/limits)
-- [Deviations](/en/images/platform/deviations)
+- [Behavior differences](/en/images/platform/deviations)

@@ -22,10 +22,13 @@ export default {
 
 `bun run oc types` writes literals into `worker-configuration.d.ts` (for example `GREETING: "Hello from TypeScript"`). Regenerate types after changing vars. Offline bundles do not contain vars; `run` / `deploy` inject them.
 
-## Same as Cloudflare
+## Compatibility
 
-Public strings/JSON on `env`, not secrets. See [Environment variables](https://developers.cloudflare.com/workers/configuration/environment-variables/).
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Public strings/JSON on `env`, not secrets | Yes — [Environment variables](https://developers.cloudflare.com/workers/configuration/environment-variables/) | Yes |
+| Wrangler `[vars]` TOML | Yes | Not provided |
+| Dashboard editor / Wrangler environments product | Yes | Not provided |
+| Unknown top-level keys | May be ignored | Fail the whole project config |
+| Where secrets live | Secrets product | [secrets](/en/workers/configuration/secrets), not `vars` |
 
-## Intentional delta
-
-No Wrangler `[vars]` TOML, no dashboard editor, no per-environment Wrangler environments product. Unknown top-level keys still fail the whole project config. Secrets go in [secrets](/en/workers/configuration/secrets), not `vars`.

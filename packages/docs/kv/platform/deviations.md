@@ -1,9 +1,16 @@
-# 偏差
+# 行为差异
 
-登记 ID：**`OC-KV-001`**。含义以仓库 `docs/references/p1-deviations.md` 和 `ocd capabilities --json` 为准。
+KV 的 Worker API 与 Cloudflare 对齐；存储拓扑不同。
 
-KV 是单节点 SQLite 权威存储，不声称 Cloudflare 全球复制或传播时延。
+## 兼容性
 
-52 个目标成员因此是 `supported_with_deviation`，不是缺方法。没有第二个 KV 偏差 ID。没有 ID 不等于其它 Cloudflare KV 产品（REST、jurisdiction、全球 purge）可用。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [KV API](https://developers.cloudflare.com/kv/api/) | 相同：`put` / `get` / `getWithMetadata` / `list` / `delete`，text / json / arrayBuffer / stream、metadata、TTL、bulk get、list cursor |
+| 复制 | 全球边缘 | 运行 ocd 的该节点上的单节点 SQLite |
+| `cacheTtl` | Colo cache | 接受该参数；无 colo cache |
+| Jurisdictions | 提供 | 不提供 |
+| REST / `client.v4` | 提供 | 不提供；使用 Worker binding |
+| REST bulk write / delete | 提供 | 不提供 |
 
 见 [Compatibility](/platform/compatibility)。

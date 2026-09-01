@@ -1,6 +1,12 @@
 # D1
 
-D1 是绑到 Worker `env` 的 SQLite SQL 数据库。本平台上，每个 database 是这一台机器上的一份本地主 SQLite。没有 read replica，没有 region routing。
+D1 是 SQLite SQL 数据库，用于从 Worker 查询关系数据。本平台上，每个 database 是运行 ocd 的该节点上的一份本地主 SQLite。
+
+例如：
+
+- 从 Worker 查询关系数据
+- 导入 schema 并执行 SQL
+- 在一次事务中 batch 多条语句
 
 ```ts
 export default {
@@ -13,9 +19,7 @@ export default {
 } satisfies ExportedHandler<{ DB: D1Database }>;
 ```
 
-## 与 Cloudflare 相同
-
-Worker API 与 [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) 相同：`prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`、session、opaque bookmark、prepared-statement / result / meta。36 个目标成员为 `supported_with_deviation`。当前 hosted 非 alpha `dump()` 按托管行为拒绝。
+在 `open-compute.json` 中绑定已有的 database。普通产品 binding 为 `{ type, id, permissions? }`：
 
 ```json
 {
@@ -27,13 +31,21 @@ Worker API 与 [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/)
 }
 ```
 
-`id` 是平台上已存在的 database。绑定语法见 [bindings](/workers/configuration/bindings)。不要从本页抄 Cloudflare REST 或 Wrangler `d1` 子命令。
+`id` 是本平台上已存在的 database。绑定语法见 [bindings](/workers/configuration/bindings)。CLI 为 `oc` / `oc run` / `oc types`。
 
-## 故意不同
+## 兼容性
 
-**`OC-D1-001`**：D1 是单个本地主 SQLite authority，不声称 read replica、region routing、hosted `served_by` 身份、region/colo metadata 或 Cloudflare 计费计数。opaque bookmark 保证同一数据库的本地顺序可见性；`rows_read` / `rows_written` 是稳定的本地 SQLite 执行计数。没有 replicas，不要读 `served_by_region` / `served_by_colo` 当地理产品。
-
-全文见 [偏差](/d1/platform/deviations) 和 [Compatibility](/platform/compatibility)。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | 相同：`prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`、session、opaque bookmark、prepared-statement / result / meta |
+| 拓扑 | 托管 D1，含 read replica | 运行 ocd 的该节点上的本地主 SQLite |
+| Read replica | 提供 | 不提供 |
+| Region routing | 提供 | 不提供 |
+| `served_by` 地理 | region / colo metadata | 不提供；`served_by_*` 不是地理产品 |
+| Bookmark | 跨副本因果 | 同一数据库的本地顺序 |
+| `rows_read` / `rows_written` | 计费计数 | 本地 SQLite 执行计数 |
+| `dump()` | hosted 非 alpha 拒绝 | 同样拒绝（`D1_DUMP_ERROR`） |
+| REST / `client.v4` | 提供 | 不提供；使用 Worker binding |
 
 ## 本节
 
@@ -42,4 +54,4 @@ Worker API 与 [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/)
 - [指南](/d1/guides/)
 - [示例](/d1/examples/)
 - [限制](/d1/platform/limits)
-- [偏差](/d1/platform/deviations)
+- [行为差异](/d1/platform/deviations)

@@ -28,10 +28,4 @@ export default {
 }
 ```
 
-## 与 Cloudflare 相同
-
-`send` / `sendBatch`、`contentType`、`delaySeconds`、`ack` / `retry` 与 [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) 相同。不要写 Wrangler `[[queues.consumers]]`。
-
-## 故意不同：OC-QUEUE-001
-
-耐久性来自单节点 `scheduler.sqlite`。投递是 at-least-once，没有全球 FIFO 或 exactly-once。创建 Queue 见[上手](/queues/get-started/)。
+`send` / `sendBatch`、`contentType`、`delaySeconds`、`ack` / `retry` 与 [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) 对齐。耐久性来自该节点上的 `scheduler.sqlite`。投递是 at-least-once。不提供全球 FIFO 或 exactly-once。创建 Queue 见[上手](/queues/get-started/)。

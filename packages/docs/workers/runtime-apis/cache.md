@@ -1,6 +1,6 @@
 # Cache API
 
-`cache_api` 产品：`caches.default`、`caches.open()`、`put` / `match` / `delete`。`caches.default` 与该 Worker 的默认 HTTP response cache 共享逻辑存储。
+`caches.default`、`caches.open()`、`put` / `match` / `delete`。`caches.default` 与该 Worker 的默认 HTTP response cache 共享逻辑存储。
 
 ```ts
 export default {
@@ -18,10 +18,13 @@ export default {
 
 部署侧 `cache.enabled` 见 [Workers Cache](/workers/cache/)。
 
-## 与 Cloudflare 相同
+## 兼容性
 
-符号与 [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) 相同。条件请求、Vary、Range 按 pinned workerd + 本机 cache authority 的已验证行为。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| `caches.default` / `caches.open` / `put` / `match` / `delete` | 是，见 [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | 是 |
+| 条件请求、Vary、Range | 是 | 按 pinned workerd 与本节点 cache authority |
+| 缓存范围 | 全球 / colo CDN | 单节点 |
+| 自动缓存 TTL | 可含启发式 TTL | 需要显式 `s-maxage` 或 `max-age`；无启发式 TTL |
+| 全球 purge / Cache Tags | 是 | 不提供 |
 
-## 故意不同
-
-见 `OC-CACHE-001` / `OC-CACHE-002`（[Workers Cache](/workers/cache/) 全文）。没有全球 purge 传播、没有 Cache Tags 作为 Cloudflare 产品、没有 colo 局部缓存伪装成全球 CDN。

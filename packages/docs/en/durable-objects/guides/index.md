@@ -12,7 +12,7 @@ const stub = env.COUNTER.get(id);
 return stub.fetch(request);
 ```
 
-`get(id, { locationHint: "weur" })` is legal, but the hint has no geographic effect (`OC-DO-001`).
+`get(id, { locationHint: "weur" })` is legal, but the hint has no geographic effect.
 
 ## storage
 

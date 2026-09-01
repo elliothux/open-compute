@@ -33,4 +33,4 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-Handler 成功且无显式 decision → ack；失败且无显式 decision → retry。不要发明 Wrangler consumers 数组写进 `open-compute.json`。
+Handler 成功且无显式 decision → ack；失败且无显式 decision → retry。`open-compute.json` 不使用 Wrangler consumers 数组。

@@ -1,6 +1,6 @@
 # Examples
 
-These samples actually run on this machine's workerd. Do not copy Cloudflare [geolocation / country-code](https://developers.cloudflare.com/workers/examples/geolocation-hello-world/) examples as if they were a global Anycast product: there is no `request.cf.country` edge-geo product here.
+These samples run on workerd on this node. Cloudflare [geolocation / country-code](https://developers.cloudflare.com/workers/examples/geolocation-hello-world/) examples depend on global Anycast and `request.cf.country`. That edge-geo product is not provided.
 
 ## Hello JSON
 
@@ -27,7 +27,7 @@ export default {
 
 ## KV get / put
 
-The KV API matches Cloudflare. See [KV](/en/kv/). Authority is single-node SQLite (`OC-KV-001`), not global replication.
+The Worker-side KV API matches [KV](/en/kv/). Authority is a SQLite database on this node. Global replication is not provided.
 
 ```ts
 export default {
@@ -52,7 +52,7 @@ export default {
 }
 ```
 
-`id` is an existing KV namespace on this platform, not a name placeholder.
+`id` is an existing KV namespace on the platform, not a name placeholder.
 
 ## Cron `scheduled` handler
 
@@ -69,11 +69,11 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-Expressions are five UTC fields plus the documented local Quartz-like extensions. Recovery: `OC-CRON-001`. The platform deployment metadata field is `crons` (string array). `open-compute.json` has no Wrangler `triggers` key; adding one is an unknown field and fails.
+Expressions are five UTC fields plus the documented local Quartz-like extensions. On misfire, recovery projects at most the latest slot within grace. The platform deployment metadata field is `crons` (string array). `open-compute.json` has no Wrangler `triggers` key; adding one is an unknown field and fails.
 
 ## Service Binding `fetch`
 
-Fetch / RPC between Workers in the same account. See [bindings](/en/workers/runtime-apis/bindings).
+Fetch / RPC between Workers in the same platform account. See [bindings](/en/workers/runtime-apis/bindings).
 
 ```ts
 export default {
@@ -93,12 +93,16 @@ export default {
 }
 ```
 
-The target Worker name is resolved and frozen as a target ID at deploy time. There is no cross-region discovery (`OC-SERVICE-001`).
+The target Worker name is resolved and frozen as a target ID at deploy time. Service Bindings are same-platform only. Cross-region discovery is not provided.
 
-## Same as Cloudflare
+## Compatibility
 
-Module handlers, KV `get`/`put`, `scheduled`, Service Binding `fetch`.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Module handlers, KV `get`/`put`, `scheduled`, Service Binding `fetch` | Yes | Yes |
+| `request.cf.country` edge geo / geolocation samples | Yes | Not provided |
+| workers.dev | Yes | Not provided |
+| Analytics Engine / Workers AI / Turnstile samples | Yes | Not provided |
+| Where state lives | Global replication products | This node |
 
-## Intentional delta
-
-No geolocation samples as a global product; no `workers.dev`; all state lives on this machine. Cloudflare examples that depend on the edge, Analytics Engine, AI, or Turnstile are not capabilities of this platform.
+Next: [Configuration](/en/workers/configuration/), [Runtime APIs](/en/workers/runtime-apis/).

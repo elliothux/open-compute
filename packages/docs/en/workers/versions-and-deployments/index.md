@@ -10,12 +10,14 @@ bun run oc run --config examples/hello-worker/open-compute.json --ocd "$PWD/targ
 
 A failed validation does not change the current active deployment. Promotion / rollback change the active pointer; they do not mutate a ready deployment's bytes. Preview is the local URL printed by `oc run`.
 
-## Same as Cloudflare
+## Compatibility
 
-Versions are immutable; a release switches the active pointer. Rollback points at an older version instead of rewriting bytes. See [Versions & deployments](https://developers.cloudflare.com/workers/versions-and-deployments/).
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Versions are immutable; a release switches the active pointer | Yes — [Versions & deployments](https://developers.cloudflare.com/workers/versions-and-deployments/) | Yes |
+| Rollback points at an older version instead of rewriting bytes | Yes | Yes |
+| Deploy authority | Cloudflare global rollout / placement / traffic-splitting | Local SQLite and one supervised runtime generation |
+| Gradual deployments / version affinity / Cloudflare preview URLs / Workers Builds CI | Yes | Not provided |
+| `oc run` origin | N/A | Loopback HTTP (or an explicitly configured local origin) |
+| `oc deploy` | Wrangler deploy | HTTPS only; URLs with credentials are rejected |
 
-## Intentional delta: OC-DEPLOY-001
-
-Deployments, routes, promotion, and rollback use one local SQLite authority and one supervised runtime generation. The platform does not claim Cloudflare's global rollout, placement, traffic-splitting, account-management, or billing control planes.
-
-No gradual deployments, version affinity, Cloudflare preview URLs, or Workers Builds CI. `run` requires loopback HTTP (or your explicitly configured local origin); remote `deploy` accepts HTTPS only, not URLs with credentials.

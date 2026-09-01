@@ -1,6 +1,6 @@
 # 示例
 
-把原始字节 POST 到 Worker，走 `input` → `transform` → `output`。不要构造 `imagedelivery.net` 或 `/cdn-cgi/image/` URL。
+把原始字节 POST 到 Worker，走 `input` → `transform` → `output`。不构造 `imagedelivery.net` 或 `/cdn-cgi/image/` URL。
 
 ```ts
 export default {
@@ -23,10 +23,4 @@ export default {
 }
 ```
 
-## 与 Cloudflare 相同
-
-链是 `input` / `transform` / `draw` / `output` / `response()` / `info()`。完整选项见[指南](/images/guides/)。
-
-## 故意不同：OC-IMAGES-001
-
-这是有界本机光栅变换 binding，不是托管 Cloudflare Images。没有上传、签名 URL、URL transform、视频或 AI upscale。配置见[上手](/images/get-started/)。
+链是 `input` / `transform` / `draw` / `output` / `response()` / `info()`。完整选项见[指南](/images/guides/)。这是有界本机光栅变换 binding，不是托管 Cloudflare Images。配置见[上手](/images/get-started/)。

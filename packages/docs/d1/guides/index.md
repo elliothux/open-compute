@@ -2,7 +2,7 @@
 
 ## 创建 database
 
-见[上手](/d1/get-started/)。`POST /v1/accounts/{accountId}/d1/databases`，`{ "name": "..." }`。不是 Cloudflare REST。
+见[上手](/d1/get-started/)。`POST /v1/accounts/{accountId}/d1/databases`，`{ "name": "..." }`。不提供 Cloudflare REST。
 
 ## prepare / bind / batch
 
@@ -31,7 +31,7 @@ if (bookmark) {
 }
 ```
 
-bookmark 是不透明字符串，只保证本库本地顺序可见性（`OC-D1-001`）。
+bookmark 是不透明字符串，只保证本库本地顺序可见性。
 
 ## dump()
 
@@ -39,12 +39,12 @@ bookmark 是不透明字符串，只保证本库本地顺序可见性（`OC-D1-0
 try {
   await env.DB.dump();
 } catch (error) {
-  // 当前 hosted 非 alpha：拒绝
+  // hosted 非 alpha：拒绝
 }
 ```
 
-不要把 `dump()` 当备份 API。平台备份走 `ocd backup`，与 D1 binding 无关。
+`dump()` 不是备份 API。平台备份走 `ocd backup`，与 D1 binding 无关。
 
 ## meta
 
-`rows_read` / `rows_written` 是本地 SQLite 执行计数。不要依赖 `served_by_region` / `served_by_colo` / `served_by_primary` 当地理或 replica 身份。
+`rows_read` / `rows_written` 是本地 SQLite 执行计数。`served_by_region` / `served_by_colo` / `served_by_primary` 不是地理或 replica 身份。

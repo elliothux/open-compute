@@ -1,6 +1,6 @@
 # TCP sockets
 
-`connect()` 从 `cloudflare:sockets` 导入，用来建立出站 TCP。API 形状与 Cloudflare 相同；政策边界不是。
+`connect()` 从 `cloudflare:sockets` 导入，用于建立出站 TCP。API 形状与 [Cloudflare TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/) 对齐；网络策略边界不同。
 
 ```ts
 import { connect } from "cloudflare:sockets";
@@ -16,14 +16,16 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-完整 `Socket` / `SocketAddress` / `SocketOptions` / `startTls()` 签名见 [Cloudflare TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)，不要在本页复述。`node:net` / `node:tls` 走同一条 general outbound。命名 Service/DO 的 `Fetcher.connect()` 必须走声明过的 capability tunnel，不是第二条通用出网。
+完整 `Socket` / `SocketAddress` / `SocketOptions` / `startTls()` 签名见 Cloudflare 原文。不可在 global scope 创建并跨请求共享 socket。
 
-## 与 Cloudflare 相同
+## 兼容性
 
-`connect(address, options?)` 返回带 `readable` / `writable` / `opened` / `closed` / `close()` / `startTls()` 的 `Socket`。`secureTransport`: `off` | `on` | `starttls`。不要在 global scope 创建并跨请求共享 socket。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| `connect(address, options?)` 返回带 `readable` / `writable` / `opened` / `closed` / `close()` / `startTls()` 的 `Socket` | 是 | 是 |
+| `secureTransport`：`off` \| `on` \| `starttls` | 是 | 是 |
+| 租户通用出站 `fetch()`、`cloudflare:sockets.connect()`、`node:net` | Cloudflare 托管网络策略 | 共享唯一的 stock-workerd `Network(allow=["public"])` |
+| 命名 Service/DO 的 `Fetcher.connect()` | 托管策略 | 使用已声明的 capability tunnel，不是第二条通用出站 |
+| Cloudflare 自有 IP 段封禁 / Worker self-connect（TCP Loop）/ 默认 SMTP 25 封禁 | 是，见 [troubleshooting](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/#troubleshooting) | 不提供 |
+| private / loopback / link-local / metadata / Unix | 拒绝 | public 地址层拒绝 |
 
-## 故意不同：OC-WKR-TCP-001
-
-tenant 的 general outbound `fetch()`、`cloudflare:sockets.connect()` 和 `node:net` 共享唯一的 stock-workerd `Network(allow = ["public"])`；命名 Service/DO 的 `Fetcher.connect()` 走声明式 capability tunnel，不是第二个通用 outbound。open-compute 不复制 Cloudflare 自有 IP 段封禁、Worker self-connect/TCP-loop detector 或默认 SMTP 25 封禁。runtime-source、binding-backend 和 workerd 内部 listener 强制 loopback；control/data listener 默认 loopback，但 operator 可以显式暴露，因此不能宣称 public Network 会按“平台所有权”额外拒绝公开地址。operator 负责公开入口和额外公网/SMTP egress policy。
-
-因此 Cloudflare 文档里的 “Cloudflare IPs are blocked”、“TCP Loop detected”、“Connections to port 25 are prohibited” 不能当成这个二进制已经执行的托管策略。public 地址层仍拒绝 private / loopback / link-local / metadata / Unix。

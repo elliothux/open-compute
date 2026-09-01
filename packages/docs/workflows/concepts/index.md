@@ -4,12 +4,15 @@ Workflow definition 是 catalog 资源。实例与 step 状态在本地 SQLite�
 
 对 KV / R2 / 外部 HTTP 的副作用**不会**随 Workflow snapshot 回滚。把外部写做成幂等。
 
-没有跨区域 placement，也没有 Cloudflare dashboard 里的 Workflow 观察面（`OC-WORKFLOW-001`）。
+不提供跨区域 placement，也不提供 Cloudflare dashboard 里的 Workflow 观察面。
 
-## 与 Cloudflare 相同
+[Workflows](https://developers.cloudflare.com/workflows/) 的 class / `step.do` / instance handle 与 Cloudflare 对齐。有界并行 `step.do`（默认最多 4 路）是实现行为。
 
-[Workflows](https://developers.cloudflare.com/workflows/) 的 class / `step.do` / instance handle。有界并行 `step.do`（默认最多 4 路）是实现行为，不是偏差。
+## 兼容性
 
-## 故意不同
-
-**`OC-WORKFLOW-001`**：本地 SQLite；callback at-least-once until commit；外部副作用不回滚；无跨地域、无 CF dashboard/observability。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| API | [Workflows](https://developers.cloudflare.com/workflows/) | 相同：class / `step.do` / instance handle |
+| 执行 | 跨地域 | 该节点上的本地 SQLite |
+| Callback | — | 提交前 at-least-once；已完成的 callback 在 replay 时跳过 |
+| 外部副作用 | — | 不随 snapshot 回滚 |

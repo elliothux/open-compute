@@ -1,9 +1,16 @@
-# Deviations
+# Behavior differences
 
-Registered ID: **`OC-DO-001`**.
+The Durable Objects Worker / class API matches Cloudflare. Every object lives on the single local workerd.
 
-Durable Objects are placed on the single local workerd process. Location hints, jurisdiction, and global migration have no geographic scheduling effect.
+## Compatibility
 
-That is why 115 target members are `supported_with_deviation` (112 use `OC-DO-001`; 3 connect members also carry `OC-WKR-TCP-001` and `OC-WKR-LIMIT-001`). Alarms (7) and WebSocket hibernation (19) are `supported` with no separate deviation ID.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`, stub `fetch` / RPC, `state.storage` KV and SQL, transactions, output gate |
+| Placement | Geographic scheduling, `locationHint` / jurisdiction / migration | All objects on one local workerd; `locationHint` / jurisdiction / migration have no geo effect |
+| Alarms | Available | 7 methods supported |
+| Hibernation | Available | Supported |
+| Binding | wrangler `durable_objects` | `{ type, id, className }`; `className` required |
+| `Fetcher.connect()` | General outbound | Declared capability tunnel |
 
-See [Compatibility](/en/platform/compatibility) and `docs/references/p1-deviations.md`.
+See [Compatibility](/en/platform/compatibility).

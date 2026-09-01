@@ -1,6 +1,6 @@
 # Runtime APIs
 
-不要在本页粘贴 1,580 个成员签名。Worker 在本机 workerd isolate 里跑同一套 runtime 表面。
+Worker 在本节点 workerd isolate 中运行与 Cloudflare Workers 对齐的 runtime 表面。完整成员以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。
 
 ```ts
 export default {
@@ -10,24 +10,27 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 与 Cloudflare 相同
+## 表面
 
-`fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC 与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 相同。完整成员去 Cloudflare 原文和 `ocd capabilities --json` 的 `products`。
-
-## 故意不同
-
-Workers runtime 是 `supported_with_deviation`（`OC-WKR-TCP-001`、`OC-WKR-LIMIT-001`）。Alarms、Version Metadata、WebSocket hibernation 为 `supported`。`ai`、`vectorize` 等非目标产品是 `unsupported`。不要从本表推导未列出的托管功能。
-
-
-| 表面 | Cloudflare | 本平台 |
+| 表面 | Cloudflare | open-compute |
 | --- | --- | --- |
-| Handlers (`fetch`, `scheduled`, `queue`) | [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | [handlers](/workers/runtime-apis/handlers) |
+| Handlers（`fetch`、`scheduled`、`queue`） | [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | [handlers](/workers/runtime-apis/handlers) |
 | Bindings / `env` | [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | [bindings](/workers/runtime-apis/bindings) |
 | Cache API | [Cache](https://developers.cloudflare.com/workers/runtime-apis/cache/) | [cache](/workers/runtime-apis/cache) |
-| WebSockets | [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/) | [websockets](/workers/runtime-apis/websockets)；hibernation 支持 |
-| TCP sockets | [TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/) | [tcp-sockets](/workers/runtime-apis/tcp-sockets)；`OC-WKR-TCP-001` |
+| WebSockets | [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/) | [websockets](/workers/runtime-apis/websockets)；hibernation 可用 |
+| TCP sockets | [TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/) | [tcp-sockets](/workers/runtime-apis/tcp-sockets) |
 | Node.js | [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | [nodejs](/workers/runtime-apis/nodejs) |
-| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | [Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) | 相同；不在本站复述 |
-| Durable Objects / Alarms | [Durable Objects](https://developers.cloudflare.com/durable-objects/api/) | 产品页；`OC-DO-001` |
-| KV / R2 / D1 / Queues / Workflows | 各产品文档 | 本站对应产品；单机偏差见 [偏差](/platform/deviations) |
+| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | [Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) | 对齐；本站不复述 |
+| Durable Objects / Alarms | [Durable Objects](https://developers.cloudflare.com/durable-objects/api/) | 见 Durable Objects 产品页 |
+| KV / R2 / D1 / Queues / Workflows | 各产品文档 | 本站对应产品页 |
+
+## 兼容性
+
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | 是 | 是 |
+| Alarms、Version Metadata、WebSocket hibernation | 是 | 是 |
+| Workers AI / Vectorize 等非本平台产品 | 是 | 不提供 |
+| 出站 TCP / `fetch` 网络策略 | Cloudflare 托管策略 | 见 [TCP sockets](/workers/runtime-apis/tcp-sockets) |
+| 请求级 CPU / subrequest 配额 | 是 | 见 [限制](/workers/platform/limits) |
 

@@ -1,6 +1,6 @@
 # 备份与保留
 
-触发信号：计划维护窗口、当前 release 恢复演练或 RPO 要求到期。影响面是本地 control / KV / D1 / DO / scheduler 权威数据。R2 只绑定当前外部 S3，**不是** point-in-time copy（`OC-R2-001`）。runtime 解压缓存不属于 snapshot authority。
+触发信号：计划维护窗口、当前 release 恢复演练或 RPO 要求到期。影响面是本地 control / KV / D1 / DO / scheduler 权威数据。R2 只绑定当前外部 S3，不是对象存储的时间点拷贝。runtime 解压缓存不属于 snapshot authority。
 
 备份和恢复是离线操作：先停 service，再拿 data-dir 锁。
 

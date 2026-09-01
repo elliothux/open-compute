@@ -1,6 +1,12 @@
 # R2
 
-R2 is object storage bound onto Worker `env`. The Worker binding API matches Cloudflare; object bytes are held by the S3-compatible provider you configured. There is no Cloudflare global placement.
+R2 is object storage that lets you store and retrieve unstructured data from a Worker. The Worker binding API matches Cloudflare. Object bytes are held by the S3-compatible provider you configured.
+
+For example, you can use R2 for:
+
+- Storage for unstructured objects
+- Serving files from a Worker
+- Multipart uploads to the configured S3 provider
 
 ```ts
 export default {
@@ -18,9 +24,7 @@ export default {
 } satisfies ExportedHandler<{ BUCKET: R2Bucket }>;
 ```
 
-## Same as Cloudflare
-
-The Worker binding is the [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/): `head` / `get` / `put` / `delete` / `list`, conditional writes, checksums, multipart, HTTP metadata. 110 target members are `supported_with_deviation`. Object bytes can also be reached through the configured S3-compatible API (the provider's own SDK). That is the storage protocol, not a second Cloudflare REST.
+Bind an existing logical bucket in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
 
 ```json
 {
@@ -32,19 +36,24 @@ The Worker binding is the [R2 Workers API](https://developers.cloudflare.com/r2/
 }
 ```
 
-`id` is an already-existing logical bucket on the platform. Binding grammar: [bindings](/en/workers/configuration/bindings). Do not copy `client.v4` from this page.
+`id` is an existing logical bucket on this platform. Binding grammar: [bindings](/en/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## Intentional differences
+## Compatibility
 
-**`OC-R2-001`**: R2 object bytes are held by the configured S3-compatible provider. The platform does not claim Cloudflare global placement or replication. No smart proximity, no Cloudflare-hosted public r2.dev product.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | Same: `head` / `get` / `put` / `delete` / `list`, conditional writes, checksums, multipart, HTTP metadata |
+| Object bytes | Cloudflare R2 storage | Configured S3-compatible provider |
+| Global placement | Available | Not provided |
+| r2.dev public product | Available | Not provided |
+| Jurisdictional restrictions | Available | Not provided |
+| REST / `client.v4` | Available | Not provided; use the Worker binding or the provider S3 API |
 
-Full text: [Deviations](/en/r2/platform/deviations) and [Compatibility](/en/platform/compatibility).
-
-## In this section
+## Next
 
 - [Get started](/en/r2/get-started/)
 - [Concepts](/en/r2/concepts/)
 - [Guides](/en/r2/guides/)
 - [Examples](/en/r2/examples/)
 - [Limits](/en/r2/platform/limits)
-- [Deviations](/en/r2/platform/deviations)
+- [Behavior differences](/en/r2/platform/deviations)

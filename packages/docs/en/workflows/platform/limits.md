@@ -1,6 +1,6 @@
 # Limits
 
-Local quotas come from `ocd` `[workflows]`. **Live numbers** come from `ocd capabilities --json`. Embedded defaults include:
+Local quotas come from `ocd` `[workflows]`. Live numbers come from `ocd capabilities --json`. Embedded defaults include:
 
 | Item | Default |
 | --- | --- |
@@ -11,4 +11,4 @@ Local quotas come from `ocd` `[workflows]`. **Live numbers** come from `ocd capa
 | `max_parallel_steps` | 4 |
 | `dispatch_timeout_ms` | 300000 |
 
-There is no Cloudflare dashboard quota page.
+A Cloudflare dashboard quota page is not provided.

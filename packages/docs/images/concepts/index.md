@@ -4,9 +4,7 @@
 
 支持输入 jpeg / png / webp（`info`）。输出 jpeg / png / webp / avif。`max_frames = 1`：没有动画。
 
-## 不是托管 Cloudflare Images
-
-没有：
+不提供：
 
 - 上传、签名 URL、Image Delivery
 - `https://.../cdn-cgi/image/` URL transform
@@ -14,8 +12,10 @@
 - AI upscale
 - Cloudflare 产品配额 / 计费
 
-不要把读者送到那些 Cloudflare 文档当本平台能力。
+## 兼容性
 
-## 故意不同
-
-**`OC-IMAGES-001`**：有界本机光栅变换 binding，不是托管 Cloudflare Images。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| Binding API | Images binding 链 | 相同链：`input` / `transform` / `draw` / `output` / `response()` / `info()` |
+| 产品 | 托管 Cloudflare Images | 有界本机光栅 binding |
+| 上传 / 签名 / URL transform / 视频 / AI upscale | 提供 | 不提供 |

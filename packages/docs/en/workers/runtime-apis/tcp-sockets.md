@@ -1,6 +1,6 @@
 # TCP sockets
 
-`connect()` is imported from `cloudflare:sockets` for outbound TCP. The API shape matches Cloudflare; the policy boundary does not.
+`connect()` is imported from `cloudflare:sockets` for outbound TCP. The API shape matches [Cloudflare TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/). The network policy boundary does not.
 
 ```ts
 import { connect } from "cloudflare:sockets";
@@ -16,14 +16,16 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-Full `Socket` / `SocketAddress` / `SocketOptions` / `startTls()` signatures: [Cloudflare TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/). Do not restate them here. `node:net` / `node:tls` share the same general outbound. Named Service/DO `Fetcher.connect()` must use a declared capability tunnel; it is not a second general outbound path.
+Full `Socket` / `SocketAddress` / `SocketOptions` / `startTls()` signatures: [Cloudflare TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/). Do not create a socket in global scope and share it across requests.
 
-## Same as Cloudflare
+## Compatibility
 
-`connect(address, options?)` returns a `Socket` with `readable` / `writable` / `opened` / `closed` / `close()` / `startTls()`. `secureTransport`: `off` | `on` | `starttls`. Do not create a socket in global scope and share it across requests.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| `connect(address, options?)` returns a `Socket` with `readable` / `writable` / `opened` / `closed` / `close()` / `startTls()` | Yes | Yes |
+| `secureTransport`: `off` \| `on` \| `starttls` | Yes | Yes |
+| Tenant general outbound `fetch()`, `cloudflare:sockets.connect()`, `node:net` | Cloudflare hosted network policy | Share one stock-workerd `Network(allow=["public"])` |
+| Named Service/DO `Fetcher.connect()` | Hosted policy | Uses the declared capability tunnel; not a second general outbound |
+| Cloudflare-owned IP-range block / Worker self-connect (TCP Loop) / default SMTP port 25 prohibition | Yes — [troubleshooting](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/#troubleshooting) | Not provided |
+| Private / loopback / link-local / metadata / Unix | Rejected | Rejected by the public address layer |
 
-## Intentional delta: OC-WKR-TCP-001
-
-Tenant general outbound `fetch()`, `cloudflare:sockets.connect()`, and `node:net` share one stock-workerd `Network(allow = ["public"])` address authority. Named Service/DO `Fetcher.connect()` uses an explicitly declared capability tunnel and is not a second general outbound path. Unlike [Cloudflare's hosted TCP policy](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/#troubleshooting), open-compute does not add Cloudflare-owned IP-range blocking, a Worker self-connect/TCP-loop detector, or the default SMTP port 25 prohibition. Runtime-source, binding-backend, and workerd-internal listeners are loopback-only. Control/data listeners default to loopback but an operator may explicitly expose them, so the public Network does not add an ownership-based rejection for such public addresses. The operator owns exposed ingress and any additional public-IP, reverse-proxy, or SMTP egress policy.
-
-So Cloudflare docs that say “Cloudflare IPs are blocked”, “TCP Loop detected”, or “Connections to port 25 are prohibited” are not policies this binary already enforces. The public address layer still rejects private / loopback / link-local / metadata / Unix.

@@ -1,22 +1,34 @@
 # KV
 
-Workers KV is key-value storage bound onto Worker `env`. On this platform, each namespace is a SQLite database on this one machine. There is no global edge cache and no cross-node replication.
+Workers KV is a data storage that allows you to store and retrieve key-value data from a Worker. On this platform, each namespace is a SQLite database on the node running ocd.
+
+For example, you can use Workers KV for:
+
+- Caching API responses
+- Storing user configurations / preferences
+- Storing user authentication details
 
 ```ts
 export default {
   async fetch(request, env, ctx): Promise<Response> {
+    // write a key-value pair
     await env.KV.put("KEY", "VALUE");
+
+    // read a key-value pair
     const value = await env.KV.get("KEY");
+
+    // list all key-value pairs
     const allKeys = await env.KV.list();
+
+    // delete a key-value pair
     await env.KV.delete("KEY");
+
     return Response.json({ value, allKeys });
   },
 } satisfies ExportedHandler<{ KV: KVNamespace }>;
 ```
 
-## Same as Cloudflare
-
-The Worker binding API is the [Cloudflare KV API](https://developers.cloudflare.com/kv/api/): `put` / `get` / `getWithMetadata` / `list` / `delete`, plus text / json / arrayBuffer / stream, metadata, TTL, bulk get, and list cursors. 52 target members are `supported_with_deviation`.
+Bind an existing namespace in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
 
 ```json
 {
@@ -28,19 +40,23 @@ The Worker binding API is the [Cloudflare KV API](https://developers.cloudflare.
 }
 ```
 
-`id` is an already-existing namespace on the platform. Binding grammar: [Workers configuration · bindings](/en/workers/configuration/bindings). Do not copy Cloudflare REST or Wrangler KV subcommands from this page.
+`id` is an existing namespace on this platform. Optional `permissions`: `{ "read": true, "write": true }`. Binding grammar: [Workers configuration · bindings](/en/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## Intentional differences
+## Compatibility
 
-**`OC-KV-001`**: KV is single-node SQLite authority. It does not claim Cloudflare global replication or edge-cache propagation timing. `cacheTtl` is accepted for parameter compatibility and does not create a colo cache. There is no jurisdiction product and no `api.cloudflare.com/client/v4`.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker API | [Cloudflare KV API](https://developers.cloudflare.com/kv/api/) | Same: `put` / `get` / `getWithMetadata` / `list` / `delete`, text / json / arrayBuffer / stream, metadata, TTL, bulk get, list cursor |
+| Replication | Global edge | Single-node SQLite on the node running ocd |
+| `cacheTtl` | Colo cache | Parameter accepted; no colo cache |
+| Jurisdictions | Available | Not provided |
+| REST / `client.v4` | Available | Not provided; use the Worker binding |
 
-Full text: [Deviations](/en/kv/platform/deviations) and [Compatibility](/en/platform/compatibility).
-
-## In this section
+## Next
 
 - [Get started](/en/kv/get-started/)
 - [Concepts](/en/kv/concepts/)
 - [Guides](/en/kv/guides/)
 - [Examples](/en/kv/examples/)
 - [Limits](/en/kv/platform/limits)
-- [Deviations](/en/kv/platform/deviations)
+- [Behavior differences](/en/kv/platform/deviations)

@@ -2,7 +2,7 @@
 
 ## Create a database
 
-See [Get started](/en/d1/get-started/). `POST /v1/accounts/{accountId}/d1/databases` with `{ "name": "..." }`. Not Cloudflare REST.
+See [Get started](/en/d1/get-started/). `POST /v1/accounts/{accountId}/d1/databases` with `{ "name": "..." }`. Cloudflare REST is not provided.
 
 ## prepare / bind / batch
 
@@ -31,7 +31,7 @@ if (bookmark) {
 }
 ```
 
-A bookmark is an opaque string. It only preserves local sequential visibility on this database (`OC-D1-001`).
+A bookmark is an opaque string. It only preserves local sequential visibility on this database.
 
 ## dump()
 
@@ -39,12 +39,12 @@ A bookmark is an opaque string. It only preserves local sequential visibility on
 try {
   await env.DB.dump();
 } catch (error) {
-  // current hosted non-alpha: rejected
+  // hosted non-alpha: rejected
 }
 ```
 
-Do not treat `dump()` as a backup API. Platform backups are `ocd backup`, unrelated to the D1 binding.
+`dump()` is not a backup API. Platform backups are `ocd backup`, unrelated to the D1 binding.
 
 ## meta
 
-`rows_read` / `rows_written` are local SQLite execution counters. Do not depend on `served_by_region` / `served_by_colo` / `served_by_primary` as geography or replica identity.
+`rows_read` / `rows_written` are local SQLite execution counters. `served_by_region` / `served_by_colo` / `served_by_primary` are not geography or replica identity.

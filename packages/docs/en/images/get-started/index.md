@@ -35,7 +35,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-Input must be request-body bytes. There is no `https://imagedelivery.net/...` URL transform and no upload/signing.
+Input must be request-body bytes. URL transforms such as `https://imagedelivery.net/...` and upload / signing are not provided.
 
 ## 3. Run
 

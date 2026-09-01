@@ -22,10 +22,13 @@ export default {
 
 The admin token is read from `OPEN_COMPUTE_ADMIN_TOKEN`, or from another variable named by `--token-env`. Do not put secret values in the project file or in command arguments. A secret object may only have the `env` key.
 
-## Same as Cloudflare
+## Compatibility
 
-`env.TOKEN` is a `string`; type generation uses `string`, not a literal. See [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/).
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| `env.TOKEN` is a `string`; type generation uses `string`, not a literal | Yes — [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/) | Yes |
+| `wrangler secret put` | Yes | Not provided |
+| Cloudflare Secrets Store / dashboard ciphertext | Yes | Not provided |
+| `file:` reference in **project** JSON | N/A | Not allowed (that form is for ocd operator config) |
+| Missing environment variable | Command-dependent | `run` / `deploy` fail |
 
-## Intentional delta
-
-No `wrangler secret put`, no Cloudflare Secrets Store, no dashboard ciphertext. There is no `file:` reference in the **project** JSON (that form is for ocd operator config). A missing environment variable fails `run` / `deploy`.

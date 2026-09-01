@@ -19,4 +19,4 @@ return result.response({ headers: { "cache-control": "public, max-age=3600" } })
 
 `fit`: `scale-down` | `contain` | `cover` | `crop` | `pad`. Unknown options throw `IMAGE_OPTION_UNSUPPORTED`. `anim` is omit or `false`.
 
-Do not use the Cloudflare Images upload API or signing.
+The Cloudflare Images upload API and signing are not provided.

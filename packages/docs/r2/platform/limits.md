@@ -1,6 +1,6 @@
 # 限额
 
-Worker API 形状与 [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) 对齐。本机配额来自 `ocd` 的 `[r2]`，**运行中精确值**以 `ocd capabilities --json` 为准。嵌入默认包括：
+Worker API 形状与 [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) 对齐。本机配额来自 `ocd` 的 `[r2]`。运行中精确值以 `ocd capabilities --json` 为准。嵌入默认包括：
 
 | 项 | 默认 |
 | --- | --- |
@@ -10,4 +10,4 @@ Worker API 形状与 [R2 Workers API](https://developers.cloudflare.com/r2/api/w
 | `max_staging_bytes` | 2 GiB |
 | `operation_timeout_ms` | 30000 |
 
-这不是 Cloudflare 的 5 TiB 对象或无限存储套餐。S3 provider 自己的限额另外算。
+不是 Cloudflare 的 5 TiB 对象或无限存储套餐。S3 provider 自己的限额另外适用。

@@ -32,10 +32,16 @@ Regenerate types after changing config:
 bun run oc types --config open-compute.json
 ```
 
-## Same as Cloudflare
+Runtime detail: [Runtime APIs · bindings](/en/workers/runtime-apis/bindings).
 
-Tenants only see declared names. The **Worker-side APIs** for KV / R2 / D1 / DO / Queue / Workflow / Service / Assets / Images / Version Metadata use the same symbols as [Cloudflare bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/). Runtime detail: [Runtime APIs · bindings](/en/workers/runtime-apis/bindings).
+## Compatibility
 
-## Intentional delta
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Tenants only see declared names | Yes | Yes |
+| Worker-side APIs for KV / R2 / D1 / DO / Queue / Workflow / Service / Assets / Images / Version Metadata | Yes — [Cloudflare bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | Same symbols |
+| Config shape | Wrangler per-product top-level arrays (`kv_namespaces`, …) | `bindings` object with `{type, id, permissions?}` |
+| Service Bindings | Same-account Workers | `services: [{binding, service, entrypoint?}]`; deploy time resolves the same-account Worker name and freezes a target ID; same-platform only |
+| Workers AI, Vectorize, Hyperdrive, mTLS, Rate Limiting, Secrets Store, Analytics Engine, Browser Rendering | Yes | Not provided |
+| Writing config creates the resource | Wrangler can create some resources | The resource must already exist on the platform |
 
-`bindings` is an object, not Wrangler's per-product top-level arrays (`kv_namespaces`, …). Service Bindings are `services: [{binding, service, entrypoint?}]`; deploy time resolves the same-account Worker name and freezes a target ID (`OC-SERVICE-001`). There is no Workers AI, Vectorize, Hyperdrive, mTLS, Rate Limiting, Secrets Store, Analytics Engine, or Browser Rendering. The resource must already exist on the platform; writing config does not create a KV namespace.

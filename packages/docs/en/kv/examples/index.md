@@ -27,4 +27,4 @@ for (const key of page.keys) {
 }
 ```
 
-Config: [Get started](/en/kv/get-started/). Do not port Cloudflare geolocation or global-purge examples.
+Config: [Get started](/en/kv/get-started/). Cloudflare geolocation and global purge are not provided.

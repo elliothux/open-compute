@@ -1,8 +1,8 @@
 # 不支持
 
-下列产品在契约里是 `non_target` / `unsupported`。它们不是本平台产品，不要写成产品页，也不要因为 upstream types 里有同名符号就当成已注入。
+open-compute 不提供下列 Cloudflare 产品。部署时会在边界拒绝它们。不要因为 upstream types 里有同名符号就当作已注入的 binding。
 
-| 稳定名 | Cloudflare 产品 |
+| 名称 | Cloudflare 产品 |
 | --- | --- |
 | `analytics_engine` | Analytics Engine |
 | `ai` | Workers AI |
@@ -13,4 +13,4 @@
 | `rate_limiting` | Rate Limiting |
 | `workers_for_platforms` | Workers for Platforms |
 
-部署 authority 会在边界拒绝它们。支持面见[目录](/directory)和[兼容性](/platform/compatibility)。
+已提供的产品见[产品目录](/directory)和[兼容性](/platform/compatibility)。

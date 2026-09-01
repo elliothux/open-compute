@@ -1,10 +1,10 @@
 # 上手
 
-`ocd` 必须 ready。先创建 definition，再绑定 class 并 `oc run`。
+创建 definition，绑定 class，再用 `oc` 运行。`ocd` 必须就绪。
 
 ## 1. 创建 definition
 
-本机平台控制面，不是 Cloudflare REST / `client.v4`。
+以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
@@ -51,10 +51,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 4. 跑起来
+## 4. 运行
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 是 `oc`，不是 Wrangler。下一步：[概念](/workflows/concepts/)。
+CLI 为 `oc`，不是 Wrangler。下一步：[概念](/workflows/concepts/)。

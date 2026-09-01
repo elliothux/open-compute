@@ -1,5 +1,7 @@
 # 示例
 
+从 Worker 建表、batch 写入并查询。`rows_read` / `rows_written` 是本地 SQLite 执行计数。
+
 ## 建表并查询
 
 ```ts
@@ -18,4 +20,4 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-`rows_read` / `rows_written` 是本地计数，不是账单。配置见[上手](/d1/get-started/)。
+配置见[上手](/d1/get-started/)。

@@ -1,10 +1,10 @@
 # Get started
 
-`ocd` must already be ready, with S3 configured (`[s3]` plus `r2_prefix`). `oc run` does not start another workerd. See [ocd get started](/en/ocd/get-started) and [configuration](/en/ocd/configuration).
+`ocd` must already be ready, with S3 configured (`[s3]` plus `r2_prefix`). Create a logical bucket, bind it in `open-compute.json`, and run the Worker with `oc`. `oc run` does not start another workerd. See [ocd get started](/en/ocd/get-started) and [configuration](/en/ocd/configuration).
 
 ## 1. Create a logical bucket
 
-Local platform control plane, not Cloudflare REST / `client.v4`. Object bytes go to the configured S3 prefix, not SQLite.
+The following is the platform control plane. Cloudflare REST and `client.v4` are not provided. Object bytes go to the configured S3 prefix, not SQLite.
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')

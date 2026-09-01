@@ -23,10 +23,4 @@ export default {
 }
 ```
 
-## Same as Cloudflare
-
-The chain is `input` / `transform` / `draw` / `output` / `response()` / `info()`. Options: [Guides](/en/images/guides/).
-
-## Intentional differences: OC-IMAGES-001
-
-This is a bounded local raster transform binding, not hosted Cloudflare Images. No upload, signed URL, URL transform, video, or AI upscale. Setup: [Get started](/en/images/get-started/).
+The chain is `input` / `transform` / `draw` / `output` / `response()` / `info()`. Options: [Guides](/en/images/guides/). This is a bounded local raster transform binding, not hosted Cloudflare Images. Setup: [Get started](/en/images/get-started/).

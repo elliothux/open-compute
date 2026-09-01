@@ -1,6 +1,12 @@
 # Durable Objects
 
-Durable Objects bind compute and strongly consistent storage to one object. On this platform every object lives on the single local `workerd` process. Location hints, jurisdiction, and global migration have no geographic scheduling effect.
+Durable Objects bind compute and strongly consistent storage to one object. On this platform every object lives on the single local `workerd` process.
+
+For example, you can use Durable Objects for:
+
+- Coordinating state among multiple clients
+- Strongly consistent per-object storage
+- Alarms and WebSocket hibernation
 
 ```ts
 export class Counter {
@@ -20,9 +26,7 @@ export default {
 } satisfies ExportedHandler<{ COUNTER: DurableObjectNamespace }>;
 ```
 
-## Same as Cloudflare
-
-The Worker / class API is the [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/): namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`, stub `fetch` / RPC, `state.storage` KV and SQL, transactions, output gate. 115 target members are `supported_with_deviation`. Alarms (7 members) and WebSocket hibernation (19 members) are `supported`. Alarms: [alarms](/en/durable-objects/alarms). Hibernation: this section or [WebSockets](/en/workers/runtime-apis/websockets).
+Bind in `open-compute.json`. Durable Object bindings require `className`:
 
 ```json
 {
@@ -34,15 +38,20 @@ The Worker / class API is the [Durable Objects API](https://developers.cloudflar
 }
 ```
 
-Durable Object bindings must include `className`. It only checks class semantics in generated framework config; it is not sent as the resource id. Grammar: [bindings](/en/workers/configuration/bindings).
+`className` only checks class semantics in generated framework config. It is not sent as the resource id. Grammar: [bindings](/en/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## Intentional differences
+## Compatibility
 
-**`OC-DO-001`**: Durable Objects are placed on the single local workerd process. Location hints, jurisdiction, and global migration have no geographic scheduling effect. Three `connect` members also carry `OC-WKR-TCP-001` / `OC-WKR-LIMIT-001` (named DO `Fetcher.connect()` uses a declared capability tunnel, not a second general outbound).
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`, stub `fetch` / RPC, `state.storage` KV and SQL, transactions, output gate |
+| Placement | Geographic scheduling, `locationHint` / jurisdiction / migration | All objects on one local workerd; `locationHint` / jurisdiction / migration have no geo effect |
+| Alarms | Available | 7 methods supported: `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler |
+| Hibernation | Available | Supported |
+| Binding | wrangler `durable_objects` | `{ type, id, className }`; `className` required |
+| `Fetcher.connect()` | General outbound | Declared capability tunnel |
 
-Full text: [Deviations](/en/durable-objects/platform/deviations) and [Compatibility](/en/platform/compatibility).
-
-## In this section
+## Next
 
 - [Get started](/en/durable-objects/get-started/)
 - [Concepts](/en/durable-objects/concepts/)
@@ -50,4 +59,4 @@ Full text: [Deviations](/en/durable-objects/platform/deviations) and [Compatibil
 - [Examples](/en/durable-objects/examples/)
 - [Alarms](/en/durable-objects/alarms)
 - [Limits](/en/durable-objects/platform/limits)
-- [Deviations](/en/durable-objects/platform/deviations)
+- [Behavior differences](/en/durable-objects/platform/deviations)

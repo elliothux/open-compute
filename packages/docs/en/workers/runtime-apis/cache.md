@@ -1,6 +1,6 @@
 # Cache API
 
-The `cache_api` product: `caches.default`, `caches.open()`, `put` / `match` / `delete`. `caches.default` shares logical storage with that Worker's default HTTP response cache.
+`caches.default`, `caches.open()`, `put` / `match` / `delete`. `caches.default` shares logical storage with that Worker's default HTTP response cache.
 
 ```ts
 export default {
@@ -18,10 +18,13 @@ export default {
 
 Deployment-side `cache.enabled`: [Workers Cache](/en/workers/cache/).
 
-## Same as Cloudflare
+## Compatibility
 
-Symbols match the [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/). Conditional requests, Vary, and Range follow pinned workerd plus the verified local cache authority.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| `caches.default` / `caches.open` / `put` / `match` / `delete` | Yes — [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | Yes |
+| Conditional requests, Vary, Range | Yes | Pinned workerd plus the local cache authority |
+| Cache scope | Global / colo CDN | Single-node |
+| Automatic cache TTL | May include heuristic TTL | Requires explicit `s-maxage` or `max-age`; no heuristic TTL |
+| Global purge / Cache Tags | Yes | Not provided |
 
-## Intentional delta
-
-See `OC-CACHE-001` / `OC-CACHE-002` (full text on [Workers Cache](/en/workers/cache/)). No global purge propagation, no Cache Tags as a Cloudflare product, no colo-local cache pretending to be a global CDN.

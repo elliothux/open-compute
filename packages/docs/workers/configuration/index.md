@@ -1,6 +1,6 @@
 # 配置
 
-Worker 项目文件是 `open-compute.json`。必须有 `name`，并选择一种内容形态：`main`、`assets`、`main` + `assets`，或 `frameworkOutput`。parser 只接受下列已实现字段，未知字段直接拒绝。
+Worker 项目文件是 `open-compute.json`。必须包含 `name`，并选择一种内容形态：`main`、`assets`、`main` + `assets`，或 `frameworkOutput`。parser 只接受下列已实现字段；未知字段会被拒绝。
 
 ```json
 {
@@ -30,16 +30,26 @@ Worker 项目文件是 `open-compute.json`。必须有 `name`，并选择一种�
 | `accountId` | 覆盖默认账户 |
 | `endpoint` | 平台 origin，默认 `http://127.0.0.1:8787` |
 
-`main`、`frameworkOutput`、assets directory 与 `tsconfig` 相对配置文件目录解析，不能逃逸项目边界。Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不能要求 Worker-first。所有 binding 名共用同一 `env` 命名空间。文件最大 64 KiB，必须是正规 JSON（不是 jsonc）。
+`main`、`frameworkOutput`、assets directory 与 `tsconfig` 相对配置文件目录解析，且不能逃逸项目边界。Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不能要求 Worker-first。所有 binding 名共用同一 `env` 命名空间。文件最大 64 KiB，必须是正规 JSON（不是 jsonc）。
 
 `bindings.type`：`kv_namespace`、`r2_bucket`、`d1_database`、`do_namespace`、`queue_producer`、`workflow`。
 
-## 与 Cloudflare 相同
+## 兼容性
 
-字段名和语义借用 Wrangler 常见配置：`vars`、`secrets`、assets routing、cache enabled、service bindings。模块 Worker 的 `main` 指向 TS/JS 入口。对照 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/)。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| `vars`、secrets、assets routing、cache enabled、service bindings 语义 | 是，对照 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) | 字段名借用常见 Wrangler 配置；不是完整 `wrangler.jsonc` 兼容层 |
+| 模块 Worker 的 `main` 指向 TS/JS 入口 | 是 | 是 |
+| `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags` | 是 | 不允许 |
+| `workers_dev`、Custom Domains、`routes`、placement、observability、AI、vectorize | 是 | 不提供；未知键失败，不会忽略 |
+| 控制面 | Cloudflare 控制面 | 本节点 `ocd` HTTP API |
 
-## 故意不同
+## 本节
 
-这不是完整 `wrangler.jsonc` 兼容层。没有 `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags`。没有 `workers_dev`、Custom Domains、`routes` 数组当 CF zone route、placement、observability、AI、vectorize。未知键失败，不会忽略。平台未广告的 API 不能靠工具链配置变成可用。
-
-子页：[bindings](/workers/configuration/bindings)、[compatibility dates](/workers/configuration/compatibility-dates)、[compatibility flags](/workers/configuration/compatibility-flags)、[Cron](/workers/configuration/cron-triggers)、[vars](/workers/configuration/environment-variables)、[secrets](/workers/configuration/secrets)、[routing](/workers/configuration/routing)。
+- [bindings](/workers/configuration/bindings)
+- [compatibility dates](/workers/configuration/compatibility-dates)
+- [compatibility flags](/workers/configuration/compatibility-flags)
+- [Cron](/workers/configuration/cron-triggers)
+- [vars](/workers/configuration/environment-variables)
+- [secrets](/workers/configuration/secrets)
+- [routing](/workers/configuration/routing)

@@ -1,10 +1,10 @@
 # 示例
 
-下面几段在本机 workerd 上能跑。不要把 Cloudflare 的 [geolocation / country-code](https://developers.cloudflare.com/workers/examples/geolocation-hello-world/) 示例当成全球 Anycast：这里没有 `request.cf.country` 的边缘地理产品。
+以下示例可在本节点的 workerd 上运行。Cloudflare 的 [geolocation / country-code](https://developers.cloudflare.com/workers/examples/geolocation-hello-world/) 示例依赖全球 Anycast 与 `request.cf.country`；本平台不提供该边缘地理产品。
 
 ## Hello JSON
 
-与 [上手](/workers/get-started/) 同一份 hello-worker。
+与 [快速开始](/workers/get-started/) 使用同一份 hello-worker。
 
 ```ts
 export default {
@@ -27,7 +27,7 @@ export default {
 
 ## KV get / put
 
-KV API 与 Cloudflare 相同，见 [KV](/kv/)。权威是单节点 SQLite（`OC-KV-001`），不是全球复制。
+Worker 侧 KV API 与 [KV](/kv/) 对齐。权威是该节点上的一份 SQLite 数据库，不提供全球复制。
 
 ```ts
 export default {
@@ -52,11 +52,11 @@ export default {
 }
 ```
 
-`id` 是平台上已存在的 KV namespace，不是名字占位。
+`id` 是平台上已存在的 KV namespace，不是名称占位符。
 
 ## Cron `scheduled` handler
 
-Cron 产品见 [Cron Triggers](/workers/configuration/cron-triggers)。handler 与 [Cloudflare scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) 相同。
+Cron 产品见 [Cron Triggers](/workers/configuration/cron-triggers)。handler 与 [Cloudflare scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) 对齐。
 
 ```ts
 export default {
@@ -69,11 +69,11 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-表达式是 UTC 五字段，加上已文档化的本机 Quartz-like 扩展。恢复行为见 `OC-CRON-001`。平台部署元数据字段是 `crons`（字符串数组）。`open-compute.json` 没有 Wrangler 的 `triggers` 键，写进去会当未知字段拒绝。
+表达式为 UTC 五字段，并支持已文档化的本节点 Quartz-like 扩展。misfire 恢复时最多投影 grace 内最新的一个 slot。平台部署元数据字段为 `crons`（字符串数组）。`open-compute.json` 没有 Wrangler 的 `triggers` 键；写入该键会作为未知字段被拒绝。
 
 ## Service Binding `fetch`
 
-同账户 Worker 之间的 fetch / RPC，见 [bindings](/workers/runtime-apis/bindings)。
+同一平台账户内 Worker 之间的 fetch / RPC，见 [bindings](/workers/runtime-apis/bindings)。
 
 ```ts
 export default {
@@ -93,12 +93,16 @@ export default {
 }
 ```
 
-目标 Worker 名在部署时解析并冻结成目标 ID。没有跨地域发现（`OC-SERVICE-001`）。
+目标 Worker 名在部署时解析并冻结为目标 ID。Service Bindings 仅限本平台，不提供跨地域发现。
 
-## 与 Cloudflare 相同
+## 兼容性
 
-模块 handler、KV `get`/`put`、`scheduled`、Service Binding `fetch`。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| 模块 handler、KV `get`/`put`、`scheduled`、Service Binding `fetch` | 是 | 是 |
+| `request.cf.country` 边缘地理 / geolocation 示例 | 是 | 不提供 |
+| workers.dev | 是 | 不提供 |
+| Analytics Engine / Workers AI / Turnstile 示例 | 是 | 不提供 |
+| 状态存储位置 | 全球复制产品 | 该节点 |
 
-## 故意不同
-
-没有 geolocation 示例当全球产品；没有 `workers.dev`；所有状态落在这一台机器。更多 Cloudflare 示例里依赖边缘、Analytics Engine、AI、Turnstile 的，不要原样当本平台能力。
+下一步：[配置](/workers/configuration/)、[Runtime APIs](/workers/runtime-apis/)。

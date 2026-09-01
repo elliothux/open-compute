@@ -1,6 +1,6 @@
 # Alarms
 
-Alarms 是 Durable Object 上的定时器。Cloudflare 把它们放在 [DO API](https://developers.cloudflare.com/durable-objects/api/) 下；本站同样挂在 Durable Objects 产品下。7 个目标成员为 `supported`（没有 alarm 偏差 ID）。对象仍在这一台 workerd 上（`OC-DO-001` 描述放置，不削弱 alarm 方法）。
+Alarms 是 Durable Object 上的定时器。Cloudflare 把它们放在 [DO API](https://developers.cloudflare.com/durable-objects/api/) 下；本站同样位于 Durable Objects 产品下。`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` handler 均支持。对象仍在该节点的这一个 workerd 上。
 
 ```ts
 export class Snooze {
@@ -15,4 +15,4 @@ export class Snooze {
 }
 ```
 
-`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` handler 与 Cloudflare 相同。没有跨区域唤醒，也没有 Cloudflare dashboard 上的 alarm 观察面。
+`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` handler 与 Cloudflare 对齐。不提供跨区域唤醒，也不提供 Cloudflare dashboard 上的 alarm 观察面。

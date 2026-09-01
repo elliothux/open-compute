@@ -1,8 +1,8 @@
 # open-compute
 
-A Workers platform on one machine: the declared programming model, run locally.
+A serverless platform for building Workers applications on a single node. open-compute runs the declared Cloudflare Workers programming model (`ocd` + pinned `workerd`). It does not provide a global edge, billing, or the Cloudflare dashboard.
 
-Compatibility is the declared Workers programming model, not a global edge, billing, or the Cloudflare dashboard. What is enabled, and which differences are intentional, is `ocd capabilities --json` on that machine.
+Deploy module Workers with `oc`. Run the platform as a service with `ocd`. The project file is `open-compute.json`.
 
 [Get started](/en/get-started) · [Directory](/en/directory)
 
@@ -26,10 +26,10 @@ Compatibility is the declared Workers programming model, not a global edge, bill
 
 ## Platform
 
-- [Platform](/en/platform/) — Contract hub
+- [Platform](/en/platform/) — Compatibility, limits, and behavior differences
 - [Limits](/en/platform/limits) — `capabilities.limits` from the running binary
-- [Compatibility](/en/platform/compatibility) — Contract, status semantics, member inventory
-- [Deviations](/en/platform/deviations) — Registered single-machine differences (`OC-*`)
+- [Compatibility](/en/platform/compatibility) — Products, Worker APIs, single-node topology
+- [Behavior differences](/en/platform/deviations) — Single-node topology and runtime behavior
 
 ## Operate
 

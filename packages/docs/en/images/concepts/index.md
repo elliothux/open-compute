@@ -4,9 +4,7 @@ The engine runs bounded raster transforms inside the `ocd` process. Sessions hav
 
 Input formats for `info` are jpeg / png / webp. Output is jpeg / png / webp / avif. `max_frames = 1`: no animation.
 
-## Not hosted Cloudflare Images
-
-There is no:
+Not provided:
 
 - upload, signed URLs, Image Delivery
 - `https://.../cdn-cgi/image/` URL transforms
@@ -14,8 +12,10 @@ There is no:
 - AI upscale
 - Cloudflare product quotas / billing
 
-Do not send readers to those Cloudflare pages as if they worked here.
+## Compatibility
 
-## Intentional differences
-
-**`OC-IMAGES-001`**: a bounded local raster transform binding, not hosted Cloudflare Images.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Binding API | Images binding chain | Same chain: `input` / `transform` / `draw` / `output` / `response()` / `info()` |
+| Product | Hosted Cloudflare Images | Bounded local raster binding |
+| Upload / signing / URL transform / video / AI upscale | Available | Not provided |

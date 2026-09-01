@@ -1,6 +1,13 @@
-# Overview
+# Workers
 
-Workers on this machine: one `ocd` process supervises one pinned `workerd` child and runs Cloudflare module Workers locally. There is no global edge, no `workers.dev`, and no Cloudflare dashboard or pricing.
+Workers is a serverless execution environment that runs Cloudflare module Workers on this platform. One `ocd` process supervises one pinned `workerd` child on the node. The platform does not provide a global edge, `workers.dev`, or a Cloudflare dashboard.
+
+With Workers you can:
+
+- Deploy a module Worker (`export default { fetch }`) with `oc run`
+- Bind KV, R2, D1, Durable Objects, Queues, Workflows, and other Workers
+- Schedule `scheduled()` with UTC cron expressions
+- Serve Static Assets from the same immutable deployment
 
 ```ts
 export default {
@@ -13,17 +20,23 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-The repo sample is `examples/hello-worker/`. Locally: `bun run oc run --config examples/hello-worker/open-compute.json --ocd <ocd-path>` against an already-running `ocd` (default `http://127.0.0.1:8787`).
+The sample in this repository is `examples/hello-worker/`. Deploy it against a running `ocd` (default origin `http://127.0.0.1:8787`):
 
-## Same as Cloudflare
+```sh
+bun run oc run --config examples/hello-worker/open-compute.json --ocd <ocd-path>
+```
 
-[Module Workers](https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/): `export default { fetch }`, `satisfies ExportedHandler<Env>`. Isolates, `env` bindings, `fetch` / `scheduled` / `queue` handlers, the Cache API, WebSocket hibernation, `cloudflare:sockets`, and `node:` imports on the pinned baseline follow the same [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/). Do not paste member signatures here; use [Runtime APIs](/en/workers/runtime-apis/) and the Cloudflare pages.
+## Compatibility
 
-## Intentional delta
-
-One process, one machine, one SQLite authority. No Anycast, no global rollout, no Custom Domains / `workers.dev` product. The project file is `open-compute.json`, not a full `wrangler.jsonc`. Unknown fields are rejected. The project JSON cannot set `compatibilityDate` / `compatibilityFlags` — the platform freezes the compatibility date in the runtime lock (currently `2026-08-30`).
-
-Registered deviations: [`OC-WKR-TCP-001`](/en/workers/runtime-apis/tcp-sockets), [`OC-WKR-LIMIT-001`](/en/workers/platform/limits), [`OC-DEPLOY-001`](/en/workers/versions-and-deployments/), [`OC-ASSETS-001`](/en/workers/static-assets/), [`OC-SERVICE-001`](/en/workers/runtime-apis/bindings), [`OC-CACHE-001`](/en/workers/cache/), [`OC-CACHE-002`](/en/workers/cache/), [`OC-CRON-001`](/en/workers/configuration/cron-triggers). Full text: [Deviations](/en/platform/deviations), [Compatibility](/en/platform/compatibility), and `docs/references/p1-deviations.md` in the repo.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Module Worker (`export default { fetch }`) | Yes | Yes |
+| Isolates, `env` bindings, `fetch` / `scheduled` / `queue` | Yes | Yes |
+| Cache API, WebSocket hibernation, `cloudflare:sockets`, `node:` imports | Yes | Yes — same [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) |
+| Global Anycast / workers.dev / Custom Domains product | Yes | Not provided |
+| Project file | wrangler.jsonc | `open-compute.json` (unknown fields rejected) |
+| compatibilityDate in project JSON | Yes | Not allowed; frozen in the runtime lock (`2026-08-30`) |
+| Deploy authority | Cloudflare control plane | Local SQLite and one supervised runtime generation |
 
 ## In this section
 
@@ -37,4 +50,4 @@ Registered deviations: [`OC-WKR-TCP-001`](/en/workers/runtime-apis/tcp-sockets),
 - [Runtime APIs](/en/workers/runtime-apis/) ([handlers](/en/workers/runtime-apis/handlers), [bindings](/en/workers/runtime-apis/bindings), [cache](/en/workers/runtime-apis/cache), [WebSockets](/en/workers/runtime-apis/websockets), [TCP](/en/workers/runtime-apis/tcp-sockets), [Node.js](/en/workers/runtime-apis/nodejs))
 - [Limits](/en/workers/platform/limits) · [Known issues](/en/workers/platform/known-issues) · [Changelog](/en/workers/platform/changelog)
 
-If the platform is not up yet, start at [ocd get started](/en/ocd/get-started).
+If the platform is not running yet, start at [ocd get started](/en/ocd/get-started).

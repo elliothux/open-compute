@@ -1,6 +1,6 @@
 # Limits
 
-Worker API shape matches the [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/). Local quotas come from `ocd` `[durable_objects]`. **Live numbers** come from `ocd capabilities --json`. Embedded defaults include:
+Worker API shape matches the [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/). Local quotas come from `ocd` `[durable_objects]`. Live numbers come from `ocd capabilities --json`. Embedded defaults include:
 
 | Item | Default |
 | --- | --- |
@@ -10,4 +10,4 @@ Worker API shape matches the [Durable Objects API](https://developers.cloudflare
 | `dispatch_timeout_ms` | 30000 |
 | `max_in_flight_dispatches` | 256 |
 
-No Cloudflare global concurrency plan. Alarms and hibernation share this process's ceilings.
+A Cloudflare global concurrency plan is not provided. Alarms and hibernation share this process's ceilings.

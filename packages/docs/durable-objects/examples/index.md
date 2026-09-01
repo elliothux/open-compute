@@ -1,5 +1,7 @@
 # 示例
 
+计数器见[概述](/durable-objects/)。Hibernation 在本地这一个 workerd 上运行。
+
 ## 计数器
 
 见[概述](/durable-objects/)的 `Counter` 示例。

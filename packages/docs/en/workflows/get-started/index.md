@@ -1,10 +1,10 @@
 # Get started
 
-`ocd` must be ready. Create a definition, bind the class, then `oc run`.
+Create a definition, bind the class, then `oc run`. `ocd` must be ready.
 
 ## 1. Create a definition
 
-Local platform control plane, not Cloudflare REST / `client.v4`.
+The following is the platform control plane. Cloudflare REST and `client.v4` are not provided.
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')

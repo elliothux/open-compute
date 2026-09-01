@@ -1,9 +1,18 @@
-# 偏差
+# 行为差异
 
-登记 ID：**`OC-WORKFLOW-001`**。
+Workflows 的 binding / instance API 与 Cloudflare 对齐；执行权威是该节点上的本地 SQLite。
 
-Workflow 在本地 SQLite authority 上执行。callback 在结果提交前是 at-least-once；replay 会跳过已耐久完成的 callback；外部产品副作用不会随 Workflow snapshot 回滚。不声称跨地域执行、全球 placement 或 Cloudflare dashboard/observability。
+## 兼容性
 
-72 个目标成员因此是 `supported_with_deviation`。batch / rollback / structured-clone / parallel 是实现行为，不是偏差。
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| Binding / instance API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | 相同：`create` / `get` / `createBatch` / `deleteBatch`、`step.do` / sleep / event、status / pause / resume / terminate / restart |
+| 执行 | 跨地域 | 该节点上的本地 SQLite |
+| Callback | — | 结果提交前 at-least-once；replay 跳过已耐久完成的 callback |
+| 外部副作用 | — | 不随 Workflow snapshot 回滚 |
+| Dashboard / observability | 提供 | 不提供 |
+| Binding | wrangler | `{ type, id, className }`；`className` 必填 |
 
-见 [Compatibility](/platform/compatibility) 与 `docs/references/p1-deviations.md`。
+batch / rollback / structured-clone / parallel 是实现行为。
+
+见 [Compatibility](/platform/compatibility)。

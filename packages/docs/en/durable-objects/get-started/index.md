@@ -36,7 +36,7 @@ Keep the returned `workerId`.
 
 ## 2. Create a namespace
 
-Local platform control plane, not Cloudflare REST / `client.v4`. The body is camelCase: `workerId`, `className`.
+The following is the platform control plane. Cloudflare REST and `client.v4` are not provided. The body is camelCase: `workerId`, `className`.
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')

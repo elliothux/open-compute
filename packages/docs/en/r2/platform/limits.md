@@ -1,6 +1,6 @@
 # Limits
 
-Worker API shape matches the [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/). Local quotas come from `ocd` `[r2]`. **Live numbers** come from `ocd capabilities --json`. Embedded defaults include:
+Worker API shape matches the [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/). Local quotas come from `ocd` `[r2]`. Live numbers come from `ocd capabilities --json`. Embedded defaults include:
 
 | Item | Default |
 | --- | --- |

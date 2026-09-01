@@ -1,9 +1,18 @@
-# Deviations
+# Behavior differences
 
-Registered ID: **`OC-IMAGES-001`**.
+Images is a bounded local raster transform binding, not hosted Cloudflare Images.
 
-Images is a bounded local raster transform binding, not hosted Cloudflare Images. Hosted delivery/upload/signing, URL transforms, video, AI upscale, and Cloudflare product quotas are out of scope.
+## Compatibility
 
-This is a platform product with 0 target AST members. Do not document it as full Cloudflare Images.
+| Topic | Cloudflare | open-compute |
+| --- | --- | --- |
+| Binding API | Images binding chain | Same chain: `input` → `transform` / `draw` → `output` → `response()`, plus `info()` |
+| Product | Hosted Cloudflare Images | Bounded local raster binding |
+| Input | Hosted image id or URL | `ReadableStream` bytes |
+| Upload / signing | Available | Not provided |
+| URL transform | Available | Not provided |
+| Video | Available | Not provided |
+| AI upscale | Available | Not provided |
+| Binding | wrangler `images` | `"images": { "binding": "IMAGES" }` |
 
-See [Compatibility](/en/platform/compatibility) and `docs/references/p1-deviations.md`.
+See [Compatibility](/en/platform/compatibility).
