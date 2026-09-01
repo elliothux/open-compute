@@ -10,6 +10,14 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0" />
+  <img src="https://img.shields.io/badge/runtime-stock%20workerd-f38020" alt="stock workerd" />
+  <img src="https://img.shields.io/badge/API%20surface-2%2C097%20members-success" alt="2097 members" />
+  <img src="https://img.shields.io/badge/rust-1.98-orange" alt="Rust 1.98" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="macOS | Linux" />
+</p>
+
+<p align="center">
   <a href="https://open-compute.dev">Website</a>
   · <a href="docs/README.md">Docs</a>
   · <a href="packages/docs">Operator site</a>
@@ -22,27 +30,47 @@
 
 ---
 
-## The Workers model, on your hardware
+## The Workers platform, running on your hardware
 
-You already know how to write Cloudflare Workers. open-compute runs them — the same module workers, the same bindings, the same APIs — on a single machine you own.
+You already know how to write Cloudflare Workers. **open-compute runs them unchanged** — the same module workers, the same bindings, the same APIs — on a single machine you own.
 
-One binary. One data directory. One S3 endpoint. That's the whole platform.
+**One binary. One data directory. One S3 endpoint.** That is the entire platform.
 
-No Kubernetes. No Redis. No service mesh. No vendor.
+No Kubernetes. No Redis. No service mesh. No control plane to babysit. No vendor.
 
-## Highlights
+```
+   Everyone else                        open-compute
+   ─────────────                        ────────────
+   gateway + router                     ┌──────────────┐
+   control plane                        │              │
+   scheduler service          ═══>      │  ocd (1 bin) │
+   Redis / Valkey cluster               │              │
+   Postgres                             └──────────────┘
+   K8s + operators                       + SQLite + S3
+```
 
-- **One binary.** The executable carries the runtime, the control plane, and every product binding. Copy it to a host, point it at a data directory — done.
-- **Fast because it's workerd.** Worker code runs on stock workerd, Cloudflare's open-source V8 runtime. Isolates start in milliseconds and idle in megabytes — not containers and gigabytes.
-- **Zero extra dependencies.** SQLite holds the state. Any S3-compatible store holds the bytes. Nothing else to install, nothing else to keep running.
-- **Self-hosted by default.** Your data never leaves your machines. Fully offline once deployed.
-- **Verified compatibility.** The same test fixtures run on open-compute and on real Cloudflare. If the results differ, it isn't shipped.
+## Why open-compute
+
+**workerd is a runtime, not a platform.** It executes isolated Workers brilliantly — and stops there. No multi-tenant routing, no durable state, no scheduling, no deployment lifecycle, no control API. Everyone who wants Workers on their own infrastructure has to build that layer.
+
+open-compute *is* that layer — and it ships as **one file**.
+
+- **One binary, everything inside.** Runtime, control plane, scheduler, and every product binding. Copy it to a host, point it at a directory, and you are serving traffic.
+- **Fast because it's workerd.** Your code runs on stock workerd, Cloudflare's open-source V8 runtime. Isolates start in **milliseconds** and idle in **megabytes** — not containers, not gigabytes, not per-request process spawns.
+- **Nothing else to run.** SQLite is the authority. Any S3-compatible store holds the bytes. That's the entire dependency list.
+- **Never forked.** Upstream workerd is pinned, verified, and used as-is — so upstream fixes and V8 upgrades arrive as a version bump, not a merge conflict.
+- **Yours completely.** Your code, your data, your machines, fully offline. No account, no egress, no telemetry, no bill.
 
 ## Proof, not promises
 
-- **2,097 stable API members** across the Workers runtime and every product binding — implemented, tested, zero gaps.
-- **Identical behavior on real Cloudflare.** Workers, Cache, KV, D1, R2, Durable Objects, and Queues return the same results on both platforms.
-- **A real Next.js 16 app runs on both.** Same artifact, same behavior, on open-compute and Cloudflare.
+Compatibility here is measured, not asserted. The same fixtures run against open-compute **and** real Cloudflare — and if the results differ, it does not ship.
+
+| | |
+| --- | --- |
+| **2,097** | stable API members implemented across the Workers runtime and every product binding — **zero gaps** |
+| **7 / 7** | product surfaces verified byte-for-byte against real Cloudflare: Workers, Cache, KV, D1, R2, Durable Objects, Queues |
+| **1 : 1** | a production Next.js 16 build runs identically on Cloudflare and on open-compute — same artifact, same behavior |
+| **90%+** | enforced line coverage, with real processes, real SQLite, and real workerd in every gate |
 
 ## Compatibility
 
@@ -66,11 +94,11 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 | WebSocket Hibernation | ██████████ 100% |
 | Operator API · SDK · Dashboard | In design |
 
-Exact scope: [compatibility matrix](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
+The remaining 5% is single-node reality — global edge topology and hosted fleet quotas — not missing methods. Exact scope: [compatibility matrix](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
 
 ## Quick start
 
-Start the platform locally (requires Rust 1.98, Bun 1.3, Node 24, and the pinned workerd archive — see [docs](docs/references/single-binary.md)):
+Bring up the platform locally (needs Rust 1.98, Bun 1.3, Node 24, and the pinned workerd archive — see [docs](docs/references/single-binary.md)):
 
 ```sh
 export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/workerd-darwin-arm64.gz
@@ -78,13 +106,13 @@ bun run build
 ./scripts/dev.sh
 ```
 
-Deploy your first Worker:
+Ship your first Worker:
 
 ```sh
 bun run oc run --config examples/hello-worker/open-compute.json
 ```
 
-That's it — type-checked, bundled, deployed, and served. In production, the same platform is a single executable with a config file and a data directory; no build tooling on the host.
+Type-checked, bundled, deployed, and served — one command. In production it is even smaller: **one executable, one config file, one data directory.** No build tooling on the host, no runtime downloads, no network required at startup.
 
 ## Architecture
 
@@ -94,18 +122,44 @@ That's it — type-checked, bundled, deployed, and served. In production, the sa
 
 | Component | Role |
 | --- | --- |
-| `ocd` | The entire control plane: routing, control API, scheduler, supervisor |
-| `workerd` | The runtime, pinned and verified — your code runs on stock V8 |
-| SQLite | Local, authoritative state — no external database |
-| S3-compatible | Object storage you choose — bundles, assets, R2 bytes |
+| `ocd` | The whole control plane: ingress, control API, scheduler, supervisor, deployment authority |
+| `workerd` | The runtime — pinned, checksum-verified, unmodified upstream |
+| SQLite | Local, authoritative state — no external database, no eventual consistency |
+| S3-compatible | Object storage you choose — bundles, static assets, R2 bytes |
 
-Tenants see only what their deployment declares. No SQLite paths, no S3 credentials, no internal tokens, no other tenants — ever.
+Tenants get exactly what their deployment declares — and nothing else. No SQLite paths, no S3 credentials, no internal tokens, no sibling tenants. Enforced at the capability layer, not by convention.
+
+### Built in Rust, engineered for the hot path
+
+The host is a single async Rust process — no GC pauses, no interpreter, no sidecar hops between the socket and your Worker.
+
+- **Async all the way down.** `tokio` multi-threaded runtime with `axum` + `hyper` serving both planes. Request bodies stream through as `bytes` without buffering whole payloads.
+- **`unsafe_code = "forbid"`.** Workspace-wide — the entire platform is safe Rust. Plus `missing_docs = "deny"`, `unused_must_use = "deny"`, and Clippy `-D warnings` across all targets and features.
+- **Release built for speed.** Full LTO, `codegen-units = 1`, `panic = "abort"`, symbols stripped — one dense, statically-linked artifact.
+- **In-process state.** `rusqlite` with SQLite bundled in — transactions are function calls, not network round-trips. Foreign keys on, synchronous callbacks, WAL.
+- **Zero-copy where it counts.** Verified runtime payloads are content-addressed and materialized once, then reused across restarts.
+
+### Layered crates with enforced boundaries
+
+Dependency direction is checked in CI — architecture that can't silently rot:
+
+```
+core ── storage ── artifacts ── runtime      (siblings, lower level)
+                    └── workers              (may use core/storage/artifacts, never runtime)
+                          └── service        (composition root: CLI, HTTP, workerd bridge)
+```
+
+`ocd` compiles a Cap'n Proto config with the verified binary, spawns workerd as a supervised child, and speaks to it over a **loopback-only** channel with per-generation tokens that never touch argv, env, or logs. It owns the full child lifecycle: readiness probes, process groups, bounded output capture, graceful and forced stop, reaping, restart backoff, and secret-free orphan recovery.
+
+Deployments are **immutable and content-addressed**. `workerLoader` keys are deployment identities, so promotion and rollback move a pointer — they never mutate what is already running.
 
 ## What it's not
 
-- **Not Cloudflare's global edge.** Single node, no Anycast, no cross-region replication.
-- **Not a drop-in for everything.** Compatibility is tracked surface by surface, and the gaps are documented.
-- **Not a multi-replica HA cluster.** One data directory, one process, one machine.
+Honest boundaries beat surprises in production:
+
+- **Not Cloudflare's global edge.** One node on infrastructure you run — no Anycast, no cross-region replication, no POP fabric. That tradeoff is exactly what buys you strong local consistency.
+- **Not a universal drop-in.** Compatibility is tracked surface by surface, and every deviation is documented rather than glossed over.
+- **Not a multi-replica HA cluster.** One data directory, one process, one machine — by design.
 
 ## Documentation
 
@@ -120,9 +174,9 @@ Tenants see only what their deployment declares. No SQLite paths, no S3 credenti
 
 ## Security
 
-- One `ocd` per data directory — enforced by lock.
-- Internal tokens never appear in argv, environment, logs, or metrics.
-- Tenant outbound is public-only; private, loopback, and metadata addresses are rejected at the network layer.
+- One `ocd` per data directory — enforced by lock, not documentation.
+- Internal tokens never appear in argv, environment, logs, status, or metrics.
+- Tenant outbound is public-only; private, loopback, link-local, and metadata addresses are rejected at the address layer.
 
 ## Sponsors
 
