@@ -1,8 +1,8 @@
 import { constants } from "node:fs";
-import { open, opendir, realpath } from "node:fs/promises";
+import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CompiledModule, CompiledModuleType, CompiledWorker } from "../build-worker.ts";
-import type { RuntimeFeatures, WorkerProject, WorkerService } from "../project.ts";
+import type { JsonValue, RuntimeFeatures, WorkerBinding, WorkerProject, WorkerService } from "../project.ts";
 import { parseRuntimeFeatures, record } from "../project.ts";
 import { loadFormalRuntimeLock, type FormalRuntimeLock } from "../runtime-lock.ts";
 import type { AssetsProject } from "../assets/types.ts";
@@ -13,16 +13,34 @@ const MAX_CONFIG_BYTES = 256 * 1024;
 const MAX_MODULES = 128;
 const MAX_MODULE_BYTES = 4 * 1024 * 1024;
 const MAX_TOTAL_MODULE_BYTES = 16 * 1024 * 1024;
-const GENERATED_BINDING_KEYS = [
-  "vars", "define", "durable_objects", "kv_namespaces", "d1_databases", "r2_buckets",
-  "queues", "workflows", "dispatch_namespaces", "ai", "vectorize",
-  "hyperdrive", "browser", "mtls_certificates", "unsafe",
+const GENERATED_CONFIG_KEYS = [
+  "configPath", "userConfigPath", "topLevelName", "definedEnvironments", "compatibility_date",
+  "compatibility_flags", "jsx_factory", "jsx_fragment", "rules", "name", "main", "triggers",
+  "assets", "vars", "define", "durable_objects", "workflows", "migrations", "exports",
+  "kv_namespaces", "cloudchamber", "send_email", "queues", "connect", "r2_buckets", "ai",
+  "d1_databases", "vectorize", "ai_search_namespaces", "ai_search", "agent_memory", "hyperdrive", "browser",
+  "services", "analytics_engine_datasets", "dispatch_namespaces", "mtls_certificates", "images",
+  "pipelines", "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship",
+  "worker_loaders", "ratelimits", "vpc_services", "vpc_networks", "version_metadata", "logfwdr", "unsafe",
+  "cache", "python_modules", "dev", "no_bundle",
+] as const;
+const UNSUPPORTED_GENERATED_BINDING_KEYS = [
+  "define", "dispatch_namespaces", "ai", "vectorize", "hyperdrive", "browser",
+  "mtls_certificates", "unsafe", "cloudchamber", "send_email", "connect",
+  "analytics_engine_datasets", "ai_search_namespaces", "ai_search", "agent_memory", "pipelines",
+  "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship", "worker_loaders",
+  "ratelimits", "vpc_services", "vpc_networks", "logfwdr",
 ] as const;
 
 interface ModuleRule {
   readonly type: CompiledModuleType;
   readonly globs: readonly RegExp[];
   readonly fallthrough: boolean;
+}
+
+interface GeneratedBinding {
+  readonly type: WorkerBinding["type"];
+  readonly className?: string;
 }
 
 /** Immutable framework build imported from a generated Wrangler deployment description. */
@@ -94,6 +112,120 @@ function string(value: unknown, label: string): string {
   return value;
 }
 
+function bindingName(value: unknown, label: string): string {
+  const name = string(value, label);
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name)) throw new Error(`${label} is invalid`);
+  return name;
+}
+
+function className(value: unknown, label: string): string {
+  const name = string(value, label);
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(name)) throw new Error(`${label} is invalid`);
+  return name;
+}
+
+function generatedArray(value: unknown, label: string, limit = 128): Record<string, unknown>[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > limit || !value.every(record)) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
+function emptyGeneratedDeclaration(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (record(value)) return Object.values(value).every(emptyGeneratedDeclaration);
+  return false;
+}
+
+function canonicalJson(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (!record(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalJson(value[key] as JsonValue)]));
+}
+
+function generatedBindings(config: Record<string, unknown>, project: WorkerProject): void {
+  const generatedVars = config.vars ?? {};
+  if (!record(generatedVars)
+      || JSON.stringify(canonicalJson(generatedVars as Record<string, JsonValue>))
+        !== JSON.stringify(canonicalJson(project.vars))) {
+    throw new Error("generated framework vars conflict with the project");
+  }
+  for (const key of UNSUPPORTED_GENERATED_BINDING_KEYS) {
+    if (!emptyGeneratedDeclaration(config[key])) {
+      throw new Error(`generated framework config declares unsupported ${key}`);
+    }
+  }
+  const declarations = new Map<string, GeneratedBinding>();
+  const add = (name: string, declaration: GeneratedBinding): void => {
+    if (declarations.has(name)) throw new Error("generated framework binding names conflict");
+    declarations.set(name, declaration);
+  };
+  for (const item of generatedArray(config.kv_namespaces, "generated framework KV bindings")) {
+    onlyKeys(item, ["binding", "id", "preview_id", "remote"], "generated framework KV binding");
+    add(bindingName(item.binding, "generated framework KV binding name"), { type: "kv_namespace" });
+  }
+  for (const item of generatedArray(config.r2_buckets, "generated framework R2 bindings")) {
+    onlyKeys(item, ["binding", "bucket_name", "preview_bucket_name"], "generated framework R2 binding");
+    add(bindingName(item.binding, "generated framework R2 binding name"), { type: "r2_bucket" });
+  }
+  for (const item of generatedArray(config.d1_databases, "generated framework D1 bindings")) {
+    onlyKeys(item, ["binding", "database_id", "database_name", "preview_database_id"], "generated framework D1 binding");
+    add(bindingName(item.binding, "generated framework D1 binding name"), { type: "d1_database" });
+  }
+  if (config.durable_objects !== undefined) {
+    if (!record(config.durable_objects)) throw new Error("generated framework Durable Object bindings are invalid");
+    onlyKeys(config.durable_objects, ["bindings"], "generated framework Durable Object config");
+    for (const item of generatedArray(config.durable_objects.bindings, "generated framework Durable Object bindings")) {
+      onlyKeys(item, ["name", "class_name", "script_name", "environment"], "generated framework Durable Object binding");
+      add(bindingName(item.name, "generated framework Durable Object binding name"), {
+        type: "do_namespace",
+        className: className(item.class_name, "generated framework Durable Object class"),
+      });
+    }
+  }
+  if (config.queues !== undefined) {
+    if (!record(config.queues)) throw new Error("generated framework Queue bindings are invalid");
+    onlyKeys(config.queues, ["producers", "consumers"], "generated framework Queue config");
+    if (generatedArray(config.queues.consumers, "generated framework Queue consumers").length) {
+      throw new Error("generated framework Queue consumers are unsupported");
+    }
+    for (const item of generatedArray(config.queues.producers, "generated framework Queue producers")) {
+      onlyKeys(item, ["binding", "queue"], "generated framework Queue producer");
+      add(bindingName(item.binding, "generated framework Queue producer binding"), { type: "queue_producer" });
+    }
+  }
+  for (const item of generatedArray(config.workflows, "generated framework Workflow bindings")) {
+    onlyKeys(item, ["binding", "name", "class_name", "script_name"], "generated framework Workflow binding");
+    add(bindingName(item.binding, "generated framework Workflow binding name"), {
+      type: "workflow",
+      className: className(item.class_name, "generated framework Workflow class"),
+    });
+  }
+  if (declarations.size !== Object.keys(project.bindings).length) {
+    throw new Error("generated framework bindings differ from the project");
+  }
+  for (const [name, local] of Object.entries(project.bindings)) {
+    const generated = declarations.get(name);
+    if (generated === undefined || generated.type !== local.type
+        || generated.className !== local.className) {
+      throw new Error("generated framework bindings differ from the project");
+    }
+  }
+}
+
+function validateGeneratedConfig(config: Record<string, unknown>): void {
+  onlyKeys(config, GENERATED_CONFIG_KEYS, "generated framework config");
+  if (config.no_bundle !== true) throw new Error("generated framework config must preserve the prebuilt module graph");
+  if (!emptyGeneratedDeclaration(config.triggers)) throw new Error("generated framework triggers are unsupported");
+  if (!emptyGeneratedDeclaration(config.migrations)) throw new Error("generated framework migrations are unsupported");
+  if (config.definedEnvironments !== undefined
+      && (!Array.isArray(config.definedEnvironments) || config.definedEnvironments.length !== 0)) {
+    throw new Error("generated framework environments are unsupported");
+  }
+}
+
 function serviceDeclarations(value: unknown): Record<string, WorkerService> {
   const services: Record<string, WorkerService> = {};
   if (value === undefined) return services;
@@ -121,10 +253,27 @@ function serviceDeclarations(value: unknown): Record<string, WorkerService> {
   return services;
 }
 
+function reconciledServices(value: unknown, local: Record<string, WorkerService>): Record<string, WorkerService> {
+  const generated = serviceDeclarations(value);
+  if (Object.keys(generated).length !== Object.keys(local).length) {
+    throw new Error("generated framework services differ from the project");
+  }
+  for (const [binding, declaration] of Object.entries(local)) {
+    const expected = generated[binding];
+    if (expected === undefined || expected.entrypoint !== declaration.entrypoint) {
+      throw new Error("generated framework services differ from the project");
+    }
+  }
+  return { ...local };
+}
+
 function outputPath(root: string, base: string, value: unknown, label: string): Promise<string> {
   const path = resolve(base, string(value, label));
   if (!within(root, path)) throw new Error(`${label} must stay inside the project`);
-  return realpath(path).then(actual => {
+  return lstat(path).then(info => {
+    if (info.isSymbolicLink()) throw new Error(`${label} must not be a symbolic link`);
+    return realpath(path);
+  }).then(actual => {
     if (!within(root, actual)) throw new Error(`${label} escapes the project`);
     return actual;
   });
@@ -138,7 +287,10 @@ function glob(pattern: string): RegExp {
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index]!;
     if (character === "*") {
-      if (pattern[index + 1] === "*") { source += ".*"; index += 1; }
+      if (pattern[index + 1] === "*" && pattern[index + 2] === "/") {
+        source += "(?:.*/)?";
+        index += 2;
+      } else if (pattern[index + 1] === "*") { source += ".*"; index += 1; }
       else source += "[^/]*";
     } else if (character === "?") source += "[^/]";
     else source += character.replace(/[\\^$+?.()|[\]{}]/g, "\\$&");
@@ -177,14 +329,12 @@ function moduleRules(value: unknown): ModuleRule[] {
 function classify(name: string, rules: readonly ModuleRule[]): CompiledModuleType | undefined {
   for (const rule of rules) {
     if (rule.globs.some(pattern => pattern.test(name))) return rule.type;
-    if (!rule.fallthrough) break;
   }
   switch (extname(name).toLowerCase()) {
-    case ".js": case ".mjs": return "esModule";
-    case ".cjs": return "commonJsModule";
-    case ".json": return "json";
+    case ".mjs": return "esModule";
+    case ".js": case ".cjs": return "commonJsModule";
     case ".wasm": return "wasm";
-    case ".txt": return "text";
+    case ".txt": case ".html": case ".sql": return "text";
     case ".bin": return "data";
     default: return undefined;
   }
@@ -220,7 +370,6 @@ async function readModule(filename: string, name: string, type: CompiledModuleTy
 
 async function importModules(
   root: string,
-  configPath: string,
   main: string,
   assetsDirectory: string | undefined,
   rules: readonly ModuleRule[],
@@ -237,9 +386,8 @@ async function importModules(
         if (item.isSymbolicLink()) throw new Error("framework output contains a symbolic link");
         if (item.isDirectory()) { await walk(filename); continue; }
         if (!item.isFile()) throw new Error("framework output contains a special file");
-        if (filename === configPath || logical.endsWith(".map")) continue;
         const type = classify(logical, rules);
-        if (type === undefined) throw new Error(`framework server output type is unsupported: ${extname(logical) || "extensionless"}`);
+        if (type === undefined) continue;
         if (modules.length >= MAX_MODULES) throw new Error("framework output exceeds 128 modules");
         const module = await readModule(filename, logical, type);
         total += module.bytes.byteLength;
@@ -297,24 +445,23 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
   const projectRoot = await realpath(project.project);
   const redirectPath = await outputPath(projectRoot, projectRoot, project.frameworkOutput, "frameworkOutput");
   const redirect = await boundedJson(redirectPath, "framework deploy config");
-  onlyKeys(redirect, ["configPath"], "framework deploy config");
+  onlyKeys(redirect, ["configPath", "auxiliaryWorkers"], "framework deploy config");
+  if (redirect.auxiliaryWorkers !== undefined
+      && (!Array.isArray(redirect.auxiliaryWorkers) || redirect.auxiliaryWorkers.length !== 0)) {
+    throw new Error("framework auxiliary Workers are unsupported");
+  }
   const configPath = await outputPath(projectRoot, dirname(redirectPath), redirect.configPath, "generated framework configPath");
   const config = await boundedJson(configPath, "generated framework config");
+  validateGeneratedConfig(config);
   const generatedName = config.name;
-  if (generatedName !== undefined && generatedName !== project.name) throw new Error("generated framework Worker name does not match the project");
+  if (generatedName !== undefined
+      && (typeof generatedName !== "string"
+        || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(generatedName))) {
+    throw new Error("generated framework Worker name is invalid");
+  }
   assertImportedCompatibility(config.compatibility_date, config.compatibility_flags, await loadFormalRuntimeLock());
-  if (GENERATED_BINDING_KEYS.some(key => config[key] !== undefined)) {
-    throw new Error("generated framework config declares bindings that open-compute cannot import yet");
-  }
-  const services = { ...project.services };
-  for (const [binding, declaration] of Object.entries(serviceDeclarations(config.services))) {
-    const existing = services[binding];
-    if (existing !== undefined
-        && (existing.service !== declaration.service || existing.entrypoint !== declaration.entrypoint)) {
-      throw new Error("generated framework service conflicts with the project");
-    }
-    Object.defineProperty(services, binding, { value: declaration, enumerable: true });
-  }
+  generatedBindings(config, project);
+  const services = reconciledServices(config.services, project.services);
   const hasGeneratedRuntimeFeatures = ["cache", "exports", "images", "version_metadata"]
     .some(key => config[key] !== undefined);
   const generatedRuntimeFeatures = hasGeneratedRuntimeFeatures
@@ -342,7 +489,7 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
     const relativeAssets = relative(projectRoot, assetsDirectory);
     assets = routing(config.assets, relativeAssets.split(sep).join("/"));
   }
-  const worker = await importModules(outputRoot, configPath, main, assetsDirectory, moduleRules(config.rules));
+  const worker = await importModules(outputRoot, main, assetsDirectory, moduleRules(config.rules));
   return { worker, ...(assets === undefined ? {} : { assets }), services,
     runtimeFeatures: generatedRuntimeFeatures ?? project.runtimeFeatures };
 }

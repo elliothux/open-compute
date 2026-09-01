@@ -10,6 +10,9 @@
 # Bun workspace dependencies and developer-tool build output.
 node_modules/
 /packages/*/dist/
+/test/applications/*/.next/
+/test/applications/*/.wrangler/
+/test/applications/*/dist/
 *.tsbuildinfo
 
 # Repository-local temporary/cache output and persistent development state.

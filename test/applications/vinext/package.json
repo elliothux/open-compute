@@ -1,0 +1,32 @@
+{
+  "name": "@open-compute/p4-vinext-qualification",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vinext build",
+    "check": "vinext check",
+    "qualification": "bun tests/qualification.ts",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/vite-plugin": "1.54.2",
+    "@vinext/cloudflare": "1.0.0-beta.6",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitejs/plugin-rsc": "0.5.34",
+    "next": "16.2.7",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-server-dom-webpack": "19.2.7",
+    "vinext": "1.0.0-beta.8",
+    "vite": "8.2.2",
+    "wrangler": "4.127.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260830.1",
+    "@playwright/test": "1.62.1",
+    "@types/react": "19.2.16",
+    "@types/react-dom": "19.2.3",
+    "typescript": "7.0.2"
+  }
+}

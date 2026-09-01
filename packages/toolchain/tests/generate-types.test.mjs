@@ -35,9 +35,9 @@ const config = {
     KV: { type: "kv_namespace", id: "kv-id" },
     BUCKET: { type: "r2_bucket", id: "r2-id" },
     DB: { type: "d1_database", id: "d1-id" },
-    DO: { type: "do_namespace", id: "do-id" },
+    DO: { type: "do_namespace", id: "do-id", className: "PortableObject" },
     QUEUE: { type: "queue_producer", id: "q-id" },
-    FLOW: { type: "workflow", id: "wf-id" },
+    FLOW: { type: "workflow", id: "wf-id", className: "PortableWorkflow" },
   },
   services: [
     { binding: "SELF", service: "hello" },
@@ -203,15 +203,24 @@ test("cli types uses imported framework Env without claiming a TypeScript main m
     
     frameworkOutput: ".wrangler/deploy/config.json",
     vars: { MODE: "prod" },
+    services: [
+      { binding: "SELF", service: "framework" },
+      { binding: "ADMIN", service: "framework", entrypoint: "Admin" },
+      { binding: "CATALOG", service: "catalog", entrypoint: "CatalogApi" },
+    ],
   });
   await mkdir(join(directory, ".wrangler", "deploy"), { recursive: true });
   await mkdir(join(directory, "dist", "server", "chunks"), { recursive: true });
   await mkdir(join(directory, "dist", "client", "assets"), { recursive: true });
   await writeFile(join(directory, ".wrangler", "deploy", "config.json"), JSON.stringify({
     configPath: "../../dist/server/wrangler.json",
+    auxiliaryWorkers: [],
   }));
   await writeFile(join(directory, "dist", "server", "wrangler.json"), JSON.stringify({
     name: "framework", main: "index.js", compatibility_date: lock.effectiveCompatibilityDate,
+    rules: [{ type: "ESModule", globs: ["**/*.js"] }],
+    no_bundle: true,
+    vars: { MODE: "prod" },
     assets: {
       directory: "../client", binding: "ASSETS", run_worker_first: ["/api/*"],
       html_handling: "auto-trailing-slash", not_found_handling: "none",

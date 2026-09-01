@@ -6,6 +6,17 @@ import test from "node:test";
 import { importFrameworkOutput } from "../src/import/framework-output.ts";
 import { loadFormalRuntimeLock } from "../src/runtime-lock.ts";
 
+function generatedConfig(lock, overrides = {}) {
+  return {
+    name: "framework-cloudflare",
+    main: "index.js",
+    compatibility_date: lock.effectiveCompatibilityDate,
+    rules: [{ type: "ESModule", globs: ["**/*.js"] }],
+    no_bundle: true,
+    ...overrides,
+  };
+}
+
 async function fixture(t, wrangler = {}) {
   const lock = await loadFormalRuntimeLock();
   const root = await mkdtemp(join(tmpdir(), "open-compute-framework-output-"));
@@ -15,21 +26,25 @@ async function fixture(t, wrangler = {}) {
   await mkdir(join(root, "dist", "client", "assets"), { recursive: true });
   await writeFile(join(root, ".wrangler", "deploy", "config.json"), JSON.stringify({
     configPath: "../../dist/server/wrangler.json",
+    auxiliaryWorkers: [],
   }));
-  await writeFile(join(root, "dist", "server", "wrangler.json"), JSON.stringify({
-    name: "framework", main: "index.js", compatibility_date: lock.effectiveCompatibilityDate,
+  await writeFile(join(root, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
     ...wrangler,
     assets: {
       directory: "../client", binding: "ASSETS", run_worker_first: ["/api/*"],
       html_handling: "auto-trailing-slash", not_found_handling: "none",
     },
-  }));
+  })));
   await writeFile(join(root, "dist", "server", "index.js"), "import('./chunks/page-abc.js'); export default {};");
   await writeFile(join(root, "dist", "server", "chunks", "page-abc.js"), "export const page = 1;");
+  await writeFile(join(root, "dist", "server", "unused.js"), "export const unused = true;");
+  await writeFile(join(root, "dist", "server", "qualification.txt"), "qualification\n");
+  await writeFile(join(root, "dist", "server", "metadata.json"), "{\"not\":\"a module\"}\n");
   await writeFile(join(root, "dist", "client", "index.html"), "<main>app</main>");
   await writeFile(join(root, "dist", "client", "assets", "app-abc.js"), "globalThis.client = true;");
   return {
-    project: root, name: "framework", services: {}, frameworkOutput: ".wrangler/deploy/config.json",
+    project: root, name: "framework-local", vars: {}, secrets: {}, bindings: {}, services: {},
+    frameworkOutput: ".wrangler/deploy/config.json",
     runtimeFeatures: {
       cache: { enabled: false, crossVersionCache: false, entrypoints: {} },
     },
@@ -46,7 +61,9 @@ function withoutSelectors(value) {
 test("imports generated server modules and client assets without rebundling or flattening", async t => {
   const output = await importFrameworkOutput(await fixture(t));
   assert.equal(output.worker.mainModule, "index.js");
-  assert.deepEqual(output.worker.modules.map(module => module.name), ["chunks/page-abc.js", "index.js"]);
+  assert.deepEqual(output.worker.modules.map(module => module.name), [
+    "chunks/page-abc.js", "index.js", "qualification.txt", "unused.js",
+  ]);
   assert.match(new TextDecoder().decode(output.worker.modules[1].bytes), /chunks\/page-abc\.js/);
   assert.equal(output.assets.directory, "dist/client");
   assert.equal(output.assets.binding, "ASSETS");
@@ -67,13 +84,13 @@ test("rejects missing, older, newer, duplicate, opt-out, experimental, and unkno
   const lock = await loadFormalRuntimeLock();
   const project = await fixture(t);
   const wrangler = join(project.project, "dist", "server", "wrangler.json");
-  const write = (body) => writeFile(wrangler, JSON.stringify({ name: "framework", main: "index.js", ...body }));
+  const write = (body) => writeFile(wrangler, JSON.stringify(generatedConfig(lock, body)));
 
   await write({ compatibility_date: "2026-08-21" });
   await assert.rejects(importFrameworkOutput(project), /compatibility date/);
   await write({ compatibility_date: "2026-08-31" });
   await assert.rejects(importFrameworkOutput(project), /compatibility date/);
-  await write({});
+  await write({ compatibility_date: undefined });
   await assert.rejects(importFrameworkOutput(project), /compatibility date/);
   await write({
     compatibility_date: lock.effectiveCompatibilityDate,
@@ -97,26 +114,63 @@ test("rejects missing, older, newer, duplicate, opt-out, experimental, and unkno
   await assert.rejects(importFrameworkOutput(project), /pinned baseline/);
 });
 
-test("imports services but rejects escaped outputs, links, metadata drift, and unsupported generated bindings", async t => {
+test("reconciles provider identities while preserving local services and binding resource IDs", async t => {
   const lock = await loadFormalRuntimeLock();
   const project = await fixture(t);
-  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify({
-    name: "framework", main: "index.js", compatibility_date: lock.effectiveCompatibilityDate,
-    services: [{ binding: "SELF", service: "x" }],
-  }));
+  project.services = { SELF: { service: "local-companion", entrypoint: "Api" } };
+  project.bindings = { KV: { type: "kv_namespace", id: "local-kv" } };
+  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
+    services: [{ binding: "SELF", service: "cloudflare-companion", entrypoint: "Api" }],
+    kv_namespaces: [{ binding: "KV", id: "cloudflare-kv" }],
+  })));
   const imported = await importFrameworkOutput(project);
-  assert.deepEqual(imported.services, { SELF: { service: "x" } });
+  assert.deepEqual(imported.services, { SELF: { service: "local-companion", entrypoint: "Api" } });
   withoutSelectors(imported);
+});
 
-  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify({
-    name: "framework", main: "index.js", compatibility_date: lock.effectiveCompatibilityDate,
+test("rejects binding-shape drift, unsupported generated capabilities, auxiliary Workers, and links", async t => {
+  const lock = await loadFormalRuntimeLock();
+  const project = await fixture(t);
+  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
     kv_namespaces: [{ binding: "KV", id: "x" }],
-  }));
-  await assert.rejects(importFrameworkOutput(project), /declares bindings/);
+  })));
+  await assert.rejects(importFrameworkOutput(project), /bindings differ/);
 
-  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify({
-    name: "framework", main: "index.js", compatibility_date: lock.effectiveCompatibilityDate,
+  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
+    ai: { binding: "AI" },
+  })));
+  await assert.rejects(importFrameworkOutput(project), /unsupported ai/);
+
+  await writeFile(join(project.project, ".wrangler", "deploy", "config.json"), JSON.stringify({
+    configPath: "../../dist/server/wrangler.json",
+    auxiliaryWorkers: [{ configPath: "worker.json" }],
   }));
+  await assert.rejects(importFrameworkOutput(project), /auxiliary Workers/);
+
+  await writeFile(join(project.project, ".wrangler", "deploy", "config.json"), JSON.stringify({
+    configPath: "../../dist/server/wrangler.json", auxiliaryWorkers: [],
+  }));
+  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock)));
   await symlink(join(project.project, "dist", "server", "index.js"), join(project.project, "dist", "server", "linked.js"));
   await assert.rejects(importFrameworkOutput(project), /symbolic link/);
+});
+
+test("requires generated class-bound bindings to match local class names", async t => {
+  const lock = await loadFormalRuntimeLock();
+  const project = await fixture(t);
+  project.bindings = {
+    OBJECTS: { type: "do_namespace", id: "local-do", className: "PortableObject" },
+    FLOW: { type: "workflow", id: "local-flow", className: "PortableWorkflow" },
+  };
+  const wrangler = join(project.project, "dist", "server", "wrangler.json");
+  await writeFile(wrangler, JSON.stringify(generatedConfig(lock, {
+    durable_objects: { bindings: [{ name: "OBJECTS", class_name: "PortableObject" }] },
+    workflows: [{ binding: "FLOW", name: "provider-flow", class_name: "PortableWorkflow" }],
+  })));
+  await importFrameworkOutput(project);
+  await writeFile(wrangler, JSON.stringify(generatedConfig(lock, {
+    durable_objects: { bindings: [{ name: "OBJECTS", class_name: "DifferentObject" }] },
+    workflows: [{ binding: "FLOW", name: "provider-flow", class_name: "PortableWorkflow" }],
+  })));
+  await assert.rejects(importFrameworkOutput(project), /bindings differ/);
 });

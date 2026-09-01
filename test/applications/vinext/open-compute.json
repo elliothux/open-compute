@@ -1,0 +1,9 @@
+{
+  "name": "oc-p4-vinext",
+  "frameworkOutput": ".wrangler/deploy/config.json",
+  "vars": {
+    "P4_PUBLIC_MARKER": "p4-public-marker"
+  },
+  "bindings": {},
+  "services": []
+}

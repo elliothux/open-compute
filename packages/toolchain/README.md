@@ -57,7 +57,8 @@ Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不
 
 其他字段是 `vars`、`secrets`、`bindings`、`services`、`assets`、`cache`、
 `exports`、`images` 和 `version_metadata`。普通产品
-binding 使用 `{type, id, permissions?}`；Service Binding 使用
+binding 使用 `{type, id, permissions?}`；Durable Object 与 Workflow 还必须提供
+`className`，它只用于核对生成的 framework config 中 class 语义，不作为资源 ID 发送给平台。Service Binding 使用
 `[{binding, service, entrypoint?}]`，部署时把同账户 Worker 名解析并冻结为目标 ID。Assets 支持
 `directory`、`binding`、`run_worker_first`、`html_handling`、`not_found_handling` 和
 `publish_source_maps`；精确支持值由 parser 与 Static Assets 文档共同约束。

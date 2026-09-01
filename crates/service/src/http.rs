@@ -483,23 +483,25 @@ async fn bounds_middleware(
     {
         return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
     }
-    let deployment_upload = request.uri().path().starts_with("/v1/accounts/")
+    let direct_deployment_upload = request.uri().path().starts_with("/v1/accounts/")
         && request.uri().path().ends_with("/deployments");
+    let staged_deployment_upload = is_staged_deployment_upload(request.uri().path());
     let mut header_total = 0_usize;
     for (name, value) in request.headers() {
-        let value_limit =
-            if deployment_upload && name.as_str() == workers_http::DEPLOYMENT_METADATA_HEADER {
-                workers_http::MAX_DEPLOYMENT_METADATA_HEADER_BYTES
-            } else {
-                MAX_HEADER_BYTES
-            };
+        let value_limit = if direct_deployment_upload
+            && name.as_str() == workers_http::DEPLOYMENT_METADATA_HEADER
+        {
+            workers_http::MAX_DEPLOYMENT_METADATA_HEADER_BYTES
+        } else {
+            MAX_HEADER_BYTES
+        };
         if value.len() > value_limit || name.as_str().len() > 256 {
             return Err(StatusCode::PAYLOAD_TOO_LARGE);
         }
         header_total = header_total
             .saturating_add(name.as_str().len())
             .saturating_add(value.len());
-        let total_limit = if deployment_upload {
+        let total_limit = if direct_deployment_upload {
             MAX_DEPLOYMENT_HEADER_TOTAL
         } else {
             MAX_HEADER_TOTAL
@@ -508,7 +510,7 @@ async fn bounds_middleware(
             return Err(StatusCode::PAYLOAD_TOO_LARGE);
         }
     }
-    let body_limit = if deployment_upload {
+    let body_limit = if direct_deployment_upload || staged_deployment_upload {
         workers_http::HARD_MAX_BUNDLE_BODY
     } else {
         MAX_BODY
@@ -562,6 +564,26 @@ async fn bounds_middleware(
         "http"
     );
     Ok(response)
+}
+
+fn is_staged_deployment_upload(path: &str) -> bool {
+    let parts = path
+        .strip_prefix('/')
+        .unwrap_or(path)
+        .split('/')
+        .collect::<Vec<_>>();
+    parts.len() >= 6
+        && parts[0] == "v1"
+        && parts[1] == "accounts"
+        && !parts[2].is_empty()
+        && parts[3] == "workers"
+        && !parts[4].is_empty()
+        && parts[5] == "deployment-uploads"
+        && (parts.len() == 6 || !parts[6].is_empty())
+        && (parts.len() == 6
+            || parts.len() == 7
+            || (parts.len() == 8 && parts[7] == "finalize")
+            || (parts.len() == 9 && parts[7] == "objects" && !parts[8].is_empty()))
 }
 
 fn product_operation(path: &str) -> Option<OperationClass> {

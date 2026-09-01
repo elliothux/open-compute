@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "application": "vinext",
+  "repository": "https://github.com/cloudflare/vinext",
+  "revision": "20fdac4cec59fd0f8dcdf490693e5205ccc33dff",
+  "packageRevisions": {
+    "vinext": "20fdac4cec59fd0f8dcdf490693e5205ccc33dff",
+    "@vinext/cloudflare": "365c604032835c7a604d922f95ed833bde75d7dd"
+  },
+  "packageIntegrity": {
+    "vinext": "sha512-JXiyi0V13PkcIHWUiql3wO/UyNlI1R325RBwBx4CIDa8dd4lgnI90LN5bD2V1J6T+EU8eYCYnKDmtxWjRdL0cg==",
+    "@vinext/cloudflare": "sha512-C0DWjPz+5YypjJNyYKrro9fv4neKGd1U1EQ7gvD+dxshFmU51/BGZKWd62yFJ+yCxf75LLNOAqFiIvzgm36zqw=="
+  },
+  "packages": {
+    "vinext": "1.0.0-beta.8",
+    "@vinext/cloudflare": "1.0.0-beta.6",
+    "next": "16.2.7",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-server-dom-webpack": "19.2.7",
+    "vite": "8.2.2",
+    "@cloudflare/vite-plugin": "1.54.2",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitejs/plugin-rsc": "0.5.34",
+    "wrangler": "4.127.1",
+    "@playwright/test": "1.62.1",
+    "typescript": "7.0.2"
+  },
+  "toolchain": {
+    "bun": "1.3.14",
+    "compatibilityDate": "2026-08-30",
+    "compatibilityFlags": ["nodejs_compat"]
+  },
+  "rootLockSha256": "1486f18448f7220d640cbd1050d11922e49c89e390daea4dd37ea9128b5128b9",
+  "fixtureTreeSha256": "250045ab6e28eaa060aaef70728500880efacb077ba166f7ddab276cf962fbe5",
+  "casesSha256": "a455847985f7dae593271b0aeea767b9af60fb96a02692666a943159d0f6ae77",
+  "browser": {
+    "name": "chromium",
+    "playwrightVersion": "1.62.1",
+    "playwrightRevision": "1234",
+    "browserVersion": "151.0.7922.34",
+    "executableSha256": "a596b1cfc6353e987fcec8d71a23a28cd6a9e7a6b4e20b908e4c4fcffe51158e"
+  },
+  "platformBaseline": {
+    "reportSha256": "f5838726aa3d662c2b566b909c551327465d78fc32af28921628079c7d0e89e6",
+    "platformVerdict": "incomplete",
+    "gateReportSha256": "fdc66f70f925afbb6eedab8222c52f7abc5ea7f8b288d86eeb3292ca65d049fb"
+  },
+  "selectedCases": [
+    "vinext/app/hydration-navigation",
+    "vinext/app/metadata-assets",
+    "vinext/app/routes-middleware",
+    "vinext/app/rsc-flight",
+    "vinext/app/server-actions",
+    "vinext/app/ssr-status-headers",
+    "vinext/app/streaming-ssr",
+    "vinext/bindings/env-context",
+    "vinext/build/production-output",
+    "vinext/cleanup/exact-absence",
+    "vinext/deploy/immutable-activation",
+    "vinext/import/binding-reconciliation",
+    "vinext/import/framework-output",
+    "vinext/lifecycle/cold-warm",
+    "vinext/pages/gsp-paths",
+    "vinext/pages/gssp",
+    "vinext/security/browser-context-isolation",
+    "vinext/security/server-only",
+    "vinext/static/deployment-coherence",
+    "vinext/static/export-routing"
+  ],
+  "optionalCases": [],
+  "excludedCases": [
+    "vinext/bindings/kv-d1-r2-do",
+    "vinext/bindings/queue-workflow",
+    "vinext/build/reproducible-inventory",
+    "vinext/cache/isr-state-machine",
+    "vinext/cache/kv-data-adapter",
+    "vinext/cache/path-tag-invalidation",
+    "vinext/cache/workers-cache",
+    "vinext/images/request-transform",
+    "vinext/lifecycle/ocd-restart",
+    "vinext/lifecycle/promote-rollback",
+    "vinext/lifecycle/workerd-restart",
+    "vinext/security/tenant-isolation",
+    "vinext/service/companion-fetch-rpc",
+    "vinext/service/self-binding"
+  ],
+  "p4Status": {
+    "verdict": "go",
+    "cloudflareSemantics": "worker-version-and-deployment",
+    "classification": "application-differential",
+    "reason": "One frozen vinext production artifact passed the selected importer, Runtime, HTTP, Chromium, security, deployment, and cleanup observations on both open-compute and Cloudflare.",
+    "evidence": {
+      "sourceBuildReproducibility": "non-blocking-upstream-deviation",
+      "firstSourceInventorySha256": "931ebcce2f04fef00877aeaabb28819cc18fe1ead90e9fdcdd15baa3a88d55b1",
+      "secondSourceInventorySha256": "90c794b77d3e14d39600b254567c2ff7bb9e535845f86b8fb0320874e909e110",
+      "wranglerModuleCount": 79,
+      "importedModuleCount": 79,
+      "wranglerModuleNamesSha256": "8311c2918f094d6bbd435c9db94d4ced97d8da8c710e008d6dd925214a3e29d1",
+      "importedModuleNamesSha256": "8311c2918f094d6bbd435c9db94d4ced97d8da8c710e008d6dd925214a3e29d1",
+      "localBundleSha256": "a68f14ec859a463bbd4f946bff33cdbf57d32a32a4ebd3efd23ed2de2a02dd14",
+      "localRuntimeCases": "15/15",
+      "cloudflareRuntimeCases": "15/15",
+      "localApplicationReportSha256": "9dca4996923c1d019aeed15f50ac4f60a2854c004f4037f76a956cf277d888ab",
+      "cloudflareApplicationReportSha256": "b5e9854fcca97c37ea8ce83645c3996cfc3abd6b8a195ba540e0c200f169ae0a",
+      "cloudflareVersionId": "890ee8c5-5608-40a7-9d85-891db837d8ec",
+      "cloudflareDeploymentId": "b45c5e85-e825-4b8a-83af-72cabc5362f3",
+      "cloudflareCleanup": "worker-absent",
+      "cloudflareDeletePostflight": "worker-delete-succeeded-before-wrangler-kv-list-auth-10000",
+      "localCleanup": "worker-route-and-processes-absent"
+    }
+  }
+}

@@ -37,6 +37,27 @@ test("loads project-relative inputs and preserves JSON without reading secret va
   });
 });
 
+test("requires generated class identity for Durable Object and Workflow reconciliation", async t => {
+  const result = await loadProject(await fixture(t, {
+    ...config,
+    bindings: {
+      OBJECTS: { type: "do_namespace", id: "objects-id", className: "PortableObject" },
+      FLOW: { type: "workflow", id: "workflow-id", className: "PortableWorkflow", schedules: ["0 * * * *"] },
+    },
+  }));
+  assert.equal(result.bindings.OBJECTS.className, "PortableObject");
+  assert.equal(result.bindings.FLOW.className, "PortableWorkflow");
+
+  for (const bindings of [
+    { OBJECTS: { type: "do_namespace", id: "objects-id" } },
+    { FLOW: { type: "workflow", id: "workflow-id" } },
+    { DB: { type: "d1_database", id: "db-id", className: "NotAClassBinding" } },
+    { OBJECTS: { type: "do_namespace", id: "objects-id", className: "not-valid-name!" } },
+  ]) {
+    await assert.rejects(loadProject(await fixture(t, { ...config, bindings })), /className/);
+  }
+});
+
 test("parses cache, entrypoint, Images, and Version Metadata as one strict runtime contract", async t => {
   const result = await loadProject(await fixture(t, {
     ...config,
@@ -76,6 +97,7 @@ test("malformed config and plaintext secrets fail without echoing their contents
     { secrets: { TOKEN: { env: "VALID", value: "sensitive-content" } } },
     { bindings: { DB: { type: "unknown", id: "id" } } },
     { bindings: { DB: { type: "d1_database", id: "id", capabilityVersion: 3 } } },
+    { bindings: { OBJECTS: { type: "do_namespace", id: "id" } } },
     { bindings: { DB: { type: "d1_database", id: "id", permissions: { read: true } } } },
     { services: {} },
     { services: [{ binding: "1BAD", service: "catalog" }] },

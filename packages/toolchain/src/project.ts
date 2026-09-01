@@ -9,6 +9,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export interface WorkerBinding {
   type: "kv_namespace" | "r2_bucket" | "d1_database" | "do_namespace" | "queue_producer" | "workflow";
   id: string;
+  className?: string;
   permissions?: { read: boolean; write: boolean };
   schedules?: string[];
 }
@@ -170,12 +171,22 @@ export async function loadProject(path: string): Promise<WorkerProject> {
     if (!record(value.bindings)) throw new Error("invalid Worker bindings");
     for (const [key, item] of Object.entries(value.bindings)) {
       if (!record(item)) throw new Error("invalid Worker binding");
-      knownKeys(item, ["type", "id", "permissions", "schedules"], "binding");
+      knownKeys(item, ["type", "id", "className", "permissions", "schedules"], "binding");
       const kind = item.type;
       if (kind !== "kv_namespace" && kind !== "r2_bucket" && kind !== "d1_database" && kind !== "do_namespace" && kind !== "queue_producer" && kind !== "workflow") {
         throw new Error("unsupported Worker binding type");
       }
       const binding: WorkerBinding = { type: kind, id: string(item.id, "binding id") };
+      if (item.className !== undefined) {
+        if ((kind !== "do_namespace" && kind !== "workflow")
+            || typeof item.className !== "string"
+            || !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(item.className)) {
+          throw new Error("invalid binding className");
+        }
+        binding.className = item.className;
+      } else if (kind === "do_namespace" || kind === "workflow") {
+        throw new Error("class-bound Worker binding requires className");
+      }
       if (item.schedules !== undefined) {
         if (kind !== "workflow" || !Array.isArray(item.schedules) || item.schedules.length > 100
             || !item.schedules.every(value => typeof value === "string" && value.length >= 1
