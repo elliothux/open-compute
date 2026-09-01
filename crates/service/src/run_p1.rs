@@ -28,6 +28,12 @@ pub(crate) fn require_current_serving_schema(loaded: &LoadedConfig) -> Result<()
     )?;
     let actual = open_compute_storage::migrations::inspect_schema(&db)?;
     let target = open_compute_storage::migrations::current_schema_version();
+    // user_version 0 is an unmigrated first start, including a SIGKILL after SQLite
+    // created the file but before migrations committed. Bootstrap still owns that
+    // path. A positive version that is not this binary's schema is unrestorable.
+    if actual == 0 {
+        return Ok(());
+    }
     if actual != target {
         return Err(PlatformError::new(
             ErrorCode::SchemaUnsupported,
