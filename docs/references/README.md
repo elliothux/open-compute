@@ -9,7 +9,9 @@ qualification。目标产品、upstream types、single-latest runtime 和管理�
 [Cloudflare Worker Runtime 全量兼容改造](../implemented/cloudflare-runtime-compatibility.md)；总体架构见
 [平台总方案](../open-compute-workerd-platform.md)，契约目录、portable differential 和双 verdict
 规则见已完成的[P3.4 方案](../implemented/p3-4-cloudflare-conformance.md)。尚未完成的 Cloudflare
-Workflow 远端资格只记录在[剩余验收计划](../cloudflare-runtime-compatibility-acceptance.md)。
+Workflow 远端资格记录在[Workflow 验收计划](../cloudflare-runtime-compatibility-acceptance.md)，Assets
+与 Service Binding 的 direct differential 记录在[对应验收计划](../p3-assets-service-bindings-acceptance.md)。
+所有 active 文档见 [docs 索引](../README.md)。
 
 ## 开发与接口
 
@@ -38,6 +40,6 @@ P0.2 的阶段性支持范围见归档的 [API 矩阵](../implemented/p0-2-api-m
 - [Scheduler 恢复](runbooks/scheduler-recovery.md)
 - [收集 support bundle](runbooks/collect-support-bundle.md)
 
-runbooks 由 `platformd` 在编译时内嵌。仓库目录调整不改变 `platformd docs <name>` 的手册名称，
+runbooks 由 `ocd` 在编译时内嵌。仓库目录调整不改变 `ocd docs <name>` 的手册名称，
 修改路径时必须同步资源读取和相关测试。操作权限、Day1 设计及实际支持范围仍以
 [AGENTS.md](../../AGENTS.md) 和当前实现为准。

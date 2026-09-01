@@ -2,8 +2,9 @@
 
 > 状态：核心 Day1 实现完成、外部资格 Conditional Go，2026-09-01。全量 inventory 的 2,097 个 stable
 > members 已有 evidence，`blocked=0`；Workers、Cache API、KV、D1、R2、Durable Objects、Queues 的
-> portable differential 已通过并精确清理。Workflow hosted differential 因 Wrangler OAuth `10000`、
-> release timing-three 与跨平台资格仍在各自 active acceptance 中，不能据此声明完整托管端/发行 Go。
+> portable differential 已通过并精确清理。Workflow hosted differential 仍受 Wrangler OAuth `10000`
+> 阻塞；Assets/Service direct differential、release timing-three 与跨平台资格仍在各自 active acceptance 中，
+> 不能据此声明完整托管端/发行 Go。固定 vinext workload 已取得 Application Go，但不替代这些平台资格。
 >
 > 当前目标是让 open-compute 对齐最新 stable Cloudflare Worker runtime，以及 Workers、Durable
 > Objects、Queues、Workflows、R2、D1、KV 的完整 tenant Worker API；具体类型、单一 latest runtime
@@ -97,7 +98,7 @@ vinext 与 Cloudflare 同时缺失的 Next.js 行为不得在平台层补成专�
 
 这些非目标不能用于豁免已声明 supported 的 contract。应用用例暴露新依赖时，先判断它是否属于
 平台既定支持面；属于则补齐或报告 blocked，不属于则登记 application incompatibility，不能通过
-框架专用后端扩大平台。Node/Vite 可用于构建、基线和 HMR；生产请求仍只由 `platformd` 与 verified
+框架专用后端扩大平台。Node/Vite 可用于构建、基线和 HMR；生产请求仍只由 `ocd` 与 verified
 stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平台运行时。
 
 ### 2.3 当前实现与剩余资格
@@ -112,7 +113,7 @@ stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平
 | Static Assets | manifest/上传/路由、`ASSETS.fetch()`、不可变发布、catalog 与维护 Gate | Assets routing/binding 直接 Cloudflare differential qualification |
 | Service Binding | 跨 Worker/自绑定、默认/命名 fetch/RPC、事件源调用、预算/pin、真实 crash handle 回收与恢复 | Service fetch/RPC/lifecycle 直接 Cloudflare differential qualification |
 | Cache 与 Images | Workers Cache、Cache API、Images、Version Metadata 的声明单节点支持面已实现；Cache API hosted differential 通过 | Images 等相邻 capability 的独立 hosted/application qualification 可选 |
-| 验收 | 193/193 JS、90.17% Rust 行覆盖率、单轮 workspace 802/802；七项 hosted differential 通过并清理 | Workflow hosted、timing-three、跨平台 release 与可选应用 qualification |
+| 验收 | 193/193 JS、90.17% Rust 行覆盖率、单轮 workspace 802/802；七项 hosted differential 通过并清理；固定 vinext workload 为 Application Go | Workflow hosted、Assets/Service direct differential、timing-three 与跨平台 release qualification |
 
 实现依据包括 [工具链](../packages/toolchain/src/build-worker.ts)、
 [绑定类型](../crates/core/src/resource.rs)、[RuntimeSource](../crates/workers/src/runtime_source.rs)
@@ -135,15 +136,15 @@ stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平
 
 “单体服务”定义为一个可安装、启动和升级的部署单元，不强求只有一个 OS process。
 
-发行形式为单个按平台构建的 `platformd`，内部包含正式 pin 对应的 workerd 和 runtime assets：
+发行形式为单个按平台构建的 `ocd`，内部包含正式 pin 对应的 workerd 和 runtime assets：
 
 ```text
-platformd          唯一发行文件、Rust 主进程
+ocd          唯一发行文件、Rust 主进程
 └── workerd        校验并物化内嵌资源后启动的 upstream 子进程
 ```
 
-`platformd` 启动并监督 `workerd` 子进程，两者通过仅监听 loopback 的内部 HTTP 通信。
-外部只暴露 `platformd` 的 public/control 端口。具体发行、离线启动与资源校验契约见
+`ocd` 启动并监督 `workerd` 子进程，两者通过仅监听 loopback 的内部 HTTP 通信。
+外部只暴露 `ocd` 的 public/control 端口。具体发行、离线启动与资源校验契约见
 [单二进制分发与部署](./references/single-binary.md)；框架构建器和 Node/Bun 不进入生产请求路径。
 
 ```text
@@ -151,7 +152,7 @@ Public HTTP / Control API
             │
             ▼
 ┌─────────────────────────────────────────┐
-│ platformd                               │
+│ ocd                               │
 │                                         │
 │  ingress/router        control API      │
 │  resource catalog      binding backend  │
@@ -196,7 +197,7 @@ family。本方案改为：
 | Redis DB 1 KV/Queue | KV resource files + `scheduler.sqlite` |
 | Redis DB 2 Workflow state | `scheduler.sqlite` |
 | 多个 runtime service | 一个受监督的 workerd |
-| Gateway + Control + Scheduler | 一个 `platformd` |
+| Gateway + Control + Scheduler | 一个 `ocd` |
 | 多副本 owner lease | 单节点进程所有权 |
 | S3 R2/ASSETS | S3 R2/bundle/assets |
 
@@ -215,7 +216,7 @@ Miniflare 和 WDL 不应被当作两个互斥实现。两者适合参考的层�
 
 Miniflare 宿主会生成 binary Cap'n Proto config；它的 `Runtime` 通过 stdin 把 config 交给
 workerd，并用 control fd 等待所需 socket 上报 ready。`Runtime` 还处理 startup stderr、
-structured logs、子进程退出和 restart notification。这些是 `platformd` supervisor 和 G0
+structured logs、子进程退出和 restart notification。这些是 `ocd` supervisor 和 G0
 harness 的直接参考，但生产实现不引入 Miniflare/Node 作为运行时依赖。
 
 Miniflare 的 resource plugin 也验证了一种有价值的组合方式：plugin 负责生成 tenant binding、
@@ -604,7 +605,7 @@ PRIMARY KEY (namespace_id, key)
 但它会让所有 namespace 竞争一个 SQLite writer lock，也让 namespace 级备份、恢复、
 删除和 quota 统计变重。一 namespace 一文件能把写锁和故障影响隔离到资源边界。
 
-代价是文件和连接数量增加。`platformd` 应使用 LRU connection manager，只保持最近活跃
+代价是文件和连接数量增加。`ocd` 应使用 LRU connection manager，只保持最近活跃
 的文件打开。对几十到几百个 namespace 的 SMB 部署，这个取舍优于全局表。达到数万
 namespace 后再引入固定数量的 KV shard files，不在 V1 提前设计。
 
@@ -642,7 +643,7 @@ exec
 直接做成远端 JSRPC object。P0.5.0 先建立 loaded-isolate facade framework：WorkerLoader 注入项目
 自有 D1 client module 和 deterministic main wrapper，在 tenant isolate 内构造 `D1Database`/
 `D1PreparedStatement`；只有 `run/all/first/raw/batch/exec` 这类 terminal operation 通过
-binding-scoped JSRPC transport 回到 `platformd`。transport 的 immutable props 固定 binding、
+binding-scoped JSRPC transport 回到 `ocd`。transport 的 immutable props 固定 binding、
 deployment、database generation 和 permission，tenant code 不能选择其他文件。
 
 完整 facade Gate、SQLite authorizer/limits、batch/exec/migration、backup/restore、工作包和测试矩阵见
@@ -667,7 +668,7 @@ deployment、database generation 和 permission，tenant code 不能选择其他
 ### 10.1 逻辑与物理边界
 
 Cloudflare 的语义是每个 Durable Object instance 拥有私有、强一致的持久存储。本方案
-保留这个逻辑边界，但不由 `platformd` 手工创建一个 OS 文件。
+保留这个逻辑边界，但不由 `ocd` 手工创建一个 OS 文件。
 
 使用 workerd native Durable Object/facet SQLite 和 `localDisk`：
 
@@ -765,7 +766,7 @@ tenant/r2/v1/<resource-id>/objects/<key>
 Worker bundle 是 immutable content-addressed object。`control.sqlite` 保存 hash 和 ref，
 本地 `cache/bundle/` 只是可删除缓存，不是 authority。
 
-S3 credential 只存在于 `platformd`。tenant Worker 获得的是 binding-scoped adapter，不能
+S3 credential 只存在于 `ocd`。tenant Worker 获得的是 binding-scoped adapter，不能
 读取物理 bucket、credential 或 `system/` prefix。
 
 R2 返回对象带同步 `writeHttpMetadata()` 和本地 body helper，因此与 D1 一样使用 P0.5.0 的
@@ -780,7 +781,7 @@ codec、conditional/range/list、provider preflight、bucket lifecycle、工作�
 manifest；资源字节独立上传，不塞进 Worker JS bundle。部署 ready/promote 前必须确认全部引用
 有效，代码和 manifest 一起冻结。上传中断不影响当前部署，损坏或缺失对象不能伪装成普通 404。
 
-`platformd` 解析 public route 并取得 deployment pin，受信任的资源路由再决定进入 assets 服务
+`ocd` 解析 public route 并取得 deployment pin，受信任的资源路由再决定进入 assets 服务
 还是 tenant Worker。`env.ASSETS.fetch()` 只进入该部署的 assets 服务，不能回到租户入口造成递归。
 两条路径复用同一套路径匹配、GET/HEAD、Content-Type、ETag/304 和响应逻辑；S3 凭据与内部读取
 能力留在平台，不向 tenant 提供按任意物理 key/digest 读取对象的接口。
@@ -1139,7 +1140,7 @@ Platform verdict 的验收对象是 **open-compute 声明支持的 Cloudflare Wo
 
 上游 [Project status](https://github.com/cloudflare/vinext/blob/5d0b53088c689b75d63672eab6ff66434afa5b3b/README.md#project-status)
 明确说明 Cache Components/PPR 尚有缺口。选中的 workload 可以覆盖其已有 PPR/cache 行为，
-但不能把结果写成“完整 Next.js PPR 已实现”，更不能在 platformd 中补 partial shell、resume、
+但不能把结果写成“完整 Next.js PPR 已实现”，更不能在 ocd 中补 partial shell、resume、
 prefetch 或其他框架语义。
 
 ### 18.3 应用组合验收矩阵
@@ -1173,7 +1174,7 @@ case identity 和来源。随后将 case 分为：Cloudflare platform contract w
 行为、toolchain/dev-only 和 upstream exclusion。选择/排除必须 tracked，不能在失败后临时删项。
 
 **分层执行。** 上游工具链、开发服务、CLI 和 Node standalone 测试留在相应对照环境；生产
-workload 则经过正常构建、部署 API、真实 `platformd -> stock workerd` 和 browser。原本使用
+workload 则经过正常构建、部署 API、真实 `ocd -> stock workerd` 和 browser。原本使用
 Miniflare/Wrangler 的平台行为场景由 adapter 连接实际 open-compute；Node/Miniflare PASS 不算
 platform PASS。
 
@@ -1192,8 +1193,13 @@ upstream-excluded、application-unsupported、blocked/not-run，以及每个 pro
 总量来自 discovery，不硬编码；记录所有 retry。上游、Cloudflare、Node/Miniflare 和 open-compute
 结果分列。
 
-**当前状态。** contract catalog、portable differential 和 application workload 清单均未生成，
-尚未运行对应 P3 suite；不能引用 vinext 宣传比例或已有 P0–P2 结果代替。
+**当前状态。** 平台 contract catalog、portable differential、本地产品与恢复 Gate 已由 P3.4 实现。
+P4 已固定 vinext beta.8 application baseline、有限 Cloudflare-alignment matrix、root lock 与 Chromium，
+并按 Cloudflare Worker Version/Deployment 语义完成同一冻结 artifact 的真实 Cloudflare/open-compute
+differential：20/20 selected mandatory 通过，两端 runner 各 15/15，结果为
+[Application Go](./implemented/p4-nextjs-vinext-results.md)。两次独立 source build 的 inventory drift
+保留为[非阻断 toolchain 调查](./implemented/p4-nextjs-vinext-p4-0-results.md)，不再作为 Runtime Hard Gate。
+不能引用 compatibility check、vinext 宣传比例或 Application Go 代替 Platform verdict。
 
 ## 19. 安全边界
 
@@ -1213,7 +1219,7 @@ upstream-excluded、application-unsupported、blocked/not-run，以及每个 pro
 
 | 故障 | 恢复行为 |
 | --- | --- |
-| `platformd` crash | SQLite WAL recovery；过期 Queue/Workflow/alarm lease 重新 claim |
+| `ocd` crash | SQLite WAL recovery；过期 Queue/Workflow/alarm lease 重新 claim |
 | workerd crash | supervisor 重启；下一次请求按 immutable version cold load |
 | dispatch response 丢失 | 非幂等 HTTP 不自动 replay；Queue/Workflow 等 lease 到期后 at-least-once replay |
 | S3 暂时不可用 | 已加载 Worker 可继续；cold load、R2 和新 bundle deploy 失败并返回可重试错误 |
@@ -1268,7 +1274,7 @@ P3：Cloudflare latest stable runtime/七项产品全量 API 对齐与真实平�
 产品优先级不等于源码目录顺序。基础能力依赖图为：
 
 ```text
-workerd pin + platformd supervisor
+workerd pin + ocd supervisor
         │
         ├── control.sqlite + resource lifecycle
         ├── S3 preflight + immutable artifact store
@@ -1323,7 +1329,7 @@ cancellation，仍需使用 CPU、memory、subrequest 和 wall deadline 做资�
 
 最先实现所有后续能力共同依赖的宿主层：
 
-- `platformd` 启动、监督和重启 workerd；
+- `ocd` 启动、监督和重启 workerd；
 - Unix socket 或 loopback internal transport；
 - `control.sqlite`、schema migration 和 resource ID；
 - 数据目录、文件权限和 master key 加载；
@@ -1575,7 +1581,7 @@ Cron parser/slot/misfire、reconciler、工作包、测试矩阵与 Exit Gate �
 
 Workflow 在 Queue 验证 scheduler lease 和 crash recovery 后实现。Pinned stock workerd 继续通过
 dynamic `workerLoader` 提供隔离、immutable deployment 和 bindings，但完整 Workflow engine 由
-platformd trusted facade + `scheduler.sqlite` 实现，不假设 workerd 内建 Cloudflare control plane。
+ocd trusted facade + `scheduler.sqlite` 实现，不假设 workerd 内建 Cloudflare control plane。
 
 P2.4 只实现 logical definition/immutable version、caller binding、instance `create/get/status`、冻结
 Worker deployment/class、`WorkflowEntrypoint.run()`、顺序 `step.do()`、bounded canonical JSON、step
@@ -1593,7 +1599,7 @@ terminal/referrer、crash matrix、工作包与 Exit Gate 见
 
 这一阶段的历史实现记录曾用 capability V2 表示 durable waiting。当前源码已将这些能力收敛为
 唯一 Workflow 实现，当前 binding/execution capability 标记为 1，不保留旧 instance/version/binding
-的平台引擎分支。继续使用一个 platformd、一个 pinned
+的平台引擎分支。继续使用一个 ocd、一个 pinned
 workerd 子进程，以及 control/scheduler 两个 SQLite authority，不新增 Redis 或独立 Workflow 服务。
 
 按依赖逐项增加：
@@ -1641,7 +1647,7 @@ HTTP -> Queue -> Consumer -> Workflow
   contract/source/case/deviation catalog；
 - 应用 qualification 需要时，再单独固定浏览器和 vinext 等应用输入，发现其上游测试并登记映射到
   platform contract 的选定 workload；
-- 为 portable fixture 提供真实 Cloudflare 与真实 platformd 两个 adapter，分开工具链和应用结果；
+- 为 portable fixture 提供真实 Cloudflare 与真实 ocd 两个 adapter，分开工具链和应用结果；
 - 盘点每个 fixture 需要的模块、Node API、bindings、缓存、图片、配置与资源限额；
 - 测试依赖、浏览器及 runtime 必须预置或显式授权准备，不由生产启动或缺依赖的 Gate 隐式下载。
 
@@ -1652,7 +1658,7 @@ vinext 或 Next.js 上游缺口不加入平台需求，已声明 supported 的 C
 
 ### P3.1：框架构建产物与 Static Assets
 
-详细实施与 Gate 见 [P3.1：Static Assets 与框架产物导入](p3-1-static-assets.md)。
+详细实施与 Gate 见 [P3.1：Static Assets 与框架产物导入](implemented/p3-1-static-assets.md)。
 
 平台接受普通 Worker + Assets、Assets-only 与已构建的多环境 framework output，不用普通 Worker
 单入口打包替代框架自己的编译。TS7 检查本项目维护的 TypeScript；构建、模块/资源校验成功后才
@@ -1670,7 +1676,7 @@ vinext 或 Next.js 上游缺口不加入平台需求，已声明 supported 的 C
 ### P3.2：Service Binding、运行时 API 与流式执行
 
 Service Binding 的实施顺序、原生 RPC 与生命周期 Gate 见
-[P3.2：Service Binding 与原生 Worker 调用](p3-2-service-bindings.md)；该子方案不代替完整 Node API 验收。
+[P3.2：Service Binding 与原生 Worker 调用](implemented/p3-2-service-bindings.md)；该子方案不代替完整 Node API 验收。
 
 实现默认/具名入口、跨 Worker 和自绑定的原生 fetch/RPC，目标按 authority 解析并固定单次调用。
 与 assets 路由复用正确入口；不为 `WORKER_SELF_REFERENCE` 或特定框架名称写专用生产分支。
@@ -1714,7 +1720,9 @@ artifacts/service/runtime 的所有权组织，禁止框架分支、test-only �
 重复轮使用新进程和隔离数据目录，保留场景内正常运行与重启恢复。P3.1 至 P3.3 的目标及其用例
 分类已经实现；P3.3 的最终本地验收见归档方案。P3.4 全量类型/runtime contract 与产品高风险矩阵已
 完成；本实现 goal 按用户明确要求只跑一个完整最终 round，不把它冒充 timing-three release qualification。
-Workflow hosted differential 和可选应用 qualification 仍分别保持未完成/未评估。
+Workflow hosted differential 仍未完成；Static Assets / Service Binding 的 direct differential 由
+[独立验收计划](p3-assets-service-bindings-acceptance.md)追踪；固定 vinext workload 已取得
+[Application Go](implemented/p4-nextjs-vinext-results.md)，不再标为未评估，也不替代上述 platform fixture。
 
 执行完整 Rust/TS 检查、依赖边界和既有 coverage 要求，Rust 行覆盖率不得低于 90.00%。相关
 G0/P0/P2 回归按影响范围执行，不在每个中间步骤递归重跑所有历史 aggregate。
@@ -1790,7 +1798,7 @@ PPR/Cache Components 缺口不记为平台 PASS，也不能借其 beta 状态接
    workers-types、workers-sdk 和工具链 Platform baseline；
 2. upstream stable AST 中属于目标范围的 API contract catalog 完整，capability/generated
    Env/runtime/deviation/case 双向一致；
-3. 全部 supported contract 在真实 stock workerd/platformd 产品路径通过，blocked 为零；
+3. 全部 supported contract 在真实 stock workerd/ocd 产品路径通过，blocked 为零；
 4. 高风险 portable fixture 的真实 Cloudflare differential 没有未解释的“CF pass / OC fail”；
 5. Static Assets、Service Binding、Cache API、Workers Cache、Images 不是 mock/fallback；
 6. 多租户、secret/client、不可变 deployment、rollback、S3/SQLite/process 故障恢复通过；
@@ -1799,9 +1807,9 @@ PPR/Cache Components 缺口不记为平台 PASS，也不能借其 beta 状态接
 结论只能写“对 baseline `<digest>` 固定的 latest stable Worker runtime 与七项产品 tenant API 达到
 Go，单节点 deviation 另列”，不能写“兼容 Cloudflare 全产品、管理 API 或全球 edge 基础设施”。
 vinext 另给 Application verdict，不能替代 Platform verdict。应用 qualification 未运行时只写
-“未评估”，不降低已有完整平台证据。当前全量本地 contract/product 实现与七项 hosted fixture 已完成；
-Workflow hosted fixture 和两个附加 timing rounds 尚未执行，因此整体结论仍是带明确边界的
-Conditional Go。
+“未评估”，不降低已有完整平台证据。当前全量本地 contract/product 实现、七项 hosted fixture 与固定
+vinext Application Go 已完成；Workflow hosted fixture、Assets/Service direct differential 和两个附加
+timing rounds 尚未执行，因此整体结论仍是带明确边界的 Conditional Go。
 
 ## 25. 参考资料
 

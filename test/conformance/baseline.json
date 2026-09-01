@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "openComputeRevision": "93dd12363d68cb70d2f57cf0b9e2837a925af690eddbe7393f3b9fd350761554",
+  "openComputeRevision": "abce62255f9e5be9c6605c79a26f7156ec7dac1bd6ab6637301483ed1b2a00f6",
   "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes test/conformance/baseline.json and non-reference docs",
   "workerdLockSha256": "4ccb7814a1ec72f50a3862cfac7475be6a4cade0ca646e8d16a2cb9aac42cb0f",
   "workerd": {
@@ -17,7 +17,7 @@
   "workersTypes": {
     "version": "5.20260830.1",
     "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
-    "lockSha256": "ebc2b7b1f14a37ed86189e81c67608da14f0f0f8b7f428fe1ab68a2141e41221",
+    "lockSha256": "1486f18448f7220d640cbd1050d11922e49c89e390daea4dd37ea9128b5128b9",
     "packageSha256": "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e",
     "indexSha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd",
     "astSha256": "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3"

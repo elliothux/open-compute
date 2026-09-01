@@ -1,6 +1,8 @@
 # open-compute
 
-可单机部署的 Cloudflare Workers Platform 兼容基础设施（`platformd` + pinned `workerd`）。
+[open-compute.dev](https://open-compute.dev)
+
+可单机部署的 Cloudflare Workers Platform 兼容基础设施（`ocd` + pinned `workerd`）。
 
 目标是在一个容器、systemd/launchd service 或前台进程中，提供常用 Workers 编程模型与产品
 binding：Workers、Static Assets、Service Binding、KV、R2、D1、Durable Objects、Queues、Cron、
@@ -12,12 +14,12 @@ Workflows、Workers Cache、Cache API、Images 和 Version Metadata。平台不�
 S3-compatible provider 的隔离前缀。不依赖 Redis、Postgres、Kafka、Kubernetes、独立网关或
 Node.js production sidecar。
 
-唯一发行物是一个按 OS/CPU 构建的 `platformd`：内嵌正式 pinned workerd 压缩包、
+唯一发行物是一个按 OS/CPU 构建的 `ocd`：内嵌正式 pinned workerd 压缩包、
 Cap'n Proto、生成的系统 Worker、默认配置、许可证和运维手册。没有外部 runtime 模式、
-安装目录资源查找或启动时下载。进程边界仍是一个 platformd 管理一个 workerd child。
+安装目录资源查找或启动时下载。进程边界仍是一个 ocd 管理一个 workerd child。
 
 Worker、KV、R2、D1、Durable Objects、Queues、Cron、Workflows、Cache 和 Images 的具体支持面与限制以
-`platformd capabilities --json` 为准；维护中的偏差见
+`ocd capabilities --json` 为准；维护中的偏差见
 [capability deviations](docs/references/p1-deviations.md)。部署步骤见
 [单二进制分发与部署](docs/references/single-binary.md)。
 
@@ -38,7 +40,7 @@ Workflow 仍因当前 Wrangler OAuth 对 inventory API 返回 code 10000 而等�
 client / operator
        │
        ▼
-platformd ── control/data plane ── SQLite authorities
+ocd ── control/data plane ── SQLite authorities
     │  └────────────────────────── external S3-compatible storage
     │
     └── supervised verified stock workerd
@@ -46,7 +48,7 @@ platformd ── control/data plane ── SQLite authorities
            └── WorkerLoader tenant isolates + declared bindings
 ```
 
-`platformd` 是唯一 public/control listener 和本地 authority，拥有 data-dir lock、SQLite、S3、
+`ocd` 是唯一 public/control listener 和本地 authority，拥有 data-dir lock、SQLite、S3、
 deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获得 immutable deployment
 中声明的 capability，不能访问 SQLite path、S3 credential、internal Fetcher/token 或其他租户资源。
 
@@ -57,10 +59,11 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 | P0：Workers/KV/R2/D1/DO/Alarms | 已实现并有归档 Gate；精确支持面仍以 capability/deviation 为准 |
 | P1：兼容性/可靠性/单文件 | 核心与本机 Gate 已完成；跨平台发行和长时 soak 仍有 active acceptance |
 | P2：Queues/Cron/Workflows | 已实现声明子集并通过 P2 Exit；DO output-gate 等限制仍保留 |
-| P3.1：Static Assets | 平台核心与本地 contract/product Gate 完成；当前 remote fixture 只覆盖 Cache API，Assets 直接 differential 与应用 qualification 未评估 |
-| P3.2：Service Binding | 本地 hard/product/event-source/SIGKILL recovery 与 contract Gate 完成；当前 remote fixture 只覆盖 Cache API，Service 直接 differential 与应用 qualification 未评估 |
+| P3.1：Static Assets | [核心实现与本地最终验收完成](docs/implemented/p3-1-static-assets.md)；固定 vinext 应用的 Assets/browser 路径已通过，完整 Assets direct differential 见[剩余验收](docs/p3-assets-service-bindings-acceptance.md) |
+| P3.2：Service Binding | [hard/product/event-source/SIGKILL recovery 与本地最终验收完成](docs/implemented/p3-2-service-bindings.md)；vinext 明确排除产品 Service 组合，direct differential 见[剩余验收](docs/p3-assets-service-bindings-acceptance.md) |
 | P3.3：Cache/Images | [声明的单节点支持面已实现并通过最终验收](docs/implemented/p3-3-workers-cache-images.md)；Cache API portable differential 已受控通过，完整 Cloudflare conformance 与应用 qualification 不在该结论内 |
 | P3.4：Cloudflare conformance | [全量 Day1 实现与本地 conformance 已完成](docs/implemented/cloudflare-runtime-compatibility.md)：2,097 个 stable members 全部有 evidence，1,585 个 `supported`、512 个 `supported_with_deviation`、`blocked=0`；七项 portable differential 已通过，Workflow 的 Cloudflare 远端资格见[剩余验收](docs/cloudflare-runtime-compatibility-acceptance.md) |
+| P4：Next.js/vinext application qualification | [固定 beta.8 / Next.js 16 workload 为 Application Go](docs/implemented/p4-nextjs-vinext-results.md)：20/20 selected mandatory，Cloudflare/open-compute runner 各 15/15；跨 source-build inventory drift 按 Cloudflare Worker Version/Deployment 语义重分类为非阻断 toolchain deviation；该结论不替代 Platform verdict |
 
 历史设计和结果只证明对应 revision/输入下的范围。当前 dirty working tree、未运行 target 或 active
 计划不能从历史 PASS 推导为已验收。
@@ -74,23 +77,25 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 | `crates/artifacts` | SigV4 S3 store + verified cache |
 | `crates/runtime` | workerd lock/verify/compile/supervisor |
 | `crates/workers` | WorkerBundle、deployment pipeline、RuntimeSource、dispatch pins |
-| `crates/service` | `platformd` CLI、health、control/data plane、workerd bridge |
+| `crates/service` | `ocd` CLI、health、control/data plane、workerd bridge |
 | `packages/runtime/` | Formal `workerd.lock.json`, Cap'n Proto, system workers |
 | `packages/toolchain` | Rolldown + TS7 Worker build/run/deploy CLI |
-| `packages/docs` | platformd 运维站点（VitePress；中文默认，英文 `/en/`） |
+| `packages/docs` | ocd 运维站点（VitePress；中文默认，英文 `/en/`） |
 | `examples/` | Container, systemd, launchd, TypeScript Worker |
 | `test/` | Repository test/Gate launchers, coverage, load/soak, fixtures, and fuzz |
 | `scripts/` | Local development and release packaging launchers |
 
-未完成的实施与验收方案放在 `docs/`；当前入口包括
-[Cloudflare Workflow 远端资格](docs/cloudflare-runtime-compatibility-acceptance.md)、
-[P3.1 Static Assets](docs/p3-1-static-assets.md)与
-[P3.2 Service Binding](docs/p3-2-service-bindings.md)。已完成的
+未完成的实施与验收方案见 [docs 索引](docs/README.md)，包括
+[Cloudflare Workflow 远端资格](docs/cloudflare-runtime-compatibility-acceptance.md)与
+[Static Assets / Service Binding 远端资格](docs/p3-assets-service-bindings-acceptance.md)。已完成的
 [Cloudflare Runtime 全量兼容改造](docs/implemented/cloudflare-runtime-compatibility.md)、
+[P3.1 Static Assets](docs/implemented/p3-1-static-assets.md)、
+[P3.2 Service Binding](docs/implemented/p3-2-service-bindings.md)、
 [P3.4 conformance](docs/implemented/p3-4-cloudflare-conformance.md)、
-[P3.3 Cache/Images](docs/implemented/p3-3-workers-cache-images.md)设计与结果，以及其他已完成阶段见
+[P3.3 Cache/Images](docs/implemented/p3-3-workers-cache-images.md)、
+[P4 Next.js/vinext 应用资格验证](docs/implemented/p4-nextjs-vinext-qualification.md)设计与结果，以及其他已完成阶段见
 [docs/implemented](docs/implemented/README.md)，持续维护的 API、测试、部署及运维资料见
-[docs/references](docs/references/README.md)。面向 platformd 运维的站点源码在 [packages/docs](packages/docs)。归档不代表对当前工作树重新执行了验收。
+[docs/references](docs/references/README.md)。面向 ocd 运维的站点源码在 [packages/docs](packages/docs)。归档不代表对当前工作树重新执行了验收。
 
 ## Prerequisites
 
@@ -107,12 +112,12 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 `--config` must be an absolute file. Secrets only via `env:` / `file:` / documented `OPEN_COMPUTE_*` and S3 env/file refs. See `share/default-config.toml`.
 
 ```sh
-platformd config init --data-dir /abs/data > /abs/new-config.toml
+ocd config init --data-dir /abs/data > /abs/new-config.toml
 # 编辑 S3 endpoint/bucket，提供配置引用的凭据；文件不可覆盖已有配置。
-platformd --config /abs/new-config.toml config check
-platformd --config /abs/new-config.toml run
+ocd --config /abs/new-config.toml config check
+ocd --config /abs/new-config.toml run
 # 首次成功运行并停机后，才可执行依赖已有数据库/身份的完整诊断。
-platformd --config /abs/new-config.toml doctor --full
+ocd --config /abs/new-config.toml doctor --full
 ```
 
 ## Dev / test
@@ -129,7 +134,7 @@ bun run build
 ```
 
 该脚本启动仅监听 `127.0.0.1:9000` 的 `rclone serve s3`，然后以前台进程启动
-`platformd`。所有可持久化开发状态都留在仓库的 ignored `.data/` 中：
+`ocd`。所有可持久化开发状态都留在仓库的 ignored `.data/` 中：
 
 ```text
 .data/
@@ -139,7 +144,7 @@ bun run build
 └── rclone-s3.log
 ```
 
-停止 `platformd` 时脚本同时停止 rclone，但保留上述数据供下次启动复用。
+停止 `ocd` 时脚本同时停止 rclone，但保留上述数据供下次启动复用。
 开发构建也必须内嵌正式 archive，不支持 `OPEN_COMPUTE_DEV_WORKERD`。
 首次启动完成数据目录初始化后，开发环境检查可运行：
 
@@ -196,7 +201,7 @@ public IPv4/IPv6/DNS allow 与 redirect/DNS-to-private deny；该脚本会要求
 在干净源码上生成宿主平台的一个可执行文件；目标文件必须不存在：
 
 ```sh
-./scripts/package-release.sh --dest /abs/releases/platformd --archive /abs/pinned-workerd.gz
+./scripts/package-release.sh --dest /abs/releases/ocd --archive /abs/pinned-workerd.gz
 # 仅在显式允许下载时，使用 --download 替代 --archive。
 ```
 
@@ -207,15 +212,15 @@ public IPv4/IPv6/DNS allow 与 redirect/DNS-to-private deny；该脚本会要求
 
 ## Operations
 
-- Container: `examples/container/` — non-root, `platformd` as PID 1, writable data volume, read-only runtime.
+- Container: `examples/container/` — non-root, `ocd` as PID 1, writable data volume, read-only runtime.
 - systemd: `examples/systemd/open-compute.service` — `KillMode=control-group`; restart on process/liveness failure, not on readiness 503.
-- launchd: `examples/launchd/io.opencompute.platformd.plist`.
+- launchd: `examples/launchd/dev.open-compute.ocd.plist`（Label `dev.open-compute.ocd`）。
 
 Never embed credentials in units/images; use env or file refs from config.
 
 ## Security / platform boundaries
 
-- One `platformd` per data dir (`DATA_DIR_IN_USE`).
+- One `ocd` per data dir (`DATA_DIR_IN_USE`).
 - Internal workerd token is not on argv/env/logs/status/metrics.
 - `/health/live` is liveness only; `/health/ready` is admission and must not restart the process.
 - tenant 仅能访问部署中明确声明的产品 binding；平台不提供 multi-node HA。

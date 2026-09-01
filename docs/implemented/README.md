@@ -38,21 +38,25 @@
 | 2026-08-29 | [Runtime 包与测试流程整理](runtime-and-test-layout.md) | [实测与验收](runtime-and-test-layout-results.md)：未跟踪 dist 可复现构建、POC 收敛、统一并行调度；六目标串行/四并行 148.10/70.98 秒，workspace 690 用例、90.16% 覆盖率、最终 23 目标各三轮通过；跨平台和正式发行未验证 |
 | 2026-08-29 | [按用例选择验收轮数](test-repetition.md) | 完整 workspace 690 用例一次、43 个时序用例追加两次，70 个宿主执行/776 次用例全部通过；90.15% 行覆盖率，同条件追加轮墙钟减少 16.85%；重启后 macOS 签名服务仍崩溃一次并自行恢复，系统缺陷未根治，跨平台和正式发行未验证 |
 | 2026-08-29 | [Day1 架构清理](day1-architecture-cleanup.md) | [验收记录](day1-architecture-cleanup-results.md)：清单 1–17 与 artifact GC 完成；coverage 32 目标通过、90.02% 行覆盖率；最终完整 32 目标 / 662 用例一轮及 17 目标 / 42 个时序用例追加两轮全部通过 |
+| 2026-08-29 | [P3.1 Static Assets 与框架产物导入](p3-1-static-assets.md) | Worker + Assets、Assets-only、上传恢复、不可变路由与 binding 本地产品矩阵完成；33 个 coverage 目标、90.11% 行覆盖率和最终 workspace 一轮 + 17 个时序用例两轮通过；direct Cloudflare differential 见独立验收计划 |
+| 2026-08-30 | [P3.2 Service Binding 与原生 Worker 调用](p3-2-service-bindings.md) | hard/product/events/recovery 四个 stock-workerd target、原生 RPC 生命周期与 SIGKILL 恢复完成；90.11% 行覆盖率、最终 834/834 case 通过；direct Cloudflare differential 见独立验收计划 |
 | 2026-08-30 | [P3.3 Workers Cache、Cache API 与 Images](p3-3-workers-cache-images.md) | 声明的单节点支持面 Platform Go：完整 37 目标 coverage 通过、Rust 行覆盖率 90.10%，最终完整 37 目标一轮及 19 个登记时序目标追加两轮全部通过；Cloudflare differential、跨平台发行与第三方应用 qualification 未纳入结论 |
 | 2026-09-01 | [Cloudflare Runtime 全量兼容改造](cloudflare-runtime-compatibility.md)、[P3.4 conformance](p3-4-cloudflare-conformance.md) | [完成报告](cloudflare-runtime-compatibility-results.md)：2,097 个 stable members、1,585 `supported`、512 `supported_with_deviation`、`blocked=0`；193/193 JS、802/802 单轮 workspace cases、90.17% Rust 行覆盖率；七项 hosted differential 已通过，Workflow hosted qualification 与 timing-three release qualification 仍为明确限制 |
+| 2026-09-01 | [P4 Next.js/vinext 应用资格验证](p4-nextjs-vinext-qualification.md)、[P4.0 build reproducibility 调查](p4-nextjs-vinext-p4-0-results.md)、[结果](p4-nextjs-vinext-results.md) | 原跨 source-build Hard Gate 已按 Cloudflare Worker Version/Deployment 语义撤回；固定 artifact 的 Wrangler/importer inventory 79/79 对齐，20/20 selected mandatory 通过，Cloudflare/open-compute runner 各 15/15，双端精确清理完成；197/197 JS、90.17% Rust 行覆盖率、最终 894/894 case executions 通过；Application Go 不替代 Platform verdict |
+| 2026-09-01 | [`ocd` Day1 命名改造](ocd-day1-rename.md) | [完成记录](ocd-day1-rename-results.md)：唯一 production binary/CLI/daemon 为 `ocd`，project/docs origin 为 `https://open-compute.dev`，launchd identity 为 `dev.open-compute.ocd`；198/198 JS、90.18% Rust 行覆盖率、完整单轮 Gate 40/40 targets 与 802/802 cases 通过；追加时序轮按用户指定不作为完成条件，未执行正式发行或跨平台验证 |
 
 ## 仍在维护或尚未完成
 
 - [P1 剩余验收](../p1-release-acceptance.md)：仅追踪尚无完成证据的长时 soak 与发行演练，
   不把已完成的 P1 核心实现重新列为待实现。
-- [平台方案](../open-compute-workerd-platform.md)：单机 Cloudflare Workers Platform 兼容目标尚未完成
-  P3 conformance；vinext 只是独立应用 qualification，不定义平台完成状态。
-- [P3.1 Static Assets](../p3-1-static-assets.md)与[P3.2 Service Binding](../p3-2-service-bindings.md)：
-  本地 contract/product、事件源和真实 crash recovery 已有证据；Assets/Service 直接 remote
-  differential 与各自应用 qualification 仍在对应文档中维护。
+- [平台方案](../open-compute-workerd-platform.md)：核心 Day1 实现与 P3 本地 conformance 已完成；该文档
+  继续维护当前架构、能力边界和仍未结束的 hosted/release qualification，因此暂留 active 根目录。
+- [Static Assets / Service Binding 远端资格](../p3-assets-service-bindings-acceptance.md)：两项核心设计已
+  归档，只继续追踪尚未执行的 direct Cloudflare differential。
 - [Cloudflare Workflow 远端 differential](../cloudflare-runtime-compatibility-acceptance.md)：本地 Day1
   runtime 与七项 hosted fixture 已完成，只追踪因 Wrangler OAuth `10000` 未运行的 Workflow 托管端资格。
 - [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
+- active 文档的完整分类见 [docs 索引](../README.md)。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 
 ## 使用规则
