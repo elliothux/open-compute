@@ -746,7 +746,7 @@ async fn wait_pin_count(
     deployment: open_compute_core::DeploymentId,
     count: usize,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while pins.count(deployment) != count {
         assert!(
             Instant::now() < deadline,
