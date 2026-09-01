@@ -10,7 +10,7 @@ interface ServiceRequestWire {
   readonly body: ReadableStream<Uint8Array> | null;
 }
 
-interface NativeServiceTransport {
+interface NativeServiceTransport extends Fetcher {
   fetchService(frame: ServiceFrame, request: ServiceRequestWire): unknown;
   rpc(frame: ServiceFrame, method: string, args: unknown[]): unknown;
   get(frame: ServiceFrame, property: string): unknown;
@@ -447,7 +447,8 @@ export class ServiceBinding {
 
   constructor(raw: unknown) {
     if (!object(raw) || !callable(Reflect.get(raw, "fetchService"))
-        || !callable(Reflect.get(raw, "rpc")) || !callable(Reflect.get(raw, "get"))) {
+        || !callable(Reflect.get(raw, "rpc")) || !callable(Reflect.get(raw, "get"))
+        || !callable(Reflect.get(raw, "connect"))) {
       throw failure("SERVICE_BINDING_DENIED");
     }
     this.#transport = raw as NativeServiceTransport;
@@ -491,6 +492,10 @@ export class ServiceBinding {
       if (!(value instanceof Response)) throw failure("SERVICE_UNAVAILABLE");
       return value;
     });
+  }
+
+  connect(address: SocketAddress | string, options?: SocketOptions): Socket {
+    return this.#transport.connect(address, options);
   }
 }
 

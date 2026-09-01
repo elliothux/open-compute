@@ -332,16 +332,6 @@ pub(crate) fn recover_unleased_staging(
                 "unleased runtime staging executable is still in use",
             ));
         }
-        if executable.exists() {
-            let mut file = crate::fsutil::open_nofollow(&executable, false, false)?;
-            let digest = crate::fsutil::hash_file(&mut file)?;
-            if crate::fsutil::hex_sha256(&digest) == expected_digest {
-                return Err(PlatformError::new(
-                    ErrorCode::RuntimeInvalid,
-                    "complete runtime staging executable has no child lease",
-                ));
-            }
-        }
         cleanup_staging_dir_strict(&journal.directory)?;
         clear_staging_journal(lease_path)?;
         Ok(())
@@ -1576,7 +1566,7 @@ fn staging_journal_recovers_crash_before_directory_creation() {
 
 #[cfg(all(test, target_os = "macos"))]
 #[test]
-fn complete_staging_without_child_lease_is_fail_closed() {
+fn complete_staging_without_child_lease_is_recovered() {
     use sha2::Digest as _;
 
     let data = tempfile::TempDir::new().expect("temporary runtime data");
@@ -1589,13 +1579,13 @@ fn complete_staging_without_child_lease_is_fail_closed() {
     let digest = hex::encode(sha2::Sha256::digest(bytes));
     let journal = write_staging_journal(&lease_path, &staging, &digest).expect("write journal");
 
-    let error = recover_unleased_staging(&lease_path, &digest).unwrap_err();
+    recover_unleased_staging(&lease_path, &digest).expect("recover complete staging");
 
-    assert_eq!(error.code(), ErrorCode::RuntimeInvalid);
-    assert!(staging.exists(), "fail-closed recovery removed staging");
-    assert!(journal.exists(), "fail-closed recovery removed journal");
-    cleanup_staging_dir_strict(&staging).expect("clean test staging");
-    clear_staging_journal(&lease_path).expect("clean test journal");
+    assert!(!staging.exists(), "complete unleased staging leaked");
+    assert!(
+        !journal.exists(),
+        "complete unleased staging journal leaked"
+    );
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadProject } from "../src/project.ts";
 
-const config = { name: "hello", main: "src/index.ts", compatibilityDate: "2026-08-22" };
+const config = { name: "hello", main: "src/index.ts" };
 
 async function fixture(t, value) {
   const directory = await mkdtemp(join(tmpdir(), "open-compute-project-"));
@@ -26,7 +26,8 @@ test("loads project-relative inputs and preserves JSON without reading secret va
   assert.equal(result.main, config.main);
   assert.equal(result.tsconfig, "tsconfig.json");
   assert.equal(result.endpoint, "http://127.0.0.1:8787");
-  assert.deepEqual(result.compatibilityFlags, []);
+  assert.equal(Object.hasOwn(result, "compatibilityDate"), false);
+  assert.equal(Object.hasOwn(result, "compatibilityFlags"), false);
   assert.deepEqual(result.vars, { GREETING: "你好 🌍", nested: [null, true, { number: 42 }] });
   assert.deepEqual(result.secrets, { TOKEN: { env: "ABSENT_PROJECT_SECRET" } });
   assert.equal(result.bindings.DB.permissions.write, false);
@@ -92,7 +93,7 @@ test("malformed config and plaintext secrets fail without echoing their contents
 });
 
 test("dictionary keys cannot modify prototypes", async t => {
-  const filename = await fixture(t, `{"name":"hello","main":"index.ts","compatibilityDate":"2026-08-22",
+  const filename = await fixture(t, `{"name":"hello","main":"index.ts",
     "vars":{"__proto__":{"polluted":true}},"secrets":{"__proto__":{"env":"PRIVATE_TOKEN"}}}`);
   const project = await loadProject(filename);
   assert.equal(Object.getPrototypeOf(project.vars), Object.prototype);
@@ -112,7 +113,7 @@ test("loads Worker-plus-assets and assets-only project unions", async t => {
   assert.equal(combined.assets.binding, "ASSETS");
   assert.equal(combined.assets.htmlHandling, "auto-trailing-slash");
   const staticOnly = await loadProject(await fixture(t, {
-    name: "static", compatibilityDate: "2026-08-22", assets: { directory: "dist" },
+    name: "static", assets: { directory: "dist" },
   }));
   assert.equal(staticOnly.main, undefined);
   assert.equal(staticOnly.assets.runWorkerFirst, false);
@@ -123,10 +124,10 @@ test("loads Worker-plus-assets and assets-only project unions", async t => {
     ...config, vars: { SELF: true }, services: [{ binding: "SELF", service: "hello" }],
   })), /conflicts/);
   await assert.rejects(loadProject(await fixture(t, {
-    name: "static", compatibilityDate: "2026-08-22", vars: { MODE: "x" }, assets: { directory: "dist" },
+    name: "static", vars: { MODE: "x" }, assets: { directory: "dist" },
   })), /assets-only/);
   await assert.rejects(loadProject(await fixture(t, {
-    name: "static", compatibilityDate: "2026-08-22",
+    name: "static",
     services: [{ binding: "SELF", service: "static" }], assets: { directory: "dist" },
   })), /assets-only/);
   await assert.rejects(loadProject(await fixture(t, {
@@ -136,7 +137,7 @@ test("loads Worker-plus-assets and assets-only project unions", async t => {
 
 test("loads a framework output union without retaining a second source entry", async t => {
   const project = await loadProject(await fixture(t, {
-    name: "framework", compatibilityDate: "2026-08-22",
+    name: "framework",
     frameworkOutput: ".wrangler/deploy/config.json",
   }));
   assert.equal(project.main, undefined);

@@ -244,8 +244,8 @@ fn concrete_executor_covers_types_metadata_ttl_and_signed_cursor_scope() {
 #[test]
 fn concrete_executor_rejects_option_boundaries_without_replay() {
     let (_temp, storage, binding, clock) = fixture();
-    let executor = SqliteKvBindingExecutor::new(storage.clone(), clock);
-    let both = executor
+    let executor = SqliteKvBindingExecutor::new(storage.clone(), clock.clone());
+    executor
         .execute(
             &binding,
             KvCommand::Put {
@@ -257,8 +257,32 @@ fn concrete_executor_rejects_option_boundaries_without_replay() {
                 metadata_present: false,
             },
         )
-        .unwrap_err();
-    assert_eq!(both.code(), ErrorCode::KvInvalidOptions);
+        .unwrap();
+    assert!(matches!(
+        executor
+            .execute(
+                &binding,
+                KvCommand::Get {
+                    keys: vec!["x".to_owned()],
+                    cache_ttl: None,
+                }
+            )
+            .unwrap(),
+        KvCommandResult::Entries(values) if values[0].is_some()
+    ));
+    clock.advance(Duration::from_secs(61));
+    assert!(matches!(
+        executor
+            .execute(
+                &binding,
+                KvCommand::Get {
+                    keys: vec!["x".to_owned()],
+                    cache_ttl: None,
+                }
+            )
+            .unwrap(),
+        KvCommandResult::Entries(values) if values == vec![None]
+    ));
     assert_eq!(
         executor
             .execute(

@@ -28,8 +28,9 @@ pub(super) fn verify(
     let mut batch_end = 0;
     let mut batch_first = 0;
     let mut batch_dependencies = Vec::new();
-    let mut previous_batch_settled = true;
+    let mut settled_ordinals = BTreeSet::new();
     let mut has_pending = false;
+    let mut rollback_started = false;
     let mut bytes = initial_state_bytes(&instance.identity, instance.input_json.len()) as u64
         + instance
             .output_json
@@ -46,18 +47,26 @@ pub(super) fn verify(
         if descriptor.ordinal != registered || descriptor.name_count != *count {
             return Err(error(ErrorCode::WorkflowInvariantViolation));
         }
-        if registered == batch_end {
-            if !previous_batch_settled {
+        if descriptor.rollback_step {
+            rollback_started = true;
+            if descriptor.batch_size != 1 || !descriptor.dependencies.is_empty() {
                 return Err(error(ErrorCode::WorkflowInvariantViolation));
             }
-            batch_dependencies = (batch_first..batch_end).collect();
+        } else if rollback_started {
+            return Err(error(ErrorCode::WorkflowInvariantViolation));
+        }
+        if registered == batch_end {
             batch_first = registered;
             batch_end = registered + descriptor.batch_size;
-            previous_batch_settled = true;
+            batch_dependencies = descriptor.dependencies.clone();
         }
         if descriptor.batch_first_ordinal != batch_first
             || descriptor.batch_size != batch_end - batch_first
             || descriptor.dependencies != batch_dependencies
+            || descriptor
+                .dependencies
+                .iter()
+                .any(|parent| !settled_ordinals.contains(parent))
         {
             return Err(error(ErrorCode::WorkflowInvariantViolation));
         }
@@ -74,8 +83,10 @@ pub(super) fn verify(
         registered += 1;
         completed += u32::from(state == "complete");
         settled += u32::from(matches!(state.as_str(), "complete" | "failed"));
-        previous_batch_settled &= matches!(state.as_str(), "complete" | "failed");
-        has_pending |= matches!(state.as_str(), "pending" | "running");
+        if matches!(state.as_str(), "complete" | "failed") {
+            settled_ordinals.insert(descriptor.ordinal);
+        }
+        has_pending |= matches!(state.as_str(), "pending" | "running" | "delay_pending");
         bytes += descriptor.state_bytes()? as u64
             + row
                 .get::<_, Option<Vec<u8>>>("output_json")
@@ -101,6 +112,9 @@ pub(super) fn verify(
         || ((registered > 0 || instance.state == WorkflowState::Running) && !metadata.has_activated)
         || ((instance.identity.instance_generation == 1)
             != metadata.last_restart_operation_id.is_none())
+        || (rollback_started
+            && !metadata.rollback_requested
+            && instance.state != WorkflowState::Terminated)
     {
         return Err(error(ErrorCode::WorkflowInvariantViolation));
     }
@@ -143,6 +157,7 @@ fn verify_instance(instance: &WorkflowInstanceRecord) -> Result<(), PlatformErro
         || (instance.state == WorkflowState::Queued) != instance.next_run_at_ms.is_some()
         || (instance.state != WorkflowState::Running
             && (metadata.pause_requested || metadata.yield_requested))
+        || (instance.state.is_terminal() && metadata.rollback_requested)
         || (instance.state.is_terminal() && metadata.next_wake_at_ms.is_some())
         || metadata.next_event_seq < 1
     {
@@ -211,7 +226,14 @@ fn verify_step(
     }
     if !matches!(
         state,
-        "pending" | "running" | "retry_wait" | "waiting" | "complete" | "failed" | "cancelled"
+        "pending"
+            | "running"
+            | "delay_pending"
+            | "retry_wait"
+            | "waiting"
+            | "complete"
+            | "failed"
+            | "cancelled"
     ) || generation != instance.identity.instance_generation
         || (state == "running") != run_token.is_some()
         || (state == "running") != step_token.is_some()
@@ -232,7 +254,7 @@ fn verify_step(
                 WorkflowStepKind::Do | WorkflowStepKind::WaitEvent
             ))
             != output.is_some()
-        || matches!(state, "failed" | "retry_wait") != failure.is_some()
+        || matches!(state, "failed" | "delay_pending" | "retry_wait") != failure.is_some()
         || failure.is_some() != code.is_some()
         || failure
             .as_ref()
@@ -247,12 +269,19 @@ fn verify_step(
     let attempt: u32 = row.get("attempt").map_err(sql_error)?;
     let started: Option<i64> = row.get("attempt_started_at_ms").map_err(sql_error)?;
     let deadline: Option<i64> = row.get("attempt_deadline_at_ms").map_err(sql_error)?;
+    let retry_delay: Option<u64> = row.get("retry_delay_ms").map_err(sql_error)?;
     let ceiling: Option<i64> = row.get("event_buffer_ceiling").map_err(sql_error)?;
     let event_seq: Option<i64> = row.get("consumed_event_seq").map_err(sql_error)?;
     if let WorkflowDurableConfig::Do(config) = &descriptor.config {
         if ceiling.is_some()
             || event_seq.is_some()
             || state == "waiting"
+            || (state == "delay_pending"
+                && (config.retries.delay.is_some()
+                    || due.is_some()
+                    || retry_delay.is_some()
+                    || code.as_deref() != Some("WORKFLOW_STEP_TIMEOUT")))
+            || (state != "retry_wait" && retry_delay.is_some())
             || attempt > config.retries.limit + 1
             || (attempt == 0
                 && (!matches!(state, "pending" | "cancelled")
@@ -266,7 +295,10 @@ fn verify_step(
             || (state == "complete" && deadline.is_none_or(|time| updated >= time))
             || (state == "retry_wait"
                 && (attempt > config.retries.limit
-                    || updated.checked_add(config.retries.delay_after(attempt)? as i64) != due
+                    || retry_delay.is_none()
+                    || updated.checked_add(retry_delay.unwrap_or_default() as i64) != due
+                    || config.retries.delay.is_some()
+                        && Some(config.retries.delay_after(attempt)?) != retry_delay
                     || !matches!(
                         code.as_deref(),
                         Some("WORKFLOW_EXECUTION_FAILED" | "WORKFLOW_STEP_TIMEOUT")
@@ -277,7 +309,7 @@ fn verify_step(
         if let Some(output) = output {
             let output = std::str::from_utf8(&output)
                 .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
-            if open_compute_core::workflow::canonical_json(
+            if open_compute_core::workflow::durable_value_base64(
                 output,
                 ErrorCode::WorkflowInvariantViolation,
             )
@@ -287,7 +319,9 @@ fn verify_step(
                 return Err(error(ErrorCode::WorkflowInvariantViolation));
             }
         }
-        Ok(if matches!(state, "pending" | "running") {
+        Ok(if state == "delay_pending" {
+            Some(updated)
+        } else if matches!(state, "pending" | "running") {
             deadline
         } else {
             due
@@ -341,7 +375,7 @@ fn verify_wait(
             let output = output
                 .and_then(|bytes| std::str::from_utf8(bytes).ok())
                 .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
-            let event = WorkflowEventEnvelope::from_canonical(output)?;
+            let event = WorkflowEventEnvelope::from_wire(output)?;
             if sequence < 1
                 || !consumed.insert(sequence)
                 || event.event_type != event_type
@@ -375,7 +409,7 @@ fn verify_events(
     let metadata = &instance.durable;
     let mut statement = conn
         .prepare(
-            "SELECT instance_generation,event_seq,type,payload_json,accepted_at_ms,logical_bytes
+            "SELECT instance_generation,event_seq,type,payload_base64,accepted_at_ms,logical_bytes
         FROM workflow_events WHERE instance_id=?1 ORDER BY event_seq",
         )
         .map_err(sql_error)?;
@@ -407,7 +441,7 @@ fn verify_events(
             || sequence >= metadata.next_event_seq
             || consumed.contains(&sequence)
             || logical_bytes != (WORKFLOW_EVENT_BYTES + event_type.len() + payload.len()) as u64
-            || open_compute_core::workflow::canonical_json(
+            || open_compute_core::workflow::durable_value_base64(
                 &payload,
                 ErrorCode::WorkflowInvariantViolation,
             )

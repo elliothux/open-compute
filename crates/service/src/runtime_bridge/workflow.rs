@@ -15,8 +15,13 @@ pub struct WorkflowRunRequest {
     pub definition_name: String,
     /// Durable creation timestamp.
     pub created_at_ms: i64,
-    /// Bounded canonical JSON payload.
-    pub payload_json: String,
+    /// Bounded canonical durable-value payload.
+    pub payload_base64: String,
+    /// Whether this activation replays successful handlers and executes durable rollback.
+    pub rollback: bool,
+    /// Direct-cron metadata, absent for programmatic and REST-created instances.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<open_compute_core::WorkflowCronSchedule>,
 }
 
 impl std::fmt::Debug for WorkflowRunRequest {
@@ -36,9 +41,9 @@ pub enum WorkflowOutcome {
         /// Number of descriptors visited by this activation.
         #[serde(rename = "finalOrdinal")]
         final_ordinal: u32,
-        /// Canonical final output, still checked against durable authority.
-        #[serde(rename = "outputJson")]
-        output_json: String,
+        /// Canonical final durable-value output, still checked against authority.
+        #[serde(rename = "outputBase64")]
+        output_base64: String,
     },
     /// A sanitized, deterministic failure, distinct from transport Unknown.
     Errored {
@@ -48,6 +53,12 @@ pub enum WorkflowOutcome {
         /// Stable failure category; never contains a tenant exception.
         #[serde(rename = "errorCode")]
         error_code: String,
+    },
+    /// Durable rollback replay completed or halted at its first exhausted handler.
+    Terminated {
+        /// One past the final replayed or rollback descriptor.
+        #[serde(rename = "finalOrdinal")]
+        final_ordinal: u32,
     },
     /// The trusted controller committed a yield and the dispatch RPC ended.
     Suspended {
@@ -69,6 +80,7 @@ impl std::fmt::Debug for WorkflowOutcome {
         f.write_str(match self {
             Self::Complete { .. } => "WorkflowOutcome::Complete([REDACTED])",
             Self::Errored { .. } => "WorkflowOutcome::Errored([REDACTED])",
+            Self::Terminated { .. } => "WorkflowOutcome::Terminated",
             Self::Suspended { .. } => "WorkflowOutcome::Suspended",
             Self::Unknown { .. } => "WorkflowOutcome::Unknown",
         })
@@ -208,10 +220,14 @@ impl WorkerdTransport {
         let valid = match &response.result {
             WorkflowOutcome::Complete {
                 final_ordinal,
-                output_json,
+                output_base64,
             } => {
                 *final_ordinal <= 1024
-                    && output_json.len() <= open_compute_core::workflow::WORKFLOW_JSON_MAX_BYTES
+                    && open_compute_core::workflow::durable_value_base64(
+                        output_base64,
+                        ErrorCode::WorkflowResultTooLarge,
+                    )
+                    .is_ok()
             }
             WorkflowOutcome::Errored {
                 final_ordinal,
@@ -220,6 +236,7 @@ impl WorkerdTransport {
                 *final_ordinal <= 1024
                     && open_compute_core::workflow::terminal_error_code(error_code).is_ok()
             }
+            WorkflowOutcome::Terminated { final_ordinal } => *final_ordinal <= 1024,
             WorkflowOutcome::Suspended { final_ordinal }
             | WorkflowOutcome::Unknown { final_ordinal } => *final_ordinal <= 1024,
         };

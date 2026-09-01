@@ -7,10 +7,50 @@ CREATE TABLE workflow_bindings (
   definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
   definition_lifecycle_generation INTEGER NOT NULL CHECK(definition_lifecycle_generation >= 1),
   capability_version INTEGER NOT NULL CHECK(capability_version = 1),
+  schedules_json BLOB NOT NULL CHECK(length(schedules_json) BETWEEN 2 AND 32768),
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   created_at_ms INTEGER NOT NULL,
   UNIQUE(deployment_id,name)
 ) STRICT;
+
+CREATE TABLE workflow_binding_operations (
+  operation_id TEXT PRIMARY KEY,
+  binding_id TEXT NOT NULL REFERENCES workflow_bindings(id),
+  kind TEXT NOT NULL,
+  fingerprint BLOB NOT NULL CHECK(length(fingerprint)=32),
+  request_json BLOB NOT NULL CHECK(length(request_json)<=2097152),
+  state TEXT NOT NULL CHECK(state IN ('prepared','applied')),
+  response_json BLOB,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  CHECK((state='applied')=(response_json IS NOT NULL))
+) STRICT;
+
+CREATE TABLE workflow_binding_operation_locks (
+  binding_id TEXT NOT NULL REFERENCES workflow_bindings(id),
+  operation_id TEXT PRIMARY KEY REFERENCES workflow_binding_operations(operation_id),
+  created_at_ms INTEGER NOT NULL
+) STRICT;
+
+CREATE TRIGGER workflow_binding_operation_immutable BEFORE UPDATE OF operation_id,binding_id,kind,
+  fingerprint,request_json,created_at_ms ON workflow_binding_operations
+BEGIN SELECT RAISE(ABORT,'workflow binding operation identity is immutable'); END;
+
+CREATE TRIGGER workflow_binding_operation_transition BEFORE UPDATE ON workflow_binding_operations
+WHEN OLD.state!='prepared' OR NEW.state!='applied' OR OLD.response_json IS NOT NULL OR NEW.response_json IS NULL
+  OR NOT EXISTS(SELECT 1 FROM workflow_binding_operation_locks l
+    WHERE l.binding_id=OLD.binding_id AND l.operation_id=OLD.operation_id)
+BEGIN SELECT RAISE(ABORT,'workflow binding operation transition'); END;
+
+CREATE TRIGGER workflow_binding_operation_lock_guard BEFORE INSERT ON workflow_binding_operation_locks
+WHEN NOT EXISTS(SELECT 1 FROM workflow_binding_operations o WHERE o.operation_id=NEW.operation_id
+  AND o.binding_id=NEW.binding_id AND o.state='prepared' AND o.created_at_ms=NEW.created_at_ms)
+BEGIN SELECT RAISE(ABORT,'workflow binding operation lock authority'); END;
+
+CREATE TRIGGER workflow_binding_operation_unlock_guard BEFORE DELETE ON workflow_binding_operation_locks
+WHEN NOT EXISTS(SELECT 1 FROM workflow_binding_operations o WHERE o.operation_id=OLD.operation_id
+  AND o.binding_id=OLD.binding_id AND o.state='applied')
+BEGIN SELECT RAISE(ABORT,'workflow binding operation is unfinished'); END;
 
 CREATE TABLE workflow_definitions (
   id TEXT PRIMARY KEY,
@@ -35,11 +75,17 @@ CREATE TABLE workflow_instance_operations (
   expected_generation INTEGER NOT NULL CHECK(expected_generation>=1),
   target_generation INTEGER NOT NULL CHECK(target_generation>=1),
   kind TEXT NOT NULL CHECK(kind IN ('restart','purge')),
+  restart_from_name TEXT CHECK(restart_from_name IS NULL OR length(CAST(restart_from_name AS BLOB)) BETWEEN 1 AND 256),
+  restart_from_count INTEGER CHECK(restart_from_count IS NULL OR restart_from_count BETWEEN 1 AND 1024),
+  restart_from_kind TEXT CHECK(restart_from_kind IS NULL OR restart_from_kind IN ('do','sleep','waitForEvent')),
   prior_ref_state TEXT NOT NULL CHECK(prior_ref_state IN ('live','retained')),
   applied INTEGER NOT NULL DEFAULT 0 CHECK(applied IN (0,1)),
   created_at_ms INTEGER NOT NULL, operation_sequence INTEGER NOT NULL DEFAULT 1 CHECK(operation_sequence>=1),
   CHECK((kind='restart' AND expected_generation<9223372036854775807 AND target_generation=expected_generation+1)
-     OR (kind='purge' AND target_generation=expected_generation AND prior_ref_state='retained'))
+     OR (kind='purge' AND target_generation=expected_generation AND prior_ref_state='retained')),
+  CHECK((kind='purge' AND restart_from_name IS NULL AND restart_from_count IS NULL AND restart_from_kind IS NULL)
+     OR (kind='restart' AND ((restart_from_name IS NULL AND restart_from_count IS NULL AND restart_from_kind IS NULL)
+       OR (restart_from_name IS NOT NULL AND restart_from_count IS NOT NULL))))
 ) STRICT;
 
 CREATE TABLE workflow_instance_referrers (
@@ -51,13 +97,20 @@ CREATE TABLE workflow_instance_referrers (
   deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
   instance_generation INTEGER NOT NULL CHECK(instance_generation >= 1),
   creation_nonce BLOB NOT NULL CHECK(length(creation_nonce) = 32),
+  creation_operation_id TEXT NOT NULL UNIQUE,
+  creation_batch_id TEXT NOT NULL,
   state TEXT NOT NULL CHECK(state IN ('creating','live','retained','restarting','releasing','released')),
+  trigger_cron TEXT CHECK(trigger_cron IS NULL OR length(trigger_cron) BETWEEN 1 AND 256),
+  trigger_scheduled_time_ms INTEGER CHECK(trigger_scheduled_time_ms IS NULL OR trigger_scheduled_time_ms >= 0),
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
   released_at_ms INTEGER, operation_sequence INTEGER NOT NULL DEFAULT 0 CHECK(operation_sequence>=0),
   UNIQUE(definition_id,external_instance_id),
-  CHECK((state = 'released') = (released_at_ms IS NOT NULL))
+  CHECK((state = 'released') = (released_at_ms IS NOT NULL)),
+  CHECK((trigger_cron IS NULL) = (trigger_scheduled_time_ms IS NULL))
 ) STRICT;
+
+CREATE INDEX workflow_instance_creation_batch ON workflow_instance_referrers(creation_batch_id);
 
 CREATE TABLE workflow_referrers (
   definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
@@ -186,7 +239,7 @@ WHEN NOT (OLD.state='restarting' AND NEW.state='live' AND OLD.instance_generatio
 BEGIN SELECT RAISE(ABORT,'workflow restart generation requires exact intent'); END;
 
 CREATE TRIGGER workflow_instance_ref_identity_guard BEFORE UPDATE OF instance_id,definition_id,
-  definition_name,external_instance_id,version_id,deployment_id,creation_nonce,created_at_ms
+  definition_name,external_instance_id,version_id,deployment_id,creation_nonce,creation_operation_id,creation_batch_id,created_at_ms
 ON workflow_instance_referrers BEGIN SELECT RAISE(ABORT,'workflow instance identity is immutable'); END;
 
 CREATE TRIGGER workflow_instance_ref_insert_guard BEFORE INSERT ON workflow_instance_referrers
@@ -251,7 +304,8 @@ WHEN NOT (
 ) BEGIN SELECT RAISE(ABORT,'workflow operation is unfinished'); END;
 
 CREATE TRIGGER workflow_operation_identity_guard BEFORE UPDATE OF operation_id,instance_id,creation_nonce,
-  expected_generation,target_generation,kind,prior_ref_state,created_at_ms ON workflow_instance_operations
+  expected_generation,target_generation,kind,restart_from_name,restart_from_count,restart_from_kind,
+  prior_ref_state,created_at_ms ON workflow_instance_operations
 BEGIN SELECT RAISE(ABORT,'workflow operation is immutable'); END;
 
 CREATE TRIGGER workflow_operation_insert_guard BEFORE INSERT ON workflow_instance_operations
@@ -283,7 +337,12 @@ WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE deployment_id = NEW.deployment
 BEGIN SELECT RAISE(ABORT,'workflow queue name conflict'); END;
 
 CREATE TRIGGER workflow_referrer_guard BEFORE DELETE ON workflow_referrers
-WHEN (OLD.referrer_kind = 'binding' AND EXISTS (SELECT 1 FROM workflow_bindings WHERE id = OLD.referrer_id))
+WHEN (OLD.referrer_kind = 'binding' AND EXISTS (
+      SELECT 1 FROM workflow_bindings b
+      JOIN worker_deployments d ON d.id=b.deployment_id
+      JOIN workers w ON w.id=d.worker_id
+      WHERE b.id=OLD.referrer_id AND w.deleted_at_ms IS NULL
+    ))
   OR (OLD.referrer_kind = 'instance' AND EXISTS (SELECT 1 FROM workflow_instance_referrers
       WHERE instance_id = OLD.referrer_id AND state != 'released'))
 BEGIN SELECT RAISE(ABORT,'workflow is referenced'); END;

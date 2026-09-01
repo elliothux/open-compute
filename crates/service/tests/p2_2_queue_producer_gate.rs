@@ -4,6 +4,7 @@
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, header};
+use base64::Engine as _;
 use open_compute_artifacts::{
     ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
@@ -11,7 +12,7 @@ use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{PlatformConfig, RuntimeConfig, StorageConfig};
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DurableObjectsConfig,
-    ErrorCode, QueueId, Redactor, RequestId, ResourceId,
+    ErrorCode, QueueId, QueueMessageId, Redactor, RequestId, ResourceId,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -19,12 +20,13 @@ use open_compute_runtime::{
     WorkerdSupervisorOptions, verify_runtime_binary,
 };
 use open_compute_service::runtime_bridge::{
-    DispatchTarget, LoaderOutcome, WorkerdTransport, bind_runtime_source, serve_runtime_source,
+    DispatchTarget, LoaderOutcome, QueueDispatchMessage, QueueDispatchMetadata,
+    QueueDispatchRequest, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
 use open_compute_service::{SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend};
 use open_compute_storage::{
-    DeploymentRecord, PlatformStorage, QueueConfig, QueueRepository, SchedulerStore,
-    WorkerRepository,
+    DeploymentRecord, PlatformStorage, QueueConfig, QueueContentType, QueueRepository,
+    SchedulerStore, WorkerRepository,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
@@ -39,6 +41,11 @@ use std::time::{Duration, Instant};
 
 #[path = "p2_2_queue_producer_gate/commit_crash.rs"]
 mod commit_crash;
+#[path = "p2_2_queue_producer_gate/matrix.rs"]
+mod matrix;
+#[path = "p2_2_queue_producer_gate/scheduler.rs"]
+mod scheduler;
+use matrix::{assert_persisted_frames, matrix_source, max_expiry, persisted_v8_body};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p2_2_real_queue_producer_matrix() {
@@ -226,8 +233,11 @@ async fn p2_2_real_queue_producer_matrix() {
     assert_eq!(matrix.loader_outcome, Some(LoaderOutcome::Cold));
     let result: serde_json::Value = serde_json::from_str(&matrix.body).unwrap();
     assert_eq!(result["initialCount"], 0);
-    assert_eq!(result["backlogCount"], 6);
+    assert_eq!(result["initialOldestUndefined"], true);
+    assert_eq!(result["backlogCount"], 7);
     assert_eq!(result["oldestIsDate"], true);
+    assert_eq!(result["bytesDetached"], true);
+    assert_eq!(result["v8RoundTrip"], true);
     assert_eq!(result["errors"], 7);
 
     let named = dispatch(
@@ -241,7 +251,7 @@ async fn p2_2_real_queue_producer_matrix() {
     )
     .await;
     assert_eq!(named.status, 200, "{}", named.body);
-    assert_eq!(named.body, "named:7:true");
+    assert_eq!(named.body, "named:8:true");
     assert_eq!(named.loader_outcome, Some(LoaderOutcome::Cold));
     let warm = dispatch(
         &transport,
@@ -256,9 +266,86 @@ async fn p2_2_real_queue_producer_matrix() {
     assert_eq!(warm.loader_outcome, Some(LoaderOutcome::Warm));
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&warm.body).unwrap()["backlogCount"],
-        7
+        8
     );
     assert_persisted_frames(&storage.data_dir().scheduler_db_path());
+    let v8_body = persisted_v8_body(&storage.data_dir().scheduler_db_path());
+    let catalog_queue = QueueRepository::new(storage.db())
+        .get(account, queue)
+        .unwrap();
+    let live_metrics = scheduler
+        .queue_metrics(
+            queue,
+            catalog_queue.lifecycle_generation,
+            catalog_queue.config_generation,
+        )
+        .unwrap();
+    let consumer = transport
+        .dispatch_queue(
+            &DispatchTarget {
+                account_id: account,
+                worker_id: worker.id,
+                deployment_id: deployment.id,
+                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                entrypoint: None,
+                route_generation: generation,
+                request_id: RequestId::generate(),
+            },
+            &QueueDispatchRequest {
+                queue_name: "events".to_owned(),
+                messages: vec![
+                    QueueDispatchMessage {
+                        id: QueueMessageId::generate().to_string(),
+                        timestamp_ms: 1_700_000_000_000,
+                        attempts: 2,
+                        content_type: QueueContentType::Text,
+                        body_base64: base64::engine::general_purpose::STANDARD.encode("retry-me"),
+                    },
+                    QueueDispatchMessage {
+                        id: QueueMessageId::generate().to_string(),
+                        timestamp_ms: 1_700_000_000_001,
+                        attempts: 1,
+                        content_type: QueueContentType::V8,
+                        body_base64: base64::engine::general_purpose::STANDARD.encode(&v8_body),
+                    },
+                ],
+                metadata: QueueDispatchMetadata::from_queue_metrics(live_metrics),
+            },
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("native Queue consumer custom event");
+    assert_eq!(consumer.outcome, "ok");
+    assert_eq!(consumer.retry_messages.len(), 1);
+    assert_eq!(consumer.retry_messages[0].delay_seconds, Some(4));
+    assert!(consumer.ack_all);
+    let thrown = transport
+        .dispatch_queue(
+            &DispatchTarget {
+                account_id: account,
+                worker_id: worker.id,
+                deployment_id: deployment.id,
+                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                entrypoint: None,
+                route_generation: generation,
+                request_id: RequestId::generate(),
+            },
+            &QueueDispatchRequest {
+                queue_name: "events".to_owned(),
+                messages: vec![QueueDispatchMessage {
+                    id: QueueMessageId::generate().to_string(),
+                    timestamp_ms: 1_700_000_000_002,
+                    attempts: 1,
+                    content_type: QueueContentType::Text,
+                    body_base64: base64::engine::general_purpose::STANDARD.encode("throw"),
+                }],
+                metadata: Default::default(),
+            },
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("native Queue consumer throw");
+    assert_eq!(thrown.outcome, "exception");
 
     let before_restart = supervisor.snapshot().pid.unwrap();
     supervisor.report_unhealthy();
@@ -276,7 +363,7 @@ async fn p2_2_real_queue_producer_matrix() {
     assert_eq!(restored.status, 200, "{}", restored.body);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&restored.body).unwrap()["backlogCount"],
-        7
+        8
     );
 
     let catalog = QueueRepository::new(storage.db());
@@ -310,7 +397,7 @@ async fn p2_2_real_queue_producer_matrix() {
         "{}",
         fenced.body
     );
-    assert_eq!(scheduler.queue_backlog_totals().unwrap().0, 7);
+    assert_eq!(scheduler.queue_backlog_totals().unwrap().0, 8);
     assert_eq!(
         QueueController::new(&storage, scheduler.clone())
             .reconcile_pending(16, 42)
@@ -328,7 +415,7 @@ async fn p2_2_real_queue_producer_matrix() {
     )
     .await;
     assert_eq!(after_reconcile.status, 200, "{}", after_reconcile.body);
-    assert_eq!(scheduler.queue_backlog_totals().unwrap().0, 8);
+    assert_eq!(scheduler.queue_backlog_totals().unwrap().0, 9);
 
     let referenced = QueueController::new(&storage, scheduler.clone())
         .delete(account, queue, 1, true, RequestId::generate(), 43)
@@ -339,8 +426,22 @@ async fn p2_2_real_queue_producer_matrix() {
     let deleted = scheduler
         .sweep_queue_retention(max_expiry.saturating_add(1), 256, 4 * 1024 * 1024)
         .unwrap();
-    assert_eq!(deleted.messages, 8);
+    assert_eq!(deleted.messages, 9);
     assert_eq!(scheduler.queue_backlog_totals().unwrap(), (0, 0));
+    let empty = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment,
+        generation,
+        None,
+        "/metrics",
+    )
+    .await;
+    assert_eq!(empty.status, 200, "{}", empty.body);
+    let empty_metrics: serde_json::Value = serde_json::from_str(&empty.body).unwrap();
+    assert_eq!(empty_metrics["backlogCount"], 0);
+    assert!(empty_metrics.get("oldestMessageTimestamp").is_none());
 
     let plain = deploy(
         &deployments,
@@ -364,7 +465,7 @@ async fn p2_2_real_queue_producer_matrix() {
 
     assert!(
         include_str!("../../../packages/runtime/dist/queues/facade.js")
-            .contains("QUEUE_DO_OUTPUT_GATE_UNSUPPORTED")
+            .contains("currentOutputGate")
     );
     let diagnostics = format!("{:?}", supervisor.last_diagnostics());
     assert!(!diagnostics.contains("matrix-json-body"));
@@ -373,7 +474,7 @@ async fn p2_2_real_queue_producer_matrix() {
     let _ = shutdown_tx.send(true);
     source_task.await.unwrap().unwrap();
     binding_task.await.unwrap().unwrap();
-    println!("QG-01..QG-10 Conditional Go; P2.2 producer matrix PASS");
+    println!("P2.2 producer/consumer matrix pending frozen Gate");
 }
 
 fn create_queue(
@@ -402,7 +503,7 @@ fn create_queue(
     }
 }
 
-async fn deploy(
+pub(crate) async fn deploy(
     controller: &DeploymentController<'_>,
     request: CreateDeploymentRequest,
 ) -> DeploymentRecord {
@@ -456,86 +557,27 @@ fn deployment_request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: vec!["rpc".to_owned()],
         vars,
         secrets: BTreeMap::new(),
         bindings,
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote: true,
         request_id: RequestId::generate(),
         now_ms,
     }
 }
 
-fn matrix_source() -> &'static str {
-    r#"import { WorkerEntrypoint } from "cloudflare:workers";
-
-const codeOf = (error) => String(error && (error.stableCode || error.message) || error);
-const rejects = async (fn, code) => {
-  try { await fn(); return false; } catch (error) { return codeOf(error).includes(code); }
-};
-
-export class Named extends WorkerEntrypoint {
-  async fetch() {
-    const result = await this.env.EVENTS.send("named", { contentType: "text", delaySeconds: 0 });
-    return new Response(`named:${result.metadata.metrics.backlogCount}:${result.metadata.metrics.oldestMessageTimestamp instanceof Date}`);
-  }
-}
-
-export default {
-  async fetch(request, env) {
-    const path = new URL(request.url).pathname;
-    if (path === "/metrics") return Response.json(await env.EVENTS.metrics());
-    if (path === "/send-one") {
-      try { return Response.json(await env.EVENTS.send({ after: "reconcile" })); }
-      catch (error) { return new Response(codeOf(error), { status: 500 }); }
-    }
-    if (path !== "/matrix") return new Response("plain");
-    const initial = await env.EVENTS.metrics();
-    await env.EVENTS.send({ marker: "matrix-json-body" });
-    await env.EVENTS.send("héllo", { contentType: "text", delaySeconds: 0 });
-    const bytes = new Uint8Array([1, 2, 3]);
-    const pending = env.EVENTS.send(bytes, { contentType: "bytes", delaySeconds: 1 });
-    bytes[0] = 9;
-    await pending;
-    function* messages() {
-      yield { body: "batch-a", contentType: "text" };
-      yield { body: { batch: "b" }, delaySeconds: 0 };
-      yield { body: new Uint8Array([4, 5]), contentType: "bytes", delaySeconds: 9 };
-    }
-    const response = await env.EVENTS.sendBatch(messages(), { delaySeconds: 7 });
-    const failures = [
-      await rejects(() => env.EVENTS.send("x", { contentType: "v8" }), "QUEUE_CONTENT_TYPE_UNSUPPORTED"),
-      await rejects(() => env.EVENTS.send(new Uint8Array(128001), { contentType: "bytes" }), "QUEUE_MESSAGE_TOO_LARGE"),
-      await rejects(() => env.EVENTS.send("x", { contentType: "text", delaySeconds: 86401 }), "QUEUE_DELAY_INVALID"),
-      await rejects(() => env.EVENTS.sendBatch([]), "QUEUE_INVALID_MESSAGE"),
-      await rejects(() => env.EVENTS.sendBatch(Array.from({ length: 101 }, () => ({ body: 1 }))), "QUEUE_BATCH_LIMIT_EXCEEDED"),
-      await rejects(() => env.EVENTS.send(undefined), "QUEUE_INVALID_MESSAGE"),
-      await rejects(() => env.EVENTS.send("x", { unexpected: true }), "QUEUE_INVALID_MESSAGE"),
-    ];
-    return Response.json({
-      initialCount: initial.backlogCount,
-      backlogCount: response.metadata.metrics.backlogCount,
-      oldestIsDate: response.metadata.metrics.oldestMessageTimestamp instanceof Date,
-      errors: failures.filter(Boolean).length,
-    });
-  }
-};"#
-}
-
-struct DispatchResponse {
+pub(crate) struct DispatchResponse {
     status: u16,
     body: String,
     loader_outcome: Option<LoaderOutcome>,
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn dispatch(
+pub(crate) async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
@@ -577,51 +619,6 @@ async fn dispatch(
     }
 }
 
-fn assert_persisted_frames(path: &Path) {
-    let connection = Connection::open(path).unwrap();
-    let mut statement = connection
-        .prepare(
-            "SELECT content_type, body, available_at_ms - enqueued_at_ms
-             FROM queue_messages ORDER BY seq",
-        )
-        .unwrap();
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Vec<u8>>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(rows.len(), 7);
-    assert_eq!(
-        rows[0],
-        (
-            "json".to_owned(),
-            br#"{"marker":"matrix-json-body"}"#.to_vec(),
-            5_000
-        )
-    );
-    assert_eq!(rows[1], ("text".to_owned(), "héllo".as_bytes().to_vec(), 0));
-    assert_eq!(rows[2], ("bytes".to_owned(), vec![1, 2, 3], 1_000));
-    assert_eq!(rows[3].2, 7_000);
-    assert_eq!(rows[4].2, 0);
-    assert_eq!(rows[5].2, 9_000);
-    assert_eq!(rows[6], ("text".to_owned(), b"named".to_vec(), 0));
-}
-
-fn max_expiry(path: &Path) -> i64 {
-    Connection::open(path)
-        .unwrap()
-        .query_row("SELECT MAX(expires_at_ms) FROM queue_messages", [], |row| {
-            row.get(0)
-        })
-        .unwrap()
-}
-
 fn insert_account(path: PathBuf, account_id: AccountId) {
     Connection::open(path)
         .unwrap()
@@ -633,7 +630,7 @@ fn insert_account(path: PathBuf, account_id: AccountId) {
         .unwrap();
 }
 
-async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Duration) {
+pub(crate) async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     let mut receiver = supervisor.subscribe();
     loop {
@@ -647,7 +644,11 @@ async fn wait_running(supervisor: &WorkerdSupervisor, timeout: Duration) {
     }
 }
 
-async fn wait_pid_change(supervisor: &WorkerdSupervisor, previous: i32, timeout: Duration) {
+pub(crate) async fn wait_pid_change(
+    supervisor: &WorkerdSupervisor,
+    previous: i32,
+    timeout: Duration,
+) {
     let deadline = Instant::now() + timeout;
     let mut receiver = supervisor.subscribe();
     loop {
@@ -660,7 +661,7 @@ async fn wait_pid_change(supervisor: &WorkerdSupervisor, previous: i32, timeout:
     }
 }
 
-fn runtime_config() -> RuntimeConfig {
+pub(crate) fn runtime_config() -> RuntimeConfig {
     RuntimeConfig {
         startup_timeout_ms: 20_000,
         shutdown_grace_ms: 500,
@@ -673,7 +674,7 @@ fn runtime_config() -> RuntimeConfig {
     }
 }
 
-fn storage_config(root: &Path) -> StorageConfig {
+pub(crate) fn storage_config(root: &Path) -> StorageConfig {
     StorageConfig {
         data_dir: root.to_owned(),
         master_key_file: root.join("keys/master.key"),
@@ -684,7 +685,7 @@ fn storage_config(root: &Path) -> StorageConfig {
     }
 }
 
-fn artifact_store(mock: &MockS3) -> ArtifactStore {
+pub(crate) fn artifact_store(mock: &MockS3) -> ArtifactStore {
     let config = PlatformConfig::from_toml_str(&format!(
         r#"
 [s3]
@@ -714,7 +715,7 @@ request_timeout_ms = 3000
     ArtifactStore::new(S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap())
 }
 
-fn repo_root() -> PathBuf {
+pub(crate) fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()

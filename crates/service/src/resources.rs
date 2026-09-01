@@ -72,3 +72,7 @@ fn invalid() -> PlatformError {
         "embedded operator resource is invalid or output failed",
     )
 }
+
+#[cfg(test)]
+#[path = "resources_tests.rs"]
+mod tests;

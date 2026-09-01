@@ -3,7 +3,8 @@
 use super::engine::{
     D1_MAX_BATCH_STATEMENTS, D1_MAX_BOUND_PARAMS, D1_MAX_COLUMNS, D1_MAX_EXEC_STATEMENTS,
     D1_MAX_SQL_BYTES, D1_MAX_VALUE_OR_ROW_BYTES, D1Engine, D1ExecResult, D1Meta, D1Migration,
-    D1MigrationRecord, D1QueryLimits, D1Statement, D1StatementResult, D1Value, limit_error,
+    D1MigrationRecord, D1QueryLimits, D1Statement, D1StatementResult, D1Value,
+    bump_session_version, limit_error,
 };
 use super::hardening::{
     ExecutionControl, SqlAuthority, install_guard, map_sqlite_error, remove_guard,
@@ -16,6 +17,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
+
+const D1_MAX_MIGRATIONS: usize = 100;
 
 impl D1Engine {
     /// Compile statements under the tenant authorizer and classify read-only
@@ -87,18 +90,24 @@ impl D1Engine {
                 return Err(error);
             }
         };
-        if !readonly && connection.execute_batch("COMMIT").is_err() {
-            let _ = connection.execute_batch("ROLLBACK");
-            return Err(PlatformError::new(
-                ErrorCode::D1ResultUnknown,
-                "D1 statement commit result is unknown",
-            ));
+        if !readonly {
+            if let Err(error) = bump_session_version(&connection) {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error);
+            }
+            if connection.execute_batch("COMMIT").is_err() {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(PlatformError::new(
+                    ErrorCode::D1ResultUnknown,
+                    "D1 statement commit result is unknown",
+                ));
+            }
         }
         result.meta.size_after = logical_size(&connection)?;
         Ok(result)
     }
 
-    /// Execute 1-100 statements in one SQLite transaction.
+    /// Execute a non-empty wire-bounded statement list in one SQLite transaction.
     pub fn batch(
         &self,
         statements: &[D1Statement],
@@ -166,6 +175,10 @@ impl D1Engine {
             let _ = connection.execute_batch("ROLLBACK");
             return Err(error);
         }
+        if any_write && let Err(error) = bump_session_version(&connection) {
+            let _ = connection.execute_batch("ROLLBACK");
+            return Err(error);
+        }
         if connection.execute_batch("COMMIT").is_err() {
             let _ = connection.execute_batch("ROLLBACK");
             return Err(PlatformError::new(
@@ -180,7 +193,7 @@ impl D1Engine {
         Ok(results)
     }
 
-    /// Execute 1-100 statements using SQLite's parser tail pointer.
+    /// Execute all statements in one bounded SQL input using SQLite's parser tail pointer.
     pub fn exec(&self, sql: &str, limits: D1QueryLimits) -> Result<D1ExecResult, PlatformError> {
         validate_sql(sql)?;
         let connection = self.open()?;
@@ -188,7 +201,10 @@ impl D1Engine {
         let control = install_guard(&connection, limits, SqlAuthority::Tenant);
         let result = execute_tail_batch(&connection, sql, D1_MAX_EXEC_STATEMENTS, &control);
         remove_guard(&connection);
-        let count = result?;
+        let (count, any_write) = result?;
+        if any_write {
+            bump_session_version(&connection)?;
+        }
         if count == 0 {
             return Err(sql_invalid());
         }
@@ -230,7 +246,7 @@ impl D1Engine {
         limits: D1QueryLimits,
         now_ms: i64,
     ) -> Result<Vec<D1MigrationRecord>, PlatformError> {
-        if migrations.is_empty() || migrations.len() > D1_MAX_EXEC_STATEMENTS {
+        if migrations.is_empty() || migrations.len() > D1_MAX_MIGRATIONS {
             return Err(sql_invalid());
         }
         let mut ids = BTreeSet::new();
@@ -286,7 +302,7 @@ impl D1Engine {
             );
             remove_guard(&connection);
             match execution {
-                Ok(0) => {
+                Ok((0, _)) => {
                     let _ = connection.execute_batch("ROLLBACK");
                     return Err(sql_invalid());
                 }
@@ -390,19 +406,18 @@ fn materialize(
     drop(rows);
     drop(statement);
     let changes = if readonly { 0 } else { connection.changes() };
+    let duration = started.elapsed().as_secs_f64() * 1000.0;
     Ok(D1StatementResult {
         columns,
-        meta: D1Meta {
-            served_by: "open-compute-local".to_owned(),
-            served_by_primary: true,
-            duration: started.elapsed().as_secs_f64() * 1000.0,
+        meta: D1Meta::local(
+            duration,
             changes,
-            last_row_id: connection.last_insert_rowid(),
-            changed_db: !readonly,
-            size_after: 0,
-            rows_read: u64::try_from(output.len()).map_err(|_| limit_error())?,
-            rows_written: changes,
-        },
+            connection.last_insert_rowid(),
+            !readonly,
+            0,
+            u64::try_from(output.len()).map_err(|_| limit_error())?,
+            changes,
+        ),
         rows: output,
     })
 }
@@ -458,9 +473,10 @@ fn execute_tail_batch(
     sql: &str,
     maximum: usize,
     control: &ExecutionControl,
-) -> Result<usize, PlatformError> {
+) -> Result<(usize, bool), PlatformError> {
     let mut batch = Batch::new(connection, sql);
     let mut count = 0_usize;
+    let mut any_write = false;
     while let Some(mut statement) = batch
         .next()
         .map_err(|error| map_sqlite_error(&error, control))?
@@ -472,6 +488,7 @@ fn execute_tail_batch(
         if statement.parameter_count() != 0 {
             return Err(parameter_mismatch());
         }
+        any_write |= !statement.readonly();
         let mut rows = statement.raw_query();
         while rows
             .next()
@@ -479,7 +496,7 @@ fn execute_tail_batch(
             .is_some()
         {}
     }
-    Ok(count)
+    Ok((count, any_write))
 }
 
 fn logical_size(connection: &Connection) -> Result<u64, PlatformError> {

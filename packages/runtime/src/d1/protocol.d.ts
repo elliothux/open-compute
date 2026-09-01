@@ -6,8 +6,18 @@ export interface D1StatementDto {
   params: readonly D1Value[];
 }
 
+/** Session constraint or sealed bookmark sent with a terminal D1 query. */
+export interface D1SessionWire {
+  kind: 0 | 1 | 2 | 3;
+  bookmark?: string;
+}
+
 /** The tenant facade validates responses before exposing them to user code. */
 export interface D1RawTransport {
-  query(mode: D1QueryMode, statements: readonly D1StatementDto[], options?: Record<string, never>): Promise<unknown>;
+  query(
+    mode: D1QueryMode,
+    statements: readonly D1StatementDto[],
+    session?: D1SessionWire,
+  ): Promise<unknown>;
   exec(sql: string, options?: Record<string, never>): Promise<unknown>;
 }

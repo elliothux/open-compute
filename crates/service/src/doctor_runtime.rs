@@ -252,6 +252,7 @@ pub(super) async fn run_full_extras(
     }
     supervisor.begin_drain();
     supervisor.shutdown().await;
+    drop((runtime_source, binding_backend));
     if ready {
         checks.push(ok(
             "runtime_cycle",

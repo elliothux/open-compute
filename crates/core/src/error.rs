@@ -201,16 +201,16 @@ pub enum ErrorCode {
     KvResultUnknown,
     /// The private KV adapter protocol was malformed.
     KvInternalProtocolError,
-    /// R2 object key type, UTF-8, or segment shape is invalid.
-    R2KeyInvalid,
-    /// R2 object key exceeds its logical bucket's dynamic provider-key budget.
+    /// R2 object key exceeds Cloudflare's 1024-byte UTF-8 limit.
     R2KeyTooLarge,
     /// R2 range, conditional, metadata, or list options are invalid.
     R2InvalidOptions,
-    /// A requested R2 write condition cannot be executed atomically.
-    R2UnsupportedCondition,
-    /// An R2 feature is intentionally outside the P0.5 capability.
-    R2UnsupportedFeature,
+    /// Caller-supplied R2 checksum bytes do not match the staged object.
+    R2ChecksumMismatch,
+    /// SSE-C key material is malformed or does not match the stored object.
+    R2SsecInvalid,
+    /// Multipart upload identity, part set, or lifecycle state is invalid.
+    R2MultipartInvalid,
     /// R2 object bytes exceed the bucket's frozen single-part limit.
     R2ObjectTooLarge,
     /// Canonical R2 custom metadata exceeds its fixed budget.
@@ -247,8 +247,10 @@ pub enum ErrorCode {
     D1ColumnNotFound,
     /// A D1 batch is empty, oversized, forged, or crosses owner scope.
     D1InvalidBatch,
-    /// A requested D1 replica or bookmark session is not implemented locally.
-    D1SessionUnsupported,
+    /// A D1 session bookmark or constraint is malformed, forged, or not valid for this database.
+    D1SessionError,
+    /// `dump()` is rejected for the current non-alpha D1 database model.
+    D1DumpError,
     /// An applied D1 migration identity conflicts with different SQL.
     D1MigrationDrift,
     /// A D1 database quota or disk safety bound was reached.
@@ -279,12 +281,10 @@ pub enum ErrorCode {
     DoStorageLimit,
     /// Durable Object dispatch exceeded its bounded foreground deadline.
     DoDispatchTimeout,
-    /// The requested plain-data RPC method or value is outside the P0.7 surface.
+    /// The requested Durable Object RPC member or value is not serializable or callable.
     DoRpcUnsupported,
     /// Tenant Durable Object code raised an opaque runtime exception.
     DoRuntimeException,
-    /// Single-node P0.7 does not implement placement hints.
-    DoPlacementOptionUnsupported,
     /// A namespace still owns live objects and force deletion was not requested.
     DoNamespaceNotEmpty,
     /// The private Durable Object transport protocol was malformed.
@@ -329,8 +329,6 @@ pub enum ErrorCode {
     QueueStorageUnavailable,
     /// Queue mutation may have committed before its response was observed.
     QueueSendResultUnknown,
-    /// Durable Object Queue producer is disabled until output-gate equivalence is proven.
-    QueueDoOutputGateUnsupported,
     /// A Queue already has a non-tombstoned push consumer.
     QueueConsumerConflict,
     /// Queue consumer control or scheduler authority is not ready for dispatch.
@@ -409,8 +407,6 @@ pub enum ErrorCode {
     WorkflowStepConfigUnsupported,
     /// Workflow duration or absolute timestamp is outside the supported grammar or range.
     WorkflowDurationInvalid,
-    /// Workflow has concurrent or unawaited steps.
-    WorkflowParallelStepUnsupported,
     /// Workflow method is outside the selected caller or execution capability.
     WorkflowMethodUnsupported,
     /// Replay descriptor or completed frontier differs from durable history.
@@ -419,8 +415,6 @@ pub enum ErrorCode {
     WorkflowRunStale,
     /// Workflow step token is no longer current.
     WorkflowStepStale,
-    /// Durable Object Workflow mutation lacks native output-gate equivalence.
-    WorkflowDoOutputGateUnsupported,
     /// Workflow transport or persistence outcome is unknown.
     WorkflowRuntimeUnavailable,
     /// Workflow tenant code failed with a sanitized known outcome.
@@ -571,11 +565,11 @@ impl ErrorCode {
             Self::KvCorrupt => "KV_CORRUPT",
             Self::KvResultUnknown => "KV_RESULT_UNKNOWN",
             Self::KvInternalProtocolError => "KV_INTERNAL_PROTOCOL_ERROR",
-            Self::R2KeyInvalid => "R2_KEY_INVALID",
             Self::R2KeyTooLarge => "R2_KEY_TOO_LARGE",
             Self::R2InvalidOptions => "R2_INVALID_OPTIONS",
-            Self::R2UnsupportedCondition => "R2_UNSUPPORTED_CONDITION",
-            Self::R2UnsupportedFeature => "R2_UNSUPPORTED_FEATURE",
+            Self::R2ChecksumMismatch => "R2_CHECKSUM_MISMATCH",
+            Self::R2SsecInvalid => "R2_SSEC_INVALID",
+            Self::R2MultipartInvalid => "R2_MULTIPART_INVALID",
             Self::R2ObjectTooLarge => "R2_OBJECT_TOO_LARGE",
             Self::R2MetadataTooLarge => "R2_METADATA_TOO_LARGE",
             Self::R2CursorInvalid => "R2_CURSOR_INVALID",
@@ -594,7 +588,8 @@ impl ErrorCode {
             Self::D1Timeout => "D1_TIMEOUT",
             Self::D1ColumnNotFound => "D1_COLUMN_NOTFOUND",
             Self::D1InvalidBatch => "D1_INVALID_BATCH",
-            Self::D1SessionUnsupported => "D1_SESSION_UNSUPPORTED",
+            Self::D1SessionError => "D1_SESSION_ERROR",
+            Self::D1DumpError => "D1_DUMP_ERROR",
             Self::D1MigrationDrift => "D1_MIGRATION_DRIFT",
             Self::D1DatabaseFull => "D1_DATABASE_FULL",
             Self::D1Overloaded => "D1_OVERLOADED",
@@ -612,7 +607,6 @@ impl ErrorCode {
             Self::DoDispatchTimeout => "DO_DISPATCH_TIMEOUT",
             Self::DoRpcUnsupported => "DO_RPC_UNSUPPORTED",
             Self::DoRuntimeException => "DO_RUNTIME_EXCEPTION",
-            Self::DoPlacementOptionUnsupported => "DO_PLACEMENT_OPTION_UNSUPPORTED",
             Self::DoNamespaceNotEmpty => "DO_NAMESPACE_NOT_EMPTY",
             Self::DoInternalProtocolError => "DO_INTERNAL_PROTOCOL_ERROR",
             Self::SchedulerUnavailable => "SCHEDULER_UNAVAILABLE",
@@ -635,7 +629,6 @@ impl ErrorCode {
             Self::QueueBacklogLimitExceeded => "QUEUE_BACKLOG_LIMIT_EXCEEDED",
             Self::QueueStorageUnavailable => "QUEUE_STORAGE_UNAVAILABLE",
             Self::QueueSendResultUnknown => "QUEUE_SEND_RESULT_UNKNOWN",
-            Self::QueueDoOutputGateUnsupported => "QUEUE_DO_OUTPUT_GATE_UNSUPPORTED",
             Self::QueueConsumerConflict => "QUEUE_CONSUMER_CONFLICT",
             Self::QueueConsumerNotReady => "QUEUE_CONSUMER_NOT_READY",
             Self::QueueConsumerProjectionPending => "QUEUE_CONSUMER_PROJECTION_PENDING",
@@ -675,12 +668,10 @@ impl ErrorCode {
             Self::WorkflowStepLimitExceeded => "WORKFLOW_STEP_LIMIT_EXCEEDED",
             Self::WorkflowStepConfigUnsupported => "WORKFLOW_STEP_CONFIG_UNSUPPORTED",
             Self::WorkflowDurationInvalid => "WORKFLOW_DURATION_INVALID",
-            Self::WorkflowParallelStepUnsupported => "WORKFLOW_PARALLEL_STEP_UNSUPPORTED",
             Self::WorkflowMethodUnsupported => "WORKFLOW_METHOD_UNSUPPORTED",
             Self::WorkflowNonDeterministic => "WORKFLOW_NON_DETERMINISTIC",
             Self::WorkflowRunStale => "WORKFLOW_RUN_STALE",
             Self::WorkflowStepStale => "WORKFLOW_STEP_STALE",
-            Self::WorkflowDoOutputGateUnsupported => "WORKFLOW_DO_OUTPUT_GATE_UNSUPPORTED",
             Self::WorkflowRuntimeUnavailable => "WORKFLOW_RUNTIME_UNAVAILABLE",
             Self::WorkflowExecutionFailed => "WORKFLOW_EXECUTION_FAILED",
             Self::WorkflowReferenced => "WORKFLOW_REFERENCED",

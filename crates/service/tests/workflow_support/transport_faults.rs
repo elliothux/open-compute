@@ -8,6 +8,7 @@ use axum::response::{IntoResponse as _, Response};
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_service::workflow_backend::WorkflowBindingService;
 use open_compute_storage::scheduler::ClaimedWorkflowRun;
+use serde_json::{Value, json};
 use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,7 +92,9 @@ fn envelope(run: &ClaimedWorkflowRun) -> WorkflowRunRequest {
         external_instance_id: run.external_instance_id.clone(),
         definition_name: run.target.definition_name.clone(),
         created_at_ms: run.created_at_ms,
-        payload_json: run.input_json.clone(),
+        payload_base64: run.input_json.clone(),
+        rollback: run.rollback,
+        schedule: None,
     }
 }
 
@@ -175,18 +178,22 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                     ..Trace::default()
                 };
                 let controller = WorkflowController::new(&harness.storage, &store, &config);
+                let input = if operation == "failure" {
+                    json!({"fail":true})
+                } else {
+                    Value::Null
+                };
+                let input = encode_workflow_json(&input);
                 let id = controller
                     .create(
                         account,
                         definition.id,
+                        open_compute_core::WorkflowOperationId::generate(),
                         None,
                         open_compute_workers::WorkflowCreateInput {
-                            payload_json: if operation == "failure" {
-                                "{\"fail\":true}"
-                            } else {
-                                "null"
-                            },
+                            payload_base64: &input,
                             retention: None,
+                            schedule: None,
                         },
                         now(),
                     )
@@ -307,18 +314,18 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                         }
                     }
                     WorkflowOutcome::Complete {
-                        output_json,
+                        output_base64,
                         final_ordinal,
                     } => {
                         assert!(!expected_error, "{fault:?}");
-                        let output: serde_json::Value = serde_json::from_str(&output_json).unwrap();
+                        let output = decode_workflow_json(&output_base64);
                         assert_eq!(output["id"], id);
                         let replayed = observation == Observation::Unknown
                             && operation == "success"
                             && after_commit;
-                        assert_eq!(output["callbacks"], usize::from(!replayed));
+                        assert_eq!(output["callbacks"], if replayed { 0.0 } else { 1.0 });
                         WorkflowCompletion::Complete {
-                            output_json,
+                            output_json: output_base64,
                             final_ordinal,
                         }
                     }
@@ -382,13 +389,8 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 };
                 eprintln!("Workflow create transport {fault:?}");
                 trace.lock().unwrap().fault = Some(fault);
-                let response = request(
-                    &harness,
-                    &caller,
-                    &format!("/create/{id}"),
-                    serde_json::Value::Null,
-                )
-                .await;
+                let response =
+                    request(&harness, &caller, &format!("/create/{id}"), Value::Null).await;
                 assert!(trace.lock().unwrap().fault.is_none());
                 let repository = WorkflowRepository::new(harness.storage.db());
                 if after_commit {
@@ -410,13 +412,8 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                             .state,
                         WorkflowState::Queued
                     );
-                    let duplicate = request(
-                        &harness,
-                        &caller,
-                        &format!("/create/{id}"),
-                        serde_json::Value::Null,
-                    )
-                    .await;
+                    let duplicate =
+                        request(&harness, &caller, &format!("/create/{id}"), Value::Null).await;
                     assert!(
                         duplicate["error"]
                             .as_str()
@@ -431,23 +428,12 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                             .code(),
                         ErrorCode::WorkflowInstanceNotFound
                     );
-                    let retry = request(
-                        &harness,
-                        &caller,
-                        &format!("/create/{id}"),
-                        serde_json::Value::Null,
-                    )
-                    .await;
+                    let retry =
+                        request(&harness, &caller, &format!("/create/{id}"), Value::Null).await;
                     assert_eq!(retry["status"], "queued", "{retry}");
                 }
                 assert_eq!(
-                    request(
-                        &harness,
-                        &caller,
-                        &format!("/status/{id}"),
-                        serde_json::Value::Null
-                    )
-                    .await["status"],
+                    request(&harness, &caller, &format!("/status/{id}"), Value::Null).await["status"],
                     "queued"
                 );
                 if after_commit && observation == Observation::Known {

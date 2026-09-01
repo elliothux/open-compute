@@ -4,6 +4,7 @@ use crate::d1_protocol::{
     D1_FRAME_CONTENT_TYPE, D1_JSON_CONTENT_TYPE, D1_MAX_FRAME_BYTES, D1QueryMode, decode_exec,
     decode_query, encode_results,
 };
+use crate::d1_session::{apply_session, issue_bookmark};
 use crate::metrics::{D1Operation as D1MetricOperation, MetricsRegistry};
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
@@ -356,6 +357,13 @@ impl D1BindingService {
                         if !readonly {
                             ensure_d1_storage_headroom(&storage)?;
                         }
+                        apply_session(
+                            storage.crypto(),
+                            binding.account_id,
+                            binding.resource.id,
+                            &engine,
+                            &query.session,
+                        )?;
                         mutation_for_task.store(!readonly, Ordering::Release);
                         let results = if query.mode == D1QueryMode::Batch {
                             engine.batch(&query.statements, limits)?
@@ -378,17 +386,26 @@ impl D1BindingService {
                             .iter()
                             .map(|result| result.meta.rows_written)
                             .fold(0_u64, u64::saturating_add);
-                        encode_results(&results).map(|bytes| CommandResult::Frame {
-                            bytes,
-                            operation: if query.mode == D1QueryMode::Batch {
-                                D1MetricOperation::Batch
-                            } else {
-                                D1MetricOperation::Query
+                        let (bookmark, session_version) = issue_bookmark(
+                            storage.crypto(),
+                            binding.account_id,
+                            binding.resource.id,
+                            &engine,
+                            &query.session,
+                        )?;
+                        encode_results(&results, bookmark.as_deref(), session_version).map(
+                            |bytes| CommandResult::Frame {
+                                bytes,
+                                operation: if query.mode == D1QueryMode::Batch {
+                                    D1MetricOperation::Batch
+                                } else {
+                                    D1MetricOperation::Query
+                                },
+                                readonly,
+                                rows_output,
+                                rows_written,
                             },
-                            readonly,
-                            rows_output,
-                            rows_written,
-                        })
+                        )
                     }
                     Command::Exec(sql) => {
                         let result = storage.reserve_mutation(
@@ -726,6 +743,8 @@ fn error_response(error: &PlatformError) -> Response {
         | ErrorCode::D1ParameterMismatch
         | ErrorCode::D1AuthorizerDenied
         | ErrorCode::D1InvalidBatch
+        | ErrorCode::D1SessionError
+        | ErrorCode::D1DumpError
         | ErrorCode::D1InternalProtocolError => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };

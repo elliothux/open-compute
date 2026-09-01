@@ -13,7 +13,7 @@ const route = { kind: "platform_path", workerId: worker, accountId: account, pat
 const ready = { promoted: true, deployment: { id: deployment, state: "ready", workerId: worker } };
 const project = {
   project: "/unused", main: "index.ts", tsconfig: "tsconfig.json", name: "hello",
-  compatibilityDate: "2026-08-22", compatibilityFlags: [], vars: { GREETING: "你好 🌍" },
+  vars: { GREETING: "你好 🌍" },
   secrets: { TOKEN: { env: "WORKER_TOKEN" } }, bindings: {},
   services: { SELF: { service: "hello" } }, endpoint: "http://127.0.0.1:1",
   runtimeFeatures: {

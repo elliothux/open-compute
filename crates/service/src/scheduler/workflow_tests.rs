@@ -30,7 +30,7 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
                 post(|| async {
                     // A successful transport cannot manufacture missing durable steps.
                     Json(json!({"result":{"outcome":"complete","finalOrdinal":1,
-                        "outputJson":"null"},"loaderOutcome":"warm","drainIncomplete":false}))
+                        "outputBase64":"T0NEVgECAA=="},"loaderOutcome":"warm","drainIncomplete":false}))
                 }),
             ),
         )
@@ -48,10 +48,12 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
         .create(
             f.account,
             definition.id,
+            open_compute_core::WorkflowOperationId::generate(),
             Some("short-frontier"),
             open_compute_workers::WorkflowCreateInput {
-                payload_json: "null",
+                payload_base64: "T0NEVgECAA==",
                 retention: None,
+                schedule: None,
             },
             10,
         )
@@ -113,10 +115,12 @@ async fn quarantined_generation_stops_claims_even_after_operator_resume() {
             .create(
                 f.account,
                 definition.id,
+                open_compute_core::WorkflowOperationId::generate(),
                 Some(name),
                 open_compute_workers::WorkflowCreateInput {
-                    payload_json: "null",
+                    payload_base64: "T0NEVgECAA==",
                     retention: None,
+                    schedule: None,
                 },
                 10,
             )

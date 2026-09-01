@@ -8,5 +8,8 @@
     ".": {
       "types": "./index.d.ts"
     }
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "catalog:"
   }
 }

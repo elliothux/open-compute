@@ -118,7 +118,8 @@ const INSTANCE_INSPECTION_SELECT: &str = "SELECT id,external_instance_id,version
     completed_step_count,(SELECT COUNT(*) FROM workflow_steps s WHERE s.instance_id=i.id),state_bytes,
     CASE WHEN run_lease_until_ms IS NOT NULL THEN MAX(0,run_lease_until_ms-?5) END,created_at_ms,terminal_at_ms,error_code,capability_version,
     pause_requested,yield_requested,next_wake_at_ms,registered_step_count,settled_step_count,success_retention_ms,error_retention_ms,
-    expires_at_ms,last_restart_operation_id,event_count,event_bytes,next_event_seq,has_activated FROM workflow_instances i";
+    expires_at_ms,last_restart_operation_id,event_count,event_bytes,next_event_seq,has_activated,
+    rollback_requested FROM workflow_instances i";
 
 fn inspection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowInstanceInspection> {
     let state: String = row.get(6)?;
@@ -176,8 +177,11 @@ pub(super) fn verify_history_connection(
     }
     for json in std::iter::once(instance.input_json.as_str()).chain(instance.output_json.as_deref())
     {
-        if open_compute_core::workflow::canonical_json(json, ErrorCode::WorkflowInvariantViolation)
-            .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?
+        if open_compute_core::workflow::durable_value_base64(
+            json,
+            ErrorCode::WorkflowInvariantViolation,
+        )
+        .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?
             != json
         {
             return Err(error(ErrorCode::WorkflowInvariantViolation));
@@ -221,11 +225,12 @@ pub(crate) fn workflow_invalid_rows(connection: &Connection) -> Result<u64, Plat
         OR i.completed_step_count!=a.completed OR i.event_count!=a.event_count OR i.event_bytes!=a.event_bytes
         OR i.next_wake_at_ms IS NOT a.next_wake
         OR i.state_bytes!=256+length(i.input_json)+coalesce(length(i.output_json),0)+coalesce(length(i.error_json),0)
+          +coalesce(length(CAST(i.trigger_cron AS BLOB))+16,0)
           +length(CAST(i.definition_name AS BLOB))+length(CAST(i.external_instance_id AS BLOB))+length(CAST(i.class_name AS BLOB))+a.history_bytes
         OR (i.state='complete' AND a.settled!=a.registered)
         OR (i.state!='running' AND EXISTS(SELECT 1 FROM workflow_steps s WHERE s.instance_id=i.id AND s.state='running'))
-        OR (i.state IN ('complete','errored','terminated') AND EXISTS(SELECT 1 FROM workflow_steps s WHERE s.instance_id=i.id AND s.state IN ('pending','waiting','retry_wait')))
-        OR (i.state='waiting' AND (a.next_wake IS NULL OR EXISTS(SELECT 1 FROM workflow_steps s WHERE s.instance_id=i.id AND s.state='pending')))
+        OR (i.state IN ('complete','errored','terminated') AND EXISTS(SELECT 1 FROM workflow_steps s WHERE s.instance_id=i.id AND s.state IN ('pending','delay_pending','waiting','retry_wait')))
+        OR (i.state='waiting' AND (a.next_wake IS NULL OR EXISTS(SELECT 1 FROM workflow_steps s WHERE s.instance_id=i.id AND s.state IN ('pending','delay_pending'))))
         OR EXISTS(SELECT 1 FROM workflow_steps s WHERE s.instance_id=i.id AND (s.instance_generation!=i.instance_generation
           OR s.config_sha256 IS NULL OR (s.state='running' AND s.run_token!=i.run_token)
           OR s.ordinal!=(SELECT COUNT(*) FROM workflow_steps p WHERE p.instance_id=i.id AND p.ordinal<s.ordinal)

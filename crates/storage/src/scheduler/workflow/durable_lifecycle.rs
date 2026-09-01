@@ -14,6 +14,50 @@ pub enum WorkflowInstanceAction {
 }
 
 impl SchedulerStore {
+    /// Fence normal execution and queue a replay that runs successful handlers in LIFO order.
+    pub fn request_workflow_rollback(
+        &self,
+        identity: &WorkflowInstanceIdentity,
+        now_ms: i64,
+        limits: &WorkflowsConfig,
+    ) -> Result<(), PlatformError> {
+        limits.validate()?;
+        durable_deadline(now_ms, 0)?;
+        let mut conn = self.lock()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let instance = tx
+            .query_row(
+                &format!("{INSTANCE_SELECT} WHERE id=?1"),
+                [identity.instance_id.to_string()],
+                instance_row,
+            )
+            .optional()
+            .map_err(sql_error)?
+            .ok_or_else(|| error(ErrorCode::WorkflowInstanceNotFound))?;
+        if instance.identity != *identity {
+            return Err(error(ErrorCode::WorkflowRunStale));
+        }
+        if instance.state.is_terminal() {
+            return Err(error(ErrorCode::WorkflowInstanceStateConflict));
+        }
+        if instance.durable.rollback_requested {
+            return Ok(());
+        }
+        cancel_unfinished(&tx, identity.instance_id, now_ms)?;
+        tx.execute(
+            "UPDATE workflow_instances SET state='queued',next_run_at_ms=?2,run_token=NULL,
+             run_claimed_at_ms=NULL,run_lease_until_ms=NULL,pause_requested=0,yield_requested=0,
+             rollback_requested=1,updated_at_ms=?2 WHERE id=?1",
+            params![identity.instance_id.to_string(), now_ms],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        self.wake.notify();
+        Ok(())
+    }
+
     /// Apply an admitted lifecycle action to an exact current generation.
     /// Termination fences platform commits; it does not cancel external side effects.
     pub fn modify_workflow(
@@ -68,7 +112,7 @@ impl SchedulerStore {
                 }
                 let due = {
                     let mut statement=tx.prepare("SELECT ordinal FROM workflow_steps WHERE instance_id=?1 AND
-                        ((state='waiting' AND due_at_ms<=?2) OR (state='pending' AND attempt>0 AND attempt_deadline_at_ms<=?2))
+                        (state='delay_pending' OR (state='waiting' AND due_at_ms<=?2) OR (state='pending' AND attempt>0 AND attempt_deadline_at_ms<=?2))
                         ORDER BY ordinal").map_err(sql_error)?;
                     statement
                         .query_map(params![identity.instance_id.to_string(), now_ms], |row| {
@@ -90,19 +134,21 @@ impl SchedulerStore {
                     .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
                     if step.state == "waiting" {
                         durable_waits::settle(&tx, &instance, &step, now_ms, limits)?;
+                    } else if step.state == "delay_pending" {
+                        // The next tenant activation resolves the persisted
+                        // dynamic delay function under the current deployment.
                     } else {
-                        durable_settlement::fail(
+                        durable_settlement::timeout(
                             &tx,
                             identity.instance_id,
                             identity.instance_generation,
                             &step,
-                            ErrorCode::WorkflowStepTimeout,
                             now_ms,
                         )?;
                     }
                 }
                 let ready:bool=tx.query_row("SELECT registered_step_count=settled_step_count OR EXISTS(
-                    SELECT 1 FROM workflow_steps WHERE instance_id=?1 AND (state='pending' OR (state='retry_wait' AND due_at_ms<=?2)))
+                    SELECT 1 FROM workflow_steps WHERE instance_id=?1 AND (state IN ('pending','delay_pending') OR (state='retry_wait' AND due_at_ms<=?2)))
                     FROM workflow_instances WHERE id=?1",params![identity.instance_id.to_string(),now_ms],|row|row.get(0)).map_err(sql_error)?;
                 tx.execute("UPDATE workflow_instances SET state=?2,next_run_at_ms=?3,updated_at_ms=?4 WHERE id=?1",
                     params![identity.instance_id.to_string(),if ready {"queued"} else {"waiting"},ready.then_some(now_ms),now_ms]).map_err(sql_error)?;
@@ -110,7 +156,8 @@ impl SchedulerStore {
             WorkflowInstanceAction::Terminate => {
                 cancel_unfinished(&tx, identity.instance_id, now_ms)?;
                 tx.execute("UPDATE workflow_instances SET state='terminated',next_run_at_ms=NULL,run_token=NULL,run_claimed_at_ms=NULL,
-                    run_lease_until_ms=NULL,pause_requested=0,yield_requested=0,terminal_at_ms=?2,expires_at_ms=?3,updated_at_ms=?2 WHERE id=?1",
+                    run_lease_until_ms=NULL,pause_requested=0,yield_requested=0,rollback_requested=0,
+                    terminal_at_ms=?2,expires_at_ms=?3,updated_at_ms=?2 WHERE id=?1",
                     params![identity.instance_id.to_string(),now_ms,durable.retention.expires_at(now_ms,false)?]).map_err(sql_error)?;
             }
         }
@@ -126,9 +173,9 @@ pub(super) fn cancel_unfinished(
     now_ms: i64,
 ) -> Result<(), PlatformError> {
     conn.execute(
-        "UPDATE workflow_steps SET state='cancelled',run_token=NULL,step_token=NULL,due_at_ms=NULL,
+        "UPDATE workflow_steps SET state='cancelled',run_token=NULL,step_token=NULL,due_at_ms=NULL,retry_delay_ms=NULL,
         error_json=NULL,error_code=NULL,cancelled_at_ms=?2,updated_at_ms=?2
-        WHERE instance_id=?1 AND state IN ('pending','running','waiting','retry_wait')",
+        WHERE instance_id=?1 AND state IN ('pending','running','delay_pending','waiting','retry_wait')",
         params![id.to_string(), now_ms],
     )
     .map_err(sql_error)?;

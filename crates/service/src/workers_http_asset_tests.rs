@@ -256,7 +256,6 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let metadata = serde_json::json!({
-        "compatibilityDate": "2026-08-22",
         "promote": true
     });
     let response = router
@@ -475,8 +474,7 @@ async fn worker_asset_upload_stages_bundle_and_replays_runtime_failure() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let metadata = serde_json::json!({
-        "mainModule": "index.js",
-        "compatibilityDate": "2026-08-22"
+        "mainModule": "index.js"
     });
     for _ in 0..2 {
         let response = router
@@ -516,8 +514,7 @@ async fn worker_asset_upload_stages_bundle_and_replays_runtime_failure() {
         assert_eq!(response.status(), StatusCode::OK);
     }
     let wrong_metadata = serde_json::json!({
-        "mainModule": "wrong.js",
-        "compatibilityDate": "2026-08-22"
+        "mainModule": "wrong.js"
     });
     for _ in 0..2 {
         let response = router

@@ -313,6 +313,30 @@ class GateTests(unittest.TestCase):
             log.write_text('0 tests, 0 benchmarks\n')
             self.assertEqual(gate.discovered_cases(log), ())
 
+    def test_contract_mapping_validates_member_runtime_evidence_before_build(self):
+        registered = f'p0-2::{gate.TIMING["p0-2"][0]}'
+        with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
+            root = Path(temp) / 'test/conformance'
+            root.mkdir(parents=True)
+            catalog = {
+                'schemaVersion': 1,
+                'contracts': [{
+                    'positiveCases': [registered],
+                    'negativeCases': [registered],
+                }],
+                'memberEvidence': [{ 'runtimeCases': [registered] }],
+            }
+            (root / 'catalog.json').write_text(json.dumps(catalog))
+            gate.validate_contract_case_mapping()
+            catalog['memberEvidence'][0]['runtimeCases'] = ['p0-2::missing']
+            (root / 'catalog.json').write_text(json.dumps(catalog))
+            with self.assertRaisesRegex(ValueError, 'unregistered Gate cases'):
+                gate.validate_contract_case_mapping()
+            catalog['memberEvidence'][0]['runtimeCases'] = [registered, registered]
+            (root / 'catalog.json').write_text(json.dumps(catalog))
+            with self.assertRaisesRegex(ValueError, 'member runtime evidence'):
+                gate.validate_contract_case_mapping()
+
     def test_exact_case_selection_rejects_zero_passes_ignored_and_partial_execution(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
             target = self.targets(['p0-2'])['p0-2']._replace(cases=('case', 'case::nested'))
@@ -426,6 +450,7 @@ class GateTests(unittest.TestCase):
                                            '--case', 'first', '--case', 'second'])
                 self.assertEqual(kwargs['env']['ALLOWED'], 'yes')
                 self.assertNotIn('SECRET', kwargs['env'])
+                self.assertEqual(kwargs['env']['BUN_RUNTIME_TRANSPILER_CACHE_PATH'], '0')
                 kwargs['stdout'].write(json.dumps({
                     'schemaVersion': 1,
                     'status': 'passed',

@@ -36,9 +36,18 @@ bun run oc build --config examples/hello-worker/open-compute.json \
 输出必须是新文件，已有文件不会被覆盖。`--json` 可输出公开的结果字段。
 这两个命令都不会安装依赖、下载 workerd 或执行项目配置代码。
 
+从已验证的项目配置生成 `Env` 类型，不需要 `platformd`：
+
+```sh
+bun run oc types --config examples/hello-worker/open-compute.json
+```
+
+默认写入项目目录的 `worker-configuration.d.ts`；`--out` 可指定另一个 `.d.ts` 路径。
+修改 vars、secrets 或 bindings 后重新运行同一命令即可替换先前生成的文件。
+
 ## 项目配置
 
-`open-compute.json` 必须有 `name`、`compatibilityDate`，并选择一种内容形态：`main`、`assets`、
+`open-compute.json` 必须有 `name`，并选择一种内容形态：`main`、`assets`、
 `main + assets`，或 `frameworkOutput`。`frameworkOutput` 不能再和显式 `main`/`assets` 组合；
 Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不能要求 Worker-first。
 `main`、`frameworkOutput`、assets directory 与 `tsconfig`（默认 `tsconfig.json`）相对配置文件目录
@@ -46,7 +55,7 @@ Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不
 默认平台地址为 `http://127.0.0.1:8787`；支持 `endpoint` / `--endpoint` 覆盖。
 默认账户由经过身份验证的 `GET /v1/account` 返回，也可用 `accountId` / `--account` 明确指定。
 
-其他字段是 `compatibilityFlags`、`vars`、`secrets`、`bindings`、`services`、`assets`、`cache`、
+其他字段是 `vars`、`secrets`、`bindings`、`services`、`assets`、`cache`、
 `exports`、`images` 和 `version_metadata`。普通产品
 binding 使用 `{type, id, permissions?}`；Service Binding 使用
 `[{binding, service, entrypoint?}]`，部署时把同账户 Worker 名解析并冻结为目标 ID。Assets 支持
@@ -74,8 +83,9 @@ Version Metadata 是平台内建 binding，不引用资源 ID，例如：
 管理令牌从 `OPEN_COMPUTE_ADMIN_TOKEN` 读取，或通过 `--token-env` 指定另一个变量名。
 不要把密钥值写入项目配置或命令参数。
 
-ESM 静态依赖、动态 import 的 chunks 和具名导出会保留；`node:` 导入需要显式启用
-`nodejs_compat`。工具链不提供 Node 运行环境、不填补未实现的产品 API，也不下载远程 import。
+ESM 静态依赖、动态 import 的 chunks 和具名导出会保留；当前 pinned baseline 已提供 Node 兼容，
+因此 `node:` 导入无需额外参数。工具链不提供 Node 运行环境、不填补未实现的产品 API，也不下载远程 import。
+项目 JSON 不得包含 `compatibilityDate` 或 `compatibilityFlags`。
 运行时仍按平台当前的兼容性日期、capability/deviation 与资源限制校验产物。Cache/Images 的精确
 支持面、单节点限制与资源预算见 P3.3 文档和 `platformd capabilities --json`。
 

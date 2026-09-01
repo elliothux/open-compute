@@ -184,8 +184,26 @@ fn workflow_config_is_resolved_strict_frozen_and_bounded() {
     let resolved=WorkflowStepConfig::resolve(&json!({"timeout":"1 minute","retries":{"limit":1.0,"delay":"0.0001 second","backoff":"linear"}})).unwrap();
     assert_eq!(resolved.timeout, 60_000);
     assert_eq!(resolved.retries.limit, 1);
-    assert_eq!(resolved.retries.delay, 1);
+    assert_eq!(resolved.retries.delay, Some(1));
     assert_eq!(resolved.retries.backoff, WorkflowBackoff::Linear);
+    let sensitive = WorkflowStepConfig::resolve(&json!({"sensitive":"output"})).unwrap();
+    assert_eq!(sensitive.sensitive, Some(WorkflowStepSensitivity::Output));
+    let dynamic = WorkflowStepConfig::resolve(
+        &json!({"timeout":100,"retries":{"limit":2,"delay":{"dynamic":true},"backoff":"linear"}}),
+    )
+    .unwrap();
+    assert_eq!(dynamic.retries.delay, None);
+    assert_eq!(
+        dynamic.retries.delay_after_resolved(2, Some(7)).unwrap(),
+        14
+    );
+    assert!(dynamic.retries.delay_after(1).is_err());
+    assert!(dynamic.retries.delay_after_resolved(0, Some(1)).is_err());
+    assert!(
+        WorkflowRetryPolicy::default()
+            .delay_after_resolved(1, Some(1))
+            .is_err()
+    );
     for invalid in [
         json!(null),
         json!([]),
@@ -229,7 +247,7 @@ fn workflow_retry_formulas_saturate_without_float_or_attempt_overflow() {
     ] {
         let policy = WorkflowRetryPolicy {
             limit: 100,
-            delay: 10,
+            delay: Some(10),
             backoff,
         };
         for (index, expected) in expected.into_iter().enumerate() {
@@ -240,7 +258,7 @@ fn workflow_retry_formulas_saturate_without_float_or_attempt_overflow() {
     }
     let mut policy = WorkflowRetryPolicy {
         limit: 100,
-        delay: WORKFLOW_MAX_DURATION_MS,
+        delay: Some(WORKFLOW_MAX_DURATION_MS),
         backoff: WorkflowBackoff::Exponential,
     };
     for attempt in [1, 2, 31, 64, 65, 100, 101] {
@@ -249,11 +267,11 @@ fn workflow_retry_formulas_saturate_without_float_or_attempt_overflow() {
             WORKFLOW_MAX_RETRY_DELAY_MS
         );
     }
-    policy.delay = 0;
+    policy.delay = Some(0);
     assert_eq!(policy.delay_after(101).unwrap(), 0);
-    policy.delay = WORKFLOW_MAX_DURATION_MS + 1;
+    policy.delay = Some(WORKFLOW_MAX_DURATION_MS + 1);
     assert!(policy.delay_after(1).is_err());
-    policy.delay = 1;
+    policy.delay = Some(1);
     policy.limit = 101;
     assert!(policy.delay_after(1).is_err());
 }

@@ -311,8 +311,6 @@ fn durable_object_policy_defaults_and_hard_bounds_are_validated() {
     for input in [
         "[durable_objects]\nmax_namespace_name_bytes = 0\n",
         "[durable_objects]\nmax_object_name_bytes = 1025\n",
-        "[durable_objects]\nmax_rpc_request_bytes = 16777217\n",
-        "[durable_objects]\nmax_rpc_response_bytes = 0\n",
         "[durable_objects]\nmax_fetch_body_bytes = 67108865\n",
         "[durable_objects]\ndispatch_timeout_ms = 300001\n",
         "[durable_objects]\nmax_in_flight_dispatches = 0\n",

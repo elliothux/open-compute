@@ -6,6 +6,7 @@ use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DoOperation {
+    Connect,
     Fetch,
     Rpc,
 }
@@ -13,6 +14,7 @@ pub(crate) enum DoOperation {
 impl DoOperation {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::Connect => "connect",
             Self::Fetch => "fetch",
             Self::Rpc => "rpc",
         }
@@ -178,8 +180,8 @@ impl super::MetricsRegistry {
     }
 }
 
-fn operations() -> [DoOperation; 2] {
-    [DoOperation::Fetch, DoOperation::Rpc]
+fn operations() -> [DoOperation; 3] {
+    [DoOperation::Connect, DoOperation::Fetch, DoOperation::Rpc]
 }
 
 fn operation_index(operation: DoOperation) -> usize {

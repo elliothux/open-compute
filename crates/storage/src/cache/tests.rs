@@ -660,7 +660,17 @@ fn cache_path_enumeration_ignores_junk_and_rejects_identity_symlinks() {
     let database = paths.database_path(account, worker);
     std::fs::write(paths.root().join("junk-account"), b"junk").unwrap();
     std::fs::write(worker_dir.join("junk-worker"), b"junk").unwrap();
+    let account_file = paths.root().join(AccountId::generate().to_string());
+    std::fs::write(&account_file, b"junk").unwrap();
+    let account_dir = paths.root().join(account.to_string());
+    let junk_worker = account_dir.join("junk-worker");
+    std::fs::create_dir(&junk_worker).unwrap();
+    let worker_file = account_dir.join(WorkerId::generate().to_string());
+    std::fs::write(&worker_file, b"junk").unwrap();
     assert_eq!(paths.databases().unwrap(), vec![database.clone()]);
+    std::fs::remove_file(account_file).unwrap();
+    std::fs::remove_dir(junk_worker).unwrap();
+    std::fs::remove_file(worker_file).unwrap();
 
     let linked_account = AccountId::generate();
     let linked_account_path = paths.root().join(linked_account.to_string());
@@ -680,5 +690,12 @@ fn cache_path_enumeration_ignores_junk_and_rejects_identity_symlinks() {
     assert_eq!(
         paths.databases().unwrap_err().code(),
         ErrorCode::CacheCorrupt
+    );
+
+    std::fs::remove_file(linked_worker_path).unwrap();
+    std::fs::remove_dir_all(paths.root()).unwrap();
+    assert_eq!(
+        paths.databases().unwrap_err().code(),
+        ErrorCode::CacheUnavailable
     );
 }

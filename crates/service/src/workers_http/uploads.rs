@@ -45,9 +45,6 @@ struct CreateUploadBody {
 struct FinalizeUploadBody {
     #[serde(default)]
     main_module: Option<String>,
-    compatibility_date: String,
-    #[serde(default)]
-    compatibility_flags: Vec<String>,
     #[serde(default)]
     vars: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
@@ -60,9 +57,8 @@ struct FinalizeUploadBody {
     runtime_features: DeploymentRuntimeFeatures,
     #[serde(default)]
     queue_consumers: Vec<QueueConsumerInput>,
-    crons: Option<Vec<String>>,
-    #[serde(default = "default_limits")]
-    limits: serde_json::Value,
+    #[serde(default)]
+    crons: Vec<String>,
     #[serde(default)]
     promote: bool,
 }
@@ -414,8 +410,6 @@ async fn complete_reserved_finalize(
                 worker_id: session.worker_id,
                 idempotency_key: format!("deployment-upload/{}", session.id),
                 content,
-                compatibility_date: metadata.compatibility_date,
-                compatibility_flags: metadata.compatibility_flags,
                 vars: metadata.vars,
                 secrets: metadata.secrets,
                 bindings: metadata.bindings,
@@ -423,7 +417,6 @@ async fn complete_reserved_finalize(
                 runtime_features: metadata.runtime_features,
                 queue_consumers: metadata.queue_consumers,
                 crons: metadata.crons,
-                limits: metadata.limits,
                 promote: metadata.promote,
                 request_id,
                 now_ms: now_ms(),

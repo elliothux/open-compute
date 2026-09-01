@@ -27,9 +27,6 @@ CREATE TABLE worker_deployments (
   artifact_size INTEGER CHECK(artifact_size IS NULL OR artifact_size >= 0),
   artifact_schema_version INTEGER,
   main_module TEXT,
-  compatibility_date TEXT NOT NULL,
-  compatibility_flags_json BLOB NOT NULL,
-  limits_json BLOB NOT NULL,
   worker_code_sha256 BLOB NOT NULL CHECK(length(worker_code_sha256) = 32),
   loader_schema_version INTEGER NOT NULL,
   created_at_ms INTEGER NOT NULL,
@@ -166,8 +163,7 @@ END;
 
 CREATE TRIGGER deployment_immutable_guard
 BEFORE UPDATE OF content_kind, artifact_sha256, artifact_size, artifact_schema_version,
-  main_module, compatibility_date, compatibility_flags_json, limits_json,
-  worker_code_sha256, loader_schema_version
+  main_module, worker_code_sha256, loader_schema_version
 ON worker_deployments
 WHEN OLD.state != 'staging'
 BEGIN

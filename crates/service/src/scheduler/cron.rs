@@ -5,7 +5,7 @@ use crate::metrics::{CronRunOutcome, MetricsRegistry, SchedulerClaimOutcome};
 use crate::runtime_bridge::{DispatchTarget, ScheduledDispatchRequest};
 use open_compute_core::{PlatformError, RequestId, SchedulerKind, SchedulerPoolState};
 use open_compute_storage::{
-    ClaimedCronRun, CronCompletion, CronCompletionResult, WorkerRepository,
+    ClaimedCronRun, CronCompletion, CronCompletionResult, CronRepository, WorkerRepository,
 };
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -61,11 +61,29 @@ impl SchedulerService {
             tokio::task::spawn_blocking(move || {
                 let workers = WorkerRepository::new(storage.db());
                 workers.get_worker(current.account_id, current.worker_id)?;
-                workers.get_deployment(current.account_id, current.worker_id, current.deployment_id)
+                let deployment = workers.get_deployment(
+                    current.account_id,
+                    current.worker_id,
+                    current.deployment_id,
+                )?;
+                let activation =
+                    CronRepository::new(storage.db()).activation(current.activation_id)?;
+                if activation.account_id != current.account_id
+                    || activation.worker_id != current.worker_id
+                    || activation.deployment_id != current.deployment_id
+                    || activation.expression != current.expression
+                    || activation.activation_generation != current.activation_generation
+                {
+                    return Err(PlatformError::new(
+                        open_compute_core::ErrorCode::CronActivationStale,
+                        "Cron activation no longer matches its scheduler projection",
+                    ));
+                }
+                Ok((deployment, activation))
             })
             .await
         };
-        let Ok(Ok(deployment)) = authority else {
+        let Ok(Ok((deployment, activation))) = authority else {
             if let Some(metrics) = &self.metrics {
                 metrics.inc_cron_run(CronRunOutcome::Unknown);
             }
@@ -93,6 +111,8 @@ impl SchedulerService {
         let request = ScheduledDispatchRequest {
             scheduled_time_ms: run.scheduled_at_ms,
             cron: run.expression.clone(),
+            scheduled_handler: activation.scheduled_handler,
+            workflow_bindings: activation.workflow_bindings,
         };
         let response = self
             .transport

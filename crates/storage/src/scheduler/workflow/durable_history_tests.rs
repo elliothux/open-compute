@@ -13,15 +13,15 @@ fn admission_freezes_retention_and_preserves_the_current_run_fence() {
     };
     let limits = WorkflowsConfig::default();
     store
-        .insert_workflow(&identity, "{}", Some(&retention), &limits)
+        .insert_workflow(&identity, TEST_NULL_VALUE, Some(&retention), &limits)
         .unwrap();
     let before = store.workflow_instance(id).unwrap().unwrap();
     assert_eq!(before.state_bytes, base_bytes(&identity) as u64);
     assert!(!before.durable.has_activated);
     for (input, retention) in [
-        ("null", Some(&retention)),
-        ("{}", None),
-        ("{}", Some(&WorkflowRetention::default())),
+        (TEST_TRUE_VALUE, Some(&retention)),
+        (TEST_NULL_VALUE, None),
+        (TEST_NULL_VALUE, Some(&WorkflowRetention::default())),
     ] {
         assert_eq!(
             store
@@ -67,6 +67,9 @@ fn paused_instances_still_consume_active_capacity() {
     store.verify_workflow_history(identity.instance_id).unwrap();
     identity.instance_id = WorkflowInstanceId::generate();
     identity.external_instance_id = "next".into();
+    identity.creation_nonce = token().unwrap();
+    identity.creation_operation_id = WorkflowOperationId::generate();
+    identity.creation_batch_id = identity.creation_operation_id;
     let limits = WorkflowsConfig {
         max_active_per_account: 1,
         ..WorkflowsConfig::default()
@@ -75,7 +78,7 @@ fn paused_instances_still_consume_active_capacity() {
         store
             .insert_workflow(
                 &identity,
-                "{}",
+                TEST_NULL_VALUE,
                 Some(&WorkflowRetention::default()),
                 &limits
             )
@@ -107,8 +110,8 @@ fn settled_batch_then_wait(store: &SchedulerStore, id: WorkflowInstanceId) {
     // The second callback settles first; a failed sibling is part of the settled frontier.
     tx.execute("UPDATE workflow_steps SET state='failed',error_json=?2,error_code='WORKFLOW_NON_RETRYABLE',completed_at_ms=3,updated_at_ms=3,
         run_token=NULL,step_token=NULL WHERE instance_id=?1 AND ordinal=1", params![id.to_string(),failure_json().as_bytes()]).unwrap();
-    tx.execute("UPDATE workflow_steps SET state='complete',output_json=X'3131',completed_at_ms=4,updated_at_ms=4,
-        run_token=NULL,step_token=NULL WHERE instance_id=?1 AND ordinal=0", [id.to_string()]).unwrap();
+    tx.execute("UPDATE workflow_steps SET state='complete',output_json=?2,completed_at_ms=4,updated_at_ms=4,
+        run_token=NULL,step_token=NULL WHERE instance_id=?1 AND ordinal=0", params![id.to_string(), b"T0NEVgECBEAmAAAAAAAA".as_slice()]).unwrap();
     let mut wait = descriptor(2, WorkflowStepKind::Sleep, json!({"duration":10}));
     wait.name_count = 1;
     wait.dependencies = vec![0, 1];
@@ -134,17 +137,17 @@ fn history_accepts_failed_siblings_dependency_barriers_and_wait_kinds_after_rest
         );
         event.name_count = 1;
         tx.execute(
-            "INSERT INTO workflow_events VALUES(?1,1,1,'ok',X'37',16,35)",
-            [id.to_string()],
+            "INSERT INTO workflow_events VALUES(?1,1,1,'ok',?2,16,54)",
+            params![id.to_string(), b"T0NEVgECBEAcAAAAAAAA".as_slice()],
         )
         .unwrap();
         register(&tx, id, &event, 16, Some(16), Some(1));
         let envelope = open_compute_core::workflow::WorkflowEventEnvelope {
             event_type: "ok",
-            payload_json: "7",
+            payload_base64: "T0NEVgECBEAcAAAAAAAA",
             timestamp_ms: 16,
         }
-        .canonical_json()
+        .canonical_wire()
         .unwrap();
         tx.execute("UPDATE workflow_steps SET state='complete',due_at_ms=NULL,output_json=?2,consumed_event_seq=1,completed_at_ms=16,updated_at_ms=16
             WHERE instance_id=?1 AND ordinal=3", params![id.to_string(),envelope.as_bytes()]).unwrap();
@@ -153,9 +156,9 @@ fn history_accepts_failed_siblings_dependency_barriers_and_wait_kinds_after_rest
             [id.to_string()],
         )
         .unwrap();
-        tx.execute("UPDATE workflow_instances SET state='complete',output_json=X'3131',state_bytes=state_bytes+2,
+        tx.execute("UPDATE workflow_instances SET state='complete',output_json=?2,state_bytes=state_bytes+20,
             run_token=NULL,run_claimed_at_ms=NULL,run_lease_until_ms=NULL,terminal_at_ms=17,updated_at_ms=17,expires_at_ms=3600017
-            WHERE id=?1", [id.to_string()]).unwrap();
+            WHERE id=?1", params![id.to_string(), b"T0NEVgECBEAmAAAAAAAA".as_slice()]).unwrap();
         tx.commit().unwrap();
     }
     store.verify_workflow_history(id).unwrap();
@@ -408,7 +411,7 @@ fn history_verifies_retry_delay_absolute_sleep_event_timeout_and_retained_inbox(
                     );
                     tx.execute("UPDATE workflow_steps SET state='running',attempt=1,attempt_started_at_ms=1,attempt_deadline_at_ms=11,
                         run_token=?2,step_token=?3 WHERE instance_id=?1", params![id.to_string(),&[0x11_u8;32][..],&[0x22_u8;32][..]]).unwrap();
-                    tx.execute("UPDATE workflow_steps SET state='retry_wait',run_token=NULL,step_token=NULL,due_at_ms=16,
+                    tx.execute("UPDATE workflow_steps SET state='retry_wait',run_token=NULL,step_token=NULL,due_at_ms=16,retry_delay_ms=5,
                         updated_at_ms=11,error_json=?2,error_code='WORKFLOW_STEP_TIMEOUT' WHERE instance_id=?1", params![id.to_string(),failure_json().as_bytes()]).unwrap();
                 }
                 WorkflowStepKind::SleepUntil => {
@@ -435,8 +438,8 @@ fn history_verifies_retry_delay_absolute_sleep_event_timeout_and_retained_inbox(
                     tx.execute("UPDATE workflow_steps SET state='failed',due_at_ms=NULL,updated_at_ms=1,completed_at_ms=1,
                         error_json=?2,error_code='WORKFLOW_EVENT_TIMEOUT' WHERE instance_id=?1", params![id.to_string(),failure_json().as_bytes()]).unwrap();
                     tx.execute(
-                        "INSERT INTO workflow_events VALUES(?1,1,1,'ok',X'37',2,35)",
-                        [id.to_string()],
+                        "INSERT INTO workflow_events VALUES(?1,1,1,'ok',?2,2,54)",
+                        params![id.to_string(), TEST_SEVEN_VALUE.as_bytes()],
                     )
                     .unwrap();
                 }
@@ -449,7 +452,13 @@ fn history_verifies_retry_delay_absolute_sleep_event_timeout_and_retained_inbox(
         let mut conn = store.lock().unwrap();
         let tx = conn.transaction().unwrap();
         if kind == WorkflowStepKind::WaitEvent {
-            tx.execute_batch("DROP TRIGGER workflow_event_immutable; UPDATE workflow_events SET payload_json=X'61';").unwrap();
+            tx.execute_batch(
+                "DROP TRIGGER workflow_event_immutable;
+                PRAGMA ignore_check_constraints=ON;
+                UPDATE workflow_events SET payload_base64=X'61';
+                PRAGMA ignore_check_constraints=OFF;",
+            )
+            .unwrap();
             assert_eq!(
                 inspection::verify_history_connection(&tx, id)
                     .unwrap_err()
@@ -457,7 +466,13 @@ fn history_verifies_retry_delay_absolute_sleep_event_timeout_and_retained_inbox(
                 ErrorCode::WorkflowInvariantViolation
             );
         } else if kind == WorkflowStepKind::Do {
-            tx.execute_batch("DROP TRIGGER workflow_step_transition_guard; UPDATE workflow_steps SET due_at_ms=17;").unwrap();
+            tx.execute_batch(
+                "DROP TRIGGER workflow_step_transition_guard;
+                PRAGMA ignore_check_constraints=ON;
+                UPDATE workflow_steps SET due_at_ms=17;
+                PRAGMA ignore_check_constraints=OFF;",
+            )
+            .unwrap();
             assert_eq!(
                 inspection::verify_history_connection(&tx, id)
                     .unwrap_err()

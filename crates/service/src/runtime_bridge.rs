@@ -24,6 +24,7 @@ use open_compute_storage::{
 };
 use open_compute_workers::{
     DeploymentPins, RuntimeScope, RuntimeSource, RuntimeValidator, ValidationCandidate, loader_key,
+    validate_env_name,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -125,6 +126,43 @@ pub struct QueueDispatchMessage {
     pub body_base64: String,
 }
 
+/// Live backlog metadata delivered with a native Queue custom event.
+#[derive(Clone, Debug, Default, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueDispatchMetrics {
+    /// Retained message count, including delayed messages.
+    pub backlog_count: u64,
+    /// Retained serialized body bytes.
+    pub backlog_bytes: u64,
+    /// Oldest enqueue timestamp; omitted when empty or the epoch sentinel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_message_timestamp_ms: Option<i64>,
+}
+
+/// Native `MessageBatch.metadata` payload assembled after a durable claim.
+#[derive(Clone, Debug, Default, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueDispatchMetadata {
+    /// Live backlog snapshot observed at dispatch.
+    pub metrics: QueueDispatchMetrics,
+}
+
+impl QueueDispatchMetadata {
+    /// Copy scheduler metrics, converting the epoch sentinel to absence.
+    #[must_use]
+    pub fn from_queue_metrics(metrics: open_compute_storage::QueueMetrics) -> Self {
+        Self {
+            metrics: QueueDispatchMetrics {
+                backlog_count: metrics.backlog_count,
+                backlog_bytes: metrics.backlog_bytes,
+                oldest_message_timestamp_ms: metrics
+                    .oldest_message_timestamp_ms
+                    .filter(|value| *value != 0),
+            },
+        }
+    }
+}
+
 /// Trusted native Queue custom-event request assembled after a durable claim.
 #[derive(Clone, Debug, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -133,6 +171,9 @@ pub struct QueueDispatchRequest {
     pub queue_name: String,
     /// Bounded claimed membership in deterministic order.
     pub messages: Vec<QueueDispatchMessage>,
+    /// Live backlog metadata for `MessageBatch.metadata`.
+    #[serde(default)]
+    pub metadata: QueueDispatchMetadata,
 }
 
 /// Native batch-level retry decision.
@@ -181,6 +222,10 @@ pub struct ScheduledDispatchRequest {
     pub scheduled_time_ms: i64,
     /// Exact deployment-declared expression.
     pub cron: String,
+    /// Whether the tenant Worker's scheduled handler owns this expression.
+    pub scheduled_handler: bool,
+    /// Workflow bindings directly triggered by this expression.
+    pub workflow_bindings: Vec<String>,
 }
 
 /// Strict result returned by workerd's native scheduled dispatcher.
@@ -898,13 +943,21 @@ fn validate_queue_dispatch_request(request: &QueueDispatchRequest) -> Result<(),
             QueueContentType::Text => {
                 std::str::from_utf8(&body).map_err(|_| queue_protocol_error())?;
             }
-            QueueContentType::Bytes => {}
+            QueueContentType::Bytes | QueueContentType::V8 => {}
         }
         total = total
             .checked_add(message.body_base64.len())
             .ok_or_else(queue_protocol_error)?;
     }
     if total > MAX_QUEUE_CUSTOM_EVENT_REQUEST {
+        return Err(queue_protocol_error());
+    }
+    let metrics = &request.metadata.metrics;
+    if metrics.oldest_message_timestamp_ms == Some(0)
+        || metrics
+            .oldest_message_timestamp_ms
+            .is_some_and(|value| value < 0)
+    {
         return Err(queue_protocol_error());
     }
     Ok(())
@@ -919,7 +972,24 @@ fn validate_scheduled_dispatch_request(
             "Cron logical slot is invalid",
         ));
     }
-    CronSchedule::parse(&request.cron).map(|_| ())
+    CronSchedule::parse(&request.cron)?;
+    if (!request.scheduled_handler && request.workflow_bindings.is_empty())
+        || request.workflow_bindings.len() > 100
+        || request
+            .workflow_bindings
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || request
+            .workflow_bindings
+            .iter()
+            .any(|name| name.len() > 64 || validate_env_name(name).is_err())
+    {
+        return Err(PlatformError::new(
+            ErrorCode::CronActivationStale,
+            "Cron activation target is invalid",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_scheduled_dispatch_result(

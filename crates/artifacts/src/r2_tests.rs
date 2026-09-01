@@ -1,5 +1,12 @@
 use super::*;
+use crate::r2_codec::{
+    canonical_custom_metadata, http_date_millis, millis_datetime, quote_etag, unquote_etag,
+};
+use crate::r2_model::{
+    R2Checksums, R2EtagMatch, R2MultipartCreateOptions, R2SsecKey, R2StorageClass,
+};
 use open_compute_core::PlatformId;
+use std::collections::BTreeMap;
 
 fn locator() -> R2BucketLocator {
     let resource_id = ResourceId::generate();
@@ -12,24 +19,18 @@ fn locator() -> R2BucketLocator {
 }
 
 #[test]
-fn user_keys_are_not_normalized_and_respect_dynamic_budget() {
+fn user_keys_are_not_normalized_and_use_cloudflare_limit() {
     let locator = locator();
     assert_eq!(locator.resource_id(), locator.resource_id);
-    for key in ["", "/", "a//b", "%2F", "中文", "+", " a "] {
-        assert_eq!(UserObjectKey::parse(key, &locator).unwrap().as_str(), key);
+    for key in [
+        "", "/", ".", "..", "a//b", "a/./b", "a/../b", "%2F", "中文", "+", " a ",
+    ] {
+        assert_eq!(UserObjectKey::parse(key).unwrap().as_str(), key);
     }
-    for key in [".", "..", "a/./b", "a/../b"] {
-        assert_eq!(
-            UserObjectKey::parse(key, &locator).unwrap_err().code(),
-            ErrorCode::R2KeyInvalid
-        );
-    }
-    let exact = "x".repeat(locator.max_user_key_bytes());
-    assert!(UserObjectKey::parse(&exact, &locator).is_ok());
+    let exact = "x".repeat(crate::R2_MAX_KEY_BYTES);
+    assert!(UserObjectKey::parse(&exact).is_ok());
     assert_eq!(
-        UserObjectKey::parse(&(exact + "x"), &locator)
-            .unwrap_err()
-            .code(),
+        UserObjectKey::parse(&(exact + "x")).unwrap_err().code(),
         ErrorCode::R2KeyTooLarge
     );
 }
@@ -128,6 +129,61 @@ fn content_range_and_md5_file_are_exact() {
 }
 
 #[test]
+fn exposed_checksums_match_cloudflare_md5_plus_requested_algorithm_semantics() {
+    let computed = hash_bytes(b"x");
+    assert_eq!(
+        computed.exposed(None),
+        R2Checksums {
+            md5: Some(hex::encode(computed.md5)),
+            ..R2Checksums::default()
+        }
+    );
+    for (requested, expected) in [
+        (
+            R2ChecksumAlgorithm::Md5(computed.md5),
+            R2Checksums {
+                md5: Some(hex::encode(computed.md5)),
+                ..R2Checksums::default()
+            },
+        ),
+        (
+            R2ChecksumAlgorithm::Sha1(computed.sha1),
+            R2Checksums {
+                md5: Some(hex::encode(computed.md5)),
+                sha1: Some(hex::encode(computed.sha1)),
+                ..R2Checksums::default()
+            },
+        ),
+        (
+            R2ChecksumAlgorithm::Sha256(computed.sha256),
+            R2Checksums {
+                md5: Some(hex::encode(computed.md5)),
+                sha256: Some(hex::encode(computed.sha256)),
+                ..R2Checksums::default()
+            },
+        ),
+        (
+            R2ChecksumAlgorithm::Sha384(computed.sha384),
+            R2Checksums {
+                md5: Some(hex::encode(computed.md5)),
+                sha384: Some(hex::encode(computed.sha384)),
+                ..R2Checksums::default()
+            },
+        ),
+        (
+            R2ChecksumAlgorithm::Sha512(computed.sha512),
+            R2Checksums {
+                md5: Some(hex::encode(computed.md5)),
+                sha512: Some(hex::encode(computed.sha512)),
+                ..R2Checksums::default()
+            },
+        ),
+    ] {
+        assert_eq!(computed.exposed(Some(&requested)), expected);
+    }
+}
+
+#[test]
 fn conditions_use_exact_etag_and_upload_time() {
     let meta = R2ObjectMetadata {
         key: "k".to_owned(),
@@ -136,28 +192,86 @@ fn conditions_use_exact_etag_and_upload_time() {
         etag: "etag".to_owned(),
         http_etag: "\"etag\"".to_owned(),
         uploaded: 100,
-        http_metadata: R2HttpMetadata::default(),
-        custom_metadata: BTreeMap::new(),
+        http_metadata: Some(R2HttpMetadata::default()),
+        custom_metadata: Some(BTreeMap::new()),
         range: None,
-        md5: "00".repeat(16),
+        checksums: R2Checksums {
+            md5: Some("00".repeat(16)),
+            ..R2Checksums::default()
+        },
         storage_class: "Standard".to_owned(),
+        ssec_key_md5: None,
     };
-    assert!(condition_matches(
-        &R2Condition {
-            etag_matches: vec!["\"etag\"".to_owned()],
+    assert!(
+        R2Condition {
+            etag_matches: vec![R2EtagMatch::Strong {
+                value: "etag".to_owned()
+            }],
             uploaded_before: Some(100),
             uploaded_after: Some(99),
             ..R2Condition::default()
-        },
-        &meta
-    ));
-    assert!(!condition_matches(
-        &R2Condition {
-            etag_does_not_match: vec!["etag".to_owned()],
+        }
+        .matches_object(&meta.etag, meta.uploaded)
+    );
+    assert!(
+        !R2Condition {
+            etag_does_not_match: vec![R2EtagMatch::Strong {
+                value: "etag".to_owned()
+            }],
             ..R2Condition::default()
-        },
-        &meta
-    ));
+        }
+        .matches_object(&meta.etag, meta.uploaded)
+    );
+    assert!(
+        !R2Condition {
+            etag_matches: vec![R2EtagMatch::Weak {
+                value: "etag".to_owned()
+            }],
+            http_headers: true,
+            ..R2Condition::default()
+        }
+        .matches_object(&meta.etag, meta.uploaded)
+    );
+    assert!(
+        !R2Condition {
+            etag_does_not_match: vec![R2EtagMatch::Weak {
+                value: "etag".to_owned()
+            }],
+            http_headers: true,
+            ..R2Condition::default()
+        }
+        .matches_object(&meta.etag, meta.uploaded)
+    );
+    assert!(
+        R2Condition {
+            etag_matches: vec![R2EtagMatch::Strong {
+                value: "etag".to_owned()
+            }],
+            uploaded_before: Some(0),
+            http_headers: true,
+            ..R2Condition::default()
+        }
+        .matches_object(&meta.etag, meta.uploaded)
+    );
+    let header_none_match = R2Condition {
+        etag_does_not_match: vec![R2EtagMatch::Strong {
+            value: "different".to_owned(),
+        }],
+        uploaded_after: Some(1_000),
+        http_headers: true,
+        ..R2Condition::default()
+    };
+    assert!(header_none_match.matches_object(&meta.etag, meta.uploaded));
+    assert!(header_none_match.matches_missing());
+}
+
+fn upload_source(path: std::path::PathBuf, bytes: &[u8]) -> R2UploadSource {
+    R2UploadSource {
+        path,
+        length: u64::try_from(bytes.len()).unwrap(),
+        checksums: hash_bytes(bytes),
+        version: uuid::Uuid::now_v7().to_string(),
+    }
 }
 
 #[tokio::test]
@@ -221,16 +335,16 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
         ErrorCode::R2PrefixCollision
     );
 
-    let key = UserObjectKey::parse("key", &locator).unwrap();
+    let key = UserObjectKey::parse("key").unwrap();
     let missing = R2UploadSource {
         path: std::path::PathBuf::from("/definitely/missing/open-compute-r2"),
         length: 0,
-        md5: Md5::digest([]).into(),
+        checksums: hash_bytes(b""),
         version: uuid::Uuid::now_v7().to_string(),
     };
     assert_eq!(
         store
-            .put_file(&locator, &key, &missing, &R2PutOptions::default())
+            .put_file(&locator, &key, &missing, &R2PutOptions::default(), None)
             .await
             .unwrap_err()
             .code(),
@@ -243,24 +357,25 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("body");
     std::fs::write(&path, b"body").unwrap();
-    let valid = R2UploadSource {
-        path: path.clone(),
-        length: 4,
-        md5: Md5::digest(b"body").into(),
-        version: uuid::Uuid::now_v7().to_string(),
-    };
+    let valid = upload_source(path.clone(), b"body");
     let wrong_length = R2UploadSource {
         length: 3,
         ..R2UploadSource {
             path: path.clone(),
             length: valid.length,
-            md5: valid.md5,
+            checksums: valid.checksums.clone(),
             version: valid.version.clone(),
         }
     };
     assert_eq!(
         store
-            .put_file(&locator, &key, &wrong_length, &R2PutOptions::default())
+            .put_file(
+                &locator,
+                &key,
+                &wrong_length,
+                &R2PutOptions::default(),
+                None
+            )
             .await
             .unwrap_err()
             .code(),
@@ -269,12 +384,12 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
     let bad_version = R2UploadSource {
         path: path.clone(),
         length: valid.length,
-        md5: valid.md5,
+        checksums: valid.checksums.clone(),
         version: "bad".to_owned(),
     };
     assert_eq!(
         store
-            .put_file(&locator, &key, &bad_version, &R2PutOptions::default())
+            .put_file(&locator, &key, &bad_version, &R2PutOptions::default(), None)
             .await
             .unwrap_err()
             .code(),
@@ -287,40 +402,33 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
                 &key,
                 &valid,
                 &R2PutOptions {
-                    expected_md5: Some([0; 16]),
+                    checksum: Some(R2ChecksumAlgorithm::Md5([0; 16])),
                     ..R2PutOptions::default()
                 },
+                None,
             )
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::R2PreconditionFailed
+        ErrorCode::R2ChecksumMismatch
     );
-    for condition in [
-        R2Condition {
-            uploaded_before: Some(1),
-            ..R2Condition::default()
-        },
-        R2Condition {
-            etag_matches: vec!["a".to_owned(), "b".to_owned()],
-            ..R2Condition::default()
-        },
-    ] {
-        assert!(
-            store
-                .put_file(
-                    &locator,
-                    &key,
-                    &valid,
-                    &R2PutOptions {
-                        only_if: Some(condition),
-                        ..R2PutOptions::default()
-                    },
-                )
-                .await
-                .is_err()
-        );
-    }
+    let missing_object = store
+        .put_file(
+            &locator,
+            &key,
+            &valid,
+            &R2PutOptions {
+                only_if: Some(R2Condition {
+                    uploaded_before: Some(1),
+                    ..R2Condition::default()
+                }),
+                ..R2PutOptions::default()
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(missing_object.is_none());
     assert_eq!(
         store.delete(&locator, &[]).await.unwrap_err().code(),
         ErrorCode::R2InvalidOptions
@@ -333,13 +441,6 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
             .code(),
         ErrorCode::R2InvalidOptions
     );
-    assert!(store.list(&locator, "", None, 0, None).await.is_err());
-    assert!(
-        store
-            .list(&locator, "", Some(""), R2_MAX_LIST_LIMIT, None)
-            .await
-            .is_err()
-    );
     assert_eq!(
         store
             .get(
@@ -350,6 +451,7 @@ async fn typed_store_rejects_local_invalid_inputs_and_identity_collisions() {
                     length: Some(0),
                     suffix: None,
                 }),
+                None,
                 None,
             )
             .await
@@ -402,13 +504,8 @@ async fn typed_store_round_trips_identity_object_range_list_and_delete() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("upload");
     std::fs::write(&path, b"hello world").unwrap();
-    let source = R2UploadSource {
-        path,
-        length: 11,
-        md5: Md5::digest(b"hello world").into(),
-        version: uuid::Uuid::now_v7().to_string(),
-    };
-    let key = UserObjectKey::parse("folder/a + %.txt", &locator).unwrap();
+    let source = upload_source(path, b"hello world");
+    let key = UserObjectKey::parse("folder/a + %.txt").unwrap();
     let mut custom = BTreeMap::new();
     custom.insert("作者".to_owned(), "Elliot".to_owned());
     let options = R2PutOptions {
@@ -418,22 +515,27 @@ async fn typed_store_round_trips_identity_object_range_list_and_delete() {
             ..R2HttpMetadata::default()
         },
         custom_metadata: custom.clone(),
-        expected_md5: Some(source.md5),
+        checksum: Some(R2ChecksumAlgorithm::Md5(source.checksums.md5)),
         ..R2PutOptions::default()
     };
     let put = store
-        .put_file(&locator, &key, &source, &options)
+        .put_file(&locator, &key, &source, &options, None)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(put.key, key.as_str());
-    assert_eq!(put.custom_metadata, custom);
+    assert_eq!(put.custom_metadata.as_ref(), Some(&custom));
     assert_eq!(
-        put.http_metadata.content_type,
-        options.http_metadata.content_type
+        put.http_metadata
+            .as_ref()
+            .and_then(|meta| meta.content_type.as_ref()),
+        options.http_metadata.content_type.as_ref()
     );
     assert_eq!(put.size, 11);
-    assert_eq!(store.head(&locator, &key).await.unwrap(), Some(put.clone()));
+    assert_eq!(
+        store.head(&locator, &key, None).await.unwrap(),
+        Some(put.clone())
+    );
 
     let R2GetResult::Body(download) = store
         .get(
@@ -444,6 +546,7 @@ async fn typed_store_round_trips_identity_object_range_list_and_delete() {
                 length: Some(5),
                 suffix: None,
             }),
+            None,
             None,
         )
         .await
@@ -457,21 +560,15 @@ async fn typed_store_round_trips_identity_object_range_list_and_delete() {
     );
     assert_eq!(download.metadata.range.unwrap().length, Some(5));
 
-    let page = store
-        .list(&locator, "folder/", Some("/"), 1000, None)
-        .await
-        .unwrap();
-    assert_eq!(page.objects.len(), 1);
-    assert_eq!(page.objects[0].key, key.as_str());
-    assert!(page.provider_token.is_none());
-
     let failed = R2Condition {
-        etag_matches: vec!["different".to_owned()],
+        etag_matches: vec![R2EtagMatch::Strong {
+            value: "different".to_owned(),
+        }],
         ..R2Condition::default()
     };
     assert!(matches!(
         store
-            .get(&locator, &key, None, Some(&failed))
+            .get(&locator, &key, None, Some(&failed), None)
             .await
             .unwrap(),
         R2GetResult::Precondition(_)
@@ -480,10 +577,105 @@ async fn typed_store_round_trips_identity_object_range_list_and_delete() {
         .delete(&locator, std::slice::from_ref(&key))
         .await
         .unwrap();
-    assert!(store.head(&locator, &key).await.unwrap().is_none());
+    assert!(store.head(&locator, &key, None).await.unwrap().is_none());
     assert!(store.is_empty(&locator).await.unwrap());
     store.delete_identity(&locator).await.unwrap();
     assert!(store.read_identity(&locator).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn conditional_put_rechecks_the_original_condition_after_a_create_race() {
+    let mock = crate::MockS3::spawn("bucket").await;
+    let config = open_compute_core::S3Config {
+        endpoint: mock.endpoint.clone(),
+        bucket: "bucket".to_owned(),
+        ..open_compute_core::S3Config::default()
+    };
+    let credentials = crate::resolve_s3_credentials_with(
+        &config,
+        &crate::MapEnv::new()
+            .with("S3_ACCESS_KEY_ID", "test-access")
+            .with("S3_SECRET_ACCESS_KEY", "test-secret"),
+    )
+    .unwrap();
+    let store =
+        R2ObjectStore::new(S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap());
+    let resource_id = ResourceId::generate();
+    let locator = store
+        .locator(resource_id, &store.physical_prefix(resource_id))
+        .unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let key = UserObjectKey::parse("conditional").unwrap();
+    let source_path = temp.path().join("source");
+    std::fs::write(&source_path, b"source").unwrap();
+    let competitor_etag = hex::encode(hash_bytes(b"competitor").md5);
+
+    mock.race_next_conditional_put(b"competitor".to_vec());
+    let excluded = store
+        .put_file(
+            &locator,
+            &key,
+            &upload_source(source_path.clone(), b"source"),
+            &R2PutOptions {
+                only_if: Some(R2Condition {
+                    etag_does_not_match: vec![R2EtagMatch::Strong {
+                        value: competitor_etag.clone(),
+                    }],
+                    ..R2Condition::default()
+                }),
+                ..R2PutOptions::default()
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(excluded.is_none());
+    assert_eq!(
+        store
+            .head(&locator, &key, None)
+            .await
+            .unwrap()
+            .unwrap()
+            .etag,
+        competitor_etag
+    );
+
+    store
+        .delete(&locator, std::slice::from_ref(&key))
+        .await
+        .unwrap();
+    mock.race_next_conditional_put(b"different".to_vec());
+    let admitted = store
+        .put_file(
+            &locator,
+            &key,
+            &upload_source(source_path, b"source"),
+            &R2PutOptions {
+                only_if: Some(R2Condition {
+                    etag_does_not_match: vec![R2EtagMatch::Strong {
+                        value: "not-the-raced-etag".to_owned(),
+                    }],
+                    ..R2Condition::default()
+                }),
+                ..R2PutOptions::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(admitted.etag, hex::encode(hash_bytes(b"source").md5));
+    let physical_key = store.object_key(&locator, &key);
+    let puts = mock
+        .recorded()
+        .into_iter()
+        .filter(|request| request.method == "PUT" && request.path.ends_with(&physical_key))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        puts.len(),
+        3,
+        "the excluded race stops after its create fence; the admitted race retries once"
+    );
 }
 
 #[tokio::test]
@@ -520,14 +712,10 @@ async fn identical_user_keys_remain_isolated_between_logical_buckets() {
         store
             .put_file(
                 locator,
-                &UserObjectKey::parse(key, locator).unwrap(),
-                &R2UploadSource {
-                    path,
-                    length: body.len() as u64,
-                    md5: Md5::digest(body).into(),
-                    version: uuid::Uuid::now_v7().to_string(),
-                },
+                &UserObjectKey::parse(key).unwrap(),
+                &upload_source(path, body),
                 &R2PutOptions::default(),
+                None,
             )
             .await
             .unwrap()
@@ -541,7 +729,8 @@ async fn identical_user_keys_remain_isolated_between_logical_buckets() {
         let R2GetResult::Body(object) = store
             .get(
                 locator,
-                &UserObjectKey::parse(key, locator).unwrap(),
+                &UserObjectKey::parse(key).unwrap(),
+                None,
                 None,
                 None,
             )
@@ -554,27 +743,5 @@ async fn identical_user_keys_remain_isolated_between_logical_buckets() {
     }
 }
 
-#[tokio::test]
-async fn r2_provider_preflight_verifies_required_capabilities_and_cleans_up() {
-    let mock = crate::MockS3::spawn("bucket").await;
-    let config = open_compute_core::S3Config {
-        endpoint: mock.endpoint.clone(),
-        bucket: "bucket".to_owned(),
-        ..open_compute_core::S3Config::default()
-    };
-    let env = crate::MapEnv::new()
-        .with("S3_ACCESS_KEY_ID", "test-access")
-        .with("S3_SECRET_ACCESS_KEY", "test-secret");
-    let credentials = crate::resolve_s3_credentials_with(&config, &env).unwrap();
-    let client = S3ArtifactClient::connect(&config, &credentials, 1024 * 1024).unwrap();
-    let outcome = crate::preflight_r2(
-        &client,
-        PlatformId::generate(),
-        open_compute_core::StartupId::generate(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(outcome.objects, 3);
-    assert!(outcome.multi_delete);
-    assert!(mock.keys().is_empty());
-}
+#[path = "r2_tests/provider_multipart.rs"]
+mod provider_multipart;

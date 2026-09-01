@@ -3,16 +3,17 @@
 use crate::{ErrorCode, PlatformError, WorkflowInstanceId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-mod json;
-pub use json::{canonical_json, decode_json};
+mod value;
+pub use value::{durable_value_base64, durable_value_bytes};
 mod event;
-pub use event::{WORKFLOW_EVENT_ENVELOPE_MAX_BYTES, WorkflowEventEnvelope};
+pub use event::{WORKFLOW_EVENT_ENVELOPE_MAX_BYTES, WorkflowCronSchedule, WorkflowEventEnvelope};
 mod descriptor;
 mod duration;
 mod policy;
 pub use descriptor::{
     WORKFLOW_DEPENDENCY_BYTES, WORKFLOW_EVENT_BYTES, WORKFLOW_INSTANCE_BYTES, WORKFLOW_STEP_BYTES,
-    WorkflowDurableConfig, WorkflowStepDeclaration, WorkflowStepDescriptor, WorkflowStepKind,
+    WorkflowDurableConfig, WorkflowRestartSelector, WorkflowRestartStepType,
+    WorkflowStepDeclaration, WorkflowStepDescriptor, WorkflowStepKind,
     validate_workflow_event_type,
 };
 pub use duration::{
@@ -21,12 +22,11 @@ pub use duration::{
 pub use policy::{
     WORKFLOW_DRAIN_MARGIN_MS, WORKFLOW_MAX_ATTEMPT_MS, WORKFLOW_MAX_RETRY_DELAY_MS,
     WorkflowBackoff, WorkflowRetention, WorkflowRetryPolicy, WorkflowStepConfig,
+    WorkflowStepSensitivity,
 };
 
-/// Maximum canonical input, step output, or final output bytes.
-pub const WORKFLOW_JSON_MAX_BYTES: usize = 1024 * 1024;
-/// Maximum JSON container nesting depth.
-pub const WORKFLOW_JSON_MAX_DEPTH: usize = 127;
+/// Maximum encoded input, step output, or final output bytes.
+pub const WORKFLOW_VALUE_MAX_BYTES: usize = 1024 * 1024;
 
 /// Local Workflow capacity and infrastructure recovery policy, not a Cloudflare plan.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -97,7 +97,7 @@ impl WorkflowsConfig {
             || self.max_in_flight_requests > 512
             || self.max_steps == 0
             || self.max_steps > 1024
-            || self.max_state_bytes < WORKFLOW_JSON_MAX_BYTES as u64
+            || self.max_state_bytes < WORKFLOW_VALUE_MAX_BYTES as u64
             || self.max_state_bytes > 1024 * 1024 * 1024
             || self.max_instances_per_account == 0
             || self.max_instances_per_account > 1_000_000
@@ -218,7 +218,6 @@ pub fn terminal_error_code(value: &str) -> Result<ErrorCode, PlatformError> {
         ErrorCode::WorkflowExecutionFailed,
         ErrorCode::WorkflowNonDeterministic,
         ErrorCode::WorkflowStepConfigUnsupported,
-        ErrorCode::WorkflowParallelStepUnsupported,
         ErrorCode::WorkflowMethodUnsupported,
         ErrorCode::WorkflowSerializationUnsupported,
         ErrorCode::WorkflowResultTooLarge,

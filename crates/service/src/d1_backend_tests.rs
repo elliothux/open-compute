@@ -105,6 +105,10 @@ async fn service_protocol_and_error_surface_are_bounded_before_lookup() {
         permission_denied().code(),
         ErrorCode::BindingPermissionDenied
     );
+    assert_eq!(
+        crate::d1_session::session_error().code(),
+        ErrorCode::D1SessionError
+    );
     assert!(wall_now_ms() > 0);
 
     for (code, status) in [
@@ -122,6 +126,8 @@ async fn service_protocol_and_error_surface_are_bounded_before_lookup() {
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
         (ErrorCode::D1TypeError, StatusCode::BAD_REQUEST),
+        (ErrorCode::D1SessionError, StatusCode::BAD_REQUEST),
+        (ErrorCode::D1DumpError, StatusCode::BAD_REQUEST),
         (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR),
     ] {
         assert_eq!(

@@ -18,8 +18,10 @@ fn query_frame_round_trips_binary_values_without_json_or_base64() {
     ] {
         writer.value(&value).unwrap();
     }
+    writer.u8(0).unwrap();
     let request = decode_query(&writer.finish()).unwrap();
     assert_eq!(request.mode, D1QueryMode::Batch);
+    assert_eq!(request.session, D1SessionConstraint::AlwaysPrimary);
     assert_eq!(
         request.statements[0].params[4],
         D1Value::Blob(vec![0, 1, 2, 255])
@@ -127,19 +129,9 @@ fn result_frame_keeps_duplicate_columns_and_blob_bytes() {
             D1Value::Integer(2),
             D1Value::Blob(vec![7, 8, 9]),
         ]],
-        meta: D1Meta {
-            served_by: "open-compute-local".to_owned(),
-            served_by_primary: true,
-            duration: 1.0,
-            changes: 0,
-            last_row_id: 0,
-            changed_db: false,
-            size_after: 4096,
-            rows_read: 1,
-            rows_written: 0,
-        },
+        meta: D1Meta::local(1.0, 0, 0, false, 4096, 1, 0),
     };
-    let frame = encode_results(&[result]).unwrap();
+    let frame = encode_results(&[result], Some("opaque-bookmark"), 7).unwrap();
     assert_eq!(&frame[..4], b"D1R1");
     assert!(frame.windows(3).any(|window| window == [7, 8, 9]));
     assert!(!String::from_utf8_lossy(&frame).contains("BwgJ"));
@@ -147,20 +139,10 @@ fn result_frame_keeps_duplicate_columns_and_blob_bytes() {
     let invalid_row = D1StatementResult {
         columns: vec!["one".to_owned()],
         rows: vec![vec![]],
-        meta: D1Meta {
-            served_by: "open-compute-local".to_owned(),
-            served_by_primary: true,
-            duration: 0.0,
-            changes: 0,
-            last_row_id: 0,
-            changed_db: false,
-            size_after: 0,
-            rows_read: 0,
-            rows_written: 0,
-        },
+        meta: D1Meta::local(0.0, 0, 0, false, 0, 0, 0),
     };
     assert_eq!(
-        encode_results(&[invalid_row]).unwrap_err().code(),
+        encode_results(&[invalid_row], None, 0).unwrap_err().code(),
         ErrorCode::D1InternalProtocolError
     );
     let mut writer = Writer::new();

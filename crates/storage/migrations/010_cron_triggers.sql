@@ -1,6 +1,5 @@
 CREATE TABLE deployment_cron_configs (
   deployment_id      TEXT PRIMARY KEY REFERENCES worker_deployments(id),
-  mode               TEXT NOT NULL CHECK(mode IN ('inherit', 'replace')),
   capability_version INTEGER NOT NULL CHECK(capability_version = 1),
   descriptor_sha256  BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   created_at_ms      INTEGER NOT NULL
@@ -13,6 +12,10 @@ CREATE TABLE deployment_cron_declarations (
   expression          TEXT NOT NULL CHECK(length(expression) BETWEEN 1 AND 256),
   expression_sha256   BLOB NOT NULL CHECK(length(expression_sha256) = 32),
   parser_version      INTEGER NOT NULL CHECK(parser_version >= 1),
+  scheduled_handler   INTEGER NOT NULL CHECK(scheduled_handler IN (0, 1)),
+  workflow_bindings_json BLOB NOT NULL CHECK(
+                         length(workflow_bindings_json) BETWEEN 2 AND 16384
+                       ),
   created_at_ms       INTEGER NOT NULL,
   UNIQUE(deployment_id, expression)
 ) STRICT;
@@ -26,6 +29,10 @@ CREATE TABLE cron_activations (
   expression            TEXT NOT NULL CHECK(length(expression) BETWEEN 1 AND 256),
   expression_sha256     BLOB NOT NULL CHECK(length(expression_sha256) = 32),
   parser_version        INTEGER NOT NULL CHECK(parser_version >= 1),
+  scheduled_handler     INTEGER NOT NULL CHECK(scheduled_handler IN (0, 1)),
+  workflow_bindings_json BLOB NOT NULL CHECK(
+                           length(workflow_bindings_json) BETWEEN 2 AND 16384
+                         ),
   activation_generation INTEGER NOT NULL CHECK(activation_generation >= 1),
   state                 TEXT NOT NULL CHECK(state IN (
                           'staging', 'active', 'retiring', 'tombstoned'
@@ -78,7 +85,7 @@ BEFORE INSERT ON deployment_cron_declarations
 WHEN NOT EXISTS (
   SELECT 1 FROM deployment_cron_configs c
   JOIN worker_deployments d ON d.id = c.deployment_id
-  WHERE c.deployment_id = NEW.deployment_id AND c.mode = 'replace' AND d.state = 'staging'
+  WHERE c.deployment_id = NEW.deployment_id AND d.state = 'staging'
 )
 BEGIN
   SELECT RAISE(ABORT, 'cron declaration authority invariant');
@@ -115,7 +122,8 @@ END;
 
 CREATE TRIGGER cron_activations_identity_guard
 BEFORE UPDATE OF id, account_id, worker_id, expression, expression_sha256,
-  parser_version, activation_generation, created_at_ms ON cron_activations
+  parser_version, scheduled_handler, workflow_bindings_json,
+  activation_generation, created_at_ms ON cron_activations
 BEGIN
   SELECT RAISE(ABORT, 'cron activation identity is immutable');
 END;

@@ -1,24 +1,31 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProject } from "../../packages/toolchain/src/project.ts";
+import { validateCaseEvidence } from "./case-evidence.ts";
 import {
-  cloudflareDeploymentUrl, cloudflareTransientFailure, cloudflareWorkerMissing,
+  cloudflareDeploymentUrl, cloudflareProject, cloudflareTransientFailure, cloudflareWorkerMissing,
   loadPortableFixtures, observationUrl, openComputeProject,
 } from "./adapters.ts";
+import { generateInventoryTwice } from "./inventory.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const CASES = [
   "baseline-identity",
   "catalog-schema",
   "capability-catalog-bijection",
+  "inventory-generation-drift",
+  "inventory-member-evidence",
   "case-registry-mapping",
   "deviation-bijection",
   "compatibility-coverage",
   "public-types-surface",
+  "compile-fixtures",
+  "conformance-self-tests",
   "unsupported-config-rejection",
   "portable-fixture-inventory",
   "cloudflare-runner-safety",
@@ -79,7 +86,19 @@ function sourceIdentity(): string {
 
 function baseline(): JsonRecord { return record(json("test/conformance/baseline.json"), "baseline"); }
 function catalog(): JsonRecord { return record(json("test/conformance/catalog.json"), "catalog"); }
-function capabilities(): JsonRecord { return record(json("share/cloudflare-capabilities.json"), "capabilities"); }
+function inventory(): JsonRecord { return record(json("share/cloudflare-capabilities.json"), "inventory"); }
+function capabilities(): JsonRecord { return record(inventory().products, "inventory.products"); }
+
+function inventoryMembers(): JsonRecord[] {
+  const members: JsonRecord[] = [];
+  for (const [product, raw] of Object.entries(capabilities())) {
+    const capability = record(raw, `capability ${product}`);
+    for (const [index, item] of array(capability.members ?? [], `${product}.members`).entries()) {
+      members.push(record(item, `${product}.members[${index}]`));
+    }
+  }
+  return members;
+}
 function contracts(): JsonRecord[] {
   return array(catalog().contracts, "catalog.contracts").map((item, index) => record(item, `contract ${index}`));
 }
@@ -101,15 +120,24 @@ function baselineIdentity(): void {
   }
   const lock = record(json("packages/runtime/workerd.lock.json"), "workerd lock");
   const workerd = record(value.workerd, "baseline.workerd");
-  if (lock.release !== workerd.release || lock.expectedVersionOutput !== "workerd 2026-08-26") {
+  if (lock.release !== workerd.release || lock.revision !== workerd.revision
+      || lock.expectedVersionOutput !== "workerd 2026-08-30") {
     throw new Error("workerd release identity drift");
   }
   const workersTypes = record(value.workersTypes, "workersTypes");
-  if (workersTypes.version !== "5.20260826.1" || workersTypes.lockSha256 !== digest("bun.lock")) {
+  const lockTypes = record(lock.workersTypes, "lock.workersTypes");
+  if (workersTypes.version !== "5.20260830.1" || lockTypes.version !== workersTypes.version
+      || lockTypes.gitHead !== lock.revision
+      || workersTypes.lockSha256 !== digest("bun.lock")
+      || workersTypes.packageSha256 !== lockTypes.packageSha256
+      || workersTypes.astSha256 !== lockTypes.astSha256) {
     throw new Error("workers-types lock identity drift");
   }
   const sdk = record(value.workersSdk, "workersSdk");
-  if (!/^[0-9a-f]{40}$/.test(string(sdk.revision, "workersSdk.revision"))
+  const lockSdk = record(lock.workersSdk, "lock.workersSdk");
+  if (sdk.revision !== lockSdk.revision || lockSdk.wranglerVersion !== record(value.wrangler, "wrangler").version
+      || lockSdk.vitePluginVersion !== record(value.vitePlugin, "vitePlugin").version
+      || !/^[0-9a-f]{40}$/.test(string(sdk.revision, "workersSdk.revision"))
       || !/^[0-9a-f]{64}$/.test(string(sdk.lockSha256, "workersSdk.lockSha256"))) {
     throw new Error("workers-sdk identity is not immutable");
   }
@@ -132,8 +160,7 @@ function catalogSchema(): void {
     if (!["supported", "supported_with_deviation", "unsupported", "blocked"].includes(status)) {
       throw new Error(`${id}: invalid status`);
     }
-    const methods = strings(contract.methods, `${id}.methods`);
-    if (new Set(methods).size !== methods.length) throw new Error(`${id}: duplicate method`);
+    if ("methods" in contract) throw new Error(`${id}: coarse methods lists are forbidden`);
     const positive = strings(contract.positiveCases, `${id}.positiveCases`);
     const negative = strings(contract.negativeCases, `${id}.negativeCases`);
     if ((status === "supported" || status === "supported_with_deviation")
@@ -151,6 +178,34 @@ function catalogSchema(): void {
         const url = string(source.url, `${id}.source.url`);
         if (!url.includes(`/blob/${revision}/${sourcePath}`)) throw new Error(`${id}: Cloudflare source URL is not revision-pinned`);
       }
+    }
+  }
+  const evidenceIds = new Set<string>();
+  for (const [index, raw] of array(catalog().memberEvidence ?? [], "memberEvidence").entries()) {
+    const item = record(raw, `memberEvidence[${index}]`);
+    const id = string(item.id, `memberEvidence[${index}].id`);
+    if (evidenceIds.has(id)) throw new Error(`duplicate memberEvidence id: ${id}`);
+    evidenceIds.add(id);
+    const status = string(item.status, `${id}.status`);
+    if (!["supported", "supported_with_deviation", "blocked"].includes(status)) {
+      throw new Error(`${id}: invalid memberEvidence status`);
+    }
+    const compileCases = strings(item.compileCases ?? [], `${id}.compileCases`);
+    const runtimeCases = strings(item.runtimeCases ?? [], `${id}.runtimeCases`);
+    if ((status === "supported" || status === "supported_with_deviation")
+        && (!compileCases.length || !runtimeCases.length)) {
+      throw new Error(`${id}: supported member lacks compile and real-runtime cases`);
+    }
+    if (status === "blocked" && (compileCases.length || runtimeCases.length)) {
+      throw new Error(`${id}: blocked member must not carry evidence cases`);
+    }
+  }
+  for (const [index, raw] of array(catalog().blockedGaps ?? [], "blockedGaps").entries()) {
+    const gap = record(raw, `blockedGaps[${index}]`);
+    string(gap.id, `blockedGaps[${index}].id`);
+    const memberIds = strings(gap.memberIds, `blockedGaps[${index}].memberIds`);
+    if (!memberIds.length || new Set(memberIds).size !== memberIds.length) {
+      throw new Error(`${gap.id}: blocked gap has no exact member IDs or contains duplicates`);
     }
   }
 }
@@ -171,21 +226,95 @@ function capabilityCatalogBijection(): void {
     const capability = record(raw, `capability ${product}`);
     const contract = mapped.get(product);
     if (contract === undefined || capability.status !== contract.status) throw new Error(`${product}: status differs`);
-    const capabilityMethods = strings(capability.methods ?? [], `${product}.methods`).sort();
-    const contractMethods = product === contract.product ? strings(contract.methods, `${product}.contractMethods`).sort() : [];
-    if (capabilityMethods.join("\0") !== contractMethods.join("\0")) throw new Error(`${product}: methods differ`);
+    if ("methods" in capability) throw new Error(`${product}: coarse methods lists are forbidden`);
     const capabilityDeviations = strings(capability.deviations ?? [], `${product}.deviations`).sort();
     const contractDeviations = product === contract.product ? strings(contract.deviations, `${product}.contractDeviations`).sort() : [];
     if (capabilityDeviations.join("\0") !== contractDeviations.join("\0")) throw new Error(`${product}: deviations differ`);
   }
 }
 
-function caseRegistryMapping(): void {
-  for (const contract of contracts()) {
-    for (const id of [...strings(contract.positiveCases, "positiveCases"), ...strings(contract.negativeCases, "negativeCases")]) {
-      if (!/^[a-z0-9][a-z0-9-]*::[^\s]+$/.test(id)) throw new Error(`invalid Gate case identity: ${id}`);
+async function inventoryGenerationDrift(): Promise<void> {
+  const { encoded } = await generateInventoryTwice();
+  const committed = readFileSync(join(ROOT, "share/cloudflare-capabilities.json"), "utf8");
+  if (encoded !== committed) throw new Error("share/cloudflare-capabilities.json drifted from generated inventory");
+  const value = inventory();
+  if (value.schema_version !== 1) throw new Error("inventory schema_version must be 1");
+  const source = record(value.source, "inventory.source");
+  const lock = record(json("packages/runtime/workerd.lock.json"), "workerd lock");
+  const lockTypes = record(lock.workersTypes, "lock.workersTypes");
+  if (string(source.workers_types_version, "source.workers_types_version") !== string(lockTypes.version, "lock.workersTypes.version")
+      || string(source.git_head, "source.git_head") !== string(lockTypes.gitHead, "lock.workersTypes.gitHead")
+      || string(source.package_sha256, "source.package_sha256") !== string(lockTypes.packageSha256, "lock.workersTypes.packageSha256")
+      || string(source.ast_sha256, "source.ast_sha256") !== string(lockTypes.astSha256, "lock.workersTypes.astSha256")) {
+    throw new Error("inventory source identity does not match the formal workers-types pin");
+  }
+}
+
+function inventoryMemberEvidence(): void {
+  const members = inventoryMembers();
+  const byId = new Map<string, JsonRecord>();
+  for (const member of members) {
+    const id = string(member.id, "member.id");
+    if (byId.has(id)) throw new Error(`duplicate inventory member: ${id}`);
+    byId.set(id, member);
+    const status = string(member.status, `${id}.status`);
+    if (status === "unsupported") throw new Error(`${id}: unsupported is reserved for non-target products`);
+    const compileCases = strings(member.compile_cases ?? [], `${id}.compile_cases`);
+    const runtimeCases = strings(member.runtime_cases ?? [], `${id}.runtime_cases`);
+    if ((status === "supported" || status === "supported_with_deviation")
+        && (!compileCases.length || !runtimeCases.length)) {
+      throw new Error(`${id}: supported member lacks compile and real-runtime cases`);
+    }
+    if (status === "blocked" && (compileCases.length || runtimeCases.length)) {
+      throw new Error(`${id}: blocked member must not carry evidence cases`);
     }
   }
+  const evidenceIds = new Set<string>();
+  for (const [index, raw] of array(catalog().memberEvidence ?? [], "memberEvidence").entries()) {
+    const item = record(raw, `memberEvidence[${index}]`);
+    const id = string(item.id, `memberEvidence[${index}].id`);
+    const member = byId.get(id);
+    if (member === undefined) throw new Error(`stale memberEvidence id: ${id}`);
+    evidenceIds.add(id);
+    if (string(member.status, `${id}.status`) !== string(item.status, `${id}.evidenceStatus`)) {
+      throw new Error(`${id}: inventory status does not match memberEvidence`);
+    }
+  }
+  for (const member of members) {
+    const status = string(member.status, "member.status");
+    const id = string(member.id, "member.id");
+    if ((status === "supported" || status === "supported_with_deviation") && !evidenceIds.has(id)) {
+      throw new Error(`${id}: supported member is missing from memberEvidence`);
+    }
+  }
+  const coveredBlocked = new Set<string>();
+  for (const [index, raw] of array(catalog().blockedGaps ?? [], "blockedGaps").entries()) {
+    const gap = record(raw, `blockedGaps[${index}]`);
+    const gapId = string(gap.id, `blockedGaps[${index}].id`);
+    for (const id of strings(gap.memberIds, `${gapId}.memberIds`)) {
+      const member = byId.get(id);
+      if (member === undefined) throw new Error(`${gapId}: stale blocked member ID: ${id}`);
+      if (member.status !== "blocked") throw new Error(`${gapId}: ${id} must remain blocked`);
+      if (coveredBlocked.has(id)) throw new Error(`${id}: blocked member has more than one gap owner`);
+      coveredBlocked.add(id);
+    }
+  }
+  for (const member of members) {
+    const id = string(member.id, "member.id");
+    if (member.status === "blocked" && !coveredBlocked.has(id)) {
+      throw new Error(`${id}: blocked member has no explicit gap owner`);
+    }
+  }
+}
+
+function caseRegistryMapping(): void {
+  const output = execFileSync("python3", [join(ROOT, "test/gate_cases.py"), "--json"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: { PATH: process.env.PATH },
+    timeout: 10_000,
+  });
+  validateCaseEvidence(ROOT, catalog(), JSON.parse(output));
 }
 
 function deviationBijection(): void {
@@ -205,50 +334,99 @@ function deviationBijection(): void {
 }
 
 function compatibilityCoverage(): void {
-  const base = baseline();
-  const dates = new Set(strings(base.compatibilityDates, "compatibilityDates"));
-  const baselineFlagSets = array(base.compatibilityFlags, "compatibilityFlags")
-    .map((item, index) => strings(item, `compatibilityFlags[${index}]`));
-  const flagSets = new Set(baselineFlagSets.map(flags => flags.join("\0")));
-  const descriptor = readFileSync(join(ROOT, "crates/workers/src/descriptor.rs"), "utf8");
-  const minimum = /COMPATIBILITY_DATE_MIN: &str = "([0-9-]+)"/.exec(descriptor)?.[1];
-  const maximum = /COMPATIBILITY_DATE_MAX: &str = "([0-9-]+)"/.exec(descriptor)?.[1];
-  if (minimum === undefined || maximum === undefined || !dates.has(minimum) || !dates.has(maximum)) {
-    throw new Error("compatibility date boundary is not tested by the baseline");
+  const lock = record(json("packages/runtime/workerd.lock.json"), "workerd lock");
+  const date = string(lock.effectiveCompatibilityDate, "lock.effectiveCompatibilityDate");
+  if (string(baseline().effectiveCompatibilityDate, "baseline.effectiveCompatibilityDate") !== date) {
+    throw new Error("baseline effective compatibility date does not match the formal lock");
   }
   for (const contract of contracts()) {
-    const compatibility = record(contract.compatibility, `${contract.id}.compatibility`);
-    if (compatibility.from !== minimum || compatibility.to !== maximum) throw new Error(`${contract.id}: date range differs`);
-    for (const flags of array(compatibility.flags, `${contract.id}.flags`)) {
-      if (!flagSets.has(strings(flags, `${contract.id}.flagSet`).join("\0"))) throw new Error(`${contract.id}: untested flag set`);
+    if (contract.compatibility !== undefined) {
+      throw new Error(`${contract.id}: catalog must not carry tenant compatibility selectors`);
     }
-  }
-  const allowedBlock = /COMPATIBILITY_FLAGS_ALLOWED: &\[&str\] = &\[([\s\S]*?)\];/.exec(descriptor)?.[1];
-  if (allowedBlock === undefined) throw new Error("compatibility flag allowlist is missing");
-  const allowedFlags = [...allowedBlock.matchAll(/"([^"]+)"/g)].flatMap(match => match[1] === undefined ? [] : [match[1]]);
-  const baselineFlags = [...new Set(baselineFlagSets.flat())];
-  if (allowedFlags.sort().join("\0") !== baselineFlags.sort().join("\0")) {
-    throw new Error("descriptor and baseline compatibility flag inventories differ");
-  }
-  for (const flag of allowedFlags) {
-    if (!flagSets.has(flag)) throw new Error(`allowed flag lacks a dedicated baseline probe: ${flag}`);
   }
 }
 
-function publicTypesSurface(): void {
-  const source = readFileSync(join(ROOT, "packages/types/index.d.ts"), "utf8");
-  for (const contract of contracts()) {
-    for (const name of strings(contract.typeInterfaces, `${contract.id}.typeInterfaces`)) {
-      if (!new RegExp(`(?:interface|class)\\s+${name}\\b`).test(source)) throw new Error(`public type is missing: ${name}`);
-    }
-    for (const name of strings(contract.forbiddenTypes ?? [], `${contract.id}.forbiddenTypes`)) {
-      if (new RegExp(`(?:interface|class|type)\\s+${name}\\b`).test(source)) throw new Error(`unsupported type is advertised: ${name}`);
-    }
+function typesAstEnv(): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH,
+    TMPDIR: join(ROOT, ".temp/bun-tmp"),
+    BUN_RUNTIME_TRANSPILER_CACHE_PATH: join(ROOT, ".temp/bun-transpile"),
+  };
+}
+
+function fingerprintFile(path: string): { sha256: string; statements: number; lines: number } {
+  const output = execFileSync(process.execPath, [join(ROOT, "test/conformance/types-ast.ts"), "fingerprint", path], {
+    cwd: ROOT, encoding: "utf8", env: typesAstEnv(), timeout: 60_000, maxBuffer: 1024 * 1024,
+  });
+  const value = record(JSON.parse(output), `fingerprint ${path}`);
+  if (typeof value.statements !== "number" || typeof value.lines !== "number") {
+    throw new Error(`fingerprint ${path} is malformed`);
   }
+  return { sha256: string(value.sha256, "fingerprint.sha256"), statements: value.statements, lines: value.lines };
+}
+
+async function publicTypesSurface(): Promise<void> {
+  const lock = record(json("packages/runtime/workerd.lock.json"), "workerd lock");
+  const lockTypes = record(lock.workersTypes, "lock.workersTypes");
+  const baselineTypes = record(baseline().workersTypes, "baseline.workersTypes");
+  const workersTypesRoot = dirname(createRequire(join(ROOT, "packages/types/package.json"))
+    .resolve("@cloudflare/workers-types/package.json"));
+  const packageJson = record(json(relative(ROOT, join(workersTypesRoot, "package.json"))), "workers-types package");
+  if (packageJson.version !== lockTypes.version || packageJson.version !== "5.20260830.1") {
+    throw new Error("installed @cloudflare/workers-types version drift");
+  }
+  const installedPath = join(workersTypesRoot, "index.d.ts");
+  const snapshotPath = join(ROOT, "references/workerd/types/generated-snapshot/index.d.ts");
+  const installed = readFileSync(installedPath);
+  let snapshot: Buffer;
+  try { snapshot = readFileSync(snapshotPath); }
+  catch { throw new Error("matching workerd generated snapshot is missing"); }
+  const indexSha256 = string(baselineTypes.indexSha256, "workersTypes.indexSha256");
+  if (sha256(installed) !== indexSha256 || sha256(snapshot) !== indexSha256) {
+    throw new Error("workers-types index digest drift");
+  }
+  if (!installed.equals(snapshot)) {
+    throw new Error("npm workers-types and workerd generated snapshot are not byte-identical");
+  }
+  const installedAst = fingerprintFile(installedPath);
+  const snapshotAst = fingerprintFile(snapshotPath);
+  if (installedAst.sha256 !== snapshotAst.sha256) {
+    throw new Error("npm workers-types and workerd generated snapshot are not structurally identical");
+  }
+  if (installedAst.sha256 !== string(lockTypes.astSha256, "lock.workersTypes.astSha256")
+      || installedAst.sha256 !== string(baselineTypes.astSha256, "baseline.workersTypes.astSha256")) {
+    throw new Error("workers-types AST digest drift");
+  }
+  if (installedAst.lines !== 17525 || installedAst.statements < 100) {
+    throw new Error("upstream stable declaration is incomplete");
+  }
+  execFileSync(process.execPath, [join(ROOT, "test/conformance/types-ast.ts"), "thin-bridge", join(ROOT, "packages/types/index.d.ts")], {
+    cwd: ROOT, encoding: "utf8", env: typesAstEnv(), timeout: 60_000,
+  });
   const example = readFileSync(join(ROOT, "examples/hello-worker/tsconfig.json"), "utf8");
-  if (example.includes("@cloudflare/workers-types") || !example.includes("@open-compute/workers-types")) {
-    throw new Error("example does not consume the authoritative supported type surface");
+  if (!example.includes("@open-compute/workers-types") || example.includes("workers-types/experimental")) {
+    throw new Error("example does not consume the pinned stable type surface");
   }
+  const fixtures = readFileSync(join(ROOT, "test/conformance/fixtures/tsconfig.json"), "utf8");
+  if (!fixtures.includes("@open-compute/workers-types") || fixtures.includes("workers-types/experimental")) {
+    throw new Error("tenant fixtures do not consume the pinned stable type surface");
+  }
+}
+
+function compileFixtures(): void {
+  execFileSync(join(ROOT, "node_modules/.bin/tsc"), [
+    "--project", join(ROOT, "test/conformance/fixtures/tsconfig.json"),
+    "--noEmit", "--pretty", "false",
+  ], { cwd: ROOT, encoding: "utf8", timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+}
+
+function conformanceSelfTests(): void {
+  execFileSync("node", [
+    "--test",
+    join(ROOT, "test/conformance/adapters.test.mjs"),
+    join(ROOT, "test/conformance/case-evidence.test.mjs"),
+    join(ROOT, "test/conformance/inventory.test.mjs"),
+  ], { cwd: ROOT, encoding: "utf8", env: typesAstEnv(), timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
 }
 
 async function unsupportedConfigRejection(): Promise<void> {
@@ -258,7 +436,7 @@ async function unsupportedConfigRejection(): Promise<void> {
       const path = join(directory, `${type}.json`);
       writeFileSync(path, JSON.stringify({
         main: "worker.ts", name: "unsupported-probe", tsconfig: "tsconfig.json",
-        compatibilityDate: "2026-08-26", compatibilityFlags: [], vars: {}, secrets: {},
+        vars: {}, secrets: {},
         bindings: { BAD: { type, id: "019c0000-0000-7000-8000-000000000001" } }, services: [],
       }));
       let rejected = false;
@@ -312,8 +490,11 @@ async function cloudflareRunnerSafety(): Promise<void> {
       !== "http://127.0.0.1:8787/__workers/account/worker/reset") {
     throw new Error("open-compute differential URL lost its Worker route prefix");
   }
-  const source = readFileSync(join(ROOT, "test/conformance/differential.ts"), "utf8");
-  if (source.includes("--force") || source.includes("force=true") || source.includes("/client/v4/")) {
+  const source = [
+    readFileSync(join(ROOT, "test/conformance/differential.ts"), "utf8"),
+    readFileSync(join(ROOT, "test/conformance/differential-product-resources.ts"), "utf8"),
+  ].join("\n");
+  if (source.includes("--force") || source.includes("/client/v4/")) {
     throw new Error("Cloudflare cleanup may force-delete or bypass the pinned Wrangler boundary");
   }
   if (!source.includes('WRANGLER_HIDE_BANNER: "true"')) {
@@ -321,10 +502,28 @@ async function cloudflareRunnerSafety(): Promise<void> {
   }
   for (const requiredOperation of [
     "ensureCloudflareAbsent", "deployments", "delete", "verifyWranglerAccount",
-    "verifyOpenComputeAccount", "createOpenComputeRoute", "readOnlyWrangler", "idempotency-key",
-    "restartOpenComputeRuntime", "/__test/runtime/restart",
+    "verifyOpenComputeAccount", "ensureOpenComputeAbsent", "createOpenComputeRoute",
+    "cleanupOpenComputeRoute", "recordOwnership", "readOnlyWrangler", "idempotency-key",
+    "ensureCloudflareKvAbsent", "createCloudflareKv", "cleanupCloudflareKv",
+    "ensureOpenComputeKvAbsent", "createOpenComputeKv", "cleanupOpenComputeKv",
+    "ensureCloudflareD1Absent", "createCloudflareD1", "cleanupCloudflareD1",
+    "ensureOpenComputeD1Absent", "createOpenComputeD1", "cleanupOpenComputeD1",
+    "ensureCloudflareR2Absent", "createCloudflareR2", "cleanupCloudflareR2",
+    "ensureOpenComputeR2Absent", "createOpenComputeR2", "cleanupOpenComputeR2",
+    "ensureCloudflareQueueAbsent", "createCloudflareQueue", "cleanupCloudflareQueue",
+    "ensureOpenComputeQueueAbsent", "createOpenComputeQueue", "cleanupOpenComputeQueue",
+    "ensureOpenComputeDurableObjectNamespaceAbsent", "createOpenComputeDurableObjectNamespace",
+    "cleanupOpenComputeDurableObjectNamespace", "ensureCloudflareWorkflowAbsent",
+    "verifyCloudflareWorkflowCreated", "cleanupCloudflareWorkflow", "ensureOpenComputeWorkflowAbsent",
+    "createOpenComputeWorkflow", "activateOpenComputeWorkflowVersion", "cleanupOpenComputeWorkflow",
+    "--skip-confirmation",
   ]) {
     if (!source.includes(requiredOperation)) throw new Error(`Cloudflare runner safety operation is missing: ${requiredOperation}`);
+  }
+  if (!source.includes('["delete", "--name", name, "--config", config]')
+      || !source.includes("restartOpenComputeRuntime") || !source.includes("/__test/runtime/restart")
+      || !source.includes("OPEN_COMPUTE_TEST_RUNTIME_RESTART_ACK")) {
+    throw new Error("differential cleanup is not exact or lacks the guarded test-runtime restart required by deployment retention");
   }
   if (!readFileSync(join(ROOT, "test/conformance/adapters.ts"), "utf8").includes("activationDeadline")) {
     throw new Error("Cloudflare activation wait is missing");
@@ -343,16 +542,62 @@ async function cloudflareRunnerSafety(): Promise<void> {
   if (project.main !== "src/index.ts" || project.tsconfig !== "tsconfig.json") {
     throw new Error("open-compute differential project is not self-contained");
   }
+  const kvFixture = (await loadPortableFixtures(join(ROOT, "test/conformance/fixtures")))
+    .find(item => item.id === "kv/portable/namespace");
+  if (kvFixture === undefined) throw new Error("portable KV differential fixture is missing");
+  const kvProject = openComputeProject(
+    kvFixture,
+    name,
+    "http://127.0.0.1:8787/",
+    "019c0000-0000-7000-8000-000000000001",
+    { KV: "019c0000-0000-7000-8000-000000000002" },
+  );
+  if (JSON.stringify(kvProject.bindings) !== JSON.stringify({
+    KV: { type: "kv_namespace", id: "019c0000-0000-7000-8000-000000000002" },
+  })) throw new Error("portable KV binding does not use an exact owned resource identity");
+  const d1Fixture = (await loadPortableFixtures(join(ROOT, "test/conformance/fixtures")))
+    .find(item => item.id === "d1/portable/database");
+  if (d1Fixture === undefined) throw new Error("portable D1 differential fixture is missing");
+  const d1Ids = {
+    DB: "019c0000-0000-7000-8000-000000000003",
+    OTHER: "019c0000-0000-7000-8000-000000000004",
+  };
+  const d1Project = openComputeProject(
+    d1Fixture,
+    name,
+    "http://127.0.0.1:8787/",
+    "019c0000-0000-7000-8000-000000000001",
+    d1Ids,
+  );
+  if (JSON.stringify(d1Project.bindings) !== JSON.stringify({
+    DB: { type: "d1_database", id: d1Ids.DB },
+    OTHER: { type: "d1_database", id: d1Ids.OTHER },
+  })) throw new Error("portable D1 binding does not use exact owned resource identities");
+  const cfD1 = cloudflareProject(
+    d1Fixture,
+    name,
+    "0123456789abcdef0123456789abcdef",
+    { DB: "11111111-1111-4111-8111-111111111111", OTHER: "22222222-2222-4222-8222-222222222222" },
+    { DB: `${name}-d1-0`, OTHER: `${name}-d1-1` },
+  );
+  if (!Array.isArray(cfD1.d1_databases) || cfD1.d1_databases.length !== 2
+      || !Array.isArray(cfD1.kv_namespaces) || cfD1.kv_namespaces.length !== 0) {
+    throw new Error("portable Cloudflare D1 project does not bind only exact owned databases");
+  }
 }
 
 const checks: Record<CaseId, () => void | Promise<void>> = {
   "baseline-identity": baselineIdentity,
   "catalog-schema": catalogSchema,
   "capability-catalog-bijection": capabilityCatalogBijection,
+  "inventory-generation-drift": inventoryGenerationDrift,
+  "inventory-member-evidence": inventoryMemberEvidence,
   "case-registry-mapping": caseRegistryMapping,
   "deviation-bijection": deviationBijection,
   "compatibility-coverage": compatibilityCoverage,
   "public-types-surface": publicTypesSurface,
+  "compile-fixtures": compileFixtures,
+  "conformance-self-tests": conformanceSelfTests,
   "unsupported-config-rejection": unsupportedConfigRejection,
   "portable-fixture-inventory": portableFixtureInventory,
   "cloudflare-runner-safety": cloudflareRunnerSafety,

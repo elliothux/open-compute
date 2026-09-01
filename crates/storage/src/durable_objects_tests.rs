@@ -122,9 +122,6 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
                 artifact_size: Some(1),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
-                compatibility_date: "2026-08-22".to_owned(),
-                compatibility_flags: vec!["rpc".to_owned()],
-                limits: serde_json::json!({"profile":"default"}),
                 worker_code_sha256: [9; 32],
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
@@ -415,7 +412,7 @@ fn fenced_delete_authority_survives_worker_tombstone() {
         )
         .unwrap_err()
         .code(),
-        ErrorCode::DoNamespaceNotFound
+        ErrorCode::BindingTypeMismatch
     );
 }
 
@@ -623,9 +620,6 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
                 artifact_size: Some(1),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
-                compatibility_date: "2026-08-22".to_owned(),
-                compatibility_flags: Vec::new(),
-                limits: serde_json::json!({"profile":"default"}),
                 worker_code_sha256: [9; 32],
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),

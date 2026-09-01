@@ -151,6 +151,7 @@ fn queue_and_scheduled_custom_event_protocols_are_bounded_and_strict() {
             content_type: QueueContentType::Json,
             body_base64: base64::engine::general_purpose::STANDARD.encode(br#"{"ok":true}"#),
         }],
+        metadata: QueueDispatchMetadata::default(),
     };
     assert!(validate_queue_dispatch_request(&request).is_ok());
     for invalid in [
@@ -233,6 +234,8 @@ fn queue_and_scheduled_custom_event_protocols_are_bounded_and_strict() {
     let scheduled = ScheduledDispatchRequest {
         scheduled_time_ms: 120_000,
         cron: "*/5 * * * *".to_owned(),
+        scheduled_handler: true,
+        workflow_bindings: Vec::new(),
     };
     assert!(validate_scheduled_dispatch_request(&scheduled).is_ok());
     assert_eq!(
@@ -247,11 +250,44 @@ fn queue_and_scheduled_custom_event_protocols_are_bounded_and_strict() {
     assert_eq!(
         validate_scheduled_dispatch_request(&ScheduledDispatchRequest {
             cron: "bad".to_owned(),
-            ..scheduled
+            ..scheduled.clone()
         })
         .unwrap_err()
         .code(),
         ErrorCode::CronExpressionInvalid
+    );
+    for invalid in [
+        ScheduledDispatchRequest {
+            scheduled_handler: false,
+            ..scheduled.clone()
+        },
+        ScheduledDispatchRequest {
+            workflow_bindings: vec!["FLOW".to_owned(), "FLOW".to_owned()],
+            ..scheduled.clone()
+        },
+        ScheduledDispatchRequest {
+            workflow_bindings: vec!["SECOND".to_owned(), "FIRST".to_owned()],
+            ..scheduled.clone()
+        },
+        ScheduledDispatchRequest {
+            workflow_bindings: vec!["bad-name".to_owned()],
+            ..scheduled.clone()
+        },
+    ] {
+        assert_eq!(
+            validate_scheduled_dispatch_request(&invalid)
+                .unwrap_err()
+                .code(),
+            ErrorCode::CronActivationStale
+        );
+    }
+    assert!(
+        validate_scheduled_dispatch_request(&ScheduledDispatchRequest {
+            scheduled_handler: false,
+            workflow_bindings: vec!["FLOW".to_owned()],
+            ..scheduled
+        })
+        .is_ok()
     );
     assert!(
         validate_scheduled_dispatch_result(ScheduledDispatchResult {

@@ -5,10 +5,11 @@
 
 仓库的产品目标是一个可单机部署的 Cloudflare Workers Platform 兼容基础设施。公开能力以
 capability、deviation、固定 Cloudflare contract 和真实产品 Gate 为准；vinext 等框架只提供应用
-qualification。目标产品、upstream types、single-latest runtime 和管理面边界由
-[Cloudflare Worker Runtime 全量兼容目标](../cloudflare-runtime-compatibility.md)定义；总体架构见
+qualification。目标产品、upstream types、single-latest runtime 和管理面边界见已完成的
+[Cloudflare Worker Runtime 全量兼容改造](../implemented/cloudflare-runtime-compatibility.md)；总体架构见
 [平台总方案](../open-compute-workerd-platform.md)，契约目录、portable differential 和双 verdict
-规则见[P3.4 方案](../p3-4-cloudflare-conformance.md)。
+规则见已完成的[P3.4 方案](../implemented/p3-4-cloudflare-conformance.md)。尚未完成的 Cloudflare
+Workflow 远端资格只记录在[剩余验收计划](../cloudflare-runtime-compatibility-acceptance.md)。
 
 ## 开发与接口
 

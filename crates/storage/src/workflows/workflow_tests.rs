@@ -52,9 +52,6 @@ fn staging(storage: &PlatformStorage, worker: open_compute_core::WorkerId) -> De
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".into()),
-                compatibility_date: "2026-08-22".into(),
-                compatibility_flags: vec![],
-                limits: serde_json::json!({"profile":"default"}),
                 worker_code_sha256: [2; 32],
                 vars: Default::default(),
                 secrets: Default::default(),
@@ -114,6 +111,7 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
         .reserve_instance(
             account,
             definition.id,
+            WorkflowOperationId::generate(),
             Some("first"),
             &WorkflowsConfig::default(),
             3,
@@ -134,6 +132,7 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
         .reserve_instance(
             account,
             definition.id,
+            WorkflowOperationId::generate(),
             Some("second"),
             &WorkflowsConfig::default(),
             9,
@@ -164,7 +163,7 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
     let purge = repo
         .prepare_instance_operation(
             &before.identity,
-            open_compute_core::WorkflowOperationId::generate(),
+            WorkflowOperationId::generate(),
             WorkflowOperationKind::Purge,
             &WorkflowsConfig::default(),
             13,
@@ -209,7 +208,14 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
         ..Default::default()
     };
     let reservation = repo
-        .reserve_instance(account, definition.id, Some("one"), &limits, 3)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("one"),
+            &limits,
+            3,
+        )
         .unwrap();
     let id = &reservation.identity;
     assert_eq!(
@@ -217,15 +223,29 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
         *id
     );
     assert_eq!(
-        repo.reserve_instance(account, definition.id, Some("one"), &limits, 3)
-            .unwrap_err()
-            .code(),
+        repo.reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("one"),
+            &limits,
+            3
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::WorkflowInstanceAlreadyExists
     );
     assert_eq!(
-        repo.reserve_instance(account, definition.id, Some("two"), &limits, 3)
-            .unwrap_err()
-            .code(),
+        repo.reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("two"),
+            &limits,
+            3
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::WorkflowStateQuotaExceeded
     );
     assert_eq!(
@@ -266,7 +286,14 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
     );
     assert!(repo.abandon_creation(id).unwrap());
     let second = repo
-        .reserve_instance(account, definition.id, Some("one"), &limits, 4)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("one"),
+            &limits,
+            4,
+        )
         .unwrap();
     repo.finalize_instance(&second.identity, 5).unwrap();
     repo.finalize_instance(&second.identity, 5).unwrap();
@@ -276,7 +303,7 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
     let purge = repo
         .prepare_instance_operation(
             &second.identity,
-            open_compute_core::WorkflowOperationId::generate(),
+            WorkflowOperationId::generate(),
             WorkflowOperationKind::Purge,
             &limits,
             6,
@@ -288,9 +315,16 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
     assert!(repo.live_reservations(None, 10).unwrap().is_empty());
     repo.mark_unavailable(account, definition.id, 7).unwrap();
     assert_eq!(
-        repo.reserve_instance(account, definition.id, None, &WorkflowsConfig::default(), 8)
-            .unwrap_err()
-            .code(),
+        repo.reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            None,
+            &WorkflowsConfig::default(),
+            8
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::WorkflowNotReady
     );
 }
@@ -301,17 +335,29 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
     let definition = ready(&storage, deployment);
-    let worker = repo
+    let target_worker = repo
         .version(account, definition.current_version_id.unwrap())
         .unwrap()
         .target
         .worker_id;
-    let caller = staging(&storage, worker);
+    let workers = WorkerRepository::new(storage.db());
+    let caller_worker = workers
+        .create_worker(
+            account,
+            "workflow-caller",
+            RequestId::generate(),
+            1,
+            1_000_000,
+        )
+        .unwrap()
+        .0;
+    assert_ne!(caller_worker.id, target_worker);
+    let caller = staging(&storage, caller_worker.id);
     let binding = repo
-        .prepare_binding(account, caller, "ORDERS", definition.id, 1)
+        .prepare_binding(account, caller, "ORDERS", definition.id, Vec::new(), 1)
         .unwrap();
     assert!(
-        repo.prepare_binding(account, caller, "__PRIVATE", definition.id, 1)
+        repo.prepare_binding(account, caller, "__PRIVATE", definition.id, Vec::new(), 1)
             .is_err()
     );
     storage
@@ -360,7 +406,6 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
             Ok(())
         })
         .unwrap();
-    let workers = WorkerRepository::new(storage.db());
     workers.begin_validation(caller).unwrap();
     workers.mark_ready(caller, 2).unwrap();
     repo.authorize_binding(
@@ -393,6 +438,16 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
         &binding.descriptor_sha256,
     )
     .unwrap();
+    workers
+        .delete_worker(
+            account,
+            caller_worker.id,
+            &[caller],
+            RequestId::generate(),
+            4,
+        )
+        .unwrap();
+    repo.delete(account, definition.id, 5).unwrap();
 }
 
 #[test]
@@ -411,9 +466,16 @@ fn workflow_rejection_does_not_replace_current_version_or_enable_unvalidated_def
     repo.finish_version(account, version.target.version_id, false, 2)
         .unwrap();
     assert_eq!(
-        repo.reserve_instance(account, definition.id, None, &WorkflowsConfig::default(), 3)
-            .unwrap_err()
-            .code(),
+        repo.reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            None,
+            &WorkflowsConfig::default(),
+            3
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::WorkflowNotReady
     );
     assert!(

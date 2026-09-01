@@ -257,7 +257,10 @@ CREATE TRIGGER queue_referrers_producer_delete_guard
 BEFORE DELETE ON queue_referrers
 WHEN OLD.referrer_kind = 'producer_binding' AND EXISTS (
   SELECT 1 FROM queue_producer_bindings b
+  JOIN worker_deployments d ON d.id = b.deployment_id
+  JOIN workers w ON w.id = d.worker_id
   WHERE b.id = OLD.referrer_id AND b.queue_id = OLD.queue_id
+    AND w.deleted_at_ms IS NULL
 )
 BEGIN
   SELECT RAISE(ABORT, 'live queue producer referrer');

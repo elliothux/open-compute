@@ -1,6 +1,13 @@
 export { DoHost } from "./host.js";
+import { WorkerEntrypoint } from "cloudflare:workers";
 import { currentStartupGeneration, doPolicy, stableCode } from "../loader/host.js";
-import type { DoHostEnv, DoPolicy, DoPolicyEnv, ResolvedDoAuthority } from "./protocol.js";
+import {
+  inboundSocketAddress,
+  tunnelSockets,
+  validateSocketAuthorityWire,
+  type SocketAuthorityWire,
+} from "../sockets/tunnel.js";
+import type { DoHostEnv, DoOrder, DoPolicy, DoPolicyEnv, ResolvedDoAuthority } from "./protocol.js";
 export {
   AlarmIndex,
   AssetTransport,
@@ -9,7 +16,6 @@ export {
   DoTransport,
   KVNamespace,
   ImageTransport,
-  OutboundGateway,
   QueueTransport,
   R2Transport,
   ServiceTransport,
@@ -18,9 +24,16 @@ export {
 
 const TOKEN_HEADER = "x-open-compute-binding-token";
 const ERROR_HEADER = "x-open-compute-error-code";
-const PUBLIC_METHOD = /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/;
-const FORBIDDEN_RPC = new Set(["constructor", "prototype", "__proto__", "then", "fetch"]);
+const FORBIDDEN_RPC = new Set([
+  "constructor", "prototype", "__proto__", "then", "dup", "fetch", "connect", "alarm",
+  "webSocketMessage", "webSocketClose", "webSocketError",
+]);
 let activeDispatches = 0;
+const pendingConnects = new Map<string, {
+  expiresAt: number;
+  hostKey: string;
+  tokenAddress: string;
+}>();
 
 function error(code: string, status = 500): Response {
   return new Response(null, {
@@ -41,6 +54,19 @@ function stableFailure(code: string): Error & { stableCode: string } {
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function orderFromHeaders(headers: Headers): DoOrder {
+  const channelId = value(
+    headers,
+    "x-open-compute-do-order-channel",
+    /^[0-9a-f]{32}$/,
+  );
+  const sequence = Number(headers.get("x-open-compute-do-order-sequence"));
+  if (!Number.isSafeInteger(sequence) || sequence < 0) {
+    throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
+  }
+  return { channelId, sequence };
 }
 
 function assertAuthority(authority: unknown): asserts authority is ResolvedDoAuthority {
@@ -116,7 +142,7 @@ function backendHeaders(request: Request, env: DoHostEnv) {
     "x-open-compute-do-operation": value(
       request.headers,
       "x-open-compute-do-operation",
-      /^(fetch|rpc)$/,
+      /^(connect|fetch|rpc)$/,
     ),
     "content-type": "application/json",
   };
@@ -191,36 +217,82 @@ async function dispatchFetch(request: Request, env: DoHostEnv, policy: DoPolicy)
   return response;
 }
 
-async function dispatchRpc(request: Request, env: DoHostEnv, policy: DoPolicy) {
-  const declared = Number(request.headers.get("content-length") || 0);
-  if (declared > policy.maxRpcRequestBytes) return error("DO_RPC_UNSUPPORTED", 413);
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > policy.maxRpcRequestBytes) return error("DO_RPC_UNSUPPORTED", 413);
-  let payload: unknown;
-  try { payload = JSON.parse(new TextDecoder().decode(bytes)); } catch { return error("DO_RPC_UNSUPPORTED", 400); }
-  if (!record(payload) || typeof payload.method !== "string" || !PUBLIC_METHOD.test(payload.method) || FORBIDDEN_RPC.has(payload.method)
-      || payload.method.startsWith("__openCompute")
-      || !Array.isArray(payload.args)) return error("DO_RPC_UNSUPPORTED", 400);
+function assertRpcMember(member: unknown): asserts member is string {
+  if (typeof member !== "string" || FORBIDDEN_RPC.has(member)
+      || member.startsWith("__openCompute")) {
+    throw stableFailure("DO_RPC_UNSUPPORTED");
+  }
+}
+
+async function dispatchNativeRpc(env: DoHostEnv, identity: Record<string, string>, method: string, args: unknown[]) {
+  assertRpcMember(method);
+  if (!Array.isArray(args)) throw stableFailure("DO_RPC_UNSUPPORTED");
+  const request = new Request("http://do-router/internal/do/v1/rpc", {
+    method: "POST",
+    headers: identity,
+  });
   const authority = await authorize(request, env);
-  const headers = hostHeaders(request, authority);
-  headers.set("x-open-compute-do-operation", "rpc");
-  headers.set("content-type", "application/json");
-  const response = await host(env, authority).fetch(
-    new Request("http://do-host/internal/rpc", {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    }),
+  const value = await host(env, authority).dispatchTenantRpc(
+    authority, orderFromHeaders(request.headers), method, args,
   );
   await acknowledge(request, env, authority);
-  const body = await response.arrayBuffer();
-  if (body.byteLength > policy.maxRpcResponseBytes) {
-    return error("DO_RPC_UNSUPPORTED", 413);
-  }
-  return new Response(body, {
-    status: response.status,
-    headers: { "content-type": "application/json" },
+  return value;
+}
+
+async function getNativeRpcProperty(env: DoHostEnv, identity: Record<string, string>, property: string) {
+  assertRpcMember(property);
+  const request = new Request("http://do-router/internal/do/v1/rpc", {
+    method: "POST",
+    headers: identity,
   });
+  const authority = await authorize(request, env);
+  const value = await host(env, authority).getTenantRpcProperty(
+    authority, orderFromHeaders(request.headers), property,
+  );
+  await acknowledge(request, env, authority);
+  return value;
+}
+
+async function prepareNativeConnect(
+  env: DoHostEnv,
+  identity: Record<string, string>,
+  authorityWire: SocketAuthorityWire,
+) {
+  const connectAuthority = validateSocketAuthorityWire(authorityWire);
+  const request = new Request("http://do-router/internal/do/v1/connect", {
+    method: "POST",
+    headers: identity,
+  });
+  const authority = await authorize(request, env);
+  const target = host(env, authority);
+  const token = await target.__openComputePrepareConnect(
+    authority, orderFromHeaders(request.headers), connectAuthority,
+  );
+  await acknowledge(request, env, authority);
+  const now = Date.now();
+  for (const [handoff, pending] of pendingConnects) {
+    if (pending.expiresAt <= now) pendingConnects.delete(handoff);
+  }
+  if (pendingConnects.size >= 1024) throw stableFailure("DO_STORAGE_LIMIT");
+  const handoff = crypto.randomUUID().replaceAll("-", "");
+  const expiresAt = now + 10_000;
+  pendingConnects.set(handoff, {
+    expiresAt,
+    hostKey: authority.hostKey,
+    tokenAddress: `${token}.do-connect.invalid:1`,
+  });
+  return { tokenAddress: `${handoff}.do-router.invalid:1` };
+}
+
+async function cancelNativeOrder(env: DoHostEnv, identity: Record<string, string>) {
+  const request = new Request("http://do-router/internal/do/v1/rpc", {
+    method: "POST",
+    headers: identity,
+  });
+  const authority = await authorize(request, env);
+  await host(env, authority).__openComputeCancelOrder(
+    orderFromHeaders(request.headers),
+  );
 }
 
 async function deleteObject(request: Request, env: DoHostEnv) {
@@ -294,26 +366,83 @@ function deleteHost(env: DoHostEnv, authority: Pick<ResolvedDoAuthority, "hostKe
   }));
 }
 
-export default {
-  async fetch(request: Request, env: DoHostEnv): Promise<Response> {
+export default class DoRouter extends WorkerEntrypoint<DoHostEnv> {
+  async dispatchFetch(identity: Record<string, string>, request: Request): Promise<Response> {
+    if (!record(identity) || !(request instanceof Request)) {
+      throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
+    }
+    const headers = new Headers(request.headers);
+    for (const [name, value] of Object.entries(identity)) headers.set(name, value);
+    headers.set("x-open-compute-do-method", request.method);
+    headers.set("x-open-compute-do-url", request.url);
+    headers.set("x-open-compute-do-operation", "fetch");
+    const init: RequestInit = {
+      method: request.method,
+      headers,
+      body: request.body,
+      redirect: "manual",
+    };
+    if (request.method === "GET" || request.method === "HEAD") delete init.body;
+    const internal = new Request("http://do-router/internal/do/v1/fetch", init);
+    return admitted(this.env, policy => dispatchFetch(internal, this.env, policy));
+  }
+
+  async dispatchRpc(identity: Record<string, string>, method: string, args: unknown[]): Promise<unknown> {
+    if (!record(identity)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
+    return admitted(this.env, () => dispatchNativeRpc(this.env, identity, method, args));
+  }
+
+  async getRpcProperty(identity: Record<string, string>, property: string): Promise<unknown> {
+    if (!record(identity)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
+    return admitted(this.env, () => getNativeRpcProperty(this.env, identity, property));
+  }
+
+
+  prepareConnect(identity: Record<string, string>, authority: SocketAuthorityWire) {
+    return admitted(this.env, () => prepareNativeConnect(this.env, identity, authority));
+  }
+
+  async cancelOrder(identity: Record<string, string>): Promise<void> {
+    if (!record(identity)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
+    await admitted(this.env, () => cancelNativeOrder(this.env, identity));
+  }
+
+  async connect(socket: Socket): Promise<void> {
+    try {
+      const tokenAddress = await inboundSocketAddress(socket);
+      const match = /^([0-9a-f]{32})\.do-router\.invalid:1$/.exec(tokenAddress);
+      const pending = match ? pendingConnects.get(match[1]!) : undefined;
+      if (!match || !pending || pending.expiresAt <= Date.now()) {
+        if (match) pendingConnects.delete(match[1]!);
+        throw stableFailure("DO_RUNTIME_EXCEPTION");
+      }
+      pendingConnects.delete(match[1]!);
+      const target = host(this.env, { hostKey: pending.hostKey })
+        .connect(pending.tokenAddress, { allowHalfOpen: true });
+      await target.opened;
+      await tunnelSockets(socket, target);
+    } catch {
+      await socket.close().catch(() => undefined);
+      throw stableFailure("DO_RUNTIME_EXCEPTION");
+    }
+  }
+
+  async fetch(request: Request): Promise<Response> {
     try {
       const path = new URL(request.url).pathname;
       if (path === "/internal/do/v1/fetch") {
-        return admitted(env, policy => dispatchFetch(request, env, policy));
+        return await admitted(this.env, policy => dispatchFetch(request, this.env, policy));
       }
       if (request.method !== "POST") return error("DO_INTERNAL_PROTOCOL_ERROR", 405);
-      if (path === "/internal/do/v1/rpc") {
-        return admitted(env, policy => dispatchRpc(request, env, policy));
-      }
-      if (path === "/internal/do/v1/delete") return deleteObject(request, env);
-      if (path === "/internal/do-delete") return deleteAuthorized(request, env);
-      if (path === "/internal/do-alarm") return admitted(env, () => dispatchAlarm(request, env, false));
+      if (path === "/internal/do/v1/delete") return deleteObject(request, this.env);
+      if (path === "/internal/do-delete") return deleteAuthorized(request, this.env);
+      if (path === "/internal/do-alarm") return admitted(this.env, () => dispatchAlarm(request, this.env, false));
       if (path === "/internal/do-alarm-repair") {
-        return admitted(env, () => dispatchAlarm(request, env, true));
+        return admitted(this.env, () => dispatchAlarm(request, this.env, true));
       }
       return error("DO_INTERNAL_PROTOCOL_ERROR", 404);
     } catch (failure) {
       return error(stableCode(failure) || "DO_RUNTIME_EXCEPTION");
     }
-  },
-};
+  }
+}

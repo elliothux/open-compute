@@ -1,7 +1,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { WorkflowEventWire, WorkflowRunResult } from "../../workflows/execution-protocol.js";
 import {
-  invokeEntrypoint, trackExecutionContext,
+  invokeEntrypoint, trackExecutionContext, trustedContextExports,
   type Environment, type EnvironmentWrapper, type TrackedContext,
 } from "./runtime.js";
 
@@ -17,8 +17,11 @@ export function createWorkflowEntrypoint<Controller>(
 
     validate(): boolean { return validate(target); }
     execute(event: WorkflowEventWire, controller: Controller): Promise<WorkflowRunResult> {
+      const trustedExports = trustedContextExports(this.ctx);
       const wrapped = wrapEnv(this.env);
-      const tracked = this.#tracked ??= trackExecutionContext(this.ctx);
+      const tracked = this.#tracked ??= trackExecutionContext(
+        this.ctx, undefined, undefined, false, trustedExports,
+      );
       const pending = invokeEntrypoint(this, () =>
         run(target, this.ctx, wrapped, event, controller), [],
       wrapped, tracked);

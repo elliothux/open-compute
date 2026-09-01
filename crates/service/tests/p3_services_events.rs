@@ -16,7 +16,7 @@ use open_compute_service::runtime_bridge::{
     WorkflowOutcome, WorkflowRunRequest,
 };
 use open_compute_storage::{
-    DO_NAMESPACE_SCHEMA_VERSION, QueueContentType, WorkerRepository, WorkflowTarget,
+    DO_NAMESPACE_SCHEMA_VERSION, QueueContentType, SchedulerStore, WorkerRepository, WorkflowTarget,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
@@ -33,28 +33,49 @@ const TARGET: &str = r#"
 import { WorkerEntrypoint } from "cloudflare:workers";
 export default class Target extends WorkerEntrypoint {
   ping(source) { return `service:${source}`; }
+  async connect(socket) {
+    const source = await new Response(socket.readable).text();
+    const writer = socket.writable.getWriter();
+    await writer.write(new TextEncoder().encode(`service:${source}`));
+    await writer.close();
+    writer.releaseLock();
+  }
 }
 "#;
 
 const EVENTS: &str = r#"
 import { DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
 
+async function socketPing(target, source) {
+  const socket = target.connect(`${source}.invalid:1`, { allowHalfOpen: true });
+  await socket.opened;
+  const writer = socket.writable.getWriter();
+  await writer.write(new TextEncoder().encode(source));
+  await writer.close();
+  writer.releaseLock();
+  const reply = await new Response(socket.readable).text();
+  await socket.close();
+  await socket.closed;
+  if (reply !== `service:${source}`) throw new Error("service socket mismatch");
+  return reply;
+}
+
 export class ObjectEvent extends DurableObject {
-  async fetch() { return new Response(await this.env.TARGET.ping("do")); }
+  async fetch() { return new Response(await socketPing(this.env.TARGET, "do")); }
 }
 
 export class Flow extends WorkflowEntrypoint {
-  async run() { return this.env.TARGET.ping("workflow"); }
+  async run() { return socketPing(this.env.TARGET, "workflow"); }
 }
 
 export default {
   fetch(_request, env) { return env.OBJECT.getByName("event").fetch("https://object.test/"); },
   async queue(batch, env) {
-    if (await env.TARGET.ping("queue") !== "service:queue") throw new Error("service mismatch");
+    await socketPing(env.TARGET, "queue");
     batch.ackAll();
   },
   async scheduled(controller, env) {
-    if (await env.TARGET.ping("cron") !== "service:cron") throw new Error("service mismatch");
+    await socketPing(env.TARGET, "cron");
     controller.noRetry();
   },
 };
@@ -85,12 +106,24 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         .unwrap();
     let namespace = create_namespace(&harness, account, events.id);
     let validator: Arc<dyn RuntimeValidator> = Arc::new(harness.transport.clone());
+    let scheduler = Arc::new(
+        SchedulerStore::open(
+            &harness.storage.data_dir().ensure_scheduler_db().unwrap(),
+            100,
+            1,
+        )
+        .unwrap(),
+    );
     let controller = DeploymentController::new(
         &harness.storage,
         harness.artifacts.clone(),
         validator,
         BundleLimits::default(),
-    );
+    )
+    .with_product_promoter(open_compute_service::product_promotion_for_test(
+        harness.storage.clone(),
+        scheduler,
+    ));
     let _target_deployment = deploy(
         &controller,
         deployment_request(
@@ -104,33 +137,31 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         ),
     )
     .await;
-    let event_deployment = deploy(
-        &controller,
-        deployment_request(
-            account,
-            events.id,
-            "service-event-sources-v1",
-            EVENTS,
-            BTreeMap::from([(
-                "OBJECT".to_owned(),
-                DeploymentBindingInput {
-                    kind: BindingKind::DoNamespace,
-                    id: namespace,
-                    permissions: CanonicalPermissions::default(),
-                    config: CanonicalBindingConfig::default(),
-                },
-            )]),
-            BTreeMap::from([(
-                "TARGET".to_owned(),
-                DeploymentServiceInput {
-                    target_worker_id: target.id,
-                    entrypoint: None,
-                },
-            )]),
-            2,
-        ),
-    )
-    .await;
+    let mut event_request = deployment_request(
+        account,
+        events.id,
+        "service-event-sources-v1",
+        EVENTS,
+        BTreeMap::from([(
+            "OBJECT".to_owned(),
+            DeploymentBindingInput {
+                kind: BindingKind::DoNamespace,
+                id: namespace,
+                permissions: CanonicalPermissions::default(),
+                config: CanonicalBindingConfig::default(),
+            },
+        )]),
+        BTreeMap::from([(
+            "TARGET".to_owned(),
+            DeploymentServiceInput {
+                target_worker_id: target.id,
+                entrypoint: None,
+            },
+        )]),
+        2,
+    );
+    event_request.crons = vec!["* * * * *".to_owned()];
+    let event_deployment = deploy(&controller, event_request).await;
     let dispatch_target = dispatch_target(account, events.id, &event_deployment, None);
 
     let message_id = QueueMessageId::generate();
@@ -147,6 +178,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
                     content_type: QueueContentType::Text,
                     body_base64: base64::engine::general_purpose::STANDARD.encode("event"),
                 }],
+                metadata: Default::default(),
             },
             Duration::from_secs(5),
         )
@@ -163,6 +195,8 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
             &ScheduledDispatchRequest {
                 scheduled_time_ms: 1_788_048_060_000,
                 cron: "* * * * *".to_owned(),
+                scheduled_handler: true,
+                workflow_bindings: Vec::new(),
             },
             Duration::from_secs(5),
         )
@@ -185,11 +219,10 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), 200);
-    assert_eq!(
-        to_bytes(response.into_body(), 1024).await.unwrap().as_ref(),
-        b"service:do"
-    );
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024).await.unwrap();
+    assert_eq!(status, 200, "unexpected DO response: {body:?}");
+    assert_eq!(body.as_ref(), b"service:do");
     wait_service_drain(&harness).await;
 
     let workflow_target = WorkflowTarget {
@@ -218,7 +251,9 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
                 external_instance_id: "service-event-instance".to_owned(),
                 definition_name: "service-events".to_owned(),
                 created_at_ms: 1_788_048_000_000,
-                payload_json: "null".to_owned(),
+                payload_base64: "T0NEVgECAA==".to_owned(),
+                rollback: false,
+                schedule: None,
             },
             Duration::from_secs(5),
         )
@@ -227,10 +262,10 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
     match workflow.result {
         WorkflowOutcome::Complete {
             final_ordinal,
-            output_json,
+            output_base64,
         } => {
             assert_eq!(final_ordinal, 0);
-            assert_eq!(output_json, r#""service:workflow""#);
+            assert_eq!(output_base64, "T0NEVgECBgAAABBzZXJ2aWNlOndvcmtmbG93");
         }
         outcome => panic!("unexpected Workflow outcome: {outcome:?}"),
     }
@@ -289,16 +324,13 @@ fn deployment_request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-26".to_owned(),
-        compatibility_flags: vec!["rpc".to_owned()],
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings,
         services,
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote: true,
         request_id: RequestId::generate(),
         now_ms,

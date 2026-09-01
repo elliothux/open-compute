@@ -10,6 +10,7 @@ export interface WorkerBinding {
   type: "kv_namespace" | "r2_bucket" | "d1_database" | "do_namespace" | "queue_producer" | "workflow";
   id: string;
   permissions?: { read: boolean; write: boolean };
+  schedules?: string[];
 }
 
 /** A Service target name resolved to one immutable Worker ID during deployment. */
@@ -35,8 +36,6 @@ export interface WorkerProject {
   readonly frameworkOutput?: string;
   readonly name: string;
   readonly tsconfig: string;
-  readonly compatibilityDate: string;
-  readonly compatibilityFlags: string[];
   readonly vars: Record<string, JsonValue>;
   readonly secrets: Record<string, { env: string }>;
   readonly bindings: Record<string, WorkerBinding>;
@@ -145,13 +144,9 @@ export async function loadProject(path: string): Promise<WorkerProject> {
   try { value = JSON.parse(content); }
   catch { throw new Error("project config must be valid JSON"); }
   if (!record(value)) throw new Error("project config must be an object");
-  knownKeys(value, ["main", "frameworkOutput", "name", "tsconfig", "compatibilityDate", "compatibilityFlags", "vars", "secrets", "bindings", "services", "assets", "cache", "exports", "images", "version_metadata", "accountId", "endpoint"], "project");
+  knownKeys(value, ["main", "frameworkOutput", "name", "tsconfig", "vars", "secrets", "bindings", "services", "assets", "cache", "exports", "images", "version_metadata", "accountId", "endpoint"], "project");
   const name = string(value.name, "name");
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) throw new Error("invalid Worker name");
-  const compatibilityDate = string(value.compatibilityDate, "compatibilityDate");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(compatibilityDate)) throw new Error("invalid compatibility date");
-  const flags: unknown = value.compatibilityFlags === undefined ? [] : value.compatibilityFlags;
-  if (!Array.isArray(flags) || !flags.every((item): item is string => typeof item === "string")) throw new Error("invalid compatibility flags");
   const vars = value.vars === undefined ? {} : value.vars;
   if (!record(vars)) throw new Error("invalid Worker vars");
   const variables: Record<string, JsonValue> = {};
@@ -175,12 +170,20 @@ export async function loadProject(path: string): Promise<WorkerProject> {
     if (!record(value.bindings)) throw new Error("invalid Worker bindings");
     for (const [key, item] of Object.entries(value.bindings)) {
       if (!record(item)) throw new Error("invalid Worker binding");
-      knownKeys(item, ["type", "id", "permissions"], "binding");
+      knownKeys(item, ["type", "id", "permissions", "schedules"], "binding");
       const kind = item.type;
       if (kind !== "kv_namespace" && kind !== "r2_bucket" && kind !== "d1_database" && kind !== "do_namespace" && kind !== "queue_producer" && kind !== "workflow") {
         throw new Error("unsupported Worker binding type");
       }
       const binding: WorkerBinding = { type: kind, id: string(item.id, "binding id") };
+      if (item.schedules !== undefined) {
+        if (kind !== "workflow" || !Array.isArray(item.schedules) || item.schedules.length > 100
+            || !item.schedules.every(value => typeof value === "string" && value.length >= 1
+              && value.length <= 256)) {
+          throw new Error("invalid Workflow schedules");
+        }
+        binding.schedules = [...new Set(item.schedules)].sort();
+      }
       if (item.permissions !== undefined) {
         if (!record(item.permissions) || typeof item.permissions.read !== "boolean" || typeof item.permissions.write !== "boolean") throw new Error("invalid binding permissions");
         knownKeys(item.permissions, ["read", "write"], "binding permissions");
@@ -284,7 +287,7 @@ export async function loadProject(path: string): Promise<WorkerProject> {
     project: dirname(filename), ...(main === undefined ? {} : { main }),
     ...(frameworkOutput === undefined ? {} : { frameworkOutput }), name,
     tsconfig: value.tsconfig === undefined ? "tsconfig.json" : string(value.tsconfig, "tsconfig"),
-    compatibilityDate, compatibilityFlags: flags, vars: variables, secrets, bindings, services,
+    vars: variables, secrets, bindings, services,
     runtimeFeatures,
     ...(assets === undefined ? {} : { assets }),
     ...(value.accountId === undefined ? {} : { accountId: string(value.accountId, "accountId") }),

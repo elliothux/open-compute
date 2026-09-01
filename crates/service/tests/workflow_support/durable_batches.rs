@@ -1,13 +1,14 @@
 //! Batch admission, illegal overlap, and bounded large replay on the current path.
 
-use super::{Harness, now, start_backend};
+use super::{now, start_backend};
+use crate::workflow_support::{Harness, decode_workflow_json, encode_workflow_json};
 use open_compute_core::{MetricsConfig, SchedulerConfig, WorkflowsConfig};
 use open_compute_service::{
     metrics::MetricsRegistry, scheduler::SchedulerService, workflow_http::WorkflowApiState,
 };
 use open_compute_storage::{SchedulerStore, WorkflowRepository};
-use open_compute_workers::{WorkflowController, WorkflowCreateInput};
-use serde_json::{Value, json};
+use open_compute_workers::{WorkflowController, WorkflowCreateInput, WorkflowEventInput};
+use serde_json::json;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -50,15 +51,17 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
     for mode in [
         "nested", "overlap", "unjoined", "overflow", "joined", "large",
     ] {
-        let input = json!({"mode":mode}).to_string();
+        let input = encode_workflow_json(&json!({"mode":mode}));
         let identity = controller
             .create(
                 account,
                 definition.id,
+                open_compute_core::WorkflowOperationId::generate(),
                 Some(mode),
                 WorkflowCreateInput {
-                    payload_json: &input,
+                    payload_base64: &input,
                     retention: None,
+                    schedule: None,
                 },
                 now(),
             )
@@ -69,8 +72,13 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
                     account,
                     definition.id,
                     identity.instance_id,
-                    "ready",
-                    &json!("e".repeat(1024 * 1024 - 100)).to_string(),
+                    WorkflowEventInput {
+                        operation_id: open_compute_core::WorkflowOperationId::generate(),
+                        event_type: "ready",
+                        payload_base64: &encode_workflow_json(&json!(
+                            "e".repeat(1024 * 1024 - 100)
+                        )),
+                    },
                     now(),
                 )
                 .unwrap();
@@ -109,28 +117,30 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
                 "{mode}: {:?}",
                 record.error_code
             );
-            let output: Value =
-                serde_json::from_str(record.output_json.as_deref().unwrap()).unwrap();
+            let output = decode_workflow_json(record.output_json.as_deref().unwrap());
             if mode == "joined" {
                 assert_eq!(
                     output,
-                    json!({"peak":4,"statuses":["fulfilled","rejected","fulfilled","fulfilled"],"next":7})
+                    json!({"peak":4.0,"statuses":["fulfilled","rejected","fulfilled","fulfilled"],"next":7.0})
                 );
             } else {
                 assert_eq!(
                     output,
-                    json!({"lengths":vec![1024*1024-100;16],"calls":0,"eventLength":1024*1024-100})
+                    json!({"lengths":vec![1_048_476.0;16],"calls":0.0,"eventLength":1_048_476.0})
                 );
             }
+        } else if mode == "overflow" {
+            assert_eq!(
+                record.error_code.as_deref(),
+                Some("WORKFLOW_STEP_LIMIT_EXCEEDED")
+            );
+            assert_eq!(record.durable.registered_step_count, 0);
         } else {
             assert_eq!(
                 record.error_code.as_deref(),
-                Some("WORKFLOW_PARALLEL_STEP_UNSUPPORTED"),
+                Some("WORKFLOW_NON_DETERMINISTIC"),
                 "{mode}"
             );
-            if mode == "overflow" {
-                assert_eq!(record.durable.registered_step_count, 0);
-            }
         }
         store.verify_workflow_history(id).unwrap();
     }

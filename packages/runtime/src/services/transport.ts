@@ -5,8 +5,12 @@ import { tenantEnv } from "../loader/bindings.js";
 import { modulesFor } from "../loader/modules.js";
 import type { LoaderEnv, RuntimeSnapshot } from "../loader/protocol.js";
 import {
+  inboundSocketTargetAddress,
+  tunnelSockets,
+} from "../sockets/tunnel.js";
+import {
   assembleOnce, bindingError, BINDING_TOKEN_HEADER, currentStartupGeneration,
-  doPolicy, INTERNAL_HEADERS, PROFILE, resolveSnapshot,
+  doPolicy, INTERNAL_HEADERS, lockWorkerCode, resolveSnapshot, tenantGlobalOutbound,
 } from "../loader/shared.js";
 
 interface ServiceFrame {
@@ -92,6 +96,23 @@ async function serviceControl<T>(env: BindingEnv, path: string, body: unknown): 
   }
   const value: unknown = await response.json();
   return value as T;
+}
+
+async function finalizeServiceConnect(env: BindingEnv, admission: ServiceAdmission): Promise<void> {
+  let lastFailure: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await serviceControl(env, "/internal/services/v1/connect/finalize", {
+        handle: admission.handle,
+        callerFrame: admission.callerFrame,
+      });
+      return;
+    } catch (error) {
+      lastFailure = error;
+      if (attempt < 2) await scheduler.wait(10 * (attempt + 1));
+    }
+  }
+  throw lastFailure;
 }
 
 class ServiceDrain {
@@ -372,22 +393,20 @@ async function loadedServiceTarget(
     const built = modulesFor(snapshot, false, entrypoint);
     const deploymentId = admission.target.loaderKey.split("/")[2]!;
     return {
-      compatibilityDate: snapshot.compatibilityDate,
-      compatibilityFlags: snapshot.compatibilityFlags,
+      ...lockWorkerCode(env),
       mainModule: built.mainModule,
       modules: built.modules,
       env: tenantEnv(
         snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
       ),
-      globalOutbound: ctx.exports.OutboundGateway({ props: { deploymentId, policyVersion: 1 } }),
-      limits: PROFILE,
+      globalOutbound: tenantGlobalOutbound(env, false),
     };
   });
   const stub = env.LOADER.get(runtimeKey, () => code);
   const runtimeEntrypoint = entrypoint ?? "__OpenComputeDefaultService";
   return {
     snapshot,
-    target: stub.getEntrypoint(runtimeEntrypoint, { limits: PROFILE }) as object,
+    target: stub.getEntrypoint(runtimeEntrypoint) as object,
   };
 }
 
@@ -416,7 +435,7 @@ export class ServiceTransport extends WorkerEntrypoint<LoaderEnv, ServiceBinding
 
   async #admit(
     frame: ServiceFrame,
-    operation: "default_fetch" | "named_fetch" | "rpc",
+    operation: "default_fetch" | "named_fetch" | "rpc" | "connect",
   ): Promise<ServiceAdmission> {
     const props = this.#props();
     const parentFrame = this.#parent(frame);
@@ -449,6 +468,33 @@ export class ServiceTransport extends WorkerEntrypoint<LoaderEnv, ServiceBinding
 
   get(frame: ServiceFrame, property: string): Promise<unknown> {
     return this.#invoke(frame, property, [], true);
+  }
+
+  async connect(socket: Socket): Promise<void> {
+    let admitted: ServiceAdmission | undefined;
+    const frame = Object.freeze({ scopeId: crypto.randomUUID(), parentFrame: null });
+    try {
+      const address = await inboundSocketTargetAddress(socket);
+      admitted = await this.#admit(frame, "connect");
+      const loaded = await loadedServiceTarget(this.env, this.ctx, admitted);
+      if (!serviceObject(loaded.target) || !serviceCallable(Reflect.get(loaded.target, "connect"))) {
+        throw bindingError("SERVICE_ENTRYPOINT_NOT_FOUND");
+      }
+      const target = (loaded.target as Fetcher).connect(address, { allowHalfOpen: true });
+      await target.opened;
+      await tunnelSockets(socket, target);
+    } catch {
+      await socket.close().catch(() => undefined);
+      throw bindingError("SERVICE_UNAVAILABLE");
+    } finally {
+      if (admitted) {
+        try {
+          await finalizeServiceConnect(this.env, admitted);
+        } finally {
+          serviceRoots.delete(frame.scopeId);
+        }
+      }
+    }
   }
 
   async #invoke(

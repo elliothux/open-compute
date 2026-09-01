@@ -12,7 +12,7 @@ pub const WORKFLOW_MAX_ATTEMPT_MS: u64 = 240_000;
 /// Saturation cap for a computed retry delay, independent of the base delay.
 pub const WORKFLOW_MAX_RETRY_DELAY_MS: u64 = 86_400_000;
 
-/// Static deterministic retry backoff, without dynamic functions or jitter.
+/// Deterministic retry backoff applied to a static or callback-resolved delay.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkflowBackoff {
@@ -31,8 +31,10 @@ pub enum WorkflowBackoff {
 pub struct WorkflowRetryPolicy {
     /// Number of additional business attempts, from zero through one hundred.
     pub limit: u32,
-    /// Normalized base delay in milliseconds, before the computed-delay cap.
-    pub delay: u64,
+    /// Normalized static base delay in milliseconds. `None` means the immutable
+    /// deployment supplies a dynamic delay function on every failed attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delay: Option<u64>,
     /// Frozen deterministic backoff formula.
     pub backoff: WorkflowBackoff,
 }
@@ -41,7 +43,7 @@ impl Default for WorkflowRetryPolicy {
     fn default() -> Self {
         Self {
             limit: 5,
-            delay: 10_000,
+            delay: Some(10_000),
             backoff: WorkflowBackoff::Exponential,
         }
     }
@@ -51,27 +53,53 @@ impl WorkflowRetryPolicy {
     /// Calculate the durable delay after a one-based business attempt.
     /// Overflow saturates at the declared daily cap rather than wrapping.
     pub fn delay_after(&self, attempt: u32) -> Result<u64, PlatformError> {
+        self.delay_after_resolved(attempt, None)
+    }
+
+    /// Calculate a retry delay using the value returned by a dynamic delay
+    /// function. Supplying a value for a static policy, or omitting it for a
+    /// dynamic policy, is an invariant violation.
+    pub fn delay_after_resolved(
+        &self,
+        attempt: u32,
+        resolved_dynamic_delay: Option<u64>,
+    ) -> Result<u64, PlatformError> {
         self.validate()?;
         if !(1..=101).contains(&attempt) {
             return Err(unsupported());
         }
+        let delay = match (self.delay, resolved_dynamic_delay) {
+            (Some(delay), None) | (None, Some(delay)) if delay <= WORKFLOW_MAX_DURATION_MS => delay,
+            _ => return Err(unsupported()),
+        };
         let factor = match self.backoff {
             WorkflowBackoff::Constant => 1,
             WorkflowBackoff::Linear => u64::from(attempt),
             WorkflowBackoff::Exponential => 1_u64.checked_shl(attempt - 1).unwrap_or(u64::MAX),
         };
-        Ok(self
-            .delay
+        Ok(delay
             .saturating_mul(factor)
             .min(WORKFLOW_MAX_RETRY_DELAY_MS))
     }
 
     fn validate(&self) -> Result<(), PlatformError> {
-        if self.limit > 100 || self.delay > WORKFLOW_MAX_DURATION_MS {
+        if self.limit > 100
+            || self
+                .delay
+                .is_some_and(|delay| delay > WORKFLOW_MAX_DURATION_MS)
+        {
             return Err(unsupported());
         }
         Ok(())
     }
+}
+
+/// Pinned stable step-output sensitivity marker.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkflowStepSensitivity {
+    /// Suppress step output from tenant-observable logs and diagnostics.
+    Output,
 }
 
 /// Fully resolved `step.do` configuration, identical to the public step context.
@@ -82,6 +110,9 @@ pub struct WorkflowStepConfig {
     pub retries: WorkflowRetryPolicy,
     /// Per-attempt timeout in milliseconds, excluding durable waiting.
     pub timeout: u64,
+    /// Optional pinned sensitivity policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sensitive: Option<WorkflowStepSensitivity>,
 }
 
 impl Default for WorkflowStepConfig {
@@ -89,6 +120,7 @@ impl Default for WorkflowStepConfig {
         Self {
             retries: WorkflowRetryPolicy::default(),
             timeout: 60_000,
+            sensitive: None,
         }
     }
 }
@@ -96,7 +128,7 @@ impl Default for WorkflowStepConfig {
 impl WorkflowStepConfig {
     /// Strictly normalize a public config object once at the authority boundary.
     pub fn resolve(value: &Value) -> Result<Self, PlatformError> {
-        let fields = object(value, &["retries", "timeout"])?;
+        let fields = object(value, &["retries", "timeout", "sensitive"])?;
         let mut resolved = Self::default();
         if let Some(timeout) = fields.get("timeout") {
             resolved.timeout = duration_ms(timeout, WORKFLOW_MAX_ATTEMPT_MS)?;
@@ -109,14 +141,22 @@ impl WorkflowStepConfig {
                 .filter(|value| value.fract() == 0.0 && (0.0..=100.0).contains(value))
                 .map(|value| value as u32)
                 .ok_or_else(unsupported)?;
-            resolved.retries.delay = duration_ms(
-                retries.get("delay").ok_or_else(unsupported)?,
-                WORKFLOW_MAX_DURATION_MS,
-            )?;
+            let delay = retries.get("delay").ok_or_else(unsupported)?;
+            resolved.retries.delay = if delay.as_object().is_some_and(|value| {
+                value.len() == 1 && value.get("dynamic") == Some(&Value::Bool(true))
+            }) {
+                None
+            } else {
+                Some(duration_ms(delay, WORKFLOW_MAX_DURATION_MS)?)
+            };
             if let Some(backoff) = retries.get("backoff") {
                 resolved.retries.backoff =
                     serde_json::from_value(backoff.clone()).map_err(|_| unsupported())?;
             }
+        }
+        if let Some(sensitive) = fields.get("sensitive") {
+            resolved.sensitive =
+                Some(serde_json::from_value(sensitive.clone()).map_err(|_| unsupported())?);
         }
         resolved.validate()?;
         Ok(resolved)

@@ -26,6 +26,7 @@ export const INTERNAL_HEADERS = Object.freeze([
   "x-open-compute-original-url",
   "x-open-compute-route-generation",
   "x-open-compute-request-id",
+  "x-open-compute-output-gate",
   "x-open-compute-binding-id",
   "x-open-compute-binding-token",
   "x-open-compute-descriptor-sha256",
@@ -45,8 +46,28 @@ export const INTERNAL_HEADERS = Object.freeze([
   "x-forwarded-proto",
 ]);
 
-/** Per-isolate loader profile applied consistently to public and Service dispatch. */
-export const PROFILE = Object.freeze({ cpuMs: 50, subRequests: 16 });
+/** Select the one public-only outbound capability for tenant code, or disable it for validation. */
+export function tenantGlobalOutbound(env: LoaderEnv, validation: boolean): Fetcher | null {
+  if (validation) return null;
+  if (env.PUBLIC_NETWORK == null) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+  return env.PUBLIC_NETWORK;
+}
+
+/** Formal-lock date and tenant-required flags from private system bindings. */
+export function lockWorkerCode(env: LoaderEnv): {
+  compatibilityDate: string;
+  compatibilityFlags: string[];
+} {
+  if (typeof env.COMPATIBILITY_DATE !== "string" || env.COMPATIBILITY_DATE.length === 0
+      || !Array.isArray(env.REQUIRED_COMPATIBILITY_FLAGS)
+      || !env.REQUIRED_COMPATIBILITY_FLAGS.every((flag): flag is string => typeof flag === "string")) {
+    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+  }
+  return {
+    compatibilityDate: env.COMPATIBILITY_DATE,
+    compatibilityFlags: [...env.REQUIRED_COMPATIBILITY_FLAGS],
+  };
+}
 
 function policyInteger(env: DoPolicyEnv, name: keyof DoPolicyEnv, maximum: number): number {
   const value = Number(env[name]);
@@ -60,8 +81,6 @@ function policyInteger(env: DoPolicyEnv, name: keyof DoPolicyEnv, maximum: numbe
 export function doPolicy(env: DoPolicyEnv): Readonly<DoPolicy> {
   return Object.freeze({
     maxObjectNameBytes: policyInteger(env, "DO_MAX_OBJECT_NAME_BYTES", 1024),
-    maxRpcRequestBytes: policyInteger(env, "DO_MAX_RPC_REQUEST_BYTES", 16 * 1024 * 1024),
-    maxRpcResponseBytes: policyInteger(env, "DO_MAX_RPC_RESPONSE_BYTES", 16 * 1024 * 1024),
     maxFetchBodyBytes: policyInteger(env, "DO_MAX_FETCH_BODY_BYTES", 64 * 1024 * 1024),
     dispatchTimeoutMs: policyInteger(env, "DO_DISPATCH_TIMEOUT_MS", 5 * 60 * 1000),
     maxInFlightDispatches: policyInteger(env, "DO_MAX_IN_FLIGHT_DISPATCHES", 4096),

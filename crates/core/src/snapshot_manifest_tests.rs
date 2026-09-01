@@ -16,7 +16,6 @@ fn release() -> PlatformReleaseIdentityV1 {
         kv_schema_version: 1,
         d1_schema_version: 1,
         snapshot_format_version: 1,
-        compatibility_policy_sha256: "3".repeat(64),
     }
 }
 

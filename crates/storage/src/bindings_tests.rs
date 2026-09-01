@@ -1,10 +1,10 @@
 use super::*;
 use crate::{
-    NewDeployment, PlatformStorage, ReserveResourceCreate, ResourceCreateReservation,
-    ResourceRepository, WorkerRepository,
+    NewDeployment, NewQueueProducerBinding, PlatformStorage, QueueConfig, QueueRepository,
+    ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, WorkerRepository,
 };
 use open_compute_core::config::StorageConfig;
-use open_compute_core::{RequestId, SystemClock, WorkerId};
+use open_compute_core::{BindingId, QueueId, RequestId, SystemClock, WorkerId};
 use std::collections::BTreeMap;
 
 fn storage() -> (tempfile::TempDir, PlatformStorage) {
@@ -36,9 +36,6 @@ fn deployment(
         artifact_size: Some(1),
         artifact_schema_version: Some(1),
         main_module: Some("index.js".to_owned()),
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
-        limits: serde_json::json!({"profile":"default"}),
         worker_code_sha256: [2; 32],
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
@@ -48,7 +45,7 @@ fn deployment(
 }
 
 #[test]
-fn binding_insert_referrer_authorize_and_release_are_atomic() {
+fn binding_insert_referrer_authorize_and_worker_release_are_atomic() {
     let (_temp, storage) = storage();
     let account = storage.identity().default_account_id;
     let resources = ResourceRepository::new(storage.db());
@@ -120,9 +117,72 @@ fn binding_insert_referrer_authorize_and_release_are_atomic() {
     assert!(!authorized.binding.permissions.write);
 
     workers
-        .tombstone_deployment(account, worker.id, deployment_id, RequestId::generate(), 23)
+        .delete_worker(
+            account,
+            worker.id,
+            &[deployment_id],
+            RequestId::generate(),
+            23,
+        )
         .unwrap();
     assert!(resources.referrers(resource_id).unwrap().is_empty());
+    resources.begin_delete(account, resource_id, 24).unwrap();
+}
+
+#[test]
+fn queue_producer_referrer_is_released_when_its_worker_is_deleted() {
+    let (_temp, storage) = storage();
+    let account = storage.identity().default_account_id;
+    let queues = QueueRepository::new(storage.db());
+    let queue_id = QueueId::generate();
+    queues
+        .insert_creating(account, queue_id, "events", QueueConfig::default(), 10)
+        .unwrap();
+    queues.mark_ready(account, queue_id, 11).unwrap();
+
+    let workers = WorkerRepository::new(storage.db());
+    let (worker, _) = workers
+        .create_worker(account, "queue-bound", RequestId::generate(), 12, 1_000_000)
+        .unwrap();
+    let deployment_id = DeploymentId::generate();
+    let binding = NewQueueProducerBinding {
+        id: BindingId::generate(),
+        name: "EVENTS".to_owned(),
+        queue_id,
+        queue_lifecycle_generation: 1,
+        capability_version: 1,
+        descriptor_sha256: [3; 32],
+    };
+    workers
+        .insert_staging_deployment(
+            &deployment(account, worker.id, deployment_id),
+            &crate::NewDeploymentProducts {
+                queue_bindings: std::slice::from_ref(&binding),
+                ..Default::default()
+            },
+            1_000_000,
+        )
+        .unwrap();
+    workers.begin_validation(deployment_id).unwrap();
+    workers.mark_ready(deployment_id, 13).unwrap();
+    assert_eq!(
+        queues
+            .begin_delete(account, queue_id, 1, 14)
+            .unwrap_err()
+            .code(),
+        ErrorCode::QueueReferenced
+    );
+
+    workers
+        .delete_worker(
+            account,
+            worker.id,
+            &[deployment_id],
+            RequestId::generate(),
+            15,
+        )
+        .unwrap();
+    queues.begin_delete(account, queue_id, 1, 16).unwrap();
 }
 
 #[test]

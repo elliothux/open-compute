@@ -49,13 +49,15 @@ pub(super) fn prepare(
             .create(
                 account,
                 definition.id,
+                WorkflowOperationId::generate(),
                 Some(mode),
                 open_compute_workers::WorkflowCreateInput {
-                    payload_json: "{\"snapshot\":true}",
+                    payload_base64: &encode_workflow_json(&serde_json::json!({"snapshot":true})),
                     retention: Some(&WorkflowRetention {
                         success_retention_ms: 3600000,
                         error_retention_ms: 3600000,
                     }),
+                    schedule: None,
                 },
                 base + 1,
             )
@@ -72,8 +74,13 @@ pub(super) fn prepare(
                         account,
                         definition.id,
                         identity.instance_id,
-                        "unmatched",
-                        "{\"kept\":true}",
+                        open_compute_workers::WorkflowEventInput {
+                            operation_id: WorkflowOperationId::generate(),
+                            event_type: "unmatched",
+                            payload_base64: &encode_workflow_json(
+                                &serde_json::json!({"kept":true}),
+                            ),
+                        },
                         base + 3,
                     )
                     .unwrap();
@@ -92,6 +99,8 @@ pub(super) fn prepare(
                 } else {
                     serde_json::json!({"duration":86400000})
                 },
+                rollback_config: None,
+                rollback_step: false,
                 dependencies: vec![],
                 batch_first_ordinal: 0,
                 batch_size: 1,
@@ -99,7 +108,13 @@ pub(super) fn prepare(
             .resolve()
             .unwrap();
             scheduler
-                .register_workflow_wait(&run.fence, &step, base + 4, config)
+                .claim_workflow_batch(
+                    &run.fence,
+                    std::slice::from_ref(&step),
+                    config.dispatch_timeout_ms,
+                    base + 4,
+                    config,
+                )
                 .unwrap();
             scheduler.yield_workflow(&run.fence, base + 5).unwrap();
             if mode == "paused" {
@@ -240,8 +255,11 @@ pub(super) fn verify(
                         identity.target.account_id,
                         identity.target.definition_id,
                         identity.instance_id,
-                        "approval",
-                        "true",
+                        open_compute_workers::WorkflowEventInput {
+                            operation_id: WorkflowOperationId::generate(),
+                            event_type: "approval",
+                            payload_base64: "T0NEVgECAw==",
+                        },
                         now_ms,
                     )
                     .unwrap();

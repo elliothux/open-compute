@@ -22,8 +22,6 @@ fn every_deployment_binds_the_complete_system_source_identity() {
         0,
         Some((bundle.sha256(), bundle.manifest())),
         None,
-        "2026-08-22".into(),
-        Vec::new(),
         BTreeMap::new(),
         Vec::new(),
         Vec::new(),
@@ -32,7 +30,6 @@ fn every_deployment_binds_the_complete_system_source_identity() {
         Vec::new(),
         CachePolicyDescriptorV1::default(),
         Vec::new(),
-        json!({"profile":"default"}),
         1,
     )
     .unwrap();

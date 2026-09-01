@@ -48,16 +48,16 @@ impl SchedulerStore {
                     WorkflowStepResult::Suspended
                 ),
                 "pending" => !matches!(
-                    durable_settlement::fail(
+                    durable_settlement::timeout(
                         &tx,
                         *id,
                         instance.identity.instance_generation,
                         &step,
-                        ErrorCode::WorkflowStepTimeout,
-                        now_ms
+                        now_ms,
                     )?,
                     WorkflowStepResult::Suspended
                 ),
+                "delay_pending" => true,
                 "retry_wait" => true,
                 _ => return Err(error(ErrorCode::WorkflowInvariantViolation)),
             };
@@ -85,6 +85,11 @@ pub(super) const DUE_STEPS: &str = "SELECT instance_id,ordinal FROM (
       JOIN workflow_instances i ON i.id=s.instance_id WHERE s.state='pending' AND s.attempt>0 AND s.attempt_deadline_at_ms<=?1
         AND i.capability_version=1 AND i.state IN ('queued','running','waiting','paused')
       ORDER BY s.attempt_deadline_at_ms,s.instance_id,s.ordinal LIMIT ?2)
+    UNION ALL
+    SELECT * FROM (SELECT s.instance_id,s.ordinal,s.updated_at_ms AS deadline FROM workflow_steps s
+      JOIN workflow_instances i ON i.id=s.instance_id WHERE s.state='delay_pending' AND s.updated_at_ms<=?1
+        AND i.capability_version=1 AND i.state IN ('queued','running','waiting','paused')
+      ORDER BY s.updated_at_ms,s.instance_id,s.ordinal LIMIT ?2)
     UNION ALL
     SELECT * FROM (SELECT s.instance_id,s.ordinal,s.due_at_ms AS deadline FROM workflow_steps s
       JOIN workflow_instances i ON i.id=s.instance_id WHERE s.state='retry_wait' AND s.due_at_ms<=?1

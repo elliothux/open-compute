@@ -4,7 +4,9 @@ use base64::Engine as _;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hmac::{Hmac, Mac};
-use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, SecretBytes, WorkerId};
+use open_compute_core::{
+    AccountId, DeploymentId, ErrorCode, PlatformError, ResourceId, SecretBytes, WorkerId,
+};
 use rand::TryRngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -12,6 +14,8 @@ use sha2::{Digest, Sha256};
 const ENVELOPE_VERSION: u8 = 1;
 const ALGORITHM: &str = "XCHACHA20-POLY1305";
 const NONCE_LEN: usize = 24;
+const D1_BOOKMARK_TOKEN_VERSION: u8 = 1;
+const D1_BOOKMARK_MAX_BYTES: usize = 256;
 /// Current revision-bound secret-envelope AAD schema, independent of artifact format.
 pub const SECRET_AAD_SCHEMA: u32 = 1;
 const MAX_SECRET_NAME_LEN: usize = 4096;
@@ -42,6 +46,7 @@ pub struct SecretCrypto {
     r2_cursor_key: [u8; 32],
     do_name_root_key: [u8; 32],
     do_host_root_key: [u8; 32],
+    d1_bookmark_cipher: XChaCha20Poly1305,
 }
 
 impl std::fmt::Debug for SecretCrypto {
@@ -97,6 +102,14 @@ impl SecretCrypto {
         let r2_cursor_key: [u8; 32] = r2_cursor_derivation.finalize().into_bytes().into();
         let do_name_root_key = derive_key(bytes, b"open-compute/do-name-root/v1")?;
         let do_host_root_key = derive_key(bytes, b"open-compute/do-host-root/v1")?;
+        let d1_bookmark_key = derive_key(bytes, b"open-compute/d1-session-bookmark/v1")?;
+        let d1_bookmark_cipher =
+            XChaCha20Poly1305::new_from_slice(&d1_bookmark_key).map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::MasterKeyMismatch,
+                    "failed to initialize D1 bookmark AEAD",
+                )
+            })?;
         Ok(Self {
             cipher,
             key_id: key_id.to_string(),
@@ -106,6 +119,7 @@ impl SecretCrypto {
             r2_cursor_key,
             do_name_root_key,
             do_host_root_key,
+            d1_bookmark_cipher,
         })
     }
 
@@ -167,6 +181,76 @@ impl SecretCrypto {
         };
         mac.update(payload);
         mac.verify_slice(signature).is_ok()
+    }
+
+    /// Seal an opaque D1 session bookmark bound to one database and state version.
+    pub fn seal_d1_bookmark(
+        &self,
+        account: AccountId,
+        resource: ResourceId,
+        session_version: u64,
+    ) -> Result<String, PlatformError> {
+        let mut nonce_bytes = [0u8; NONCE_LEN];
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut nonce_bytes)
+            .map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::D1SessionError,
+                    "failed to generate D1 bookmark nonce",
+                )
+            })?;
+        let nonce = XNonce::from(nonce_bytes);
+        let aad = d1_bookmark_aad(account, resource);
+        let ciphertext = self
+            .d1_bookmark_cipher
+            .encrypt(
+                &nonce,
+                Payload {
+                    msg: &session_version.to_be_bytes(),
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| {
+                PlatformError::new(ErrorCode::D1SessionError, "D1 bookmark sealing failed")
+            })?;
+        let mut token = Vec::with_capacity(1 + NONCE_LEN + ciphertext.len());
+        token.push(D1_BOOKMARK_TOKEN_VERSION);
+        token.extend_from_slice(&nonce_bytes);
+        token.extend_from_slice(&ciphertext);
+        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token))
+    }
+
+    /// Open a D1 session bookmark and return its sealed database state version.
+    pub fn open_d1_bookmark(
+        &self,
+        account: AccountId,
+        resource: ResourceId,
+        token: &str,
+    ) -> Result<u64, PlatformError> {
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(token)
+            .map_err(|_| session_bookmark_error())?;
+        if bytes.len() <= 1 + NONCE_LEN || bytes.len() > D1_BOOKMARK_MAX_BYTES {
+            return Err(session_bookmark_error());
+        }
+        if bytes[0] != D1_BOOKMARK_TOKEN_VERSION {
+            return Err(session_bookmark_error());
+        }
+        let nonce = XNonce::from_slice(&bytes[1..1 + NONCE_LEN]);
+        let aad = d1_bookmark_aad(account, resource);
+        let plaintext = self
+            .d1_bookmark_cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: &bytes[1 + NONCE_LEN..],
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| session_bookmark_error())?;
+        let version =
+            <[u8; 8]>::try_from(plaintext.as_slice()).map_err(|_| session_bookmark_error())?;
+        Ok(u64::from_be_bytes(version))
     }
 
     /// Derive the namespace-local HMAC key injected only into the tenant facade closure.
@@ -286,6 +370,166 @@ impl SecretCrypto {
             })?;
         Ok(SecretBytes::new(plaintext))
     }
+
+    /// Seal one R2 SSE-C key bound to its account, bucket, and tenant upload id.
+    pub fn encrypt_r2_ssec(
+        &self,
+        plaintext: &SecretBytes,
+        account: AccountId,
+        resource: ResourceId,
+        upload_id: &str,
+    ) -> Result<SecretEnvelope, PlatformError> {
+        if plaintext.expose().len() != 32 {
+            return Err(PlatformError::new(
+                ErrorCode::R2SsecInvalid,
+                "R2 SSE-C key is invalid or does not match the object",
+            ));
+        }
+        let mut nonce_bytes = [0u8; NONCE_LEN];
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut nonce_bytes)
+            .map_err(|_| {
+                PlatformError::new(ErrorCode::ConfigInvalid, "failed to generate AEAD nonce")
+            })?;
+        let nonce = XNonce::from(nonce_bytes);
+        let aad = r2_ssec_aad(account, resource, upload_id)?;
+        let ciphertext = self
+            .cipher
+            .encrypt(
+                &nonce,
+                Payload {
+                    msg: plaintext.expose(),
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| {
+                PlatformError::new(ErrorCode::ConfigInvalid, "secret encryption failed")
+            })?;
+        Ok(SecretEnvelope {
+            version: ENVELOPE_VERSION,
+            key_id: self.key_id.clone(),
+            algorithm: ALGORITHM.to_string(),
+            nonce: nonce_bytes.to_vec(),
+            ciphertext,
+        })
+    }
+
+    /// Seal one R2 object SSE-C key to its committed object version.
+    pub fn encrypt_r2_object_ssec(
+        &self,
+        plaintext: &SecretBytes,
+        account: AccountId,
+        resource: ResourceId,
+        object_version: &str,
+    ) -> Result<SecretEnvelope, PlatformError> {
+        self.encrypt_r2_ssec(
+            plaintext,
+            account,
+            resource,
+            &format!("object/{object_version}"),
+        )
+    }
+
+    /// Open a sealed R2 SSE-C key, rejecting identity or envelope mismatch.
+    pub fn decrypt_r2_ssec(
+        &self,
+        envelope: &SecretEnvelope,
+        account: AccountId,
+        resource: ResourceId,
+        upload_id: &str,
+    ) -> Result<SecretBytes, PlatformError> {
+        if envelope.version != ENVELOPE_VERSION
+            || envelope.algorithm != ALGORITHM
+            || envelope.nonce.len() != NONCE_LEN
+        {
+            return Err(PlatformError::new(
+                ErrorCode::ResourceInvariantViolation,
+                "R2 SSE-C envelope is invalid",
+            ));
+        }
+        if envelope.key_id != self.key_id {
+            return Err(PlatformError::new(
+                ErrorCode::MasterKeyMismatch,
+                "secret envelope key id mismatch",
+            ));
+        }
+        let nonce = XNonce::from_slice(&envelope.nonce);
+        let aad = r2_ssec_aad(account, resource, upload_id)?;
+        let plaintext = self
+            .cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: &envelope.ciphertext,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| {
+                PlatformError::new(
+                    ErrorCode::ResourceInvariantViolation,
+                    "R2 SSE-C envelope is invalid",
+                )
+            })?;
+        if plaintext.len() != 32 {
+            return Err(PlatformError::new(
+                ErrorCode::ResourceInvariantViolation,
+                "R2 SSE-C envelope is invalid",
+            ));
+        }
+        Ok(SecretBytes::new(plaintext))
+    }
+
+    /// Open an R2 object SSE-C key sealed to its committed object version.
+    pub fn decrypt_r2_object_ssec(
+        &self,
+        envelope: &SecretEnvelope,
+        account: AccountId,
+        resource: ResourceId,
+        object_version: &str,
+    ) -> Result<SecretBytes, PlatformError> {
+        self.decrypt_r2_ssec(
+            envelope,
+            account,
+            resource,
+            &format!("object/{object_version}"),
+        )
+    }
+}
+
+fn r2_ssec_aad(
+    account: AccountId,
+    resource: ResourceId,
+    upload_id: &str,
+) -> Result<Vec<u8>, PlatformError> {
+    if upload_id.is_empty() || upload_id.len() > MAX_SECRET_NAME_LEN {
+        return Err(PlatformError::new(
+            ErrorCode::R2MultipartInvalid,
+            "R2 multipart upload is invalid",
+        ));
+    }
+    let mut out = Vec::new();
+    out.extend_from_slice(&SECRET_AAD_SCHEMA.to_be_bytes());
+    out.extend_from_slice(b"open-compute/r2-multipart-ssec/v1");
+    write_framed(&mut out, account.as_canonical_str().as_bytes())?;
+    write_framed(&mut out, resource.as_canonical_str().as_bytes())?;
+    write_framed(&mut out, upload_id.as_bytes())?;
+    Ok(out)
+}
+
+fn d1_bookmark_aad(account: AccountId, resource: ResourceId) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&1u32.to_be_bytes());
+    out.extend_from_slice(account.as_canonical_str().as_bytes());
+    out.push(0);
+    out.extend_from_slice(resource.as_canonical_str().as_bytes());
+    out
+}
+
+fn session_bookmark_error() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::D1SessionError,
+        "D1 session bookmark is invalid for this database",
+    )
 }
 
 fn derive_key(master: &[u8], domain: &[u8]) -> Result<[u8; 32], PlatformError> {

@@ -1,6 +1,9 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { BindingEnv, BindingError, ResourceBindingProps } from "../bindings/protocol.js";
-import type { R2GetOptions, R2ListOptions, R2ListResult, R2Metadata, R2PutOptions } from "./protocol.js";
+import type {
+  R2Checksums, R2GetOptions, R2ListOptions, R2ListResult, R2Metadata,
+  R2MultipartCreateOptions, R2PutOptions, R2UploadedPart,
+} from "./protocol.js";
 
 const CONTENT_TYPE = "application/vnd.open-compute.r2.v1+json";
 const FRAME_CONTENT_TYPE = "application/vnd.open-compute.r2.v1+frame";
@@ -14,22 +17,46 @@ function stringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item: unknown) => typeof item === "string");
 }
 
+function optionalString(value: unknown): value is string | null | undefined {
+  return value == null || typeof value === "string";
+}
+
+function assertChecksums(value: unknown, bindingError: BindingError): asserts value is R2Checksums {
+  if (!isRecord(value)) throw bindingError("BINDING_PROTOCOL_ERROR");
+  for (const [name, length] of [
+    ["md5", 32], ["sha1", 40], ["sha256", 64], ["sha384", 96], ["sha512", 128],
+  ] as const) {
+    if (value[name] != null && (typeof value[name] !== "string"
+        || value[name].length !== length || !/^[0-9a-f]+$/.test(value[name]))) {
+      throw bindingError("BINDING_PROTOCOL_ERROR");
+    }
+  }
+}
+
 function assertMetadata(value: unknown, bindingError: BindingError): asserts value is R2Metadata {
   if (!isRecord(value) || typeof value.key !== "string" || typeof value.etag !== "string"
       || typeof value.httpEtag !== "string" || typeof value.size !== "number"
       || !Number.isSafeInteger(value.size) || value.size < 0
       || typeof value.uploaded !== "number" || !Number.isSafeInteger(value.uploaded)
-      || (value.version !== undefined && typeof value.version !== "string")
-      || (value.md5 !== undefined && typeof value.md5 !== "string")
-      || value.storageClass !== "Standard" || !isRecord(value.httpMetadata)
-      || !isRecord(value.customMetadata)
-      || Object.values(value.customMetadata).some(item => typeof item !== "string")) {
+      || typeof value.version !== "string"
+      || (value.storageClass !== "Standard" && value.storageClass !== "InfrequentAccess")
+      || !optionalString(value.ssecKeyMd5)) {
     throw bindingError("BINDING_PROTOCOL_ERROR");
   }
-  for (const [key, item] of Object.entries(value.httpMetadata)) {
-    if (!["contentType", "contentLanguage", "contentDisposition", "contentEncoding", "cacheControl", "cacheExpiry"].includes(key)
-        || (item != null && (key === "cacheExpiry"
-          ? typeof item !== "number" || !Number.isSafeInteger(item) : typeof item !== "string"))) {
+  assertChecksums(value.checksums, bindingError);
+  if (value.httpMetadata != null) {
+    if (!isRecord(value.httpMetadata)) throw bindingError("BINDING_PROTOCOL_ERROR");
+    for (const [key, item] of Object.entries(value.httpMetadata)) {
+      if (!["contentType", "contentLanguage", "contentDisposition", "contentEncoding", "cacheControl", "cacheExpiry"].includes(key)
+          || (item != null && (key === "cacheExpiry"
+            ? typeof item !== "number" || !Number.isSafeInteger(item) : typeof item !== "string"))) {
+        throw bindingError("BINDING_PROTOCOL_ERROR");
+      }
+    }
+  }
+  if (value.customMetadata != null) {
+    if (!isRecord(value.customMetadata)
+        || Object.values(value.customMetadata).some(item => typeof item !== "string")) {
       throw bindingError("BINDING_PROTOCOL_ERROR");
     }
   }
@@ -42,7 +69,7 @@ function assertMetadata(value: unknown, bindingError: BindingError): asserts val
   }
 }
 
-function framedPutBody(header: { key: string; options: R2PutOptions }, stream: ReadableStream<unknown>, bindingError: BindingError): ReadableStream<Uint8Array> {
+function framedBody(header: unknown, stream: ReadableStream<unknown>, bindingError: BindingError): ReadableStream<Uint8Array> {
   if (!(stream instanceof ReadableStream)) throw bindingError("R2_INVALID_OPTIONS");
   const encoded = new TextEncoder().encode(JSON.stringify(header));
   if (encoded.byteLength > MAX_METADATA_BYTES) throw bindingError("R2_METADATA_TOO_LARGE");
@@ -101,9 +128,7 @@ async function decodeFrame(response: Response, bindingError: BindingError): Prom
   const metadataLength = new DataView((await exact(4)).buffer).getUint32(0);
   if (metadataLength > MAX_METADATA_BYTES) throw bindingError("BINDING_PROTOCOL_ERROR");
   const frame: unknown = JSON.parse(new TextDecoder().decode(await exact(metadataLength)));
-  if (!isRecord(frame) || !frame.meta) {
-    throw bindingError("BINDING_PROTOCOL_ERROR");
-  }
+  if (!isRecord(frame) || !frame.meta) throw bindingError("BINDING_PROTOCOL_ERROR");
   assertMetadata(frame.meta, bindingError);
   if (frame.hasBody !== true) {
     const terminal = await reader.read();
@@ -118,13 +143,9 @@ async function decodeFrame(response: Response, bindingError: BindingError): Prom
         return;
       }
       const next = await reader.read();
-      if (next.done) {
-        controller.close();
-      } else if (next.value instanceof Uint8Array) {
-        controller.enqueue(next.value);
-      } else {
-        controller.error(bindingError("BINDING_PROTOCOL_ERROR"));
-      }
+      if (next.done) controller.close();
+      else if (next.value instanceof Uint8Array) controller.enqueue(next.value);
+      else controller.error(bindingError("BINDING_PROTOCOL_ERROR"));
     },
     cancel(reason) { return reader.cancel(reason); },
   });
@@ -181,22 +202,12 @@ export function makeR2TransportBase(bindingError: BindingError, currentStartupGe
     }
 
     async get(key: string, options: R2GetOptions) {
-      const response = await this.#request(
-        "get",
-        JSON.stringify({ key, options }),
-        "read",
-        FRAME_CONTENT_TYPE,
-      );
+      const response = await this.#request("get", JSON.stringify({ key, options }), "read", FRAME_CONTENT_TYPE);
       return response.status === 204 ? null : decodeFrame(response, bindingError);
     }
 
     async put(key: string, body: ReadableStream<unknown>, options: R2PutOptions): Promise<R2Metadata | null> {
-      const response = await this.#request(
-        "put",
-        framedPutBody({ key, options }, body, bindingError),
-        "write",
-        FRAME_CONTENT_TYPE,
-      );
+      const response = await this.#request("put", framedBody({ key, options }, body, bindingError), "write", FRAME_CONTENT_TYPE);
       if (response.status === 204) return null;
       const meta: unknown = await response.json();
       assertMetadata(meta, bindingError);
@@ -211,14 +222,52 @@ export function makeR2TransportBase(bindingError: BindingError, currentStartupGe
       const response = await this.#request("list", JSON.stringify(options), "read");
       const result: unknown = await response.json();
       if (!isRecord(result) || !Array.isArray(result.objects) || typeof result.truncated !== "boolean"
-          || (result.cursor !== null && typeof result.cursor !== "string")
+          || (result.truncated ? typeof result.cursor !== "string" : result.cursor != null)
           || !stringArray(result.delimitedPrefixes)) throw bindingError("BINDING_PROTOCOL_ERROR");
       const objects: R2Metadata[] = [];
       for (const object of result.objects) {
         assertMetadata(object, bindingError);
         objects.push(object);
       }
-      return { objects, truncated: result.truncated, cursor: result.cursor, delimitedPrefixes: result.delimitedPrefixes };
+      if (result.truncated) {
+        if (typeof result.cursor !== "string") throw bindingError("BINDING_PROTOCOL_ERROR");
+        return { objects, truncated: true, cursor: result.cursor, delimitedPrefixes: result.delimitedPrefixes };
+      }
+      return { objects, truncated: false, delimitedPrefixes: result.delimitedPrefixes };
+    }
+
+    async createMultipartUpload(key: string, options: R2MultipartCreateOptions) {
+      const response = await this.#request("createMultipartUpload", JSON.stringify({ key, options }), "write");
+      const result: unknown = await response.json();
+      if (!isRecord(result) || typeof result.key !== "string" || typeof result.uploadId !== "string") {
+        throw bindingError("BINDING_PROTOCOL_ERROR");
+      }
+      return { key: result.key, uploadId: result.uploadId };
+    }
+
+    async uploadPart(key: string, uploadId: string, partNumber: number, body: ReadableStream<unknown>, ssecKey?: string) {
+      const response = await this.#request(
+        "uploadPart",
+        framedBody({ key, uploadId, partNumber, ssecKey }, body, bindingError),
+        "write",
+        FRAME_CONTENT_TYPE,
+      );
+      const result: unknown = await response.json();
+      if (!isRecord(result) || typeof result.partNumber !== "number" || typeof result.etag !== "string") {
+        throw bindingError("BINDING_PROTOCOL_ERROR");
+      }
+      return { partNumber: result.partNumber, etag: result.etag } satisfies R2UploadedPart;
+    }
+
+    async completeMultipartUpload(key: string, uploadId: string, parts: R2UploadedPart[]) {
+      const response = await this.#request("completeMultipartUpload", JSON.stringify({ key, uploadId, parts }), "write");
+      const meta: unknown = await response.json();
+      assertMetadata(meta, bindingError);
+      return meta;
+    }
+
+    async abortMultipartUpload(key: string, uploadId: string) {
+      await this.#request("abortMultipartUpload", JSON.stringify({ key, uploadId }), "write");
     }
 
     async fetch(): Promise<never> {

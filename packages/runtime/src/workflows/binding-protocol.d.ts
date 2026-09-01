@@ -10,14 +10,24 @@ export interface WorkflowStatus {
   error?: { name: string; message: string };
 }
 
+/** Stable create envelope. Tenant values are durable-value bytes, never JSON. */
+export interface WorkflowCreateWire {
+  id?: string;
+  payloadBase64: string;
+  retention?: unknown;
+  locationHint?: string;
+  schedule?: { cron: string; scheduledTime: number };
+}
+
 /** Instance-scoped RPC object; only the system isolate knows its UUID. */
 export interface WorkflowHandle {
   status(): Promise<WorkflowStatus>;
-  pause(): Promise<unknown>;
-  resume(): Promise<unknown>;
-  terminate(): Promise<unknown>;
-  restart(): Promise<unknown>;
-  sendEvent(body: { type: string; payloadJson: string }): Promise<unknown>;
+  pause(operationId: string): Promise<unknown>;
+  resume(operationId: string): Promise<unknown>;
+  terminate(options: { rollback?: boolean }, operationId: string): Promise<unknown>;
+  restart(options: { from?: { name: string; count?: number; type?: "do" | "sleep" | "waitForEvent" } }, operationId: string): Promise<unknown>;
+  delete(operationId: string): Promise<unknown>;
+  sendEvent(body: { type: string; payloadBase64: string }, operationId: string): Promise<unknown>;
 }
 
 /** Validated binding result without generation credentials. */
@@ -28,6 +38,12 @@ export interface WorkflowResolvedInstance {
 
 /** Tenant-facing durable Workflow binding transport. */
 export interface WorkflowTransport {
-  create(body: { id?: string; payloadJson: string; retention?: unknown }): Promise<WorkflowResolvedInstance>;
+  resolve(id: string): WorkflowResolvedInstance;
+  create(body: WorkflowCreateWire, operationId: string): Promise<WorkflowResolvedInstance>;
   get(id: string): Promise<WorkflowResolvedInstance>;
+  createBatch(body: WorkflowCreateWire[], operationId: string): Promise<WorkflowResolvedInstance[]>;
+  deleteBatch(instanceIds: string[], operationId: string): Promise<{
+    deleted: { id: string }[];
+    errors: { id: string; code: number; message: string }[];
+  }>;
 }

@@ -31,9 +31,10 @@ mod workflow;
 
 pub use workflow::{
     ClaimedWorkflowRun, WorkflowClaimCursor, WorkflowCompletion, WorkflowDatabaseInspection,
-    WorkflowFailure, WorkflowInspection, WorkflowInstanceAction, WorkflowInstanceInspection,
-    WorkflowInstanceRecord, WorkflowState, WorkflowStepAttempt, WorkflowStepGrant,
-    WorkflowStepInspection, WorkflowStepOutcome, WorkflowStepResult, inspect_workflow_databases,
+    WorkflowDelayResolution, WorkflowFailure, WorkflowInspection, WorkflowInstanceAction,
+    WorkflowInstanceInspection, WorkflowInstanceRecord, WorkflowState, WorkflowStepAttempt,
+    WorkflowStepGrant, WorkflowStepInspection, WorkflowStepOutcome, WorkflowStepResult,
+    inspect_workflow_databases,
 };
 
 pub use cron::{

@@ -9,6 +9,7 @@ use open_compute_storage::{
 pub(crate) const D1_FRAME_CONTENT_TYPE: &str = "application/vnd.open-compute.d1.v1+frame";
 pub(crate) const D1_JSON_CONTENT_TYPE: &str = "application/vnd.open-compute.d1.v1+json";
 pub(crate) const D1_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+const D1_MAX_BOOKMARK_CHARS: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum D1QueryMode {
@@ -18,10 +19,19 @@ pub(crate) enum D1QueryMode {
     Batch,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum D1SessionConstraint {
+    AlwaysPrimary,
+    FirstUnconstrained,
+    FirstPrimary,
+    Bookmark(String),
+}
+
 #[derive(Debug)]
 pub(crate) struct D1QueryRequest {
     pub(crate) mode: D1QueryMode,
     pub(crate) statements: Vec<D1Statement>,
+    pub(crate) session: D1SessionConstraint,
 }
 
 pub(crate) fn decode_query(bytes: &[u8]) -> Result<D1QueryRequest, PlatformError> {
@@ -56,8 +66,25 @@ pub(crate) fn decode_query(bytes: &[u8]) -> Result<D1QueryRequest, PlatformError
         }
         statements.push(D1Statement { sql, params });
     }
+    let session = match reader.u8()? {
+        0 => D1SessionConstraint::AlwaysPrimary,
+        1 => D1SessionConstraint::FirstUnconstrained,
+        2 => D1SessionConstraint::FirstPrimary,
+        3 => {
+            let token = reader.text(D1_MAX_BOOKMARK_CHARS)?;
+            if token.is_empty() {
+                return Err(protocol_error());
+            }
+            D1SessionConstraint::Bookmark(token)
+        }
+        _ => return Err(protocol_error()),
+    };
     reader.done()?;
-    Ok(D1QueryRequest { mode, statements })
+    Ok(D1QueryRequest {
+        mode,
+        statements,
+        session,
+    })
 }
 
 pub(crate) fn decode_exec(bytes: &[u8]) -> Result<String, PlatformError> {
@@ -73,7 +100,11 @@ pub(crate) fn decode_exec(bytes: &[u8]) -> Result<String, PlatformError> {
     Ok(sql)
 }
 
-pub(crate) fn encode_results(results: &[D1StatementResult]) -> Result<Vec<u8>, PlatformError> {
+pub(crate) fn encode_results(
+    results: &[D1StatementResult],
+    bookmark: Option<&str>,
+    session_version: u64,
+) -> Result<Vec<u8>, PlatformError> {
     let mut writer = Writer::new();
     writer.bytes(b"D1R1")?;
     writer.u16(u16::try_from(results.len()).map_err(|_| protocol_error())?)?;
@@ -91,20 +122,11 @@ pub(crate) fn encode_results(results: &[D1StatementResult]) -> Result<Vec<u8>, P
                 writer.value(value)?;
             }
         }
-        let meta = serde_json::to_vec(&serde_json::json!({
-            "served_by": result.meta.served_by,
-            "served_by_primary": result.meta.served_by_primary,
-            "duration": result.meta.duration,
-            "changes": result.meta.changes,
-            "last_row_id": result.meta.last_row_id,
-            "changed_db": result.meta.changed_db,
-            "size_after": result.meta.size_after,
-            "rows_read": result.meta.rows_read,
-            "rows_written": result.meta.rows_written,
-        }))
-        .map_err(|_| protocol_error())?;
+        let meta = serde_json::to_vec(&result.meta).map_err(|_| protocol_error())?;
         writer.length_bytes(&meta)?;
     }
+    writer.text(bookmark.unwrap_or(""))?;
+    writer.u64(session_version)?;
     Ok(writer.finish())
 }
 
@@ -239,6 +261,9 @@ impl Writer {
         self.bytes(&value.to_be_bytes())
     }
     fn i64(&mut self, value: i64) -> Result<(), PlatformError> {
+        self.bytes(&value.to_be_bytes())
+    }
+    fn u64(&mut self, value: u64) -> Result<(), PlatformError> {
         self.bytes(&value.to_be_bytes())
     }
     fn f64(&mut self, value: f64) -> Result<(), PlatformError> {

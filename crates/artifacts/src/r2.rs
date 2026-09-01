@@ -1,37 +1,40 @@
 //! Typed S3-backed authority for tenant R2 object bytes and metadata.
 
 use crate::client::S3ArtifactClient;
+use crate::r2_codec::{
+    META_CUSTOM, META_MD5, META_SCHEMA, META_SHA1, META_SHA256, META_SHA384, META_SHA512,
+    META_SSEC_MD5, META_STORAGE, META_VERSION, OBJECTS_SUFFIX, canonical_custom_metadata,
+    decode_metadata, encode_custom_metadata, http_date_millis, integrity_error,
+};
 use crate::r2_model::{
-    R2_MAX_CUSTOM_METADATA_JSON_BYTES, R2_MAX_DELETE_KEYS, R2_MAX_LIST_LIMIT,
-    R2_PROVIDER_KEY_MAX_BYTES, R2BucketIdentity, R2BucketLocator, R2Condition, R2Download,
-    R2GetResult, R2HttpMetadata, R2ListPage, R2ListedObject, R2ObjectMetadata, R2PutOptions,
-    R2Range, R2UploadSource, UserObjectKey,
+    R2_MAX_DELETE_KEYS, R2_MAX_LIST_LIMIT, R2BucketIdentity, R2BucketLocator, R2ChecksumAlgorithm,
+    R2ComputedChecksums, R2Condition, R2Download, R2GetResult, R2HttpMetadata, R2ObjectMetadata,
+    R2PutOptions, R2Range, R2SsecKey, R2StorageClass, R2UploadSource, UserObjectKey,
+    checksum_mismatch, invalid_options, ssec_invalid,
 };
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::delete_objects::DeleteObjectsError;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::operation::put_object::PutObjectError;
-use aws_sdk_s3::primitives::{ByteStream, DateTime};
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{Delete, ObjectIdentifier};
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-use aws_smithy_types::date_time::Format as DateTimeFormat;
 use base64::Engine as _;
 use md5::{Digest as _, Md5};
 use open_compute_core::{ErrorCode, PlatformError, ResourceId};
-use std::collections::{BTreeMap, HashMap};
+use sha1::Sha1;
+use sha2::{Sha256, Sha384, Sha512};
+use std::collections::HashMap;
 use std::path::Path;
 
-const META_SCHEMA: &str = "oc-r2-schema";
-const META_VERSION: &str = "oc-r2-version";
-const META_CUSTOM: &str = "oc-r2-custom";
-const META_MD5: &str = "oc-r2-md5";
-const OBJECTS_SUFFIX: &str = "objects/";
+const R2_PROVIDER_KEY_MAX_BYTES: usize = 1024;
+const R2_PHYSICAL_OBJECT_DIGEST_BYTES: usize = 64;
 
 /// Compile-time typed tenant object store sharing only the configured S3 client context.
 #[derive(Clone, Debug)]
 pub struct R2ObjectStore {
-    client: S3ArtifactClient,
+    pub(crate) client: S3ArtifactClient,
 }
 
 impl R2ObjectStore {
@@ -54,7 +57,13 @@ impl R2ObjectStore {
         physical_prefix: &str,
     ) -> Result<R2BucketLocator, PlatformError> {
         let expected = format!("{}v1/{resource_id}/", self.client.r2_prefix());
-        if physical_prefix != expected || expected.len() >= R2_PROVIDER_KEY_MAX_BYTES {
+        if physical_prefix != expected
+            || expected
+                .len()
+                .saturating_add(OBJECTS_SUFFIX.len())
+                .saturating_add(R2_PHYSICAL_OBJECT_DIGEST_BYTES)
+                > R2_PROVIDER_KEY_MAX_BYTES
+        {
             return Err(PlatformError::new(
                 ErrorCode::ResourceInvariantViolation,
                 "R2 physical prefix does not match configured authority",
@@ -165,35 +174,44 @@ impl R2ObjectStore {
         &self,
         locator: &R2BucketLocator,
         key: &UserObjectKey,
+        ssec: Option<&R2SsecKey>,
     ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
         let physical = self.object_key(locator, key);
-        let result = self
+        let mut request = self
             .client
             .inner()
             .head_object()
             .bucket(self.client.bucket())
-            .key(physical)
-            .send()
-            .await;
+            .key(physical);
+        request = apply_ssec_head(request, ssec);
+        let result = request.send().await;
         match result {
-            Ok(output) => decode_metadata(
-                key.as_str(),
-                output.content_length(),
-                output.e_tag(),
-                output.last_modified(),
-                output.metadata(),
-                R2HttpMetadata {
-                    content_type: output.content_type().map(str::to_owned),
-                    content_language: output.content_language().map(str::to_owned),
-                    content_disposition: output.content_disposition().map(str::to_owned),
-                    content_encoding: output.content_encoding().map(str::to_owned),
-                    cache_control: output.cache_control().map(str::to_owned),
-                    cache_expiry: output.expires_string().and_then(http_date_millis),
-                },
-                None,
-            )
-            .map(Some),
+            Ok(output) => {
+                let metadata = decode_metadata(
+                    key.as_str(),
+                    output.content_length(),
+                    output.e_tag(),
+                    output.last_modified(),
+                    output.metadata(),
+                    R2HttpMetadata {
+                        content_type: output.content_type().map(str::to_owned),
+                        content_language: output.content_language().map(str::to_owned),
+                        content_disposition: output.content_disposition().map(str::to_owned),
+                        content_encoding: output.content_encoding().map(str::to_owned),
+                        cache_control: output.cache_control().map(str::to_owned),
+                        cache_expiry: output.expires_string().and_then(http_date_millis),
+                    },
+                    None,
+                )?;
+                if ssec.is_some() {
+                    check_ssec(&metadata, ssec)?;
+                }
+                Ok(Some(metadata))
+            }
             Err(error) if is_head_not_found(&error) => Ok(None),
+            Err(error) if ssec.is_some() && is_ssec_denied(sdk_status(&error)) => {
+                Err(ssec_invalid())
+            }
             Err(error) => Err(map_head_failure(&error)),
         }
     }
@@ -205,14 +223,15 @@ impl R2ObjectStore {
         key: &UserObjectKey,
         range: Option<R2Range>,
         condition: Option<&R2Condition>,
+        ssec: Option<&R2SsecKey>,
     ) -> Result<R2GetResult, PlatformError> {
         let physical = self.object_key(locator, key);
         for attempt in 0..2 {
             let expected = if let Some(condition) = condition {
-                let Some(metadata) = self.head(locator, key).await? else {
+                let Some(metadata) = self.head(locator, key, ssec).await? else {
                     return Ok(R2GetResult::Missing);
                 };
-                if !condition_matches(condition, &metadata) {
+                if !condition.matches_object(&metadata.etag, metadata.uploaded) {
                     return Ok(R2GetResult::Precondition(metadata));
                 }
                 Some(metadata.http_etag)
@@ -225,6 +244,7 @@ impl R2ObjectStore {
                 .get_object()
                 .bucket(self.client.bucket())
                 .key(&physical);
+            request = apply_ssec_get(request, ssec);
             if let Some(range) = range {
                 request = request.range(range.header()?);
             }
@@ -234,6 +254,7 @@ impl R2ObjectStore {
             let output = match request.send().await {
                 Ok(output) => output,
                 Err(error) if is_not_found(&error) => return Ok(R2GetResult::Missing),
+                Err(error) if is_ssec_denied(sdk_status(&error)) => return Err(ssec_invalid()),
                 Err(error)
                     if condition.is_some() && is_get_precondition(&error) && attempt == 0 =>
                 {
@@ -268,85 +289,13 @@ impl R2ObjectStore {
                 },
                 returned_range,
             )?;
+            check_ssec(&metadata, ssec)?;
             return Ok(R2GetResult::Body(R2Download {
                 metadata,
                 body: output.body,
             }));
         }
         Err(provider_unavailable())
-    }
-
-    /// Upload one already-staged, replayable single-part object and verify it by HEAD.
-    pub async fn put_file(
-        &self,
-        locator: &R2BucketLocator,
-        key: &UserObjectKey,
-        source: &R2UploadSource,
-        options: &R2PutOptions,
-    ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
-        validate_upload(source, options)?;
-        let body = ByteStream::read_from()
-            .path(&source.path)
-            .length(aws_smithy_types::byte_stream::Length::Exact(source.length))
-            .buffer_size(64 * 1024)
-            .build()
-            .await
-            .map_err(|_| provider_unavailable())?;
-        let custom = canonical_custom_metadata(&options.custom_metadata)?;
-        let mut metadata = HashMap::new();
-        metadata.insert(META_SCHEMA.to_owned(), "1".to_owned());
-        metadata.insert(META_VERSION.to_owned(), source.version.clone());
-        metadata.insert(
-            META_CUSTOM.to_owned(),
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(custom),
-        );
-        metadata.insert(META_MD5.to_owned(), hex::encode(source.md5));
-        let mut request = self
-            .client
-            .inner()
-            .put_object()
-            .bucket(self.client.bucket())
-            .key(self.object_key(locator, key))
-            .body(body)
-            .content_length(i64::try_from(source.length).map_err(|_| object_too_large())?)
-            .set_metadata(Some(metadata))
-            .set_content_type(options.http_metadata.content_type.clone())
-            .set_content_language(options.http_metadata.content_language.clone())
-            .set_content_disposition(options.http_metadata.content_disposition.clone())
-            .set_content_encoding(options.http_metadata.content_encoding.clone())
-            .set_cache_control(options.http_metadata.cache_control.clone())
-            .set_expires(options.http_metadata.cache_expiry.map(millis_datetime))
-            .content_md5(base64::engine::general_purpose::STANDARD.encode(source.md5));
-        if let Some(condition) = &options.only_if {
-            if condition.uploaded_before.is_some() || condition.uploaded_after.is_some() {
-                return Err(PlatformError::new(
-                    ErrorCode::R2UnsupportedCondition,
-                    "R2 conditional PUT supports only atomic ETag conditions",
-                ));
-            }
-            match (
-                condition.etag_matches.as_slice(),
-                condition.etag_does_not_match.as_slice(),
-            ) {
-                ([etag], []) => request = request.if_match(quote_etag(etag)?),
-                ([], [etag]) => request = request.if_none_match(quote_etag(etag)?),
-                ([], []) => {}
-                _ => return Err(invalid_options()),
-            }
-        }
-        match request.send().await {
-            Ok(_) => {}
-            Err(error) if is_precondition(&error) => return Ok(None),
-            Err(error) => return Err(map_put_failure(&error)),
-        }
-        let metadata = self.head(locator, key).await?.ok_or_else(integrity_error)?;
-        if metadata.size != source.length
-            || metadata.version != source.version
-            || metadata.md5 != hex::encode(source.md5)
-        {
-            return Err(integrity_error());
-        }
-        Ok(Some(metadata))
     }
 
     /// Delete one or more fully validated logical keys.
@@ -363,9 +312,17 @@ impl R2ObjectStore {
         }
         let objects = keys
             .iter()
+            .map(|key| self.object_key(locator, key))
+            .collect::<Vec<_>>();
+        self.delete_provider_keys(&objects).await
+    }
+
+    async fn delete_provider_keys(&self, keys: &[String]) -> Result<(), PlatformError> {
+        let objects = keys
+            .iter()
             .map(|key| {
                 ObjectIdentifier::builder()
-                    .key(self.object_key(locator, key))
+                    .key(key)
                     .build()
                     .map_err(|_| invalid_options())
             })
@@ -388,7 +345,7 @@ impl R2ObjectStore {
             Ok(_) => Err(result_unknown()),
             Err(error) if multi_delete_unsupported(&error) => {
                 for key in keys {
-                    self.delete_one(locator, key).await?;
+                    self.delete_physical_one(key).await?;
                 }
                 Ok(())
             }
@@ -396,75 +353,11 @@ impl R2ObjectStore {
         }
     }
 
-    /// List one exact logical prefix without exposing the provider continuation token.
-    pub async fn list(
-        &self,
-        locator: &R2BucketLocator,
-        prefix: &str,
-        delimiter: Option<&str>,
-        limit: u16,
-        provider_token: Option<&str>,
-    ) -> Result<R2ListPage, PlatformError> {
-        let logical_prefix = UserObjectKey::parse(prefix, locator)?;
-        if limit == 0 || limit > R2_MAX_LIST_LIMIT {
-            return Err(invalid_options());
-        }
-        if delimiter.is_some_and(str::is_empty) {
-            return Err(invalid_options());
-        }
-        let physical_prefix = self.object_key(locator, &logical_prefix);
-        let mut request = self
-            .client
-            .inner()
-            .list_objects_v2()
-            .bucket(self.client.bucket())
-            .prefix(&physical_prefix)
-            .max_keys(i32::from(limit));
-        if let Some(delimiter) = delimiter {
-            request = request.delimiter(delimiter);
-        }
-        if let Some(token) = provider_token {
-            request = request.continuation_token(token);
-        }
-        let output = request
-            .send()
-            .await
-            .map_err(|error| crate::error::from_list(&error))
-            .map_err(|_| provider_unavailable())?;
-        let mut objects = Vec::with_capacity(output.contents().len());
-        for object in output.contents() {
-            let physical = object.key().ok_or_else(integrity_error)?;
-            let key = physical
-                .strip_prefix(&locator.object_prefix)
-                .ok_or_else(integrity_error)?;
-            UserObjectKey::parse(key, locator)?;
-            objects.push(R2ListedObject {
-                key: key.to_owned(),
-                size: u64::try_from(object.size().unwrap_or(-1)).map_err(|_| integrity_error())?,
-                etag: unquote_etag(object.e_tag().ok_or_else(integrity_error)?)?,
-                uploaded: object.last_modified().map_or(0, datetime_millis),
-            });
-        }
-        let mut delimited_prefixes = Vec::with_capacity(output.common_prefixes().len());
-        for common in output.common_prefixes() {
-            let physical = common.prefix().ok_or_else(integrity_error)?;
-            let logical = physical
-                .strip_prefix(&locator.object_prefix)
-                .ok_or_else(integrity_error)?;
-            delimited_prefixes.push(logical.to_owned());
-        }
-        Ok(R2ListPage {
-            objects,
-            delimited_prefixes,
-            provider_token: output.next_continuation_token().map(str::to_owned),
-        })
-    }
-
     /// Return whether the logical objects prefix currently contains any object.
     pub async fn is_empty(&self, locator: &R2BucketLocator) -> Result<bool, PlatformError> {
-        self.list(locator, "", None, 1, None)
+        self.list_physical_keys(locator, 1)
             .await
-            .map(|page| page.objects.is_empty())
+            .map(|keys| keys.is_empty())
     }
 
     /// Delete at most one full provider page and return whether more work may remain.
@@ -472,19 +365,40 @@ impl R2ObjectStore {
         &self,
         locator: &R2BucketLocator,
     ) -> Result<bool, PlatformError> {
-        let page = self
-            .list(locator, "", None, R2_MAX_LIST_LIMIT, None)
-            .await?;
-        if page.objects.is_empty() {
+        let keys = self.list_physical_keys(locator, R2_MAX_LIST_LIMIT).await?;
+        if keys.is_empty() {
             return Ok(false);
         }
-        let keys = page
-            .objects
-            .iter()
-            .map(|object| UserObjectKey::parse(&object.key, locator))
-            .collect::<Result<Vec<_>, _>>()?;
-        self.delete(locator, &keys).await?;
+        self.delete_provider_keys(&keys).await?;
         Ok(true)
+    }
+
+    async fn list_physical_keys(
+        &self,
+        locator: &R2BucketLocator,
+        limit: u16,
+    ) -> Result<Vec<String>, PlatformError> {
+        let output = self
+            .client
+            .inner()
+            .list_objects_v2()
+            .bucket(self.client.bucket())
+            .prefix(&locator.object_prefix)
+            .max_keys(i32::from(limit))
+            .send()
+            .await
+            .map_err(|error| crate::error::from_list(&error))
+            .map_err(|_| provider_unavailable())?;
+        output
+            .contents()
+            .iter()
+            .map(|object| {
+                let key = object.key().ok_or_else(integrity_error)?;
+                key.starts_with(&locator.object_prefix)
+                    .then(|| key.to_owned())
+                    .ok_or_else(integrity_error)
+            })
+            .collect()
     }
 
     async fn delete_one(
@@ -492,89 +406,29 @@ impl R2ObjectStore {
         locator: &R2BucketLocator,
         key: &UserObjectKey,
     ) -> Result<(), PlatformError> {
+        self.delete_physical_one(&self.object_key(locator, key))
+            .await
+    }
+
+    async fn delete_physical_one(&self, key: &str) -> Result<(), PlatformError> {
         self.client
             .inner()
             .delete_object()
             .bucket(self.client.bucket())
-            .key(self.object_key(locator, key))
+            .key(key)
             .send()
             .await
             .map_err(|error| map_delete_failure(&error))?;
         Ok(())
     }
 
-    fn object_key(&self, locator: &R2BucketLocator, key: &UserObjectKey) -> String {
-        format!("{}{}", locator.object_prefix, key.as_str())
+    pub(crate) fn object_key(&self, locator: &R2BucketLocator, key: &UserObjectKey) -> String {
+        format!(
+            "{}{}",
+            locator.object_prefix,
+            hex::encode(Sha256::digest(key.as_str().as_bytes()))
+        )
     }
-}
-
-fn canonical_custom_metadata(
-    metadata: &BTreeMap<String, String>,
-) -> Result<Vec<u8>, PlatformError> {
-    let bytes = serde_json::to_vec(metadata).map_err(|_| invalid_options())?;
-    if bytes.len() > R2_MAX_CUSTOM_METADATA_JSON_BYTES {
-        return Err(PlatformError::new(
-            ErrorCode::R2MetadataTooLarge,
-            "R2 custom metadata exceeds the canonical JSON budget",
-        ));
-    }
-    Ok(bytes)
-}
-
-fn decode_metadata(
-    key: &str,
-    content_length: Option<i64>,
-    etag: Option<&str>,
-    modified: Option<&DateTime>,
-    metadata: Option<&HashMap<String, String>>,
-    http_metadata: R2HttpMetadata,
-    range: Option<R2Range>,
-) -> Result<R2ObjectMetadata, PlatformError> {
-    let metadata = metadata.ok_or_else(integrity_error)?;
-    if metadata.get(META_SCHEMA).map(String::as_str) != Some("1") {
-        return Err(integrity_error());
-    }
-    let version = metadata.get(META_VERSION).ok_or_else(integrity_error)?;
-    let parsed = uuid::Uuid::parse_str(version).map_err(|_| integrity_error())?;
-    if parsed.get_version_num() != 7 || parsed.hyphenated().to_string() != *version {
-        return Err(integrity_error());
-    }
-    let custom = metadata.get(META_CUSTOM).ok_or_else(integrity_error)?;
-    let custom_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(custom)
-        .map_err(|_| integrity_error())?;
-    if custom_bytes.len() > R2_MAX_CUSTOM_METADATA_JSON_BYTES {
-        return Err(integrity_error());
-    }
-    let custom_metadata: BTreeMap<String, String> =
-        serde_json::from_slice(&custom_bytes).map_err(|_| integrity_error())?;
-    if canonical_custom_metadata(&custom_metadata).map_err(|_| integrity_error())? != custom_bytes {
-        return Err(integrity_error());
-    }
-    let md5 = metadata.get(META_MD5).ok_or_else(integrity_error)?;
-    if md5.len() != 32
-        || hex::decode(md5).is_err()
-        || md5.bytes().any(|byte| byte.is_ascii_uppercase())
-    {
-        return Err(integrity_error());
-    }
-    let etag = unquote_etag(etag.ok_or_else(integrity_error)?)?;
-    let http_etag = quote_etag(&etag)?;
-    let size = u64::try_from(content_length.ok_or_else(integrity_error)?)
-        .map_err(|_| integrity_error())?;
-    Ok(R2ObjectMetadata {
-        key: key.to_owned(),
-        version: version.to_owned(),
-        size,
-        etag,
-        http_etag,
-        uploaded: modified.map_or(0, datetime_millis),
-        http_metadata,
-        custom_metadata,
-        range,
-        md5: md5.to_owned(),
-        storage_class: "Standard".to_owned(),
-    })
 }
 
 fn validate_upload(source: &R2UploadSource, options: &R2PutOptions) -> Result<(), PlatformError> {
@@ -587,23 +441,25 @@ fn validate_upload(source: &R2UploadSource, options: &R2PutOptions) -> Result<()
         return Err(invariant());
     }
     if options
-        .expected_md5
-        .is_some_and(|expected| expected != source.md5)
+        .checksum
+        .as_ref()
+        .is_some_and(|expected| !source.checksums.matches(expected))
     {
-        return Err(PlatformError::new(
-            ErrorCode::R2PreconditionFailed,
-            "R2 caller MD5 does not match staged object bytes",
-        ));
+        return Err(checksum_mismatch());
     }
     canonical_custom_metadata(&options.custom_metadata)?;
     Ok(())
 }
 
-/// Compute MD5 for an exact secure staging file without loading it into memory.
-pub fn md5_file(path: &Path, expected_length: u64) -> Result<[u8; 16], PlatformError> {
+/// Compute every pinned checksum for an exact secure staging file.
+pub fn hash_file(path: &Path, expected_length: u64) -> Result<R2ComputedChecksums, PlatformError> {
     use std::io::Read as _;
     let mut file = std::fs::File::open(path).map_err(|_| provider_unavailable())?;
-    let mut hasher = Md5::new();
+    let mut md5 = Md5::new();
+    let mut sha1 = Sha1::new();
+    let mut sha256 = Sha256::new();
+    let mut sha384 = Sha384::new();
+    let mut sha512 = Sha512::new();
     let mut total = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -615,30 +471,156 @@ pub fn md5_file(path: &Path, expected_length: u64) -> Result<[u8; 16], PlatformE
         if total > expected_length {
             return Err(integrity_error());
         }
-        hasher.update(&buffer[..count]);
+        md5.update(&buffer[..count]);
+        sha1.update(&buffer[..count]);
+        sha256.update(&buffer[..count]);
+        sha384.update(&buffer[..count]);
+        sha512.update(&buffer[..count]);
     }
     if total != expected_length {
         return Err(integrity_error());
     }
-    Ok(hasher.finalize().into())
+    Ok(R2ComputedChecksums {
+        md5: md5.finalize().into(),
+        sha1: sha1.finalize().into(),
+        sha256: sha256.finalize().into(),
+        sha384: sha384.finalize().into(),
+        sha512: sha512.finalize().into(),
+    })
 }
 
-fn condition_matches(condition: &R2Condition, metadata: &R2ObjectMetadata) -> bool {
-    (condition.etag_matches.is_empty()
-        || condition
-            .etag_matches
-            .iter()
-            .any(|etag| etag == &metadata.etag || etag == &metadata.http_etag))
-        && condition
-            .etag_does_not_match
-            .iter()
-            .all(|etag| etag != &metadata.etag && etag != &metadata.http_etag)
-        && condition
-            .uploaded_before
-            .is_none_or(|time| metadata.uploaded <= time)
-        && condition
-            .uploaded_after
-            .is_none_or(|time| metadata.uploaded > time)
+/// Compute MD5 for an exact secure staging file without loading it into memory.
+pub fn md5_file(path: &Path, expected_length: u64) -> Result<[u8; 16], PlatformError> {
+    hash_file(path, expected_length).map(|checksums| checksums.md5)
+}
+
+/// Compute every pinned checksum for an in-memory buffer.
+#[must_use]
+pub fn hash_bytes(bytes: &[u8]) -> R2ComputedChecksums {
+    R2ComputedChecksums {
+        md5: Md5::digest(bytes).into(),
+        sha1: Sha1::digest(bytes).into(),
+        sha256: Sha256::digest(bytes).into(),
+        sha384: Sha384::digest(bytes).into(),
+        sha512: Sha512::digest(bytes).into(),
+    }
+}
+
+pub(crate) fn create_user_metadata(
+    version: &str,
+    custom_metadata: &std::collections::BTreeMap<String, String>,
+    storage_class: R2StorageClass,
+    ssec: Option<&R2SsecKey>,
+) -> Result<HashMap<String, String>, PlatformError> {
+    let mut metadata = HashMap::new();
+    metadata.insert(META_SCHEMA.to_owned(), "1".to_owned());
+    metadata.insert(META_VERSION.to_owned(), version.to_owned());
+    metadata.insert(
+        META_CUSTOM.to_owned(),
+        encode_custom_metadata(custom_metadata)?,
+    );
+    metadata.insert(META_STORAGE.to_owned(), storage_class.as_str().to_owned());
+    if let Some(ssec) = ssec {
+        metadata.insert(META_SSEC_MD5.to_owned(), ssec.md5_base64());
+    }
+    Ok(metadata)
+}
+
+fn object_user_metadata(
+    source: &R2UploadSource,
+    options: &R2PutOptions,
+) -> Result<HashMap<String, String>, PlatformError> {
+    create_user_metadata(
+        &source.version,
+        &options.custom_metadata,
+        options.storage_class,
+        options.ssec.as_ref(),
+    )
+}
+
+pub(crate) fn apply_checksum_metadata(
+    metadata: &mut HashMap<String, String>,
+    checksums: &R2ComputedChecksums,
+    requested: Option<&R2ChecksumAlgorithm>,
+) {
+    let exposed = checksums.exposed(requested);
+    for (name, value) in [
+        (META_MD5, exposed.md5),
+        (META_SHA1, exposed.sha1),
+        (META_SHA256, exposed.sha256),
+        (META_SHA384, exposed.sha384),
+        (META_SHA512, exposed.sha512),
+    ] {
+        if let Some(value) = value {
+            metadata.insert(name.to_owned(), value);
+        }
+    }
+}
+
+fn apply_ssec_put(
+    request: aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder,
+    ssec: Option<&R2SsecKey>,
+) -> aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder {
+    match ssec {
+        Some(ssec) => request
+            .sse_customer_algorithm("AES256")
+            .sse_customer_key(ssec.base64())
+            .sse_customer_key_md5(ssec.md5_base64()),
+        None => request,
+    }
+}
+
+fn apply_ssec_get(
+    request: aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder,
+    ssec: Option<&R2SsecKey>,
+) -> aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder {
+    match ssec {
+        Some(ssec) => request
+            .sse_customer_algorithm("AES256")
+            .sse_customer_key(ssec.base64())
+            .sse_customer_key_md5(ssec.md5_base64()),
+        None => request,
+    }
+}
+
+fn apply_ssec_head(
+    request: aws_sdk_s3::operation::head_object::builders::HeadObjectFluentBuilder,
+    ssec: Option<&R2SsecKey>,
+) -> aws_sdk_s3::operation::head_object::builders::HeadObjectFluentBuilder {
+    match ssec {
+        Some(ssec) => request
+            .sse_customer_algorithm("AES256")
+            .sse_customer_key(ssec.base64())
+            .sse_customer_key_md5(ssec.md5_base64()),
+        None => request,
+    }
+}
+
+fn apply_put_checksum(
+    request: aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder,
+    checksum: Option<&R2ChecksumAlgorithm>,
+) -> aws_sdk_s3::operation::put_object::builders::PutObjectFluentBuilder {
+    match checksum {
+        Some(R2ChecksumAlgorithm::Sha1(value)) => {
+            request.checksum_sha1(base64::engine::general_purpose::STANDARD.encode(value))
+        }
+        Some(R2ChecksumAlgorithm::Sha256(value)) => {
+            request.checksum_sha256(base64::engine::general_purpose::STANDARD.encode(value))
+        }
+        _ => request,
+    }
+}
+
+fn check_ssec(metadata: &R2ObjectMetadata, ssec: Option<&R2SsecKey>) -> Result<(), PlatformError> {
+    match (metadata.ssec_key_md5.as_deref(), ssec) {
+        (None, _) => Ok(()),
+        (Some(expected), Some(ssec)) if expected == ssec.md5_base64() => Ok(()),
+        (Some(_), _) => Err(ssec_invalid()),
+    }
+}
+
+fn is_ssec_denied(status: Option<u16>) -> bool {
+    matches!(status, Some(400 | 403))
 }
 
 fn parse_content_range(value: &str) -> Option<(R2Range, u64)> {
@@ -657,43 +639,7 @@ fn parse_content_range(value: &str) -> Option<(R2Range, u64)> {
     ))
 }
 
-fn unquote_etag(value: &str) -> Result<String, PlatformError> {
-    let value = value
-        .strip_prefix('"')
-        .and_then(|v| v.strip_suffix('"'))
-        .unwrap_or(value);
-    if value.is_empty()
-        || value
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b'"')
-    {
-        return Err(integrity_error());
-    }
-    Ok(value.to_owned())
-}
-
-fn quote_etag(value: &str) -> Result<String, PlatformError> {
-    let value = unquote_etag(value)?;
-    Ok(format!("\"{value}\""))
-}
-
-fn datetime_millis(value: &DateTime) -> i64 {
-    (*value).to_millis().unwrap_or(0)
-}
-
-fn http_date_millis(value: &str) -> Option<i64> {
-    DateTime::from_str(value, DateTimeFormat::HttpDate)
-        .ok()
-        .and_then(|date| date.to_millis().ok())
-}
-
-fn millis_datetime(value: i64) -> DateTime {
-    let seconds = value.div_euclid(1000);
-    let nanos = u32::try_from(value.rem_euclid(1000)).unwrap_or(0) * 1_000_000;
-    DateTime::from_secs_and_nanos(seconds, nanos)
-}
-
-fn sdk_status<E>(error: &SdkError<E, HttpResponse>) -> Option<u16> {
+pub(crate) fn sdk_status<E>(error: &SdkError<E, HttpResponse>) -> Option<u16> {
     match error {
         SdkError::ServiceError(service) => Some(service.raw().status().as_u16()),
         SdkError::ResponseError(response) => Some(response.raw().status().as_u16()),
@@ -753,32 +699,21 @@ fn map_head_failure(_error: &SdkError<HeadObjectError, HttpResponse>) -> Platfor
     provider_unavailable()
 }
 
-fn provider_unavailable() -> PlatformError {
+pub(crate) fn provider_unavailable() -> PlatformError {
     PlatformError::new(
         ErrorCode::R2ProviderUnavailable,
         "R2 provider operation is unavailable",
     )
 }
 
-fn result_unknown() -> PlatformError {
+pub(crate) fn result_unknown() -> PlatformError {
     PlatformError::new(ErrorCode::R2ResultUnknown, "R2 mutation result is unknown")
 }
 
-fn invalid_options() -> PlatformError {
-    PlatformError::new(ErrorCode::R2InvalidOptions, "R2 options are invalid")
-}
-
-fn object_too_large() -> PlatformError {
+pub(crate) fn object_too_large() -> PlatformError {
     PlatformError::new(
         ErrorCode::R2ObjectTooLarge,
         "R2 object exceeds the frozen single-part limit",
-    )
-}
-
-fn integrity_error() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::R2ObjectMetadataInvalid,
-        "R2 object metadata failed integrity validation",
     )
 }
 
@@ -789,12 +724,15 @@ fn prefix_collision() -> PlatformError {
     )
 }
 
-fn invariant() -> PlatformError {
+pub(crate) fn invariant() -> PlatformError {
     PlatformError::new(
         ErrorCode::ResourceInvariantViolation,
         "R2 typed store invariant failed",
     )
 }
+
+#[path = "r2_put.rs"]
+mod put;
 
 #[cfg(test)]
 #[path = "r2_tests.rs"]

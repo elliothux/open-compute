@@ -1,4 +1,5 @@
-import { WorkerEntrypoint } from "cloudflare:workers";
+import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
+import { decodeDurableValue } from "../serialization/codec.js";
 import { bytes, modulesFor } from "./modules.js";
 export { modulesFor } from "./modules.js";
 import { handleWorkflow } from "../workflows/host.js";
@@ -8,18 +9,26 @@ export { tenantEnv } from "./bindings.js";
 export { WorkflowBindingTransport } from "../workflows/binding.js";
 import { makeR2TransportBase } from "../r2/transport.js";
 import { makeD1TransportBase } from "../d1/transport.js";
+import {
+  inboundSocketAddress,
+  tunnelSockets,
+  validateSocketAuthorityWire,
+  type SocketAuthorityWire,
+} from "../sockets/tunnel.js";
 import type {
   AssetBindingProps, BindingEnv, ResourceBindingProps,
 } from "../bindings/protocol.js";
 import type { QueueBindingProps } from "../queues/protocol.js";
-import type { AlarmIdentity, AlarmProjection, DoWireValue } from "../durable-objects/protocol.js";
+import type { AlarmIdentity, AlarmProjection } from "../durable-objects/protocol.js";
 import type { DispatchEnvelope, LoaderEnv, RuntimeModule } from "./protocol.js";
 import {
   assembleOnce, bindingError, BINDING_TOKEN_HEADER, currentStartupGeneration,
-  doPolicy, INTERNAL_HEADERS, PROFILE, resolveSnapshot, TOKEN_HEADER,
+  doPolicy, INTERNAL_HEADERS, lockWorkerCode, resolveSnapshot, tenantGlobalOutbound,
+  TOKEN_HEADER,
 } from "./shared.js";
 export {
-  bindingError, currentStartupGeneration, doPolicy, PROFILE, resolveSnapshot,
+  bindingError, currentStartupGeneration, doPolicy, lockWorkerCode, resolveSnapshot,
+  tenantGlobalOutbound,
 } from "./shared.js";
 export { ServiceTransport } from "../services/transport.js";
 export { CacheTransport } from "../cache/host.js";
@@ -29,6 +38,38 @@ const MAX_QUEUE_MESSAGES = 100;
 const MAX_QUEUE_BODY_BYTES = 128 * 1024;
 const MAX_QUEUE_BATCH_BYTES = 256 * 1024;
 const seenHashes = new Map<string, string>();
+const DO_ORDER_CHANNEL = /^[0-9a-f]{32}$/;
+const SCHEDULED_WORKFLOW_BINDING = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const doConnects = new Map<string, {
+  authority: SocketAuthorityWire;
+  channelId: string;
+  expiresAt: number;
+  objectId: string;
+  sequence: number;
+}>();
+type PendingDoConnect = NonNullable<ReturnType<typeof doConnects.get>>;
+const doConnectWaiters = new Map<string, {
+  resolve: (pending: PendingDoConnect | undefined) => void;
+  promise: Promise<PendingDoConnect | undefined>;
+}>();
+
+async function waitForDoConnect(operationId: string): Promise<PendingDoConnect | undefined> {
+  const existing = doConnects.get(operationId);
+  if (existing) return existing;
+  if (doConnectWaiters.size >= 1024) throw bindingError("DO_STORAGE_LIMIT");
+  let resolve: (pending: PendingDoConnect | undefined) => void = () => {};
+  const promise = new Promise<PendingDoConnect | undefined>(done => { resolve = done; });
+  const waiter = { resolve, promise };
+  doConnectWaiters.set(operationId, waiter);
+  try {
+    return await Promise.race([
+      promise,
+      scheduler.wait(10_000).then(() => undefined),
+    ]);
+  } finally {
+    if (doConnectWaiters.get(operationId) === waiter) doConnectWaiters.delete(operationId);
+  }
+}
 
 function stableError(code: string, status: number, requestId?: string | null): Response {
   return Response.json({
@@ -117,8 +158,12 @@ export class QueueTransport extends WorkerEntrypoint<BindingEnv, QueueBindingPro
     return props;
   }
 
-  async #request(operation: string, body?: BodyInit): Promise<unknown> {
+  async #request(operation: string, body?: BodyInit, operationId?: string): Promise<unknown> {
     const props = this.#props();
+    if (operationId !== undefined && (typeof operationId !== "string"
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(operationId))) {
+      throw bindingError("QUEUE_INVARIANT_VIOLATION");
+    }
     const response = await this.env.BINDING_BACKEND.fetch(
       `http://binding-backend/internal/bindings/v1/queue/${props.bindingId}/${operation}`,
       {
@@ -131,7 +176,8 @@ export class QueueTransport extends WorkerEntrypoint<BindingEnv, QueueBindingPro
           "x-open-compute-startup-generation": currentStartupGeneration(),
           "x-open-compute-deployment-id": props.deploymentId,
           "x-open-compute-descriptor-sha256": props.descriptorSha256,
-          "x-open-compute-request-id": crypto.randomUUID(),
+          "x-open-compute-request-id": operationId ?? crypto.randomUUID(),
+          "x-open-compute-output-gate": operationId === undefined ? "0" : "1",
         },
         ...(body === undefined ? {} : { body }),
       },
@@ -147,12 +193,16 @@ export class QueueTransport extends WorkerEntrypoint<BindingEnv, QueueBindingPro
     return result;
   }
 
-  send(frame: Uint8Array) {
-    return this.#request("send", frame);
+  send(frame: Uint8Array, operationId?: string) {
+    return this.#request("send", frame, operationId);
   }
 
-  sendBatch(frame: Uint8Array) {
-    return this.#request("batch", frame);
+  sendBatch(frame: Uint8Array, operationId?: string) {
+    return this.#request("batch", frame, operationId);
+  }
+
+  async finalize(operationId: string): Promise<void> {
+    await this.#request("finalize", undefined, operationId);
   }
 
   metrics() {
@@ -225,9 +275,7 @@ export class AssetTransport extends WorkerEntrypoint<BindingEnv, AssetBindingPro
   }
 }
 
-export class DoTransport extends WorkerEntrypoint<LoaderEnv, ResourceBindingProps> {
-  #props() {
-    const props = this.ctx.props;
+function doTransportProps(props: ResourceBindingProps | undefined): ResourceBindingProps {
     if (!props || typeof props.accountId !== "string" || typeof props.workerId !== "string"
         || typeof props.bindingId !== "string" || typeof props.deploymentId !== "string"
         || typeof props.namespaceResourceId !== "string"
@@ -236,12 +284,19 @@ export class DoTransport extends WorkerEntrypoint<LoaderEnv, ResourceBindingProp
       throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
     }
     return props;
-  }
+}
 
-  #headers(objectId: string) {
-    const props = this.#props();
+function doTransportHeaders(
+  props: ResourceBindingProps,
+  objectId: string,
+  channelId: string,
+  sequence: number,
+) {
     if (typeof objectId !== "string" || !/^[0-9a-f]{64}$/.test(objectId)) {
       throw bindingError("DO_ID_INVALID");
+    }
+    if (!DO_ORDER_CHANNEL.test(channelId) || !Number.isSafeInteger(sequence) || sequence < 0) {
+      throw bindingError("DO_RUNTIME_EXCEPTION");
     }
     return {
       "x-open-compute-startup-generation": currentStartupGeneration(),
@@ -254,46 +309,166 @@ export class DoTransport extends WorkerEntrypoint<LoaderEnv, ResourceBindingProp
       "x-open-compute-namespace-resource-id": props.namespaceResourceId,
       "x-open-compute-object-id": objectId,
       "x-open-compute-request-id": crypto.randomUUID(),
+      "x-open-compute-do-order-channel": channelId,
+      "x-open-compute-do-order-sequence": String(sequence),
     };
+}
+
+class DoRpcResult extends RpcTarget {
+  #taken = false;
+  #value: unknown;
+
+  constructor(value: unknown) {
+    super();
+    this.#value = value;
   }
 
-  async fetch(request: Request): Promise<Response> {
-    const objectId = new URL(request.url).pathname.slice(1);
+  take(): unknown {
+    if (this.#taken) throw bindingError("DO_RUNTIME_EXCEPTION");
+    this.#taken = true;
+    const value = this.#value;
+    this.#value = undefined;
+    return value;
+  }
+}
+
+export class DoTransport extends WorkerEntrypoint<LoaderEnv, ResourceBindingProps> {
+  #props() {
+    return doTransportProps(this.ctx.props);
+  }
+
+  fetch(request: Request): Promise<Response> {
+    const props = this.#props();
+    const match = /^\/([0-9a-f]{64})\/([0-9a-f]{32})\/([0-9]+)$/.exec(new URL(request.url).pathname);
+    if (!match) throw bindingError("DO_RUNTIME_EXCEPTION");
+    const objectId = match[1]!;
+    const channelId = match[2]!;
+    const sequence = Number(match[3]);
+    const identity = doTransportHeaders(props, objectId, channelId, sequence);
     const headers = new Headers(request.headers);
     const tenantMethod = headers.get("x-open-compute-do-method") || request.method;
     const tenantUrl = headers.get("x-open-compute-do-url") || "https://do.invalid/";
     for (const name of INTERNAL_HEADERS) headers.delete(name);
-    for (const [name, value] of Object.entries(this.#headers(objectId))) headers.set(name, value);
-    headers.set("x-open-compute-do-method", tenantMethod);
-    headers.set("x-open-compute-do-url", tenantUrl);
-    headers.set("x-open-compute-do-operation", "fetch");
+    if (headers.get("upgrade")?.toLowerCase() === "websocket") {
+      for (const [name, value] of Object.entries(identity)) headers.set(name, value);
+      headers.set("x-open-compute-do-method", tenantMethod);
+      headers.set("x-open-compute-do-url", tenantUrl);
+      headers.set("x-open-compute-do-operation", "fetch");
+      return this.env.DO_ROUTER.fetch(new Request(
+        "http://do-router/internal/do/v1/fetch",
+        { method: request.method, headers, body: request.body, redirect: "manual" },
+      ));
+    }
     const init: RequestInit = { method: request.method, headers, body: request.body, redirect: "manual" };
     if (request.method === "GET" || request.method === "HEAD") delete init.body;
-    return this.env.DO_ROUTER.fetch(new Request(
-      "http://do-router/internal/do/v1/fetch",
-      init,
-    ));
+    return this.env.DO_ROUTER.dispatchFetch(identity, new Request(tenantUrl, init));
   }
 
-  async dispatchRpc(objectId: string, method: string, args: DoWireValue): Promise<unknown> {
-    const response = await this.env.DO_ROUTER.fetch(
-      "http://do-router/internal/do/v1/rpc",
-      {
-        method: "POST",
-        headers: {
-          ...this.#headers(objectId),
-          "content-type": "application/json",
-          "x-open-compute-do-operation": "rpc",
-        },
-        body: JSON.stringify({ method, args }),
-      },
-    );
-    if (!response.ok) {
-      throw bindingError(response.headers.get("x-open-compute-error-code") || "DO_RUNTIME_EXCEPTION");
+  startRpc(
+    objectId: string,
+    channelId: string,
+    sequence: number,
+    kind: "call" | "get",
+    member: string,
+    args: unknown[],
+  ): DoRpcResult {
+    const props = this.#props();
+    if ((kind !== "call" && kind !== "get") || typeof member !== "string" || !Array.isArray(args)
+        || (kind === "get" && args.length !== 0)) {
+      throw bindingError("DO_RPC_UNSUPPORTED");
     }
-    const payload: unknown = await response.json();
-    if (!isRecord(payload)) throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
-    return payload.value;
+    const headers = {
+      ...doTransportHeaders(props, objectId, channelId, sequence),
+      "x-open-compute-do-operation": "rpc",
+      "content-type": "application/json",
+    };
+    const value = kind === "call"
+      ? this.env.DO_ROUTER.dispatchRpc(headers, member, args)
+      : this.env.DO_ROUTER.getRpcProperty(headers, member);
+    return new DoRpcResult(value);
+  }
+
+  async cancelOrder(objectId: string, channelId: string, sequence: number): Promise<void> {
+    const props = this.#props();
+    await this.env.DO_ROUTER.cancelOrder({
+      ...doTransportHeaders(props, objectId, channelId, sequence),
+      "x-open-compute-do-operation": "rpc",
+      "content-type": "application/json",
+    });
+  }
+
+  async prepareConnect(
+    objectId: string,
+    channelId: string,
+    sequence: number,
+    operationId: string,
+    authority: SocketAuthorityWire,
+  ): Promise<void> {
+    const props = this.#props();
+    doTransportHeaders(props, objectId, channelId, sequence);
+    if (!DO_ORDER_CHANNEL.test(operationId)) {
+      throw bindingError("DO_RUNTIME_EXCEPTION");
+    }
+    let validated: SocketAuthorityWire;
+    try {
+      validated = validateSocketAuthorityWire(authority);
+    } catch (error) { throw error; }
+    const now = Date.now();
+    for (const [token, pending] of doConnects) {
+      if (pending.expiresAt <= now) {
+        doConnects.delete(token);
+        doConnectWaiters.get(token)?.resolve(undefined);
+      }
+    }
+    if (doConnects.size >= 1024) {
+      throw bindingError("DO_STORAGE_LIMIT");
+    }
+    if (doConnects.has(operationId)) throw bindingError("DO_RUNTIME_EXCEPTION");
+    const pending = {
+      authority: validated,
+      channelId,
+      expiresAt: now + 10_000,
+      objectId,
+      sequence,
+    };
+    doConnects.set(operationId, pending);
+    doConnectWaiters.get(operationId)?.resolve(pending);
+  }
+
+  async cancelConnect(operationId: string): Promise<void> {
+    if (!DO_ORDER_CHANNEL.test(operationId)) throw bindingError("DO_RUNTIME_EXCEPTION");
+    const pending = doConnects.get(operationId);
+    if (pending) doConnects.delete(operationId);
+    doConnectWaiters.get(operationId)?.resolve(undefined);
+  }
+
+  async connect(socket: Socket): Promise<void> {
+    try {
+      const tokenAddress = await inboundSocketAddress(socket);
+      const match = /^([0-9a-f]{32})\.do-transport\.invalid:1$/.exec(tokenAddress);
+      const pending = match ? await waitForDoConnect(match[1]!) : undefined;
+      if (!match || !pending || pending.expiresAt <= Date.now()) {
+        if (match && pending) doConnects.delete(match[1]!);
+        throw bindingError("DO_RUNTIME_EXCEPTION");
+      }
+      doConnects.delete(match[1]!);
+      const prepared = await this.env.DO_ROUTER.prepareConnect({
+        ...doTransportHeaders(
+          this.#props(), pending.objectId, pending.channelId, pending.sequence,
+        ),
+        "x-open-compute-do-operation": "connect",
+        "content-type": "application/json",
+      }, pending.authority);
+      if (!prepared || typeof prepared !== "object" || typeof prepared.tokenAddress !== "string") {
+        throw bindingError("DO_RUNTIME_EXCEPTION");
+      }
+      const target = this.env.DO_ROUTER.connect(prepared.tokenAddress, { allowHalfOpen: true });
+      await target.opened;
+      await tunnelSockets(socket, target);
+    } catch {
+      await socket.close().catch(() => undefined);
+      throw bindingError("DO_RUNTIME_EXCEPTION");
+    }
   }
 }
 
@@ -363,16 +538,6 @@ function tenantRequest(request: Request): Request {
   return new Request(url, init);
 }
 
-export class OutboundGateway extends WorkerEntrypoint<Record<string, never>, { deploymentId: string; policyVersion: 1 }> {
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new TypeError("OUTBOUND_DENIED");
-    }
-    return fetch(new Request(request, { redirect: "follow" }));
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -423,17 +588,13 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
     const code = await assembleOnce(envelope.runtimeKey, async () => {
       const built = modulesFor(snapshot, validation, entrypoint);
       return {
-        compatibilityDate: snapshot.compatibilityDate,
-        compatibilityFlags: snapshot.compatibilityFlags,
+        ...lockWorkerCode(env),
         mainModule: built.mainModule,
         modules: built.modules,
         env: validation ? {} : tenantEnv(
           snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
         ),
-        globalOutbound: validation ? null : ctx.exports.OutboundGateway({
-          props: { deploymentId, policyVersion: 1 },
-        }),
-        limits: PROFILE,
+        globalOutbound: tenantGlobalOutbound(env, validation),
       };
     });
     let cold = false;
@@ -441,7 +602,7 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
       cold = true;
       return code;
     });
-    const target = stub.getEntrypoint(validation ? undefined : entrypoint, { limits: PROFILE });
+    const target = stub.getEntrypoint(validation ? undefined : entrypoint);
     executionStarted = !validation;
     const response = await target.fetch(validation ? "https://validation.invalid/" : tenant!);
     if (validation) {
@@ -499,10 +660,49 @@ function customEventMessageBody(message: Record<string, unknown>) {
     case "bytes":
       body = raw;
       break;
+    case "v8":
+      body = decodeDurableValue(raw, "queue-v8");
+      break;
     default:
       throw bindingError("QUEUE_DISPOSITION_INVALID");
   }
   return { body, byteLength: raw.byteLength };
+}
+
+function queueBatchMetadata(input: unknown): { metrics: {
+  backlogCount: number;
+  backlogBytes: number;
+  oldestMessageTimestamp?: Date;
+} } {
+  if (input === undefined) {
+    return { metrics: { backlogCount: 0, backlogBytes: 0 } };
+  }
+  if (!isRecord(input) || !isRecord(input.metrics)) {
+    throw bindingError("QUEUE_DISPOSITION_INVALID");
+  }
+  const metrics = input.metrics;
+  if (typeof metrics.backlogCount !== "number" || !Number.isSafeInteger(metrics.backlogCount)
+      || metrics.backlogCount < 0
+      || typeof metrics.backlogBytes !== "number" || !Number.isSafeInteger(metrics.backlogBytes)
+      || metrics.backlogBytes < 0) {
+    throw bindingError("QUEUE_DISPOSITION_INVALID");
+  }
+  const oldest = metrics.oldestMessageTimestampMs;
+  const output: {
+    backlogCount: number;
+    backlogBytes: number;
+    oldestMessageTimestamp?: Date;
+  } = {
+    backlogCount: metrics.backlogCount,
+    backlogBytes: metrics.backlogBytes,
+  };
+  if (oldest !== undefined && oldest !== null && oldest !== 0) {
+    if (typeof oldest !== "number" || !Number.isSafeInteger(oldest)) {
+      throw bindingError("QUEUE_DISPOSITION_INVALID");
+    }
+    output.oldestMessageTimestamp = new Date(oldest);
+  }
+  return { metrics: output };
 }
 
 async function customEventTarget(request: Request, env: LoaderEnv, ctx: ExecutionContext) {
@@ -519,17 +719,13 @@ async function customEventTarget(request: Request, env: LoaderEnv, ctx: Executio
     const built = modulesFor(snapshot, false, entrypoint);
     const deploymentId = envelope.loaderKey.split("/")[2]!;
     return {
-      compatibilityDate: snapshot.compatibilityDate,
-      compatibilityFlags: snapshot.compatibilityFlags,
+      ...lockWorkerCode(env),
       mainModule: built.mainModule,
       modules: built.modules,
       env: tenantEnv(
         snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
       ),
-      globalOutbound: ctx.exports.OutboundGateway({
-        props: { deploymentId, policyVersion: 1 },
-      }),
-      limits: PROFILE,
+      globalOutbound: tenantGlobalOutbound(env, false),
     };
   });
   let cold = false;
@@ -538,7 +734,8 @@ async function customEventTarget(request: Request, env: LoaderEnv, ctx: Executio
     return code;
   });
   return {
-    target: stub.getEntrypoint(entrypoint, { limits: PROFILE }),
+    target: stub.getEntrypoint(entrypoint),
+    snapshot,
     loaderOutcome: () => cold ? "cold" : "warm",
   };
 }
@@ -573,7 +770,11 @@ async function handleQueue(request: Request, env: LoaderEnv, ctx: ExecutionConte
       };
     });
     const loaded = await customEventTarget(request, env, ctx);
-    const result = await loaded.target.queue(payload.queueName, messages);
+    const result = await loaded.target.queue(
+      payload.queueName,
+      messages,
+      queueBatchMetadata(payload.metadata),
+    );
     const response = Response.json(result);
     response.headers.set("x-open-compute-loader-outcome", loaded.loaderOutcome());
     return response;
@@ -586,17 +787,32 @@ async function handleQueue(request: Request, env: LoaderEnv, ctx: ExecutionConte
 async function handleScheduled(request: Request, env: LoaderEnv, ctx: ExecutionContext) {
   try {
     const payload: unknown = await request.json();
-    if (!isRecord(payload)
-        || typeof payload.scheduledTimeMs !== "number" || !Number.isSafeInteger(payload.scheduledTimeMs) || payload.scheduledTimeMs < 0
+    if (!isRecord(payload)) throw bindingError("CRON_EXPRESSION_INVALID");
+    const workflowBindings: unknown = payload.workflowBindings;
+    if (typeof payload.scheduledTimeMs !== "number" || !Number.isSafeInteger(payload.scheduledTimeMs) || payload.scheduledTimeMs < 0
+        || payload.scheduledTimeMs % 60_000 !== 0
         || typeof payload.cron !== "string" || payload.cron.length < 1
-        || payload.cron.length > 256) {
+        || payload.cron.length > 256 || typeof payload.scheduledHandler !== "boolean"
+        || !Array.isArray(workflowBindings) || workflowBindings.length > 100
+        || (!payload.scheduledHandler && workflowBindings.length === 0)
+        || !workflowBindings.every((value, index) => typeof value === "string"
+          && SCHEDULED_WORKFLOW_BINDING.test(value)
+          && !value.startsWith("OPEN_COMPUTE_") && !value.startsWith("__")
+          && (index === 0 || workflowBindings[index - 1] < value))) {
       throw bindingError("CRON_EXPRESSION_INVALID");
     }
     const loaded = await customEventTarget(request, env, ctx);
-    const result = await loaded.target.scheduled({
+    const target = loaded.snapshot.scheduledTargets.find(value => value.cron === payload.cron);
+    if (!target || target.scheduledHandler !== payload.scheduledHandler
+        || target.workflowBindings.length !== workflowBindings.length
+        || target.workflowBindings.some((value, index) => value !== workflowBindings[index])) {
+      throw bindingError("CRON_ACTIVATION_STALE");
+    }
+    const scheduledEvent = {
       scheduledTime: new Date(payload.scheduledTimeMs),
       cron: payload.cron,
-    });
+    };
+    const result = await loaded.target.scheduled(scheduledEvent);
     const response = Response.json(result);
     response.headers.set("x-open-compute-loader-outcome", loaded.loaderOutcome());
     return response;
@@ -629,13 +845,11 @@ async function validateDurableObjectClass(request: Request, env: LoaderEnv) {
   }
   const built = modulesFor(snapshot, false, className, true);
   const code = {
-    compatibilityDate: snapshot.compatibilityDate,
-    compatibilityFlags: snapshot.compatibilityFlags,
+    ...lockWorkerCode(env),
     mainModule: built.mainModule,
     modules: built.modules,
     env: {},
     globalOutbound: null,
-    limits: PROFILE,
   };
   try {
     const loaded = env.LOADER.get(`validate-do/${envelope.runtimeKey}`, () => code);

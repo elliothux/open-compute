@@ -66,16 +66,29 @@ fn write_lock(dir: &Path, binary_sha: &str) -> PathBuf {
     let lock = format!(
         r#"{{
   "schemaVersion": 1,
-  "release": "v1.20260826.1",
+  "release": "v1.20260830.1",
+  "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
   "expectedVersionOutput": "{VERSION}",
-  "hostCompatibilityDate": "2026-08-22",
+  "effectiveCompatibilityDate": "2026-08-30",
+  "requiredCompatibilityFlags": [],
+  "systemCompatibilityFlags": ["experimental", "service_binding_extra_handlers"],
   "processFlags": ["--experimental"],
-  "hostCompatibilityFlags": ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
+  "workersTypes": {{
+    "version": "5.20260830.1",
+    "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
+    "packageSha256": "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e",
+    "astSha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd"
+  }},
+  "workersSdk": {{
+    "revision": "f8085545bcaa2c639f171c25e4424685036a0e10",
+    "wranglerVersion": "4.127.1",
+    "vitePluginVersion": "1.54.2"
+  }},
   "targets": {{
     "{target}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}",
-      "archiveSha256": "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}",
+      "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "{binary_sha}"
     }}
   }}

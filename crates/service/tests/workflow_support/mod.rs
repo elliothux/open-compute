@@ -1,5 +1,6 @@
 //! Shared real-runtime fixture for Workflow Gates; all scenario data stays here.
 
+use base64::Engine as _;
 use open_compute_artifacts::{
     ArtifactCache, ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
@@ -23,6 +24,114 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+const DURABLE_VALUE_HEADER: &[u8] = b"OCDV\x01\x02";
+
+/// Encode the JSON subset used by workflow process fixtures with the production durable-value wire.
+pub(crate) fn encode_workflow_json(value: &serde_json::Value) -> String {
+    fn u32_bytes(output: &mut Vec<u8>, value: usize) {
+        output.extend_from_slice(&u32::try_from(value).unwrap().to_be_bytes());
+    }
+    fn string(output: &mut Vec<u8>, value: &str) {
+        u32_bytes(output, value.len());
+        output.extend_from_slice(value.as_bytes());
+    }
+    fn encode_value(output: &mut Vec<u8>, value: &serde_json::Value) {
+        match value {
+            serde_json::Value::Null => output.push(0x00),
+            serde_json::Value::Bool(false) => output.push(0x02),
+            serde_json::Value::Bool(true) => output.push(0x03),
+            serde_json::Value::Number(number) => {
+                output.push(0x04);
+                output.extend_from_slice(&number.as_f64().unwrap().to_be_bytes());
+            }
+            serde_json::Value::String(text) => {
+                output.push(0x06);
+                string(output, text);
+            }
+            serde_json::Value::Array(items) => {
+                output.push(0x10);
+                u32_bytes(output, items.len());
+                u32_bytes(output, 0);
+                for item in items {
+                    encode_value(output, item);
+                }
+            }
+            serde_json::Value::Object(fields) => {
+                output.push(0x11);
+                u32_bytes(output, fields.len());
+                for (key, entry) in fields {
+                    string(output, key);
+                    encode_value(output, entry);
+                }
+            }
+        }
+    }
+    let mut bytes = DURABLE_VALUE_HEADER.to_vec();
+    encode_value(&mut bytes, value);
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Decode the production durable-value JSON subset returned by workflow fixtures.
+pub(crate) fn decode_workflow_json(encoded: &str) -> serde_json::Value {
+    struct Reader {
+        bytes: Vec<u8>,
+        offset: usize,
+    }
+    impl Reader {
+        fn take(&mut self, count: usize) -> &[u8] {
+            let end = self.offset.checked_add(count).unwrap();
+            let bytes = &self.bytes[self.offset..end];
+            self.offset = end;
+            bytes
+        }
+        fn byte(&mut self) -> u8 {
+            self.take(1)[0]
+        }
+        fn u32(&mut self) -> usize {
+            usize::try_from(u32::from_be_bytes(self.take(4).try_into().unwrap())).unwrap()
+        }
+        fn string(&mut self) -> String {
+            let count = self.u32();
+            String::from_utf8(self.take(count).to_vec()).unwrap()
+        }
+        fn value(&mut self) -> serde_json::Value {
+            match self.byte() {
+                0x00 | 0x01 => serde_json::Value::Null,
+                0x02 => serde_json::Value::Bool(false),
+                0x03 => serde_json::Value::Bool(true),
+                0x04 => serde_json::json!(f64::from_be_bytes(self.take(8).try_into().unwrap())),
+                0x06 => serde_json::Value::String(self.string()),
+                0x10 => {
+                    let count = self.u32();
+                    assert_eq!(self.u32(), 0, "fixture arrays do not have extra properties");
+                    serde_json::Value::Array((0..count).map(|_| self.value()).collect())
+                }
+                0x11 => {
+                    let count = self.u32();
+                    let mut fields = serde_json::Map::new();
+                    for _ in 0..count {
+                        let key = self.string();
+                        fields.insert(key, self.value());
+                    }
+                    serde_json::Value::Object(fields)
+                }
+                tag => panic!("unsupported durable fixture tag {tag:#x}"),
+            }
+        }
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .unwrap();
+    assert!(bytes.starts_with(DURABLE_VALUE_HEADER));
+    let mut reader = Reader {
+        bytes,
+        offset: DURABLE_VALUE_HEADER.len(),
+    };
+    let value = reader.value();
+    assert_eq!(reader.offset, reader.bytes.len());
+    value
+}
 
 pub(crate) struct Harness {
     pub storage: Arc<PlatformStorage>,
@@ -276,16 +385,13 @@ request_timeout_ms = 3000
                     bundle: bundle.into_bytes().into(),
                     assets: None,
                 },
-                compatibility_date: "2026-08-22".into(),
-                compatibility_flags: vec!["rpc".into()],
                 vars: BTreeMap::from([("MODE".into(), serde_json::json!("frozen"))]),
                 secrets: BTreeMap::new(),
                 bindings,
                 services: BTreeMap::new(),
                 runtime_features: Default::default(),
                 queue_consumers: Vec::new(),
-                crons: None,
-                limits: serde_json::json!({"profile":"default"}),
+                crons: Vec::new(),
                 promote: true,
                 request_id: RequestId::generate(),
                 now_ms: 1,

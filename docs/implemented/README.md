@@ -39,6 +39,7 @@
 | 2026-08-29 | [按用例选择验收轮数](test-repetition.md) | 完整 workspace 690 用例一次、43 个时序用例追加两次，70 个宿主执行/776 次用例全部通过；90.15% 行覆盖率，同条件追加轮墙钟减少 16.85%；重启后 macOS 签名服务仍崩溃一次并自行恢复，系统缺陷未根治，跨平台和正式发行未验证 |
 | 2026-08-29 | [Day1 架构清理](day1-architecture-cleanup.md) | [验收记录](day1-architecture-cleanup-results.md)：清单 1–17 与 artifact GC 完成；coverage 32 目标通过、90.02% 行覆盖率；最终完整 32 目标 / 662 用例一轮及 17 目标 / 42 个时序用例追加两轮全部通过 |
 | 2026-08-30 | [P3.3 Workers Cache、Cache API 与 Images](p3-3-workers-cache-images.md) | 声明的单节点支持面 Platform Go：完整 37 目标 coverage 通过、Rust 行覆盖率 90.10%，最终完整 37 目标一轮及 19 个登记时序目标追加两轮全部通过；Cloudflare differential、跨平台发行与第三方应用 qualification 未纳入结论 |
+| 2026-09-01 | [Cloudflare Runtime 全量兼容改造](cloudflare-runtime-compatibility.md)、[P3.4 conformance](p3-4-cloudflare-conformance.md) | [完成报告](cloudflare-runtime-compatibility-results.md)：2,097 个 stable members、1,585 `supported`、512 `supported_with_deviation`、`blocked=0`；193/193 JS、802/802 单轮 workspace cases、90.17% Rust 行覆盖率；七项 hosted differential 已通过，Workflow hosted qualification 与 timing-three release qualification 仍为明确限制 |
 
 ## 仍在维护或尚未完成
 
@@ -49,9 +50,8 @@
 - [P3.1 Static Assets](../p3-1-static-assets.md)与[P3.2 Service Binding](../p3-2-service-bindings.md)：
   本地 contract/product、事件源和真实 crash recovery 已有证据；Assets/Service 直接 remote
   differential 与各自应用 qualification 仍在对应文档中维护。
-- [P3.4 Cloudflare conformance](../p3-4-cloudflare-conformance.md)：原常用子集及一项 Cache API
-  portable differential 已有证据；扩展后的全量 stable tenant API 目标仍为 active/blocked，不能从
-  已归档 P3.3 或单个 remote fixture 推导完整兼容结论。
+- [Cloudflare Workflow 远端 differential](../cloudflare-runtime-compatibility-acceptance.md)：本地 Day1
+  runtime 与七项 hosted fixture 已完成，只追踪因 Wrangler OAuth `10000` 未运行的 Workflow 托管端资格。
 - [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 

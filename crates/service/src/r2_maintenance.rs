@@ -67,9 +67,16 @@ impl R2Maintenance {
 
         for bucket in ready.iter().cycle().skip(start).take(count) {
             saw_ready = true;
-            let result = tokio::time::timeout(timeout, driver.reconcile(&bucket.resource))
-                .await
-                .unwrap_or_else(|_| Err(provider_unavailable()));
+            let result = tokio::time::timeout(timeout, async {
+                driver.reconcile(&bucket.resource).await?;
+                crate::r2_backend::multipart::reconcile_bucket_multipart(
+                    storage, objects, bucket, false, false, timeout,
+                )
+                .await?;
+                Ok::<_, PlatformError>(())
+            })
+            .await
+            .unwrap_or_else(|_| Err(provider_unavailable()));
             let _ = repository.mark_probed(bucket.resource.id, now_ms);
             match result {
                 Ok(_) => {

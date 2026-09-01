@@ -305,9 +305,6 @@ async fn delete_worker(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DeploymentMetadata {
     main_module: String,
-    compatibility_date: String,
-    #[serde(default)]
-    compatibility_flags: Vec<String>,
     #[serde(default)]
     vars: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
@@ -320,9 +317,8 @@ struct DeploymentMetadata {
     runtime_features: DeploymentRuntimeFeatures,
     #[serde(default)]
     queue_consumers: Vec<QueueConsumerInput>,
-    crons: Option<Vec<String>>,
-    #[serde(default = "default_limits")]
-    limits: serde_json::Value,
+    #[serde(default)]
+    crons: Vec<String>,
     #[serde(default)]
     promote: bool,
 }
@@ -412,8 +408,6 @@ async fn create_deployment(
                 bundle: DeploymentBundle::Staged(staged.bundle.clone()),
                 assets: None,
             },
-            compatibility_date: metadata.compatibility_date,
-            compatibility_flags: metadata.compatibility_flags,
             vars: metadata.vars,
             secrets: metadata.secrets,
             bindings: metadata.bindings,
@@ -421,7 +415,6 @@ async fn create_deployment(
             runtime_features: metadata.runtime_features,
             queue_consumers: metadata.queue_consumers,
             crons: metadata.crons,
-            limits: metadata.limits,
             promote: metadata.promote,
             request_id,
             now_ms: now_ms(),
@@ -978,10 +971,6 @@ fn deployment_metadata(request: &Request) -> Result<DeploymentMetadata, Platform
         .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "deployment metadata is invalid"))
 }
 
-fn default_limits() -> serde_json::Value {
-    serde_json::json!({ "profile": "default" })
-}
-
 fn parse_account(value: &str) -> Result<AccountId, PlatformError> {
     AccountId::from_str(value)
         .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "account ID is invalid"))
@@ -1330,9 +1319,6 @@ fn deployment_json(deployment: &DeploymentRecord) -> serde_json::Value {
         "artifactSize": deployment.artifact_size,
         "artifactSchemaVersion": deployment.artifact_schema_version,
         "mainModule": deployment.main_module,
-        "compatibilityDate": deployment.compatibility_date,
-        "compatibilityFlags": deployment.compatibility_flags,
-        "limits": deployment.limits,
         "workerCodeSha256": hex::encode(deployment.worker_code_sha256),
         "loaderSchemaVersion": deployment.loader_schema_version,
         "createdAtMs": deployment.created_at_ms,

@@ -1,6 +1,6 @@
 use super::*;
 use open_compute_artifacts::{
-    MapEnv, R2PutOptions, R2UploadSource, S3ArtifactClient, UserObjectKey,
+    MapEnv, R2PutOptions, R2UploadSource, S3ArtifactClient, UserObjectKey, hash_bytes,
 };
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{RequestId, SystemClock};
@@ -104,14 +104,13 @@ async fn driver_creates_reconciles_refuses_nonempty_and_recovers_force_delete() 
     let source = R2UploadSource {
         path: staging,
         length: 5,
-        md5: open_compute_artifacts::md5_file(&storage.data_dir().root().join("r2-test-upload"), 5)
-            .unwrap(),
-        version: uuid::Uuid::now_v7().to_string(),
+        checksums: hash_bytes(b"value"),
+        version: uuid::Uuid::now_v7().hyphenated().to_string(),
     };
     let locator = driver.locator(&ready).unwrap();
-    let key = UserObjectKey::parse("same/key", &locator).unwrap();
+    let key = UserObjectKey::parse("same/key").unwrap();
     objects
-        .put_file(&locator, &key, &source, &R2PutOptions::default())
+        .put_file(&locator, &key, &source, &R2PutOptions::default(), None)
         .await
         .unwrap();
     assert_eq!(

@@ -1,25 +1,28 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { compileWorker } from "./build-worker.ts";
 import { encodeWorker } from "./bundle-worker.ts";
 import { readAssetObject, scanAssets } from "./assets/scan.ts";
 import type { ScannedAssets } from "./assets/types.ts";
 import { deployProject } from "./deploy-worker.ts";
+import { generateEnvTypes, writeGeneratedTypes } from "./generate-types.ts";
 import { loadProject } from "./project.ts";
-import { importFrameworkOutput } from "./import/framework-output.ts";
+import { applyFrameworkOutput, importFrameworkOutput, type FrameworkOutput } from "./import/framework-output.ts";
+import type { WorkerProject } from "./project.ts";
 
-const HELP = `Usage: oc <build|run|deploy> [entry.ts] [options]
+const HELP = `Usage: oc <build|run|deploy|types> [entry.ts] [options]
 
   build    Type-check and write a canonical Worker bundle without network access
   run      Compile and serve a Worker through an already-running local platform
   deploy   Compile, validate, and activate a Worker on the configured platform
+  types    Generate Env types from the project configuration without platformd
 
 Options:
   --config <file>       Project JSON (default: open-compute.json)
   --platformd <file>    Matching platformd binary for Worker code, or OPEN_COMPUTE_PLATFORMD
-  --out <file>          New bundle output file (required for build; never overwritten)
+  --out <file>          New bundle for build, or types destination for types
   --endpoint <origin>   Override the platform origin
   --account <id>        Override the platform's default account
   --token-env <name>    Admin token environment variable (default: OPEN_COMPUTE_ADMIN_TOKEN)
@@ -27,8 +30,24 @@ Options:
   --help               Show this help
 
 Dependencies must already be installed. No runtime or package is downloaded.
+types is offline and does not encode Worker code or contact the platform.
 run activates a deployment on the local platform; it does not start another workerd.
 `;
+
+function hasOption(args: readonly string[], name: string): boolean {
+  const flag = `--${name}`;
+  return args.some(arg => arg === flag || arg.startsWith(`${flag}=`));
+}
+
+async function configuredProject(config: string): Promise<{
+  project: WorkerProject;
+  framework: FrameworkOutput | undefined;
+}> {
+  const loaded = await loadProject(config);
+  if (loaded.frameworkOutput === undefined) return { project: loaded, framework: undefined };
+  const framework = await importFrameworkOutput(loaded);
+  return { project: applyFrameworkOutput(loaded, framework), framework };
+}
 
 /** Execute a developer command without loading executable project configuration. */
 export async function runCli(args: readonly string[]): Promise<void> {
@@ -44,25 +63,31 @@ export async function runCli(args: readonly string[]): Promise<void> {
   });
   if (values.help) { process.stdout.write(HELP); return; }
   const [command, entry] = positionals;
+  if (command === "types") {
+    if (positionals.length !== 1) throw new Error("types does not accept an entry argument");
+    for (const name of ["platformd", "endpoint", "account", "token-env", "json"] as const) {
+      if (hasOption(args, name)) throw new Error(`types does not accept --${name}`);
+    }
+    const { project } = await configuredProject(values.config);
+    const output = values.out === undefined
+      ? join(project.project, "worker-configuration.d.ts")
+      : resolve(values.out);
+    const written = await writeGeneratedTypes(output, generateEnvTypes(project, output));
+    process.stdout.write(`Wrote ${written}\n`);
+    return;
+  }
   if (!["build", "run", "deploy"].includes(command ?? "") || positionals.length > 2) throw new Error(HELP);
   if (command === "build" && values.out === undefined) throw new Error("build requires --out; existing output is never overwritten");
   if (command !== "build" && values.out !== undefined) throw new Error("--out is only supported by build");
-  const project = await loadProject(values.config);
+  const { project, framework } = await configuredProject(values.config);
   if (entry !== undefined && project.frameworkOutput !== undefined) {
     throw new Error("an entry argument cannot override frameworkOutput");
   }
-  const framework = project.frameworkOutput === undefined ? undefined : await importFrameworkOutput(project);
-  const effectiveProject = framework === undefined ? project : {
-    ...project,
-    ...(framework.assets === undefined ? {} : { assets: framework.assets }),
-    services: framework.services,
-    runtimeFeatures: framework.runtimeFeatures,
-  };
   const main = entry ?? project.main;
   const binary = values.platformd ?? process.env.OPEN_COMPUTE_PLATFORMD;
   if (main !== undefined && !binary) throw new Error("set --platformd or OPEN_COMPUTE_PLATFORMD to encode Worker code");
-  const assets = effectiveProject.assets === undefined
-    ? undefined : await scanAssets(effectiveProject.project, effectiveProject.assets);
+  const assets = project.assets === undefined
+    ? undefined : await scanAssets(project.project, project.assets);
   let artifact: Awaited<ReturnType<typeof encodeWorker>> | undefined;
   if (framework !== undefined) {
     if (binary === undefined) throw new Error("platformd is required to encode framework Worker code");
@@ -71,7 +96,6 @@ export async function runCli(args: readonly string[]): Promise<void> {
     if (binary === undefined) throw new Error("platformd is required to encode Worker code");
     artifact = await encodeWorker(await compileWorker({
       project: project.project, entry: main, tsconfig: project.tsconfig,
-      compatibilityFlags: project.compatibilityFlags,
     }), resolve(binary));
   }
   if (command === "build") {
@@ -93,7 +117,7 @@ export async function runCli(args: readonly string[]): Promise<void> {
     return;
   }
   const token = process.env[values["token-env"]];
-  const result = await deployProject(effectiveProject, artifact, assets, {
+  const result = await deployProject(project, artifact, assets, {
     localOnly: command === "run",
     ...(values.endpoint === undefined ? {} : { endpoint: values.endpoint }),
     ...(values.account === undefined ? {} : { accountId: values.account }),

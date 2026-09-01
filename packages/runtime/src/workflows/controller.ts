@@ -23,7 +23,9 @@ function record(value: unknown): value is Record<string, unknown> {
 function assertConfig(value: unknown): asserts value is WorkflowResolvedConfig {
   if (!record(value) || typeof value.timeout !== "number" || !Number.isSafeInteger(value.timeout)
       || !record(value.retries) || typeof value.retries.limit !== "number" || !Number.isSafeInteger(value.retries.limit)
-      || typeof value.retries.delay !== "number" || !Number.isSafeInteger(value.retries.delay)
+      || (value.retries.delay !== undefined
+        && (typeof value.retries.delay !== "number" || !Number.isSafeInteger(value.retries.delay)))
+      || (value.sensitive !== undefined && value.sensitive !== "output")
       || (value.retries.backoff !== "constant" && value.retries.backoff !== "linear" && value.retries.backoff !== "exponential")) {
     throw new Error("WORKFLOW_RUNTIME_UNAVAILABLE");
   }
@@ -101,11 +103,20 @@ export class WorkflowRunController extends RpcTarget implements WorkflowControll
     if (typeof reply.errorCode === "string" && reply.errorCode) return { errorCode: reply.errorCode };
     switch (reply?.state) {
       case "complete":
-        if (reply.outputJson !== undefined && typeof reply.outputJson !== "string") break;
-        return { state: "complete", outputJson: reply.outputJson };
+        if (reply.outputBase64 !== undefined && typeof reply.outputBase64 !== "string") break;
+        return { state: "complete", outputBase64: reply.outputBase64 };
+      case "event":
+        if (typeof reply.type !== "string" || typeof reply.payloadBase64 !== "string"
+            || typeof reply.timestampMs !== "number" || !Number.isSafeInteger(reply.timestampMs)) break;
+        return { state: "event", type: reply.type, payloadBase64: reply.payloadBase64, timestampMs: reply.timestampMs };
       case "failed":
         if (typeof reply.code !== "string") break;
         return { state: "failed", code: reply.code };
+      case "resolve_delay":
+        if (typeof reply.attempt !== "number" || !Number.isInteger(reply.attempt)
+            || reply.attempt < 1 || reply.attempt > 101 || typeof reply.code !== "string") break;
+        assertConfig(reply.config);
+        return { state: "resolve_delay", attempt: reply.attempt, code: reply.code, config: reply.config };
       case "suspended":
         this.#yield = true;
         return { state: "suspended" };
@@ -117,9 +128,6 @@ export class WorkflowRunController extends RpcTarget implements WorkflowControll
   async claimBatch(body: { steps: WorkflowClaimDeclaration[] }): Promise<WorkflowBatchReply> {
     if (this.#drainIncomplete) return { state: "suspended" };
     if (this.#yield) return { state: "suspended" };
-    if (this.#claiming || [...this.#grants.values()].some(grant => !grant.settled || !grant.acknowledged)) {
-      return { errorCode: "WORKFLOW_PARALLEL_STEP_UNSUPPORTED" };
-    }
     this.#claiming = true;
     try {
       const reply = await this.#request("claim-batch", { ...body,
@@ -136,9 +144,30 @@ export class WorkflowRunController extends RpcTarget implements WorkflowControll
         const ordinal = body.steps[i]!.ordinal;
         if (step.state !== "run") {
           // Large replay values are fetched individually, not in claim-batch.
-          if (step.state !== "complete" && step.state !== "failed" && step.state !== "suspended") throw new Error("invalid state");
+          if (step.state === "resolve_delay") {
+            if (typeof step.attempt !== "number" || !Number.isInteger(step.attempt)
+                || step.attempt < 1 || step.attempt > 101 || typeof step.code !== "string") {
+              throw new Error("invalid delay grant");
+            }
+            assertConfig(step.config);
+            steps.push({ ordinal, state: "resolve_delay", attempt: step.attempt, code: step.code, config: step.config });
+            continue;
+          }
+          if (step.state !== "complete" && step.state !== "failed" && step.state !== "suspended"
+              && step.state !== "rollback_boundary") throw new Error("invalid state");
           if (step.state === "suspended") this.#yield = true;
-          steps.push({ ordinal, state: step.state });
+          if (step.state === "rollback_boundary") {
+            if (typeof step.rollbackOrdinal !== "number" || !Number.isInteger(step.rollbackOrdinal)
+                || step.rollbackOrdinal < 0 || step.rollbackOrdinal > 1024) throw new Error("invalid rollback frontier");
+            steps.push({ ordinal, state: "rollback_boundary", rollbackOrdinal: step.rollbackOrdinal });
+          } else if (step.state === "complete" && (step.attempt !== undefined || step.config !== undefined)) {
+            if (typeof step.attempt !== "number" || !Number.isInteger(step.attempt)
+                || step.attempt < 1 || step.attempt > 101) throw new Error("invalid replay attempt");
+            assertConfig(step.config);
+            steps.push({ ordinal, state: "complete", attempt: step.attempt, config: step.config });
+          } else {
+            steps.push({ ordinal, state: step.state });
+          }
           continue;
         }
         if (typeof step.stepToken !== "string" || !/^[0-9a-f]{64}$/.test(step.stepToken)
@@ -169,7 +198,9 @@ export class WorkflowRunController extends RpcTarget implements WorkflowControll
     } finally { this.#claiming = false; }
   }
 
-  async #commit(operation: string, body: { ordinal: number; code?: string; outputJson?: string }): Promise<WorkflowVerdict> {
+  async #commit(operation: string, body: {
+    ordinal: number; code?: string; outputBase64?: string; resolvedDelayMs?: number;
+  }): Promise<WorkflowVerdict> {
     const grant = this.#grants.get(body?.ordinal);
     if (grant && operation !== "timeout") {
       grant.acknowledged = true;
@@ -192,8 +223,11 @@ export class WorkflowRunController extends RpcTarget implements WorkflowControll
     }
   }
 
-  success(body: { ordinal: number; outputJson: string }) { return this.#commit("success", body); }
-  failure(body: { ordinal: number; code: string }) { return this.#commit("failure", body); }
+  success(body: { ordinal: number; outputBase64: string }) { return this.#commit("success", body); }
+  failure(body: { ordinal: number; code: string; resolvedDelayMs?: number }) { return this.#commit("failure", body); }
+  resolveDelay(body: { ordinal: number; attempt: number; code: string; resolvedDelayMs?: number }) {
+    return this.#request("resolve-delay", body).then(reply => this.#verdict(reply));
+  }
 
   async result(ordinal: number): Promise<WorkflowVerdict> {
     const grant = this.#grants.get(ordinal);
@@ -223,17 +257,6 @@ export class WorkflowRunController extends RpcTarget implements WorkflowControll
     return { ok: true };
   }
 
-  async registerWait(body: WorkflowClaimDeclaration): Promise<WorkflowVerdict> {
-    if (this.#drainIncomplete) return { state: "suspended" };
-    if (this.#yield) return { state: "suspended" };
-    if (this.#claiming || [...this.#grants.values()].some(grant => !grant.settled || !grant.acknowledged)) {
-      return { errorCode: "WORKFLOW_PARALLEL_STEP_UNSUPPORTED" };
-    }
-    return this.#verdict(await this.#request(
-      body.kind === "wait_event" ? "register-wait" : "register-sleep", body,
-    ));
-  }
-
   // Called only by the trusted host after the loaded RPC finishes. A forged or
   // caught tenant signal is never authority to yield or to commit success.
   async [finishWorkflowRun](result: WorkflowRunResult) {
@@ -249,7 +272,7 @@ export class WorkflowRunController extends RpcTarget implements WorkflowControll
       if (reply?.ok !== true) throw new Error("WORKFLOW_RUNTIME_UNAVAILABLE");
       return { result: { outcome: "suspended", finalOrdinal: result.finalOrdinal }, drainIncomplete: false };
     }
-    if (!["complete", "errored"].includes(result?.outcome)) throw new Error("invalid outcome");
+    if (!["complete", "errored", "terminated"].includes(result?.outcome)) throw new Error("invalid outcome");
     return { result, drainIncomplete: false };
   }
 }

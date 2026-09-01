@@ -23,13 +23,14 @@ Worker、KV、R2、D1、Durable Objects、Queues、Cron、Workflows、Cache 和 
 
 ## Platform contract
 
-平台兼容性按固定 Cloudflare API/config、compatibility date/flags、正式 stock workerd 和真实产品
+平台兼容性按固定 Cloudflare API/config、正式 runtime lock 的唯一 effective compatibility date、正式 stock workerd 和真实产品
 Gate 判定。高风险行为使用同一 portable fixture 对比 open-compute 与真实 Cloudflare Workers；
 第三方框架只是组合 workload。固定 vinext 可以检验 SSR/RSC、Assets、Service、KV、Cache 与
 Images，但 vinext/Next.js 自身缺口不进入平台 schema 或专用分支，vinext 全绿也不能替代 Platform
-verdict。完整规则见[平台总方案](docs/open-compute-workerd-platform.md)；P3.4 已有原常用子集的
-catalog/product/local Gate 与一项受控 Cache API portable differential，但扩展后的完整 stable tenant
-API 目标仍未完成。
+verdict。完整规则见[平台总方案](docs/open-compute-workerd-platform.md)；P3.4 的 single-latest
+types、2,097 个 stable member inventory、完整产品实现和本地 conformance 已闭环，`blocked=0`。
+真实 Cloudflare differential 已覆盖 Workers、Cache API、KV、D1、R2、Durable Objects 和 Queues；
+Workflow 仍因当前 Wrangler OAuth 对 inventory API 返回 code 10000 而等待独立远端资格。
 
 ## Architecture
 
@@ -59,7 +60,7 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 | P3.1：Static Assets | 平台核心与本地 contract/product Gate 完成；当前 remote fixture 只覆盖 Cache API，Assets 直接 differential 与应用 qualification 未评估 |
 | P3.2：Service Binding | 本地 hard/product/event-source/SIGKILL recovery 与 contract Gate 完成；当前 remote fixture 只覆盖 Cache API，Service 直接 differential 与应用 qualification 未评估 |
 | P3.3：Cache/Images | [声明的单节点支持面已实现并通过最终验收](docs/implemented/p3-3-workers-cache-images.md)；Cache API portable differential 已受控通过，完整 Cloudflare conformance 与应用 qualification 不在该结论内 |
-| P3.4：Cloudflare conformance | 原常用子集 baseline/catalog/harness/local Gate 与一项 Cache API differential 已完成；[扩展后的全量 stable tenant API 目标](docs/cloudflare-runtime-compatibility.md)仍为 active/blocked |
+| P3.4：Cloudflare conformance | [全量 Day1 实现与本地 conformance 已完成](docs/implemented/cloudflare-runtime-compatibility.md)：2,097 个 stable members 全部有 evidence，1,585 个 `supported`、512 个 `supported_with_deviation`、`blocked=0`；七项 portable differential 已通过，Workflow 的 Cloudflare 远端资格见[剩余验收](docs/cloudflare-runtime-compatibility-acceptance.md) |
 
 历史设计和结果只证明对应 revision/输入下的范围。当前 dirty working tree、未运行 target 或 active
 计划不能从历史 PASS 推导为已验收。
@@ -82,10 +83,11 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 | `scripts/` | Local development and release packaging launchers |
 
 未完成的实施与验收方案放在 `docs/`；当前入口包括
-[Cloudflare Runtime 全量兼容目标](docs/cloudflare-runtime-compatibility.md)、
-[P3.1 Static Assets](docs/p3-1-static-assets.md)、
-[P3.2 Service Binding](docs/p3-2-service-bindings.md)与
-[P3.4 Cloudflare conformance](docs/p3-4-cloudflare-conformance.md)。已完成的
+[Cloudflare Workflow 远端资格](docs/cloudflare-runtime-compatibility-acceptance.md)、
+[P3.1 Static Assets](docs/p3-1-static-assets.md)与
+[P3.2 Service Binding](docs/p3-2-service-bindings.md)。已完成的
+[Cloudflare Runtime 全量兼容改造](docs/implemented/cloudflare-runtime-compatibility.md)、
+[P3.4 conformance](docs/implemented/p3-4-cloudflare-conformance.md)、
 [P3.3 Cache/Images](docs/implemented/p3-3-workers-cache-images.md)设计与结果，以及其他已完成阶段见
 [docs/implemented](docs/implemented/README.md)，持续维护的 API、测试、部署及运维资料见
 [docs/references](docs/references/README.md)。面向 platformd 运维的站点源码在 [packages/docs](packages/docs)。归档不代表对当前工作树重新执行了验收。
@@ -96,7 +98,7 @@ deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获�
 - Bun 1.3.14, Node.js 24, and locked workspace dependencies for TypeScript development/tests (not daemon startup)
 - Python 3.11+ for the test scheduler
 - macOS or Linux
-- 构建时：与目标平台及 `packages/runtime/workerd.lock.json` 匹配的官方 `.gz`，通过绝对路径 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 显式提供（pin `v1.20260826.1`）
+- 构建时：与目标平台及 `packages/runtime/workerd.lock.json` 匹配的官方 `.gz`，通过绝对路径 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 显式提供（pin `v1.20260830.1`）
 - `rclone` with `serve s3` support for local development
 - Local S3-compatible endpoint for real runs (the Gate hosts its own fake S3; protocol is still AWS SDK SigV4)
 

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "queues/portable/producer",
+  "contracts": ["queues.push.methods"],
+  "source": "src/index.ts",
+  "bindings": {
+    "EVENTS": { "type": "queue_producer" }
+  },
+  "observations": [
+    {
+      "method": "POST",
+      "path": "/surface",
+      "expect": {
+        "status": 200,
+        "json": {
+          "responses": [true, true, true, true, true],
+          "metrics": {
+            "backlogCountPositive": true,
+            "backlogBytesPositive": true,
+            "oldestValid": true
+          },
+          "monotonic": true
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/errors",
+      "expect": {
+        "status": 200,
+        "json": {
+          "invalidContentType": { "synchronous": false, "name": "TypeError" },
+          "negativeDelay": { "synchronous": false, "name": "Error" },
+          "highDelay": { "synchronous": false, "name": "Error" },
+          "emptyBatch": { "synchronous": false, "name": "TypeError" },
+          "highBatch": { "synchronous": false, "name": "Error" }
+        }
+      }
+    },
+    { "method": "DELETE", "path": "/cleanup", "expect": { "status": 200, "json": { "cleaned": true } } }
+  ],
+  "normalization": [],
+  "cleanup": {
+    "cloudflare": ["worker", "queue_producer"],
+    "openCompute": ["worker", "queue_producer"]
+  }
+}

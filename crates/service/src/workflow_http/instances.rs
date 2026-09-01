@@ -3,8 +3,7 @@
 use super::*;
 use open_compute_core::WorkflowOperationId;
 use open_compute_storage::scheduler::WorkflowInstanceAction;
-use open_compute_workers::WorkflowController;
-use serde_json::Value;
+use open_compute_workers::{WorkflowController, WorkflowEventInput};
 
 pub(super) fn routes() -> Router<HttpState> {
     Router::new()
@@ -31,8 +30,8 @@ struct EmptyBody {}
 struct EventBody {
     #[serde(rename = "type")]
     event_type: String,
-    #[serde(default)]
-    payload: Value,
+    #[serde(rename = "payloadBase64")]
+    payload_base64: String,
 }
 
 async fn inspect(
@@ -100,6 +99,7 @@ async fn modify(
                     definition,
                     instance,
                     WorkflowOperationId::generate(),
+                    None,
                     now_ms(),
                 )
             };
@@ -139,8 +139,11 @@ async fn send_event(
                     account,
                     definition,
                     instance,
-                    &body.event_type,
-                    &body.payload.to_string(),
+                    WorkflowEventInput {
+                        operation_id: WorkflowOperationId::generate(),
+                        event_type: &body.event_type,
+                        payload_base64: &body.payload_base64,
+                    },
                     now_ms(),
                 );
             metrics.workflow_event(result.as_ref().err().map(PlatformError::code));

@@ -3,7 +3,8 @@
 use crate::{ControlDb, DeploymentState};
 use open_compute_core::{
     AccountId, BindingId, DeploymentId, ErrorCode, PlatformError, ResourceAvailability,
-    ResourceState, WorkflowId, WorkflowInstanceId, WorkflowToken, WorkflowVersionId,
+    ResourceState, WorkflowId, WorkflowInstanceId, WorkflowOperationId, WorkflowToken,
+    WorkflowVersionId,
 };
 use rusqlite::{OptionalExtension as _, params};
 use sha2::{Digest as _, Sha256};

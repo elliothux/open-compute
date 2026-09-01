@@ -134,7 +134,7 @@ struct FramePutHeader {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FrameListRequest {
     #[serde(default)]
-    prefix: String,
+    prefix: Option<String>,
     limit: u16,
     cursor: Option<String>,
 }
@@ -583,7 +583,7 @@ fn parse_frame_command(operation: Operation, bytes: &[u8]) -> Result<KvCommand, 
         Operation::List => {
             let request = parse_json::<FrameListRequest>(bytes)?;
             Ok(KvCommand::List {
-                prefix: request.prefix,
+                prefix: request.prefix.unwrap_or_default(),
                 limit: request.limit,
                 cursor: request.cursor,
             })

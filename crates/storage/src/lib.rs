@@ -24,6 +24,8 @@ pub mod platform_snapshot;
 pub mod queue_consumers;
 pub mod queues;
 pub mod r2;
+pub mod r2_multipart;
+pub mod r2_objects;
 pub mod r2_staging;
 pub mod resources;
 mod restore_cleanup;
@@ -60,15 +62,15 @@ pub use cache::{
 pub use control_db::ControlDb;
 pub use cron::{
     CRON_PARSER_VERSION, CronActivationRecord, CronActivationState, CronDeclaration,
-    CronDeclarationMode, CronDeploymentConfig, CronRepository, NewCronConfig, NewCronDeclaration,
+    CronDeploymentConfig, CronRepository, NewCronConfig, NewCronDeclaration,
 };
 pub use crypto::{SecretCrypto, SecretEnvelope};
 pub use d1::{
     D1_DATABASE_SCHEMA_VERSION, D1_MAX_BATCH_STATEMENTS, D1_MAX_BOUND_PARAMS, D1_MAX_COLUMNS,
     D1_MAX_EXEC_STATEMENTS, D1_MAX_SQL_BYTES, D1_MAX_VALUE_OR_ROW_BYTES, D1BackupRecord,
     D1BackupState, D1DatabaseRecord, D1DatabaseRepository, D1Engine, D1ExecResult, D1Meta,
-    D1Migration, D1MigrationRecord, D1Paths, D1QueryLimits, D1Statement, D1StatementResult,
-    D1Value,
+    D1Migration, D1MigrationRecord, D1Paths, D1QueryLimits, D1QueryTimings, D1Statement,
+    D1StatementResult, D1Value,
 };
 pub use data_dir::{
     DURABLE_OBJECT_DATA_FORMAT_VERSION, DURABLE_OBJECT_UNIQUE_KEY, DataDir,
@@ -124,6 +126,13 @@ pub use queues::{
     RunningQueueMutation,
 };
 pub use r2::{R2_SCHEMA_VERSION, R2BucketRecord, R2BucketRepository};
+pub use r2_multipart::{
+    R2MultipartPartRecord, R2MultipartRepository, R2MultipartState, R2MultipartUploadRecord,
+};
+pub use r2_objects::{
+    R2ObjectListEntry, R2ObjectListPage, R2ObjectMutationKind, R2ObjectMutationRecord,
+    R2ObjectRecord, R2ObjectRepository,
+};
 pub use r2_staging::R2Staging;
 pub use resources::{
     ReserveResourceCreate, ReserveResourceDelete, ResourceCreateReservation,

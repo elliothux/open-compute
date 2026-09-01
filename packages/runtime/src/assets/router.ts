@@ -97,8 +97,6 @@ function canFetch(assets: RuntimeAssets, request: Request): boolean {
 export function routeDefaultHttp(snapshot: {
   assets?: RuntimeAssets;
   contentKind: "worker" | "assets_only";
-  compatibilityDate: string;
-  compatibilityFlags: string[];
 }, request: Request): "asset" | "worker" {
   const assets = snapshot.assets;
   if (!assets) return "worker";
@@ -112,9 +110,6 @@ export function routeDefaultHttp(snapshot: {
     return "asset";
   }
   if (canFetch(assets, request) || !hasWorker) return "asset";
-  const navigation = snapshot.compatibilityFlags.includes("assets_navigation_prefers_asset_serving")
-    || (snapshot.compatibilityDate >= "2025-04-01"
-      && !snapshot.compatibilityFlags.includes("assets_navigation_has_no_effect"));
-  return navigation && request.headers.get("sec-fetch-mode") === "navigate"
+  return request.headers.get("sec-fetch-mode") === "navigate"
     && assets.routing.notFoundHandling !== "none" ? "asset" : "worker";
 }

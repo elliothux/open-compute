@@ -45,6 +45,10 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[path = "../../../test/runtime/durable-objects/hibernation.rs"]
+mod hibernation;
+#[path = "../../../test/runtime/durable-objects/output_crash.rs"]
+mod output_crash;
 #[path = "../../../test/runtime/durable-objects/recovery.rs"]
 mod recovery;
 
@@ -60,6 +64,7 @@ async fn p0_7_real_durable_objects_matrix() {
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
     );
+    let scheduler = output_crash::open_scheduler(&storage);
     let mock = MockS3::spawn("open-compute").await;
     let artifacts = artifact_store(&mock);
     let runtime = verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
@@ -90,6 +95,7 @@ async fn p0_7_real_durable_objects_matrix() {
         let executor_storage = storage.clone();
         let auth = binding_auth.clone();
         let pins = resource_pins.clone();
+        let scheduler = scheduler.clone();
         async move {
             serve_binding_backend(
                 binding_listener,
@@ -106,7 +112,7 @@ async fn p0_7_real_durable_objects_matrix() {
                 durable_objects_config(),
                 open_compute_core::QueuesConfig::default(),
                 open_compute_core::WorkflowsConfig::default(),
-                None,
+                Some(scheduler),
                 async move {
                     let _ = binding_shutdown.changed().await;
                 },
@@ -159,6 +165,8 @@ async fn p0_7_real_durable_objects_matrix() {
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
     let account = storage.identity().default_account_id;
+    let (output_queue, output_queue_resource) =
+        output_crash::create_queue(&storage, scheduler.clone(), account);
     let workers = WorkerRepository::new(storage.db());
     let (worker, _) = workers
         .create_worker(account, "do-matrix", RequestId::generate(), 10, 1_000_000)
@@ -187,7 +195,15 @@ async fn p0_7_real_durable_objects_matrix() {
     let deployment_a = deploy(
         &deployments,
         deployment_request(
-            account, worker.id, counter, other, "deploy-a", "A", 20, true,
+            account,
+            worker.id,
+            counter,
+            other,
+            output_queue_resource,
+            "deploy-a",
+            "A",
+            20,
+            true,
         ),
         &supervisor,
     )
@@ -214,7 +230,16 @@ async fn p0_7_real_durable_objects_matrix() {
     assert_ne!(identity["named"], identity["unique"]);
     assert_eq!(identity["crossNamespaceRejected"], true);
     assert_eq!(identity["uppercaseRejected"], true);
-    assert_eq!(identity["placementRejected"], true);
+    assert_eq!(identity["invalidHintRejected"], true);
+    assert_eq!(identity["locationAccepted"], true);
+    assert_eq!(identity["jurisdiction"], "eu");
+    assert_eq!(identity["namedJurisdiction"], "eu");
+    assert_eq!(identity["jurisdictionRoundTrip"], true);
+    assert_eq!(identity["jurisdictionChangesId"], true);
+    assert_eq!(identity["unscopedGetAcceptsJurisdiction"], true);
+    assert_eq!(identity["nullishJurisdiction"], true);
+    assert_eq!(identity["forgedRejected"], true);
+    assert_eq!(identity["forgedBridgeRejected"], true);
     assert_eq!(identity["mutatedIntrinsicNamed"], identity["named"]);
     assert!(
         DurableObjectId::from_str(named_id)
@@ -226,8 +251,15 @@ async fn p0_7_real_durable_objects_matrix() {
         .unwrap();
     let mut expected = Vec::from(prefix);
     let mut mac = <Hmac<Sha256>>::new_from_slice(&name_key).unwrap();
-    mac.update(b"alpha");
-    expected.extend_from_slice(&mac.finalize().into_bytes()[..24]);
+    mac.update(b"\x6e\x00alpha");
+    let named_body = mac.finalize().into_bytes();
+    let mut payload = Vec::with_capacity(24);
+    payload.push(0xa0);
+    payload.extend_from_slice(&named_body[..15]);
+    let mut tag = <Hmac<Sha256>>::new_from_slice(&name_key).unwrap();
+    tag.update(&payload);
+    payload.extend_from_slice(&tag.finalize().into_bytes()[..8]);
+    expected.extend_from_slice(&payload);
     assert_eq!(named_id, hex::encode(expected));
 
     let first = dispatch(
@@ -283,6 +315,167 @@ async fn p0_7_real_durable_objects_matrix() {
         (binary_rpc.status, binary_rpc.body.as_str()),
         (200, "4,5,6")
     );
+    let connect = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/connect?name=alpha",
+    )
+    .await;
+    assert_eq!(
+        (connect.status, connect.body.as_str()),
+        (200, "4,5,6"),
+        "diagnostics={:?}",
+        supervisor.last_diagnostics()
+    );
+    let connect_ipv6 = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/connect-ipv6?name=alpha",
+    )
+    .await;
+    assert_eq!(
+        (connect_ipv6.status, connect_ipv6.body.as_str()),
+        (200, "10,11,12"),
+        "diagnostics={:?}",
+        supervisor.last_diagnostics()
+    );
+    let structured_rpc = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-structured?name=alpha",
+    )
+    .await;
+    assert_eq!(structured_rpc.status, 200, "{}", structured_rpc.body);
+    let structured: serde_json::Value = serde_json::from_str(&structured_rpc.body).unwrap();
+    assert_eq!(structured["time"], "2026-08-30T00:00:00.000Z");
+    for member in [
+        "bigint", "map", "regexp", "error", "typed", "view", "buffer", "headers", "request",
+        "response",
+    ] {
+        assert_eq!(structured[member], true, "{member}: {structured}");
+    }
+    let stream_rpc = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-stream?name=alpha",
+    )
+    .await;
+    assert_eq!(
+        (stream_rpc.status, stream_rpc.body.as_str()),
+        (200, "7,8,9")
+    );
+    let writable_rpc = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-writable?name=alpha",
+    )
+    .await;
+    assert_eq!(
+        (writable_rpc.status, writable_rpc.body.as_str()),
+        (200, "10,11")
+    );
+    let capability_rpc = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-capability?name=alpha",
+    )
+    .await;
+    assert_rpc_capability(&capability_rpc, "A");
+    let property_rpc = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-property?name=alpha",
+    )
+    .await;
+    assert_eq!(property_rpc.status, 200, "{}", property_rpc.body);
+    let property: serde_json::Value = serde_json::from_str(&property_rpc.body).unwrap();
+    assert_eq!(property["regular"], "A:property");
+    assert_eq!(property["punctuation"], "A:punctuation");
+    assert_eq!(property["method"], "A:punctuation-method");
+    let property_error = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-property-error?name=alpha",
+    )
+    .await;
+    assert_eq!(
+        (property_error.status, property_error.body.as_str()),
+        (200, "true")
+    );
+    let callback_rpc = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-callback?name=alpha",
+    )
+    .await;
+    assert_eq!(callback_rpc.status, 200, "{}", callback_rpc.body);
+    let callback: serde_json::Value = serde_json::from_str(&callback_rpc.body).unwrap();
+    assert_eq!(callback["target"], "target:ok");
+    assert_eq!(callback["callback"], "function:ok");
+    let clone_error = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-clone-error?name=alpha",
+    )
+    .await;
+    assert_eq!(
+        (clone_error.status, clone_error.body.as_str()),
+        (200, "true")
+    );
+    let capability_error = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-capability-error?name=alpha",
+    )
+    .await;
+    assert_eq!(
+        (capability_error.status, capability_error.body.as_str()),
+        (200, "true"),
+        "tenant RpcTarget exceptions must be sanitized at the trust boundary"
+    );
+    let rpc_error = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/rpc-error?name=alpha",
+    )
+    .await;
+    assert_eq!((rpc_error.status, rpc_error.body.as_str()), (200, "true"));
     let rollback = dispatch(
         &transport,
         account,
@@ -314,28 +507,6 @@ async fn p0_7_real_durable_objects_matrix() {
     }
     assert_eq!(websocket.body, "text:true,binary:true");
 
-    let storage_matrix = dispatch(
-        &transport,
-        account,
-        worker.id,
-        &deployment_a,
-        generation_a,
-        "/storage?name=storage-matrix",
-    )
-    .await;
-    assert_eq!(storage_matrix.status, 200, "{}", storage_matrix.body);
-    let storage_result: serde_json::Value = serde_json::from_str(&storage_matrix.body).unwrap();
-    for key in [
-        "syncKv",
-        "asyncKv",
-        "asyncTransactionRollback",
-        "deleteAll",
-        "blockConcurrency",
-        "waitUntil",
-    ] {
-        assert_eq!(storage_result[key], true, "{key}: {storage_result}");
-    }
-
     let ordered = dispatch(
         &transport,
         account,
@@ -353,6 +524,64 @@ async fn p0_7_real_durable_objects_matrix() {
         .position(|item| item == "second:start")
         .unwrap();
     assert!(first_start < second_start, "same-stub E-order: {order:?}");
+
+    let cross_ordered = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/cross-order?name=cross-ordered",
+    )
+    .await;
+    assert_eq!(cross_ordered.status, 200, "{}", cross_ordered.body);
+    let cross_order: serde_json::Value = serde_json::from_str(&cross_ordered.body).unwrap();
+    assert_eq!(cross_order["echoed"], true, "{cross_order}");
+    let starts = cross_order["order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .filter(|value| value.ends_with(":start"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        starts,
+        [
+            "rpc-first:start",
+            "fetch-second:start",
+            "connect:start",
+            "rpc-fourth:start",
+        ],
+        "cross-surface same-stub E-order: {cross_order}"
+    );
+
+    let order_error = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/order-error?name=order-error",
+    )
+    .await;
+    assert_eq!(order_error.status, 200, "{}", order_error.body);
+    let order_error: serde_json::Value = serde_json::from_str(&order_error.body).unwrap();
+    for key in ["failed", "fetched", "rpc"] {
+        assert_eq!(order_error[key], true, "{key}: {order_error}");
+    }
+
+    let storage_matrix = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_a,
+        "/storage?name=storage-matrix",
+    )
+    .await;
+    assert_eq!(storage_matrix.status, 200, "{}", storage_matrix.body);
+    hibernation::storage_members(&serde_json::from_str(&storage_matrix.body).unwrap());
+    hibernation::facets(&transport, account, worker.id, &deployment_a, generation_a).await;
 
     let parallel_start = Instant::now();
     let (left, right) = tokio::join!(
@@ -381,6 +610,7 @@ async fn p0_7_real_durable_objects_matrix() {
         worker.id,
         counter,
         other,
+        output_queue_resource,
         "missing-class",
         "invalid",
         29,
@@ -425,12 +655,56 @@ async fn p0_7_real_durable_objects_matrix() {
             .await
         }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let capability_in_flight = tokio::spawn({
+        let transport = transport.clone();
+        let deployment = deployment_a.clone();
+        async move {
+            dispatch(
+                &transport,
+                account,
+                worker.id,
+                &deployment,
+                generation_a,
+                "/rpc-pipeline-hold?name=alpha&ms=3000",
+            )
+            .await
+        }
+    });
+    let admitted_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let admitted = dispatch(
+            &transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_a,
+            "/hold-started?name=alpha",
+        )
+        .await;
+        assert_eq!(admitted.status, 200, "{}", admitted.body);
+        let admitted: serde_json::Value = serde_json::from_str(&admitted.body).unwrap();
+        if admitted["fetch"] == true && admitted["capability"] == true {
+            break;
+        }
+        assert!(
+            Instant::now() < admitted_deadline,
+            "old-generation operations were not admitted before promotion: {admitted}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let deployment_b = deploy(
         &deployments,
         deployment_request(
-            account, worker.id, counter, other, "deploy-b", "B", 30, true,
+            account,
+            worker.id,
+            counter,
+            other,
+            output_queue_resource,
+            "deploy-b",
+            "B",
+            30,
+            true,
         ),
         &supervisor,
     )
@@ -442,6 +716,15 @@ async fn p0_7_real_durable_objects_matrix() {
             completed_in_flight.body.as_str()
         ),
         (200, "A:2")
+    );
+    let completed_capability = capability_in_flight.await.unwrap();
+    assert_eq!(
+        (
+            completed_capability.status,
+            completed_capability.body.as_str()
+        ),
+        (200, "A:ok"),
+        "an admitted old-generation RPC capability must remain pinned until its request completes"
     );
     let generation_b = workers
         .get_worker(account, worker.id)
@@ -458,6 +741,16 @@ async fn p0_7_real_durable_objects_matrix() {
     )
     .await;
     assert_eq!((promoted.status, promoted.body.as_str()), (200, "B:3"));
+    let promoted_capability = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_b,
+        generation_b,
+        "/rpc-capability?name=alpha",
+    )
+    .await;
+    assert_rpc_capability(&promoted_capability, "B");
     let stale = dispatch(
         &transport,
         account,
@@ -508,6 +801,59 @@ async fn p0_7_real_durable_objects_matrix() {
     )
     .await;
     assert_eq!((recovered.status, recovered.body.as_str()), (200, "A:3"));
+    let capability_after_restart = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_rollback,
+        "/rpc-capability?name=alpha",
+    )
+    .await;
+    assert_rpc_capability(&capability_after_restart, "A");
+
+    let pending_capability = tokio::spawn({
+        let transport = transport.clone();
+        let deployment = deployment_a.clone();
+        async move {
+            dispatch(
+                &transport,
+                account,
+                worker.id,
+                &deployment,
+                generation_rollback,
+                "/rpc-pipeline-hold?name=alpha&ms=60000",
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let old_pid = supervisor.snapshot().pid.unwrap();
+    rustix::process::kill_process(
+        rustix::process::Pid::from_raw(old_pid).unwrap(),
+        rustix::process::Signal::KILL,
+    )
+    .unwrap();
+    wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
+    match tokio::time::timeout(Duration::from_secs(10), pending_capability).await {
+        Ok(Ok(response)) => assert_ne!(
+            (response.status, response.body.as_str()),
+            (200, "A:ok"),
+            "an RPC capability from a dead runtime generation remained callable"
+        ),
+        Ok(Err(_)) => {}
+        Err(_) => panic!("dead runtime-generation RPC capability did not settle"),
+    }
+    let fresh_capability = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_rollback,
+        "/rpc-capability?name=alpha",
+    )
+    .await;
+    assert_rpc_capability(&fresh_capability, "A");
 
     recovery::check(
         &transport,
@@ -516,6 +862,28 @@ async fn p0_7_real_durable_objects_matrix() {
         worker.id,
         &deployment_a,
         generation_rollback,
+    )
+    .await;
+    hibernation::check(
+        &transport,
+        &supervisor,
+        account,
+        worker.id,
+        &deployment_a,
+        generation_rollback,
+    )
+    .await;
+    output_crash::check(
+        &transport,
+        &supervisor,
+        &scheduler,
+        output_crash::Target {
+            queue: output_queue,
+            account,
+            worker: worker.id,
+            deployment: &deployment_a,
+            generation: generation_rollback,
+        },
     )
     .await;
 
@@ -653,6 +1021,7 @@ fn deployment_request(
     worker_id: WorkerId,
     counter: ResourceId,
     other: ResourceId,
+    output_queue: ResourceId,
     key: &str,
     release: &str,
     now_ms: i64,
@@ -682,6 +1051,15 @@ fn deployment_request(
             },
         );
     }
+    bindings.insert(
+        "EVENTS".to_owned(),
+        DeploymentBindingInput {
+            kind: BindingKind::QueueProducer,
+            id: output_queue,
+            permissions: CanonicalPermissions::default(),
+            config: CanonicalBindingConfig::default(),
+        },
+    );
     let mut vars = BTreeMap::new();
     vars.insert("RELEASE".to_owned(), serde_json::json!(release));
     CreateDeploymentRequest {
@@ -692,25 +1070,32 @@ fn deployment_request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: vec!["rpc".to_owned()],
         vars,
         secrets: BTreeMap::new(),
         bindings,
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote,
         request_id: RequestId::generate(),
         now_ms,
     }
 }
 
+#[derive(Debug)]
 struct DispatchResponse {
     status: u16,
     body: String,
+}
+
+fn assert_rpc_capability(response: &DispatchResponse, release: &str) {
+    assert_eq!(response.status, 200, "{}", response.body);
+    let value: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+    assert_eq!(value["direct"], format!("{release}:ok"));
+    assert_eq!(value["property"], format!("{release}:capability"));
+    assert_eq!(value["nested"], format!("{release}:nested:ok"));
+    assert_eq!(value["envelope"], format!("{release}:ok"));
 }
 
 async fn dispatch(
@@ -741,7 +1126,7 @@ async fn dispatch(
             request,
         )
         .await
-        .unwrap();
+        .unwrap_or_else(|error| panic!("dispatch {path} failed: {error:?}"));
     let status = response.status().as_u16();
     let bytes = to_bytes(response.into_body(), 8 * 1024 * 1024)
         .await
@@ -776,8 +1161,9 @@ async fn wait_pid_change(supervisor: &WorkerdSupervisor, old_pid: i32, timeout: 
             return;
         }
         assert!(
-            start.elapsed() < timeout,
-            "runtime did not restart: {snapshot:?}"
+            snapshot.state != SupervisorState::Failed && start.elapsed() < timeout,
+            "runtime did not restart: {snapshot:?}; diagnostics={:?}",
+            supervisor.last_diagnostics()
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -829,6 +1215,9 @@ fn runtime_config() -> RuntimeConfig {
     config.startup_timeout_ms = 20_000;
     config.shutdown_grace_ms = 1_000;
     config.kill_timeout_ms = 2_000;
+    // This cohesive recovery matrix intentionally kills one runtime generation
+    // for each independent crash boundary it verifies.
+    config.restart_budget = 12;
     config
 }
 

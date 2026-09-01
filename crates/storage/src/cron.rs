@@ -5,48 +5,16 @@ use open_compute_core::{
     AccountId, CronActivationId, DeploymentId, ErrorCode, PlatformError, WorkerId,
 };
 use rusqlite::{Transaction, params};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use sha2::{Digest as _, Sha256};
 use std::str::FromStr;
 
 /// Cron parser/canonicalization contract shipped by P2.3.
 pub const CRON_PARSER_VERSION: u32 = 1;
 
-/// Deployment promotion semantics for Cron declarations.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CronDeclarationMode {
-    /// Keep the active expression set and retarget it to the new deployment.
-    Inherit,
-    /// Replace the active set with the exact declared expressions.
-    Replace,
-}
-
-impl CronDeclarationMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Inherit => "inherit",
-            Self::Replace => "replace",
-        }
-    }
-}
-
-impl FromStr for CronDeclarationMode {
-    type Err = PlatformError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "inherit" => Ok(Self::Inherit),
-            "replace" => Ok(Self::Replace),
-            _ => Err(invariant()),
-        }
-    }
-}
-
 /// Frozen Cron config inserted with a staging deployment.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewCronConfig {
-    /// Omitted/inherit versus exact replacement semantics.
-    pub mode: CronDeclarationMode,
     /// Capability version.
     pub capability_version: u32,
     /// Canonical config digest.
@@ -66,6 +34,10 @@ pub struct NewCronDeclaration {
     pub expression_sha256: [u8; 32],
     /// Parser contract version.
     pub parser_version: u32,
+    /// Whether this expression invokes the Worker's scheduled handler.
+    pub scheduled_handler: bool,
+    /// Workflow bindings directly triggered by this expression.
+    pub workflow_bindings: Vec<String>,
 }
 
 /// Immutable deployment Cron config.
@@ -73,8 +45,6 @@ pub struct NewCronDeclaration {
 pub struct CronDeploymentConfig {
     /// Owning deployment.
     pub deployment_id: DeploymentId,
-    /// Promotion set semantics.
-    pub mode: CronDeclarationMode,
     /// Capability version.
     pub capability_version: u32,
     /// Config digest.
@@ -83,6 +53,47 @@ pub struct CronDeploymentConfig {
     pub created_at_ms: i64,
     /// Ordered exact expressions.
     pub declarations: Vec<CronDeclaration>,
+}
+
+impl CronDeploymentConfig {
+    /// Verify the complete canonical Day1 declaration set and its descriptor.
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        if self.capability_version != 1
+            || self.declarations.len() > 100
+            || self
+                .declarations
+                .windows(2)
+                .any(|pair| pair[0].expression >= pair[1].expression)
+            || self.declarations.iter().any(|declaration| {
+                declaration.deployment_id != self.deployment_id
+                    || !valid_declaration(
+                        &declaration.expression,
+                        &declaration.expression_sha256,
+                        declaration.parser_version,
+                        declaration.scheduled_handler,
+                        &declaration.workflow_bindings,
+                    )
+            })
+        {
+            return Err(invariant());
+        }
+        let descriptor = serde_json::json!({
+            "capabilityVersion": self.capability_version,
+            "declarations": self.declarations.iter().map(|declaration| serde_json::json!({
+                "expression": declaration.expression,
+                "expressionSha256": hex::encode(declaration.expression_sha256),
+                "parserVersion": declaration.parser_version,
+                "scheduledHandler": declaration.scheduled_handler,
+                "workflowBindings": declaration.workflow_bindings,
+            })).collect::<Vec<_>>(),
+        });
+        let actual: [u8; 32] =
+            Sha256::digest(serde_json::to_vec(&descriptor).map_err(|_| invariant())?).into();
+        if actual != self.descriptor_sha256 {
+            return Err(invariant());
+        }
+        Ok(())
+    }
 }
 
 /// Immutable Cron expression declaration.
@@ -100,6 +111,10 @@ pub struct CronDeclaration {
     pub expression_sha256: [u8; 32],
     /// Parser contract version.
     pub parser_version: u32,
+    /// Whether this expression invokes the Worker's scheduled handler.
+    pub scheduled_handler: bool,
+    /// Workflow bindings directly triggered by this expression.
+    pub workflow_bindings: Vec<String>,
     /// Creation time.
     pub created_at_ms: i64,
 }
@@ -151,6 +166,10 @@ pub struct CronActivationRecord {
     pub expression_sha256: [u8; 32],
     /// Parser contract version.
     pub parser_version: u32,
+    /// Whether this expression invokes the Worker's scheduled handler.
+    pub scheduled_handler: bool,
+    /// Workflow bindings directly triggered by this expression.
+    pub workflow_bindings: Vec<String>,
     /// Monotonic set generation.
     pub activation_generation: u64,
     /// Lifecycle state.
@@ -189,7 +208,8 @@ impl<'a> CronRepository<'a> {
             let mut statement = connection
                 .prepare(
                     "SELECT id, account_id, worker_id, deployment_id, expression,
-                            expression_sha256, parser_version, activation_generation,
+                            expression_sha256, parser_version, scheduled_handler,
+                            workflow_bindings_json, activation_generation,
                             state, availability, availability_code, created_at_ms,
                             updated_at_ms, deleted_at_ms
                      FROM cron_activations WHERE state != 'tombstoned'
@@ -211,19 +231,18 @@ impl<'a> CronRepository<'a> {
         deployment_id: DeploymentId,
     ) -> Result<CronDeploymentConfig, PlatformError> {
         self.db.with_read(|connection| {
-            let (mode, capability_version, descriptor, created_at_ms): (String, i64, Vec<u8>, i64) =
-                connection
-                    .query_row(
-                        "SELECT mode, capability_version, descriptor_sha256, created_at_ms
+            let (capability_version, descriptor, created_at_ms): (i64, Vec<u8>, i64) = connection
+                .query_row(
+                    "SELECT capability_version, descriptor_sha256, created_at_ms
                      FROM deployment_cron_configs WHERE deployment_id = ?1",
-                        [deployment_id.to_string()],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-                    )
-                    .map_err(|_| invariant())?;
+                    [deployment_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(|_| invariant())?;
             let mut statement = connection
                 .prepare(
                     "SELECT id, deployment_id, expression, expression_sha256,
-                            parser_version, created_at_ms
+                            parser_version, scheduled_handler, workflow_bindings_json, created_at_ms
                      FROM deployment_cron_declarations WHERE deployment_id = ?1
                      ORDER BY expression, id",
                 )
@@ -233,14 +252,15 @@ impl<'a> CronRepository<'a> {
                 .map_err(|_| invariant())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| invariant())?;
-            Ok(CronDeploymentConfig {
+            let config = CronDeploymentConfig {
                 deployment_id,
-                mode: mode.parse()?,
                 capability_version: u32::try_from(capability_version).map_err(|_| invariant())?,
                 descriptor_sha256: digest(descriptor).map_err(|_| invariant())?,
                 created_at_ms,
                 declarations,
-            })
+            };
+            config.validate()?;
+            Ok(config)
         })
     }
 
@@ -253,7 +273,8 @@ impl<'a> CronRepository<'a> {
             let mut statement = connection
                 .prepare(
                     "SELECT id, account_id, worker_id, deployment_id, expression,
-                            expression_sha256, parser_version, activation_generation,
+                            expression_sha256, parser_version, scheduled_handler,
+                            workflow_bindings_json, activation_generation,
                             state, availability, availability_code, created_at_ms,
                             updated_at_ms, deleted_at_ms
                      FROM cron_activations WHERE worker_id = ?1 AND state != 'tombstoned'
@@ -264,6 +285,23 @@ impl<'a> CronRepository<'a> {
                 .query_map([worker_id.to_string()], map_activation)
                 .map_err(|_| invariant())?
                 .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| invariant())
+        })
+    }
+
+    /// Read one exact activation used by a scheduler claim.
+    pub fn activation(&self, id: CronActivationId) -> Result<CronActivationRecord, PlatformError> {
+        self.db.with_read(|connection| {
+            connection
+                .query_row(
+                    "SELECT id, account_id, worker_id, deployment_id, expression,
+                            expression_sha256, parser_version, scheduled_handler,
+                            workflow_bindings_json, activation_generation, state, availability,
+                            availability_code, created_at_ms, updated_at_ms, deleted_at_ms
+                     FROM cron_activations WHERE id = ?1",
+                    [id.to_string()],
+                    map_activation,
+                )
                 .map_err(|_| invariant())
         })
     }
@@ -285,11 +323,12 @@ impl<'a> CronRepository<'a> {
                 tx.execute(
                     "INSERT INTO cron_activations
                      (id, account_id, worker_id, deployment_id, expression,
-                      expression_sha256, parser_version, activation_generation,
+                      expression_sha256, parser_version, scheduled_handler,
+                      workflow_bindings_json, activation_generation,
                       state, availability, availability_code, created_at_ms,
                       updated_at_ms, deleted_at_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'staging', 'degraded',
-                             'CRON_PROJECTION_PENDING', ?9, ?9, NULL)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                             'staging', 'degraded', 'CRON_PROJECTION_PENDING', ?11, ?11, NULL)",
                     params![
                         id.to_string(),
                         account_id.to_string(),
@@ -298,6 +337,9 @@ impl<'a> CronRepository<'a> {
                         declaration.expression,
                         declaration.expression_sha256.as_slice(),
                         i64::from(declaration.parser_version),
+                        declaration.scheduled_handler,
+                        serde_json::to_vec(&declaration.workflow_bindings)
+                            .map_err(|_| invariant())?,
                         as_i64(generation)?,
                         now_ms,
                     ],
@@ -380,11 +422,10 @@ pub(crate) fn insert_staging_config(
 ) -> Result<(), PlatformError> {
     tx.execute(
         "INSERT INTO deployment_cron_configs
-         (deployment_id, mode, capability_version, descriptor_sha256, created_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         (deployment_id, capability_version, descriptor_sha256, created_at_ms)
+         VALUES (?1, ?2, ?3, ?4)",
         params![
             deployment_id.to_string(),
-            config.mode.as_str(),
             i64::from(config.capability_version),
             config.descriptor_sha256.as_slice(),
             now_ms,
@@ -394,14 +435,17 @@ pub(crate) fn insert_staging_config(
     for declaration in &config.declarations {
         tx.execute(
             "INSERT INTO deployment_cron_declarations
-             (id, deployment_id, expression, expression_sha256, parser_version, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             (id, deployment_id, expression, expression_sha256, parser_version,
+              scheduled_handler, workflow_bindings_json, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 declaration.id.to_string(),
                 deployment_id.to_string(),
                 declaration.expression,
                 declaration.expression_sha256.as_slice(),
                 i64::from(declaration.parser_version),
+                declaration.scheduled_handler,
+                serde_json::to_vec(&declaration.workflow_bindings).map_err(|_| invariant())?,
                 now_ms,
             ],
         )
@@ -416,7 +460,8 @@ fn read_activation_tx(
 ) -> Result<CronActivationRecord, PlatformError> {
     tx.query_row(
         "SELECT id, account_id, worker_id, deployment_id, expression,
-                expression_sha256, parser_version, activation_generation, state,
+                expression_sha256, parser_version, scheduled_handler, workflow_bindings_json,
+                activation_generation, state,
                 availability, availability_code, created_at_ms, updated_at_ms, deleted_at_ms
          FROM cron_activations WHERE id = ?1",
         [id.to_string()],
@@ -426,18 +471,31 @@ fn read_activation_tx(
 }
 
 fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronDeclaration> {
-    Ok(CronDeclaration {
+    let declaration = CronDeclaration {
         id: parse(&row.get::<_, String>(0)?)?,
         deployment_id: parse(&row.get::<_, String>(1)?)?,
         expression: row.get(2)?,
         expression_sha256: digest(row.get(3)?)?,
         parser_version: unsigned(row.get(4)?)?,
-        created_at_ms: row.get(5)?,
-    })
+        scheduled_handler: row.get(5)?,
+        workflow_bindings: serde_json::from_slice(&row.get::<_, Vec<u8>>(6)?)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        created_at_ms: row.get(7)?,
+    };
+    if !valid_declaration(
+        &declaration.expression,
+        &declaration.expression_sha256,
+        declaration.parser_version,
+        declaration.scheduled_handler,
+        &declaration.workflow_bindings,
+    ) {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    Ok(declaration)
 }
 
 fn map_activation(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronActivationRecord> {
-    Ok(CronActivationRecord {
+    let activation = CronActivationRecord {
         id: parse(&row.get::<_, String>(0)?)?,
         account_id: parse(&row.get::<_, String>(1)?)?,
         worker_id: parse(&row.get::<_, String>(2)?)?,
@@ -445,17 +503,58 @@ fn map_activation(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronActivationRec
         expression: row.get(4)?,
         expression_sha256: digest(row.get(5)?)?,
         parser_version: unsigned(row.get(6)?)?,
-        activation_generation: unsigned(row.get(7)?)?,
+        scheduled_handler: row.get(7)?,
+        workflow_bindings: serde_json::from_slice(&row.get::<_, Vec<u8>>(8)?)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        activation_generation: unsigned(row.get(9)?)?,
         state: row
-            .get::<_, String>(8)?
+            .get::<_, String>(10)?
             .parse()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        availability: row.get(9)?,
-        availability_code: row.get(10)?,
-        created_at_ms: row.get(11)?,
-        updated_at_ms: row.get(12)?,
-        deleted_at_ms: row.get(13)?,
-    })
+        availability: row.get(11)?,
+        availability_code: row.get(12)?,
+        created_at_ms: row.get(13)?,
+        updated_at_ms: row.get(14)?,
+        deleted_at_ms: row.get(15)?,
+    };
+    if !valid_declaration(
+        &activation.expression,
+        &activation.expression_sha256,
+        activation.parser_version,
+        activation.scheduled_handler,
+        &activation.workflow_bindings,
+    ) {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    Ok(activation)
+}
+
+fn valid_declaration(
+    expression: &str,
+    expression_sha256: &[u8; 32],
+    parser_version: u32,
+    scheduled_handler: bool,
+    workflow_bindings: &[String],
+) -> bool {
+    let Ok(parsed) = open_compute_core::CronSchedule::parse(expression) else {
+        return false;
+    };
+    parser_version == CRON_PARSER_VERSION
+        && Sha256::digest(parsed.normalized().as_bytes()).as_slice() == expression_sha256
+        && (scheduled_handler || !workflow_bindings.is_empty())
+        && workflow_bindings.len() <= 100
+        && !workflow_bindings.iter().any(|name| {
+            let bytes = name.as_bytes();
+            bytes.is_empty()
+                || bytes.len() > 64
+                || name.starts_with("__")
+                || name.starts_with("OPEN_COMPUTE_")
+                || bytes[0].is_ascii_digit()
+                || !bytes
+                    .iter()
+                    .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        })
+        && !workflow_bindings.windows(2).any(|pair| pair[0] >= pair[1])
 }
 
 fn parse<T: FromStr>(value: &str) -> rusqlite::Result<T> {

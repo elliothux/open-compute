@@ -5,7 +5,7 @@
 
 本计划只验证单机发行在不同 OS/CPU 上的构建、隔离启动和运行时资产契约，不证明 Cloudflare
 Workers API conformance；平台契约与 portable differential 由
-[P3.4](p3-4-cloudflare-conformance.md)单独验收。
+[P3.4](implemented/p3-4-cloudflare-conformance.md)单独验收。
 
 ## 待验证
 

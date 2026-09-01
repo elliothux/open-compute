@@ -1,40 +1,34 @@
 {
   "schemaVersion": 1,
-  "openComputeRevision": "bb89075255c31fe734ebd47360ab8f054150deb9e2a10d2d8dbcf4cd37a81bae",
+  "openComputeRevision": "93dd12363d68cb70d2f57cf0b9e2837a925af690eddbe7393f3b9fd350761554",
   "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes test/conformance/baseline.json and non-reference docs",
-  "workerdLockSha256": "d3614a6394cf85e24704954d9e7a9585fb38a2107e8eb73a02519e39add14d2e",
+  "workerdLockSha256": "4ccb7814a1ec72f50a3862cfac7475be6a4cade0ca646e8d16a2cb9aac42cb0f",
   "workerd": {
-    "release": "v1.20260826.1",
-    "revision": "c28fa55802436ce0ce3f3b0255598fb504817f27",
-    "treeSha256": "ba93a203fa882db417918ea09dd084619a578481e605abcbb95a49410d1642fa"
+    "release": "v1.20260830.1",
+    "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
+    "treeSha256": "ff9c599c2f2097d3045ff9078220028f5dfe8f24cff3a0f8c93c20991c84c62b"
   },
-  "compatibilityDates": ["2022-01-01", "2026-08-22", "2026-08-26"],
-  "compatibilityFlags": [
-    [],
-    ["nodejs_compat"],
-    ["rpc"],
-    ["nodejs_compat", "rpc"],
-    ["assets_navigation_has_no_effect"],
-    ["assets_navigation_prefers_asset_serving"]
-  ],
+  "effectiveCompatibilityDate": "2026-08-30",
   "cloudflareDocs": {
     "revision": "3feb9a48ac3b20803e7d672f546bebf4b5b65a30",
     "treeSha256": "7ca53a3df0bc12cb183d2d9f2ff4755dcfbf51e923b5b97396c2744717035f08",
     "treeDigestAlgorithm": "sha256(git-ls-tree-r-full-tree)"
   },
   "workersTypes": {
-    "version": "5.20260826.1",
-    "lockSha256": "9f5d1a13af3af5f01f9d067bfa4e7211a1fc971830d3d445e9af751fd997d024",
-    "packageSha256": "6663169b7276d683080a9c0f82da09a29116a92983c2f0e84208e12e1e12738d",
-    "indexSha256": "8aade9309432ba26420540b0cfa435ce2a945c0a563cc20bf2537a221f2c98c1"
+    "version": "5.20260830.1",
+    "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
+    "lockSha256": "ebc2b7b1f14a37ed86189e81c67608da14f0f0f8b7f428fe1ab68a2141e41221",
+    "packageSha256": "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e",
+    "indexSha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd",
+    "astSha256": "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3"
   },
   "workersSdk": {
-    "revision": "296a1a7c97e027a308740e1eaaa6d904dec8f102",
-    "lockSha256": "b011dee793fc3db7a05a8279f2d77460d2b92f8384653f455ed20a5a4652b1ff",
-    "treeSha256": "4d77c2bff3d869c0bab2703e9f1bb673d597994831051c0691100a637cf9d2ad"
+    "revision": "f8085545bcaa2c639f171c25e4424685036a0e10",
+    "lockSha256": "ef15324296cecd9d0b7ea3713c0731ffdf70d41db4751387f22ad436c2da3e4a",
+    "treeSha256": "83b060c12487a749bb8fda309f9534fbd4a3de2563c37a9501c7a7f4bb8a52fe"
   },
-  "wrangler": { "version": "4.125.0" },
-  "vitePlugin": { "version": "1.53.1" },
+  "wrangler": { "version": "4.127.1" },
+  "vitePlugin": { "version": "1.54.2" },
   "toolchain": {
     "bun": "1.3.14",
     "typescript": "7.0.2",

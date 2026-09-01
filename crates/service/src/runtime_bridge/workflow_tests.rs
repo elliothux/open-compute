@@ -29,7 +29,7 @@ async fn workflow_probe_unknown_and_generation_bound_completion_fail_closed() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app=Router::new().route("/internal/validate-workflow",post({let status=status.clone();move || {let status=status.clone();async move { (StatusCode::from_u16(status.load(Ordering::SeqCst)).unwrap(),axum::Json(serde_json::json!({"valid":true}))) }}}))
-        .route("/internal/workflow",post(||async {axum::Json(serde_json::json!({"result":{"outcome":"complete","finalOrdinal":1,"outputJson":"null"},"loaderOutcome":"warm","drainIncomplete":false}))}));
+        .route("/internal/workflow",post(||async {axum::Json(serde_json::json!({"result":{"outcome":"complete","finalOrdinal":1,"outputBase64":"T0NEVgECAA=="},"loaderOutcome":"warm","drainIncomplete":false}))}));
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async {
         axum::serve(listener, app)
@@ -70,7 +70,9 @@ async fn workflow_probe_unknown_and_generation_bound_completion_fail_closed() {
         external_instance_id: "public-id".into(),
         definition_name: "public-name".into(),
         created_at_ms: 0,
-        payload_json: "null".into(),
+        payload_base64: "T0NEVgECAA==".into(),
+        rollback: false,
+        schedule: None,
     };
     let response = transport
         .dispatch_workflow(&target(), &request, Duration::from_secs(1))
@@ -185,7 +187,9 @@ async fn invalid_workflow_results_quarantine_all_transport_clones_until_rotation
         external_instance_id: "external".into(),
         definition_name: "flow".into(),
         created_at_ms: 0,
-        payload_json: "null".into(),
+        payload_base64: "T0NEVgECAA==".into(),
+        rollback: false,
+        schedule: None,
     };
     transport
         .dispatch_workflow(&version, &request, Duration::from_secs(1))
@@ -194,8 +198,8 @@ async fn invalid_workflow_results_quarantine_all_transport_clones_until_rotation
     let invalid = [
         json!({"outcome":"errored","finalOrdinal":1,"errorCode":"private exception text"}),
         json!({"outcome":"errored","finalOrdinal":1,"errorCode":"WORKFLOW_RUNTIME_UNAVAILABLE"}),
-        json!({"outcome":"complete","finalOrdinal":1025,"outputJson":"null"}),
-        json!({"outcome":"complete","finalOrdinal":1,"outputJson":"x".repeat(1024*1024+1)}),
+        json!({"outcome":"complete","finalOrdinal":1025,"outputBase64":"T0NEVgECAA=="}),
+        json!({"outcome":"complete","finalOrdinal":1,"outputBase64":"x".repeat(1024*1024+1)}),
         json!({"outcome":"unknown","finalOrdinal":1}),
     ];
     for (index, bad) in invalid.into_iter().enumerate() {

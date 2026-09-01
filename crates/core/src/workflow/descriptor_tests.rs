@@ -7,6 +7,8 @@ fn declaration(kind: WorkflowStepKind, config: Value) -> WorkflowStepDeclaration
         name: "step".into(),
         name_count: 1,
         config,
+        rollback_config: None,
+        rollback_step: false,
         dependencies: vec![],
         batch_first_ordinal: 0,
         batch_size: 1,
@@ -123,6 +125,10 @@ fn replay_digest_contains_kind_policy_batch_and_ordered_frontier() {
             ..original.clone()
         },
         WorkflowStepDescriptor {
+            rollback_config: Some(WorkflowStepConfig::default()),
+            ..original.clone()
+        },
+        WorkflowStepDescriptor {
             ordinal: 4,
             ..original.clone()
         },
@@ -130,7 +136,7 @@ fn replay_digest_contains_kind_policy_batch_and_ordered_frontier() {
     for changed in variants {
         assert_ne!(changed.sha256().unwrap(), digest);
     }
-    for predecessors in [vec![], vec![1, 1, 2], vec![2, 1], vec![0, 2], vec![1, 2, 3]] {
+    for predecessors in [vec![1, 1, 2], vec![2, 1], vec![1, 2, 3]] {
         assert!(
             WorkflowStepDescriptor {
                 dependencies: predecessors,
@@ -140,14 +146,34 @@ fn replay_digest_contains_kind_policy_batch_and_ordered_frontier() {
             .is_err()
         );
     }
-    assert!(
+    for predecessors in [vec![], vec![0, 2]] {
+        assert!(
+            WorkflowStepDescriptor {
+                dependencies: predecessors,
+                ..original.clone()
+            }
+            .sha256()
+            .is_ok()
+        );
+    }
+    assert_ne!(
         WorkflowStepDescriptor {
             config: WorkflowDurableConfig::Sleep(0),
             ..original.clone()
         }
         .sha256()
-        .is_err()
+        .unwrap(),
+        digest
     );
+    let mut rollback = declaration(WorkflowStepKind::Do, json!({}));
+    rollback.rollback_config = Some(json!({"timeout":"1 minute"}));
+    assert_eq!(
+        rollback.resolve().unwrap().rollback_config.unwrap().timeout,
+        60_000
+    );
+    let mut invalid_rollback = declaration(WorkflowStepKind::Sleep, json!({"duration":0}));
+    invalid_rollback.rollback_config = Some(json!({}));
+    assert!(invalid_rollback.resolve().is_err());
     assert!(
         WorkflowStepDescriptor {
             batch_size: 17,
@@ -195,6 +221,104 @@ fn logical_accounting_uses_the_shared_current_contract_and_counts_utf8_and_edges
     descriptor.dependencies = vec![0, 1];
     assert_eq!(
         descriptor.state_bytes().unwrap(),
-        160 + 6 + r#"{"durationMs":0}"#.len() + 2 * 16
+        160 + 6 + r#"{"durationMs":0,"rollbackStep":false}"#.len() + 2 * 16
+    );
+}
+
+#[test]
+fn restart_selector_and_stored_policy_validation_are_strict() {
+    assert_eq!(WorkflowRestartStepType::Do.as_str(), "do");
+    assert_eq!(WorkflowRestartStepType::Sleep.as_str(), "sleep");
+    assert_eq!(
+        WorkflowRestartStepType::WaitForEvent.as_str(),
+        "waitForEvent"
+    );
+    assert!(WorkflowRestartStepType::Do.matches(WorkflowStepKind::Do));
+    assert!(WorkflowRestartStepType::Sleep.matches(WorkflowStepKind::Sleep));
+    assert!(WorkflowRestartStepType::Sleep.matches(WorkflowStepKind::SleepUntil));
+    assert!(WorkflowRestartStepType::WaitForEvent.matches(WorkflowStepKind::WaitEvent));
+    assert!(!WorkflowRestartStepType::Do.matches(WorkflowStepKind::Sleep));
+
+    let defaulted: WorkflowRestartSelector =
+        serde_json::from_value(json!({"name":"step"})).unwrap();
+    assert_eq!(defaulted.count, 1);
+    defaulted.validate().unwrap();
+    for selector in [
+        WorkflowRestartSelector {
+            name: String::new(),
+            count: 1,
+            step_type: None,
+        },
+        WorkflowRestartSelector {
+            name: "x".repeat(257),
+            count: 1,
+            step_type: None,
+        },
+        WorkflowRestartSelector {
+            name: "step".into(),
+            count: 0,
+            step_type: None,
+        },
+        WorkflowRestartSelector {
+            name: "step".into(),
+            count: 1025,
+            step_type: None,
+        },
+    ] {
+        assert_eq!(
+            selector.validate().unwrap_err().code(),
+            ErrorCode::WorkflowMethodUnsupported
+        );
+    }
+    assert_eq!(
+        WorkflowDurableConfig::from_canonical(WorkflowStepKind::Sleep, &"x".repeat(4097))
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowInvariantViolation
+    );
+    assert_eq!(
+        WorkflowDurableConfig::Sleep(WORKFLOW_MAX_DURATION_MS + 1)
+            .validate()
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowDurationInvalid
+    );
+    assert!(WorkflowDurableConfig::resolve(WorkflowStepKind::Sleep, &json!({})).is_err());
+
+    let resolved = declaration(WorkflowStepKind::Do, json!({}))
+        .resolve()
+        .unwrap();
+    assert_eq!(
+        WorkflowStepDescriptor {
+            rollback_config: Some(WorkflowStepConfig::default()),
+            rollback_step: true,
+            ..resolved.clone()
+        }
+        .validate()
+        .unwrap_err()
+        .code(),
+        ErrorCode::WorkflowStepConfigUnsupported
+    );
+    assert_eq!(
+        WorkflowStepDescriptor {
+            config: WorkflowDurableConfig::Sleep(0),
+            rollback_config: Some(WorkflowStepConfig::default()),
+            ..resolved.clone()
+        }
+        .validate()
+        .unwrap_err()
+        .code(),
+        ErrorCode::WorkflowStepConfigUnsupported
+    );
+    assert_eq!(
+        WorkflowStepDescriptor {
+            config: WorkflowDurableConfig::Sleep(0),
+            rollback_step: true,
+            ..resolved
+        }
+        .validate()
+        .unwrap_err()
+        .code(),
+        ErrorCode::WorkflowStepConfigUnsupported
     );
 }

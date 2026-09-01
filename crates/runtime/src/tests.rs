@@ -30,7 +30,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
-const VERSION: &str = "workerd 2026-08-26";
+const VERSION: &str = "workerd 2026-08-30";
 const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TOKEN_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const TOKEN_C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
@@ -103,16 +103,29 @@ fn lock_json(binary_sha: &str, extra_target: &str) -> String {
     format!(
         r#"{{
   "schemaVersion": 1,
-  "release": "v1.20260826.1",
+  "release": "v1.20260830.1",
+  "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
   "expectedVersionOutput": "{VERSION}",
-  "hostCompatibilityDate": "2026-08-22",
+  "effectiveCompatibilityDate": "2026-08-30",
+  "requiredCompatibilityFlags": [],
+  "systemCompatibilityFlags": ["experimental", "service_binding_extra_handlers"],
   "processFlags": ["--experimental"],
-  "hostCompatibilityFlags": ["nodejs_compat", "rpc", "enable_ctx_exports", "experimental"],
+  "workersTypes": {{
+    "version": "5.20260830.1",
+    "gitHead": "e9dda5963aba7ee4323960db795690ec78fec118",
+    "packageSha256": "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e",
+    "astSha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd"
+  }},
+  "workersSdk": {{
+    "revision": "f8085545bcaa2c639f171c25e4424685036a0e10",
+    "wranglerVersion": "4.127.1",
+    "vitePluginVersion": "1.54.2"
+  }},
   "targets": {{
     "{target}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}",
-      "archiveSha256": "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}",
+      "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "{binary_sha}"
     }}{extra_target}
   }}
@@ -254,6 +267,25 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
     let extra_field = good.replacen('{', "{\"nope\":1,", 1);
     assert!(RuntimeLock::parse(extra_field.as_bytes()).is_err());
 
+    let obsolete_date = good.replacen(
+        "\"effectiveCompatibilityDate\"",
+        "\"hostCompatibilityDate\"",
+        1,
+    );
+    assert!(
+        RuntimeLock::parse(obsolete_date.as_bytes()).is_err(),
+        "obsolete hostCompatibilityDate must be rejected"
+    );
+    let obsolete_flags = good.replacen(
+        "\"systemCompatibilityFlags\"",
+        "\"hostCompatibilityFlags\"",
+        1,
+    );
+    assert!(
+        RuntimeLock::parse(obsolete_flags.as_bytes()).is_err(),
+        "obsolete hostCompatibilityFlags must be rejected"
+    );
+
     let bad_url = good.replace("https://github.com/", "http://example.com/");
     assert!(RuntimeLock::parse(bad_url.as_bytes()).is_err());
 
@@ -265,7 +297,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         r#",
     "solaris-sparc": {
       "archiveName": "x.gz",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/x.gz",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/x.gz",
       "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }"#,
@@ -279,7 +311,10 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
     );
     assert!(RuntimeLock::parse(dup_keys.as_bytes()).is_err());
 
-    let bad_date = good.replace("2026-08-22", "2026-02-30");
+    let bad_date = good.replace(
+        "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+        "\"effectiveCompatibilityDate\": \"2026-02-30\"",
+    );
     assert!(RuntimeLock::parse(bad_date.as_bytes()).is_err());
 
     let dup_flag = good.replace(
@@ -309,10 +344,10 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         )
         .replace(
             &format!(
-                "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}"
+                "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}"
             ),
             &format!(
-                "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{foreign_archive}"
+                "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{foreign_archive}"
             ),
         );
     assert!(
@@ -324,7 +359,7 @@ fn lock_parse_rejects_unknown_schema_bad_url_hash_and_target() {
         r#",
     "{foreign}": {{
       "archiveName": "{archive}",
-      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}",
+      "archiveUrl": "https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}",
       "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "binarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }}"#
@@ -359,42 +394,50 @@ fn load_lock_rejects_symlink_and_missing() {
 fn lock_validation_rejects_every_malformed_authority_field() {
     let good = lock_json(&"ab".repeat(32), "");
     let replacements = [
-        ("\"release\": \"v1.20260826.1\"", "\"release\": \"\""),
+        ("\"release\": \"v1.20260830.1\"", "\"release\": \"\""),
         (
-            "\"release\": \"v1.20260826.1\"",
-            "\"release\": \" v1.20260826.1\"",
+            "\"release\": \"v1.20260830.1\"",
+            "\"release\": \" v1.20260830.1\"",
         ),
         (
-            "\"expectedVersionOutput\": \"workerd 2026-08-26\"",
+            "\"revision\": \"e9dda5963aba7ee4323960db795690ec78fec118\"",
+            "\"revision\": \"\"",
+        ),
+        (
+            "\"revision\": \"e9dda5963aba7ee4323960db795690ec78fec118\"",
+            "\"revision\": \"E9DDA5963ABA7EE4323960DB795690EC78FEC118\"",
+        ),
+        (
+            "\"expectedVersionOutput\": \"workerd 2026-08-30\"",
             "\"expectedVersionOutput\": \"\"",
         ),
         (
-            "\"expectedVersionOutput\": \"workerd 2026-08-26\"",
-            "\"expectedVersionOutput\": \"workerd 2026-08-26 \"",
+            "\"expectedVersionOutput\": \"workerd 2026-08-30\"",
+            "\"expectedVersionOutput\": \"workerd 2026-08-30 \"",
         ),
         (
-            "\"hostCompatibilityDate\": \"2026-08-22\"",
-            "\"hostCompatibilityDate\": \"20260822\"",
+            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"20260830\"",
         ),
         (
-            "\"hostCompatibilityDate\": \"2026-08-22\"",
-            "\"hostCompatibilityDate\": \"1969-01-01\"",
+            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"1969-01-01\"",
         ),
         (
-            "\"hostCompatibilityDate\": \"2026-08-22\"",
-            "\"hostCompatibilityDate\": \"2026-00-01\"",
+            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-00-01\"",
         ),
         (
-            "\"hostCompatibilityDate\": \"2026-08-22\"",
-            "\"hostCompatibilityDate\": \"2026-13-01\"",
+            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-13-01\"",
         ),
         (
-            "\"hostCompatibilityDate\": \"2026-08-22\"",
-            "\"hostCompatibilityDate\": \"2026-01-00\"",
+            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2026-01-00\"",
         ),
         (
-            "\"hostCompatibilityDate\": \"2026-08-22\"",
-            "\"hostCompatibilityDate\": \"2100-02-29\"",
+            "\"effectiveCompatibilityDate\": \"2026-08-30\"",
+            "\"effectiveCompatibilityDate\": \"2100-02-29\"",
         ),
         (
             "\"processFlags\": [\"--experimental\"]",
@@ -417,20 +460,32 @@ fn lock_validation_rejects_every_malformed_authority_field() {
             "\"processFlags\": [\"--x y\"]",
         ),
         (
-            "\"hostCompatibilityFlags\": [\"nodejs_compat\", \"rpc\", \"enable_ctx_exports\", \"experimental\"]",
-            "\"hostCompatibilityFlags\": []",
+            "\"systemCompatibilityFlags\": [\"experimental\", \"service_binding_extra_handlers\"]",
+            "\"systemCompatibilityFlags\": [\"\"]",
         ),
         (
-            "\"hostCompatibilityFlags\": [\"nodejs_compat\", \"rpc\", \"enable_ctx_exports\", \"experimental\"]",
-            "\"hostCompatibilityFlags\": [\"\"]",
+            "\"systemCompatibilityFlags\": [\"experimental\", \"service_binding_extra_handlers\"]",
+            "\"systemCompatibilityFlags\": [\"node-js\"]",
         ),
         (
-            "\"hostCompatibilityFlags\": [\"nodejs_compat\", \"rpc\", \"enable_ctx_exports\", \"experimental\"]",
-            "\"hostCompatibilityFlags\": [\"node-js\"]",
+            "\"systemCompatibilityFlags\": [\"experimental\", \"service_binding_extra_handlers\"]",
+            "\"systemCompatibilityFlags\": [\"experimental\", \"experimental\"]",
         ),
         (
-            "\"hostCompatibilityFlags\": [\"nodejs_compat\", \"rpc\", \"enable_ctx_exports\", \"experimental\"]",
-            "\"hostCompatibilityFlags\": [\"rpc\", \"rpc\"]",
+            "\"requiredCompatibilityFlags\": []",
+            "\"requiredCompatibilityFlags\": [\"experimental\"]",
+        ),
+        (
+            "\"workersTypes\": {\n    \"version\": \"5.20260830.1\",\n    \"gitHead\": \"e9dda5963aba7ee4323960db795690ec78fec118\",\n    \"packageSha256\": \"d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e\",\n    \"astSha256\": \"a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd\"\n  }",
+            "\"workersTypes\": {\n    \"version\": \"5.20260830.1\",\n    \"gitHead\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n    \"packageSha256\": \"d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e\",\n    \"astSha256\": \"a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd\"\n  }",
+        ),
+        (
+            "\"wranglerVersion\": \"4.127.1\"",
+            "\"wranglerVersion\": \"\"",
+        ),
+        (
+            "\"vitePluginVersion\": \"1.54.2\"",
+            "\"vitePluginVersion\": \" 1.54.2\"",
         ),
     ];
     for (needle, replacement) in replacements {
@@ -458,7 +513,7 @@ fn lock_target_url_identity_and_accessors_are_strict() {
     let good = lock_json(&"ab".repeat(32), "");
     let archive = host_archive();
     let url =
-        format!("https://github.com/cloudflare/workerd/releases/download/v1.20260826.1/{archive}");
+        format!("https://github.com/cloudflare/workerd/releases/download/v1.20260830.1/{archive}");
     let bad_urls = [
         "not a url".to_owned(),
         url.replacen("https://", "http://", 1),
@@ -466,7 +521,7 @@ fn lock_target_url_identity_and_accessors_are_strict() {
         url.replace("github.com", "example.com"),
         format!("{url}?download=1"),
         format!("{url}#fragment"),
-        url.replace("v1.20260826.1", "v1.other"),
+        url.replace("v1.20260830.1", "v1.other"),
     ];
     for bad_url in bad_urls {
         let bad = good.replacen(&url, &bad_url, 1);
@@ -484,7 +539,7 @@ fn lock_target_url_identity_and_accessors_are_strict() {
         assert!(RuntimeLock::parse(bad.as_bytes()).is_err());
     }
     let bad_archive_hash = good.replacen(
-        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "zz",
         1,
     );
@@ -701,7 +756,7 @@ async fn missing_symlink_directory_non_executable_tampered_rejected_before_versi
     let tampered = dir.path().join("workerd-bad");
     write_exec(
         &tampered,
-        "#!/bin/sh\nprintf x >> /dev/null\necho 'workerd 2026-08-26'\n# tampered\n",
+        &format!("#!/bin/sh\nprintf x >> /dev/null\necho '{VERSION}'\n# tampered\n"),
     );
     assert_eq!(
         verify_runtime_binary(
@@ -745,7 +800,7 @@ async fn version_success_mismatch_nonzero_timeout_oversized_non_utf8() {
     );
 
     let nonzero = dir.path().join("nonzero");
-    write_exec(&nonzero, "#!/bin/sh\necho 'workerd 2026-08-26'\nexit 3\n");
+    write_exec(&nonzero, &format!("#!/bin/sh\necho '{VERSION}'\nexit 3\n"));
     let nlock = dir.path().join("n.lock.json");
     fs::write(&nlock, lock_json(&sha256_file(&nonzero), "")).unwrap();
     assert!(
@@ -902,7 +957,7 @@ async fn real_pinned_binary_is_accepted() {
     .await
     .expect("real workerd must verify");
     assert_eq!(verified.version_output(), VERSION);
-    assert_eq!(verified.release(), "v1.20260826.1");
+    assert_eq!(verified.release(), "v1.20260830.1");
 }
 
 #[tokio::test]
@@ -1319,7 +1374,9 @@ async fn compile_failures_clean_partials() {
     let sleepy = dir.path().join("sleepy");
     write_exec(
         &sleepy,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-26'; exit 0; fi\nsleep 30\n",
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '{VERSION}'; exit 0; fi\nsleep 30\n"
+        ),
     );
     let slock_path = dir.path().join("sleepy.lock.json");
     fs::write(&slock_path, lock_json(&sha256_file(&sleepy), "")).unwrap();
@@ -1341,7 +1398,9 @@ async fn compile_failures_clean_partials() {
     let big = dir.path().join("bigc");
     write_exec(
         &big,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'workerd 2026-08-26'; exit 0; fi\ndd if=/dev/zero bs=1048576 count=18 2>/dev/null\n",
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '{VERSION}'; exit 0; fi\ndd if=/dev/zero bs=1048576 count=18 2>/dev/null\n"
+        ),
     );
     let block = dir.path().join("big.lock.json");
     fs::write(&block, lock_json(&sha256_file(&big), "")).unwrap();
@@ -1651,34 +1710,62 @@ fn packaged_lock_matches_formal_release_pin() {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/runtime/workerd.lock.json");
     let (lock, _) = load_runtime_lock(&path.canonicalize().unwrap()).unwrap();
-    assert_eq!(lock.release, "v1.20260826.1");
+    assert_eq!(lock.release, "v1.20260830.1");
+    assert_eq!(lock.revision, "e9dda5963aba7ee4323960db795690ec78fec118");
     assert_eq!(lock.expected_version_output, VERSION);
-    assert_eq!(lock.host_compatibility_date, "2026-08-22");
+    assert_eq!(lock.effective_compatibility_date, "2026-08-30");
+    assert_eq!(lock.required_compatibility_flags, Vec::<String>::new());
+    assert_eq!(
+        lock.system_compatibility_flags,
+        vec![
+            "experimental".to_string(),
+            "service_binding_extra_handlers".to_string()
+        ]
+    );
     assert_eq!(lock.process_flags, vec!["--experimental".to_string()]);
+    assert_eq!(lock.workers_types.version, "5.20260830.1");
+    assert_eq!(
+        lock.workers_types.git_head,
+        "e9dda5963aba7ee4323960db795690ec78fec118"
+    );
+    assert_eq!(
+        lock.workers_types.package_sha256,
+        "d3d7a80d3b27e53116e34736ec1945eb359f53a1000df37b205c4cb59ce29a8e"
+    );
+    assert_eq!(
+        lock.workers_types.ast_sha256,
+        "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3"
+    );
+    assert_eq!(
+        lock.workers_sdk.revision,
+        "f8085545bcaa2c639f171c25e4424685036a0e10"
+    );
+    assert_eq!(lock.workers_sdk.wrangler_version, "4.127.1");
+    assert_eq!(lock.workers_sdk.vite_plugin_version, "1.54.2");
     let darwin = lock.targets.get("darwin-arm64").unwrap();
     assert_eq!(
         darwin.archive_sha256,
-        "22657ec7045a3677b7f52e97f106fe0493add57810687e755e8c6f4fba4b1dba"
+        "845ee71f74e821a6085ed506361dd57894f5a416af05396efdc9fd43bc8f69fc"
     );
     assert_eq!(
         darwin.binary_sha256,
-        "2d17da54d2671d6e9e7c776d56b934f60be8c140b9bac35ddf22f60d6cff9403"
+        "60f972c2b208ad6ab9db09f770396d6d9f38b663d91e62b9a1166e93b51d7675"
     );
     let expected = [
         (
             "darwin-x64",
-            "61b644abde08329d3057634e591bd72a9cd5adc3424edd66509b138648289e37",
-            "b1046219d7b5b5e86047f44cb3372b803741a772db632a54ba987ee0f16dcd58",
+            "a723e54a9629a12cad6cdc005083deb6a17d71b9a04499a55b88deff30f5d308",
+            "ba226132f48dd470b7cd5da5a2a4547204c8aa40152a1b38d243f2c1e1425538",
         ),
         (
             "linux-x64",
-            "b832c71df79585b7eb361205f531aeebd6b4f15a0934ecdbfdf01d32c025ed63",
-            "32976646cded43835d624c138d10121f63a692e47df0438390ab11a072345880",
+            "1652f25430ba1130fd9dfe659f3ab501cf94ce34cd2877cd1d1cfcf9a70fa394",
+            "81d20c3ccda8ed724cfe2f5252c155990be81728c68eb206cf67d7d48ac539be",
         ),
         (
             "linux-arm64",
-            "66237c656a3dd770db05cfd33c07c3710cbc74a3e00953105667fdeb91f36d8e",
-            "44ad4e92dd4260a6f9689cf4d4839c4bc3e58adb11e6faeacb68c5740acee1a9",
+            "c81f1ab0bcde373437a67cff935eb0135bf9ed86a35e3ea9b605556d74100652",
+            "34996ff9eb98ba44857b971b52e10083b4bb2e9f07dd6a3715cb33ee79abf997",
         ),
     ];
     for (name, archive, binary) in expected {

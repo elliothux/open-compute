@@ -2,8 +2,6 @@
   "schemaVersion": 1,
   "id": "cache-api/portable/cache-hit",
   "contracts": ["cache.api.methods"],
-  "compatibilityDate": "2026-08-26",
-  "compatibilityFlags": [],
   "source": "src/index.ts",
   "bindings": {},
   "observations": [

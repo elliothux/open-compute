@@ -364,7 +364,7 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
         tables.extend(["kv_namespaces", "kv_backups"]);
     }
     if version >= 5 {
-        tables.push("r2_buckets");
+        tables.extend(["r2_buckets", "r2_multipart_uploads", "r2_multipart_parts"]);
     }
     if version >= 6 {
         tables.extend(["d1_databases", "d1_backups"]);

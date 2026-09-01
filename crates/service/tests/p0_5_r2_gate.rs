@@ -222,6 +222,15 @@ async fn p0_5_real_r2_facade_matrix() {
     assert_eq!(matrix["typedArray"], serde_json::json!([1, 2]));
     assert_eq!(matrix["streamJson"]["ok"], true);
     assert_eq!(matrix["aliasVisible"], true);
+    assert_eq!(matrix["checksumMd5"], "5d41402abc4b2a76b9719d911017c592");
+    assert_eq!(matrix["versionOk"], true);
+    assert_eq!(matrix["storageClass"], "InfrequentAccess");
+    assert_eq!(matrix["ssecGetDenied"], true);
+    assert_eq!(matrix["ssecBody"], "secret");
+    assert!(!matrix["ssecMd5"].as_str().unwrap().is_empty());
+    assert_eq!(matrix["onlyIfSkipped"], true);
+    assert_eq!(matrix["multipartKey"], "mpu.txt");
+    assert_eq!(matrix["startAfterOmitsHello"], true);
 
     let warm = dispatch(
         &transport,
@@ -473,16 +482,13 @@ fn request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: vec!["rpc".to_owned()],
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings,
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote: true,
         request_id: RequestId::generate(),
         now_ms,
@@ -521,11 +527,12 @@ export default {
       const unexpected = () => { throw new Error("unexpected R2 transport call"); };
       const bucket = new ImportableR2Bucket({
         head: unexpected, put: unexpected, delete: unexpected, list: unexpected,
+        createMultipartUpload: unexpected, uploadPart: unexpected, completeMultipartUpload: unexpected, abortMultipartUpload: unexpected,
         async get() {
           return {
-            meta: { key: "fake", version: "fixture-version", size: 1,
+            meta: { key: "fake", version: "00000000-0000-7000-8000-000000000001", size: 1,
               etag: "0".repeat(32), httpEtag: `"${"0".repeat(32)}"`,
-              uploaded: 0, httpMetadata: {}, customMetadata: {}, storageClass: "Standard" },
+              uploaded: 0, httpMetadata: {}, customMetadata: {}, checksums: {}, storageClass: "Standard" },
             body: new ReadableStream({
               start(controller) { controller.enqueue(new Uint8Array([1])); },
               cancel() { cancelled = true; },
@@ -539,7 +546,7 @@ export default {
       return new Response(cancelled ? "cancelled" : "not-cancelled");
     }
     if (path === "/cleanup") {
-      await env.BUCKET.delete(["hello.txt", "typed.bin", "stream.json"]);
+      await env.BUCKET.delete(["hello.txt", "typed.bin", "stream.json", "ia.bin", "ssec.bin", "mpu.txt"]);
       return new Response("clean");
     }
     if (path !== "/matrix") return new Response("missing", { status: 404 });
@@ -599,6 +606,27 @@ export default {
     const streamJson = await (await env.BUCKET.get("stream.json")).json();
     const aliasVisible = (await env.BUCKET_ALIAS.head("hello.txt")).size === 5
       && wrapped(env.BUCKET_ALIAS);
+    phase = "checksums";
+    const checksumJson = first.checksums.toJSON();
+    const versionOk = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(head.version);
+    phase = "storage-class";
+    const ia = await mark("storage-class", env.BUCKET.put("ia.bin", "ia", { storageClass: "InfrequentAccess" }));
+    phase = "ssec";
+    const ssecKey = "00".repeat(32);
+    await mark("ssec-put", env.BUCKET.put("ssec.bin", "secret", { ssecKey }));
+    const ssecHead = await mark("ssec-head", env.BUCKET.head("ssec.bin"));
+    let ssecGetDenied = false;
+    try { await env.BUCKET.get("ssec.bin"); } catch { ssecGetDenied = true; }
+    const ssecBody = await (await env.BUCKET.get("ssec.bin", { ssecKey })).text();
+    phase = "only-if";
+    const skipped = await env.BUCKET.put("hello.txt", "nope", { onlyIf: { etagMatches: "missing" } });
+    phase = "multipart";
+    const created = await env.BUCKET.createMultipartUpload("mpu.txt");
+    const resumed = env.BUCKET.resumeMultipartUpload(created.key, created.uploadId);
+    const uploaded = await resumed.uploadPart(1, "multipart-body");
+    const completed = await resumed.complete([uploaded]);
+    phase = "start-after";
+    const after = await env.BUCKET.list({ startAfter: "hello.txt", limit: 1000 });
     return Response.json({
       localFacade, rawHidden, envKeys, httpMetadata,
       headCustom: head.customMetadata.greeting,
@@ -606,6 +634,9 @@ export default {
       range, rangeSize, conditionHasBody: "body" in condition,
       pageSeparated: page1.truncated && page1.objects[0].key !== page2.objects[0].key,
       typedArray, streamJson, aliasVisible,
+      checksumMd5: checksumJson.md5, versionOk, storageClass: ia.storageClass,
+      ssecGetDenied, ssecBody, ssecMd5: ssecHead.ssecKeyMd5, onlyIfSkipped: skipped === null,
+      multipartKey: completed.key, startAfterOmitsHello: after.objects.every((item) => item.key !== "hello.txt"),
     });
     } catch (error) {
       return new Response(`${phase}:${error && error.stack ? error.stack : error}`, { status: 598 });

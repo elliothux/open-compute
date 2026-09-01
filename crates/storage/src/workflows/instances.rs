@@ -30,38 +30,173 @@ impl WorkflowRepository<'_> {
         &self,
         account: AccountId,
         definition: WorkflowId,
+        operation: WorkflowOperationId,
         external: Option<&str>,
         limits: &WorkflowsConfig,
         now_ms: i64,
     ) -> Result<WorkflowReservation, PlatformError> {
-        let external =
-            external.map_or_else(|| WorkflowInstanceId::generate().to_string(), str::to_owned);
-        open_compute_core::workflow::validate_workflow_instance_id(&external)?;
+        self.reserve_instances(
+            account,
+            definition,
+            operation,
+            &[(operation, external)],
+            limits,
+            now_ms,
+        )?
+        .pop()
+        .ok_or_else(invariant)
+    }
+
+    /// Atomically reserve every public identity in one create batch.
+    pub fn reserve_instances(
+        &self,
+        account: AccountId,
+        definition: WorkflowId,
+        batch_operation: WorkflowOperationId,
+        requests: &[(WorkflowOperationId, Option<&str>)],
+        limits: &WorkflowsConfig,
+        now_ms: i64,
+    ) -> Result<Vec<WorkflowReservation>, PlatformError> {
+        let scheduled = requests
+            .iter()
+            .map(|(operation, external)| (*operation, *external, None))
+            .collect::<Vec<_>>();
+        self.reserve_instances_with_schedules(
+            account,
+            definition,
+            batch_operation,
+            &scheduled,
+            limits,
+            now_ms,
+        )
+    }
+
+    /// Atomically reserve public identities and their optional direct-cron metadata.
+    pub fn reserve_instances_with_schedules(
+        &self,
+        account: AccountId,
+        definition: WorkflowId,
+        batch_operation: WorkflowOperationId,
+        requests: &[(
+            WorkflowOperationId,
+            Option<&str>,
+            Option<&open_compute_core::WorkflowCronSchedule>,
+        )],
+        limits: &WorkflowsConfig,
+        now_ms: i64,
+    ) -> Result<Vec<WorkflowReservation>, PlatformError> {
+        if requests.is_empty() || requests.len() > 100 {
+            return Err(error(ErrorCode::WorkflowMethodUnsupported));
+        }
         limits.validate()?;
         self.db.with_immediate(|tx| {
+            let existing = requests
+                .iter()
+                .map(|(operation, _, _)| {
+                    tx.query_row(
+                        &format!("{RESERVATION_SELECT} WHERE r.creation_operation_id=?1"),
+                        [operation.to_string()],
+                        reservation_row,
+                    )
+                    .optional()
+                    .map_err(sql_error)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let batch_count: usize = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM workflow_instance_referrers WHERE creation_batch_id=?1",
+                    [batch_operation.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if existing.iter().any(Option::is_some) {
+                if existing.iter().any(Option::is_none) || batch_count != requests.len() {
+                    return Err(invariant());
+                }
+                return existing
+                    .into_iter()
+                    .zip(requests)
+                    .map(|(reservation, (operation, external, schedule))| {
+                        let reservation = reservation.ok_or_else(invariant)?;
+                        if reservation.identity.target.account_id != account
+                            || reservation.identity.target.definition_id != definition
+                            || reservation.identity.creation_operation_id != *operation
+                            || reservation.identity.creation_batch_id != batch_operation
+                            || reservation.identity.schedule.as_ref() != *schedule
+                            || external.is_some_and(|value| {
+                                value != reservation.identity.external_instance_id
+                            })
+                        {
+                            return Err(invariant());
+                        }
+                        Ok(reservation)
+                    })
+                    .collect();
+            }
+            if batch_count != 0 {
+                return Err(invariant());
+            }
             let version = tx.query_row(&format!("{VERSION_SELECT} WHERE f.account_id=?1 AND f.id=?2
                 AND f.state='ready' AND f.availability='healthy' AND f.current_version_id=v.id AND v.state='ready'"),
                 params![account.to_string(),definition.to_string()],version_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotReady))?;
             if version_digest(&version.target)? != version.target.descriptor_sha256 { return Err(invariant()); }
-            if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_instance_referrers WHERE definition_id=?1 AND external_instance_id=?2)",
-                params![definition.to_string(),external],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
-                return Err(error(ErrorCode::WorkflowInstanceAlreadyExists));
-            }
+            let mut operation_ids = std::collections::HashSet::with_capacity(requests.len());
+            let mut external_ids = std::collections::HashSet::with_capacity(requests.len());
+            let pending = requests
+                .iter()
+                .map(|(operation, requested_external, schedule)| {
+                    if !operation_ids.insert(*operation) {
+                        return Err(invariant());
+                    }
+                    let external = requested_external.map_or_else(
+                        || WorkflowInstanceId::generate().to_string(),
+                        |value| (*value).to_owned(),
+                    );
+                    open_compute_core::workflow::validate_workflow_instance_id(&external)?;
+                    if !external_ids.insert(external.clone()) {
+                        return Err(error(ErrorCode::WorkflowInstanceAlreadyExists));
+                    }
+                    let exists = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM workflow_instance_referrers WHERE definition_id=?1 AND external_instance_id=?2)",
+                        params![definition.to_string(), external],
+                        |row| row.get::<_, bool>(0),
+                    ).map_err(sql_error)?;
+                    if exists {
+                        return Err(error(ErrorCode::WorkflowInstanceAlreadyExists));
+                    }
+                    if let Some(schedule) = schedule {
+                        schedule.validate()?;
+                    }
+                    Ok((*operation, external, (*schedule).cloned()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let (total,active,definition_total): (u64,u64,u64) = tx.query_row(
                 "SELECT COUNT(*),coalesce(SUM(r.state IN ('creating','live','restarting')),0),coalesce(SUM(r.definition_id=?2),0)
                  FROM workflow_instance_referrers r JOIN workflow_definitions f ON f.id=r.definition_id WHERE f.account_id=?1",
                 params![account.to_string(),definition.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).map_err(sql_error)?;
-            if total >= u64::from(limits.max_instances_per_account) || active >= u64::from(limits.max_active_per_account)
-                || definition_total >= u64::from(limits.max_instances_per_definition) { return Err(error(ErrorCode::WorkflowStateQuotaExceeded)); }
-            let identity = WorkflowInstanceIdentity { instance_id: WorkflowInstanceId::generate(),external_instance_id: external,
-                target: version.target,instance_generation: 1,creation_nonce: token()?,created_at_ms: now_ms };
-            tx.execute("INSERT INTO workflow_instance_referrers(instance_id,definition_id,definition_name,external_instance_id,
-                version_id,deployment_id,instance_generation,creation_nonce,state,created_at_ms,updated_at_ms)
-                VALUES(?1,?2,?3,?4,?5,?6,1,?7,'creating',?8,?8)", params![identity.instance_id.to_string(),definition.to_string(),
-                identity.target.definition_name,identity.external_instance_id,identity.target.version_id.to_string(),
-                identity.target.deployment_id.to_string(),identity.creation_nonce.as_bytes().as_slice(),now_ms]).map_err(sql_error)?;
-            Ok(WorkflowReservation { identity,state: WorkflowRefState::Creating,updated_at_ms: now_ms })
+            let added = u64::try_from(requests.len()).map_err(|_| invariant())?;
+            if total.saturating_add(added) > u64::from(limits.max_instances_per_account)
+                || active.saturating_add(added) > u64::from(limits.max_active_per_account)
+                || definition_total.saturating_add(added) > u64::from(limits.max_instances_per_definition)
+            { return Err(error(ErrorCode::WorkflowStateQuotaExceeded)); }
+            let mut reservations = Vec::with_capacity(requests.len());
+            for (operation, external, schedule) in pending {
+                let identity = WorkflowInstanceIdentity { instance_id: WorkflowInstanceId::generate(),external_instance_id: external,
+                    target: version.target.clone(),instance_generation: 1,creation_nonce: token()?,
+                    creation_operation_id:operation,creation_batch_id:batch_operation,created_at_ms: now_ms,
+                    schedule };
+                tx.execute("INSERT INTO workflow_instance_referrers(instance_id,definition_id,definition_name,external_instance_id,
+                    version_id,deployment_id,instance_generation,creation_nonce,creation_operation_id,creation_batch_id,state,
+                    trigger_cron,trigger_scheduled_time_ms,created_at_ms,updated_at_ms)
+                    VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,'creating',?10,?11,?12,?12)", params![identity.instance_id.to_string(),definition.to_string(),
+                    identity.target.definition_name,identity.external_instance_id,identity.target.version_id.to_string(),
+                    identity.target.deployment_id.to_string(),identity.creation_nonce.as_bytes().as_slice(),operation.to_string(),
+                    batch_operation.to_string(),identity.schedule.as_ref().map(|value| &value.cron),
+                    identity.schedule.as_ref().map(|value| value.scheduled_time),now_ms]).map_err(sql_error)?;
+                reservations.push(WorkflowReservation { identity,state: WorkflowRefState::Creating,updated_at_ms: now_ms });
+            }
+            Ok(reservations)
         })
     }
 
@@ -108,14 +243,55 @@ impl WorkflowRepository<'_> {
         reservation: &WorkflowInstanceIdentity,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
+        self.finalize_instances(std::slice::from_ref(reservation), now_ms)
+    }
+
+    /// Atomically publish every scheduler-confirmed reservation in one create batch.
+    pub fn finalize_instances(
+        &self,
+        reservations: &[WorkflowInstanceIdentity],
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        if reservations.is_empty() || reservations.len() > 100 {
+            return Err(invariant());
+        }
         self.db.with_immediate(|tx| {
-            verify_identity(tx,reservation)?;
-            let changed = tx.execute("UPDATE workflow_instance_referrers SET state='live',updated_at_ms=?3
-                WHERE instance_id=?1 AND creation_nonce=?2 AND state='creating'",params![reservation.instance_id.to_string(),
-                reservation.creation_nonce.as_bytes().as_slice(),now_ms]).map_err(sql_error)?;
-            if changed == 0 && !tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_instance_referrers WHERE instance_id=?1 AND creation_nonce=?2)",
-                params![reservation.instance_id.to_string(),reservation.creation_nonce.as_bytes().as_slice()],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
+            let batch = reservations[0].creation_batch_id;
+            if reservations
+                .iter()
+                .any(|reservation| reservation.creation_batch_id != batch)
+            {
                 return Err(invariant());
+            }
+            let batch_count: usize = tx.query_row(
+                "SELECT COUNT(*) FROM workflow_instance_referrers WHERE creation_batch_id=?1",
+                [batch.to_string()],
+                |row| row.get(0),
+            ).map_err(sql_error)?;
+            if batch_count != reservations.len() {
+                return Err(invariant());
+            }
+            let mut states = Vec::with_capacity(reservations.len());
+            for reservation in reservations {
+                verify_identity(tx,reservation)?;
+                let state: String = tx.query_row(
+                    "SELECT state FROM workflow_instance_referrers WHERE instance_id=?1 AND creation_nonce=?2",
+                    params![reservation.instance_id.to_string(),reservation.creation_nonce.as_bytes().as_slice()],
+                    |row| row.get(0),
+                ).map_err(sql_error)?;
+                states.push(state);
+            }
+            if states.iter().all(|state| state == "live") {
+                return Ok(());
+            }
+            if !states.iter().all(|state| state == "creating") {
+                return Err(invariant());
+            }
+            for reservation in reservations {
+                let changed = tx.execute("UPDATE workflow_instance_referrers SET state='live',updated_at_ms=?3
+                            WHERE instance_id=?1 AND creation_nonce=?2 AND state='creating'",params![reservation.instance_id.to_string(),
+                            reservation.creation_nonce.as_bytes().as_slice(),now_ms]).map_err(sql_error)?;
+                if changed != 1 { return Err(invariant()); }
             }
             Ok(())
         })
@@ -126,17 +302,68 @@ impl WorkflowRepository<'_> {
         &self,
         reservation: &WorkflowInstanceIdentity,
     ) -> Result<bool, PlatformError> {
+        Ok(self.abandon_creations(std::slice::from_ref(reservation))? == 1)
+    }
+
+    /// Atomically release a batch proven absent from scheduler authority.
+    pub fn abandon_creations(
+        &self,
+        reservations: &[WorkflowInstanceIdentity],
+    ) -> Result<usize, PlatformError> {
+        if reservations.is_empty() || reservations.len() > 100 {
+            return Err(invariant());
+        }
         self.db.with_immediate(|tx| {
-            tx.execute(
-                "DELETE FROM workflow_instance_referrers WHERE instance_id=?1
-            AND creation_nonce=?2 AND state='creating'",
-                params![
-                    reservation.instance_id.to_string(),
-                    reservation.creation_nonce.as_bytes().as_slice()
-                ],
-            )
-            .map(|count| count == 1)
-            .map_err(sql_error)
+            let batch = reservations[0].creation_batch_id;
+            if reservations
+                .iter()
+                .any(|reservation| reservation.creation_batch_id != batch)
+            {
+                return Err(invariant());
+            }
+            let batch_count: usize = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM workflow_instance_referrers WHERE creation_batch_id=?1",
+                    [batch.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if batch_count != reservations.len() {
+                return Err(invariant());
+            }
+            let mut states = Vec::with_capacity(reservations.len());
+            for reservation in reservations {
+                verify_identity(tx, reservation)?;
+                let state: String = tx
+                    .query_row(
+                        "SELECT state FROM workflow_instance_referrers WHERE instance_id=?1",
+                        [reservation.instance_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .map_err(sql_error)?;
+                states.push(state);
+            }
+            if states.iter().all(|state| state == "live") {
+                return Ok(0);
+            }
+            if !states.iter().all(|state| state == "creating") {
+                return Err(invariant());
+            }
+            let mut removed = 0;
+            for reservation in reservations {
+                removed += tx
+                    .execute(
+                        "DELETE FROM workflow_instance_referrers WHERE instance_id=?1
+                AND creation_nonce=?2 AND creation_operation_id=?3 AND state='creating'",
+                        params![
+                            reservation.instance_id.to_string(),
+                            reservation.creation_nonce.as_bytes().as_slice(),
+                            reservation.creation_operation_id.to_string(),
+                        ],
+                    )
+                    .map_err(sql_error)?;
+            }
+            Ok(removed)
         })
     }
 
@@ -164,6 +391,29 @@ impl WorkflowRepository<'_> {
                 .map_err(sql_error)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(sql_error)
+        })
+    }
+
+    /// Read one complete creation group for atomic crash recovery.
+    pub fn creation_batch_reservations(
+        &self,
+        batch: WorkflowOperationId,
+    ) -> Result<Vec<WorkflowReservation>, PlatformError> {
+        self.db.with_read(|conn| {
+            let mut statement = conn
+                .prepare(&format!(
+                    "{RESERVATION_SELECT} WHERE r.creation_batch_id=?1 ORDER BY r.instance_id LIMIT 101"
+                ))
+                .map_err(sql_error)?;
+            let rows = statement
+                .query_map([batch.to_string()], reservation_row)
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?;
+            if rows.len() > 100 {
+                return Err(invariant());
+            }
+            Ok(rows)
         })
     }
 
@@ -196,7 +446,8 @@ impl WorkflowRepository<'_> {
 
 pub(super) const RESERVATION_SELECT: &str = "SELECT f.account_id,r.definition_id,r.definition_name,r.version_id,v.worker_id,r.deployment_id,
     v.worker_code_sha256,v.class_name,v.loader_schema_version,v.capability_version,v.descriptor_sha256,
-    r.instance_id,r.external_instance_id,r.instance_generation,r.creation_nonce,r.state,r.created_at_ms,r.updated_at_ms
+    r.instance_id,r.external_instance_id,r.instance_generation,r.creation_nonce,r.state,r.created_at_ms,r.updated_at_ms,
+    r.creation_operation_id,r.creation_batch_id,r.trigger_cron,r.trigger_scheduled_time_ms
     FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.version_id
     JOIN workflow_definitions f ON f.id=r.definition_id";
 
@@ -249,7 +500,22 @@ pub(super) fn reservation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workf
             external_instance_id: row.get(12)?,
             instance_generation: row.get(13)?,
             creation_nonce: WorkflowToken::from_bytes(digest(row, 14)?),
+            creation_operation_id: parse(row, 18)?,
+            creation_batch_id: parse(row, 19)?,
             created_at_ms: row.get(16)?,
+            schedule: match (
+                row.get::<_, Option<String>>(20)?,
+                row.get::<_, Option<i64>>(21)?,
+            ) {
+                (Some(cron), Some(scheduled_time)) => {
+                    Some(open_compute_core::WorkflowCronSchedule {
+                        cron,
+                        scheduled_time,
+                    })
+                }
+                (None, None) => None,
+                _ => return Err(rusqlite::Error::InvalidQuery),
+            },
         },
         state,
         updated_at_ms: row.get(17)?,

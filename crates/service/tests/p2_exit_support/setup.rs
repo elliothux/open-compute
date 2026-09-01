@@ -200,8 +200,6 @@ pub(super) async fn prepare() -> Fixture {
                 bundle: bundle.into_bytes().into(),
                 assets: None,
             },
-            compatibility_date: "2026-08-22".into(),
-            compatibility_flags: vec!["rpc".into()],
             vars: Default::default(),
             secrets: Default::default(),
             bindings: bound,
@@ -217,8 +215,7 @@ pub(super) async fn prepare() -> Fixture {
             } else {
                 vec![]
             },
-            crons: None,
-            limits: json!({"profile":"default"}),
+            crons: Vec::new(),
             promote: index != 2,
             request_id: RequestId::generate(),
             now_ms: now_ms(),

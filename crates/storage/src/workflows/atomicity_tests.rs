@@ -10,7 +10,14 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
     let account = storage.identity().default_account_id;
     let limits = WorkflowsConfig::default();
     let original = repository
-        .reserve_instance(account, definition.id, Some("old"), &limits, 10)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("old"),
+            &limits,
+            10,
+        )
         .unwrap();
     repository
         .finalize_instance(&original.identity, 11)
@@ -67,7 +74,14 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
         .finish_version(account, version.target.version_id, true, 15)
         .unwrap();
     let next = repository
-        .reserve_instance(account, definition.id, Some("new"), &limits, 16)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("new"),
+            &limits,
+            16,
+        )
         .unwrap();
     assert_eq!(next.identity.target.deployment_id, replacement);
     assert_eq!(next.identity.target.version_id, version.target.version_id);
@@ -111,7 +125,14 @@ fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_retention
     );
     assert!(
         repository
-            .reserve_instance(account, definition.id, Some("atomic"), &limits, 10)
+            .reserve_instance(
+                account,
+                definition.id,
+                WorkflowOperationId::generate(),
+                Some("atomic"),
+                &limits,
+                10
+            )
             .is_err()
     );
     assert_eq!(
@@ -141,7 +162,14 @@ fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_retention
         .unwrap();
     inject("DROP TRIGGER reject_workflow_reservation;");
     let reservation = repository
-        .reserve_instance(account, definition.id, Some("atomic"), &limits, 10)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("atomic"),
+            &limits,
+            10,
+        )
         .unwrap();
     inject(
         "CREATE TEMP TRIGGER reject_workflow_finalize AFTER UPDATE ON workflow_instance_referrers
@@ -211,4 +239,94 @@ fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_retention
             .instance_referrers_intact(&reservation.identity)
             .unwrap()
     );
+}
+
+#[test]
+fn workflow_create_batch_reservation_and_publication_are_atomic_and_replayable() {
+    let (_temp, storage, deployment) = setup();
+    let definition = ready(&storage, deployment);
+    let repository = WorkflowRepository::new(storage.db());
+    let account = storage.identity().default_account_id;
+    let limits = WorkflowsConfig::default();
+    let first = WorkflowOperationId::generate();
+    let second = WorkflowOperationId::generate();
+    let batch = WorkflowOperationId::generate();
+    let requests = [(first, Some("batch-a")), (second, Some("batch-b"))];
+    let execute = |sql: &str| {
+        storage
+            .db()
+            .with_read(|connection| {
+                connection.execute_batch(sql).unwrap();
+                Ok(())
+            })
+            .unwrap();
+    };
+
+    execute(
+        "CREATE TEMP TRIGGER reject_workflow_batch_reserve BEFORE INSERT ON workflow_instance_referrers
+         WHEN NEW.external_instance_id='batch-b' BEGIN SELECT RAISE(ABORT,'test batch fault'); END;",
+    );
+    assert!(
+        repository
+            .reserve_instances(account, definition.id, batch, &requests, &limits, 20)
+            .is_err()
+    );
+    for external in ["batch-a", "batch-b"] {
+        assert_eq!(
+            repository
+                .find_instance(definition.id, external)
+                .unwrap_err()
+                .code(),
+            ErrorCode::WorkflowInstanceNotFound
+        );
+    }
+    execute("DROP TRIGGER reject_workflow_batch_reserve;");
+
+    let reservations = repository
+        .reserve_instances(account, definition.id, batch, &requests, &limits, 20)
+        .unwrap();
+    let replay = repository
+        .reserve_instances(account, definition.id, batch, &requests, &limits, 21)
+        .unwrap();
+    assert_eq!(
+        reservations
+            .iter()
+            .map(|row| &row.identity)
+            .collect::<Vec<_>>(),
+        replay.iter().map(|row| &row.identity).collect::<Vec<_>>()
+    );
+    let identities = reservations
+        .iter()
+        .map(|row| row.identity.clone())
+        .collect::<Vec<_>>();
+
+    execute(
+        "CREATE TEMP TRIGGER reject_workflow_batch_finalize BEFORE UPDATE ON workflow_instance_referrers
+         WHEN NEW.external_instance_id='batch-b' AND NEW.state='live'
+         BEGIN SELECT RAISE(ABORT,'test batch fault'); END;",
+    );
+    assert!(repository.finalize_instances(&identities, 22).is_err());
+    for identity in &identities {
+        assert_eq!(
+            repository
+                .reservation(identity.instance_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            WorkflowRefState::Creating
+        );
+    }
+    execute("DROP TRIGGER reject_workflow_batch_finalize;");
+    repository.finalize_instances(&identities, 23).unwrap();
+    repository.finalize_instances(&identities, 24).unwrap();
+    for identity in &identities {
+        assert_eq!(
+            repository
+                .reservation(identity.instance_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            WorkflowRefState::Live
+        );
+    }
 }

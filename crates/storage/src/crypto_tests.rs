@@ -1,5 +1,6 @@
 use super::*;
 use crate::master_key;
+use open_compute_core::{AccountId, ResourceId};
 
 #[test]
 fn aead_roundtrip_nonce_context_tamper_key() {
@@ -226,5 +227,97 @@ fn aead_revision_and_envelope_validation_matrix() {
             .unwrap_err()
             .code(),
         ErrorCode::MasterKeyMismatch
+    );
+}
+
+#[test]
+fn d1_bookmarks_are_opaque_db_bound_and_reject_forged_tokens() {
+    let key = SecretBytes::new(vec![5u8; 32]);
+    let fp = master_key::fingerprint_for_test(key.expose());
+    let crypto = SecretCrypto::new(&key, &fp).unwrap();
+    let account = AccountId::generate();
+    let resource = ResourceId::generate();
+    let first = crypto.seal_d1_bookmark(account, resource, 3).unwrap();
+    let second = crypto.seal_d1_bookmark(account, resource, 3).unwrap();
+    assert_ne!(first, second);
+    assert_ne!(first, "3");
+    assert!(!first.chars().all(|ch| ch.is_ascii_digit()));
+    assert_eq!(
+        crypto.open_d1_bookmark(account, resource, &first).unwrap(),
+        3
+    );
+    assert_eq!(
+        crypto
+            .open_d1_bookmark(account, ResourceId::generate(), &first)
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1SessionError
+    );
+    assert_eq!(
+        crypto
+            .open_d1_bookmark(AccountId::generate(), resource, &first)
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1SessionError
+    );
+    assert_eq!(
+        crypto
+            .open_d1_bookmark(account, resource, "not-a-token")
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1SessionError
+    );
+    let other_key = SecretBytes::new(vec![9u8; 32]);
+    let other = SecretCrypto::new(
+        &other_key,
+        &master_key::fingerprint_for_test(other_key.expose()),
+    )
+    .unwrap();
+    assert_eq!(
+        other
+            .open_d1_bookmark(account, resource, &first)
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1SessionError
+    );
+    assert_eq!(
+        format!("{first:?} {crypto:?}"),
+        format!("{first:?} {crypto:?}")
+    );
+}
+
+#[test]
+fn r2_ssec_envelope_is_identity_bound_and_contains_no_plaintext() {
+    let key = SecretBytes::new(vec![3u8; 32]);
+    let fp = master_key::fingerprint_for_test(key.expose());
+    let crypto = SecretCrypto::new(&key, &fp).unwrap();
+    let account = AccountId::generate();
+    let resource = ResourceId::generate();
+    let upload_id = "00000000-0000-7000-8000-000000000001";
+    let plaintext = SecretBytes::new(vec![0xab; 32]);
+    let envelope = crypto
+        .encrypt_r2_ssec(&plaintext, account, resource, upload_id)
+        .unwrap();
+    let encoded = serde_json::to_string(&envelope).unwrap();
+    assert!(!encoded.contains("abababab"));
+    assert!(!encoded.contains(&hex::encode(plaintext.expose())));
+    let opened = crypto
+        .decrypt_r2_ssec(&envelope, account, resource, upload_id)
+        .unwrap();
+    assert_eq!(opened.expose(), plaintext.expose());
+    assert!(
+        crypto
+            .decrypt_r2_ssec(&envelope, AccountId::generate(), resource, upload_id)
+            .is_err()
+    );
+    assert!(
+        crypto
+            .decrypt_r2_ssec(&envelope, account, ResourceId::generate(), upload_id)
+            .is_err()
+    );
+    assert!(
+        crypto
+            .decrypt_r2_ssec(&envelope, account, resource, "other-upload")
+            .is_err()
     );
 }

@@ -1,4 +1,7 @@
-import { PROFILE, doPolicy, modulesFor, resolveSnapshot, stableCode, tenantEnv } from "../loader/host.js";
+import {
+  doPolicy, lockWorkerCode, modulesFor, resolveSnapshot, stableCode,
+  tenantEnv, tenantGlobalOutbound,
+} from "../loader/host.js";
 import { WorkflowRunController, finishWorkflowRun, closeWorkflowRun } from "./controller.js";
 import type { LoaderEnv } from "../loader/protocol.js";
 import type { LoadedWorkflow, WorkflowEventWire, WorkflowRunIdentity } from "./execution-protocol.js";
@@ -8,11 +11,20 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 function assertActivation(value: Record<string, unknown>): asserts value is Record<string, unknown> & WorkflowRunIdentity & WorkflowEventWire {
-  for (const name of ["instanceId", "runToken", "externalInstanceId", "definitionName", "payloadJson"]) {
+  for (const name of ["instanceId", "runToken", "externalInstanceId", "definitionName", "payloadBase64"]) {
     if (typeof value[name] !== "string") throw new Error("invalid activation");
   }
   if (typeof value.instanceGeneration !== "number" || !Number.isSafeInteger(value.instanceGeneration)
-      || typeof value.createdAtMs !== "number" || !Number.isSafeInteger(value.createdAtMs)) throw new Error("invalid activation");
+      || typeof value.createdAtMs !== "number" || !Number.isSafeInteger(value.createdAtMs)
+      || typeof value.rollback !== "boolean") throw new Error("invalid activation");
+  if (value.schedule !== undefined) {
+    if (!record(value.schedule) || typeof value.schedule.cron !== "string"
+        || value.schedule.cron.length < 1 || value.schedule.cron.length > 256
+        || typeof value.schedule.scheduledTime !== "number"
+        || !Number.isSafeInteger(value.schedule.scheduledTime) || value.schedule.scheduledTime < 0) {
+      throw new Error("invalid activation");
+    }
+  }
 }
 
 export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: ExecutionContext, validation: boolean) {
@@ -40,12 +52,10 @@ export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: Exec
     const loaded = env.LOADER.get(key, () => {
       cold = true;
       return {
-        compatibilityDate: snapshot.compatibilityDate,
-        compatibilityFlags: snapshot.compatibilityFlags,
+        ...lockWorkerCode(env),
         mainModule: built.mainModule, modules: built.modules,
         env: validation ? {} : tenantEnv(snapshot, ctx, deploymentId, doPolicy(env), false, false),
-        globalOutbound: validation ? null : ctx.exports.OutboundGateway({ props: { deploymentId, policyVersion: 1 } }),
-        limits: PROFILE,
+        globalOutbound: tenantGlobalOutbound(env, validation),
       };
     });
     const target = loaded.getEntrypoint<LoadedWorkflow>("__OpenComputeWorkflow");
@@ -59,7 +69,8 @@ export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: Exec
     try {
       const result = await target.execute({
         externalInstanceId: body.externalInstanceId, definitionName: body.definitionName,
-        createdAtMs: body.createdAtMs, payloadJson: body.payloadJson,
+        createdAtMs: body.createdAtMs, payloadBase64: body.payloadBase64, rollback: body.rollback,
+        ...(body.schedule === undefined ? {} : { schedule: body.schedule }),
       }, backend);
       return Response.json({ ...await backend[finishWorkflowRun](result),
         loaderOutcome: cold ? "cold" : "warm" });

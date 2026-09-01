@@ -2,19 +2,17 @@
 
 use crate::config_load::LoadedConfig;
 use open_compute_core::{
-    CacheConfig, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig, KvConfig,
-    PlatformCapabilitiesV1, PlatformConfig, PlatformError, PlatformReleaseIdentityV1,
+    CacheConfig, CapabilityInventoryV1, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig,
+    KvConfig, PlatformCapabilitiesV1, PlatformConfig, PlatformError, PlatformReleaseIdentityV1,
     PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config, ReleaseSchemaDefinitionV1,
-    RuntimeCapabilityV1, SchedulerConfig, WorkersConfig,
+    RuntimeCapabilityV1, SchedulerConfig, TypeSourceIdentityV1, WorkersConfig,
 };
 use open_compute_runtime::{embedded_runtime_assets_sha256, embedded_runtime_lock};
 use open_compute_storage::{
     D1_DATABASE_SCHEMA_VERSION, KV_SCHEMA_VERSION, QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES,
     QUEUE_MAX_DELAY_SECONDS, QUEUE_MAX_MESSAGE_BYTES, current_scheduler_schema_version, migrations,
 };
-use open_compute_workers::{
-    COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN, COMPATIBILITY_FLAGS_ALLOWED,
-};
+
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -49,7 +47,6 @@ pub fn platform_capabilities(
     let (runtime_lock, lock_bytes) = embedded_runtime_lock()?;
     let lock_sha256 = hex::encode(Sha256::digest(lock_bytes));
     let assets_sha256 = embedded_runtime_assets_sha256().to_owned();
-    let compatibility_policy_sha256 = compatibility_policy_sha256();
     let release = PlatformReleaseIdentityV1 {
         schema_version: 1,
         platform_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -68,25 +65,20 @@ pub fn platform_capabilities(
         kv_schema_version: KV_SCHEMA_VERSION,
         d1_schema_version: D1_DATABASE_SCHEMA_VERSION,
         snapshot_format_version: SNAPSHOT_FORMAT_VERSION,
-        compatibility_policy_sha256,
     };
-    let products = product_registry()?;
+    let (type_source, products) = product_registry()?;
     let limits = limit_registry(config);
     let capabilities = PlatformCapabilitiesV1 {
         schema_version: 1,
         release,
         runtime: RuntimeCapabilityV1 {
-            compatibility_date_min: COMPATIBILITY_DATE_MIN.to_owned(),
-            compatibility_date_max: COMPATIBILITY_DATE_MAX.to_owned(),
-            allowed_flags: COMPATIBILITY_FLAGS_ALLOWED
-                .iter()
-                .map(ToString::to_string)
-                .collect(),
-            denied_flags: vec![
-                "nodejs_compat_populate_process_env".to_owned(),
-                "unsafe_module".to_owned(),
-            ],
+            effective_compatibility_date: runtime_lock.effective_compatibility_date.clone(),
             workerd_lock_sha256: lock_sha256,
+            workers_types_version: type_source.workers_types_version,
+            workers_types_git_head: type_source.git_head,
+            workers_types_package_sha256: type_source.package_sha256,
+            workers_types_index_sha256: type_source.index_sha256,
+            workers_types_ast_sha256: type_source.ast_sha256,
         },
         products,
         limits,
@@ -139,7 +131,7 @@ pub fn platform_release_metadata(
         ]),
         workerd_local_disk_gate_result: "p0.7-stock-workerd".to_owned(),
         conformance_result: "workflow-current".to_owned(),
-        websocket_hibernation_result: "no-go:p1.8-unsupported".to_owned(),
+        websocket_hibernation_result: "p0.7-stock-workerd".to_owned(),
     };
     if !metadata.validate() {
         return Err(capability_invalid());
@@ -193,21 +185,28 @@ pub fn write_capabilities(
         )
         .map_err(|_| capability_invalid())?;
         for (name, capability) in &capabilities.products {
-            writeln!(out, "{name} {:?}", capability.status).map_err(|_| capability_invalid())?;
+            writeln!(
+                out,
+                "{name} {:?} members={}",
+                capability.status,
+                capability.members.len()
+            )
+            .map_err(|_| capability_invalid())?;
         }
     }
     Ok(())
 }
 
-fn product_registry() -> Result<BTreeMap<String, ProductCapabilityV1>, PlatformError> {
-    let products: BTreeMap<String, ProductCapabilityV1> = serde_json::from_slice(include_bytes!(
+fn product_registry()
+-> Result<(TypeSourceIdentityV1, BTreeMap<String, ProductCapabilityV1>), PlatformError> {
+    let inventory: CapabilityInventoryV1 = serde_json::from_slice(include_bytes!(
         "../../../share/cloudflare-capabilities.json"
     ))
     .map_err(|_| capability_invalid())?;
-    if !products.values().all(ProductCapabilityV1::validate) {
+    if !inventory.validate() {
         return Err(capability_invalid());
     }
-    Ok(products)
+    Ok((inventory.source, inventory.products))
 }
 
 fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
@@ -223,7 +222,7 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
     BTreeMap::from([
         (
             "workflows.max_json_bytes".to_owned(),
-            open_compute_core::workflow::WORKFLOW_JSON_MAX_BYTES as u64,
+            open_compute_core::workflow::WORKFLOW_VALUE_MAX_BYTES as u64,
         ),
         (
             "workflows.max_steps".to_owned(),
@@ -531,19 +530,6 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
             config.hardening.snapshot_stale_after_ms,
         ),
     ])
-}
-
-fn compatibility_policy_sha256() -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"open-compute/compatibility-policy/v1\0");
-    for value in std::iter::once(COMPATIBILITY_DATE_MIN)
-        .chain(std::iter::once(COMPATIBILITY_DATE_MAX))
-        .chain(COMPATIBILITY_FLAGS_ALLOWED.iter().copied())
-    {
-        hasher.update(value.len().to_be_bytes());
-        hasher.update(value.as_bytes());
-    }
-    hex::encode(hasher.finalize())
 }
 
 fn capability_invalid() -> PlatformError {

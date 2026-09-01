@@ -1,7 +1,6 @@
 {
   "name": "hello-typescript",
   "main": "src/index.ts",
-  "compatibilityDate": "2026-08-22",
   "vars": {
     "GREETING": "Hello from TypeScript"
   }

@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { compileWorker } from "../src/build-worker.ts";
+
+const require = createRequire(resolve(import.meta.dirname, "../package.json"));
+const nodeTypes = dirname(require.resolve("@types/node/package.json"));
 
 const defaultConfig = {
   compilerOptions: {
@@ -26,7 +30,7 @@ async function project(t, files, config = defaultConfig) {
     await mkdir(dirname(join(root, name)), { recursive: true });
     await writeFile(join(root, name), source);
   }
-  return { project: root, entry: "index.ts", tsconfig: "tsconfig.json", compatibilityFlags: [] };
+  return { project: root, entry: "index.ts", tsconfig: "tsconfig.json" };
 }
 
 test("bundles TS dependencies and lazy imports while preserving Worker named exports", async t => {
@@ -101,14 +105,68 @@ test("type errors, excluded entries, and disabled checks cannot bypass validatio
   }
 });
 
-test("Node modules require an explicit compatibility flag and unknown runtime modules fail", async t => {
+test("pinned @types/node compiles default node: builtins without a tenant flag", async t => {
   const options = await project(t, {
-    "index.ts": 'import { value } from "node:crypto"; export default { value };',
-    "modules.d.ts": 'declare module "node:crypto" { export const value: string; }',
+    "index.ts": `import { Buffer } from "node:buffer";
+      import { createHash } from "node:crypto";
+      import { join } from "node:path";
+      import process from "node:process";
+      import { kind } from "conditional";
+      const value: "workerd" = kind;
+      export default { async fetch(): Promise<Response> {
+        return Response.json({
+          buffer: Buffer.from("node").toString(),
+          digest: createHash("sha256").update("open-compute").digest("hex"),
+          path: join("a", "b"),
+          envKeys: Object.keys(process.env),
+          kind: value,
+        });
+      } };`,
+    "node_modules/conditional/package.json": JSON.stringify({
+      name: "conditional", type: "module", exports: {
+        workerd: { types: "./worker.d.ts", default: "./worker.js" },
+        node: { types: "./node.d.ts", default: "./node.js" },
+        browser: { types: "./browser.d.ts", default: "./browser.js" },
+        default: "./browser.js",
+      },
+    }),
+    "node_modules/conditional/worker.d.ts": 'export const kind: "workerd";',
+    "node_modules/conditional/worker.js": 'export const kind = "workerd";',
+    "node_modules/conditional/node.d.ts": 'export const kind: "node";',
+    "node_modules/conditional/node.js": 'export const kind = "node";',
+    "node_modules/conditional/browser.d.ts": 'export const kind: "browser";',
+    "node_modules/conditional/browser.js": 'export const kind = "browser";',
+  }, {
+    compilerOptions: {
+      target: "ES2024", module: "Preserve", moduleResolution: "Bundler",
+      lib: ["ES2024"], types: ["node"], strict: true,
+      isolatedModules: true, verbatimModuleSyntax: true, noEmit: true,
+    },
+    include: ["*.ts"],
   });
-  await assert.rejects(compileWorker(options), /nodejs_compat/);
-  const compiled = await compileWorker({ ...options, compatibilityFlags: ["nodejs_compat"] });
-  assert.match(new TextDecoder().decode(compiled.modules[0].bytes), /node:crypto/);
+  await mkdir(join(options.project, "node_modules/@types"), { recursive: true });
+  await symlink(nodeTypes, join(options.project, "node_modules/@types/node"));
+  const compiled = await compileWorker(options);
+  const code = new TextDecoder().decode(compiled.modules[0].bytes);
+  assert.match(code, /from\s*["']node:buffer["']/);
+  assert.match(code, /from\s*["']node:crypto["']/);
+  assert.match(code, /from\s*["']node:path["']/);
+  assert.match(code, /from\s*["']node:process["']/);
+  assert.match(code, /["']workerd["']/);
+  assert.doesNotMatch(code, /["']node["']\s*;/);
+  await writeFile(join(options.project, "index.ts"), `
+    import { connect } from "cloudflare:sockets";
+    import { connect as netConnect } from "node:net";
+    import { connect as tlsConnect } from "node:tls";
+    declare const service: { connect(address: string): unknown };
+    export default { connect, netConnect, tlsConnect, bindingConnect: service.connect };
+  `);
+  await writeFile(join(options.project, "modules.d.ts"), 'declare module "cloudflare:sockets" { export function connect(address: string): unknown; }');
+  const sockets = await compileWorker(options);
+  const socketCode = new TextDecoder().decode(sockets.modules[0].bytes);
+  for (const specifier of ["cloudflare:sockets", "node:net", "node:tls"]) {
+    assert.match(socketCode, new RegExp(`from\\s*["']${specifier.replace(":", "\\:")}["']`));
+  }
   for (const specifier of ["cloudflare:unknown", "https://example.invalid/module.js"]) {
     await writeFile(join(options.project, "index.ts"), `import { value } from ${JSON.stringify(specifier)}; export default { value };`);
     await writeFile(join(options.project, "modules.d.ts"), `declare module ${JSON.stringify(specifier)} { export const value: string; }`);

@@ -145,24 +145,24 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         assert!(process.0.try_wait().unwrap().is_none());
         tokio::time::sleep(Duration::from_millis(20)).await;
     };
-    let committed: String = database
+    let committed: Vec<u8> = database
         .query_row(
-            "SELECT CAST(output_json AS TEXT) FROM workflow_steps
+            "SELECT output_json FROM workflow_steps
         WHERE instance_id=?1 AND ordinal=0 AND state='complete'",
             [&identity],
             |r| r.get(0),
         )
         .unwrap();
+    let committed_wire = String::from_utf8(committed.clone()).unwrap();
     assert_eq!(fence.instance_id.to_string(), identity);
     assert_eq!(attempt.attempt, 1);
     assert_eq!(
         request(&client, public, "/guards/chain", json!({})).await,
-        json!({"id":"chain", "status":"running", "errors":
-            vec!["WORKFLOW_DO_OUTPUT_GATE_UNSUPPORTED"; 6]}),
+        json!({"id":"chain", "status":"running", "rolledBack": true, "rolledExists": false, "created": "from-object-chain"}),
     );
     assert_eq!(
         count(&database, "SELECT count(*) FROM workflow_instances"),
-        1
+        2
     );
 
     // Kill an actual platformd while a callback owns an uncommitted attempt.
@@ -298,8 +298,16 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     assert_eq!(output["payload"], json!({"accepted":true}));
     assert_eq!(output["dated"], true);
     assert_eq!(
-        output["products"],
-        serde_json::from_str::<Value>(&committed).unwrap()
+        database
+            .query_row(
+                "SELECT output_json FROM workflow_steps
+                 WHERE instance_id=?1 AND ordinal=0 AND state='complete'",
+                [&identity],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .unwrap(),
+        committed,
+        "completed product step changed during crash recovery"
     );
     for product in ["kv", "r2", "d1"] {
         assert_eq!(output["products"][product], "frozen");
@@ -336,7 +344,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     );
     assert_eq!(
         count(&database, "SELECT count(*) FROM workflow_instances"),
-        1
+        2
     );
     assert_eq!(count(&database, "SELECT count(*) FROM workflow_events"), 0);
     assert_eq!(
@@ -366,7 +374,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     assert!(tokio::net::TcpStream::connect(public).await.is_err());
     assert!(tokio::net::TcpStream::connect(admin).await.is_err());
     let logs = std::fs::read_to_string(log).unwrap();
-    assert!(!logs.contains(&committed));
+    assert!(!logs.contains(&committed_wire));
     for token in [&fence.run_token, &attempt.step_token] {
         assert!(!logs.contains(&serde_json::to_string(token).unwrap()));
     }

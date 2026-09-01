@@ -125,10 +125,7 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
     assert_eq!(status["output"]["callbacks"], 0);
-    assert_eq!(
-        status["output"]["nonce"],
-        serde_json::from_str::<serde_json::Value>(&committed).unwrap()
-    );
+    assert_eq!(status["output"]["nonce"], decode_workflow_json(&committed));
     assert_eq!(
         connection
             .query_row("SELECT COUNT(*) FROM workflow_instances", [], |row| row

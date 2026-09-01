@@ -27,6 +27,17 @@ interface ResolvedService {
   readonly entrypoint?: string;
 }
 
+function deploymentBindings(bindings: WorkerProject["bindings"]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(bindings).map(([name, binding]) => [name, {
+    type: binding.type,
+    id: binding.id,
+    ...(binding.permissions === undefined ? {} : { permissions: binding.permissions }),
+    ...(binding.type !== "workflow" || binding.schedules === undefined ? {} : {
+      config: { workflowSchedules: binding.schedules },
+    }),
+  }]));
+}
+
 function identifier(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 }
@@ -148,9 +159,8 @@ export async function deployProject(
   // including astral characters, without putting credentials in URLs or artifacts.
   const metadata = JSON.stringify({
     ...(artifact === undefined ? {} : { mainModule: artifact.mainModule }),
-    compatibilityDate: project.compatibilityDate,
-    compatibilityFlags: project.compatibilityFlags, vars: project.vars, secrets,
-    bindings: project.bindings, services,
+    vars: project.vars, secrets,
+    bindings: deploymentBindings(project.bindings), services,
     cache: project.runtimeFeatures.cache,
     ...(project.runtimeFeatures.images === undefined ? {} : { images: project.runtimeFeatures.images }),
     ...(project.runtimeFeatures.versionMetadata === undefined ? {} : {
@@ -255,11 +265,9 @@ async function deployAssets(
     "POST",
     JSON.stringify({
       ...(artifact === undefined ? {} : { mainModule: artifact.mainModule }),
-      compatibilityDate: project.compatibilityDate,
-      compatibilityFlags: project.compatibilityFlags,
       vars: project.vars,
       secrets,
-      bindings: project.bindings,
+      bindings: deploymentBindings(project.bindings),
       services,
       cache: project.runtimeFeatures.cache,
       ...(project.runtimeFeatures.images === undefined ? {} : { images: project.runtimeFeatures.images }),

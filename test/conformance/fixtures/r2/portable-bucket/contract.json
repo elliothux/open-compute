@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "id": "r2/portable/bucket",
+  "contracts": ["r2.bucket.methods"],
+  "source": "src/index.ts",
+  "bindings": {
+    "BUCKET": { "type": "r2_bucket" }
+  },
+  "observations": [
+    { "method": "POST", "path": "/reset", "expect": { "status": 200, "json": { "reset": true } } },
+    {
+      "method": "POST",
+      "path": "/surface",
+      "expect": {
+        "status": 200,
+        "json": {
+          "object": {
+            "key": "portable:a",
+            "size": 5,
+            "etag": true,
+            "httpEtag": true,
+            "version": true,
+            "uploaded": true,
+            "checksums": { "md5": "5d41402abc4b2a76b9719d911017c592" },
+            "storageClass": "Standard",
+            "ssecAbsent": true
+          },
+          "head": { "sameEtag": true, "contentType": "text/plain", "customTag": "primary" },
+          "headers": {
+            "cache-control": "max-age=60",
+            "content-disposition": "inline",
+            "content-encoding": "identity",
+            "content-language": "en",
+            "content-type": "text/plain",
+            "expires": "Thu, 01 Jan 1970 00:00:00 GMT"
+          },
+          "bodies": {
+            "conditional": "hello",
+            "notModifiedHasBody": false,
+            "failedPut": null,
+            "ranged": { "text": "ell", "range": { "offset": 1, "length": 3 } },
+            "suffix": "lo",
+            "bytes": [1, 2, 3],
+            "arrayBuffer": [1, 2, 3],
+            "blob": { "text": "hello", "type": "text/plain" },
+            "json": { "ok": true },
+            "bodyUsed": [false, true],
+            "stream": "stream-value"
+          },
+          "checksumAlgorithms": {
+            "sha1": { "md5": "9dd4e461268c8034f5c8564e155c67a6", "sha1": "11f6ad8ec52a2984abaafd7c3b516503785c2072" },
+            "sha256": { "md5": "9dd4e461268c8034f5c8564e155c67a6", "sha256": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881" },
+            "sha384": { "md5": "9dd4e461268c8034f5c8564e155c67a6", "sha384": "d752c2c51fba0e29aa190570a9d4253e44077a058d3297fa3a5630d5bd012622f97c28acaed313b5c83bb990caa7da85" },
+            "sha512": { "md5": "9dd4e461268c8034f5c8564e155c67a6", "sha512": "a4abd4448c49562d828115d13a1fccea927f52b4d5459297f8b43e42da89238bc13626e43dcb38ddb082488927ec904fb42057443983e88585179d50551afe62" }
+          },
+          "keyShapes": true,
+          "list": {
+            "objects": [
+              { "key": "portable:a", "hasHttpMetadata": true, "hasCustomMetadata": true },
+              { "key": "portable:json", "hasHttpMetadata": true, "hasCustomMetadata": true },
+              { "key": "portable:sha1", "hasHttpMetadata": true, "hasCustomMetadata": true },
+              { "key": "portable:sha256", "hasHttpMetadata": true, "hasCustomMetadata": true },
+              { "key": "portable:sha384", "hasHttpMetadata": true, "hasCustomMetadata": true },
+              { "key": "portable:sha512", "hasHttpMetadata": true, "hasCustomMetadata": true },
+              { "key": "portable:stream", "hasHttpMetadata": true, "hasCustomMetadata": true },
+              { "key": "portable:z", "hasHttpMetadata": true, "hasCustomMetadata": true }
+            ],
+            "prefixes": ["portable:dir/"],
+            "truncated": false,
+            "after": ["portable:dir/one", "portable:dir/two"]
+          },
+          "deleted": true
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/multipart",
+      "expect": {
+        "status": 200,
+        "json": {
+          "identity": true,
+          "part": { "number": 1, "etag": true },
+          "object": {
+            "key": "portable:multipart",
+            "size": 5,
+            "storageClass": "InfrequentAccess",
+            "text": "hello"
+          },
+          "aborted": true
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/errors",
+      "expect": {
+        "status": 200,
+        "json": {
+          "observed": {
+            "getUnknownOption": null,
+            "putUnknownOption": null,
+            "listUnknownOption": null,
+            "getNumberKey": null,
+            "getSymbolKey": { "synchronous": false, "name": "TypeError", "message": "Cannot convert a Symbol value to a string" },
+            "negativeOffset": { "synchronous": false, "name": "RangeError", "message": "Invalid range. Starting offset (-1) must be greater than or equal to 0." },
+            "fractionalOffset": { "synchronous": false, "name": "RangeError", "message": "Invalid range. Starting offset (0.5) must be an integer, not floating point." },
+            "negativeLength": { "synchronous": false, "name": "RangeError", "message": "Invalid range. Length (-1) must be greater than or equal to 0." },
+            "fractionalLength": { "synchronous": false, "name": "RangeError", "message": "Invalid range. Length (0.5) must be an integer, not floating point." },
+            "negativeSuffix": { "synchronous": false, "name": "RangeError", "message": "Invalid suffix. Suffix (-1) must be greater than or equal to 0." },
+            "fractionalSuffix": { "synchronous": false, "name": "RangeError", "message": "Invalid range. Suffix (0.5) must be an integer, not floating point." },
+            "suffixOffset": { "synchronous": false, "name": "TypeError", "message": "Suffix is incompatible with offset." },
+            "suffixLength": { "synchronous": false, "name": "TypeError", "message": "Suffix is incompatible with length." },
+            "emptyRange": { "synchronous": false, "name": "Error", "message": "get: We encountered an internal error. Please try again. (10001)" },
+            "malformedRangeHeader": null,
+            "multiRangeHeader": null,
+            "quotedMatch": { "synchronous": false, "name": "TypeError", "message": "Conditional ETag should not be wrapped in quotes (\"quoted\")." },
+            "malformedMatchHeader": { "synchronous": false, "name": "Error", "message": "Invalid ETag in if-match header" },
+            "md5Bytes": { "synchronous": false, "name": "TypeError", "message": "MD5 is 16 bytes, not 15" },
+            "md5Length": { "synchronous": false, "name": "TypeError", "message": "MD5 is 32 hex characters, not 2" },
+            "md5Hex": { "synchronous": false, "name": "TypeError", "message": "Provided MD5 wasn't a valid hex string" },
+            "multipleHashes": { "synchronous": false, "name": "TypeError", "message": "You cannot specify multiple hashing algorithms." },
+            "ssecFormat": { "synchronous": false, "name": "Error", "message": "SSE-C Key has invalid format" },
+            "ssecLength": { "synchronous": false, "name": "Error", "message": "SSE-C Key must be 32 bytes in length" },
+            "invalidStorageClass": { "synchronous": false, "name": "Error", "message": "put: We encountered an internal error. Please try again. (10001)" },
+            "invalidInclude": { "synchronous": false, "name": "RangeError", "message": "Unsupported include value etag" },
+            "writeUnknownMetadata": { "synchronous": true, "name": "TypeError", "message": "HTTP metadata unknown for key `portable:error-seed`. Did you forget to add 'httpMetadata' to `include` when listing?" },
+            "bodySecondUse": { "synchronous": false, "name": "TypeError", "message": "Body has already been used. It can only be used once. Use tee() first if you need to read it twice." },
+            "unpairedKey": null
+          },
+          "limits": {
+            "zero": { "count": 0, "truncated": true, "hasCursor": true },
+            "negative": { "keys": ["portable:limit-0", "portable:limit-1", "portable:limit-2", "portable:limit-3"], "truncated": false, "hasCursor": true },
+            "fractional": { "keys": ["portable:limit-0"], "truncated": true, "hasCursor": true },
+            "high": { "keys": ["portable:limit-0", "portable:limit-1", "portable:limit-2", "portable:limit-3"], "truncated": false, "hasCursor": true }
+          },
+          "multipart": {
+            "uploadPartZero": { "synchronous": false, "name": "TypeError", "message": "Part number must be between 1 and 10000 (inclusive). Actual value was: 0" },
+            "uploadPartHigh": { "synchronous": false, "name": "TypeError", "message": "Part number must be between 1 and 10000 (inclusive). Actual value was: 10001" },
+            "uploadPartFractional": null,
+            "completePartZero": { "synchronous": false, "name": "TypeError", "message": "Part number must be between 1 and 10000 (inclusive). Actual value was: 0" },
+            "completeNonArray": { "synchronous": false, "name": "TypeError", "message": "Failed to execute 'complete' on 'R2MultipartUpload': parameter 1 is not of type 'Array'." },
+            "resumeEmpty": null
+          }
+        }
+      }
+    },
+    { "method": "DELETE", "path": "/cleanup", "expect": { "status": 200, "json": { "cleaned": true } } }
+  ],
+  "normalization": [],
+  "cleanup": { "cloudflare": ["worker", "r2_bucket"], "openCompute": ["worker", "r2_bucket"] }
+}

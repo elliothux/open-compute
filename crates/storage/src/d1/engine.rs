@@ -18,10 +18,10 @@ pub const D1_MAX_BOUND_PARAMS: usize = 100;
 pub const D1_MAX_COLUMNS: usize = 100;
 /// Maximum bytes in one value or materialized row.
 pub const D1_MAX_VALUE_OR_ROW_BYTES: usize = 2_000_000;
-/// Maximum statements in a transactional batch.
-pub const D1_MAX_BATCH_STATEMENTS: usize = 100;
-/// Maximum statements parsed by `exec` or one migration.
-pub const D1_MAX_EXEC_STATEMENTS: usize = 100;
+/// Maximum statements represented by the private D1 batch frame.
+pub const D1_MAX_BATCH_STATEMENTS: usize = u16::MAX as usize;
+/// Maximum statements that can fit inside one maximum-length SQL input.
+pub const D1_MAX_EXEC_STATEMENTS: usize = D1_MAX_SQL_BYTES;
 
 const INTERNAL_SCHEMA: &str = "
 CREATE TABLE __open_compute_meta (
@@ -108,28 +108,78 @@ impl D1QueryLimits {
     }
 }
 
+/// SQL execution timings nested under `D1Meta.timings`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct D1QueryTimings {
+    /// Duration of SQL execution by the database instance, excluding transport.
+    pub sql_duration_ms: f64,
+}
+
 /// D1-compatible local execution metadata.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct D1Meta {
-    /// Fixed local serving identity.
-    pub served_by: String,
-    /// All local operations use the sole primary.
-    pub served_by_primary: bool,
     /// SQLite compile/step/materialization wall milliseconds.
     pub duration: f64,
-    /// Rows changed by this statement.
-    pub changes: u64,
-    /// Last SQLite rowid converted to JavaScript Number later.
-    pub last_row_id: i64,
-    /// Whether SQLite classified the statement as non-readonly.
-    pub changed_db: bool,
     /// Logical page count times page size.
     pub size_after: u64,
     /// Local estimate equal to materialized output rows.
     pub rows_read: u64,
     /// Local estimate equal to SQLite changes.
     pub rows_written: u64,
+    /// Last SQLite rowid converted to JavaScript Number later.
+    pub last_row_id: i64,
+    /// Whether SQLite classified the statement as non-readonly.
+    pub changed_db: bool,
+    /// Rows changed by this statement.
+    pub changes: u64,
+    /// Optional region identity; omitted on the single local primary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub served_by_region: Option<String>,
+    /// Optional colo identity; omitted on the single local primary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub served_by_colo: Option<String>,
+    /// True when the local primary executed the query.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub served_by_primary: Option<bool>,
+    /// Optional SQL-only timings for the last attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timings: Option<D1QueryTimings>,
+    /// Attempt count including automatic retries; local execution is one attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_attempts: Option<u32>,
+}
+
+impl D1Meta {
+    /// Local-primary metadata with required core fields and stable optional locals.
+    #[must_use]
+    pub fn local(
+        duration: f64,
+        changes: u64,
+        last_row_id: i64,
+        changed_db: bool,
+        size_after: u64,
+        rows_read: u64,
+        rows_written: u64,
+    ) -> Self {
+        Self {
+            duration,
+            size_after,
+            rows_read,
+            rows_written,
+            last_row_id,
+            changed_db,
+            changes,
+            served_by_region: None,
+            served_by_colo: None,
+            served_by_primary: Some(true),
+            timings: Some(D1QueryTimings {
+                sql_duration_ms: duration,
+            }),
+            total_attempts: Some(1),
+        }
+    }
 }
 
 /// One statement result retaining both object and raw column order information.
@@ -221,6 +271,7 @@ impl D1Engine {
             ("resource_id", resource_id.to_string().into_bytes()),
             ("account_id", account_id.to_string().into_bytes()),
             ("created_at_ms", created_at_ms.to_string().into_bytes()),
+            ("session_version", b"0".to_vec()),
         ];
         for (key, value) in values {
             connection
@@ -291,7 +342,13 @@ impl D1Engine {
                 return Err(identity_error());
             }
         }
+        let _ = read_session_version(&connection)?;
         Ok(())
+    }
+
+    /// Read the durable monotonic D1 session state version.
+    pub fn session_version(&self) -> Result<u64, PlatformError> {
+        read_session_version(&self.open()?)
     }
 
     /// Run a bounded fast integrity check.
@@ -389,6 +446,42 @@ pub(crate) fn corrupt_error() -> PlatformError {
         ErrorCode::D1DatabaseCorrupt,
         "D1 database failed integrity validation",
     )
+}
+
+pub(crate) fn read_session_version(connection: &Connection) -> Result<u64, PlatformError> {
+    let actual: Vec<u8> = connection
+        .query_row(
+            "SELECT value FROM __open_compute_meta WHERE key = ?1",
+            ["session_version"],
+            |row| row.get(0),
+        )
+        .map_err(|_| identity_error())?;
+    let text = std::str::from_utf8(&actual).map_err(|_| identity_error())?;
+    text.parse::<u64>().map_err(|_| identity_error())
+}
+
+pub(crate) fn write_session_version(
+    connection: &Connection,
+    version: u64,
+) -> Result<(), PlatformError> {
+    let changed = connection
+        .execute(
+            "UPDATE __open_compute_meta SET value = ?1 WHERE key = ?2",
+            params![version.to_string().into_bytes(), "session_version"],
+        )
+        .map_err(map_internal_error)?;
+    if changed != 1 {
+        return Err(identity_error());
+    }
+    Ok(())
+}
+
+pub(crate) fn bump_session_version(connection: &Connection) -> Result<u64, PlatformError> {
+    let next = read_session_version(connection)?
+        .checked_add(1)
+        .ok_or_else(limit_error)?;
+    write_session_version(connection, next)?;
+    Ok(next)
 }
 
 pub(crate) fn limit_error() -> PlatformError {

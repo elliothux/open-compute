@@ -227,3 +227,7 @@ fn invalid_operator_request() -> PlatformError {
         "scheduler operator request is invalid",
     )
 }
+
+#[cfg(test)]
+#[path = "scheduler_http_tests.rs"]
+mod tests;

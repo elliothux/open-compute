@@ -3,95 +3,16 @@
 use super::durable_model::{DurableStep, read_step};
 use super::*;
 use open_compute_core::workflow::{
-    WORKFLOW_EVENT_BYTES, WorkflowDurableConfig, WorkflowEventEnvelope, WorkflowStepDescriptor,
+    WORKFLOW_EVENT_BYTES, WorkflowDurableConfig, WorkflowEventEnvelope,
 };
 
 impl SchedulerStore {
-    /// Register or replay one sleep/event descriptor without retaining an execution lease while it waits.
-    pub fn register_workflow_wait(
-        &self,
-        fence: &WorkflowFence,
-        descriptor: &WorkflowStepDescriptor,
-        now_ms: i64,
-        limits: &WorkflowsConfig,
-    ) -> Result<WorkflowStepResult, PlatformError> {
-        limits.validate()?;
-        descriptor.validate()?;
-        if matches!(descriptor.config, WorkflowDurableConfig::Do(_)) || descriptor.batch_size != 1 {
-            return Err(error(ErrorCode::WorkflowParallelStepUnsupported));
-        }
-        let mut conn = self.lock()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(sql_error)?;
-        let instance = running(&tx, fence, now_ms)?;
-        let metadata = &instance.durable;
-        if metadata.pause_requested || metadata.yield_requested {
-            return Ok(WorkflowStepResult::Suspended);
-        }
-        let existing = read_step(
-            &tx,
-            fence.instance_id,
-            fence.instance_generation,
-            descriptor.ordinal,
-        )?;
-        if let Some(existing) = &existing {
-            if existing.descriptor != *descriptor {
-                return Err(error(ErrorCode::WorkflowNonDeterministic));
-            }
-        } else {
-            if descriptor.ordinal != metadata.registered_step_count {
-                return Err(error(ErrorCode::WorkflowNonDeterministic));
-            }
-            if metadata.registered_step_count != metadata.settled_step_count {
-                return Err(error(ErrorCode::WorkflowParallelStepUnsupported));
-            }
-            if descriptor.ordinal >= limits.max_steps {
-                return Err(error(ErrorCode::WorkflowStepLimitExceeded));
-            }
-            let (due, ceiling) = match &descriptor.config {
-                WorkflowDurableConfig::Sleep(duration) => {
-                    (durable_deadline(now_ms, *duration)?, None)
-                }
-                WorkflowDurableConfig::SleepUntil(timestamp) => (*timestamp, None),
-                WorkflowDurableConfig::WaitEvent { timeout_ms, .. } => (
-                    durable_deadline(now_ms, *timeout_ms)?,
-                    Some(metadata.next_event_seq - 1),
-                ),
-                WorkflowDurableConfig::Do(_) => {
-                    return Err(error(ErrorCode::WorkflowStepConfigUnsupported));
-                }
-            };
-            capacity_change(
-                &tx,
-                &instance,
-                descriptor.state_bytes()? as i64,
-                i64::from(ceiling.is_some()),
-                limits,
-            )?;
-            durable_steps::register(&tx, fence, descriptor, now_ms, Some(due), ceiling)?;
-        }
-        let step = read_step(
-            &tx,
-            fence.instance_id,
-            fence.instance_generation,
-            descriptor.ordinal,
-        )?
-        .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
-        let result = settle(&tx, &instance, &step, now_ms, limits)?;
-        if matches!(result, WorkflowStepResult::Suspended) {
-            durable_steps::request_yield(&tx, fence, now_ms)?;
-        }
-        heartbeat(&tx, fence, now_ms, limits)?;
-        tx.commit().map_err(sql_error)?;
-        Ok(result)
-    }
-
     /// Admit a canonical event for an exact immutable instance generation, then arbitrate a matching wait.
     /// Inbox insertion, result copy and consumption commit together; ambiguous callers must not auto-retry.
     pub fn send_workflow_event(
         &self,
         identity: &WorkflowInstanceIdentity,
+        operation_id: WorkflowOperationId,
         event_type: &str,
         payload: &str,
         now_ms: i64,
@@ -99,7 +20,7 @@ impl SchedulerStore {
     ) -> Result<(), PlatformError> {
         limits.validate()?;
         open_compute_core::workflow::validate_workflow_event_type(event_type)?;
-        let payload = open_compute_core::workflow::canonical_json(
+        let payload = open_compute_core::workflow::durable_value_base64(
             payload,
             ErrorCode::WorkflowPayloadTooLarge,
         )?;
@@ -107,6 +28,22 @@ impl SchedulerStore {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
+        let payload_sha256: [u8; 32] = Sha256::digest(payload.as_bytes()).into();
+        let receipt = tx.query_row(
+            "SELECT instance_id,instance_generation,type,payload_sha256 FROM workflow_event_receipts WHERE operation_id=?1",
+            [operation_id.to_string()],
+            |row| Ok((parse::<WorkflowInstanceId>(row, 0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?, row.get::<_, Vec<u8>>(3)?)),
+        ).optional().map_err(sql_error)?;
+        if let Some((stored_id, generation, stored_type, stored_payload)) = receipt {
+            if stored_id != identity.instance_id
+                || generation != identity.instance_generation
+                || stored_type != event_type
+                || stored_payload.as_slice() != payload_sha256
+            {
+                return Err(error(ErrorCode::WorkflowInvariantViolation));
+            }
+            return Ok(());
+        }
         let instance = tx
             .query_row(
                 &format!("{INSTANCE_SELECT} WHERE id=?1"),
@@ -133,7 +70,10 @@ impl SchedulerStore {
         capacity_change(&tx, &instance, logical as i64, 0, limits)?;
         let now_ms = now_ms.max(instance.updated_at_ms);
         durable_deadline(now_ms, 0)?;
-        tx.execute("INSERT INTO workflow_events(instance_id,instance_generation,event_seq,type,payload_json,accepted_at_ms,logical_bytes)
+        tx.execute("INSERT INTO workflow_event_receipts(operation_id,instance_id,instance_generation,type,payload_sha256,accepted_at_ms)
+            VALUES(?1,?2,?3,?4,?5,?6)", params![operation_id.to_string(),identity.instance_id.to_string(),identity.instance_generation,
+                event_type,payload_sha256.as_slice(),now_ms]).map_err(sql_error)?;
+        tx.execute("INSERT INTO workflow_events(instance_id,instance_generation,event_seq,type,payload_base64,accepted_at_ms,logical_bytes)
             VALUES(?1,?2,?3,?4,?5,?6,?7)",params![identity.instance_id.to_string(),identity.instance_generation,metadata.next_event_seq,
                 event_type,payload.as_bytes(),now_ms,logical]).map_err(sql_error)?;
         tx.execute(
@@ -183,7 +123,7 @@ pub(super) fn settle(
     if let WorkflowDurableConfig::WaitEvent { event_type, .. } = &step.descriptor.config {
         let event: Option<(i64, String, i64, u64)> = conn
             .query_row(
-                "SELECT event_seq,payload_json,accepted_at_ms,logical_bytes FROM workflow_events
+                "SELECT event_seq,payload_base64,accepted_at_ms,logical_bytes FROM workflow_events
             WHERE instance_id=?1 AND instance_generation=?2 AND type=?3 ORDER BY event_seq LIMIT 1",
                 params![
                     id.to_string(),
@@ -201,10 +141,10 @@ pub(super) fn settle(
             if accepted < due || sequence <= ceiling {
                 let output = WorkflowEventEnvelope {
                     event_type,
-                    payload_json: &payload,
+                    payload_base64: &payload,
                     timestamp_ms: accepted,
                 }
-                .canonical_json()?;
+                .canonical_wire()?;
                 capacity_change(
                     conn,
                     instance,
@@ -221,8 +161,10 @@ pub(super) fn settle(
                     params![id.to_string(), sequence],
                 )
                 .map_err(sql_error)?;
-                return Ok(WorkflowStepResult::Complete {
-                    output_json: Some(output),
+                return Ok(WorkflowStepResult::Event {
+                    event_type: event_type.clone(),
+                    payload_base64: payload,
+                    timestamp_ms: accepted,
                 });
             }
         }
@@ -236,7 +178,9 @@ pub(super) fn settle(
     } else if due <= now_ms {
         conn.execute("UPDATE workflow_steps SET state='complete',due_at_ms=NULL,updated_at_ms=?3,completed_at_ms=?3
             WHERE instance_id=?1 AND ordinal=?2",params![id.to_string(),ordinal,now_ms]).map_err(sql_error)?;
-        return Ok(WorkflowStepResult::Complete { output_json: None });
+        return Ok(WorkflowStepResult::Complete {
+            output_base64: None,
+        });
     }
     Ok(WorkflowStepResult::Suspended)
 }

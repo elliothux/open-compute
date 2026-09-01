@@ -11,14 +11,14 @@
     "rolldown": "1.2.6",
     "typescript": "7.0.2",
     "@types/node": "24.13.3",
-    "@cloudflare/workers-types": "5.20260826.1",
+    "@cloudflare/workers-types": "5.20260830.1",
     "vitepress": "1.6.4"
   },
   "scripts": {
     "oc": "bun packages/toolchain/src/bin.ts",
     "build": "bun run --filter @open-compute/toolchain build && bun run --filter @open-compute/runtime build && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
     "typecheck": "bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
-    "test:js": "node --test 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs'",
+    "test:js": "node --test 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs' 'test/conformance/*.test.mjs'",
     "check:generated": "bun run --filter @open-compute/runtime check:generated",
     "docs:dev": "bun run --filter @open-compute/docs dev",
     "docs:build": "bun run --filter @open-compute/docs build",

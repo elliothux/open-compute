@@ -114,7 +114,7 @@ def selection(names):
 
 
 def validate_contract_case_mapping():
-    """Every catalog result reference must resolve to one audited native runner case."""
+    """Every contract/member reference must resolve to one audited native runner case."""
     catalog = json.loads((ROOT / 'test/conformance/catalog.json').read_text())
     if not isinstance(catalog, dict):
         raise ValueError('invalid conformance catalog')
@@ -132,6 +132,18 @@ def validate_contract_case_mapping():
             if not isinstance(cases, list) or not all(isinstance(case, str) for case in cases):
                 raise ValueError(f'invalid conformance contract {field}')
             referenced.update(cases)
+    evidence = catalog.get('memberEvidence')
+    if not isinstance(evidence, list):
+        raise ValueError('invalid conformance member evidence')
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError('invalid conformance member evidence')
+        cases = item.get('runtimeCases', [])
+        if (not isinstance(cases, list)
+                or not all(isinstance(case, str) and case for case in cases)
+                or len(cases) != len(set(cases))):
+            raise ValueError('invalid conformance member runtime evidence')
+        referenced.update(cases)
     missing = referenced - registered
     if missing:
         raise ValueError(f'catalog references unregistered Gate cases: {sorted(missing)}')
@@ -425,6 +437,9 @@ def execute_target(name, executable, directory, target, *, list_only=False):
     if isinstance(target, TypedTarget):
         env = {key: os.environ[key] for key in target.env_allowlist if key in os.environ}
         env.update(TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary))
+        # Bun otherwise materializes its transpiler cache under the isolated TMPDIR,
+        # which is a harness leak even for read-only discovery and contract checks.
+        env['BUN_RUNTIME_TRANSPILER_CACHE_PATH'] = '0'
     else:
         env = dict(os.environ, TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary))
     # Repetition belongs only to this runner, including when a test spawns its own fixture.

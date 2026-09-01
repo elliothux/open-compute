@@ -27,7 +27,7 @@ use open_compute_workers::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use workflow_support::Harness;
+use workflow_support::{Harness, decode_workflow_json, encode_workflow_json};
 
 fn now() -> i64 {
     SystemSchedulerClock.wall_time_ms()
@@ -68,8 +68,8 @@ fn complete(result: WorkflowDispatchResult) -> (u32, String) {
     match result.result {
         WorkflowOutcome::Complete {
             final_ordinal,
-            output_json,
-        } => (final_ordinal, output_json),
+            output_base64,
+        } => (final_ordinal, output_base64),
         outcome => panic!("expected complete Workflow result, got {outcome:?}"),
     }
 }

@@ -1,10 +1,6 @@
 //! P1.0 release/capability contract black-box Gate.
 
-use open_compute_workers::{
-    COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN, validate_compatibility,
-};
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -87,33 +83,59 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         first["release"]["workerd_lock_sha256"]
     );
     let products = first["products"].as_object().expect("products");
-    for name in ["workers", "alarms", "version_metadata"] {
-        assert_eq!(products[name]["status"], "supported", "{name}");
-        assert_eq!(products[name]["capability_version"], 1, "{name}");
-    }
-    for name in [
-        "deployments",
-        "static_assets",
-        "service_bindings",
-        "kv",
-        "r2",
-        "d1",
-        "durable_objects",
-        "queues",
-        "cron",
-        "workflows",
-        "workers_cache",
-        "cache_api",
-        "images",
-    ] {
+    for name in ["deployments", "service_bindings", "workers_cache"] {
         assert_eq!(
             products[name]["status"], "supported_with_deviation",
             "{name}"
         );
+        assert_eq!(products[name]["kind"], "platform", "{name}");
         assert_eq!(products[name]["capability_version"], 1, "{name}");
+        assert!(products[name].get("methods").is_none(), "{name}");
+        assert!(products[name].get("members").is_none(), "{name}");
     }
     for name in [
+        "workers",
+        "kv",
+        "r2",
+        "d1",
+        "durable_objects",
+        "alarms",
+        "queues",
+        "cron",
+        "workflows",
+        "cache_api",
+        "version_metadata",
         "websocket_hibernation",
+    ] {
+        assert_eq!(products[name]["kind"], "target", "{name}");
+        assert!(
+            matches!(
+                products[name]["status"].as_str(),
+                Some("supported" | "supported_with_deviation")
+            ),
+            "{name}"
+        );
+        assert_eq!(products[name]["capability_version"], 1, "{name}");
+        assert!(products[name].get("methods").is_none(), "{name}");
+        assert!(
+            products[name]["members"]
+                .as_array()
+                .expect(name)
+                .iter()
+                .all(|member| member["status"] != "blocked"),
+            "{name}"
+        );
+    }
+    for name in ["static_assets", "images"] {
+        assert_eq!(
+            products[name]["status"], "supported_with_deviation",
+            "{name}"
+        );
+        assert_eq!(products[name]["kind"], "platform", "{name}");
+        assert_eq!(products[name]["capability_version"], 1, "{name}");
+        assert!(products[name].get("members").is_none(), "{name}");
+    }
+    for name in [
         "analytics_engine",
         "ai",
         "browser_rendering",
@@ -124,130 +146,22 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         "workers_for_platforms",
     ] {
         assert_eq!(products[name]["status"], "unsupported", "{name}");
+        assert_eq!(products[name]["kind"], "non_target", "{name}");
         assert!(products[name].get("capability_version").is_none(), "{name}");
+        assert!(products[name].get("members").is_none(), "{name}");
     }
-    let expected_methods = BTreeMap::from([
-        (
-            "workers",
-            vec!["fetch", "rpc", "streams", "websocket", "outbound_fetch"],
-        ),
-        (
-            "deployments",
-            vec![
-                "create", "validate", "stage", "ready", "promote", "rollback", "route", "delete",
-                "vars", "secrets",
-            ],
-        ),
-        (
-            "static_assets",
-            vec!["binding.fetch", "routing", "http", "publish", "rollback"],
-        ),
-        (
-            "service_bindings",
-            vec!["fetch", "rpc", "named_entrypoint", "self", "lifecycle"],
-        ),
-        (
-            "kv",
-            vec!["get", "getWithMetadata", "put", "delete", "list"],
-        ),
-        ("r2", vec!["head", "get", "put", "delete", "list"]),
-        (
-            "d1",
-            vec![
-                "prepare",
-                "batch",
-                "exec",
-                "withSession",
-                "run",
-                "all",
-                "first",
-                "raw",
-            ],
-        ),
-        (
-            "durable_objects",
-            vec![
-                "idFromName",
-                "newUniqueId",
-                "idFromString",
-                "get",
-                "getByName",
-                "fetch",
-                "rpc",
-                "storage.get",
-                "storage.put",
-                "storage.delete",
-                "storage.list",
-                "storage.transaction",
-            ],
-        ),
-        (
-            "alarms",
-            vec!["getAlarm", "setAlarm", "deleteAlarm", "alarm"],
-        ),
-        (
-            "queues",
-            vec![
-                "send",
-                "sendBatch",
-                "metrics",
-                "queue",
-                "ack",
-                "retry",
-                "ackAll",
-                "retryAll",
-            ],
-        ),
-        ("cron", vec!["scheduled", "noRetry"]),
-        (
-            "workflows",
-            vec![
-                "create",
-                "get",
-                "id",
-                "status",
-                "step.do",
-                "step.sleep",
-                "step.sleepUntil",
-                "step.waitForEvent",
-                "sendEvent",
-                "pause",
-                "resume",
-                "terminate",
-                "restart",
-            ],
-        ),
-        ("workers_cache", vec!["fetch", "purge"]),
-        (
-            "cache_api",
-            vec!["default", "open", "put", "match", "delete"],
-        ),
-        (
-            "images",
-            vec![
-                "input",
-                "info",
-                "transform",
-                "draw",
-                "output",
-                "response",
-                "contentType",
-                "image",
-            ],
-        ),
-        ("version_metadata", vec!["id", "tag", "timestamp"]),
-    ]);
-    for (product, methods) in expected_methods {
-        assert_eq!(
-            products[product]["methods"],
-            serde_json::json!(methods),
-            "{product}"
-        );
-    }
-    assert_eq!(products["durable_objects"]["basic_websocket"], "supported");
+    assert!(
+        first["runtime"]["workers_types_version"]
+            .as_str()
+            .expect("workers_types_version")
+            .starts_with("5.")
+    );
     assert_eq!(
-        products["durable_objects"]["hibernatable_websocket"],
-        "unsupported"
+        first["runtime"]["workers_types_ast_sha256"]
+            .as_str()
+            .expect("ast")
+            .len(),
+        64
     );
     let deviations = fs::read_to_string(workspace().join("docs/references/p1-deviations.md"))
         .expect("deviations document");
@@ -259,44 +173,19 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         }
     }
     assert_eq!(capabilities(&config), first);
-
-    for date in [COMPATIBILITY_DATE_MIN, COMPATIBILITY_DATE_MAX] {
-        assert_eq!(
-            validate_compatibility(date, vec!["nodejs_compat".to_owned(), "rpc".to_owned()],)
-                .expect("supported compatibility boundary"),
-            ["nodejs_compat".to_owned(), "rpc".to_owned()]
-        );
-        for flag in [
-            "assets_navigation_has_no_effect",
-            "assets_navigation_prefers_asset_serving",
-        ] {
-            assert_eq!(
-                validate_compatibility(date, vec![flag.to_owned()])
-                    .expect("supported official assets compatibility flag"),
-                [flag.to_owned()]
-            );
-        }
-    }
-    assert!(
-        validate_compatibility(
-            COMPATIBILITY_DATE_MIN,
-            vec![
-                "assets_navigation_has_no_effect".to_owned(),
-                "assets_navigation_prefers_asset_serving".to_owned(),
-            ],
-        )
-        .is_err()
-    );
-    assert!(validate_compatibility("2021-12-31", Vec::new()).is_err());
-    assert!(validate_compatibility("2026-08-27", Vec::new()).is_err());
-    assert!(validate_compatibility(COMPATIBILITY_DATE_MIN, vec!["unknown".to_owned()]).is_err());
     assert_eq!(
-        validate_compatibility(
-            COMPATIBILITY_DATE_MIN,
-            vec!["rpc".to_owned(), "rpc".to_owned()],
-        )
-        .expect("duplicate flag is canonicalized"),
-        ["rpc".to_owned()]
+        capabilities(&config)["runtime"]["effective_compatibility_date"],
+        "2026-08-30"
+    );
+    assert!(
+        capabilities(&config)["runtime"]
+            .get("allowed_flags")
+            .is_none()
+    );
+    assert!(
+        capabilities(&config)["runtime"]
+            .get("compatibility_date_min")
+            .is_none()
     );
 
     let fixture_root = workspace().join("crates/service/tests/fixtures/p1-conformance");

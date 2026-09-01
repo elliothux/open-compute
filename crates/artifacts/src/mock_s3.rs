@@ -24,6 +24,9 @@ pub enum Fault {
     DeleteFail,
     PutResponseLoss,
     DeleteResponseLoss,
+    CreateResponseLoss,
+    CompleteResponseLoss,
+    AbortResponseLoss,
     MidstreamReset,
     NotFound,
 }
@@ -36,6 +39,10 @@ pub struct Recorded {
     pub query: String,
     pub has_authorization: bool,
     pub authorization: Option<String>,
+    /// Present when the request carried SSE-C headers. Never stores the key.
+    pub ssec_algorithm: Option<String>,
+    /// Public SSE-C key MD5 header, if any.
+    pub ssec_key_md5: Option<String>,
 }
 
 #[derive(Clone)]
@@ -47,6 +54,17 @@ pub(crate) struct StoredObject {
     pub response_headers: HashMap<String, String>,
     #[allow(dead_code)]
     pub modified: SystemTime,
+    pub storage_class: String,
+    pub ssec_key_md5: Option<String>,
+}
+
+struct MultipartUpload {
+    key: String,
+    parts: std::collections::BTreeMap<i32, (String, Vec<u8>)>,
+    metadata: HashMap<String, String>,
+    response_headers: HashMap<String, String>,
+    storage_class: String,
+    ssec_key_md5: Option<String>,
 }
 
 #[derive(Clone)]
@@ -68,12 +86,14 @@ impl std::fmt::Debug for MockS3 {
 struct Inner {
     bucket: String,
     objects: HashMap<String, StoredObject>,
+    uploads: HashMap<String, MultipartUpload>,
     fault: Fault,
     recorded: Vec<Recorded>,
     get_chunk_size: usize,
     get_chunk_delay: Duration,
     omit_last_modified: bool,
     head_barrier: Option<Arc<tokio::sync::Barrier>>,
+    conditional_put_race: Option<Vec<u8>>,
 }
 
 impl MockS3 {
@@ -83,12 +103,14 @@ impl MockS3 {
         let state = Arc::new(Mutex::new(Inner {
             bucket: bucket.to_string(),
             objects: HashMap::new(),
+            uploads: HashMap::new(),
             fault: Fault::None,
             recorded: Vec::new(),
             get_chunk_size: usize::MAX,
             get_chunk_delay: Duration::ZERO,
             omit_last_modified: false,
             head_barrier: None,
+            conditional_put_race: None,
         }));
         let (tx, mut rx) = oneshot::channel();
         let state_clone = Arc::clone(&state);
@@ -127,6 +149,16 @@ impl MockS3 {
             Some(Arc::new(tokio::sync::Barrier::new(participants)));
     }
 
+    /// Insert one competing object immediately before the next conditional create fence.
+    pub fn race_next_conditional_put(&self, body: Vec<u8>) {
+        self.state.lock().expect("lock").conditional_put_race = Some(body);
+    }
+
+    /// Number of provider multipart uploads that have not completed or aborted.
+    pub fn multipart_upload_count(&self) -> usize {
+        self.state.lock().expect("lock").uploads.len()
+    }
+
     pub fn recorded(&self) -> Vec<Recorded> {
         self.state.lock().expect("lock").recorded.clone()
     }
@@ -162,6 +194,8 @@ impl MockS3 {
                 metadata: HashMap::new(),
                 response_headers: HashMap::new(),
                 modified: SystemTime::now(),
+                storage_class: "STANDARD".to_owned(),
+                ssec_key_md5: None,
             },
         );
     }
@@ -254,6 +288,12 @@ async fn handle_conn(
                 query: query.clone(),
                 has_authorization,
                 authorization,
+                ssec_algorithm: headers
+                    .get("x-amz-server-side-encryption-customer-algorithm")
+                    .cloned(),
+                ssec_key_md5: headers
+                    .get("x-amz-server-side-encryption-customer-key-md5")
+                    .cloned(),
             });
         }
         let content_length = headers
@@ -315,11 +355,50 @@ async fn handle_conn(
 
         if method == "GET"
             && (path == format!("/{bucket}") || path == format!("/{bucket}/"))
+            && query
+                .split('&')
+                .any(|part| part == "uploads" || part == "uploads=")
+        {
+            let list_prefix = query_param(&query, "prefix").unwrap_or_default();
+            let mut uploads = state
+                .lock()
+                .expect("lock")
+                .uploads
+                .iter()
+                .filter(|(_, upload)| upload.key.starts_with(&list_prefix))
+                .map(|(id, upload)| (upload.key.clone(), id.clone()))
+                .collect::<Vec<_>>();
+            uploads.sort();
+            let entries = uploads
+                .into_iter()
+                .map(|(key, id)| {
+                    format!(
+                        "<Upload><Key>{}</Key><UploadId>{}</UploadId></Upload>",
+                        xml_escape(&key),
+                        xml_escape(&id)
+                    )
+                })
+                .collect::<String>();
+            write_xml(
+                &mut stream,
+                200,
+                &format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListMultipartUploadsResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Bucket>{}</Bucket><IsTruncated>false</IsTruncated>{entries}</ListMultipartUploadsResult>",
+                    xml_escape(&bucket)
+                ),
+            )
+            .await?;
+            continue;
+        }
+
+        if method == "GET"
+            && (path == format!("/{bucket}") || path == format!("/{bucket}/"))
             && (query.contains("list-type=2") || query.contains("prefix="))
         {
             let list_prefix = query_param(&query, "prefix").unwrap_or_default();
             let delimiter = query_param(&query, "delimiter");
             let continuation = query_param(&query, "continuation-token");
+            let start_after = query_param(&query, "start-after");
             let max_keys = query_param(&query, "max-keys")
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(1000)
@@ -330,6 +409,7 @@ async fn handle_conn(
                 &list_prefix,
                 delimiter.as_deref(),
                 continuation.as_deref(),
+                start_after.as_deref(),
                 max_keys,
             );
             write_xml(&mut stream, 200, &xml).await?;
@@ -379,6 +459,159 @@ async fn handle_conn(
             }
         };
 
+        if method == "POST" && (query == "uploads" || query.starts_with("uploads=")) {
+            let Ok(ssec) = parse_ssec(&headers) else {
+                write_s3_err(&mut stream, 400, "InvalidRequest").await?;
+                continue;
+            };
+            let upload_id = format!(
+                "upload-{}",
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_nanos())
+            );
+            let metadata = meta_from_headers(&headers);
+            let response_headers = http_headers(&headers);
+            state.lock().expect("lock").uploads.insert(
+                upload_id.clone(),
+                MultipartUpload {
+                    key: key.clone(),
+                    parts: std::collections::BTreeMap::new(),
+                    metadata,
+                    response_headers,
+                    storage_class: storage_class_from(&headers),
+                    ssec_key_md5: ssec,
+                },
+            );
+            if fault == Fault::CreateResponseLoss {
+                stream.shutdown().await?;
+                return Ok(());
+            }
+            write_xml(
+                &mut stream,
+                200,
+                &format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><InitiateMultipartUploadResult><Bucket>{}</Bucket><Key>{}</Key><UploadId>{}</UploadId></InitiateMultipartUploadResult>",
+                    xml_escape(&bucket),
+                    xml_escape(&key),
+                    xml_escape(&upload_id)
+                ),
+            )
+            .await?;
+            continue;
+        }
+        if method == "PUT"
+            && let (Some(part_number), Some(upload_id)) = (
+                query_param(&query, "partNumber").and_then(|value| value.parse::<i32>().ok()),
+                query_param(&query, "uploadId"),
+            )
+        {
+            let Ok(ssec) = parse_ssec(&headers) else {
+                write_s3_err(&mut stream, 400, "InvalidRequest").await?;
+                continue;
+            };
+            let etag = hex::encode(md5::Md5::digest(&body));
+            let ok = {
+                let mut g = state.lock().expect("lock");
+                match g.uploads.get_mut(&upload_id) {
+                    Some(upload) if upload.key == key && upload.ssec_key_md5 == ssec => {
+                        upload.parts.insert(part_number, (etag.clone(), body));
+                        true
+                    }
+                    Some(_) | None => false,
+                }
+            };
+            if !ok {
+                write_s3_err(&mut stream, 404, "NoSuchUpload").await?;
+                continue;
+            }
+            write_object_status(&mut stream, 200, "OK", 0, &HashMap::new(), &etag, None).await?;
+            continue;
+        }
+        if method == "POST"
+            && let Some(upload_id) = query_param(&query, "uploadId")
+        {
+            let Ok(ssec) = parse_ssec(&headers) else {
+                write_s3_err(&mut stream, 400, "InvalidRequest").await?;
+                continue;
+            };
+            let completed = {
+                let mut g = state.lock().expect("lock");
+                g.uploads.remove(&upload_id)
+            };
+            let Some(upload) = completed else {
+                write_s3_err(&mut stream, 404, "NoSuchUpload").await?;
+                continue;
+            };
+            if upload.key != key {
+                write_s3_err(&mut stream, 404, "NoSuchUpload").await?;
+                continue;
+            }
+            if upload.ssec_key_md5 != ssec {
+                write_s3_err(&mut stream, 403, "AccessDenied").await?;
+                continue;
+            }
+            let mut assembled = Vec::new();
+            for (_number, (_etag, part)) in upload.parts {
+                assembled.extend_from_slice(&part);
+            }
+            let checksums = crate::hash_bytes(&assembled);
+            let metadata = upload.metadata;
+            let etag = hex::encode(checksums.md5);
+            if fault == Fault::CompleteResponseLoss {
+                state.lock().expect("lock").objects.insert(
+                    key.clone(),
+                    StoredObject {
+                        sha256: hex::encode(checksums.sha256),
+                        body: assembled,
+                        etag: etag.clone(),
+                        metadata: metadata.clone(),
+                        response_headers: upload.response_headers.clone(),
+                        modified: SystemTime::now(),
+                        storage_class: upload.storage_class.clone(),
+                        ssec_key_md5: upload.ssec_key_md5.clone(),
+                    },
+                );
+                stream.shutdown().await?;
+                return Ok(());
+            }
+            state.lock().expect("lock").objects.insert(
+                key.clone(),
+                StoredObject {
+                    sha256: hex::encode(checksums.sha256),
+                    body: assembled,
+                    etag: etag.clone(),
+                    metadata,
+                    response_headers: upload.response_headers,
+                    modified: SystemTime::now(),
+                    storage_class: upload.storage_class,
+                    ssec_key_md5: upload.ssec_key_md5,
+                },
+            );
+            write_xml(
+                &mut stream,
+                200,
+                &format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><CompleteMultipartUploadResult><Key>{}</Key><ETag>\"{}\"</ETag></CompleteMultipartUploadResult>",
+                    xml_escape(&key),
+                    xml_escape(&etag)
+                ),
+            )
+            .await?;
+            continue;
+        }
+        if method == "DELETE"
+            && let Some(upload_id) = query_param(&query, "uploadId")
+        {
+            state.lock().expect("lock").uploads.remove(&upload_id);
+            if fault == Fault::AbortResponseLoss {
+                stream.shutdown().await?;
+                return Ok(());
+            }
+            write_status(&mut stream, 204, "No Content", b"").await?;
+            continue;
+        }
+
         if method == "HEAD" {
             let barrier = state.lock().expect("lock").head_barrier.clone();
             if let Some(barrier) = barrier {
@@ -418,8 +651,51 @@ async fn handle_conn(
                     .map(|(name, value)| (name.clone(), value.clone()))
                     .collect::<HashMap<_, _>>();
                 let etag = hex::encode(md5::Md5::digest(&body));
+                let Ok(ssec) = parse_ssec(&headers) else {
+                    write_s3_err(&mut stream, 400, "InvalidRequest").await?;
+                    continue;
+                };
+                let storage_class = storage_class_from(&headers);
                 let conflict = {
                     let mut g = state.lock().expect("lock");
+                    if headers
+                        .get("if-none-match")
+                        .is_some_and(|value| value == "*")
+                        && let Some(raced_body) = g.conditional_put_race.take()
+                    {
+                        let raced_checksums = crate::hash_bytes(&raced_body);
+                        let mut raced_metadata = metadata.clone();
+                        raced_metadata
+                            .insert("oc-r2-md5".to_owned(), hex::encode(raced_checksums.md5));
+                        raced_metadata
+                            .insert("oc-r2-sha1".to_owned(), hex::encode(raced_checksums.sha1));
+                        raced_metadata.insert(
+                            "oc-r2-sha256".to_owned(),
+                            hex::encode(raced_checksums.sha256),
+                        );
+                        raced_metadata.insert(
+                            "oc-r2-sha384".to_owned(),
+                            hex::encode(raced_checksums.sha384),
+                        );
+                        raced_metadata.insert(
+                            "oc-r2-sha512".to_owned(),
+                            hex::encode(raced_checksums.sha512),
+                        );
+                        let raced_etag = hex::encode(md5::Md5::digest(&raced_body));
+                        g.objects.insert(
+                            key.clone(),
+                            StoredObject {
+                                sha256: hex::encode(raced_checksums.sha256),
+                                body: raced_body,
+                                etag: raced_etag,
+                                metadata: raced_metadata,
+                                response_headers: response_headers.clone(),
+                                modified: SystemTime::now(),
+                                storage_class: storage_class.clone(),
+                                ssec_key_md5: ssec.clone(),
+                            },
+                        );
+                    }
                     let current = g.objects.get(&key);
                     let none_failed = headers.get("if-none-match").is_some_and(|value| {
                         value == "*" && current.is_some()
@@ -441,6 +717,8 @@ async fn handle_conn(
                                 metadata,
                                 response_headers,
                                 modified: SystemTime::now(),
+                                storage_class,
+                                ssec_key_md5: ssec,
                             },
                         );
                         false
@@ -477,12 +755,17 @@ async fn handle_conn(
                             metadata,
                             obj.response_headers.clone(),
                             obj.etag.clone(),
+                            obj.ssec_key_md5.clone(),
                         )
                     })
                 };
                 match found {
                     None => write_s3_err(&mut stream, 404, "NoSuchKey").await?,
-                    Some((len, metadata, response_headers, etag)) => {
+                    Some((len, metadata, response_headers, etag, ssec_md5)) => {
+                        if ssec_denied(&headers, ssec_md5.as_deref()) {
+                            write_s3_err(&mut stream, 403, "AccessDenied").await?;
+                            continue;
+                        }
                         if headers
                             .get("if-match")
                             .is_some_and(|value| !etag_header_matches(value, &etag))
@@ -520,13 +803,18 @@ async fn handle_conn(
                             metadata,
                             obj.response_headers.clone(),
                             obj.etag.clone(),
+                            obj.ssec_key_md5.clone(),
                         )
                     });
                     (found, g.get_chunk_size, g.get_chunk_delay)
                 };
                 match found {
                     None => write_s3_err(&mut stream, 404, "NoSuchKey").await?,
-                    Some((body, metadata, response_headers, etag)) => {
+                    Some((body, metadata, response_headers, etag, ssec_md5)) => {
+                        if ssec_denied(&headers, ssec_md5.as_deref()) {
+                            write_s3_err(&mut stream, 403, "AccessDenied").await?;
+                            continue;
+                        }
                         if headers
                             .get("if-match")
                             .is_some_and(|value| !etag_header_matches(value, &etag))
@@ -692,14 +980,16 @@ fn list_xml(
     prefix: &str,
     delimiter: Option<&str>,
     continuation: Option<&str>,
+    start_after: Option<&str>,
     max_keys: usize,
 ) -> String {
     let g = state.lock().expect("lock");
+    let after = continuation.or(start_after);
     let mut rows = g
         .objects
         .iter()
         .filter(|(key, _)| key.starts_with(prefix))
-        .filter(|(key, _)| continuation.is_none_or(|after| key.as_str() > after))
+        .filter(|(key, _)| after.is_none_or(|after| key.as_str() > after))
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
     let mut contents = String::new();
@@ -728,10 +1018,11 @@ fn list_xml(
             "<LastModified>2020-01-01T00:00:00.000Z</LastModified>".to_string()
         };
         contents.push_str(&format!(
-            "<Contents><Key>{}</Key>{lm}<ETag>\"{}\"</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass></Contents>",
+            "<Contents><Key>{}</Key>{lm}<ETag>\"{}\"</ETag><Size>{}</Size><StorageClass>{}</StorageClass></Contents>",
             xml_escape(key),
             obj.etag,
-            obj.body.len()
+            obj.body.len(),
+            xml_escape(&obj.storage_class)
         ));
         emitted = emitted.saturating_add(1);
         last_emitted = Some(key.clone());
@@ -979,6 +1270,73 @@ fn xml_unescape(value: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .replace("&amp;", "&")
+}
+
+fn meta_from_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            name.strip_prefix("x-amz-meta-")
+                .map(|name| (name.to_owned(), value.clone()))
+        })
+        .collect()
+}
+
+fn http_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    headers
+        .iter()
+        .filter(|(name, _)| {
+            matches!(
+                name.as_str(),
+                "content-type"
+                    | "content-language"
+                    | "content-disposition"
+                    | "content-encoding"
+                    | "cache-control"
+                    | "expires"
+            )
+        })
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
+fn storage_class_from(headers: &HashMap<String, String>) -> String {
+    headers
+        .get("x-amz-storage-class")
+        .cloned()
+        .unwrap_or_else(|| "STANDARD".to_owned())
+}
+
+fn parse_ssec(headers: &HashMap<String, String>) -> Result<Option<String>, ()> {
+    let algo = headers.get("x-amz-server-side-encryption-customer-algorithm");
+    let key = headers.get("x-amz-server-side-encryption-customer-key");
+    let md5 = headers.get("x-amz-server-side-encryption-customer-key-md5");
+    match (algo, key, md5) {
+        (None, None, None) => Ok(None),
+        (Some(algo), Some(key), Some(md5)) if algo.eq_ignore_ascii_case("AES256") => {
+            let raw = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, key)
+                .map_err(|_| ())?;
+            if raw.len() != 32 {
+                return Err(());
+            }
+            let computed = base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                md5::Md5::digest(&raw),
+            );
+            if &computed != md5 {
+                return Err(());
+            }
+            Ok(Some(computed))
+        }
+        _ => Err(()),
+    }
+}
+
+fn ssec_denied(headers: &HashMap<String, String>, stored: Option<&str>) -> bool {
+    let Some(expected) = stored else {
+        return false;
+    };
+    parse_ssec(headers).ok().flatten().as_deref() != Some(expected)
 }
 
 #[cfg(test)]

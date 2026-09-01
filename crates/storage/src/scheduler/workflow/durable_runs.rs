@@ -128,8 +128,10 @@ impl SchedulerStore {
             target: identity.target.clone(),
             external_instance_id: identity.external_instance_id.clone(),
             created_at_ms: identity.created_at_ms,
+            schedule: identity.schedule.clone(),
             input_json: record.input_json,
             recovered: record.durable.has_activated,
+            rollback: record.durable.rollback_requested,
         }))
     }
 
@@ -228,6 +230,41 @@ impl SchedulerStore {
             self.wake.notify();
             return Ok(state);
         }
+        if let WorkflowCompletion::Terminated { final_ordinal } = completion {
+            if !metadata.rollback_requested || *final_ordinal != metadata.registered_step_count {
+                return Err(error(ErrorCode::WorkflowNonDeterministic));
+            }
+            let unfinished: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM workflow_steps WHERE instance_id=?1
+                     AND state IN ('pending','running','delay_pending','retry_wait','waiting'))",
+                    [fence.instance_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if unfinished {
+                return Err(error(ErrorCode::WorkflowNonDeterministic));
+            }
+            tx.execute(
+                "UPDATE workflow_instances SET state='terminated',output_json=NULL,error_json=NULL,error_code=NULL,
+                 rollback_requested=0,terminal_at_ms=?4,updated_at_ms=?4,expires_at_ms=?5,
+                 run_token=NULL,run_claimed_at_ms=NULL,run_lease_until_ms=NULL
+                 WHERE id=?1 AND instance_generation=?2 AND run_token=?3 AND state='running'",
+                params![
+                    fence.instance_id.to_string(),
+                    fence.instance_generation,
+                    fence.run_token.as_bytes().as_slice(),
+                    now_ms,
+                    metadata.retention.expires_at(now_ms, false)?
+                ],
+            )
+            .map_err(sql_error)?;
+            tx.commit().map_err(sql_error)?;
+            return Ok(WorkflowState::Terminated);
+        }
+        if metadata.rollback_requested {
+            return Err(error(ErrorCode::WorkflowNonDeterministic));
+        }
         let platform_failure:Option<String>=tx.query_row("SELECT error_code FROM workflow_steps WHERE instance_id=?1 AND state='failed'
             AND error_code NOT IN ('WORKFLOW_STEP_TIMEOUT','WORKFLOW_STEP_RETRIES_EXHAUSTED','WORKFLOW_NON_RETRYABLE','WORKFLOW_EVENT_TIMEOUT')
             ORDER BY ordinal LIMIT 1",[fence.instance_id.to_string()],|row|row.get(0)).optional().map_err(sql_error)?;
@@ -247,7 +284,7 @@ impl SchedulerStore {
                     {
                         Err(ErrorCode::WorkflowNonDeterministic)
                     } else {
-                        open_compute_core::workflow::canonical_json(
+                        open_compute_core::workflow::durable_value_base64(
                             output_json,
                             ErrorCode::WorkflowResultTooLarge,
                         )
@@ -258,6 +295,7 @@ impl SchedulerStore {
                         .map_err(|error| error.code())
                     }
                 }
+                WorkflowCompletion::Terminated { .. } => unreachable!("handled above"),
             }
         };
         let (state, encoded, output, failure, code) = match result {
@@ -282,7 +320,7 @@ impl SchedulerStore {
         };
         let added = output.as_ref().map_or(0, String::len) + failure.map_or(0, str::len);
         tx.execute("UPDATE workflow_instances SET state=?4,output_json=?5,error_json=?6,error_code=?7,state_bytes=state_bytes+?8,
-            terminal_at_ms=?9,updated_at_ms=?9,expires_at_ms=?10,run_token=NULL,run_claimed_at_ms=NULL,run_lease_until_ms=NULL
+            rollback_requested=0,terminal_at_ms=?9,updated_at_ms=?9,expires_at_ms=?10,run_token=NULL,run_claimed_at_ms=NULL,run_lease_until_ms=NULL
             WHERE id=?1 AND instance_generation=?2 AND run_token=?3 AND state='running'",
             params![fence.instance_id.to_string(),fence.instance_generation,fence.run_token.as_bytes().as_slice(),encoded,
                 output.as_ref().map(String::as_bytes),failure.map(str::as_bytes),code,added,now_ms,
@@ -326,7 +364,7 @@ pub(super) fn release(
         .query_row(
             "SELECT
         EXISTS(SELECT 1 FROM workflow_steps WHERE instance_id=?1 AND state='running'),
-        EXISTS(SELECT 1 FROM workflow_steps WHERE instance_id=?1 AND state='pending')",
+        EXISTS(SELECT 1 FROM workflow_steps WHERE instance_id=?1 AND state IN ('pending','delay_pending'))",
             [instance.identity.instance_id.to_string()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )

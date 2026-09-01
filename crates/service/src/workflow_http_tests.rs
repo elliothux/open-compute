@@ -68,9 +68,6 @@ pub(crate) fn fixture() -> Fixture {
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".into()),
-                compatibility_date: "2026-08-26".into(),
-                compatibility_flags: Vec::new(),
-                limits: serde_json::json!({"profile":"default"}),
                 worker_code_sha256: [2; 32],
                 vars: Default::default(),
                 secrets: Default::default(),
@@ -247,10 +244,12 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
         .create(
             f.account,
             definition,
+            open_compute_core::WorkflowOperationId::generate(),
             Some("instance"),
             open_compute_workers::WorkflowCreateInput {
-                payload_json: "{\"private\":\"payload-marker\"}",
+                payload_base64: "T0NEVgECEQAAAAEAAAAHcHJpdmF0ZQYAAAAOcGF5bG9hZC1tYXJrZXI=",
                 retention: None,
+                schedule: None,
             },
             now_ms(),
         )
@@ -472,10 +471,12 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
         .create(
             f.account,
             definition.id,
+            open_compute_core::WorkflowOperationId::generate(),
             Some("stable-name"),
             WorkflowCreateInput {
-                payload_json: "\"admin-private-input\"",
+                payload_base64: "T0NEVgECBgAAABNhZG1pbi1wcml2YXRlLWlucHV0",
                 retention: None,
+                schedule: None,
             },
             now_ms(),
         )
@@ -498,6 +499,8 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
         "admin-private-input",
         "inputJson",
         "outputJson",
+        "inputBase64",
+        "outputBase64",
         "runToken",
         "creationNonce",
     ] {
@@ -519,7 +522,10 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
         f.request(
             "POST",
             &format!("{instance}/events"),
-            json!({"type":"approval","payload":"admin-private-event"})
+            json!({
+                "type":"approval",
+                "payloadBase64":"T0NEVgECBgAAABNhZG1pbi1wcml2YXRlLWV2ZW50"
+            })
         )
         .await
         .0,
@@ -553,12 +559,15 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
         ),
         (
             "events",
-            json!({"type":"bad type","payload":null}),
+            json!({"type":"bad type","payloadBase64":"T0NEVgECAA=="}),
             StatusCode::BAD_REQUEST,
         ),
         (
             "events",
-            json!({"type":"ok","payload":"x".repeat(1024*1024)}),
+            json!({
+                "type":"ok",
+                "payloadBase64":format!("T0NEVgEC{}", "A".repeat(1_398_104))
+            }),
             StatusCode::PAYLOAD_TOO_LARGE,
         ),
         ("unknown", json!({}), StatusCode::BAD_REQUEST),
@@ -612,7 +621,7 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
         f.request(
             "POST",
             &format!("{instance}/events"),
-            json!({"type":"approval"})
+            json!({"type":"approval","payloadBase64":"T0NEVgECAA=="})
         )
         .await
         .0,
@@ -633,7 +642,10 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
     for (suffix, body) in [
         ("pause", json!({})),
         ("restart", json!({})),
-        ("events", json!({"type":"approval"})),
+        (
+            "events",
+            json!({"type":"approval","payloadBase64":"T0NEVgECAA=="}),
+        ),
     ] {
         assert_eq!(
             f.request("POST", &format!("{instance}/{suffix}"), body)

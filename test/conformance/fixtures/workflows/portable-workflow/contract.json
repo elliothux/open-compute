@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "workflows/portable/lifecycle",
+  "contracts": ["workflows.binding.lifecycle"],
+  "source": "src/index.ts",
+  "bindings": {
+    "FLOW": { "type": "workflow", "className": "PortableWorkflow" }
+  },
+  "observations": [
+    {
+      "method": "POST",
+      "path": "/surface",
+      "expect": {
+        "status": 200,
+        "json": {
+          "instance": {
+            "id": "portable-surface",
+            "status": "complete",
+            "output": {
+              "identity": true,
+              "scheduleAbsent": true,
+              "step": { "attempt": 1, "name": "first", "count": 1 },
+              "structured": true,
+              "parallel": ["a", "b"],
+              "slept": true
+            }
+          },
+          "batch": {
+            "ids": ["portable-batch-a", "portable-batch-b"],
+            "complete": true,
+            "deleted": 2,
+            "errors": 0
+          }
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/event",
+      "expect": {
+        "status": 200,
+        "json": {
+          "id": "portable-event",
+          "status": "complete",
+          "received": true
+        }
+      }
+    },
+    { "method": "DELETE", "path": "/cleanup", "expect": { "status": 200, "json": { "cleaned": true } } }
+  ],
+  "normalization": [],
+  "cleanup": {
+    "cloudflare": ["worker", "workflow"],
+    "openCompute": ["worker", "workflow"]
+  }
+}

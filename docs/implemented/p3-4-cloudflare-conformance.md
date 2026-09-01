@@ -1,12 +1,12 @@
 # P3.4：Cloudflare 能力对齐、隔离与恢复 Day1 方案
 
-状态（2026-08-30）：**原常用子集的 Day1 实现与本地 Contract Gate 已完成；全量兼容目标已扩大，
-重新进入 active**。固定 baseline/catalog、typed runner、portable fixture、P3.1–P3.3 产品证据、
-两账户隔离与 crash/recovery 已进入当前实现，完整 workspace 最终验收与 90% 覆盖率门槛曾对原子集
-通过；这些证据不证明新的全量目标。一项受控 Cache API portable differential 已在真实 Cloudflare
-Workers 与 open-compute 上得到相同观察并完成精确清理；它只 qualification 该 fixture，不满足扩展后
-覆盖全部目标产品高风险行为的 `CF-TEST-03`，全量目标仍为 active/blocked。
-P1 长时 soak 与正式发行演练继续由独立的[P1 剩余验收计划](p1-release-acceptance.md)跟踪。
+状态（2026-09-01）：**Day1 全量 stable tenant API 实现与本地 conformance 已完成；外部资格为
+Conditional Go**。固定 baseline/catalog、typed runner、portable fixtures、P3.1–P3.3 产品证据、隔离与
+crash/recovery 已进入当前实现，inventory 为 2,097 个成员、`blocked=0`。Workers、Cache API、KV、D1、
+R2、Durable Objects、Queues 的真实 Cloudflare differential 已通过并精确清理；Workflow 托管端运行因
+Wrangler OAuth `10000` 拆分到[剩余验收](../cloudflare-runtime-compatibility-acceptance.md)。最终 workspace
+按用户明确要求只运行一个完整 round，802/802 cases 通过；这不冒充仓库默认的 timing-three 资格。
+P1 长时 soak 与正式发行演练继续由独立的[P1 剩余验收计划](../p1-release-acceptance.md)跟踪。
 
 P3.4 的目标不是实现 Next.js，也不是让某个 vinext revision 的全部 API 或测试无条件变绿；目标由
 [Cloudflare Worker Runtime 全量兼容目标](cloudflare-runtime-compatibility.md)定义：让 open-compute
@@ -18,8 +18,8 @@ vinext 是第三方应用检验手段之一。它能同时覆盖多环境构建�
 Binding、KV、Workers Cache、Version Metadata 和 Images，但它自己的 Next.js 兼容缺口不属于
 平台实现，vinext 未使用的 Cloudflare API 也不能因此从平台契约中消失。
 
-本文细化[总方案](open-compute-workerd-platform.md)的 P3.4。进入最终验收前，P3.1、P3.2 与
-[P3.3](implemented/p3-3-workers-cache-images.md)必须达到各自声明的 Go；它们的 Conditional Go/未运行项
+本文细化[总方案](../open-compute-workerd-platform.md)的 P3.4。进入最终验收前，P3.1、P3.2 与
+[P3.3](p3-3-workers-cache-images.md)必须达到各自声明的 Go；它们的 Conditional Go/未运行项
 中属于平台 contract 的部分不能在本阶段改名为“上游限制”。未选择的应用 qualification 保持
 “未评估”，不混入 Platform verdict。
 
@@ -137,7 +137,7 @@ flags 只允许启用该行为所需的平台内部项。基线变更必须重�
 
 catalog 只保存结构化事实和 source identity，不复制大段第三方文档。配套
 `docs/references/cloudflare-compatibility.md` 是人类可读矩阵；已有
-[`p1-deviations.md`](references/p1-deviations.md)继续拥有稳定 deviation 文本，不建立第二份
+[`p1-deviations.md`](../references/p1-deviations.md)继续拥有稳定 deviation 文本，不建立第二份
 deviation truth。
 
 静态检查强制：
@@ -228,9 +228,12 @@ credential 只由 Wrangler 或环境/文件引用读取，不写报告、argv、
 删除 Worker、KV/R2/D1/Queue 等本轮资源并二次枚举。清理失败使 qualification 失败并输出不含
 credential 的资源清单，不能把孤儿留到“以后自动处理”。
 
-当前 Cache API fixture 只创建随机 `oc-p34-*` workers.dev Worker，不配置 route、service binding、
-KV、R2、D1、Queue 或共享资源；删除使用精确名称且禁止 `--force`。这项安全边界属于该 fixture 的
-qualification 条件，不授权 runner 枚举、修改或清理账号中的其他服务。
+当前 Cache API fixture 只创建随机 `oc-p34-*` workers.dev Worker；KV fixture 另在两个 provider 各创建
+一个同前缀唯一 namespace，D1 fixture 在两个 provider 各创建两个同前缀唯一数据库。三者都不配置
+Service/R2/Queue 或其它共享资源；删除使用精确名称/ID 且禁止 `--force`，再枚举确认 absent。
+open-compute deployment retention 只在本次 qualification 的专用
+test-support 实例上通过显式确认的 generation 轮换释放。这项安全边界不授权 runner 修改或清理账号中的
+其他服务。
 
 Cloudflare observation 是某日、某账号、某 effective compatibility date 的证据，不是永久真值。
 结果以 source/baseline digest 冻结；官方契约后来变化时通过 coordinated update 重新运行，生产
@@ -254,13 +257,42 @@ runtime 不能自动追随网络上的 latest。
 Cloudflare `10007`（Worker 不存在）。这证明该随机 Worker 已清理，不证明账号其他服务曾被枚举或
 变更。本节记录已经完成的冻结运行，不把后续文档维护表述成重新执行。
 
-### 4.4 无 Cloudflare 凭据时的结论
+### 4.4 已运行的 KV differential（2026-09-01）
 
-本地/CI mandatory suite 不依赖 Cloudflare 账号，使用官方契约、正式 workerd 与真实平台产品 Gate。
-它可以给出 “contract Go”。缺 remote differential 时，报告必须写“Cloudflare differential 未
-qualification”，不能写“与 Cloudflare 实测完全一致”。现有 Cache API 对照只能解除该 fixture 的
-qualification 缺口；正式 P3.4 Platform Go 仍需在冻结输入上完成扩展后的高风险 differential 集合。
-若项目决定不承担其余外部验收，则最终只能是带明确未覆盖范围的 Conditional Go。
+最终一轮 `p3-cf-diff` 中，`kv/portable/namespace` 使用 Worker
+`oc-p34-mthwfgbw-c7f66ce5-1` 和 KV namespace `oc-p34-mthwfgbw-c7f66ce5-1-kv-0`；fixture
+SHA-256 为 `ff48e7dddb49869466d68a63a07eb092bf1804f2f773d3771773963cb9d78e7a`。同一
+TypeScript source 在真实 Cloudflare 与 open-compute 上依次完成 reset、seed、bulk/metadata/list read、
+25 项 error/conversion/limit 观察、混合 string/byte stream put 和 delete-missing，所有 status 与 canonical
+JSON 完全一致。其中固定了 bulk metadata 不含 `cacheStatus`、single/list 的可空 `cacheStatus`、Promise
+rejection 时序、TTL 优先级、未配对 surrogate 的 URL decode 错误，以及 25 MiB/1 KiB/100-key 等边界。
+
+Cloudflare Worker/KV 与 open-compute Worker/route/KV 的 cleanup 均为 `deleted=true,status=absent`；每个
+资源只按本轮精确名称/ID 处理。同轮 Cache API case 也通过，Gate 共 2/2 cases passed。该结果关闭 KV
+的 remote differential 缺口，不证明其它产品已完成。
+
+### 4.5 已运行的 D1 differential（2026-09-01）
+
+冻结报告 `.temp/gate-run/20260901T083041-bdff6a02/report.json` 以同一源码运行 Cache API、D1、KV
+三个 portable case，3/3 通过。D1 fixture `d1/portable/database` 的 SHA-256 为
+`8763456ab0c8670cf48ebb778f3ca6aa823452c62d01880e79d6ad77314acedd`，Worker 为
+`oc-p34-mthxlapl-90f90526-1`。两端观察逐字段一致，覆盖 result/meta、跨 binding statement 的 receiving-
+database 语义、`all/run/first/raw/batch/exec`、duplicate column、bind 转换、错误类别/Promise 时序、
+session bookmark、batch rollback 和非 alpha `dump()` 拒绝。
+
+Cloudflare cleanup 按 Worker 名和两个 database ID
+`28ad8100-17de-409d-8d2f-e62fc2c0e7ff`、`3ad8d7a8-1841-48fd-b7eb-e3253f031cfe`
+完成并记录 `deleted=true,status=absent`；open-compute Worker/route/两个 D1 也全部 absent。Gate 后的独立
+只读 Wrangler 复查得到三个精确 Worker 均为 `10007`，本轮前缀/ID 过滤后的 D1 与 KV inventory 均为
+`[]`。这关闭 D1 的 remote differential 缺口，不代表 R2、DO、Queues、Workflows 或其余 Workers 面已完成。
+
+### 4.6 本轮外部资格结论
+
+本地/CI mandatory suite 不依赖 Cloudflare 账号，使用官方契约、正式 workerd 与真实平台产品 Gate；
+本轮已给出 local contract implementation completion。Workers、Cache API、KV、D1、R2、Durable Objects
+和 Queues 的同源 remote differential 已逐字段通过。Workflow fixture 已实现并通过 open-compute 本地路径，
+但 Cloudflare Workflow inventory preflight 返回 OAuth `10000`，没有创建 Workflow 或 Worker。因此本文
+结论为带明确未覆盖范围的 Conditional Go，不能写“全部产品均与 Cloudflare 托管端实测完全一致”。
 
 ## 5. 分层测试模型
 
@@ -436,7 +468,7 @@ pass denominator 后称 100%。记录所有原始 attempt；上游 runner 自带
 进程退出、deadline、cache refresh race、browser timing 与清理登记为 TIMING。最终仍是完整确定性
 一轮、仅 TIMING fresh-process 补两轮；不把所有浏览器/上游测试机械跑三遍。
 
-case 分类只由 [`test/gate_cases.py`](../test/gate_cases.py)拥有。新增 typed runner 后，registry 也必须
+case 分类只由 [`test/gate_cases.py`](../../test/gate_cases.py)拥有。新增 typed runner 后，registry 也必须
 覆盖非 Cargo case，新增/删除/重名未审查时在执行前失败。并行只用于已证明 data-dir/S3 prefix/
 port/browser profile 隔离的目标；resource-heavy browser/images/recovery 保守独占或固定小并发。
 
@@ -454,9 +486,9 @@ port/browser profile 隔离的目标；resource-heavy browser/images/recovery �
 | P3.4-7 | Cloudflare differential qualification | 冻结 fixture、受控账号、无未解释差异/孤儿资源 |
 | P3.4-8 | P3 Exit 与报告/归档 | 静态检查、coverage、最终轮次、verdict 与限制完整 |
 
-原 P3.4-0/1/2 的子集实现保留为迁移基础，但需要按新的 upstream AST 和 single-latest contract 重做
-完整性判定；P3.4-4 依赖目标产品冻结。P3.4-5 不阻塞 Platform Go，但不能在对应平台 contract 未完成
-时给出组合应用 Go；P3.4-7 必须在源码和 inputs 冻结后进行。
+P3.4-0/1/2/3/4/6/8 已按新的 upstream AST 和 single-latest contract 完成；P3.4-5 是可选应用
+qualification。P3.4-7 的七项 hosted fixture 已完成，Workflow hosted fixture 因外部 credential 条件单独
+保持 active，不重新打开已经完成的本地 contract/product 实现。
 
 ## 12. P3 Exit
 
@@ -474,8 +506,9 @@ port/browser profile 隔离的目标；resource-heavy browser/images/recovery �
    crash/recovery/cleanup 全部通过；
 6. portable high-risk fixture 在真实 Cloudflare differential 中没有未解释的“CF pass / OC fail”；
 7. 完整 Rust/TS/static/dependency/MSRV/production 检查通过，Rust line coverage 不低于 90.00%；
-8. 最终调度按[测试规范](references/testing.md)执行完整一轮 + TIMING 两个附加 fresh-process 轮次，
-   报告保留每轮原始结果且无 retry-to-green；
+8. 正式 release qualification 应按[测试规范](../references/testing.md)执行完整一轮 + TIMING 两个附加
+   fresh-process 轮次；本实现 goal 按用户明确要求只执行完整一轮，报告保留原始结果且无 retry-to-green，
+   因而不宣称完成 timing-three release qualification；
 9. 没有遗留 workerd/platformd/browser、listener、Cloudflare fixture、S3 prefix、image session、temp
    file 或未释放 pin；
 10. P1 的单文件/离线/跨目标 release qualification 仍按其 active 文档完成；P3 测试不能代替正式
@@ -500,7 +533,6 @@ Platform contract 未完成，即使 vinext workload 全绿也只能是应用 sm
 
 ### 12.3 归档
 
-完成实现、审查和实际 Gate 后，把本方案与结果移入 `docs/implemented/`，更新该目录索引和总方案
-链接。最终结果至少记录 revision、dirty source digest、workerd lock、baseline/catalog、Cloudflare
-observation 时间/账号别名、工具链/browser、各 target/case/round、coverage、清理与限制。计划文档
-本身不能作为完成证据。
+本方案已与[完成报告](cloudflare-runtime-compatibility-results.md)归档到 `docs/implemented/`。报告记录
+revision、dirty source digest、workerd lock、baseline/catalog、Cloudflare observation、工具链、
+target/case/round、coverage、清理与限制；本方案本身不作为完成证据。

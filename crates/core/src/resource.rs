@@ -157,13 +157,18 @@ impl Default for CanonicalPermissions {
     }
 }
 
-/// P0.3 canonical empty product config.
+/// Canonical product configuration carried by an immutable binding.
 ///
-/// Product phases may replace this with kind-specific fields through a new
-/// capability version; unknown fields fail closed today.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+/// Fields are admitted only by their owning product adapter; a non-Workflow
+/// binding rejects `workflow_schedules` even though deployment input shares
+/// this closed wire shape.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CanonicalBindingConfig {}
+pub struct CanonicalBindingConfig {
+    /// Direct cron schedules attached to a Workflow binding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflow_schedules: Vec<String>,
+}
 
 fn resource_type_error() -> PlatformError {
     PlatformError::new(

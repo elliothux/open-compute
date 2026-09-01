@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "kv/portable/namespace",
+  "contracts": ["kv.namespace.methods"],
+  "source": "src/index.ts",
+  "bindings": {
+    "KV": { "type": "kv_namespace" }
+  },
+  "observations": [
+    { "method": "POST", "path": "/reset", "expect": { "status": 200, "json": { "reset": true } } },
+    { "method": "POST", "path": "/seed", "expect": { "status": 200, "json": { "seeded": true } } },
+    {
+      "method": "GET",
+      "path": "/read",
+      "expect": {
+        "status": 200,
+        "json": {
+          "bulk": [["portable:text", "hello"], ["portable:json", { "ok": true }], ["portable:missing", null]],
+          "bulkMetadata": [
+            ["portable:text", { "hasCacheStatus": false, "metadata": { "tag": "text" }, "value": "hello" }],
+            ["portable:missing", null]
+          ],
+          "list": {
+            "cacheStatusValid": true,
+            "hasCursor": false,
+            "keys": [
+              { "hasExpiration": false, "metadata": { "tag": "json" }, "name": "portable:json" },
+              { "hasExpiration": false, "metadata": { "tag": "text" }, "name": "portable:text" }
+            ],
+            "list_complete": true
+          },
+          "singleMetadata": {
+            "cacheStatusValid": true,
+            "hasCacheStatus": true,
+            "metadata": { "tag": "text" },
+            "value": "hello"
+          }
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/errors",
+      "expect": {
+        "status": 200,
+        "json": {
+          "bulkEmpty": { "message": "KV GET_BULK failed: 400 You must request a minimum of 1 key", "name": "Error", "synchronous": false },
+          "bulkEmptyKey": { "message": "KV GET_BULK failed: 400 Key name  is not legal", "name": "Error", "synchronous": false },
+          "bulkDotKey": { "message": "KV GET_BULK failed: 400 Key name . is not legal", "name": "Error", "synchronous": false },
+          "bulkLongKey": { "message": "KV GET_BULK failed: 414 Encoded length of 513 is too long", "name": "Error", "synchronous": false },
+          "bulkUnpairedSurrogate": null,
+          "bulkMetadataDotDotKey": { "message": "KV GET_BULK failed: 400 Key name .. is not legal", "name": "Error", "synchronous": false },
+          "bulkStream": { "message": "KV GET_BULK failed: 400 \"stream\" is not a valid type. Use \"json\" or \"text\"", "name": "Error", "synchronous": false },
+          "bulkTooMany": { "message": "KV GET_BULK failed: 400 You can request a maximum of 100 keys", "name": "Error", "synchronous": false },
+          "cacheTtlLow": { "message": "KV GET failed: 400 Invalid cache_ttl of 29. Cache TTL must be at least 30.", "name": "Error", "synchronous": false },
+          "deleteDotDot": { "message": "\"..\" is not allowed as a key name.", "name": "TypeError", "synchronous": false },
+          "getEmpty": { "message": "Key name cannot be empty.", "name": "TypeError", "synchronous": false },
+          "getInvalidType": { "message": "Unknown response type. Possible types are \"text\", \"arrayBuffer\", \"json\", and \"stream\".", "name": "TypeError", "synchronous": false },
+          "getLong": { "message": "KV GET failed: 414 UTF-8 encoded length of 513 exceeds key length limit of 512.", "name": "Error", "synchronous": false },
+          "getNumber": null,
+          "getUnpairedSurrogate": { "message": "KV GET failed: 400 Could not URL-decode key name", "name": "Error", "synchronous": false },
+          "getUnknownOption": null,
+          "listHigh": { "message": "KV GET failed: 400 Invalid key_count_limit of 1001. Please specify integer less than 1000.", "name": "Error", "synchronous": false },
+          "listNumberPrefix": null,
+          "listUnpairedSurrogate": null,
+          "listUnknownOption": null,
+          "listZero": null,
+          "putBothExpiration": null,
+          "putInvalidValue": { "message": "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and ReadableStreams as values.", "name": "TypeError", "synchronous": false },
+          "putMetadataTooLarge": { "message": "KV PUT failed: 413 Payload Too Large", "name": "Error", "synchronous": false },
+          "putTtlLow": { "message": "KV PUT failed: 400 Invalid expiration_ttl of 59. Expiration TTL must be at least 60.", "name": "Error", "synchronous": false }
+        }
+      }
+    },
+    { "method": "POST", "path": "/stream", "expect": { "status": 200, "json": { "value": "stream-value" } } },
+    { "method": "DELETE", "path": "/delete", "expect": { "status": 200, "json": { "deleted": true, "value": null } } }
+  ],
+  "normalization": [],
+  "cleanup": { "cloudflare": ["worker", "kv_namespace"], "openCompute": ["worker", "kv_namespace"] }
+}

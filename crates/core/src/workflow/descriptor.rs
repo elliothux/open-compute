@@ -32,6 +32,74 @@ pub enum WorkflowStepKind {
     WaitEvent,
 }
 
+/// Public restart selector kind; both relative and absolute sleeps share Cloudflare's `sleep` kind.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum WorkflowRestartStepType {
+    /// A `WorkflowStep.do` callback.
+    #[serde(rename = "do")]
+    Do,
+    /// Either `sleep` or `sleepUntil`.
+    #[serde(rename = "sleep")]
+    Sleep,
+    /// A `waitForEvent` step.
+    #[serde(rename = "waitForEvent")]
+    WaitForEvent,
+}
+
+impl WorkflowRestartStepType {
+    /// Stable control-authority spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Do => "do",
+            Self::Sleep => "sleep",
+            Self::WaitForEvent => "waitForEvent",
+        }
+    }
+
+    /// Whether an internal durable step kind belongs to this public selector kind.
+    #[must_use]
+    pub const fn matches(self, kind: WorkflowStepKind) -> bool {
+        matches!(
+            (self, kind),
+            (Self::Do, WorkflowStepKind::Do)
+                | (
+                    Self::Sleep,
+                    WorkflowStepKind::Sleep | WorkflowStepKind::SleepUntil
+                )
+                | (Self::WaitForEvent, WorkflowStepKind::WaitEvent)
+        )
+    }
+}
+
+/// Exact one-based step occurrence from which a new Workflow generation must resume.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkflowRestartSelector {
+    /// Step name as supplied to the Workflow API.
+    pub name: String,
+    /// One-based occurrence for the selected name and kind.
+    #[serde(default = "first_occurrence")]
+    pub count: u32,
+    /// Optional disambiguation when multiple step kinds use the same name and occurrence.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub step_type: Option<WorkflowRestartStepType>,
+}
+
+impl WorkflowRestartSelector {
+    /// Validate the strict pinned selector without normalizing its identity.
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        if self.name.is_empty() || self.name.len() > 256 || self.count == 0 || self.count > 1024 {
+            return Err(error(ErrorCode::WorkflowMethodUnsupported));
+        }
+        Ok(())
+    }
+}
+
+const fn first_occurrence() -> u32 {
+    1
+}
+
 impl WorkflowStepKind {
     /// Stable SQL/wire spelling.
     #[must_use]
@@ -188,11 +256,7 @@ impl WorkflowDurableConfig {
                 timeout_ms,
             } => json!({"type":event_type,"timeoutMs":timeout_ms}),
         };
-        let encoded = value.to_string();
-        if encoded.len() > 4096 {
-            return Err(unsupported());
-        }
-        Ok(encoded)
+        Ok(value.to_string())
     }
 }
 
@@ -210,22 +274,42 @@ pub struct WorkflowStepDeclaration {
     pub name_count: u32,
     /// Raw supported options, normalized at admission.
     pub config: Value,
-    /// Ordered settled frontier from the preceding batch.
+    /// Rollback callback policy when the deployment registered a handler.
+    #[serde(default)]
+    pub rollback_config: Option<Value>,
+    /// Whether this descriptor executes a previously registered rollback handler.
+    #[serde(default)]
+    pub rollback_step: bool,
+    /// Ordered settled predecessor frontier for this submission group.
     pub dependencies: Vec<u32>,
-    /// First ordinal in this synchronous batch.
+    /// First ordinal in this durable submission group.
     pub batch_first_ordinal: u32,
-    /// Complete batch membership count, never inferred from completion order.
+    /// Complete submission-group membership count, never inferred from completion order.
     pub batch_size: u32,
 }
 
 impl WorkflowStepDeclaration {
     /// Resolve the supported policy and validate the complete replay declaration.
     pub fn resolve(self) -> Result<WorkflowStepDescriptor, PlatformError> {
+        let rollback_config = self
+            .rollback_config
+            .map(|value| {
+                if self.kind != WorkflowStepKind::Do {
+                    return Err(unsupported());
+                }
+                WorkflowStepConfig::resolve(&value)
+            })
+            .transpose()?;
+        if self.rollback_step && (self.kind != WorkflowStepKind::Do || rollback_config.is_some()) {
+            return Err(unsupported());
+        }
         let descriptor = WorkflowStepDescriptor {
             ordinal: self.ordinal,
             name: self.name,
             name_count: self.name_count,
             config: WorkflowDurableConfig::resolve(self.kind, &self.config)?,
+            rollback_config,
+            rollback_step: self.rollback_step,
             dependencies: self.dependencies,
             batch_first_ordinal: self.batch_first_ordinal,
             batch_size: self.batch_size,
@@ -246,6 +330,10 @@ pub struct WorkflowStepDescriptor {
     pub name_count: u32,
     /// Fully resolved frozen configuration.
     pub config: WorkflowDurableConfig,
+    /// Frozen retry/timeout policy for an optional rollback handler.
+    pub rollback_config: Option<WorkflowStepConfig>,
+    /// Whether this is a scheduler-owned execution of a rollback handler.
+    pub rollback_step: bool,
     /// Ordered predecessor ordinals; backend also compares the actual previous batch.
     pub dependencies: Vec<u32>,
     /// Immutable first batch ordinal.
@@ -255,32 +343,40 @@ pub struct WorkflowStepDescriptor {
 }
 
 impl WorkflowStepDescriptor {
-    /// Validate bounded names, ordinals, contiguous predecessor shape, and frozen policy.
+    /// Validate bounded names, ordinals, an acyclic predecessor set, and frozen policy.
     pub fn validate(&self) -> Result<(), PlatformError> {
         self.config.validate()?;
+        if let Some(config) = &self.rollback_config {
+            if self.config.kind() != WorkflowStepKind::Do || self.rollback_step {
+                return Err(error(ErrorCode::WorkflowStepConfigUnsupported));
+            }
+            config.validate()?;
+        }
+        if self.rollback_step && self.config.kind() != WorkflowStepKind::Do {
+            return Err(error(ErrorCode::WorkflowStepConfigUnsupported));
+        }
         if self.ordinal >= 1024 {
             return Err(error(ErrorCode::WorkflowStepLimitExceeded));
         }
         if self.name.is_empty() || self.name.len() > 256 || self.name_count == 0 {
             return Err(error(ErrorCode::WorkflowSerializationUnsupported));
         }
-        if !(1..=16).contains(&self.batch_size)
-            || self.batch_first_ordinal > self.ordinal
+        if self.batch_size == 0 || self.batch_size > 16 || self.dependencies.len() > 16 {
+            return Err(error(ErrorCode::WorkflowStepLimitExceeded));
+        }
+        if self.batch_first_ordinal > self.ordinal
             || self
                 .batch_first_ordinal
                 .checked_add(self.batch_size)
                 .is_none_or(|end| self.ordinal >= end || end > 1024)
-            || (self.config.kind() != WorkflowStepKind::Do && self.batch_size != 1)
-            || self.dependencies.len() > 16
+            || self.dependencies.windows(2).any(|pair| pair[0] >= pair[1])
             || self
                 .dependencies
-                .windows(2)
-                .any(|pair| pair[0].checked_add(1) != Some(pair[1]))
+                .last()
+                .is_some_and(|parent| *parent >= self.batch_first_ordinal)
             || (self.batch_first_ordinal == 0 && !self.dependencies.is_empty())
-            || (self.batch_first_ordinal > 0
-                && self.dependencies.last() != Some(&(self.batch_first_ordinal - 1)))
         {
-            return Err(error(ErrorCode::WorkflowParallelStepUnsupported));
+            return Err(error(ErrorCode::WorkflowSerializationUnsupported));
         }
         Ok(())
     }
@@ -290,10 +386,33 @@ impl WorkflowStepDescriptor {
         self.validate()?;
         let config: Value =
             serde_json::from_str(&self.config.canonical_json()?).map_err(|_| unsupported())?;
+        let rollback_config = self
+            .rollback_config
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|_| unsupported())?;
         let descriptor = json!({"capabilityVersion":1,"ordinal":self.ordinal,"kind":self.config.kind(),"name":self.name,
             "nameCount":self.name_count,"config":config,"dependencies":self.dependencies,
-            "batchFirstOrdinal":self.batch_first_ordinal,"batchSize":self.batch_size});
+            "batchFirstOrdinal":self.batch_first_ordinal,"batchSize":self.batch_size,
+            "rollbackConfig":rollback_config,"rollbackStep":self.rollback_step});
         Ok(Sha256::digest(descriptor.to_string().as_bytes()).into())
+    }
+
+    /// Canonical persisted policy, including rollback registration identity.
+    pub fn canonical_config_json(&self) -> Result<String, PlatformError> {
+        self.validate()?;
+        let encoded = self.config.canonical_json()?;
+        let mut value: serde_json::Map<String, Value> =
+            serde_json::from_str(&encoded).map_err(|_| unsupported())?;
+        if let Some(config) = &self.rollback_config {
+            value.insert(
+                "rollbackConfig".into(),
+                serde_json::to_value(config).map_err(|_| unsupported())?,
+            );
+        }
+        value.insert("rollbackStep".into(), Value::Bool(self.rollback_step));
+        Ok(Value::Object(value).to_string())
     }
 
     /// Exact retained descriptor/edge bytes, excluding later result and error bytes.
@@ -301,7 +420,7 @@ impl WorkflowStepDescriptor {
         self.validate()?;
         Ok(WORKFLOW_STEP_BYTES
             + self.name.len()
-            + self.config.canonical_json()?.len()
+            + self.canonical_config_json()?.len()
             + WORKFLOW_DEPENDENCY_BYTES * self.dependencies.len())
     }
 }

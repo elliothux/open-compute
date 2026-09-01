@@ -11,28 +11,10 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
-/// Version of the public-only outbound gateway policy in the descriptor.
-pub const GLOBAL_OUTBOUND_POLICY_VERSION: u32 = 1;
 /// Namespace reserved for all platform-owned loaded-isolate modules.
 pub const SYSTEM_MODULE_PREFIX: &str = "__open_compute__/";
 const SYSTEM_WORKER_MANIFEST: &[u8] =
     include_bytes!("../../../packages/runtime/dist/manifest.json");
-/// Earliest compatibility date accepted by the pinned P1 policy.
-pub const COMPATIBILITY_DATE_MIN: &str = "2022-01-01";
-/// Latest compatibility date accepted by the pinned P1 policy.
-pub const COMPATIBILITY_DATE_MAX: &str = "2026-08-26";
-/// Compatibility flags accepted by the production descriptor validator.
-///
-/// The navigation pair implements Cloudflare's documented Static Assets contract:
-/// `assets_navigation_prefers_asset_serving` defaults on at `2025-04-01`, while
-/// `assets_navigation_has_no_effect` explicitly disables it. The pinned behavior is
-/// regression-tested by the asset handler matrix.
-pub const COMPATIBILITY_FLAGS_ALLOWED: &[&str] = &[
-    "assets_navigation_has_no_effect",
-    "assets_navigation_prefers_asset_serving",
-    "nodejs_compat",
-    "rpc",
-];
 
 /// Immutable asset identity and routing included in the deployment descriptor.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -407,10 +389,6 @@ pub struct WorkerCodeDescriptorV1 {
     pub ordered_modules: Vec<ModuleManifest>,
     /// Optional immutable static-asset descriptor.
     pub assets: Option<AssetDescriptorV1>,
-    /// Tenant compatibility date.
-    pub compatibility_date: String,
-    /// Sorted compatibility flags.
-    pub compatibility_flags: Vec<String>,
     /// Canonical JSON vars.
     pub canonical_vars: BTreeMap<String, serde_json::Value>,
     /// Sorted secret revision descriptors.
@@ -429,10 +407,6 @@ pub struct WorkerCodeDescriptorV1 {
     pub builtin_binding_descriptors: Vec<BuiltinBindingDescriptorV1>,
     /// SHA-256 of the complete generated system Worker source manifest.
     pub system_worker_sources_sha256: String,
-    /// Immutable limits profile document.
-    pub limits: serde_json::Value,
-    /// Public egress policy version.
-    pub global_outbound_policy_version: u32,
     /// Loader host schema.
     pub loader_schema_version: u32,
 }
@@ -447,8 +421,6 @@ impl WorkerCodeDescriptorV1 {
         created_at_ms: i64,
         artifact: Option<([u8; 32], &WorkerBundleManifest)>,
         assets: Option<(&AssetManifestV1, &AssetRoutingConfigV1)>,
-        compatibility_date: String,
-        compatibility_flags: Vec<String>,
         canonical_vars: BTreeMap<String, serde_json::Value>,
         mut secret_revisions: Vec<SecretDescriptor>,
         mut binding_descriptors: Vec<BindingDescriptorV1>,
@@ -457,10 +429,8 @@ impl WorkerCodeDescriptorV1 {
         mut service_descriptors: Vec<ServiceDescriptorV1>,
         cache_policy: CachePolicyDescriptorV1,
         mut builtin_binding_descriptors: Vec<BuiltinBindingDescriptorV1>,
-        limits: serde_json::Value,
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
-        let compatibility_flags = validate_compatibility(&compatibility_date, compatibility_flags)?;
         if created_at_ms < 0 {
             return Err(binding_invariant());
         }
@@ -601,7 +571,6 @@ impl WorkerCodeDescriptorV1 {
                 "assets-only deployments cannot declare an execution environment",
             ));
         }
-        validate_limits(&limits)?;
         let (artifact_sha256, artifact_schema_version, main_module, ordered_modules) = artifact
             .map_or((None, None, None, Vec::new()), |(digest, manifest)| {
                 (
@@ -631,8 +600,6 @@ impl WorkerCodeDescriptorV1 {
             main_module,
             ordered_modules,
             assets,
-            compatibility_date,
-            compatibility_flags,
             canonical_vars,
             secret_revisions,
             binding_descriptors,
@@ -642,8 +609,6 @@ impl WorkerCodeDescriptorV1 {
             service_descriptors,
             cache_policy,
             builtin_binding_descriptors,
-            limits,
-            global_outbound_policy_version: GLOBAL_OUTBOUND_POLICY_VERSION,
             loader_schema_version,
         })
     }
@@ -731,38 +696,6 @@ pub fn canonicalize_vars(
     Ok((values, bytes))
 }
 
-/// Validate and sort tenant compatibility metadata against the pinned P0.2 policy.
-pub fn validate_compatibility(
-    date: &str,
-    flags: Vec<String>,
-) -> Result<Vec<String>, PlatformError> {
-    if !valid_date(date) || !(COMPATIBILITY_DATE_MIN..=COMPATIBILITY_DATE_MAX).contains(&date) {
-        return Err(PlatformError::new(
-            ErrorCode::CompatibilityUnsupported,
-            "compatibility date is outside the pinned runtime policy",
-        ));
-    }
-    let mut unique = BTreeSet::new();
-    for flag in flags {
-        if !COMPATIBILITY_FLAGS_ALLOWED.contains(&flag.as_str()) {
-            return Err(PlatformError::new(
-                ErrorCode::CompatibilityUnsupported,
-                "compatibility flag is not allowed by P0.2 policy",
-            ));
-        }
-        unique.insert(flag);
-    }
-    if unique.contains("assets_navigation_prefers_asset_serving")
-        && unique.contains("assets_navigation_has_no_effect")
-    {
-        return Err(PlatformError::new(
-            ErrorCode::CompatibilityUnsupported,
-            "asset navigation compatibility flags conflict",
-        ));
-    }
-    Ok(unique.into_iter().collect())
-}
-
 /// Validate one P0.2 env name and reject platform/prototype namespaces.
 pub fn validate_env_name(name: &str) -> Result<(), PlatformError> {
     let mut bytes = name.bytes();
@@ -814,47 +747,6 @@ fn canonical_json(
     }
 }
 
-fn validate_limits(limits: &serde_json::Value) -> Result<(), PlatformError> {
-    let Some(object) = limits.as_object() else {
-        return Err(invalid_limits());
-    };
-    if object.len() != 1
-        || object.get("profile").and_then(serde_json::Value::as_str) != Some("default")
-    {
-        return Err(invalid_limits());
-    }
-    Ok(())
-}
-
-fn valid_date(date: &str) -> bool {
-    let bytes = date.as_bytes();
-    if bytes.len() != 10
-        || bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || bytes
-            .iter()
-            .enumerate()
-            .any(|(i, b)| i != 4 && i != 7 && !b.is_ascii_digit())
-    {
-        return false;
-    }
-    let year = date[0..4].parse::<u32>().ok();
-    let month = date[5..7].parse::<u32>().ok();
-    let day = date[8..10].parse::<u32>().ok();
-    let (Some(year), Some(month), Some(day)) = (year, month, day) else {
-        return false;
-    };
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let max_day = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return false,
-    };
-    day >= 1 && day <= max_day
-}
-
 /// Hash nonce and ciphertext for a secret descriptor.
 #[must_use]
 pub fn ciphertext_sha256(nonce: &[u8], ciphertext: &[u8]) -> String {
@@ -884,13 +776,6 @@ fn env_too_large() -> PlatformError {
     PlatformError::new(
         ErrorCode::ResourceLimitExceeded,
         "deployment environment exceeds its configured limit",
-    )
-}
-
-fn invalid_limits() -> PlatformError {
-    PlatformError::new(
-        ErrorCode::ResourceLimitExceeded,
-        "deployment limits profile is invalid",
     )
 }
 

@@ -12,6 +12,8 @@ pub(crate) enum ServiceMetricOperation {
     NamedFetch,
     /// Default or named Worker RPC.
     Rpc,
+    /// Default or named Worker raw TCP connect.
+    Connect,
     /// Method/getter call on a retained native capability.
     Capability,
 }
@@ -22,6 +24,7 @@ impl ServiceMetricOperation {
             Self::DefaultFetch => "default_fetch",
             Self::NamedFetch => "named_fetch",
             Self::Rpc => "rpc",
+            Self::Connect => "connect",
             Self::Capability => "capability",
         }
     }
@@ -102,11 +105,12 @@ pub(super) fn service_operation_index(operation: ServiceMetricOperation) -> usiz
         .unwrap()
 }
 
-const fn service_operations() -> [ServiceMetricOperation; 4] {
+const fn service_operations() -> [ServiceMetricOperation; 5] {
     [
         ServiceMetricOperation::DefaultFetch,
         ServiceMetricOperation::NamedFetch,
         ServiceMetricOperation::Rpc,
+        ServiceMetricOperation::Connect,
         ServiceMetricOperation::Capability,
     ]
 }

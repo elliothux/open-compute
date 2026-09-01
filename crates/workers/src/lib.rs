@@ -17,7 +17,8 @@ pub mod resource_pins;
 pub mod runtime_source;
 pub mod workflows;
 pub use workflows::{
-    WorkflowController, WorkflowCreateInput, WorkflowReconcileCursor, WorkflowStatus,
+    WorkflowController, WorkflowCreateInput, WorkflowEventInput, WorkflowReconcileCursor,
+    WorkflowStatus,
 };
 
 pub use assets::{
@@ -35,11 +36,10 @@ pub use bundle::{
 pub use d1::D1ResourceDriver;
 pub use descriptor::{
     AssetDescriptorV1, BindingDescriptorV1, BuiltinBindingDescriptorKindV1,
-    BuiltinBindingDescriptorV1, COMPATIBILITY_DATE_MAX, COMPATIBILITY_DATE_MIN,
-    COMPATIBILITY_FLAGS_ALLOWED, CacheEntrypointPolicyV1, CachePolicyDescriptorV1,
-    GLOBAL_OUTBOUND_POLICY_VERSION, QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX,
-    SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1, canonicalize_vars,
-    ciphertext_sha256, loader_key, parse_loader_key, validate_compatibility, validate_env_name,
+    BuiltinBindingDescriptorV1, CacheEntrypointPolicyV1, CachePolicyDescriptorV1,
+    QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptorV1,
+    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, loader_key, parse_loader_key,
+    validate_env_name,
 };
 pub use durable_objects::DurableObjectResourceDriver;
 pub use kv::KvResourceDriver;
@@ -63,7 +63,7 @@ pub use resource_pins::{ResourcePin, ResourcePins};
 pub use runtime_source::{
     DurableObjectFacadeIdentity, RuntimeAssetBinding, RuntimeAssets, RuntimeBinding,
     RuntimeCachePolicy, RuntimeImagesBinding, RuntimeModule, RuntimePayload, RuntimeQueueBinding,
-    RuntimeScope, RuntimeServiceBinding, RuntimeSnapshot, RuntimeSource,
+    RuntimeScheduledTarget, RuntimeScope, RuntimeServiceBinding, RuntimeSnapshot, RuntimeSource,
     RuntimeVersionMetadataBinding,
 };
 

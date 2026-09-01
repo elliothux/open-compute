@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { transform } from "rolldown/utils";
 
-export const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
+const moduleRoot = fileURLToPath(new URL("../../../.temp/runtime-test-modules/", import.meta.url));
+mkdirSync(moduleRoot, { recursive: true });
+const modules = mkdtempSync(join(moduleRoot, "run-"));
+let moduleOrdinal = 0;
+
+export const moduleUrl = source => {
+  const path = join(modules, `module-${moduleOrdinal++}.mjs`);
+  writeFileSync(path, source);
+  return pathToFileURL(path).href;
+};
 
 export async function compileRuntime(name, imports = {}) {
   const source = await readFile(new URL(`../src/${name}`, import.meta.url), "utf8");

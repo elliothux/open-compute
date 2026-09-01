@@ -31,7 +31,14 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
     changed.capability_version = 2;
     assert!(version_digest(&changed).is_err());
     let binding = repo
-        .prepare_binding(account, DeploymentId::generate(), "FLOW", definition.id, 3)
+        .prepare_binding(
+            account,
+            DeploymentId::generate(),
+            "FLOW",
+            definition.id,
+            Vec::new(),
+            3,
+        )
         .unwrap();
     assert_eq!(binding.descriptor.capability_version, 1);
     let mut changed = binding.descriptor.clone();
@@ -40,7 +47,14 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
     changed.capability_version = 3;
     assert!(changed.sha256().is_err());
     let first = repo
-        .reserve_instance(account, definition.id, Some("first"), &limits, 4)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("first"),
+            &limits,
+            4,
+        )
         .unwrap()
         .identity;
     assert_eq!(
@@ -56,13 +70,20 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
         ErrorCode::WorkflowReferenced
     );
     let second = repo
-        .reserve_instance(account, definition.id, Some("second"), &limits, 7)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("second"),
+            &limits,
+            7,
+        )
         .unwrap()
         .identity;
     assert_eq!(
         repo.prepare_instance_operation(
             &first,
-            open_compute_core::WorkflowOperationId::generate(),
+            WorkflowOperationId::generate(),
             WorkflowOperationKind::Restart,
             &limits,
             8
@@ -80,7 +101,7 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
     let operation = repo
         .prepare_instance_operation(
             &first,
-            open_compute_core::WorkflowOperationId::generate(),
+            WorkflowOperationId::generate(),
             WorkflowOperationKind::Restart,
             &limits,
             9,
@@ -115,7 +136,7 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
     assert_eq!(
         repo.prepare_instance_operation(
             &first,
-            open_compute_core::WorkflowOperationId::generate(),
+            WorkflowOperationId::generate(),
             WorkflowOperationKind::Purge,
             &limits,
             10
@@ -125,9 +146,16 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
         ErrorCode::WorkflowInstanceBusy
     );
     assert_eq!(
-        repo.reserve_instance(account, definition.id, None, &limits, 10)
-            .unwrap_err()
-            .code(),
+        repo.reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            None,
+            &limits,
+            10
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::WorkflowStateQuotaExceeded
     );
     storage
@@ -158,14 +186,21 @@ fn operation_finalize_is_atomic_and_idempotent_and_purge_releases_external_ident
     let repo = WorkflowRepository::new(storage.db());
     let limits = WorkflowsConfig::default();
     let identity = repo
-        .reserve_instance(account, definition.id, Some("reusable"), &limits, 3)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("reusable"),
+            &limits,
+            3,
+        )
         .unwrap()
         .identity;
     repo.finalize_instance(&identity, 4).unwrap();
     let operation = repo
         .prepare_instance_operation(
             &identity,
-            open_compute_core::WorkflowOperationId::generate(),
+            WorkflowOperationId::generate(),
             WorkflowOperationKind::Restart,
             &limits,
             5,
@@ -214,7 +249,7 @@ fn operation_finalize_is_atomic_and_idempotent_and_purge_releases_external_ident
     assert_eq!(
         repo.prepare_instance_operation(
             &next,
-            open_compute_core::WorkflowOperationId::generate(),
+            WorkflowOperationId::generate(),
             WorkflowOperationKind::Purge,
             &limits,
             8
@@ -227,7 +262,7 @@ fn operation_finalize_is_atomic_and_idempotent_and_purge_releases_external_ident
     let purge = repo
         .prepare_instance_operation(
             &next,
-            open_compute_core::WorkflowOperationId::generate(),
+            WorkflowOperationId::generate(),
             WorkflowOperationKind::Purge,
             &limits,
             9,
@@ -261,7 +296,14 @@ fn operation_finalize_is_atomic_and_idempotent_and_purge_releases_external_ident
     assert!(!repo.instance_referrers_intact(&next).unwrap());
     assert!(repo.instance_operations(None, 100).unwrap().is_empty());
     let reused = repo
-        .reserve_instance(account, definition.id, Some("reusable"), &limits, 12)
+        .reserve_instance(
+            account,
+            definition.id,
+            WorkflowOperationId::generate(),
+            Some("reusable"),
+            &limits,
+            12,
+        )
         .unwrap()
         .identity;
     assert_ne!(reused.instance_id, identity.instance_id);

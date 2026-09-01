@@ -44,7 +44,7 @@ async fn verify_project(origin: &str, storage: Arc<PlatformStorage>, account: Ac
     std::fs::write(
         project.join("open-compute.json"),
         serde_json::json!({
-            "name": "typescript-cli", "main": "index.ts", "compatibilityDate": "2026-08-22",
+            "name": "typescript-cli", "main": "index.ts",
             "endpoint": origin, "vars": {"GREETING": "你好 🌍"},
             "secrets": {"TOKEN": {"env": "OPEN_COMPUTE_TS_FIXTURE_SECRET"}},
         })

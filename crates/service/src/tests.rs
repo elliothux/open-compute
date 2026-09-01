@@ -1154,6 +1154,8 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         .enqueue_queue(
             &open_compute_storage::QueueEnqueueRequest {
                 queue_id,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 batch_delay_seconds: None,
@@ -1761,6 +1763,7 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     drop(D1LifecycleGuard::new(reg.clone(), D1Lifecycle::Migration));
     reg.observe_do_dispatch(DoOperation::Fetch, true, Duration::from_millis(7));
     reg.observe_do_dispatch(DoOperation::Rpc, false, Duration::from_millis(8));
+    reg.observe_do_dispatch(DoOperation::Connect, true, Duration::from_millis(9));
     reg.set_do_active_hosts(4);
     for reason in [
         DoFacetReloadReason::Promotion,
@@ -1870,6 +1873,7 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     assert!(rendered.contains("d1_migration_total{outcome=\"failure\"} 1"));
     assert!(rendered.contains("oc_do_dispatch_total{operation=\"fetch\",outcome=\"success\"} 1"));
     assert!(rendered.contains("oc_do_dispatch_total{operation=\"rpc\",outcome=\"failure\"} 1"));
+    assert!(rendered.contains("oc_do_dispatch_total{operation=\"connect\",outcome=\"success\"} 1"));
     assert!(rendered.contains("oc_do_active_host_actors 4"));
     assert!(rendered.contains("oc_do_facet_reload_total{reason=\"promotion\"} 1"));
     assert!(
@@ -1981,7 +1985,10 @@ request_timeout_ms = 2000
         .data_dir()
         .prepare_durable_object_storage(
             &storage.identity().platform_id.to_string(),
-            "workerd 2026-08-26",
+            &open_compute_runtime::embedded_runtime_lock()
+                .unwrap()
+                .0
+                .expected_version_output,
         )
         .unwrap();
     (dir, path, mock)
@@ -2095,13 +2102,12 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     let mut loaded = load_platform_config(&path).unwrap();
     let capabilities = crate::capabilities::platform_capabilities(&loaded.config).unwrap();
     assert!(capabilities.validate());
-    assert_eq!(
-        capabilities.products["durable_objects"].basic_websocket,
-        Some(open_compute_core::CapabilityStatus::Supported)
-    );
-    assert_eq!(
-        capabilities.products["durable_objects"].hibernatable_websocket,
-        Some(open_compute_core::CapabilityStatus::Unsupported)
+    assert!(
+        capabilities.products["durable_objects"]
+            .members
+            .iter()
+            .any(|member| member.member == "get"
+                && member.status != open_compute_core::CapabilityStatus::Blocked)
     );
     assert_eq!(
         capabilities.products["queues"].status,
@@ -2125,12 +2131,14 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     assert_eq!(
         capabilities.products["workflows"].deviations,
-        vec!["OC-WORKFLOW-001", "OC-WORKFLOW-002"]
+        vec!["OC-WORKFLOW-001"]
     );
     assert_eq!(
         capabilities.products["websocket_hibernation"].status,
-        open_compute_core::CapabilityStatus::Unsupported
+        open_compute_core::CapabilityStatus::Supported
     );
+    assert!(!capabilities.runtime.workers_types_version.is_empty());
+    assert_eq!(capabilities.runtime.workers_types_ast_sha256.len(), 64);
     let metadata = crate::capabilities::platform_release_metadata(&loaded).unwrap();
     assert!(metadata.validate());
     assert_eq!(metadata.release, capabilities.release);
@@ -2511,8 +2519,6 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
                 bundle: bundle.into_bytes().into(),
                 assets: None,
             },
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: Vec::new(),
             vars: std::collections::BTreeMap::new(),
             secrets: std::collections::BTreeMap::new(),
             bindings: std::collections::BTreeMap::new(),
@@ -2527,8 +2533,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
                 },
                 dead_letter_queue: None,
             }],
-            crons: Some(vec![cron.to_owned()]),
-            limits: serde_json::json!({"profile": "default"}),
+            crons: vec![cron.to_owned()],
             promote,
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_000,
@@ -2635,6 +2640,8 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         .enqueue_queue(
             &open_compute_storage::QueueEnqueueRequest {
                 queue_id,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 batch_delay_seconds: None,
@@ -2719,6 +2726,8 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         .enqueue_queue(
             &open_compute_storage::QueueEnqueueRequest {
                 queue_id,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 batch_delay_seconds: None,
@@ -3091,41 +3100,43 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         open_compute_storage::P23CrossDatabaseInspection::default()
     );
 
-    let mut inherit = request("p23-inherit", "inherit", true, "ignored", 40);
-    inherit.crons = None;
-    let inherited = controller.create_deployment(inherit).await.unwrap();
-    let inherited_id = match inherited {
+    let mut retarget = request("p23-retarget", "retarget", true, "ignored", 40);
+    retarget.crons = vec!["30 * * * *".to_owned()];
+    let retargeted = controller.create_deployment(retarget).await.unwrap();
+    let retargeted_id = match retargeted {
         CreateDeploymentOutcome::Applied(result) => result.deployment.id,
-        CreateDeploymentOutcome::Replay(_) => panic!("inherited P2.3 deployment replayed"),
+        CreateDeploymentOutcome::Replay(_) => panic!("retargeted P2.3 deployment replayed"),
     };
-    let inherited_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
-    assert_eq!(inherited_consumer.consumer_generation, 4);
-    assert_eq!(inherited_consumer.deployment_id, inherited_id);
-    let inherited_crons = open_compute_storage::CronRepository::new(storage.db())
+    let retargeted_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
+    assert_eq!(retargeted_consumer.consumer_generation, 4);
+    assert_eq!(retargeted_consumer.deployment_id, retargeted_id);
+    let retargeted_crons = open_compute_storage::CronRepository::new(storage.db())
         .live_for_worker(worker.id)
         .unwrap();
-    assert_eq!(inherited_crons.len(), 1);
-    assert_eq!(inherited_crons[0].expression, "30 * * * *");
-    assert_eq!(inherited_crons[0].deployment_id, inherited_id);
-    let inherited_declaration = consumer_repo
-        .deployment_declarations(inherited_id)
+    assert_eq!(retargeted_crons.len(), 1);
+    assert_eq!(retargeted_crons[0].expression, "30 * * * *");
+    assert_eq!(retargeted_crons[0].deployment_id, retargeted_id);
+    let retargeted_declaration = consumer_repo
+        .deployment_declarations(retargeted_id)
         .unwrap()
         .into_iter()
         .next()
         .unwrap();
-    let inherited_cron_declarations = vec![open_compute_storage::CronDeclaration {
+    let retargeted_cron_declarations = vec![open_compute_storage::CronDeclaration {
         id: open_compute_core::CronActivationId::generate(),
-        deployment_id: inherited_id,
-        expression: inherited_crons[0].expression.clone(),
-        expression_sha256: inherited_crons[0].expression_sha256,
-        parser_version: inherited_crons[0].parser_version,
+        deployment_id: retargeted_id,
+        expression: retargeted_crons[0].expression.clone(),
+        expression_sha256: retargeted_crons[0].expression_sha256,
+        parser_version: retargeted_crons[0].parser_version,
+        scheduled_handler: true,
+        workflow_bindings: Vec::new(),
         created_at_ms: 706_002,
     }];
     assert!(
         consumer_repo
             .begin_delete(
-                inherited_consumer.id,
-                inherited_consumer.consumer_generation,
+                retargeted_consumer.id,
+                retargeted_consumer.consumer_generation,
                 706_001,
             )
             .unwrap()
@@ -3134,7 +3145,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         open_compute_storage::CronRepository::new(storage.db())
             .retire_before(
                 worker.id,
-                inherited_crons[0].activation_generation + 1,
+                retargeted_crons[0].activation_generation + 1,
                 706_001,
             )
             .unwrap(),
@@ -3149,15 +3160,15 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             .is_empty()
     );
     let reactivated = consumer_repo
-        .create_attachment(account, worker.id, &inherited_declaration, 706_002)
+        .create_attachment(account, worker.id, &retargeted_declaration, 706_002)
         .unwrap();
     let restaged = open_compute_storage::CronRepository::new(storage.db())
         .stage_activations(
             account,
             worker.id,
-            inherited_id,
-            inherited_crons[0].activation_generation + 1,
-            &inherited_cron_declarations,
+            retargeted_id,
+            retargeted_crons[0].activation_generation + 1,
+            &retargeted_cron_declarations,
             706_002,
         )
         .unwrap();
@@ -3179,7 +3190,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             .begin_update(
                 reactivated.id,
                 reactivated.consumer_generation,
-                &inherited_declaration,
+                &retargeted_declaration,
                 706_003,
             )
             .unwrap()
@@ -3206,7 +3217,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
 
     let mut empty = request("p23-empty", "empty", true, "ignored", 10);
     empty.queue_consumers.clear();
-    empty.crons = Some(Vec::new());
+    empty.crons = Vec::new();
     let emptied = controller.create_deployment(empty).await.unwrap();
     let emptied_id = match emptied {
         CreateDeploymentOutcome::Applied(result) => result.deployment.id,
@@ -3448,7 +3459,7 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
                 .header("idempotency-key", "too-large")
                 .header(
                     "x-open-compute-deployment-metadata",
-                    r#"{"mainModule":"index.js","compatibilityDate":"2026-08-22"}"#,
+                    r#"{"mainModule":"index.js"}"#,
                 )
                 .header("content-length", (25 * 1024 * 1024 + 1).to_string())
                 .body(Body::empty())
@@ -3681,7 +3692,7 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
                 .header("idempotency-key", "deployment-invalid-bundle")
                 .header(
                     "x-open-compute-deployment-metadata",
-                    r#"{"mainModule":"index.js","compatibilityDate":"2026-08-22"}"#,
+                    r#"{"mainModule":"index.js"}"#,
                 )
                 .body(Body::from("not-a-canonical-bundle"))
                 .unwrap(),
@@ -3699,7 +3710,7 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
                 .header("idempotency-key", "deployment-mismatch")
                 .header(
                     "x-open-compute-deployment-metadata",
-                    r#"{"mainModule":"other.js","compatibilityDate":"2026-08-22"}"#,
+                    r#"{"mainModule":"other.js"}"#,
                 )
                 .body(Body::from(bundle.clone()))
                 .unwrap(),
@@ -3725,7 +3736,7 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
             .header("idempotency-key", "deployment-runtime-failure")
             .header(
                 "x-open-compute-deployment-metadata",
-                r#"{"mainModule":"index.js","compatibilityDate":"2026-08-22"}"#,
+                r#"{"mainModule":"index.js"}"#,
             )
             .body(Body::from(bundle.clone()))
             .unwrap()
@@ -4258,9 +4269,6 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
                     artifact_size: Some(u64::from(index)),
                     artifact_schema_version: Some(1),
                     main_module: Some("index.js".to_owned()),
-                    compatibility_date: "2026-08-22".to_owned(),
-                    compatibility_flags: Vec::new(),
-                    limits: serde_json::json!({}),
                     worker_code_sha256: [index.saturating_add(10); 32],
                     vars: std::collections::BTreeMap::new(),
                     secrets: std::collections::BTreeMap::new(),
@@ -4434,9 +4442,6 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
             artifact_size: Some(payload.len() as u64),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: Vec::new(),
-            limits: serde_json::json!({}),
             worker_code_sha256: [7; 32],
             vars: std::collections::BTreeMap::new(),
             secrets: std::collections::BTreeMap::new(),

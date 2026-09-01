@@ -8,9 +8,12 @@ use open_compute_core::{
 use rusqlite::{OptionalExtension as _, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use uuid::Uuid;
 
 #[path = "queue/helpers.rs"]
 pub(super) mod helpers;
+#[path = "queue/operations.rs"]
+mod operations;
 use helpers::*;
 
 /// Queue message content representation persisted by capability version one.
@@ -23,6 +26,8 @@ pub enum QueueContentType {
     Text,
     /// Opaque owned bytes.
     Bytes,
+    /// Day1 structured-clone `v8` body encoded by the queue-v8 codec.
+    V8,
 }
 
 impl QueueContentType {
@@ -33,6 +38,7 @@ impl QueueContentType {
             Self::Json => "json",
             Self::Text => "text",
             Self::Bytes => "bytes",
+            Self::V8 => "v8",
         }
     }
 }
@@ -45,6 +51,7 @@ impl FromStr for QueueContentType {
             "json" => Ok(Self::Json),
             "text" => Ok(Self::Text),
             "bytes" => Ok(Self::Bytes),
+            "v8" => Ok(Self::V8),
             _ => Err(PlatformError::new(
                 ErrorCode::QueueContentTypeUnsupported,
                 "Queue content type is not supported",
@@ -88,6 +95,10 @@ pub struct QueueMessageInput {
 pub struct QueueEnqueueRequest {
     /// Frozen Queue identity.
     pub queue_id: QueueId,
+    /// Stable producer operation identity reused across response-loss retries.
+    pub request_id: Uuid,
+    /// Whether a Durable Object output intent must explicitly finalize this operation.
+    pub output_gate: bool,
     /// Frozen lifecycle generation.
     pub lifecycle_generation: u64,
     /// Current healthy control config generation.
@@ -483,6 +494,13 @@ impl SchedulerStore {
         lifecycle_generation: u64,
     ) -> Result<(), PlatformError> {
         let connection = self.lock()?;
+        connection
+            .execute(
+                "DELETE FROM queue_enqueue_operations
+                 WHERE queue_id = ?1 AND finalized_at_ms IS NOT NULL",
+                [queue_id.to_string()],
+            )
+            .map_err(map_sql_error)?;
         let changed = connection
             .execute(
                 "DELETE FROM queue_state WHERE queue_id = ?1 AND lifecycle_generation = ?2
@@ -505,89 +523,6 @@ impl SchedulerStore {
         drop(connection);
         self.wake.notify();
         Ok(())
-    }
-
-    /// Enqueue a non-empty batch atomically and return transaction-local metrics.
-    pub fn enqueue_queue(
-        &self,
-        request: &QueueEnqueueRequest,
-        now_ms: i64,
-    ) -> Result<QueueEnqueueResult, PlatformError> {
-        validate_request(request)?;
-        let mut connection = self.lock()?;
-        let tx = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(queue_sql_error)?;
-        let authority = read_state_tx(&tx, request.queue_id)?;
-        if authority.lifecycle_generation != request.lifecycle_generation
-            || authority.config_generation != request.config_generation
-        {
-            return Err(queue_invariant());
-        }
-        match authority.state.as_str() {
-            "accepting" => {}
-            "configuring" => {
-                return Err(PlatformError::new(
-                    ErrorCode::QueueConfigPending,
-                    "Queue config projection is pending",
-                ));
-            }
-            _ => {
-                return Err(PlatformError::new(
-                    ErrorCode::QueueNotReady,
-                    "Queue does not accept producer messages",
-                ));
-            }
-        }
-        validate_dynamic_limits(request, &authority)?;
-        let total = request.messages.iter().try_fold(0_u64, |sum, message| {
-            sum.checked_add(u64::try_from(message.body.len()).map_err(|_| queue_limit())?)
-                .ok_or_else(queue_limit)
-        })?;
-        if authority.message_bytes.saturating_add(total) > authority.config.max_backlog_bytes {
-            return Err(PlatformError::new(
-                ErrorCode::QueueBacklogLimitExceeded,
-                "Queue backlog byte limit would be exceeded",
-            ));
-        }
-        let expires_at_ms = checked_timestamp(now_ms, authority.config.retention_seconds)?;
-        let mut message_ids = Vec::with_capacity(request.messages.len());
-        for message in &request.messages {
-            let delay = message
-                .delay_seconds
-                .or(request.batch_delay_seconds)
-                .unwrap_or(authority.config.delivery_delay_seconds);
-            let available_at_ms = checked_timestamp(now_ms, delay)?;
-            let id = QueueMessageId::generate();
-            tx.execute(
-                "INSERT INTO queue_messages
-                 (id, queue_id, queue_generation, enqueued_at_ms, available_at_ms,
-                  expires_at_ms, content_type, body, body_bytes, state, attempts,
-                  claim_token, claim_until_ms, claimed_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'ready', 0, NULL, NULL, NULL)",
-                params![
-                    id.to_string(),
-                    request.queue_id.to_string(),
-                    as_i64(request.lifecycle_generation)?,
-                    now_ms,
-                    available_at_ms,
-                    expires_at_ms,
-                    message.content_type.as_str(),
-                    message.body,
-                    as_i64(u64::try_from(message.body.len()).map_err(|_| queue_limit())?)?,
-                ],
-            )
-            .map_err(queue_sql_error)?;
-            message_ids.push(id);
-        }
-        let metrics = metrics_tx(&tx, request.queue_id)?;
-        tx.commit().map_err(queue_sql_error)?;
-        drop(connection);
-        self.wake.notify();
-        Ok(QueueEnqueueResult {
-            message_ids,
-            metrics,
-        })
     }
 
     /// Read an exact Queue backlog summary without scanning message bodies.
@@ -676,17 +611,24 @@ impl SchedulerStore {
             }
             bytes = bytes.checked_add(*body_bytes).ok_or_else(queue_invariant)?;
         }
+        operations::delete_expired_operations(&tx, now_ms, max_rows)?;
         let expired_remaining: bool = tx
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM queue_messages
-                  WHERE state = 'ready' AND expires_at_ms <= ?1)",
+                  WHERE state = 'ready' AND expires_at_ms <= ?1)
+                  OR EXISTS(SELECT 1 FROM queue_enqueue_operations
+                  WHERE expires_at_ms <= ?1)",
                 [now_ms],
                 |row| row.get(0),
             )
             .map_err(map_sql_error)?;
         let next_expiry_at_ms = tx
             .query_row(
-                "SELECT MIN(expires_at_ms) FROM queue_messages WHERE state = 'ready'",
+                "SELECT MIN(expiry) FROM (
+                   SELECT MIN(expires_at_ms) AS expiry FROM queue_messages WHERE state = 'ready'
+                   UNION ALL
+                   SELECT MIN(expires_at_ms) FROM queue_enqueue_operations
+                 )",
                 [],
                 |row| row.get(0),
             )
@@ -753,16 +695,22 @@ impl SchedulerStore {
             }
             bytes = bytes.checked_add(*body_bytes).ok_or_else(queue_invariant)?;
         }
+        operations::delete_queue_operations(&tx, queue_id)?;
         let remaining: bool = tx
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM queue_messages WHERE queue_id = ?1)",
+                "SELECT EXISTS(SELECT 1 FROM queue_messages WHERE queue_id = ?1)
+                  OR EXISTS(SELECT 1 FROM queue_enqueue_operations WHERE queue_id = ?1)",
                 [queue_id.to_string()],
                 |row| row.get(0),
             )
             .map_err(map_sql_error)?;
         let next_expiry_at_ms = tx
             .query_row(
-                "SELECT MIN(expires_at_ms) FROM queue_messages WHERE state = 'ready'",
+                "SELECT MIN(expiry) FROM (
+                   SELECT MIN(expires_at_ms) AS expiry FROM queue_messages WHERE state = 'ready'
+                   UNION ALL
+                   SELECT MIN(expires_at_ms) FROM queue_enqueue_operations
+                 )",
                 [],
                 |row| row.get(0),
             )

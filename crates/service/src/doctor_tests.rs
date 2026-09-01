@@ -49,3 +49,17 @@ fn report_helpers_cover_all_statuses_bounds_and_write_failures() {
     assert_eq!(bound_value("aéz", 3), "aé");
     assert_eq!(bound_value("aéz", 2), "a");
 }
+
+#[test]
+fn workflow_doctor_fails_closed_when_authority_is_unavailable() {
+    let root = tempfile::tempdir().unwrap();
+    let loaded = LoadedConfig {
+        path: root.path().join("open-compute.toml"),
+        config: open_compute_core::PlatformConfig::default(),
+    };
+    let check = workflow::inspect(&loaded, &root.path().join("missing"));
+    assert_eq!(check.name, "workflow_authority");
+    assert_eq!(check.status, CheckStatus::Failed);
+    assert!(check.code.is_some());
+    assert_eq!(check.value, None);
+}

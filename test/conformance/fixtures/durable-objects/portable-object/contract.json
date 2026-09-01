@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "durable-objects/portable/object",
+  "contracts": ["durable-objects.namespace.storage", "durable-objects.alarms", "durable-objects.hibernation"],
+  "source": "src/index.ts",
+  "bindings": {
+    "OBJECTS": { "type": "do_namespace", "className": "PortableObject" }
+  },
+  "observations": [
+    {
+      "method": "GET",
+      "path": "/ids",
+      "expect": {
+        "status": 200,
+        "json": {
+          "namedStable": true,
+          "parsedEqual": true,
+          "namedName": "portable",
+          "uniqueNameAbsent": true,
+          "stubIdentity": true,
+          "jurisdiction": "eu"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/surface",
+      "expect": {
+        "status": 200,
+        "json": {
+          "rpc": {
+            "count": 2,
+            "structured": true
+          },
+          "storage": {
+            "asyncKv": true,
+            "syncKv": true,
+            "transactionRollback": true,
+            "sql": true,
+            "alarm": true,
+            "deleteAll": true
+          },
+          "context": {
+            "id": true,
+            "props": true,
+            "exports": true,
+            "blockConcurrency": true,
+            "waitUntil": true
+          },
+          "facets": {
+            "first": 1,
+            "second": 2,
+            "props": "facet",
+            "nestedSecond": 2,
+            "clone": 3,
+            "nestedClone": 3,
+            "fresh": 1,
+            "nestedFresh": 1
+          }
+        }
+      }
+    },
+    { "method": "DELETE", "path": "/cleanup", "expect": { "status": 200, "json": { "cleaned": true } } }
+  ],
+  "normalization": [],
+  "cleanup": {
+    "cloudflare": ["worker", "do_namespace"],
+    "openCompute": ["worker", "do_namespace"]
+  }
+}

@@ -4,10 +4,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function strings(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item: unknown) => typeof item === "string");
-}
-
 function invalid(): never {
   throw Object.assign(new Error("DEPLOYMENT_INVARIANT_VIOLATION"), { stableCode: "DEPLOYMENT_INVARIANT_VIOLATION" });
 }
@@ -20,8 +16,7 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
       || !["worker", "assets_only"].includes(String(value.contentKind))
       || (value.contentKind === "worker" && typeof value.mainModule !== "string")
       || (value.contentKind === "assets_only" && value.mainModule !== undefined)
-      || typeof value.compatibilityDate !== "string"
-      || !strings(value.compatibilityFlags) || !Array.isArray(value.modules)
+      || !Array.isArray(value.modules)
       || !record(value.env) || !Array.isArray(value.bindings) || !Array.isArray(value.services)
       || !record(value.cachePolicy) || typeof value.cachePolicy.enabled !== "boolean"
       || typeof value.cachePolicy.failOpen !== "boolean"

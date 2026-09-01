@@ -130,8 +130,6 @@ max_consumer_concurrency = 32
 [durable_objects]
 max_namespace_name_bytes = 128
 max_object_name_bytes = 1024
-max_rpc_request_bytes = 1048576
-max_rpc_response_bytes = 1048576
 max_fetch_body_bytes = 33554432
 dispatch_timeout_ms = 30000
 max_in_flight_dispatches = 256

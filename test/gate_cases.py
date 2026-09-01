@@ -6,20 +6,36 @@ and recovery. A mixed monolithic case stays TIMING until it can be separated wit
 losing assertions. Discovery rejects missing, extra, and overlapping registrations.
 """
 
+import json
+import sys
+
 ONCE = {
     'p3-contract': (
         'baseline-identity',
         'catalog-schema',
         'capability-catalog-bijection',
+        'inventory-generation-drift',
+        'inventory-member-evidence',
         'case-registry-mapping',
         'deviation-bijection',
         'compatibility-coverage',
         'public-types-surface',
+        'compile-fixtures',
+        'conformance-self-tests',
         'unsupported-config-rejection',
         'portable-fixture-inventory',
         'cloudflare-runner-safety',
     ),
-    'p3-cf-diff': ('cache-api/portable/cache-hit',),
+    'p3-cf-diff': (
+        'cache-api/portable/cache-hit',
+        'd1/portable/database',
+        'durable-objects/portable/object',
+        'kv/portable/namespace',
+        'queues/portable/producer',
+        'r2/portable/bucket',
+        'workers/portable/runtime',
+        'workflows/portable/lifecycle',
+    ),
     # Fixed listener ordering, not a startup race.
     'p0-1': ('public_health_port_ignores_private_listener_that_appears_first',),
     # The capability case already compares two fresh CLI processes in one invocation.
@@ -58,6 +74,8 @@ ONCE = {
         'timestamps_use_deterministic_clock',
     ),
     'single-binary': ('readonly_commands_need_only_the_single_executable',),
+    # Default Node builtins, process.env isolation, and fail-closed stubs.
+    'p0-2': ('nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs',),
 }
 
 TIMING = {
@@ -73,7 +91,10 @@ TIMING = {
     'p0-8': ('p0_8_real_scheduler_alarm_matrix',),
     'p0-exit': ('p0_real_combined_exit_matrix',),
     'p1-crash': ('p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly',),
-    'p2-2': ('p2_2_real_queue_producer_matrix',),
+    'p2-2': (
+        'p2_2_real_queue_producer_matrix',
+        'scheduler::p2_2_real_queue_scheduler_matrix',
+    ),
     'workflow-runtime': ('workflow_runtime_suspension_timeout_parallel_and_native_errors',),
     'workflow-recovery': (
         'process_crash::workflow_platformd_sigkill_after_step_commit_replays_without_callback',
@@ -132,3 +153,18 @@ def validate_registry(target_names):
         cases = ONCE.get(name, ()) + TIMING.get(name, ())
         if not cases or len(cases) != len(set(cases)):
             raise ValueError(f'duplicate or empty Gate case registration: {name}')
+
+
+def registered_case_ids():
+    """Return the authoritative, fully-qualified native case inventory."""
+    return tuple(sorted(
+        f'{target}::{case}'
+        for target in ONCE.keys() | TIMING.keys()
+        for case in ONCE.get(target, ()) + TIMING.get(target, ())
+    ))
+
+
+if __name__ == '__main__':
+    if sys.argv != [sys.argv[0], '--json']:
+        raise SystemExit('use --json')
+    print(json.dumps({'schemaVersion': 1, 'cases': registered_case_ids()}, separators=(',', ':')))

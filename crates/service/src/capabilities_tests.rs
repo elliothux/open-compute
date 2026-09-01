@@ -1,5 +1,5 @@
 use super::*;
-use open_compute_core::CapabilityStatus;
+use open_compute_core::{CapabilityStatus, ProductKind};
 
 #[test]
 fn snapshot_policy_covers_the_current_workflow_configuration() {
@@ -40,7 +40,9 @@ fn snapshot_policy_covers_the_current_workflow_configuration() {
 
 #[test]
 fn workflow_capabilities_report_current_model_and_operator_limits() {
-    let products = product_registry().unwrap();
+    let (source, products) = product_registry().unwrap();
+    assert!(!source.workers_types_version.is_empty());
+    assert_eq!(source.ast_sha256.len(), 64);
     for product in products.values() {
         if matches!(
             product.status,
@@ -48,12 +50,31 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
         ) {
             assert_eq!(product.capability_version, Some(1));
         }
+        if product.kind == ProductKind::Target {
+            assert!(matches!(
+                product.status,
+                CapabilityStatus::Supported | CapabilityStatus::SupportedWithDeviation
+            ));
+            assert!(!product.members.is_empty());
+            assert!(
+                product
+                    .members
+                    .iter()
+                    .all(open_compute_core::CapabilityMemberV1::validate)
+            );
+            assert!(
+                product
+                    .members
+                    .iter()
+                    .all(|member| member.status != CapabilityStatus::Blocked)
+            );
+        }
     }
     assert!(
         products["workflows"]
-            .methods
+            .members
             .iter()
-            .any(|method| method == "step.waitForEvent")
+            .any(|member| { member.member == "waitForEvent" || member.member == "do" })
     );
     assert_eq!(
         products["cache_api"].deviations,
@@ -63,6 +84,34 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
     assert_eq!(
         products["service_bindings"].status,
         CapabilityStatus::SupportedWithDeviation
+    );
+    assert_eq!(
+        products["websocket_hibernation"].status,
+        CapabilityStatus::Supported
+    );
+    assert!(
+        products["websocket_hibernation"]
+            .members
+            .iter()
+            .any(|member| {
+                member.symbol == "DurableObjectState" && member.member == "acceptWebSocket"
+            })
+    );
+    assert!(
+        products["d1"].members.iter().any(|member| {
+            member.symbol == "D1DatabaseSession" && member.member == "getBookmark"
+        })
+    );
+    assert!(
+        products["queues"].members.iter().any(|member| {
+            member.symbol == "QueueSendOptions" && member.member == "contentType"
+        })
+    );
+    assert!(
+        products["workflows"]
+            .members
+            .iter()
+            .any(|member| { member.member == "createBatch" })
     );
     let mut loaded = LoadedConfig {
         path: "/unused/policy.toml".into(),

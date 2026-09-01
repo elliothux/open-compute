@@ -1,4 +1,4 @@
-//! Strict `workerd.lock.json` schema.
+//! Strict current Day1 `workerd.lock.json` schema. Obsolete fields are rejected.
 
 use crate::fsutil::{
     MAX_LOCK_BYTES, parse_sha256_hex, read_regular_nofollow_bounded, require_absolute,
@@ -22,22 +22,64 @@ pub struct RuntimeLock {
     /// Schema version. Must be 1.
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
-    /// Release tag, for example `v1.20260826.1`.
+    /// Release tag, for example `v1.20260830.1`.
     pub release: String,
+    /// workerd git revision that produced this release.
+    pub revision: String,
     /// Exact `workerd --version` stdout, trimmed.
     #[serde(rename = "expectedVersionOutput")]
     pub expected_version_output: String,
-    /// Host Worker compatibility date.
-    #[serde(rename = "hostCompatibilityDate")]
-    pub host_compatibility_date: String,
+    /// Internal tenant compatibility date mixed into every isolate.
+    #[serde(rename = "effectiveCompatibilityDate")]
+    pub effective_compatibility_date: String,
+    /// Platform-internal flags required to enable the pinned tenant surface.
+    #[serde(rename = "requiredCompatibilityFlags")]
+    pub required_compatibility_flags: Vec<String>,
+    /// System-Worker-only flags. Never tenant configuration or capabilities.
+    #[serde(rename = "systemCompatibilityFlags")]
+    pub system_compatibility_flags: Vec<String>,
     /// Required process flags, each starting with `--`.
     #[serde(rename = "processFlags")]
     pub process_flags: Vec<String>,
-    /// Host Worker compatibility flags.
-    #[serde(rename = "hostCompatibilityFlags")]
-    pub host_compatibility_flags: Vec<String>,
+    /// Pinned `@cloudflare/workers-types` identity.
+    #[serde(rename = "workersTypes")]
+    pub workers_types: WorkersTypesPin,
+    /// Pinned workers-sdk revision and tool versions.
+    #[serde(rename = "workersSdk")]
+    pub workers_sdk: WorkersSdkPin,
     /// OS/arch target map.
     pub targets: BTreeMap<String, RuntimeTarget>,
+}
+
+/// Immutable `@cloudflare/workers-types` pin.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkersTypesPin {
+    /// npm package version, for example `5.20260830.1`.
+    pub version: String,
+    /// Upstream gitHead for this workers-types release.
+    #[serde(rename = "gitHead")]
+    pub git_head: String,
+    /// SHA-256 of the npm package tarball.
+    #[serde(rename = "packageSha256")]
+    pub package_sha256: String,
+    /// SHA-256 of the stable declaration AST source (`index.d.ts`).
+    #[serde(rename = "astSha256")]
+    pub ast_sha256: String,
+}
+
+/// Immutable workers-sdk pin.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkersSdkPin {
+    /// workers-sdk git revision.
+    pub revision: String,
+    /// Wrangler package version from that revision.
+    #[serde(rename = "wranglerVersion")]
+    pub wrangler_version: String,
+    /// Vite plugin package version from that revision.
+    #[serde(rename = "vitePluginVersion")]
+    pub vite_plugin_version: String,
 }
 
 /// Per-target official archive and binary hashes.
@@ -96,8 +138,9 @@ impl RuntimeLock {
             ));
         }
         require_nonempty(&self.release, "release")?;
+        require_git_sha(&self.revision)?;
         require_nonempty(&self.expected_version_output, "expectedVersionOutput")?;
-        require_compat_date(&self.host_compatibility_date)?;
+        require_compat_date(&self.effective_compatibility_date)?;
         if self.process_flags.is_empty() {
             return Err(PlatformError::new(
                 ErrorCode::RuntimeInvalid,
@@ -122,27 +165,16 @@ impl RuntimeLock {
                 ));
             }
         }
-        if self.host_compatibility_flags.is_empty() {
+        let required = require_compat_flags(&self.required_compatibility_flags)?;
+        let system = require_compat_flags(&self.system_compatibility_flags)?;
+        if !required.is_disjoint(&system) {
             return Err(PlatformError::new(
                 ErrorCode::RuntimeInvalid,
-                "hostCompatibilityFlags must not be empty",
+                "required and system compatibility flags must be disjoint",
             ));
         }
-        let mut seen_compat = BTreeSet::new();
-        for flag in &self.host_compatibility_flags {
-            if flag.is_empty() || !flag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-                return Err(PlatformError::new(
-                    ErrorCode::RuntimeInvalid,
-                    "compatibility flag is malformed",
-                ));
-            }
-            if !seen_compat.insert(flag) {
-                return Err(PlatformError::new(
-                    ErrorCode::RuntimeInvalid,
-                    "compatibility flag is duplicated",
-                ));
-            }
-        }
+        self.workers_types.validate(&self.revision)?;
+        self.workers_sdk.validate()?;
         if self.targets.is_empty() {
             return Err(PlatformError::new(
                 ErrorCode::RuntimeInvalid,
@@ -241,6 +273,64 @@ impl RuntimeTarget {
         parse_sha256_hex(&self.binary_sha256)?;
         Ok(())
     }
+}
+
+impl WorkersTypesPin {
+    fn validate(&self, revision: &str) -> Result<(), PlatformError> {
+        require_nonempty(&self.version, "workersTypes.version")?;
+        require_git_sha(&self.git_head)?;
+        if self.git_head != revision {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "workers-types gitHead must match the workerd revision",
+            ));
+        }
+        parse_sha256_hex(&self.package_sha256)?;
+        parse_sha256_hex(&self.ast_sha256)?;
+        Ok(())
+    }
+}
+
+impl WorkersSdkPin {
+    fn validate(&self) -> Result<(), PlatformError> {
+        require_git_sha(&self.revision)?;
+        require_nonempty(&self.wrangler_version, "workersSdk.wranglerVersion")?;
+        require_nonempty(&self.vite_plugin_version, "workersSdk.vitePluginVersion")?;
+        Ok(())
+    }
+}
+
+fn require_git_sha(value: &str) -> Result<(), PlatformError> {
+    if value.len() != 40
+        || !value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(PlatformError::new(
+            ErrorCode::RuntimeInvalid,
+            "git revision must be a lowercase 40-character SHA-1",
+        ));
+    }
+    Ok(())
+}
+
+fn require_compat_flags(flags: &[String]) -> Result<BTreeSet<&String>, PlatformError> {
+    let mut seen = BTreeSet::new();
+    for flag in flags {
+        if flag.is_empty() || !flag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "compatibility flag is malformed",
+            ));
+        }
+        if !seen.insert(flag) {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "compatibility flag is duplicated",
+            ));
+        }
+    }
+    Ok(seen)
 }
 
 fn require_nonempty(value: &str, _field: &str) -> Result<(), PlatformError> {

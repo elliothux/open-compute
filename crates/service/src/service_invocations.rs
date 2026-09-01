@@ -5,6 +5,7 @@ use open_compute_storage::{ResolvedServiceTarget, ServiceRepository};
 use open_compute_workers::{DeploymentPin, DeploymentPins};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -13,6 +14,8 @@ const MAX_DEPTH: u32 = 16;
 const MAX_TOTAL_CALLS: u32 = 128;
 const MAX_CONCURRENT_CALLS: u32 = 32;
 const CALL_DEADLINE: Duration = Duration::from_secs(30);
+/// Poll cadence for the binding-backend-owned invocation deadline reaper.
+pub(crate) const DEADLINE_REAPER_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Service operation category used only for authority and low-cardinality policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
@@ -24,6 +27,8 @@ pub enum ServiceOperation {
     NamedFetch,
     /// Native RPC on default or named entrypoint.
     Rpc,
+    /// Native raw TCP connect handler on default or named entrypoint.
+    Connect,
 }
 
 /// Private resolve request containing control metadata only.
@@ -86,6 +91,16 @@ pub struct ServiceReleaseRequest {
 pub struct ServiceRootCompleteRequest {
     /// Caller frame returned when the root was first admitted.
     pub frame: String,
+}
+
+/// Atomic completion of one native connect operation and its root event.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ServiceConnectFinalizeRequest {
+    /// Connect operation handle returned by admission.
+    pub handle: String,
+    /// Root caller frame returned by the same admission.
+    pub caller_frame: String,
 }
 
 /// Immutable target identity returned to the trusted workerd controller.
@@ -177,7 +192,7 @@ struct Operation {
     owner: String,
     caller_owner: String,
     frame: String,
-    completed: bool,
+    connect: bool,
 }
 
 #[derive(Debug)]
@@ -202,6 +217,7 @@ struct Inner {
 pub struct ServiceInvocationRegistry {
     storage: Arc<open_compute_storage::PlatformStorage>,
     pins: DeploymentPins,
+    call_deadline: Duration,
     inner: Arc<Mutex<Inner>>,
 }
 
@@ -228,7 +244,39 @@ impl ServiceInvocationRegistry {
         Self {
             storage,
             pins,
+            call_deadline: CALL_DEADLINE,
             inner: Arc::new(Mutex::new(Inner::default())),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_deadline(
+        storage: Arc<open_compute_storage::PlatformStorage>,
+        pins: DeploymentPins,
+        call_deadline: Duration,
+    ) -> Self {
+        Self {
+            storage,
+            pins,
+            call_deadline,
+            inner: Arc::new(Mutex::new(Inner::default())),
+        }
+    }
+
+    /// Reap expired invocation roots until the owning binding backend begins shutdown.
+    pub(crate) async fn reap_deadlines_until_shutdown(
+        &self,
+        interval: Duration,
+        shutdown: impl Future<Output = ()>,
+    ) {
+        let mut ticks = tokio::time::interval(interval);
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        tokio::pin!(shutdown);
+        loop {
+            tokio::select! {
+                () = &mut shutdown => break,
+                _ = ticks.tick() => self.reap_expired(),
+            }
         }
     }
 
@@ -280,7 +328,7 @@ impl ServiceInvocationRegistry {
                 inner.roots.insert(
                     root_id.clone(),
                     Root {
-                        deadline: now + CALL_DEADLINE,
+                        deadline: now + self.call_deadline,
                         total_calls: 0,
                         concurrent_calls: 0,
                         anchor_owner: anchor_owner.clone(),
@@ -329,7 +377,7 @@ impl ServiceInvocationRegistry {
                 owner: owner_id,
                 caller_owner,
                 frame: frame_id.clone(),
-                completed: false,
+                connect: request.operation == ServiceOperation::Connect,
             },
         );
         let deadline_ms = remaining_ms(inner.roots.get(&root_id).ok_or_else(denied)?, now);
@@ -408,7 +456,7 @@ impl ServiceInvocationRegistry {
                 owner: owner_id.clone(),
                 caller_owner,
                 frame: frame_id.clone(),
-                completed: false,
+                connect: false,
             },
         );
         Ok(CapabilityAdmission {
@@ -425,9 +473,6 @@ impl ServiceInvocationRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let operation = inner.operations.get(&request.handle).ok_or_else(denied)?;
-        if operation.completed {
-            return Err(denied());
-        }
         let owner_id = match request.owner {
             RetentionOwner::Target => operation.owner.clone(),
             RetentionOwner::Caller => operation.caller_owner.clone(),
@@ -455,21 +500,36 @@ impl ServiceInvocationRegistry {
             .inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(mut operation) = inner.operations.remove(&request.handle) else {
+        complete_operation(&mut inner, &request.handle);
+        Ok(())
+    }
+
+    /// Atomically and idempotently finalize a native connect and close its root event.
+    pub fn finalize_connect(
+        &self,
+        request: &ServiceConnectFinalizeRequest,
+    ) -> Result<(), PlatformError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(operation) = inner.operations.get(&request.handle) else {
             return Ok(());
         };
-        if operation.completed {
-            return Ok(());
+        if !operation.connect {
+            return Err(denied());
         }
-        operation.completed = true;
-        if let Some(root) = inner.roots.get_mut(&operation.root) {
-            root.concurrent_calls = root.concurrent_calls.saturating_sub(1);
+        let root_id = operation.root.clone();
+        let root_frame = inner.frames.get(&request.caller_frame).ok_or_else(denied)?;
+        let root = inner.roots.get(&root_id).ok_or_else(denied)?;
+        if root_frame.root != root_id
+            || root_frame.owner != root.anchor_owner
+            || root_frame.depth != 0
+        {
+            return Err(denied());
         }
-        if let Some(owner) = inner.owners.get_mut(&operation.owner) {
-            owner.operations = owner.operations.saturating_sub(1);
-        }
-        inner.frames.remove(&operation.frame);
-        reap(&mut inner, &operation.root, &operation.owner);
+        inner.roots.get_mut(&root_id).ok_or_else(denied)?.closing = true;
+        complete_operation(&mut inner, &request.handle);
         Ok(())
     }
 
@@ -534,6 +594,23 @@ impl ServiceInvocationRegistry {
         )
     }
 
+    fn reap_expired(&self) {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        let expired = inner
+            .roots
+            .iter()
+            .filter(|(_, root)| root.deadline <= now)
+            .map(|(root_id, _)| root_id.clone())
+            .collect::<Vec<_>>();
+        for root_id in expired {
+            remove_root(&mut inner, &root_id);
+        }
+    }
+
     /// Select the authenticated workerd generation before processing one controller request.
     ///
     /// A first request from a replacement generation atomically invalidates any state left by its
@@ -588,6 +665,7 @@ impl ServiceInvocationRegistry {
                 (ServiceOperation::DefaultFetch, Some(_))
                 | (ServiceOperation::NamedFetch, None) => return Err(denied()),
                 (ServiceOperation::Rpc, _)
+                | (ServiceOperation::Connect, _)
                 | (ServiceOperation::DefaultFetch, None)
                 | (ServiceOperation::NamedFetch, Some(_)) => {}
             }
@@ -644,6 +722,32 @@ fn admit_budget(
     root.total_calls = root.total_calls.saturating_add(1);
     root.concurrent_calls = root.concurrent_calls.saturating_add(1);
     Ok(())
+}
+
+fn complete_operation(inner: &mut Inner, handle: &str) {
+    let Some(operation) = inner.operations.remove(handle) else {
+        return;
+    };
+    if let Some(root) = inner.roots.get_mut(&operation.root) {
+        root.concurrent_calls = root.concurrent_calls.saturating_sub(1);
+    }
+    if let Some(owner) = inner.owners.get_mut(&operation.owner) {
+        owner.operations = owner.operations.saturating_sub(1);
+    }
+    inner.frames.remove(&operation.frame);
+    reap(inner, &operation.root, &operation.owner);
+}
+
+fn remove_root(inner: &mut Inner, root_id: &str) {
+    inner
+        .operations
+        .retain(|_, operation| operation.root != root_id);
+    inner
+        .retentions
+        .retain(|_, retention| retention.root != root_id);
+    inner.frames.retain(|_, frame| frame.root != root_id);
+    inner.owners.retain(|_, owner| owner.root != root_id);
+    inner.roots.remove(root_id);
 }
 
 fn reap(inner: &mut Inner, root_id: &str, owner_id: &str) {

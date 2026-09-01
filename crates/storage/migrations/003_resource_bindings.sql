@@ -179,8 +179,13 @@ CREATE TRIGGER deployment_binding_referrer_delete_guard
 BEFORE DELETE ON resource_referrers
 WHEN OLD.referrer_kind = 'deployment_binding'
   AND EXISTS (
-    SELECT 1 FROM deployment_bindings
-    WHERE id = OLD.referrer_id AND resource_id = OLD.resource_id
+    SELECT 1
+    FROM deployment_bindings b
+    JOIN worker_deployments d ON d.id = b.deployment_id
+    JOIN workers w ON w.id = d.worker_id
+    WHERE b.id = OLD.referrer_id
+      AND b.resource_id = OLD.resource_id
+      AND w.deleted_at_ms IS NULL
   )
 BEGIN
   SELECT RAISE(ABORT, 'live deployment binding referrer');

@@ -4,5 +4,5 @@
     "types": ["@open-compute/workers-types"],
     "lib": ["ES2024", "ESNext.Disposable"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["worker-configuration.d.ts", "src/**/*.ts"]
 }

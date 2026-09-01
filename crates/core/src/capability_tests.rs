@@ -1,5 +1,69 @@
 use super::*;
 
+fn unsupported_product() -> ProductCapabilityV1 {
+    ProductCapabilityV1 {
+        status: CapabilityStatus::Unsupported,
+        kind: ProductKind::NonTarget,
+        capability_version: None,
+        members: Vec::new(),
+        deviations: Vec::new(),
+    }
+}
+
+fn platform_product(deviations: &[&str]) -> ProductCapabilityV1 {
+    ProductCapabilityV1 {
+        status: CapabilityStatus::SupportedWithDeviation,
+        kind: ProductKind::Platform,
+        capability_version: Some(1),
+        members: Vec::new(),
+        deviations: deviations.iter().map(|id| (*id).to_owned()).collect(),
+    }
+}
+
+fn blocked_member(product: &str, symbol: &str, member: &str) -> CapabilityMemberV1 {
+    CapabilityMemberV1 {
+        id: format!("{product}::{symbol}::{member}:method#0"),
+        product: product.to_owned(),
+        symbol: symbol.to_owned(),
+        member: member.to_owned(),
+        kind: "method".to_owned(),
+        overload: 0,
+        readonly: false,
+        optional: false,
+        is_static: false,
+        signature: format!("{member}(): void"),
+        signature_sha256: "a".repeat(64),
+        status: CapabilityStatus::Blocked,
+        compile_cases: Vec::new(),
+        runtime_cases: Vec::new(),
+        deviations: Vec::new(),
+    }
+}
+
+fn supported_member(status: CapabilityStatus) -> CapabilityMemberV1 {
+    CapabilityMemberV1 {
+        id: "workers::Socket::close:method#0".to_owned(),
+        product: "workers".to_owned(),
+        symbol: "Socket".to_owned(),
+        member: "close".to_owned(),
+        kind: "method".to_owned(),
+        overload: 0,
+        readonly: false,
+        optional: false,
+        is_static: false,
+        signature: "close(): Promise<void>".to_owned(),
+        signature_sha256: "b".repeat(64),
+        status,
+        compile_cases: vec!["raw-tcp-compile".to_owned()],
+        runtime_cases: vec!["p0-2::raw-tcp".to_owned()],
+        deviations: if status == CapabilityStatus::SupportedWithDeviation {
+            vec!["OC-WKR-TCP-001".to_owned()]
+        } else {
+            Vec::new()
+        },
+    }
+}
+
 #[test]
 fn capability_status_serialization_and_contract_are_strict() {
     assert_eq!(
@@ -14,14 +78,6 @@ fn capability_status_serialization_and_contract_are_strict() {
         serde_json::to_string(&CapabilityStatus::Blocked).unwrap(),
         "\"blocked\""
     );
-    let product = ProductCapabilityV1 {
-        status: CapabilityStatus::Unsupported,
-        capability_version: None,
-        methods: Vec::new(),
-        deviations: Vec::new(),
-        basic_websocket: None,
-        hibernatable_websocket: None,
-    };
     let release = PlatformReleaseIdentityV1 {
         schema_version: 1,
         platform_version: "0.1.0".to_owned(),
@@ -36,7 +92,6 @@ fn capability_status_serialization_and_contract_are_strict() {
         kv_schema_version: 1,
         d1_schema_version: 1,
         snapshot_format_version: 1,
-        compatibility_policy_sha256: "c".repeat(64),
     };
     let mut products = BTreeMap::new();
     for name in [
@@ -66,22 +121,41 @@ fn capability_status_serialization_and_contract_are_strict() {
         "rate_limiting",
         "workers_for_platforms",
     ] {
-        products.insert(name.to_owned(), product.clone());
+        products.insert(name.to_owned(), unsupported_product());
     }
+    products.insert(
+        "deployments".to_owned(),
+        platform_product(&["OC-DEPLOY-001"]),
+    );
+    products.insert(
+        "kv".to_owned(),
+        ProductCapabilityV1 {
+            status: CapabilityStatus::Blocked,
+            kind: ProductKind::Target,
+            capability_version: None,
+            members: vec![blocked_member("kv", "KVNamespace", "get")],
+            deviations: vec!["OC-KV-001".to_owned()],
+        },
+    );
     let mut capabilities = PlatformCapabilitiesV1 {
         schema_version: 1,
         release,
         runtime: RuntimeCapabilityV1 {
-            compatibility_date_min: "2026-01-01".to_owned(),
-            compatibility_date_max: "2026-12-31".to_owned(),
-            allowed_flags: Vec::new(),
-            denied_flags: Vec::new(),
+            effective_compatibility_date: "2026-08-30".to_owned(),
             workerd_lock_sha256: "a".repeat(64),
+            workers_types_version: "5.20260830.1".to_owned(),
+            workers_types_git_head: "e".repeat(40),
+            workers_types_package_sha256: "c".repeat(64),
+            workers_types_index_sha256: "e".repeat(64),
+            workers_types_ast_sha256: "d".repeat(64),
         },
         products,
         limits: BTreeMap::new(),
     };
     assert!(capabilities.validate());
+
+    capabilities.products.get_mut("queues").unwrap().kind = ProductKind::Target;
+    capabilities.products.get_mut("queues").unwrap().status = CapabilityStatus::Blocked;
     capabilities
         .products
         .get_mut("queues")
@@ -89,34 +163,77 @@ fn capability_status_serialization_and_contract_are_strict() {
         .capability_version = Some(1);
     assert!(!capabilities.validate());
 
-    capabilities.products.get_mut("queues").unwrap().status = CapabilityStatus::Blocked;
     capabilities
         .products
         .get_mut("queues")
         .unwrap()
         .capability_version = None;
+    capabilities.products.get_mut("queues").unwrap().members =
+        vec![blocked_member("queues", "Queue", "send")];
     assert!(capabilities.validate());
-    capabilities
-        .products
-        .get_mut("queues")
-        .unwrap()
-        .methods
-        .push("send".to_owned());
+    capabilities.products.get_mut("queues").unwrap().members[0].status =
+        CapabilityStatus::Supported;
     assert!(!capabilities.validate());
-    capabilities
-        .products
-        .get_mut("queues")
-        .unwrap()
-        .methods
-        .clear();
-    capabilities
-        .products
-        .get_mut("queues")
-        .unwrap()
-        .basic_websocket = Some(CapabilityStatus::Supported);
+    capabilities.products.get_mut("queues").unwrap().members[0].status = CapabilityStatus::Blocked;
+    capabilities.products.get_mut("queues").unwrap().members[0]
+        .compile_cases
+        .push("p0-4::example".to_owned());
     assert!(!capabilities.validate());
     assert!(
-        serde_json::from_str::<ProductCapabilityV1>(r#"{"status":"unsupported","unknown":true}"#)
-            .is_err()
+        serde_json::from_str::<ProductCapabilityV1>(
+            r#"{"status":"unsupported","kind":"non_target","unknown":true}"#
+        )
+        .is_err()
     );
+    assert!(
+        serde_json::from_str::<ProductCapabilityV1>(
+            r#"{"status":"unsupported","kind":"non_target","methods":["send"]}"#
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn member_and_product_status_combinations_validate_exactly() {
+    for status in [
+        CapabilityStatus::Supported,
+        CapabilityStatus::SupportedWithDeviation,
+    ] {
+        assert!(supported_member(status).validate());
+    }
+    let mut invalid = supported_member(CapabilityStatus::Supported);
+    invalid.compile_cases.clear();
+    assert!(!invalid.validate());
+    invalid = supported_member(CapabilityStatus::SupportedWithDeviation);
+    invalid.deviations.clear();
+    assert!(!invalid.validate());
+    invalid = supported_member(CapabilityStatus::Supported);
+    invalid.signature_sha256 = "not-a-digest".to_owned();
+    assert!(!invalid.validate());
+
+    let supported = ProductCapabilityV1 {
+        status: CapabilityStatus::Supported,
+        kind: ProductKind::Target,
+        capability_version: Some(1),
+        members: vec![supported_member(CapabilityStatus::Supported)],
+        deviations: Vec::new(),
+    };
+    assert!(supported.validate());
+    let deviating = ProductCapabilityV1 {
+        status: CapabilityStatus::SupportedWithDeviation,
+        kind: ProductKind::Target,
+        capability_version: Some(1),
+        members: vec![supported_member(CapabilityStatus::SupportedWithDeviation)],
+        deviations: vec!["OC-WKR-TCP-001".to_owned()],
+    };
+    assert!(deviating.validate());
+    let platform = ProductCapabilityV1 {
+        status: CapabilityStatus::Supported,
+        kind: ProductKind::Platform,
+        capability_version: Some(1),
+        members: Vec::new(),
+        deviations: Vec::new(),
+    };
+    assert!(platform.validate());
+    assert!(unsupported_product().validate());
 }

@@ -688,8 +688,6 @@ fn descriptor_binds_every_runtime_effective_input() {
         0,
         Some((bundle.sha256(), bundle.manifest())),
         None,
-        "2026-08-22".to_owned(),
-        vec!["rpc".to_owned(), "rpc".to_owned()],
         vars,
         Vec::new(),
         Vec::new(),
@@ -698,18 +696,19 @@ fn descriptor_binds_every_runtime_effective_input() {
         Vec::new(),
         CachePolicyDescriptorV1::default(),
         Vec::new(),
-        serde_json::json!({"profile": "default"}),
         1,
     )
     .unwrap();
-    assert_eq!(descriptor.compatibility_flags, vec!["rpc"]);
+    let encoded = serde_json::to_value(&descriptor).unwrap();
+    assert!(encoded.get("compatibilityDate").is_none());
+    assert!(encoded.get("compatibilityFlags").is_none());
     assert_eq!(
         parse_loader_key(&descriptor.loader_key).unwrap(),
         (account, worker, deployment)
     );
     let first = descriptor.sha256().unwrap();
     let mut changed = descriptor.clone();
-    changed.global_outbound_policy_version += 1;
+    changed.loader_schema_version += 1;
     assert_ne!(first, changed.sha256().unwrap());
 }
 
@@ -727,7 +726,7 @@ fn vars_reject_reserved_names_and_prototype_keys() {
 }
 
 #[test]
-fn descriptor_env_date_secret_and_limits_validation_matrix() {
+fn descriptor_env_date_and_secret_validation_matrix() {
     for valid in ["A", "_A", "VALUE_123"] {
         validate_env_name(valid).unwrap();
     }
@@ -787,32 +786,6 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
     assert_eq!(encoded["OBJECT"], br#"{"a":[true,null],"z":1}"#);
     assert_eq!(vars["OBJECT"]["z"], 1);
 
-    assert_eq!(
-        validate_compatibility(
-            "2024-02-29",
-            vec!["rpc".to_owned(), "nodejs_compat".to_owned()],
-        )
-        .unwrap(),
-        vec!["nodejs_compat", "rpc"]
-    );
-    for invalid in [
-        "2023-02-29",
-        "2024-13-01",
-        "2024-04-31",
-        "2024-00-01",
-        "2024-01-00",
-        "2024/01/01",
-        "not-a-date",
-        "2021-12-31",
-    ] {
-        assert_eq!(
-            validate_compatibility(invalid, Vec::new())
-                .unwrap_err()
-                .code(),
-            ErrorCode::CompatibilityUnsupported
-        );
-    }
-
     let account = AccountId::generate();
     let worker = WorkerId::generate();
     let deployment = DeploymentId::generate();
@@ -827,9 +800,7 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
         revision_id: "revision".to_owned(),
         ciphertext_sha256: "ab".repeat(32),
     };
-    let build = |vars: BTreeMap<String, serde_json::Value>,
-                 secrets: Vec<SecretDescriptor>,
-                 limits: serde_json::Value| {
+    let build = |vars: BTreeMap<String, serde_json::Value>, secrets: Vec<SecretDescriptor>| {
         WorkerCodeDescriptorV1::new(
             account,
             worker,
@@ -837,8 +808,6 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             0,
             Some((bundle.sha256(), bundle.manifest())),
             None,
-            "2026-08-22".to_owned(),
-            Vec::new(),
             vars,
             secrets,
             Vec::new(),
@@ -847,15 +816,13 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             Vec::new(),
             CachePolicyDescriptorV1::default(),
             Vec::new(),
-            limits,
             1,
         )
     };
     assert_eq!(
         build(
             BTreeMap::new(),
-            vec![valid_secret.clone(), valid_secret.clone()],
-            serde_json::json!({"profile": "default"}),
+            vec![valid_secret.clone(), valid_secret.clone()]
         )
         .unwrap_err()
         .code(),
@@ -865,7 +832,6 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
         build(
             BTreeMap::from([("TOKEN".to_owned(), serde_json::json!(1))]),
             vec![valid_secret.clone()],
-            serde_json::json!({"profile": "default"}),
         )
         .unwrap_err()
         .code(),
@@ -888,26 +854,7 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
             ciphertext_sha256: "ab".repeat(32),
         },
     ] {
-        assert!(
-            build(
-                BTreeMap::new(),
-                vec![secret],
-                serde_json::json!({"profile": "default"}),
-            )
-            .is_err()
-        );
-    }
-    for limits in [
-        serde_json::json!("default"),
-        serde_json::json!({}),
-        serde_json::json!({"profile": "other"}),
-    ] {
-        assert_eq!(
-            build(BTreeMap::new(), Vec::new(), limits)
-                .unwrap_err()
-                .code(),
-            ErrorCode::ResourceLimitExceeded
-        );
+        assert!(build(BTreeMap::new(), vec![secret]).is_err());
     }
     assert_ne!(
         ciphertext_sha256(b"nonce", b"ciphertext"),
@@ -916,7 +863,7 @@ fn descriptor_env_date_secret_and_limits_validation_matrix() {
 }
 
 #[test]
-fn loader_key_and_compatibility_are_strict() {
+fn loader_key_is_strict() {
     let account = AccountId::generate();
     let worker = WorkerId::generate();
     let deployment = DeploymentId::generate();
@@ -927,9 +874,6 @@ fn loader_key_and_compatibility_are_strict() {
     );
     assert!(parse_loader_key(&format!("{key}/extra")).is_err());
     assert!(parse_loader_key(&key.replace('-', "%2d")).is_err());
-    assert!(validate_compatibility("2026-02-29", Vec::new()).is_err());
-    assert!(validate_compatibility("2026-08-27", Vec::new()).is_err());
-    assert!(validate_compatibility("2026-08-22", vec!["experimental".to_owned()]).is_err());
     for invalid in ["", "a/b", "a/b/c", "a/b/c/d"] {
         assert_eq!(
             parse_loader_key(invalid).unwrap_err().code(),
@@ -1161,16 +1105,13 @@ fn deployment_request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
         vars,
         secrets,
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile": "default"}),
+        crons: Vec::new(),
         promote: true,
         request_id: RequestId::generate(),
         now_ms: 10_000,
@@ -1548,16 +1489,13 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
         content: DeploymentContent::AssetsOnly {
             assets: assets.clone(),
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile": "default"}),
+        crons: Vec::new(),
         promote: true,
         request_id: RequestId::generate(),
         now_ms: 10,
@@ -1662,7 +1600,7 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
     let mut valid = deployment_request(account, worker.id, "products-valid", "secret");
     valid.promote = false;
     valid.queue_consumers = vec![consumer.clone()];
-    valid.crons = Some(vec!["*/5 * * * *".to_owned(), "*/5 * * * *".to_owned()]);
+    valid.crons = vec!["*/5 * * * *".to_owned(), "*/5 * * * *".to_owned()];
     let deployment = match controller.create_deployment(valid).await.unwrap() {
         CreateDeploymentOutcome::Applied(result) => result.deployment,
         CreateDeploymentOutcome::Replay(_) => panic!("product deployment replayed"),
@@ -1731,7 +1669,7 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
 
     let mut invalid_cron = deployment_request(account, worker.id, "products-cron", "secret");
     invalid_cron.promote = false;
-    invalid_cron.crons = Some(vec!["not a cron".to_owned()]);
+    invalid_cron.crons = vec!["not a cron".to_owned()];
     cases.push((invalid_cron, ErrorCode::CronExpressionInvalid));
 
     let mut too_many = deployment_request(account, worker.id, "products-count", "secret");

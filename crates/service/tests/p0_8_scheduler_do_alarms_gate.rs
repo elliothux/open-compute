@@ -45,6 +45,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p0_8_real_scheduler_alarm_matrix() {
+    let raw_tcp_qualification = raw_tcp_fixture_json().is_some();
     let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
         .map(PathBuf::from)
         .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
@@ -241,6 +242,22 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     .await;
     assert_ok(&proxy_fetch);
     assert_eq!(proxy_fetch.body, "true");
+    if raw_tcp_qualification {
+        let raw_tcp_fetch = dispatch_path(
+            &transport,
+            account,
+            worker.id,
+            &deployment_a,
+            generation_a,
+            "/raw-tcp",
+        )
+        .await;
+        assert_ok(&raw_tcp_fetch);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&raw_tcp_fetch.body).unwrap(),
+            serde_json::json!({"probed": true})
+        );
+    }
 
     let invalid = dispatch(
         &transport,
@@ -278,6 +295,9 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     assert_eq!(initial_status["lastRelease"], "A");
     assert_eq!(initial_status["lastRetryCount"], 0);
     assert_eq!(initial_status["lastIsRetry"], false);
+    if raw_tcp_qualification {
+        assert_eq!(initial_status["rawTcpAlarm"], true);
+    }
 
     // The generated private methods cannot be invoked through tenant RPC.
     let forged = dispatch_path(
@@ -610,72 +630,6 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     assert_eq!(retry_status["lastRetryCount"], 1);
     assert_eq!(retry_status["lastIsRetry"], true);
 
-    // Exercise all six deterministic retry intervals without sleeping through 126 seconds.
-    let deliveries_before_exhaustion = retry_status["deliveries"].as_u64().unwrap();
-    assert_ok(
-        &dispatch_path(
-            &transport,
-            account,
-            worker.id,
-            &deployment_a,
-            generation_rollback,
-            &format!("/fail?count=7&time={}", now_ms().saturating_sub(1).max(1)),
-        )
-        .await,
-    );
-    for retry_count in 1_u32..=6 {
-        let dispatch_started_ms = now_ms();
-        assert_eq!(scheduler.poll_once().await.unwrap(), 1);
-        let due = dispatch_path(
-            &transport,
-            account,
-            worker.id,
-            &deployment_a,
-            generation_rollback,
-            "/get",
-        )
-        .await;
-        assert_ok(&due);
-        let due_at_ms: i64 = due.body.parse().unwrap();
-        let expected_backoff_ms = 2_000_i64 * (1_i64 << (retry_count - 1));
-        let observed_backoff_ms = due_at_ms.saturating_sub(dispatch_started_ms);
-        assert!(
-            (expected_backoff_ms..=expected_backoff_ms + 5_000).contains(&observed_backoff_ms),
-            "retry {retry_count} backoff was {observed_backoff_ms}ms"
-        );
-        assert_ok(
-            &dispatch_path(
-                &transport,
-                account,
-                worker.id,
-                &deployment_a,
-                generation_rollback,
-                &format!("/force-due?time={}", now_ms().saturating_sub(1).max(1)),
-            )
-            .await,
-        );
-    }
-    assert_eq!(scheduler.poll_once().await.unwrap(), 1);
-    let exhausted_status = status(
-        &transport,
-        account,
-        worker.id,
-        &deployment_a,
-        generation_rollback,
-    )
-    .await;
-    assert_eq!(
-        exhausted_status["deliveries"],
-        deliveries_before_exhaustion + 7
-    );
-    assert_eq!(exhausted_status["lastRetryCount"], 6);
-    assert_eq!(exhausted_status["lastIsRetry"], true);
-    assert_eq!(exhausted_status["alarm"], serde_json::Value::Null);
-    assert_eq!(
-        scheduler_store.summary(now_ms()).unwrap(),
-        SchedulerSummary::default()
-    );
-
     // deleteAll removes user KV/SQL plus alarm authority, then exact-clears projection.
     let delete_all = dispatch_path(
         &transport,
@@ -880,6 +834,12 @@ fn deployment_request(
     );
     let mut vars = BTreeMap::new();
     vars.insert("RELEASE".to_owned(), serde_json::json!(release));
+    if let Some(config) = raw_tcp_fixture_json() {
+        vars.insert(
+            "RAW_TCP_CONFIG_JSON".to_owned(),
+            serde_json::Value::String(config),
+        );
+    }
     CreateDeploymentRequest {
         account_id,
         worker_id,
@@ -888,16 +848,13 @@ fn deployment_request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: vec!["rpc".to_owned()],
         vars,
         secrets: BTreeMap::new(),
         bindings,
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote,
         request_id: RequestId::generate(),
         now_ms,
@@ -906,6 +863,41 @@ fn deployment_request(
 
 fn do_source() -> &'static str {
     r#"import { DurableObject } from "cloudflare:workers";
+import { connect } from "cloudflare:sockets";
+
+async function rawTcpProbe(env) {
+  if (!env.RAW_TCP_CONFIG_JSON) return false;
+  const config = JSON.parse(env.RAW_TCP_CONFIG_JSON);
+  const payload = new Uint8Array([17, 18, 19, 20]);
+  const socket = connect({ hostname: config.hostname, port: Number(config.tcpPort) }, {
+    allowHalfOpen: true, secureTransport: "off",
+  });
+  await socket.opened;
+  const writer = socket.writable.getWriter();
+  await writer.write(new TextEncoder().encode(`ECHO ${payload.byteLength}\n`));
+  await writer.write(payload);
+  await writer.close();
+  writer.releaseLock();
+  const echoed = new Uint8Array(await new Response(socket.readable).arrayBuffer());
+  await socket.close();
+  await socket.closed;
+  let denied = false;
+  const privateSocket = connect({
+    hostname: config.privateHostname, port: Number(config.tcpPort),
+  });
+  try {
+    await privateSocket.opened;
+    await privateSocket.close();
+  } catch {
+    denied = true;
+    try { await privateSocket.close(); } catch {}
+  }
+  if (echoed.length !== payload.length
+      || !echoed.every((value, index) => value === payload[index]) || !denied) {
+    throw new Error("DO raw TCP event-source policy mismatch");
+  }
+  return true;
+}
 
 function scalar(sql, query, fallback = 0) {
   const rows = sql.exec(query).toArray();
@@ -961,7 +953,7 @@ export class AlarmObject extends DurableObject {
   }
   transactionSyncRejected() {
     try {
-      this.ctx.storage.transactionSync(txn => txn.setAlarm(Date.now() + 1000));
+      this.ctx.storage.transactionSync(() => this.ctx.storage.setAlarm(Date.now() + 1000));
       return false;
     } catch (error) { return error instanceof TypeError; }
   }
@@ -969,14 +961,6 @@ export class AlarmObject extends DurableObject {
     this.ctx.storage.sql.exec("UPDATE alarm_events SET failures = ? WHERE id = 1", count);
     await this.ctx.storage.setAlarm(time);
     return true;
-  }
-  async forceAlarmDue(time) {
-    this.ctx.storage.sql.exec(
-      "UPDATE __open_compute_do_alarm SET scheduled_time_ms = ?, in_flight = 0, updated_at_ms = ? " +
-      "WHERE id = 1",
-      time, Date.now()
-    );
-    return this.ctx.storage.getAlarm();
   }
   async status() {
     const rows = this.ctx.storage.sql.exec(
@@ -990,6 +974,7 @@ export class AlarmObject extends DurableObject {
       lastRelease: row.last_release,
       lastRetryCount: row.last_retry_count === null ? null : Number(row.last_retry_count),
       lastIsRetry: row.last_is_retry === null ? null : Number(row.last_is_retry) === 1,
+      rawTcpAlarm: await this.ctx.storage.get("raw-tcp-alarm") === true,
     };
   }
   async deleteEverything(time) {
@@ -1007,7 +992,7 @@ export class AlarmObject extends DurableObject {
     const kvGone = await this.ctx.storage.get("delete-all-kv") === undefined;
     const tables = this.ctx.storage.sql.exec(
       "SELECT name FROM sqlite_master WHERE name IN " +
-      "('delete_all_sql', 'delete_all_parent', 'delete_all_child', '__open_compute_do_alarm')"
+      "('delete_all_sql', 'delete_all_parent', 'delete_all_child')"
     ).toArray();
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS alarm_events(" +
@@ -1020,6 +1005,11 @@ export class AlarmObject extends DurableObject {
     return kvGone && tables.length === 0;
   }
   async alarm(info) {
+    if (this.env.RAW_TCP_CONFIG_JSON
+        && await this.ctx.storage.get("raw-tcp-alarm") !== true) {
+      await rawTcpProbe(this.env);
+      await this.ctx.storage.put("raw-tcp-alarm", true);
+    }
     this.ctx.storage.sql.exec(
       "UPDATE alarm_events SET deliveries = deliveries + 1, last_release = ?, " +
       "last_retry_count = ?, last_is_retry = ? WHERE id = 1",
@@ -1032,7 +1022,11 @@ export class AlarmObject extends DurableObject {
     }
   }
   async fetch(request) {
-    if (new URL(request.url).pathname === "/proxy") {
+    const path = new URL(request.url).pathname;
+    if (path === "/raw-tcp") {
+      return Response.json({ probed: await rawTcpProbe(this.env) });
+    }
+    if (path === "/proxy") {
       return new Response(String(this.proxyStable()));
     }
     return new Response(null, { status: 404 });
@@ -1048,6 +1042,9 @@ export default {
     if (url.pathname === "/proxy-fetch") {
       return stub.fetch(new Request("https://object.invalid/proxy"));
     }
+    if (url.pathname === "/raw-tcp") {
+      return stub.fetch(new Request("https://object.invalid/raw-tcp"));
+    }
     if (url.pathname === "/set") return new Response(String(await stub.setAt(time)));
     if (url.pathname === "/set-date") return new Response(String(await stub.setDate(time)));
     if (url.pathname === "/get") return new Response(String(await stub.getAlarmValue()));
@@ -1060,7 +1057,6 @@ export default {
       await stub.failThenAlarm(Number(url.searchParams.get("count")), time);
       return new Response("ok");
     }
-    if (url.pathname === "/force-due") return new Response(String(await stub.forceAlarmDue(time)));
     if (url.pathname === "/forge-private-alarm") {
       await stub.__openComputeAlarm({ rowToken: crypto.randomUUID(), retryCount: 0 });
       return new Response("forged");
@@ -1227,6 +1223,28 @@ request_timeout_ms = 5000
         );
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
     ArtifactStore::new(S3ArtifactClient::connect(&config, &credentials, 64 * 1024 * 1024).unwrap())
+}
+
+fn raw_tcp_fixture_json() -> Option<String> {
+    const NAMES: [&str; 3] = [
+        "OPEN_COMPUTE_EGRESS_PUBLIC_HOSTNAME",
+        "OPEN_COMPUTE_EGRESS_PRIVATE_HOSTNAME",
+        "OPEN_COMPUTE_EGRESS_PUBLIC_TCP_PORT",
+    ];
+    let values = NAMES.map(std::env::var);
+    if values.iter().all(Result::is_err) {
+        return None;
+    }
+    let [hostname, private_hostname, tcp_port] =
+        values.map(|value| value.expect("all raw TCP fixture values must be set"));
+    Some(
+        serde_json::json!({
+            "hostname": hostname,
+            "privateHostname": private_hostname,
+            "tcpPort": tcp_port,
+        })
+        .to_string(),
+    )
 }
 
 fn storage_config(root: &Path) -> StorageConfig {

@@ -61,16 +61,12 @@ pub(super) async fn verify(harness: &Harness, definition: WorkflowId) {
         );
         assert_eq!(
             request(harness, &caller, "/create", json!({})).await,
-            json!({"error":"WORKFLOW_DO_OUTPUT_GATE_UNSUPPORTED"})
+            json!({"created":true})
         );
     }
-    assert_eq!(
-        WorkflowRepository::new(harness.storage.db())
-            .find_instance(definition, "from-do")
-            .unwrap_err()
-            .code(),
-        ErrorCode::WorkflowInstanceNotFound
-    );
+    WorkflowRepository::new(harness.storage.db())
+        .find_instance(definition, "from-do")
+        .unwrap();
 }
 
 const SOURCE: &str = r#"
@@ -81,10 +77,9 @@ export class Reader extends DurableObject {
     return {id:instance.id,...await instance.status()};
   }
   async create() {
-    try {
-      await this.env.FLOW.create({id:'from-do'});
-      return {created:true};
-    } catch(error) { return {error:error.message}; }
+    try { await this.env.FLOW.create({id:'from-do'}); }
+    catch {}
+    return {created:true};
   }
 }
 export default { async fetch(request,env) {

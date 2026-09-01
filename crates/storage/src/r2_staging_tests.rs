@@ -38,4 +38,40 @@ fn rejects_noncanonical_request_and_unknown_startup_entries() {
     assert!(data.path().join("r2-staging/unowned").exists());
 }
 
+#[test]
+fn rejects_noncanonical_uuid_and_typed_path_kind_drift() {
+    let data = tempfile::tempdir().unwrap();
+    let staging = R2Staging::open(data.path()).unwrap();
+    let uppercase = uuid::Uuid::now_v7()
+        .hyphenated()
+        .to_string()
+        .to_ascii_uppercase();
+    assert_eq!(
+        staging
+            .create(ResourceId::generate(), &uppercase)
+            .unwrap_err()
+            .code(),
+        ErrorCode::PathInvalid
+    );
+
+    let resource_file = ResourceId::generate().to_string();
+    std::fs::write(data.path().join("r2-staging").join(resource_file), b"junk").unwrap();
+    assert_eq!(
+        staging.cleanup().unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+
+    let data = tempfile::tempdir().unwrap();
+    let staging = R2Staging::open(data.path()).unwrap();
+    let resource = ResourceId::generate();
+    let resource_dir = data.path().join("r2-staging").join(resource.to_string());
+    std::fs::create_dir(&resource_dir).unwrap();
+    let request_dir = resource_dir.join(uuid::Uuid::now_v7().hyphenated().to_string());
+    std::fs::create_dir(&request_dir).unwrap();
+    assert_eq!(
+        staging.cleanup().unwrap_err().code(),
+        ErrorCode::PathInvalid
+    );
+}
+
 use std::os::unix::fs::PermissionsExt as _;

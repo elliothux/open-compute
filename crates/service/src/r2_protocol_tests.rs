@@ -1,6 +1,5 @@
 use super::*;
 use axum::http::HeaderMap;
-use open_compute_artifacts::R2ListedObject;
 
 #[tokio::test]
 async fn wire_validation_and_error_mapping_cover_every_bounded_shape() {
@@ -8,52 +7,50 @@ async fn wire_validation_and_error_mapping_cover_every_bounded_shape() {
         serde_json::from_value(serde_json::json!({"storageClass": "Archive"})).unwrap();
     assert_eq!(
         unsupported.validate().unwrap_err().code(),
-        ErrorCode::R2UnsupportedFeature
+        ErrorCode::R2InvalidOptions
     );
-    let date_condition: PutWireOptions =
-        serde_json::from_value(serde_json::json!({"onlyIf": {"uploadedBefore": 1}})).unwrap();
-    assert_eq!(
-        date_condition.validate().unwrap_err().code(),
-        ErrorCode::R2UnsupportedCondition
-    );
-    let hex_md5: R2PutOptions = serde_json::from_value::<PutWireOptions>(
-        serde_json::json!({"md5": "00000000000000000000000000000000"}),
+    let infrequent: R2PutOptions = serde_json::from_value::<PutWireOptions>(
+        serde_json::json!({"storageClass": "InfrequentAccess"}),
     )
     .unwrap()
     .try_into()
     .unwrap();
-    assert_eq!(hex_md5.expected_md5, Some([0; 16]));
-    let base64_md5: R2PutOptions = serde_json::from_value::<PutWireOptions>(
-        serde_json::json!({"md5": "AAAAAAAAAAAAAAAAAAAAAA=="}),
-    )
+    assert_eq!(infrequent.storage_class, R2StorageClass::InfrequentAccess);
+    let date_condition: PutWireOptions = serde_json::from_value(serde_json::json!({
+        "onlyIf": {"uploadedBefore": 1}
+    }))
+    .unwrap();
+    assert!(date_condition.validate().is_ok());
+    let hex_md5: R2PutOptions = serde_json::from_value::<PutWireOptions>(serde_json::json!({
+        "checksum": {"algorithm": "md5", "hex": "00000000000000000000000000000000"}
+    }))
     .unwrap()
     .try_into()
     .unwrap();
-    assert_eq!(base64_md5.expected_md5, Some([0; 16]));
-    let array_md5: R2PutOptions =
-        serde_json::from_value::<PutWireOptions>(serde_json::json!({"md5": vec![0; 16]}))
-            .unwrap()
-            .try_into()
-            .unwrap();
-    assert_eq!(array_md5.expected_md5, Some([0; 16]));
+    assert!(matches!(
+        hex_md5.checksum,
+        Some(R2ChecksumAlgorithm::Md5(_))
+    ));
     for invalid in [
-        serde_json::json!({"md5": {}}),
-        serde_json::json!({"md5": [256]}),
-        serde_json::json!({"md5": "not-base64"}),
-        serde_json::json!({"md5": []}),
+        serde_json::json!({"checksum": {"algorithm": "md5", "hex": "zz"}}),
+        serde_json::json!({"checksum": {"algorithm": "md4", "hex": "00".repeat(16)}}),
+        serde_json::json!({"ssecKey": "abcd"}),
     ] {
-        assert_eq!(
+        assert!(
             R2PutOptions::try_from(serde_json::from_value::<PutWireOptions>(invalid).unwrap())
-                .unwrap_err()
-                .code(),
-            ErrorCode::R2InvalidOptions
+                .is_err()
         );
     }
 
     let defaults: ListRequest = serde_json::from_slice(b"{}").unwrap();
     assert_eq!(defaults.limit, R2_MAX_LIST_LIMIT);
+    assert!(
+        serde_json::from_value::<ListRequest>(serde_json::json!({"limit": 0}))
+            .unwrap()
+            .validate()
+            .is_ok()
+    );
     for invalid in [
-        serde_json::json!({"limit": 0}),
         serde_json::json!({"limit": 1001}),
         serde_json::json!({"delimiter": ""}),
         serde_json::json!({"include": ["a", "b", "c"]}),
@@ -75,16 +72,38 @@ async fn wire_validation_and_error_mapping_cover_every_bounded_shape() {
         include_mask(&["unknown".to_owned()]).unwrap_err().code(),
         ErrorCode::R2InvalidOptions
     );
-    let listed = minimal_list_metadata(&R2ListedObject {
-        key: "k".to_owned(),
-        size: 1,
-        etag: "e".to_owned(),
-        uploaded: 2,
-    });
+    let listed = list_object_json(
+        open_compute_artifacts::R2ObjectMetadata {
+            key: "k".to_owned(),
+            version: uuid::Uuid::now_v7().to_string(),
+            size: 1,
+            etag: "e".to_owned(),
+            http_etag: "\"e\"".to_owned(),
+            uploaded: 2,
+            http_metadata: Some(R2HttpMetadata::default()),
+            custom_metadata: Some(Default::default()),
+            range: None,
+            checksums: open_compute_artifacts::R2Checksums::default(),
+            storage_class: "Standard".to_owned(),
+            ssec_key_md5: None,
+        },
+        0,
+    );
     assert_eq!(listed["httpEtag"], "\"e\"");
+    assert!(listed.get("httpMetadata").is_none());
 
     let binding = BindingId::generate();
-    for operation in ["head", "get", "put", "delete", "list"] {
+    for operation in [
+        "head",
+        "get",
+        "put",
+        "delete",
+        "list",
+        "createMultipartUpload",
+        "uploadPart",
+        "completeMultipartUpload",
+        "abortMultipartUpload",
+    ] {
         assert!(parse_path(&format!("/internal/bindings/v1/r2/{binding}/{operation}")).is_ok());
     }
     for path in [

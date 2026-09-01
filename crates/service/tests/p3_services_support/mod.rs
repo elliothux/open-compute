@@ -4,7 +4,8 @@ use open_compute_artifacts::{
     ArtifactCache, ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
 use open_compute_core::{
-    CacheConfig, PlatformConfig, Redactor, RuntimeConfig, StartupId, StorageConfig, SystemClock,
+    CacheConfig, DurableObjectsConfig, PlatformConfig, Redactor, RuntimeConfig, StartupId,
+    StorageConfig, SystemClock,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -116,7 +117,7 @@ impl Harness {
                     None,
                     None,
                     None,
-                    Default::default(),
+                    durable_objects_config(),
                     Default::default(),
                     Default::default(),
                     None,
@@ -257,6 +258,14 @@ fn runtime_config() -> RuntimeConfig {
         restart_window_ms: 60_000,
         restart_backoff_initial_ms: 10,
         restart_backoff_max_ms: 100,
+    }
+}
+
+fn durable_objects_config() -> DurableObjectsConfig {
+    DurableObjectsConfig {
+        disk_high_watermark_percent: 98,
+        disk_stop_writes_percent: 99,
+        ..DurableObjectsConfig::default()
     }
 }
 

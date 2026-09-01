@@ -128,12 +128,10 @@ fn exec_and_migration_validation_fail_closed_before_mutation() {
     for sql in ["", " -- comment only", "SELECT ?1"] {
         assert!(engine.exec(sql, limits()).is_err());
     }
-    let too_many = std::iter::repeat_n("SELECT 1", D1_MAX_EXEC_STATEMENTS + 1)
-        .collect::<Vec<_>>()
-        .join(";");
+    let too_long = "x".repeat(D1_MAX_SQL_BYTES + 1);
     assert_eq!(
-        engine.exec(&too_many, limits()).unwrap_err().code(),
-        ErrorCode::D1LimitError
+        engine.exec(&too_long, limits()).unwrap_err().code(),
+        ErrorCode::D1SqlInvalid
     );
     assert_eq!(
         engine

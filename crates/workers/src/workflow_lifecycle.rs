@@ -2,6 +2,7 @@
 
 use super::*;
 use open_compute_core::WorkflowOperationId;
+use open_compute_core::workflow::WorkflowRestartSelector;
 use open_compute_storage::scheduler::{WorkflowInstanceAction, WorkflowInstanceRecord};
 use open_compute_storage::{WorkflowOperation, WorkflowOperationKind, WorkflowOperationResult};
 
@@ -28,15 +29,49 @@ impl WorkflowController<'_> {
         definition: WorkflowId,
         id: WorkflowInstanceId,
         operation_id: WorkflowOperationId,
+        restart_from: Option<WorkflowRestartSelector>,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        let instance = self.current_instance(account, definition, id, now_ms)?;
+        if let Some(selector) = &restart_from {
+            selector.validate()?;
+        }
         let _admission = self.storage.reserve_mutation(64 * 1024)?;
         let repository = WorkflowRepository::new(self.storage.db());
-        let operation = repository.prepare_instance_operation(
+        repository.definition(account, definition)?;
+        let reservation = repository
+            .reservation(id)?
+            .filter(|row| {
+                row.identity.target.account_id == account
+                    && row.identity.target.definition_id == definition
+            })
+            .ok_or_else(|| error(ErrorCode::WorkflowInstanceNotFound))?;
+        if let Some(operation) = repository.instance_operation(id)? {
+            if operation.kind() != WorkflowOperationKind::Restart
+                || operation.id() != operation_id
+                || operation.restart_from() != restart_from.as_ref()
+            {
+                return Err(error(ErrorCode::WorkflowInstanceBusy));
+            }
+            if let Some(code) = self.finish_operation(&operation, now_ms)? {
+                return Err(error(code));
+            }
+            self.scheduler.wake_signal().notify();
+            return Ok(());
+        }
+        if self
+            .scheduler
+            .workflow_restart_matches(id, operation_id, restart_from.as_ref())?
+        {
+            return Ok(());
+        }
+        let instance = self.current_instance(account, definition, id, now_ms)?;
+        if instance.identity != reservation.identity {
+            return Err(error(ErrorCode::WorkflowInvariantViolation));
+        }
+        let operation = repository.prepare_restart_operation(
             &instance.identity,
             operation_id,
-            WorkflowOperationKind::Restart,
+            restart_from,
             self.limits,
             now_ms,
         )?;
@@ -44,6 +79,49 @@ impl WorkflowController<'_> {
             return Err(error(code));
         }
         self.scheduler.wake_signal().notify();
+        Ok(())
+    }
+
+    /// Delete one instance through the same purge saga used by retention GC.
+    pub fn delete(
+        &self,
+        account: AccountId,
+        definition: WorkflowId,
+        id: WorkflowInstanceId,
+        operation_id: WorkflowOperationId,
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        let mut instance = self.current_instance(account, definition, id, now_ms)?;
+        let _admission = self.storage.reserve_mutation(64 * 1024)?;
+        if !instance.state.is_terminal() {
+            self.scheduler.modify_workflow(
+                &instance.identity,
+                WorkflowInstanceAction::Terminate,
+                now_ms,
+                self.limits,
+            )?;
+            instance = self
+                .scheduler
+                .workflow_instance(id)?
+                .ok_or_else(|| error(ErrorCode::WorkflowInstanceNotFound))?;
+        }
+        let repository = WorkflowRepository::new(self.storage.db());
+        if repository
+            .reservation(id)?
+            .is_some_and(|reservation| reservation.state == WorkflowRefState::Live)
+        {
+            repository.retain_instance(&instance.identity, now_ms)?;
+        }
+        let operation = repository.prepare_instance_operation(
+            &instance.identity,
+            operation_id,
+            WorkflowOperationKind::Purge,
+            self.limits,
+            now_ms,
+        )?;
+        if let Some(code) = self.finish_operation(&operation, now_ms)? {
+            return Err(error(code));
+        }
         Ok(())
     }
 
@@ -65,6 +143,20 @@ impl WorkflowController<'_> {
                 .retain_instance(&instance.identity, now_ms)?;
         }
         Ok(())
+    }
+
+    /// Fence normal execution and durably run registered rollback handlers before termination.
+    pub fn rollback(
+        &self,
+        account: AccountId,
+        definition: WorkflowId,
+        id: WorkflowInstanceId,
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        let instance = self.current_instance(account, definition, id, now_ms)?;
+        let _admission = self.storage.reserve_mutation(64 * 1024)?;
+        self.scheduler
+            .request_workflow_rollback(&instance.identity, now_ms, self.limits)
     }
 
     pub(super) fn current_instance(

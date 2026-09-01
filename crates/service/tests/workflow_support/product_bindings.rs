@@ -1,6 +1,8 @@
 //! Workflow callbacks use the real product facades without acquiring host authority.
 
 use super::*;
+use open_compute_core::WorkflowCronSchedule;
+use open_compute_service::runtime_bridge::ScheduledDispatchRequest;
 use open_compute_storage::{PlatformStorage, WorkerRepository};
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateDeploymentRequest, CreateQueueOutcome, CreateQueueRequest,
@@ -158,18 +160,74 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         storage.clone(),
         scheduler.clone(),
     ));
-    let deployment = deploy(
+    let workflow_deployment = deploy(
         &controller,
         CreateDeploymentRequest {
             account_id: account,
             worker_id: worker.id,
             idempotency_key: "workflow-products".into(),
             content: open_compute_workers::DeploymentContent::Worker {
+                bundle: bundle.clone().into_bytes().into(),
+                assets: None,
+            },
+            vars: Default::default(),
+            secrets: Default::default(),
+            bindings: bindings.clone(),
+            services: Default::default(),
+            runtime_features: Default::default(),
+            queue_consumers: vec![open_compute_workers::QueueConsumerInput {
+                queue: queue.queue.id,
+                entrypoint: None,
+                config: Default::default(),
+                dead_letter_queue: None,
+            }],
+            crons: Vec::new(),
+            promote: true,
+            request_id: RequestId::generate(),
+            now_ms: now(),
+        },
+        &stack.supervisor,
+    )
+    .await;
+    let definition = WorkflowRepository::new(storage.db())
+        .create_definition(account, "workflow-products", now())
+        .unwrap();
+    let workflow_api = WorkflowApiState::new(
+        storage.clone(),
+        scheduler.clone(),
+        stack.transport.clone(),
+        Default::default(),
+    );
+    workflow_api
+        .create_version(
+            account,
+            definition.id,
+            workflow_deployment.id,
+            "Flow".into(),
+        )
+        .await
+        .unwrap();
+    bindings.insert(
+        "FLOW".into(),
+        DeploymentBindingInput {
+            kind: BindingKind::Workflow,
+            id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
+            permissions: Default::default(),
+            config: CanonicalBindingConfig {
+                workflow_schedules: vec!["* * * * *".into()],
+            },
+        },
+    );
+    let deployment = deploy(
+        &controller,
+        CreateDeploymentRequest {
+            account_id: account,
+            worker_id: worker.id,
+            idempotency_key: "workflow-products-scheduled".into(),
+            content: open_compute_workers::DeploymentContent::Worker {
                 bundle: bundle.into_bytes().into(),
                 assets: None,
             },
-            compatibility_date: "2026-08-22".into(),
-            compatibility_flags: vec!["rpc".into()],
             vars: Default::default(),
             secrets: Default::default(),
             bindings,
@@ -181,37 +239,115 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
                 config: Default::default(),
                 dead_letter_queue: None,
             }],
-            crons: Some(vec!["* * * * *".into()]),
-            limits: json!({"profile":"default"}),
+            crons: vec!["* * * * *".into()],
             promote: true,
             request_id: RequestId::generate(),
-            now_ms: now(),
+            now_ms: now() + 1,
         },
         &stack.supervisor,
     )
     .await;
-    let definition = WorkflowRepository::new(storage.db())
-        .create_definition(account, "workflow-products", now())
+    let version = workflow_api
+        .create_version(account, definition.id, deployment.id, "Flow".into())
+        .await
         .unwrap();
-    let version = WorkflowApiState::new(
-        storage.clone(),
-        scheduler.clone(),
-        stack.transport.clone(),
-        Default::default(),
-    )
-    .create_version(account, definition.id, deployment.id, "Flow".into())
-    .await
-    .unwrap();
     let config = WorkflowsConfig::default();
     let workflow = WorkflowController::new(&storage, &scheduler, &config);
+    let generation = WorkerRepository::new(storage.db())
+        .get_worker(account, worker.id)
+        .unwrap()
+        .route_generation;
+    let scheduled_time = 1_788_048_000_000;
+    let scheduled = stack
+        .transport
+        .dispatch_scheduled(
+            &DispatchTarget {
+                account_id: account,
+                worker_id: worker.id,
+                deployment_id: deployment.id,
+                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                entrypoint: None,
+                route_generation: i64::try_from(generation).unwrap(),
+                request_id: RequestId::generate(),
+            },
+            &ScheduledDispatchRequest {
+                scheduled_time_ms: scheduled_time,
+                cron: "* * * * *".into(),
+                scheduled_handler: true,
+                workflow_bindings: vec!["FLOW".into()],
+            },
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    assert_eq!(scheduled.outcome, "ok");
+    assert!(!scheduled.no_retry);
+    let reservations = WorkflowRepository::new(storage.db())
+        .live_reservations(None, 1000)
+        .unwrap();
+    assert_eq!(reservations.len(), 1);
+    assert_eq!(
+        reservations[0].identity.schedule,
+        Some(WorkflowCronSchedule {
+            cron: "* * * * *".into(),
+            scheduled_time,
+        })
+    );
+    let scheduled_run = workflow
+        .claim(now(), &mut Default::default())
+        .unwrap()
+        .unwrap();
+    let target = version.target;
+    let scheduled_result = stack
+        .transport
+        .dispatch_workflow(
+            &target,
+            &WorkflowRunRequest {
+                fence: scheduled_run.fence.clone(),
+                external_instance_id: scheduled_run.external_instance_id,
+                definition_name: scheduled_run.target.definition_name,
+                created_at_ms: scheduled_run.created_at_ms,
+                payload_base64: scheduled_run.input_json,
+                rollback: scheduled_run.rollback,
+                schedule: scheduled_run.schedule.clone(),
+            },
+            Duration::from_millis(config.dispatch_timeout_ms),
+        )
+        .await
+        .unwrap();
+    let (final_ordinal, output_base64) = complete(scheduled_result);
+    assert_eq!(
+        decode_workflow_json(&output_base64),
+        json!({
+            "cron":"* * * * *",
+            "scheduledTime":scheduled_time as f64,
+            "payloadUndefined":true,
+        })
+    );
+    scheduler
+        .finish_workflow(
+            &scheduled_run.fence,
+            &WorkflowCompletion::Complete {
+                output_json: output_base64,
+                final_ordinal,
+            },
+            now(),
+            &config,
+        )
+        .unwrap();
+    workflow
+        .reconcile(&mut WorkflowReconcileCursor::default(), 32, now())
+        .unwrap();
     workflow
         .create(
             account,
             definition.id,
+            open_compute_core::WorkflowOperationId::generate(),
             Some("products-instance"),
             open_compute_workers::WorkflowCreateInput {
-                payload_json: "null",
+                payload_base64: &encode_workflow_json(&Value::Null),
                 retention: None,
+                schedule: None,
             },
             now(),
         )
@@ -220,13 +356,14 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .claim(now(), &mut Default::default())
         .unwrap()
         .unwrap();
-    let target = version.target;
     let envelope = WorkflowRunRequest {
         fence: run.fence.clone(),
         external_instance_id: run.external_instance_id,
         definition_name: run.target.definition_name,
         created_at_ms: run.created_at_ms,
-        payload_json: run.input_json,
+        payload_base64: run.input_json,
+        rollback: run.rollback,
+        schedule: None,
     };
     let result = stack
         .transport
@@ -237,21 +374,21 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         )
         .await
         .unwrap();
-    let (_, output_json) = complete(result);
-    let before: Value = serde_json::from_str(&output_json).unwrap();
+    let (_, output_base64) = complete(result);
+    let before = decode_workflow_json(&output_base64);
     assert!(
         before["value"].get("failure").is_none(),
         "product facade failure: {before}"
     );
-    assert_eq!(before["calls"], 1);
+    assert_eq!(before["calls"], 1.0);
     assert_eq!(before["value"]["kv"], "stored");
     assert_eq!(before["value"]["r2"], "stored");
-    assert_eq!(before["value"]["d1"], 7);
-    assert_eq!(before["value"]["object"], 1);
+    assert_eq!(before["value"]["d1"], 7.0);
+    assert_eq!(before["value"]["object"], 1.0);
     assert_eq!(
         before["value"]["context"],
-        json!({"attempt":1,"step":{"name":"products","count":1},"config":{
-            "retries":{"limit":5,"delay":10000,"backoff":"exponential"},"timeout":60000
+        json!({"attempt":1.0,"step":{"name":"products","count":1.0},"config":{
+            "retries":{"limit":5.0,"delay":10000.0,"backoff":"exponential"},"timeout":60000.0
         }})
     );
     let expired = now() + i64::try_from(config.lease_ms + 1).unwrap();
@@ -265,7 +402,9 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         external_instance_id: replay.external_instance_id,
         definition_name: replay.target.definition_name,
         created_at_ms: replay.created_at_ms,
-        payload_json: replay.input_json,
+        payload_base64: replay.input_json,
+        rollback: replay.rollback,
+        schedule: None,
     };
     let replay_result = stack
         .transport
@@ -277,8 +416,8 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .await
         .unwrap();
     let (final_ordinal, replay_output) = complete(replay_result);
-    let after: Value = serde_json::from_str(&replay_output).unwrap();
-    assert_eq!(after["calls"], 0);
+    let after = decode_workflow_json(&replay_output);
+    assert_eq!(after["calls"], 0.0);
     assert_eq!(after["value"], before["value"]);
     assert_eq!(
         scheduler
@@ -307,10 +446,12 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .create(
             account,
             definition.id,
+            open_compute_core::WorkflowOperationId::generate(),
             Some("external-effect"),
             open_compute_workers::WorkflowCreateInput {
-                payload_json: "{\"crashBeforeCommit\":true}",
+                payload_base64: &encode_workflow_json(&json!({"crashBeforeCommit":true})),
                 retention: None,
+                schedule: None,
             },
             now(),
         )
@@ -324,7 +465,9 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         external_instance_id: interrupted.external_instance_id,
         definition_name: interrupted.target.definition_name,
         created_at_ms: interrupted.created_at_ms,
-        payload_json: interrupted.input_json,
+        payload_base64: interrupted.input_json,
+        rollback: interrupted.rollback,
+        schedule: None,
     };
     let dispatch_timeout = Duration::from_millis(config.dispatch_timeout_ms);
     let observation = tokio::spawn({
@@ -383,7 +526,9 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         external_instance_id: retry.external_instance_id,
         definition_name: retry.target.definition_name,
         created_at_ms: retry.created_at_ms,
-        payload_json: retry.input_json,
+        payload_base64: retry.input_json,
+        rollback: retry.rollback,
+        schedule: None,
     };
     let retried = stack
         .transport
@@ -395,8 +540,8 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .await
         .unwrap();
     let (final_ordinal, retried_output) = complete(retried);
-    let value: Value = serde_json::from_str(&retried_output).unwrap();
-    assert_eq!(value, json!({"attempts":2,"durable":1}));
+    let value = decode_workflow_json(&retried_output);
+    assert_eq!(value, json!({"attempts":2.0,"durable":1.0}));
     scheduler
         .finish_workflow(
             &retry.fence,
@@ -416,10 +561,12 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             .create(
                 account,
                 definition.id,
+                open_compute_core::WorkflowOperationId::generate(),
                 Some(&format!("backlog-{index}")),
                 open_compute_workers::WorkflowCreateInput {
-                    payload_json: "{\"backlog\":true}",
+                    payload_base64: &encode_workflow_json(&json!({"backlog":true})),
                     retention: None,
+                    schedule: None,
                 },
                 now(),
             )
@@ -457,12 +604,23 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         )
         .await;
         let flags: Value = serde_json::from_str(&response.body).unwrap();
-        if flags == json!(["done", "done", "done"]) {
+        let queue_drained = scheduler
+            .queue_metrics(queue.queue.id, 1, 1)
+            .unwrap()
+            .backlog_count
+            == 0;
+        let cron_complete = service
+            .inspect()
+            .unwrap()
+            .cron_activations
+            .iter()
+            .any(|row| row.last_outcome.as_deref() == Some("complete"));
+        if flags == json!(["done", "done", "done"]) && queue_drained && cron_complete {
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "other pools starved: {flags}"
+            "other pools starved: flags={flags}, queue_drained={queue_drained}, cron_complete={cron_complete}"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -504,6 +662,13 @@ export class Counter extends DurableObject {
 }
 export class Flow extends WorkflowEntrypoint {
   async run(event,step) {
+    if(event.schedule) {
+      return step.do('schedule',async()=>({
+        cron:event.schedule.cron,
+        scheduledTime:event.schedule.scheduledTime,
+        payloadUndefined:event.payload===undefined
+      }));
+    }
     if(event.payload?.crashBeforeCommit) {
       return step.do('effect',{timeout:240000,retries:{limit:0,delay:0}},async context=>{
         const attempts = Number(await this.env.KV.get('effects') || 0)+1;

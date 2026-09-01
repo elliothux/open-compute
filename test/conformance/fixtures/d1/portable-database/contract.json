@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "id": "d1/portable/database",
+  "contracts": ["d1.binding.methods"],
+  "source": "src/index.ts",
+  "bindings": {
+    "DB": { "type": "d1_database" },
+    "OTHER": { "type": "d1_database" }
+  },
+  "observations": [
+    { "method": "POST", "path": "/reset", "expect": { "status": 200, "json": { "reset": true } } },
+    {
+      "method": "POST",
+      "path": "/surface",
+      "expect": {
+        "status": 200,
+        "json": {
+          "rows": [
+            { "id": 1, "value": "one", "data": [1, 2] },
+            { "id": 2, "value": "two", "data": [3, 4] }
+          ],
+          "raw": [[1, "one", [1, 2]], [2, "two", [3, 4]]],
+          "rawNames": [["id", "value", "data"], [1, "one", [1, 2]], [2, "two", [3, 4]]],
+          "first": { "id": 1, "value": "one", "data": [1, 2] },
+          "firstColumn": "one",
+          "duplicateColumn": 2,
+          "batch": [
+            { "success": true, "results": [], "meta": true },
+            { "success": true, "results": [], "meta": true }
+          ],
+          "allShape": true,
+          "runShape": true,
+          "execShape": true,
+          "foreignExecutedOnReceiver": true
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/sessions",
+      "expect": {
+        "status": 200,
+        "json": {
+          "defaultsNull": true,
+          "trimmed": true,
+          "before": null,
+          "count": 2,
+          "bookmark": true,
+          "resumedBefore": true,
+          "resumedCount": 2,
+          "resumedAfter": true
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/errors",
+      "expect": {
+        "status": 200,
+        "json": {
+          "observed": {
+            "emptyBatch": { "synchronous": false, "name": "Error", "message": "D1_ERROR: No SQL statements detected." },
+            "invalidBatch": { "synchronous": false, "name": "Error", "message": "D1_ERROR: Malformed input: [{}], should be {sql: string, params?: any[]} or an array of these query objects" },
+            "bindUndefined": { "synchronous": true, "name": "Error", "message": "D1_TYPE_ERROR: Type 'undefined' not supported for value 'undefined'" },
+            "bindObject": { "synchronous": true, "name": "Error", "message": "D1_TYPE_ERROR: Type 'object' not supported for value '[object Object]'" },
+            "missingColumn": { "synchronous": false, "name": "Error", "message": "D1_COLUMN_NOTFOUND: Column not found (missing)" },
+            "numberedColumn": { "synchronous": false, "name": "Error", "message": "D1_COLUMN_NOTFOUND: Column not found (42)" },
+            "emptyAll": { "synchronous": false, "name": "Error", "message": "D1_ERROR: No SQL statements detected." },
+            "emptyExec": { "synchronous": false, "name": "Error", "message": "D1_EXEC_ERROR: Error in line 1: : No SQL statements detected." },
+            "dump": { "synchronous": false, "name": "Error", "message": "D1_DUMP_ERROR: Status + 400" }
+          },
+          "permissive": {
+            "firstExtra": "one",
+            "rawNull": [["one"], ["two"]],
+            "rawExtra": [["one"], ["two"]],
+            "nan": null,
+            "infinity": null,
+            "unsafe": 9007199254740992,
+            "dataView": 0
+          }
+        }
+      }
+    },
+    { "method": "POST", "path": "/transaction", "expect": { "status": 200, "json": { "rolledBack": true, "prefixed": true } } },
+    { "method": "DELETE", "path": "/cleanup", "expect": { "status": 200, "json": { "cleaned": true } } }
+  ],
+  "normalization": [],
+  "cleanup": { "cloudflare": ["worker", "d1_database"], "openCompute": ["worker", "d1_database"] }
+}

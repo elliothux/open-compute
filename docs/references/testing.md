@@ -55,7 +55,7 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
 | --- | --- |
 | `p0-1` … `p0-8`、`p0-exit` | 对应 service 集成测试；P0.1 本体只有一轮 |
 | `p1-conformance`、`p1-security`、`p1-crash`、`p1-snapshot` | 对应当前 P1 集成测试；恢复 staging 拒绝矩阵归 `p1-snapshot` |
-| `p1-8` | P0.7 基本 WebSocket 与 P1 capability；hibernation 仍不支持 |
+| `p1-8` | P0.7 WebSocket/hibernation 与 P1 capability；保留该别名用于当前产品回归，不恢复旧 No-Go 实现 |
 | `p2-1`、`p2-2`、`p2-exit` | 对应 scheduler、queue producer、产品链集成测试 |
 | `p2-3` | P0.2 同一 Worker/Queue/Cron 矩阵，不再重复调度 |
 | `workflow-runtime` | 当前 Workflow 的真实 runtime、suspension、timeout、parallel 与 native output gate |
@@ -70,11 +70,14 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
 | `runtime`、`single-binary` | supervisor、单文件离线首启/重启/损坏路径 |
 | `p0`、`p1`、`p2`、`all` | 对应集合；多个选择取并集，首轮完整，后两轮仅时序用例 |
 
-`p3-cf-diff` 每次只使用随机 `oc-p34-*` Worker 名与 workers.dev endpoint；当前 Cache fixture 不创建
-route、service binding、KV、R2、D1、Queue 或其他共享资源。runner 在 mutation 前验证目标账号和
-同名资源不存在，只对只读部署状态做有界传播等待，不重试写操作；cleanup 使用精确名称且禁止
-`--force`，再以只读查询确认 absent。任何清理失败都使 Gate 失败并保留 inventory，不得扩大到账号
-级批量删除或触碰其他服务。
+`p3-cf-diff` 每个 fixture 只使用随机 `oc-p34-*` Worker 名与 workers.dev endpoint；按 fixture 在两个
+provider 创建同前缀且唯一的 KV namespace、D1 database、R2 bucket、Queue、Durable Object namespace 或
+Workflow。runner 在 mutation 前验证目标账号和每个同名资源不存在，只对只读状态做有界重试，绝不重试
+写操作。cleanup 禁止扩大到非本轮资源，按精确 Worker 名、route ID 和 binding resource ID/name 删除并
+再次枚举确认 absent；本地 deployment retention 需要显式
+`OPEN_COMPUTE_TEST_RUNTIME_RESTART_ACK=restart-generation`，且只允许对本次 qualification 的专用测试
+实例轮换 generation。任何清理失败都使 Gate 失败并保留 inventory，不得扩大到账号级批量删除或触碰
+其它服务。
 
 ## 哪些用例重复
 

@@ -25,7 +25,6 @@ export interface WorkerBuildOptions {
   readonly project: string;
   readonly entry: string;
   readonly tsconfig: string;
-  readonly compatibilityFlags: readonly string[];
 }
 
 async function projectFile(project: string, path: string, label: string): Promise<string> {
@@ -79,12 +78,9 @@ export async function compileWorker(options: WorkerBuildOptions): Promise<Compil
     preserveEntrySignatures: "strict",
     resolve: { conditionNames: ["workerd", "worker", "browser"] },
     external(id) {
-      if (id === "cloudflare:workers" || id === "cloudflare:workflows") return true;
+      if (id === "cloudflare:workers" || id === "cloudflare:workflows" || id === "cloudflare:sockets") return true;
       if (id.startsWith("cloudflare:")) throw new Error("unsupported Cloudflare module");
-      if (id.startsWith("node:")) {
-        if (!options.compatibilityFlags.includes("nodejs_compat")) throw new Error("Node.js imports require nodejs_compat");
-        return true;
-      }
+      if (id.startsWith("node:")) return true;
       if (/^https?:/.test(id)) throw new Error("remote module imports are unsupported");
       return false;
     },

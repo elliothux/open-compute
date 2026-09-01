@@ -110,6 +110,18 @@ pub struct RuntimeWorkflowBinding {
     pub descriptor_sha256: String,
 }
 
+/// Verified immutable target set for one native scheduled event expression.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeScheduledTarget {
+    /// Exact deployment-declared cron expression.
+    pub cron: String,
+    /// Whether the tenant default scheduled handler is invoked.
+    pub scheduled_handler: bool,
+    /// Direct Workflow bindings invoked for the logical slot.
+    pub workflow_bindings: Vec<String>,
+}
+
 /// Verified dynamic Service declaration supplied to the trusted loader host.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -193,10 +205,6 @@ pub struct RuntimeSnapshot {
     pub content_kind: DeploymentContentKind,
     /// Main module for executable Workers.
     pub main_module: Option<String>,
-    /// Exact tenant compatibility date.
-    pub compatibility_date: String,
-    /// Canonically sorted flags.
-    pub compatibility_flags: Vec<String>,
     /// Verified modules.
     pub modules: Vec<RuntimeModule>,
     /// Canonical structured-clone-compatible vars.
@@ -209,6 +217,8 @@ pub struct RuntimeSnapshot {
     pub queue_bindings: Vec<RuntimeQueueBinding>,
     /// Verified Workflow caller bindings, carrying no execution or creation tokens.
     pub workflow_bindings: Vec<RuntimeWorkflowBinding>,
+    /// Verified deployment Cron targets used by the generated system adapter.
+    pub scheduled_targets: Vec<RuntimeScheduledTarget>,
     /// Verified lazy Service declarations.
     pub services: Vec<RuntimeServiceBinding>,
     /// Verified automatic response-cache policy.
@@ -221,8 +231,6 @@ pub struct RuntimeSnapshot {
     pub asset_binding: Option<RuntimeAssetBinding>,
     /// Optional verified static assets used by the trusted default HTTP router.
     pub assets: Option<RuntimeAssets>,
-    /// Immutable resource limits.
-    pub limits: serde_json::Value,
 }
 
 impl std::fmt::Debug for RuntimeSnapshot {
@@ -237,6 +245,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("binding_count", &self.bindings.len())
             .field("queue_binding_count", &self.queue_bindings.len())
             .field("workflow_binding_count", &self.workflow_bindings.len())
+            .field("scheduled_target_count", &self.scheduled_targets.len())
             .field("service_count", &self.services.len())
             .field("cache_enabled", &self.cache_policy.enabled)
             .field("images_binding", &self.images_binding.is_some())
@@ -460,7 +469,7 @@ impl RuntimeSource {
                 binding.resource_spec_generation,
                 binding.capability_version,
                 binding.permissions,
-                binding.config,
+                binding.config.clone(),
             )?;
             let digest = descriptor.sha256()?;
             if digest != binding.descriptor_sha256 {
@@ -519,6 +528,52 @@ impl RuntimeSource {
                 descriptor_sha256: hex::encode(digest),
             });
         }
+        let scheduled_targets = if snapshot.deployment.content_kind == DeploymentContentKind::Worker
+        {
+            let cron = open_compute_storage::CronRepository::new(self.storage.db())
+                .deployment_config(deployment_id)?;
+            for declaration in &cron.declarations {
+                for name in &declaration.workflow_bindings {
+                    let Some(binding) = runtime_workflow_bindings
+                        .iter()
+                        .find(|binding| binding.descriptor.name == *name)
+                    else {
+                        return Err(invariant());
+                    };
+                    if binding
+                        .descriptor
+                        .schedules
+                        .binary_search(&declaration.expression)
+                        .is_err()
+                    {
+                        return Err(invariant());
+                    }
+                }
+            }
+            for binding in &runtime_workflow_bindings {
+                if binding.descriptor.schedules.iter().any(|expression| {
+                    !cron.declarations.iter().any(|declaration| {
+                        declaration.expression == *expression
+                            && declaration
+                                .workflow_bindings
+                                .binary_search(&binding.descriptor.name)
+                                .is_ok()
+                    })
+                }) {
+                    return Err(invariant());
+                }
+            }
+            cron.declarations
+                .into_iter()
+                .map(|declaration| RuntimeScheduledTarget {
+                    cron: declaration.expression,
+                    scheduled_handler: declaration.scheduled_handler,
+                    workflow_bindings: declaration.workflow_bindings,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut service_descriptors = Vec::with_capacity(snapshot.services.len());
         let mut runtime_services = Vec::with_capacity(snapshot.services.len());
         for service in &snapshot.services {
@@ -602,8 +657,6 @@ impl RuntimeSource {
             assets
                 .as_ref()
                 .map(|(manifest, routing)| (manifest, routing)),
-            snapshot.deployment.compatibility_date.clone(),
-            snapshot.deployment.compatibility_flags.clone(),
             vars.clone(),
             secret_descriptors,
             binding_descriptors,
@@ -612,7 +665,6 @@ impl RuntimeSource {
             service_descriptors,
             cache_policy.clone(),
             builtin_descriptors,
-            snapshot.deployment.limits.clone(),
             snapshot.deployment.loader_schema_version,
         )?;
         let actual_descriptor = descriptor.sha256()?;
@@ -662,14 +714,13 @@ impl RuntimeSource {
             main_module: bundle
                 .as_ref()
                 .map(|bundle| bundle.manifest().main_module.clone()),
-            compatibility_date: snapshot.deployment.compatibility_date,
-            compatibility_flags: snapshot.deployment.compatibility_flags,
             modules,
             vars,
             secrets,
             bindings: runtime_bindings,
             queue_bindings: runtime_queue_bindings,
             workflow_bindings: runtime_workflow_bindings,
+            scheduled_targets,
             services: runtime_services,
             cache_policy: RuntimeCachePolicy {
                 enabled: cache_policy.enabled,
@@ -681,7 +732,6 @@ impl RuntimeSource {
             version_metadata_binding,
             asset_binding,
             assets: assets.map(|(manifest, routing)| RuntimeAssets { manifest, routing }),
-            limits: snapshot.deployment.limits,
         })
     }
 
@@ -705,11 +755,10 @@ impl RuntimeSource {
             content_kind: DeploymentContentKind,
             #[serde(skip_serializing_if = "Option::is_none")]
             main_module: Option<&'a str>,
-            compatibility_date: &'a str,
-            compatibility_flags: &'a [String],
             modules: Vec<Module<'a>>,
             env: BTreeMap<&'a str, serde_json::Value>,
             bindings: Vec<BindingPayload<'a>>,
+            scheduled_targets: &'a [RuntimeScheduledTarget],
             services: &'a [RuntimeServiceBinding],
             cache_policy: &'a RuntimeCachePolicy,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -720,7 +769,6 @@ impl RuntimeSource {
             asset_binding: Option<&'a RuntimeAssetBinding>,
             #[serde(skip_serializing_if = "Option::is_none")]
             assets: Option<&'a RuntimeAssets>,
-            limits: &'a serde_json::Value,
         }
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -804,18 +852,16 @@ impl RuntimeSource {
             route_generation: snapshot.route_generation,
             content_kind: snapshot.content_kind,
             main_module: snapshot.main_module.as_deref(),
-            compatibility_date: &snapshot.compatibility_date,
-            compatibility_flags: &snapshot.compatibility_flags,
             modules,
             env,
             bindings,
+            scheduled_targets: &snapshot.scheduled_targets,
             services: &snapshot.services,
             cache_policy: &snapshot.cache_policy,
             images_binding: snapshot.images_binding.as_ref(),
             version_metadata_binding: snapshot.version_metadata_binding.as_ref(),
             asset_binding: snapshot.asset_binding.as_ref(),
             assets: snapshot.assets.as_ref(),
-            limits: &snapshot.limits,
         })
         .map_err(|_| invariant())?;
         Ok(RuntimePayload { bytes })

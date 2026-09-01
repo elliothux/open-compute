@@ -561,19 +561,7 @@ fn prepare_put_options(
     metadata: Option<&Value>,
     metadata_present: bool,
 ) -> Result<KvPutOptions, PlatformError> {
-    if expiration.is_some() && expiration_ttl.is_some() {
-        return Err(invalid_options());
-    }
-    let expires_at_ms = if let Some(seconds) = expiration {
-        let millis = i64::try_from(seconds)
-            .ok()
-            .and_then(|value| value.checked_mul(1000))
-            .ok_or_else(invalid_options)?;
-        if millis < now_ms.saturating_add(60_000) {
-            return Err(invalid_options());
-        }
-        Some(millis)
-    } else if let Some(ttl) = expiration_ttl {
+    let expires_at_ms = if let Some(ttl) = expiration_ttl {
         if ttl < KV_MIN_EXPIRATION_TTL_SECONDS {
             return Err(invalid_options());
         }
@@ -582,6 +570,15 @@ fn prepare_put_options(
             .and_then(|value| value.checked_mul(1000))
             .ok_or_else(invalid_options)?;
         Some(now_ms.checked_add(delta).ok_or_else(invalid_options)?)
+    } else if let Some(seconds) = expiration {
+        let millis = i64::try_from(seconds)
+            .ok()
+            .and_then(|value| value.checked_mul(1000))
+            .ok_or_else(invalid_options)?;
+        if millis < now_ms.saturating_add(60_000) {
+            return Err(invalid_options());
+        }
+        Some(millis)
     } else {
         None
     };

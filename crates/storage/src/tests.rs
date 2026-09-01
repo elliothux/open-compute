@@ -1316,9 +1316,6 @@ fn snapshot_deployment_artifact_inventory_uses_the_canonical_sharded_key() {
             artifact_size: Some(123),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: Vec::new(),
-            limits: serde_json::json!({}),
             worker_code_sha256: [2; 32],
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
@@ -1402,9 +1399,6 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
                 artifact_size: Some(123),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
-                compatibility_date: "2026-08-22".to_owned(),
-                compatibility_flags: vec!["rpc".to_owned()],
-                limits: serde_json::json!({"profile": "default"}),
                 worker_code_sha256: [2; 32],
                 vars,
                 secrets,
@@ -2196,9 +2190,6 @@ fn insert_ready(
             artifact_size: Some(100),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: Vec::new(),
-            limits: serde_json::json!({"profile":"default"}),
             worker_code_sha256: digest,
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
@@ -2258,9 +2249,6 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
-                compatibility_date: "2026-08-22".to_owned(),
-                compatibility_flags: vec!["rpc".to_owned()],
-                limits: serde_json::json!({"profile":"default"}),
                 worker_code_sha256: [3; 32],
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
@@ -2367,9 +2355,6 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
                     artifact_size: Some(100),
                     artifact_schema_version: Some(1),
                     main_module: Some("index.js".to_owned()),
-                    compatibility_date: "2026-08-22".to_owned(),
-                    compatibility_flags: Vec::new(),
-                    limits: serde_json::json!({"profile":"default"}),
                     worker_code_sha256: [6; 32],
                     vars: BTreeMap::new(),
                     secrets: BTreeMap::new(),
@@ -2503,9 +2488,6 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             artifact_size: Some(100),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: Vec::new(),
-            limits: serde_json::json!({"profile":"default"}),
             worker_code_sha256: [4; 32],
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
@@ -2984,7 +2966,6 @@ fn p1_release_identity() -> PlatformReleaseIdentityV1 {
         kv_schema_version: crate::KV_SCHEMA_VERSION,
         d1_schema_version: crate::D1_DATABASE_SCHEMA_VERSION,
         snapshot_format_version: 1,
-        compatibility_policy_sha256: "c".repeat(64),
     }
 }
 
@@ -3308,6 +3289,8 @@ fn p2_2_queue_catalog_projection_and_config_fences_are_exact() {
             .enqueue_queue(
                 &crate::QueueEnqueueRequest {
                     queue_id,
+                    request_id: uuid::Uuid::now_v7(),
+                    output_gate: false,
                     lifecycle_generation: 1,
                     config_generation: 1,
                     batch_delay_seconds: None,
@@ -3383,6 +3366,8 @@ fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
         .enqueue_queue(
             &crate::QueueEnqueueRequest {
                 queue_id,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 batch_delay_seconds: Some(3),
@@ -3430,6 +3415,8 @@ fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
             .enqueue_queue(
                 &crate::QueueEnqueueRequest {
                     queue_id,
+                    request_id: uuid::Uuid::now_v7(),
+                    output_gate: false,
                     lifecycle_generation: 1,
                     config_generation: 1,
                     batch_delay_seconds: None,
@@ -3506,6 +3493,8 @@ fn p2_2_concurrent_queue_enqueues_never_exceed_backlog_quota() {
             scheduler.enqueue_queue(
                 &crate::QueueEnqueueRequest {
                     queue_id,
+                    request_id: uuid::Uuid::now_v7(),
+                    output_gate: false,
                     lifecycle_generation: 1,
                     config_generation: 1,
                     batch_delay_seconds: None,

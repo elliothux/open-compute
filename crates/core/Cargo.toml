@@ -12,6 +12,7 @@ default = []
 test-support = []
 
 [dependencies]
+base64.workspace = true
 futures.workspace = true
 hex.workspace = true
 serde.workspace = true

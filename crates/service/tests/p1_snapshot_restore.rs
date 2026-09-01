@@ -208,6 +208,8 @@ async fn snapshot_restore_gate() {
         .enqueue_queue(
             &QueueEnqueueRequest {
                 queue_id: snapshot_queue,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 batch_delay_seconds: None,
@@ -287,7 +289,10 @@ async fn snapshot_restore_gate() {
         .data_dir()
         .prepare_durable_object_storage(
             &storage.identity().platform_id.to_string(),
-            "workerd 2026-08-26",
+            &open_compute_runtime::embedded_runtime_lock()
+                .expect("embedded runtime lock")
+                .0
+                .expected_version_output,
         )
         .expect("DO root");
     write_mode(
@@ -506,7 +511,7 @@ async fn snapshot_restore_gate() {
     assert_eq!(capabilities["schema_version"], 1);
     let capabilities_human = run_cli_human(&source_config, &["capabilities"]).await;
     assert!(capabilities_human.starts_with("CAPABILITIES V1\nrelease=0.1.0 workerd="));
-    assert!(capabilities_human.contains("durable_objects Supported"));
+    assert!(capabilities_human.contains("durable_objects SupportedWithDeviation members=115"));
     let deleted = run_cli_json(
         &source_config,
         &["backup", "delete", "--snapshot", &cli_snapshot_id, "--json"],

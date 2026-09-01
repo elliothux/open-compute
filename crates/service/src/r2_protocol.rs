@@ -4,10 +4,10 @@ use crate::metrics::R2Operation;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use base64::Engine as _;
 use bytes::Bytes;
 use open_compute_artifacts::{
-    R2_MAX_LIST_LIMIT, R2Condition, R2HttpMetadata, R2PutOptions, R2Range,
+    R2_MAX_LIST_LIMIT, R2ChecksumAlgorithm, R2Condition, R2HttpMetadata, R2MultipartCreateOptions,
+    R2PutOptions, R2Range, R2SsecKey, R2StorageClass, R2UploadedPart,
 };
 use open_compute_core::{BindingId, BindingKind, ErrorCode, PlatformError, ResourceId};
 use open_compute_storage::{AuthorizedBinding, PlatformStorage};
@@ -31,16 +31,28 @@ pub(crate) enum Operation {
     Put,
     Delete,
     List,
+    CreateMultipartUpload,
+    UploadPart,
+    CompleteMultipartUpload,
+    AbortMultipartUpload,
 }
 
 impl Operation {
     pub(crate) const fn write(self) -> bool {
-        matches!(self, Self::Put | Self::Delete)
+        matches!(
+            self,
+            Self::Put
+                | Self::Delete
+                | Self::CreateMultipartUpload
+                | Self::UploadPart
+                | Self::CompleteMultipartUpload
+                | Self::AbortMultipartUpload
+        )
     }
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KeyRequest {
     pub(crate) key: String,
 }
@@ -58,6 +70,7 @@ pub(crate) struct GetRequest {
 pub(crate) struct GetOptions {
     pub(crate) range: Option<R2Range>,
     pub(crate) only_if: Option<R2Condition>,
+    pub(crate) ssec_key: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -77,29 +90,22 @@ pub(crate) struct PutWireOptions {
     http_metadata: R2HttpMetadata,
     #[serde(default)]
     custom_metadata: BTreeMap<String, String>,
-    md5: Option<serde_json::Value>,
+    checksum: Option<ChecksumWire>,
     storage_class: Option<String>,
+    ssec_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChecksumWire {
+    algorithm: String,
+    hex: String,
 }
 
 impl PutWireOptions {
     pub(crate) fn validate(&self) -> Result<(), PlatformError> {
-        if self
-            .storage_class
-            .as_deref()
-            .is_some_and(|value| value != "Standard")
-        {
-            return Err(PlatformError::new(
-                ErrorCode::R2UnsupportedFeature,
-                "R2 storage class is unsupported",
-            ));
-        }
-        if self.only_if.as_ref().is_some_and(|condition| {
-            condition.uploaded_before.is_some() || condition.uploaded_after.is_some()
-        }) {
-            return Err(PlatformError::new(
-                ErrorCode::R2UnsupportedCondition,
-                "R2 conditional PUT supports only ETags",
-            ));
+        if let Some(class) = self.storage_class.as_deref() {
+            R2StorageClass::parse(class)?;
         }
         Ok(())
     }
@@ -114,9 +120,85 @@ impl TryFrom<PutWireOptions> for R2PutOptions {
             http_metadata: value.http_metadata,
             custom_metadata: value.custom_metadata,
             only_if: value.only_if,
-            expected_md5: value.md5.as_ref().map(parse_md5).transpose()?,
+            checksum: value.checksum.as_ref().map(parse_checksum).transpose()?,
+            storage_class: value
+                .storage_class
+                .as_deref()
+                .map(R2StorageClass::parse)
+                .transpose()?
+                .unwrap_or_default(),
+            ssec: value
+                .ssec_key
+                .as_deref()
+                .map(R2SsecKey::parse_hex)
+                .transpose()?,
         })
     }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MultipartCreateWireOptions {
+    #[serde(default)]
+    http_metadata: R2HttpMetadata,
+    #[serde(default)]
+    custom_metadata: BTreeMap<String, String>,
+    storage_class: Option<String>,
+    ssec_key: Option<String>,
+}
+
+impl TryFrom<MultipartCreateWireOptions> for R2MultipartCreateOptions {
+    type Error = PlatformError;
+
+    fn try_from(value: MultipartCreateWireOptions) -> Result<Self, Self::Error> {
+        Ok(Self {
+            http_metadata: value.http_metadata,
+            custom_metadata: value.custom_metadata,
+            storage_class: value
+                .storage_class
+                .as_deref()
+                .map(R2StorageClass::parse)
+                .transpose()?
+                .unwrap_or_default(),
+            ssec: value
+                .ssec_key
+                .as_deref()
+                .map(R2SsecKey::parse_hex)
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateMultipartRequest {
+    pub(crate) key: String,
+    #[serde(default)]
+    pub(crate) options: MultipartCreateWireOptions,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UploadPartHeader {
+    pub(crate) key: String,
+    pub(crate) upload_id: String,
+    pub(crate) part_number: i32,
+    pub(crate) ssec_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CompleteMultipartRequest {
+    pub(crate) key: String,
+    pub(crate) upload_id: String,
+    pub(crate) parts: Vec<R2UploadedPart>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AbortMultipartRequest {
+    pub(crate) key: String,
+    pub(crate) upload_id: String,
 }
 
 #[derive(Deserialize)]
@@ -132,6 +214,7 @@ pub(crate) struct ListRequest {
     pub(crate) prefix: String,
     pub(crate) delimiter: Option<String>,
     pub(crate) cursor: Option<String>,
+    pub(crate) start_after: Option<String>,
     #[serde(default = "default_limit")]
     pub(crate) limit: u16,
     #[serde(default)]
@@ -140,8 +223,7 @@ pub(crate) struct ListRequest {
 
 impl ListRequest {
     pub(crate) fn validate(&self) -> Result<(), PlatformError> {
-        if self.limit == 0
-            || self.limit > R2_MAX_LIST_LIMIT
+        if self.limit > R2_MAX_LIST_LIMIT
             || self.delimiter.as_deref().is_some_and(str::is_empty)
             || self.include.len() > 2
         {
@@ -156,6 +238,7 @@ impl ListRequest {
 pub(crate) struct ListResponse {
     pub(crate) objects: Vec<serde_json::Value>,
     pub(crate) truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cursor: Option<String>,
     pub(crate) delimited_prefixes: Vec<String>,
 }
@@ -169,14 +252,22 @@ pub(crate) struct CursorPayload {
     pub(crate) prefix_sha256: String,
     pub(crate) delimiter_sha256: String,
     pub(crate) include_mask: u8,
-    pub(crate) provider_token: String,
+    pub(crate) start_after_sha256: String,
+    pub(crate) after_key: Option<String>,
     pub(crate) expires_at_ms: u64,
 }
 
-pub(crate) fn minimal_list_metadata(
-    object: &open_compute_artifacts::R2ListedObject,
+pub(crate) fn list_object_json(
+    mut metadata: open_compute_artifacts::R2ObjectMetadata,
+    include_mask: u8,
 ) -> serde_json::Value {
-    serde_json::json!({ "key": object.key, "size": object.size, "etag": object.etag, "httpEtag": format!("\"{}\"", object.etag), "uploaded": object.uploaded, "httpMetadata": {}, "customMetadata": {}, "storageClass": "Standard" })
+    if include_mask & 1 == 0 {
+        metadata.http_metadata = None;
+    }
+    if include_mask & 2 == 0 {
+        metadata.custom_metadata = None;
+    }
+    serde_json::to_value(metadata).unwrap_or(serde_json::Value::Null)
 }
 
 pub(crate) fn include_mask(include: &[String]) -> Result<u8, PlatformError> {
@@ -191,29 +282,30 @@ pub(crate) fn include_mask(include: &[String]) -> Result<u8, PlatformError> {
     Ok(mask)
 }
 
-fn parse_md5(value: &serde_json::Value) -> Result<[u8; 16], PlatformError> {
-    let bytes = if let Some(text) = value.as_str() {
-        if text.len() == 32 {
-            hex::decode(text).map_err(|_| invalid_options())?
-        } else {
-            base64::engine::general_purpose::STANDARD
-                .decode(text)
-                .map_err(|_| invalid_options())?
-        }
-    } else if let Some(values) = value.as_array() {
-        values
-            .iter()
-            .map(|value| {
-                value
-                    .as_u64()
-                    .and_then(|value| u8::try_from(value).ok())
-                    .ok_or_else(invalid_options)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    } else {
-        return Err(invalid_options());
-    };
-    bytes.try_into().map_err(|_| invalid_options())
+fn parse_checksum(value: &ChecksumWire) -> Result<R2ChecksumAlgorithm, PlatformError> {
+    let bytes = hex::decode(&value.hex).map_err(|_| invalid_options())?;
+    match value.algorithm.as_str() {
+        "md5" => Ok(R2ChecksumAlgorithm::Md5(
+            bytes.try_into().map_err(|_| invalid_options())?,
+        )),
+        "sha1" => Ok(R2ChecksumAlgorithm::Sha1(
+            bytes.try_into().map_err(|_| invalid_options())?,
+        )),
+        "sha256" => Ok(R2ChecksumAlgorithm::Sha256(
+            bytes.try_into().map_err(|_| invalid_options())?,
+        )),
+        "sha384" => Ok(R2ChecksumAlgorithm::Sha384(
+            bytes.try_into().map_err(|_| invalid_options())?,
+        )),
+        "sha512" => Ok(R2ChecksumAlgorithm::Sha512(
+            bytes.try_into().map_err(|_| invalid_options())?,
+        )),
+        _ => Err(invalid_options()),
+    }
+}
+
+pub(crate) fn parse_ssec(value: Option<&str>) -> Result<Option<R2SsecKey>, PlatformError> {
+    value.map(R2SsecKey::parse_hex).transpose()
 }
 
 pub(crate) fn parse_path(path: &str) -> Result<(BindingId, Operation), PlatformError> {
@@ -230,6 +322,10 @@ pub(crate) fn parse_path(path: &str) -> Result<(BindingId, Operation), PlatformE
         "put" => Operation::Put,
         "delete" => Operation::Delete,
         "list" => Operation::List,
+        "createMultipartUpload" => Operation::CreateMultipartUpload,
+        "uploadPart" => Operation::UploadPart,
+        "completeMultipartUpload" => Operation::CompleteMultipartUpload,
+        "abortMultipartUpload" => Operation::AbortMultipartUpload,
         _ => return Err(protocol_error()),
     };
     Ok((
@@ -263,7 +359,10 @@ pub(crate) fn validate_binding(
 }
 
 pub(crate) fn content_type_matches(headers: &axum::http::HeaderMap, operation: Operation) -> bool {
-    let expected = if matches!(operation, Operation::Get | Operation::Put) {
+    let expected = if matches!(
+        operation,
+        Operation::Get | Operation::Put | Operation::UploadPart
+    ) {
         FRAME_CONTENT_TYPE
     } else {
         JSON_CONTENT_TYPE
@@ -404,10 +503,10 @@ pub(crate) fn error_response(error: &PlatformError) -> Response {
         | ErrorCode::R2PrefixCollision
         | ErrorCode::ResourceInvariantViolation => StatusCode::UNPROCESSABLE_ENTITY,
         ErrorCode::BindingProtocolError
-        | ErrorCode::R2KeyInvalid
         | ErrorCode::R2InvalidOptions
-        | ErrorCode::R2UnsupportedCondition
-        | ErrorCode::R2UnsupportedFeature
+        | ErrorCode::R2ChecksumMismatch
+        | ErrorCode::R2SsecInvalid
+        | ErrorCode::R2MultipartInvalid
         | ErrorCode::R2CursorInvalid
         | ErrorCode::R2PreconditionFailed => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -446,6 +545,10 @@ pub(crate) fn metric_operation(path: &str) -> Option<R2Operation> {
         "put" => Some(R2Operation::Put),
         "delete" => Some(R2Operation::Delete),
         "list" => Some(R2Operation::List),
+        "createMultipartUpload"
+        | "uploadPart"
+        | "completeMultipartUpload"
+        | "abortMultipartUpload" => Some(R2Operation::Put),
         _ => None,
     }
 }

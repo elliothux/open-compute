@@ -56,10 +56,12 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .create(
             account,
             definition.id,
+            open_compute_core::WorkflowOperationId::generate(),
             Some("snapshot-instance"),
             open_compute_workers::WorkflowCreateInput {
-                payload_json: "{\"value\":42}",
+                payload_base64: &encode_workflow_json(&serde_json::json!({"value":42})),
                 retention: None,
+                schedule: None,
             },
             now(),
         )
@@ -74,7 +76,9 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         external_instance_id: run.external_instance_id,
         definition_name: run.target.definition_name,
         created_at_ms: run.created_at_ms,
-        payload_json: run.input_json,
+        payload_base64: run.input_json,
+        rollback: run.rollback,
+        schedule: None,
     };
     let result = original
         .transport
@@ -86,8 +90,8 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .await
         .unwrap();
     let (_, before_output) = complete(result);
-    let before: serde_json::Value = serde_json::from_str(&before_output).unwrap();
-    assert_eq!(before["callbacks"], 1);
+    let before = decode_workflow_json(&before_output);
+    assert_eq!(before["callbacks"], 1.0);
     assert_eq!(
         store
             .workflow_instance(identity.instance_id)
@@ -234,7 +238,9 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         external_instance_id: replay.external_instance_id,
         definition_name: replay.target.definition_name,
         created_at_ms: replay.created_at_ms,
-        payload_json: replay.input_json,
+        payload_base64: replay.input_json,
+        rollback: replay.rollback,
+        schedule: None,
     };
     let result = restored
         .transport
@@ -246,15 +252,15 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         .await
         .unwrap();
     assert_eq!(result.loader_outcome, "cold");
-    let (final_ordinal, output_json) = complete(result);
-    let after: serde_json::Value = serde_json::from_str(&output_json).unwrap();
-    assert_eq!(after["callbacks"], 0);
+    let (final_ordinal, output_base64) = complete(result);
+    let after = decode_workflow_json(&output_base64);
+    assert_eq!(after["callbacks"], 0.0);
     assert_eq!(after["value"], before["value"]);
     restored_store
         .finish_workflow(
             &replay.fence,
             &WorkflowCompletion::Complete {
-                output_json,
+                output_json: output_base64,
                 final_ordinal,
             },
             expired_at + 1001,

@@ -134,14 +134,6 @@ pub(super) fn request_fingerprint(
         frame(&mut canonical, &[])?;
         frame(&mut canonical, &[])?;
     }
-    frame(&mut canonical, request.compatibility_date.as_bytes())?;
-    let mut flags = request.compatibility_flags.clone();
-    flags.sort();
-    flags.dedup();
-    frame(
-        &mut canonical,
-        &serde_json::to_vec(&flags).map_err(|_| invariant())?,
-    )?;
     frame(
         &mut canonical,
         &serde_json::to_vec(vars).map_err(|_| invariant())?,
@@ -169,10 +161,6 @@ pub(super) fn request_fingerprint(
     frame(
         &mut canonical,
         &serde_json::to_vec(&request.crons).map_err(|_| invariant())?,
-    )?;
-    frame(
-        &mut canonical,
-        &serde_json::to_vec(&request.limits).map_err(|_| invariant())?,
     )?;
     canonical.push(u8::from(request.promote));
     let mut domain = Sha256::new();

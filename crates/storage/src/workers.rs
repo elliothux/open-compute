@@ -135,12 +135,6 @@ pub struct DeploymentRecord {
     pub artifact_schema_version: Option<u32>,
     /// Main ES module.
     pub main_module: Option<String>,
-    /// Tenant compatibility date.
-    pub compatibility_date: String,
-    /// Canonically sorted compatibility flags.
-    pub compatibility_flags: Vec<String>,
-    /// Immutable limits document.
-    pub limits: serde_json::Value,
     /// Hash of every runtime-effective input.
     pub worker_code_sha256: [u8; 32],
     /// Loader contract schema.
@@ -296,12 +290,6 @@ pub struct NewDeployment {
     pub artifact_schema_version: Option<u32>,
     /// Main module.
     pub main_module: Option<String>,
-    /// Tenant compatibility date.
-    pub compatibility_date: String,
-    /// Sorted flags.
-    pub compatibility_flags: Vec<String>,
-    /// Immutable limits.
-    pub limits: serde_json::Value,
     /// Descriptor digest.
     pub worker_code_sha256: [u8; 32],
     /// Canonical JSON vars.
@@ -697,7 +685,6 @@ impl<'a> WorkerRepository<'a> {
                 .query_row(
                     "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
-                        compatibility_date, compatibility_flags_json, limits_json,
                         worker_code_sha256, loader_schema_version, created_at_ms,
                         ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms
                  FROM worker_deployments WHERE id = ?1 AND worker_id = ?2",
@@ -757,7 +744,6 @@ impl<'a> WorkerRepository<'a> {
                 .prepare(
                     "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
-                        compatibility_date, compatibility_flags_json, limits_json,
                         worker_code_sha256, loader_schema_version, created_at_ms,
                         ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms
                  FROM worker_deployments WHERE worker_id = ?1
@@ -783,7 +769,6 @@ impl<'a> WorkerRepository<'a> {
             conn.query_row(
                 "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
-                        compatibility_date, compatibility_flags_json, limits_json,
                         worker_code_sha256, loader_schema_version, created_at_ms,
                         ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms
                  FROM worker_deployments WHERE id = ?1 AND worker_id = ?2",
@@ -839,7 +824,6 @@ impl<'a> WorkerRepository<'a> {
                 .query_row(
                     "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
-                        compatibility_date, compatibility_flags_json, limits_json,
                         worker_code_sha256, loader_schema_version, created_at_ms,
                         ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms
                  FROM worker_deployments WHERE id = ?1 AND worker_id = ?2 AND state = 'ready'",
@@ -1140,6 +1124,39 @@ impl<'a> WorkerRepository<'a> {
             if changed != 1 {
                 return Err(worker_not_found());
             }
+            tx.execute(
+                "DELETE FROM resource_referrers
+                 WHERE referrer_kind = 'deployment_binding'
+                   AND referrer_id IN (
+                     SELECT b.id FROM deployment_bindings b
+                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     WHERE d.worker_id = ?1
+                   )",
+                [worker_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
+                "DELETE FROM queue_referrers
+                 WHERE referrer_kind = 'producer_binding'
+                   AND referrer_id IN (
+                     SELECT b.id FROM queue_producer_bindings b
+                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     WHERE d.worker_id = ?1
+                   )",
+                [worker_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
+                "DELETE FROM workflow_referrers
+                 WHERE referrer_kind = 'binding'
+                   AND referrer_id IN (
+                     SELECT b.id FROM workflow_bindings b
+                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     WHERE d.worker_id = ?1
+                   )",
+                [worker_id.to_string()],
+            )
+            .map_err(|_| db_error())?;
             audit(
                 tx,
                 account_id,
@@ -2148,10 +2165,8 @@ fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord>
     let artifact: Option<Vec<u8>> = row.get(5)?;
     let artifact_size: Option<i64> = row.get(6)?;
     let artifact_schema: Option<i64> = row.get(7)?;
-    let flags: Vec<u8> = row.get(10)?;
-    let limits: Vec<u8> = row.get(11)?;
-    let descriptor: Vec<u8> = row.get(12)?;
-    let loader_schema: i64 = row.get(13)?;
+    let descriptor: Vec<u8> = row.get(9)?;
+    let loader_schema: i64 = row.get(10)?;
     Ok(DeploymentRecord {
         id: DeploymentId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -2169,18 +2184,14 @@ fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord>
             .transpose()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         main_module: row.get(8)?,
-        compatibility_date: row.get(9)?,
-        compatibility_flags: serde_json::from_slice(&flags)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        limits: serde_json::from_slice(&limits).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_code_sha256: array32(&descriptor)?,
         loader_schema_version: u32::try_from(loader_schema)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        created_at_ms: row.get(14)?,
-        ready_at_ms: row.get(15)?,
-        rejected_at_ms: row.get(16)?,
-        rejection_code: row.get(17)?,
-        deleted_at_ms: row.get(18)?,
+        created_at_ms: row.get(11)?,
+        ready_at_ms: row.get(12)?,
+        rejected_at_ms: row.get(13)?,
+        rejection_code: row.get(14)?,
+        deleted_at_ms: row.get(15)?,
     })
 }
 

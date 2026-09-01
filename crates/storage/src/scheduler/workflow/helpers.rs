@@ -96,7 +96,22 @@ pub(super) fn instance_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workflow
             external_instance_id: row.get("external_instance_id")?,
             instance_generation: row.get("instance_generation")?,
             creation_nonce: WorkflowToken::from_bytes(digest(row, "creation_nonce")?),
+            creation_operation_id: parse(row, "creation_operation_id")?,
+            creation_batch_id: parse(row, "creation_batch_id")?,
             created_at_ms: row.get("created_at_ms")?,
+            schedule: match (
+                row.get::<_, Option<String>>("trigger_cron")?,
+                row.get::<_, Option<i64>>("trigger_scheduled_time_ms")?,
+            ) {
+                (Some(cron), Some(scheduled_time)) => {
+                    Some(open_compute_core::WorkflowCronSchedule {
+                        cron,
+                        scheduled_time,
+                    })
+                }
+                (None, None) => None,
+                _ => return Err(rusqlite::Error::InvalidQuery),
+            },
         },
         updated_at_ms: row.get("updated_at_ms")?,
         state,
@@ -146,6 +161,7 @@ pub(super) fn durable_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workflo
     Ok(WorkflowDurableState {
         pause_requested: row.get("pause_requested")?,
         yield_requested: row.get("yield_requested")?,
+        rollback_requested: row.get("rollback_requested")?,
         next_wake_at_ms: row.get("next_wake_at_ms")?,
         registered_step_count: row.get("registered_step_count")?,
         settled_step_count: row.get("settled_step_count")?,
@@ -226,7 +242,7 @@ pub(super) fn account_capacity(
         coalesce(SUM(state IN ('queued','running','waiting','paused')),0)
         +(SELECT COUNT(*) FROM workflow_steps s JOIN workflow_instances i ON i.id=s.instance_id
           WHERE i.account_id=?1 AND i.capability_version=1 AND s.kind IN ('do','wait_event')
-          AND s.state IN ('pending','running','waiting'))
+          AND s.state IN ('pending','running','delay_pending','waiting'))
         FROM workflow_instances WHERE account_id=?1",
         [account.to_string()],
         |row| Ok((row.get(0)?, row.get(1)?)),
@@ -246,7 +262,7 @@ pub(super) fn capacity_change(
     let (bytes,reservations):(u64,u64)=conn.query_row("SELECT state_bytes,
         (state IN ('queued','running','waiting','paused'))
         +(SELECT COUNT(*) FROM workflow_steps s WHERE s.instance_id=i.id AND s.kind IN ('do','wait_event')
-          AND s.state IN ('pending','running','waiting')) FROM workflow_instances i WHERE id=?1 AND capability_version=1",
+          AND s.state IN ('pending','running','delay_pending','waiting')) FROM workflow_instances i WHERE id=?1 AND capability_version=1",
         [instance.identity.instance_id.to_string()],|row|Ok((row.get(0)?,row.get(1)?))).map_err(sql_error)?;
     let (account_bytes, account_reservations) =
         account_capacity(conn, instance.identity.target.account_id)?;
@@ -300,6 +316,10 @@ pub(super) fn initial_state_bytes(
         + identity.target.definition_name.len()
         + identity.external_instance_id.len()
         + identity.target.class_name.len()
+        + identity
+            .schedule
+            .as_ref()
+            .map_or(0, |value| value.cron.len() + 16)
 }
 
 pub(super) fn heartbeat(

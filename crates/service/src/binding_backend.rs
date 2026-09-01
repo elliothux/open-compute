@@ -258,6 +258,7 @@ async fn serve_binding_backend_inner(
         })
         .transpose()?
         .map(Arc::new);
+    let service_reaper = services.clone();
     let state = BackendState {
         storage,
         auth,
@@ -277,8 +278,21 @@ async fn serve_binding_backend_inner(
         images,
     };
     let router = Router::new().fallback(handle).with_state(state);
+    let managed_shutdown = async move {
+        match service_reaper {
+            Some(registry) => {
+                registry
+                    .reap_deadlines_until_shutdown(
+                        crate::service_invocations::DEADLINE_REAPER_INTERVAL,
+                        shutdown,
+                    )
+                    .await;
+            }
+            None => shutdown.await,
+        }
+    };
     axum::serve(listener, router.into_make_service())
-        .with_graceful_shutdown(shutdown)
+        .with_graceful_shutdown(managed_shutdown)
         .await
         .map_err(|_| {
             PlatformError::new(
@@ -559,8 +573,8 @@ async fn handle_service_invocation(
     request: Request,
 ) -> Response {
     use crate::service_invocations::{
-        CapabilityBeginRequest, ServiceReleaseRequest, ServiceResolveRequest, ServiceRetainRequest,
-        ServiceRootCompleteRequest,
+        CapabilityBeginRequest, ServiceConnectFinalizeRequest, ServiceReleaseRequest,
+        ServiceResolveRequest, ServiceRetainRequest, ServiceRootCompleteRequest,
     };
     let path = request.uri().path().to_owned();
     let Ok(bytes) = to_bytes(request.into_body(), 16 * 1024).await else {
@@ -584,6 +598,9 @@ async fn handle_service_invocation(
                             }
                             crate::service_invocations::ServiceOperation::Rpc => {
                                 ServiceMetricOperation::Rpc
+                            }
+                            crate::service_invocations::ServiceOperation::Connect => {
+                                ServiceMetricOperation::Connect
                             }
                         });
                         registry.resolve(&value)
@@ -621,6 +638,12 @@ async fn handle_service_invocation(
                 serde_json::from_slice::<ServiceRootCompleteRequest>(&bytes)
                     .map_err(|_| protocol_error())
                     .and_then(|value| registry.complete_root(&value))
+                    .and_then(|()| json_response(&serde_json::json!({ "ok": true })))
+            }
+            "/internal/services/v1/connect/finalize" => {
+                serde_json::from_slice::<ServiceConnectFinalizeRequest>(&bytes)
+                    .map_err(|_| protocol_error())
+                    .and_then(|value| registry.finalize_connect(&value))
                     .and_then(|()| json_response(&serde_json::json!({ "ok": true })))
             }
             _ => Ok(StatusCode::NOT_FOUND.into_response()),
@@ -827,7 +850,10 @@ async fn acknowledge_durable_object(state: BackendState, request: Request) -> Re
         return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
     };
     let Ok(bytes) = to_bytes(request.into_body(), 4096).await else {
-        return backend_error(ErrorCode::DoRpcUnsupported, StatusCode::PAYLOAD_TOO_LARGE);
+        return backend_error(
+            ErrorCode::DoInternalProtocolError,
+            StatusCode::PAYLOAD_TOO_LARGE,
+        );
     };
     let body = match parse_json::<DoReadyRequest>(&bytes) {
         Ok(value) if value.object_generation > 0 => value,
@@ -874,6 +900,7 @@ async fn resolve_durable_object(state: BackendState, request: Request) -> Respon
     let operation = match header_text(request.headers(), "x-open-compute-do-operation") {
         Some("fetch") => DoOperation::Fetch,
         Some("rpc") => DoOperation::Rpc,
+        Some("connect") => DoOperation::Connect,
         _ => {
             return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
         }
@@ -900,7 +927,10 @@ async fn resolve_durable_object(state: BackendState, request: Request) -> Respon
         }
     };
     let Ok(bytes) = to_bytes(request.into_body(), 4096).await else {
-        return backend_error(ErrorCode::DoRpcUnsupported, StatusCode::PAYLOAD_TOO_LARGE);
+        return backend_error(
+            ErrorCode::DoInternalProtocolError,
+            StatusCode::PAYLOAD_TOO_LARGE,
+        );
     };
     let Ok(body) = parse_json::<DoResolveRequest>(&bytes) else {
         return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
@@ -1072,7 +1102,6 @@ fn platform_error(error: &PlatformError) -> Response {
         | ErrorCode::KvInternalProtocolError => StatusCode::BAD_REQUEST,
         ErrorCode::DoIdInvalid
         | ErrorCode::DoRpcUnsupported
-        | ErrorCode::DoPlacementOptionUnsupported
         | ErrorCode::DoInternalProtocolError
         | ErrorCode::SchedulerInternalProtocolError => StatusCode::BAD_REQUEST,
         ErrorCode::DoClassNotFound | ErrorCode::DoRuntimeException => {

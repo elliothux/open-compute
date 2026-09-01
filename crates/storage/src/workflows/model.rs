@@ -3,7 +3,7 @@
 use crate::DeploymentState;
 use open_compute_core::{
     AccountId, BindingId, DeploymentId, ResourceAvailability, ResourceState, WorkerId, WorkflowId,
-    WorkflowInstanceId, WorkflowToken, WorkflowVersionId,
+    WorkflowInstanceId, WorkflowOperationId, WorkflowToken, WorkflowVersionId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +95,8 @@ pub struct WorkflowBindingDescriptor {
     pub definition_lifecycle_generation: i64,
     /// Supported facade capability.
     pub capability_version: u32,
+    /// Exact direct cron schedules owned by this binding.
+    pub schedules: Vec<String>,
 }
 
 /// Persisted immutable Workflow binding.
@@ -141,8 +143,14 @@ pub struct WorkflowInstanceIdentity {
     pub instance_generation: i64,
     /// Cross-database identity proof, not a tenant-visible idempotency key.
     pub creation_nonce: WorkflowToken,
+    /// Durable per-instance creation operation shared by control and scheduler authority.
+    pub creation_operation_id: WorkflowOperationId,
+    /// Durable create-batch identity used to recover publication as one atomic group.
+    pub creation_batch_id: WorkflowOperationId,
     /// Stable event timestamp.
     pub created_at_ms: i64,
+    /// Direct cron metadata, absent for programmatic and REST-created instances.
+    pub schedule: Option<open_compute_core::WorkflowCronSchedule>,
 }
 
 /// Recoverable control reservation, with lifecycle read only from control authority.

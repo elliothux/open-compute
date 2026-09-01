@@ -174,7 +174,8 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     wait_running(&supervisor, Duration::from_secs(30)).await;
 
     let account = storage.identity().default_account_id;
-    let database = create_database(&storage, &d1_config, account);
+    let database = create_database(&storage, &d1_config, account, "d1");
+    let other = create_database(&storage, &d1_config, account, "d1-other");
     let bucket = create_bucket(&storage, &objects, &r2_config, account).await;
     let repository = WorkerRepository::new(storage.db());
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
@@ -189,6 +190,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
             account,
             worker.id,
             database,
+            Some(other),
             Some(bucket),
             "matrix-v1",
             matrix_source(),
@@ -218,6 +220,35 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     assert_eq!(matrix["authorizer"], true);
     assert_eq!(matrix["resultUnknown"], true);
     assert_eq!(matrix["limitMatrix"], true);
+
+    let dump = dispatch(&transport, account, worker.id, &deployment, None, "/dump").await;
+    assert_eq!((dump.status, dump.body.as_str()), (200, "true"));
+    let session = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment,
+        None,
+        "/session",
+    )
+    .await;
+    assert_eq!(session.status, 200, "{}", session.body);
+    let session_json: serde_json::Value = serde_json::from_str(&session.body).unwrap();
+    for key in [
+        "before",
+        "opaque",
+        "afterResume",
+        "invalid",
+        "otherDb",
+        "firstRow",
+        "rawNamed",
+        "rawPlain",
+        "metaShape",
+    ] {
+        assert_eq!(session_json[key], true, "{key}: {session_json}");
+    }
+    let bookmark = session_json["bookmark"].as_str().unwrap().to_owned();
+    assert!(!bookmark.is_empty());
 
     d1_service.arm_response_loss_once();
     let batch_loss = dispatch(
@@ -259,6 +290,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
                 shape_worker.id,
                 database,
                 None,
+                None,
                 name,
                 source,
                 now + 1,
@@ -275,6 +307,23 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
     let restarted = dispatch(&transport, account, worker.id, &deployment, None, "/count").await;
     assert_eq!((restarted.status, restarted.body.as_str()), (200, "2"));
+    let resumed = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment,
+        None,
+        &format!("/resume?b={bookmark}"),
+    )
+    .await;
+    assert_eq!(resumed.status, 200, "{}", resumed.body);
+    let resumed_json: serde_json::Value = serde_json::from_str(&resumed.body).unwrap();
+    assert_eq!(resumed_json["n"], 2);
+    assert!(
+        resumed_json["bookmark"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
     assert_eq!(pins.count(database), 0);
     supervisor.shutdown().await;
     assert_eq!(supervisor.owner_registry_len(), 0);
@@ -284,13 +333,18 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     println!("P0.6 DF-01..DF-12 facade/SQLite/restart matrix PASS");
 }
 
-fn create_database(storage: &PlatformStorage, config: &D1Config, account: AccountId) -> ResourceId {
+fn create_database(
+    storage: &PlatformStorage,
+    config: &D1Config,
+    account: AccountId,
+    key: &str,
+) -> ResourceId {
     let resource = reserve(
         storage,
         account,
         BindingKind::D1Database,
         D1_DATABASE_SCHEMA_VERSION,
-        "d1",
+        key,
     );
     D1ResourceDriver::new(storage, config.database_quota_bytes)
         .create(&resource)
@@ -382,6 +436,7 @@ fn deployment_request(
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     database: ResourceId,
+    other: Option<ResourceId>,
     bucket: Option<ResourceId>,
     key: &str,
     source: &str,
@@ -409,6 +464,17 @@ fn deployment_request(
             },
         );
     }
+    if let Some(other) = other {
+        bindings.insert(
+            "OTHER".to_owned(),
+            DeploymentBindingInput {
+                kind: BindingKind::D1Database,
+                id: other,
+                permissions: CanonicalPermissions::default(),
+                config: CanonicalBindingConfig::default(),
+            },
+        );
+    }
     if let Some(bucket) = bucket {
         bindings.insert(
             "BUCKET".to_owned(),
@@ -428,16 +494,13 @@ fn deployment_request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: vec!["rpc".to_owned()],
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings,
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote: true,
         request_id: RequestId::generate(),
         now_ms,
@@ -445,166 +508,7 @@ fn deployment_request(
 }
 
 fn matrix_source() -> &'static str {
-    r#"import { WorkerEntrypoint } from "cloudflare:workers";
-import { D1Database as ImportableD1Database } from "./__open_compute__/d1/facade.js";
-import { R2Bucket as ImportableR2Bucket } from "./__open_compute__/r2/facade.js";
-
-const meta = () => ({
-  served_by: "open-compute-local", served_by_primary: true, duration: 0,
-  changes: 0, last_row_id: 0, changed_db: false, size_after: 0,
-  rows_read: 1, rows_written: 0,
-});
-const fakeResult = (columns = ["value"], rows = [[1]]) => ({ results: [{ columns, rows, meta: meta() }] });
-const codeOf = (error) => String(error && error.message || error);
-const syncThrows = (fn, code) => {
-  try { fn(); return false; } catch (error) { return codeOf(error).includes(code); }
-};
-const rejects = async (fn, code) => {
-  try { await fn(); return false; } catch (error) { return codeOf(error).includes(code); }
-};
-
-export class Named extends WorkerEntrypoint {
-  constructor(ctx, env) { super(ctx, env); this.wrapped = env.DB instanceof ImportableD1Database; }
-  async fetch() { return new Response(`named:${this.wrapped}`); }
-}
-
-export default {
-  async fetch(request, env) {
-    const path = new URL(request.url).pathname;
-    if (path === "/count") return new Response(String((await env.DB.prepare("SELECT count(*) AS n FROM items").first("n"))));
-    if (path === "/batch-loss") {
-      try {
-        await env.DB.batch([
-          env.DB.prepare("INSERT INTO items(value) VALUES ('lost-batch-a')"),
-          env.DB.prepare("INSERT INTO items(value) VALUES ('lost-batch-b')"),
-        ]);
-        return new Response("false");
-      } catch (error) {
-        const committed = (await env.DB.prepare(
-          "SELECT count(*) AS n FROM items WHERE value IN ('lost-batch-a', 'lost-batch-b')",
-        ).first("n")) === 2;
-        await env.DB.prepare(
-          "DELETE FROM items WHERE value IN ('lost-batch-a', 'lost-batch-b')",
-        ).run();
-        return new Response(String(codeOf(error).includes("D1_RESULT_UNKNOWN") && committed));
-      }
-    }
-    if (path !== "/matrix") return new Response("missing", { status: 404 });
-    try {
-      const calls = [];
-      const raw = {
-        async query(mode, statements) {
-          calls.push({ mode, statements });
-          if (mode === "batch") return { results: statements.map(() => fakeResult().results[0]) };
-          if (statements[0].sql === "magic") return fakeResult(["__proto__", "constructor"], [["safe", "also-safe"]]);
-          if (statements[0].sql === "empty") return fakeResult(["value"], []);
-          return fakeResult();
-        },
-        async exec(sql) { calls.push({ exec: sql }); return { count: 1, duration: 0 }; },
-      };
-      const fake = new ImportableD1Database(raw);
-      const prepared = fake.prepare("SELECT ?1");
-      const df01 = prepared && calls.length === 0;
-      const view = new Uint8Array([9, 1, 2, 9]).subarray(1, 3);
-      const bound = prepared.bind(view);
-      const reused = prepared.bind("again");
-      const df02 = bound !== prepared && reused !== prepared && calls.length === 0;
-      await bound.all();
-      const df03 = calls.length === 1 && calls[0].mode === "all"
-        && calls[0].statements.length === 1 && calls[0].statements[0].params[0] instanceof Uint8Array;
-      const beforeBatch = calls.length;
-      const batch = await fake.batch([bound, reused, bound]);
-      const df04 = batch.length === 3 && calls.length === beforeBatch + 1
-        && calls.at(-1).statements.length === 3;
-      const other = new ImportableD1Database(raw);
-      const session = fake.withSession("first-primary");
-      const df05 = await rejects(() => fake.batch([other.prepare("SELECT 1")]), "D1_INVALID_BATCH")
-        && await rejects(() => fake.batch([session.prepare("SELECT 1")]), "D1_INVALID_BATCH")
-        && await rejects(() => fake.batch([{}]), "D1_INVALID_BATCH");
-      const rejected = [undefined, 1n, NaN, Infinity, {}, new Date(), () => {}, Symbol("x")]
-        .every((value) => syncThrows(() => prepared.bind(value), "D1_TYPE_ERROR"));
-      const df06 = rejected && prepared.bind(null, true, false, 1, 1.5, "x", new ArrayBuffer(0));
-      const df07 = calls[0].statements[0].params[0].byteLength === 2
-        && calls[0].statements[0].params[0][0] === 1 && calls[0].statements[0].params[0][1] === 2;
-      const magic = await fake.prepare("magic").first();
-      const df08 = Object.getPrototypeOf(magic) === Object.prototype
-        && Object.prototype.hasOwnProperty.call(magic, "__proto__") && magic.__proto__ === "safe";
-      const df09 = env.DB instanceof ImportableD1Database && env.DB_ALIAS instanceof ImportableD1Database;
-      const df10 = Object.keys(env).sort().join(",") === "BUCKET,DB,DB_ALIAS"
-        && !Reflect.ownKeys(env.DB).some((key) => String(key).includes("raw"))
-        && typeof env.DB.fetch === "undefined";
-      const df11 = df09;
-      const df12 = env.BUCKET instanceof ImportableR2Bucket
-        && typeof env.BUCKET.head === "function" && typeof env.BUCKET.fetch === "undefined"
-        && await env.BUCKET.head("missing") === null;
-
-      let resultUnknown = false;
-      try {
-        await env.DB.exec("CREATE TABLE items(id INTEGER PRIMARY KEY, value TEXT UNIQUE, data BLOB)");
-      } catch (error) {
-        resultUnknown = codeOf(error).includes("D1_RESULT_UNKNOWN")
-          && (await env.DB.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='items'").first("n")) === 1;
-      }
-      await env.DB.prepare("INSERT INTO items(value, data) VALUES (?1, ?2)").bind("one", view).run();
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO items(value) VALUES (?1)").bind("two"),
-        env.DB.prepare("SELECT count(*) FROM items"),
-      ]);
-      const real = await env.DB.prepare("SELECT id, value FROM items ORDER BY id").raw();
-      const blob = await env.DB.prepare("SELECT data FROM items WHERE id = 1").first("data");
-      let batchRollback = false;
-      try {
-        await env.DB.batch([
-          env.DB.prepare("INSERT INTO items(value) VALUES ('three')"),
-          env.DB.prepare("INSERT INTO items(value) VALUES ('one')"),
-        ]);
-      } catch {
-        batchRollback = (await env.DB.prepare("SELECT count(*) AS n FROM items WHERE value='three'").first("n")) === 0;
-      }
-      let execPrefix = false;
-      try {
-        await env.DB.exec("INSERT INTO items(value) VALUES ('prefix'); SELECT * FROM absent; INSERT INTO items(value) VALUES ('never')");
-      } catch {
-        execPrefix = (await env.DB.prepare("SELECT count(*) AS n FROM items WHERE value='prefix'").first("n")) === 1;
-        await env.DB.prepare("DELETE FROM items WHERE value='prefix'").run();
-      }
-      const denied = [];
-      for (const sql of ["ATTACH DATABASE ':memory:' AS other", "PRAGMA writable_schema=ON", "BEGIN", "SELECT * FROM __open_compute_meta"]) {
-        try { await env.DB.exec(sql); denied.push(false); } catch (error) { denied.push(codeOf(error).includes("D1_AUTHORIZER_DENIED")); }
-      }
-      const firstNull = await fake.prepare("empty").first() === null;
-      const rawColumns = JSON.stringify(await fake.prepare("magic").raw({ columnNames: true }))
-        === JSON.stringify([["__proto__", "constructor"], ["safe", "also-safe"]]);
-      const sqlFastLimit = syncThrows(() => fake.prepare("x".repeat(100001)), "D1_SQL_INVALID");
-      const batchFastLimit = await rejects(
-        () => fake.batch(Array.from({ length: 101 }, () => prepared)), "D1_INVALID_BATCH",
-      );
-      const parameterLimit = await rejects(
-        () => env.DB.prepare("SELECT 1").bind(...Array(101).fill(null)).all(), "D1_LIMIT_ERROR",
-      );
-      const rowLimit = await rejects(
-        () => env.DB.prepare("SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3").all(),
-        "D1_LIMIT_ERROR",
-      );
-      const resultLimit = await rejects(
-        () => env.DB.prepare("SELECT printf('%2000s', 'x')").all(), "D1_LIMIT_ERROR",
-      );
-      const vmLimit = await rejects(
-        () => env.DB.prepare("WITH RECURSIVE c(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM c WHERE x<100000) SELECT sum(x) FROM c").all(),
-        "D1_LIMIT_ERROR",
-      );
-      const limitMatrix = sqlFastLimit && batchFastLimit && parameterLimit
-        && rowLimit && resultLimit && vmLimit;
-      return Response.json({
-        df01, df02, df03, df04, df05, df06: Boolean(df06), df07, df08, df09, df10, df11, df12,
-        realRows: real, blob, batchRollback, execPrefix, authorizer: denied.every(Boolean),
-        resultUnknown, firstNull, rawColumns, limitMatrix,
-      });
-    } catch (error) {
-      return new Response(error && error.stack ? error.stack : String(error), { status: 598 });
-    }
-  }
-};"#
+    include_str!("fixtures/p0_6_d1_worker.js")
 }
 
 fn function_source() -> &'static str {

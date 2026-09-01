@@ -16,6 +16,7 @@ pub mod config_load;
 pub mod d1_backend;
 pub mod d1_http;
 mod d1_protocol;
+mod d1_session;
 pub mod do_http;
 pub mod doctor;
 pub mod exit;

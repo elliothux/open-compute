@@ -9,6 +9,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
+use open_compute_core::workflow::{WorkflowDurableConfig, WorkflowStepDeclaration};
 use open_compute_core::{WorkflowFence, WorkflowInstanceId, WorkflowToken};
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_service::runtime_bridge::{WorkflowOutcome, WorkflowRunRequest};
@@ -18,7 +19,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use workflow_support::Harness;
+use workflow_support::{Harness, decode_workflow_json, encode_workflow_json};
 
 #[derive(Clone)]
 struct Backend {
@@ -36,16 +37,50 @@ fn now() -> i64 {
     .unwrap()
 }
 
+fn raw_tcp_fixture_payload() -> Option<Value> {
+    const NAMES: [&str; 3] = [
+        "OPEN_COMPUTE_EGRESS_PUBLIC_HOSTNAME",
+        "OPEN_COMPUTE_EGRESS_PRIVATE_HOSTNAME",
+        "OPEN_COMPUTE_EGRESS_PUBLIC_TCP_PORT",
+    ];
+    let values = NAMES.map(std::env::var);
+    if values.iter().all(Result::is_err) {
+        return None;
+    }
+    let [hostname, private_hostname, tcp_port] =
+        values.map(|value| value.expect("all raw TCP fixture values must be set"));
+    Some(json!({
+        "mode": "rawTcp",
+        "hostname": hostname,
+        "privateHostname": private_hostname,
+        "tcpPort": tcp_port,
+    }))
+}
+
 fn result(db: &Connection, id: &str, ordinal: i64) -> Value {
     db.query_row(
-        "SELECT state,output,code FROM steps WHERE id=?1 AND ordinal=?2",
+        "SELECT descriptor,state,output,code FROM steps WHERE id=?1 AND ordinal=?2",
         params![id, ordinal],
         |row| {
-            let state: String = row.get(0)?;
-            let output: Option<String> = row.get(1)?;
-            let code: Option<String> = row.get(2)?;
+            let descriptor: String = row.get(0)?;
+            let state: String = row.get(1)?;
+            let output: Option<String> = row.get(2)?;
+            let code: Option<String> = row.get(3)?;
+            let descriptor: Value = serde_json::from_str(&descriptor).unwrap();
             Ok(match state.as_str() {
-                "complete" => json!({"state":"complete","outputJson":output}),
+                "complete" if descriptor["kind"] == "wait_event" => {
+                    let event = decode_workflow_json(output.as_deref().unwrap());
+                    json!({
+                        "state": "event",
+                        "type": event["type"],
+                        "payloadBase64": encode_workflow_json(&event["payload"]),
+                        "timestampMs": event["timestampMs"],
+                    })
+                }
+                "complete" => output.map_or_else(
+                    || json!({"state":"complete"}),
+                    |output| json!({"state":"complete","outputBase64":output}),
+                ),
                 "failed" => json!({"state":"failed","code":code}),
                 _ => json!({"state":"suspended"}),
             })
@@ -96,11 +131,9 @@ async fn handle(
             let mut grants = Vec::new();
             for descriptor in body["steps"].as_array().unwrap() {
                 let ordinal = descriptor["ordinal"].as_i64().unwrap();
-                let policy =
-                    open_compute_core::workflow::WorkflowStepConfig::resolve(&descriptor["config"])
-                        .unwrap();
-                let timeout = i64::try_from(policy.timeout).unwrap();
-                let config = serde_json::to_value(policy).unwrap();
+                let declaration: WorkflowStepDeclaration =
+                    serde_json::from_value(descriptor.clone()).unwrap();
+                let resolved = declaration.resolve().unwrap();
                 let stored: Option<(String, String, i64, i64)> = tx
                     .query_row(
                         "SELECT descriptor,state,attempt,deadline FROM steps WHERE id=?1 AND ordinal=?2",
@@ -111,55 +144,120 @@ async fn handle(
                     .unwrap();
                 if let Some((saved, state, attempt, deadline)) = stored {
                     assert_eq!(serde_json::from_str::<Value>(&saved).unwrap(), *descriptor);
-                    if state == "retry_wait" {
-                        if deadline > now() {
-                            grants.push(json!({"state":"suspended"}));
-                            continue;
+                    match &resolved.config {
+                        WorkflowDurableConfig::Do(policy) => {
+                            let timeout = i64::try_from(policy.timeout).unwrap();
+                            let config = serde_json::to_value(policy).unwrap();
+                            if state == "retry_wait" {
+                                if deadline > now() {
+                                    grants.push(json!({"state":"suspended"}));
+                                    continue;
+                                }
+                                let token = format!("{:064x}", ordinal + 2 + (attempt + 1) * 1024);
+                                tx.execute("UPDATE steps SET state='running',token=?3,attempt=attempt+1,deadline=?4 WHERE id=?1 AND ordinal=?2",
+                                    params![id,ordinal,token,now()+timeout]).unwrap();
+                                grants.push(
+                                    json!({"state":"run","stepToken":token,"attempt":attempt+1,
+                                    "remainingMs":timeout,"config":config}),
+                                );
+                                continue;
+                            }
+                            if state == "complete" {
+                                grants.push(json!({"state":"complete","attempt":attempt,
+                                    "config":config}));
+                            } else {
+                                grants.push(json!({"state":state}));
+                            }
                         }
-                        let token = format!("{:064x}", ordinal + 2 + (attempt + 1) * 1024);
-                        tx.execute("UPDATE steps SET state='running',token=?3,attempt=attempt+1,deadline=?4 WHERE id=?1 AND ordinal=?2",
-                            params![id,ordinal,token,now()+timeout]).unwrap();
-                        grants.push(json!({"state":"run","stepToken":token,"attempt":attempt+1,
-                            "remainingMs":timeout,"config":config}));
-                        continue;
+                        WorkflowDurableConfig::WaitEvent { .. }
+                            if state == "waiting" && deadline <= now() =>
+                        {
+                            tx.execute(
+                                "UPDATE steps SET state='failed',code='WORKFLOW_EVENT_TIMEOUT' WHERE id=?1 AND ordinal=?2",
+                                params![id, ordinal],
+                            )
+                            .unwrap();
+                            grants.push(json!({"state":"failed"}));
+                        }
+                        WorkflowDurableConfig::Sleep(_) | WorkflowDurableConfig::SleepUntil(_)
+                            if state == "waiting" && deadline <= now() =>
+                        {
+                            tx.execute(
+                                "UPDATE steps SET state='complete' WHERE id=?1 AND ordinal=?2",
+                                params![id, ordinal],
+                            )
+                            .unwrap();
+                            grants.push(json!({"state":"complete"}));
+                        }
+                        _ => grants.push(json!({"state":state})),
                     }
-                    grants.push(json!({"state":state}));
                     continue;
                 }
-                let token = format!("{:064x}", ordinal + 2);
-                tx.execute(
-                    "INSERT INTO steps VALUES(?1,?2,?3,'running',?4,?5,NULL,NULL,1)",
-                    params![id, ordinal, descriptor.to_string(), token, now() + timeout],
-                )
-                .unwrap();
-                grants.push(json!({"state":"run","stepToken":token,"attempt":1,
-                    "remainingMs":timeout,"config":config}));
+                match &resolved.config {
+                    WorkflowDurableConfig::Do(policy) => {
+                        let timeout = i64::try_from(policy.timeout).unwrap();
+                        let config = serde_json::to_value(policy).unwrap();
+                        let token = format!("{:064x}", ordinal + 2);
+                        tx.execute(
+                            "INSERT INTO steps VALUES(?1,?2,?3,'running',?4,?5,NULL,NULL,1)",
+                            params![id, ordinal, descriptor.to_string(), token, now() + timeout],
+                        )
+                        .unwrap();
+                        grants.push(json!({"state":"run","stepToken":token,"attempt":1,
+                            "remainingMs":timeout,"config":config}));
+                    }
+                    WorkflowDurableConfig::Sleep(duration) => {
+                        let deadline = now() + i64::try_from(*duration).unwrap();
+                        tx.execute(
+                            "INSERT INTO steps VALUES(?1,?2,?3,'waiting',NULL,?4,NULL,NULL,0)",
+                            params![id, ordinal, descriptor.to_string(), deadline],
+                        )
+                        .unwrap();
+                        grants.push(json!({"state":"suspended"}));
+                    }
+                    WorkflowDurableConfig::SleepUntil(timestamp) => {
+                        let state = if *timestamp <= now() {
+                            "complete"
+                        } else {
+                            "waiting"
+                        };
+                        tx.execute(
+                            "INSERT INTO steps VALUES(?1,?2,?3,?4,NULL,?5,NULL,NULL,0)",
+                            params![id, ordinal, descriptor.to_string(), state, timestamp],
+                        )
+                        .unwrap();
+                        grants.push(json!({"state":if state == "complete" { "complete" } else { "suspended" }}));
+                    }
+                    WorkflowDurableConfig::WaitEvent { timeout_ms, .. } => {
+                        let deadline = now() + i64::try_from(*timeout_ms).unwrap();
+                        let state = if *timeout_ms == 0 {
+                            "failed"
+                        } else {
+                            "waiting"
+                        };
+                        tx.execute(
+                            "INSERT INTO steps VALUES(?1,?2,?3,?4,NULL,?5,NULL,?6,0)",
+                            params![
+                                id,
+                                ordinal,
+                                descriptor.to_string(),
+                                state,
+                                deadline,
+                                if state == "failed" {
+                                    Some("WORKFLOW_EVENT_TIMEOUT")
+                                } else {
+                                    None
+                                }
+                            ],
+                        )
+                        .unwrap();
+                        grants.push(
+                            json!({"state":if state == "failed" { "failed" } else { "suspended" }}),
+                        );
+                    }
+                }
             }
             json!({"steps":grants})
-        }
-        "register-sleep" | "register-wait" => {
-            let stored: Option<String> = tx
-                .query_row(
-                    "SELECT descriptor FROM steps WHERE id=?1 AND ordinal=?2",
-                    params![id, ordinal],
-                    |row| row.get(0),
-                )
-                .optional()
-                .unwrap();
-            let mut descriptor = body.clone();
-            for key in ["instanceId", "instanceGeneration", "runToken"] {
-                descriptor.as_object_mut().unwrap().remove(key);
-            }
-            if let Some(saved) = stored {
-                assert_eq!(serde_json::from_str::<Value>(&saved).unwrap(), descriptor);
-            } else {
-                tx.execute(
-                    "INSERT INTO steps VALUES(?1,?2,?3,'waiting',NULL,?4,NULL,NULL,0)",
-                    params![id, ordinal, descriptor.to_string(), now() + 86400000],
-                )
-                .unwrap();
-            }
-            result(&tx, id, ordinal)
         }
         "success" | "failure" | "timeout" => {
             let saved: Option<(String, Option<String>, i64, i64, String)> = tx
@@ -210,7 +308,7 @@ async fn handle(
                             id,
                             ordinal,
                             state,
-                            if state=="complete" {body["outputJson"].as_str()} else {None},
+                            if state=="complete" {body["outputBase64"].as_str()} else {None},
                             code
                         ],
                     )
@@ -273,14 +371,48 @@ fn envelope(db: &Connection, mode: &str) -> WorkflowRunRequest {
         external_instance_id: "public-instance".into(),
         definition_name: "probe".into(),
         created_at_ms: now(),
-        payload_json: json!({"mode":mode}).to_string(),
+        payload_base64: encode_workflow_json(&json!({"mode":mode})),
+        rollback: false,
+        schedule: None,
     }
 }
 
 const SOURCE: &str = r#"
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import { NonRetryableError } from 'cloudflare:workflows';
+import { connect } from 'cloudflare:sockets';
 let observedPrivateGrant=false;
+async function rawTcpProbe(config) {
+  const payload = new Uint8Array([21, 22, 23, 24]);
+  const socket = connect({ hostname: config.hostname, port: Number(config.tcpPort) }, {
+    allowHalfOpen: true, secureTransport: 'off',
+  });
+  await socket.opened;
+  const writer = socket.writable.getWriter();
+  await writer.write(new TextEncoder().encode(`ECHO ${payload.byteLength}\n`));
+  await writer.write(payload);
+  await writer.close();
+  writer.releaseLock();
+  const echoed = new Uint8Array(await new Response(socket.readable).arrayBuffer());
+  await socket.close();
+  await socket.closed;
+  let denied = false;
+  const privateSocket = connect({
+    hostname: config.privateHostname, port: Number(config.tcpPort),
+  });
+  try {
+    await privateSocket.opened;
+    await privateSocket.close();
+  } catch {
+    denied = true;
+    try { await privateSocket.close(); } catch {}
+  }
+  if (echoed.length !== payload.length
+      || !echoed.every((value, index) => value === payload[index])) {
+    throw new Error('Workflow raw TCP echo mismatch');
+  }
+  return { bytes: echoed.length, denied };
+}
 function observe(value) {
   if (value && typeof value==='object'
       && ('stepToken' in value || 'runToken' in value || 'creationNonce' in value)) observedPrivateGrant=true;
@@ -306,7 +438,11 @@ async function hostile(step,mode) {
     }
     const values=await Promise.all([
       step.do('thenable',()=>({then(resolve){resolve(7);}})),
-      step.do('json-hook',()=>({safe:8,toJSON(){getters++;throw new Error('private JSON hook');}})),
+      step.do('json-hook',()=>{
+        const value={safe:8};
+        Object.defineProperty(value,'toJSON',{value(){getters++;throw new Error('private JSON hook');}});
+        return value;
+      }),
     ]);
     try {
       await step.do('hostile-error',{retries:{limit:0,delay:0}},()=>{
@@ -326,6 +462,7 @@ async function hostile(step,mode) {
 export class Flow extends WorkflowEntrypoint {
   async run(event,step) {
     const mode=event.payload.mode;
+    if (mode==='rawTcp') return rawTcpProbe(event.payload);
     if (mode.startsWith('hostile')) return hostile(step,mode);
     if (mode==='sleep') { await step.sleep('long',86400000); return 'awake'; }
     if (mode==='catch') {
@@ -437,19 +574,42 @@ async fn workflow_runtime_suspension_timeout_parallel_and_native_errors() {
     );
     let version = current.target;
     harness.transport.probe_workflow(&version).await.unwrap();
+    if let Some(payload) = raw_tcp_fixture_payload() {
+        let mut request = envelope(&db.lock().unwrap(), "rawTcp");
+        request.payload_base64 = encode_workflow_json(&payload);
+        let response = harness
+            .transport
+            .dispatch_workflow(&version, &request, Duration::from_secs(10))
+            .await
+            .unwrap();
+        let WorkflowOutcome::Complete { output_base64, .. } = response.result else {
+            panic!("expected raw TCP Workflow completion");
+        };
+        assert_eq!(
+            decode_workflow_json(&output_base64),
+            json!({"bytes": 4.0, "denied": true})
+        );
+    }
     for mode in ["hostileWait", "hostileRetry"] {
         let mut request = envelope(&db.lock().unwrap(), mode);
         let first = harness
             .transport
             .dispatch_workflow(&version, &request, Duration::from_secs(10))
-            .await
-            .unwrap();
+            .await;
+        assert!(
+            first.is_ok(),
+            "mode={mode}: {first:?} {:?}",
+            harness.supervisor.last_diagnostics()
+        );
+        let first = first.unwrap();
         assert!(matches!(first.result, WorkflowOutcome::Suspended { .. }));
         assert!(!first.drain_incomplete);
         {
             let db = db.lock().unwrap();
             if mode == "hostileWait" {
-                let event = json!({"type":"approved","payload":7,"timestampMs":now()}).to_string();
+                let event = encode_workflow_json(
+                    &json!({"type":"approved","payload":7,"timestampMs":now()}),
+                );
                 db.execute(
                     "UPDATE steps SET state='complete',output=?2 WHERE id=?1 AND state='waiting'",
                     params![request.fence.instance_id.to_string(), event],
@@ -471,16 +631,16 @@ async fn workflow_runtime_suspension_timeout_parallel_and_native_errors() {
             .dispatch_workflow(&version, &request, Duration::from_secs(10))
             .await
             .unwrap();
-        let WorkflowOutcome::Complete { output_json, .. } = replay.result else {
+        let WorkflowOutcome::Complete { output_base64, .. } = replay.result else {
             panic!("expected replay completion");
         };
-        let output: Value = serde_json::from_str(&output_json).unwrap();
+        let output = decode_workflow_json(&output_base64);
         assert_eq!(output["observedPrivateGrant"], false, "{mode}");
         if mode == "hostileWait" {
             assert_eq!(output["date"], true);
-            assert_eq!(output["payload"], 7);
+            assert_eq!(output["payload"], 7.0);
         } else {
-            assert_eq!(output["attempt"], 2);
+            assert_eq!(output["attempt"], 2.0);
         }
     }
     let mut sleeping = None;
@@ -551,19 +711,19 @@ async fn workflow_runtime_suspension_timeout_parallel_and_native_errors() {
             (WorkflowOutcome::Errored { error_code, .. }, "forgedSerialization") => {
                 assert_eq!(error_code, "WORKFLOW_SERIALIZATION_UNSUPPORTED");
             }
-            (WorkflowOutcome::Complete { output_json, .. }, _) => {
-                let output: Value = serde_json::from_str(output_json).unwrap();
+            (WorkflowOutcome::Complete { output_base64, .. }, _) => {
+                let output = decode_workflow_json(output_base64);
                 match mode {
-                    "normal" => assert_eq!(output, 7),
-                    "context" => assert_eq!(output, json!({"frozen":true,"attempt":1})),
-                    "parallel" => assert_eq!(output, json!([0, 1, 2, 3])),
+                    "normal" => assert_eq!(output, 7.0),
+                    "context" => assert_eq!(output, json!({"frozen":true,"attempt":1.0})),
+                    "parallel" => assert_eq!(output, json!([0.0, 1.0, 2.0, 3.0])),
                     "nonretryable" => assert_eq!(
                         output,
                         json!({"native":true,"name":"NonRetryableError","message":"Workflow step is not retryable"})
                     ),
                     "hostile" => assert_eq!(
                         output,
-                        json!({"observedPrivateGrant":false,"getters":0,"values":[7,{"safe":8}]})
+                        json!({"observedPrivateGrant":false,"getters":0.0,"values":[7.0,{"safe":8.0}]})
                     ),
                     "lateResolve" | "lateReject" => {
                         assert_eq!(output, json!({"timeout":true}));
@@ -648,7 +808,7 @@ async fn workflow_runtime_suspension_timeout_parallel_and_native_errors() {
     {
         let db = db.lock().unwrap();
         db.execute(
-            "UPDATE steps SET state='complete',output='null' WHERE id=?1 AND state='waiting'",
+            "UPDATE steps SET state='complete',output=NULL WHERE id=?1 AND state='waiting'",
             [&id],
         )
         .unwrap();
@@ -666,7 +826,7 @@ async fn workflow_runtime_suspension_timeout_parallel_and_native_errors() {
         .unwrap();
     assert_eq!(replay.loader_outcome, "cold");
     assert!(
-        matches!(replay.result,WorkflowOutcome::Complete{ref output_json,..} if output_json=="\"awake\"")
+        matches!(replay.result,WorkflowOutcome::Complete{ref output_base64,..} if decode_workflow_json(output_base64)==json!("awake"))
     );
     assert_eq!(
         db.lock()

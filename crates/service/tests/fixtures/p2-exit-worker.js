@@ -5,20 +5,27 @@ const VERSION = 'frozen';
 export class Counter extends DurableObject {
   async inspectWorkflow(id) {
     const handle = await this.env.FLOW.get(id);
-    const actions = [
-      () => this.env.FLOW.create({ id: `from-object-${id}` }),
-      () => handle.pause(),
-      () => handle.resume(),
-      () => handle.terminate(),
-      () => handle.restart(),
-      () => handle.sendEvent({ type: 'blocked', payload: null }),
-    ];
-    const errors = [];
-    for (const action of actions) {
-      try { await action(); errors.push('accepted'); }
-      catch (error) { errors.push(error.message); }
+    let rolledBack = false;
+    try {
+      await this.ctx.storage.transaction(async txn => {
+        await txn.put('gate', 1);
+        const pending = this.env.FLOW.create({ id: `rolled-${id}` });
+        pending.catch(() => undefined);
+        throw new Error('rollback');
+      });
+    } catch (error) {
+      rolledBack = String(error.message).includes('rollback');
     }
-    return { id: handle.id, status: (await handle.status()).status, errors };
+    let rolledExists = false;
+    try { await this.env.FLOW.get(`rolled-${id}`); rolledExists = true; } catch {}
+    const created = await this.env.FLOW.create({ id: `from-object-${id}` });
+    return {
+      id: handle.id,
+      status: (await handle.status()).status,
+      rolledBack,
+      rolledExists,
+      created: created.id,
+    };
   }
   async recordOnce(key) {
     const prior = await this.ctx.storage.get('effect');

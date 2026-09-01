@@ -43,8 +43,6 @@ impl WorkerRepository<'_> {
             ));
         }
         validate_deployment_shape(input, products)?;
-        let flags_json = serde_json::to_vec(&input.compatibility_flags).map_err(|_| invariant())?;
-        let limits_json = serde_json::to_vec(&input.limits).map_err(|_| invariant())?;
         self.db.with_immediate(|tx| {
             require_live_worker(tx, input.account_id, input.worker_id)?;
             let retained_count: i64 = tx
@@ -72,12 +70,11 @@ impl WorkerRepository<'_> {
             tx.execute(
                 "INSERT INTO worker_deployments
                  (id, worker_id, version_number, content_kind, state, artifact_sha256, artifact_size,
-                  artifact_schema_version, main_module, compatibility_date,
-                  compatibility_flags_json, limits_json, worker_code_sha256,
+                  artifact_schema_version, main_module, worker_code_sha256,
                   loader_schema_version, created_at_ms, ready_at_ms, rejected_at_ms,
                   rejection_code, deleted_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, 'staging', ?5, ?6, ?7, ?8, ?9,
-                         ?10, ?11, ?12, ?13, ?14, NULL, NULL, NULL, NULL)",
+                 VALUES (?1, ?2, ?3, ?4, 'staging', ?5, ?6, ?7, ?8,
+                         ?9, ?10, ?11, NULL, NULL, NULL, NULL)",
                 params![
                     input.id.to_string(),
                     input.worker_id.to_string(),
@@ -93,9 +90,6 @@ impl WorkerRepository<'_> {
                         ))?,
                     input.artifact_schema_version.map(i64::from),
                     input.main_module,
-                    input.compatibility_date,
-                    flags_json,
-                    limits_json,
                     input.worker_code_sha256.as_slice(),
                     LOADER_SCHEMA_VERSION,
                     input.now_ms,
@@ -197,9 +191,6 @@ impl WorkerRepository<'_> {
                 artifact_size: input.artifact_size,
                 artifact_schema_version: input.artifact_schema_version,
                 main_module: input.main_module.clone(),
-                compatibility_date: input.compatibility_date.clone(),
-                compatibility_flags: input.compatibility_flags.clone(),
-                limits: input.limits.clone(),
                 worker_code_sha256: input.worker_code_sha256,
                 loader_schema_version: u32::try_from(LOADER_SCHEMA_VERSION)
                     .map_err(|_| invariant())?,

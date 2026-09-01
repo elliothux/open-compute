@@ -97,6 +97,8 @@ pub struct WorkflowDurableState {
     pub pause_requested: bool,
     /// The active run must drain before releasing its lease.
     pub yield_requested: bool,
+    /// External termination requested durable rollback execution for this generation.
+    pub rollback_requested: bool,
     /// Earliest unfinished attempt, retry or wait deadline.
     pub next_wake_at_ms: Option<i64>,
     /// Number of immutable descriptors in this generation.
@@ -140,10 +142,14 @@ pub struct ClaimedWorkflowRun {
     pub external_instance_id: String,
     /// Stable event creation timestamp.
     pub created_at_ms: i64,
+    /// Direct-cron metadata, absent for programmatic instances.
+    pub schedule: Option<open_compute_core::WorkflowCronSchedule>,
     /// Canonical durable input.
     pub input_json: String,
     /// Whether this activation was recovered from an expired earlier run lease.
     pub recovered: bool,
+    /// Execute registered successful rollback handlers before terminal release.
+    pub rollback: bool,
 }
 
 impl std::fmt::Debug for ClaimedWorkflowRun {
@@ -169,6 +175,11 @@ pub enum WorkflowCompletion {
         /// Stable category from the trusted dispatcher.
         code: open_compute_core::ErrorCode,
     },
+    /// All reachable rollback handlers have completed or the LIFO chain halted.
+    Terminated {
+        /// One past the last replayed or rollback descriptor.
+        final_ordinal: u32,
+    },
 }
 
 impl std::fmt::Debug for WorkflowCompletion {
@@ -179,6 +190,10 @@ impl std::fmt::Debug for WorkflowCompletion {
                 .field("final_ordinal", final_ordinal)
                 .finish_non_exhaustive(),
             Self::Errored { code } => f.debug_struct("Errored").field("code", code).finish(),
+            Self::Terminated { final_ordinal } => f
+                .debug_struct("Terminated")
+                .field("final_ordinal", final_ordinal)
+                .finish(),
         }
     }
 }

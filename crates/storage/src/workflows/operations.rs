@@ -1,6 +1,7 @@
 //! Exact cross-database restart/purge intents and proof-gated control finalization.
 
 use super::*;
+use open_compute_core::workflow::{WorkflowRestartSelector, WorkflowRestartStepType};
 use open_compute_core::{WorkflowOperationId, WorkflowsConfig};
 
 #[path = "operation_evidence.rs"]
@@ -34,6 +35,7 @@ pub struct WorkflowOperation {
     pub(crate) id: WorkflowOperationId,
     pub(crate) identity: WorkflowInstanceIdentity,
     pub(crate) kind: WorkflowOperationKind,
+    pub(crate) restart_from: Option<WorkflowRestartSelector>,
     pub(crate) target_generation: i64,
     pub(crate) prior_state: WorkflowRefState,
     pub(crate) created_at_ms: i64,
@@ -55,6 +57,11 @@ impl WorkflowOperation {
     #[must_use]
     pub const fn kind(&self) -> WorkflowOperationKind {
         self.kind
+    }
+    /// Exact restart selector frozen by control authority; absent means restart from the beginning.
+    #[must_use]
+    pub const fn restart_from(&self) -> Option<&WorkflowRestartSelector> {
+        self.restart_from.as_ref()
     }
     /// Exact generation after application; purge keeps the original generation.
     #[must_use]
@@ -109,14 +116,54 @@ impl WorkflowRepository<'_> {
         limits: &WorkflowsConfig,
         now_ms: i64,
     ) -> Result<WorkflowOperation, PlatformError> {
+        self.prepare_operation(identity, operation_id, kind, None, limits, now_ms)
+    }
+
+    /// Prepare an exact restart intent including the optional pinned step occurrence selector.
+    pub fn prepare_restart_operation(
+        &self,
+        identity: &WorkflowInstanceIdentity,
+        operation_id: WorkflowOperationId,
+        restart_from: Option<WorkflowRestartSelector>,
+        limits: &WorkflowsConfig,
+        now_ms: i64,
+    ) -> Result<WorkflowOperation, PlatformError> {
+        if let Some(selector) = &restart_from {
+            selector.validate()?;
+        }
+        self.prepare_operation(
+            identity,
+            operation_id,
+            WorkflowOperationKind::Restart,
+            restart_from,
+            limits,
+            now_ms,
+        )
+    }
+
+    fn prepare_operation(
+        self,
+        identity: &WorkflowInstanceIdentity,
+        operation_id: WorkflowOperationId,
+        kind: WorkflowOperationKind,
+        restart_from: Option<WorkflowRestartSelector>,
+        limits: &WorkflowsConfig,
+        now_ms: i64,
+    ) -> Result<WorkflowOperation, PlatformError> {
         limits.validate()?;
-        if identity.target.capability_version != 1 {
+        if identity.target.capability_version != 1
+            || (kind == WorkflowOperationKind::Purge && restart_from.is_some())
+        {
             return Err(error(ErrorCode::WorkflowMethodUnsupported));
         }
         self.db.with_immediate(|tx| {
             instances::verify_identity(tx, identity)?;
             if let Some(operation) = read_operation(tx, identity.instance_id)? {
-                if operation.id != operation_id || operation.identity != *identity || operation.kind != kind {
+                if operation.id != operation_id
+                    || operation.identity != *identity
+                    || operation.kind != kind
+                    || operation.restart_from != restart_from
+                {
                     return Err(error(ErrorCode::WorkflowInstanceBusy));
                 }
                 return Ok(operation);
@@ -150,12 +197,16 @@ impl WorkflowRepository<'_> {
             let sequence=sequence.checked_add(1).ok_or_else(||error(ErrorCode::WorkflowInstanceStateConflict))?;
             tx.execute("UPDATE workflow_instance_referrers SET operation_sequence=?2 WHERE instance_id=?1",
                 params![identity.instance_id.to_string(),sequence]).map_err(sql_error)?;
-            let operation = WorkflowOperation {id: operation_id, identity: identity.clone(), kind,
+            let operation = WorkflowOperation {id: operation_id, identity: identity.clone(), kind, restart_from,
                 target_generation, prior_state: reservation.state, created_at_ms: now_ms, sequence};
             tx.execute("INSERT INTO workflow_instance_operations(operation_id,instance_id,creation_nonce,expected_generation,
-                target_generation,kind,prior_ref_state,created_at_ms,operation_sequence) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", params![
+                target_generation,kind,restart_from_name,restart_from_count,restart_from_kind,prior_ref_state,created_at_ms,operation_sequence)
+                VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", params![
                 operation.id.to_string(),identity.instance_id.to_string(),identity.creation_nonce.as_bytes().as_slice(),
                 identity.instance_generation,target_generation,kind.as_str(),
+                operation.restart_from.as_ref().map(|selector| selector.name.as_str()),
+                operation.restart_from.as_ref().map(|selector| selector.count),
+                operation.restart_from.as_ref().and_then(|selector| selector.step_type.map(WorkflowRestartStepType::as_str)),
                 if reservation.state==WorkflowRefState::Live {"live"} else {"retained"},now_ms,sequence]).map_err(sql_error)?;
             if kind == WorkflowOperationKind::Restart {
                 tx.execute("UPDATE workflow_instance_referrers SET state='restarting',updated_at_ms=?2 WHERE instance_id=?1",
@@ -256,16 +307,21 @@ fn read_operation(
     conn: &rusqlite::Connection,
     id: WorkflowInstanceId,
 ) -> Result<Option<WorkflowOperation>, PlatformError> {
-    let raw=conn.query_row("SELECT operation_id,creation_nonce,expected_generation,target_generation,kind,prior_ref_state,applied,created_at_ms,operation_sequence
+    let raw=conn.query_row("SELECT operation_id,creation_nonce,expected_generation,target_generation,kind,
+        restart_from_name,restart_from_count,restart_from_kind,prior_ref_state,applied,created_at_ms,operation_sequence
         FROM workflow_instance_operations WHERE instance_id=?1",[id.to_string()],|row|Ok((
             parse::<WorkflowOperationId>(row,0)?,digest(row,1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?,row.get::<_,String>(4)?,
-            row.get::<_,String>(5)?,row.get::<_,bool>(6)?,row.get::<_,i64>(7)?,row.get::<_,i64>(8)?))).optional().map_err(sql_error)?;
+            row.get::<_,Option<String>>(5)?,row.get::<_,Option<u32>>(6)?,row.get::<_,Option<String>>(7)?,
+            row.get::<_,String>(8)?,row.get::<_,bool>(9)?,row.get::<_,i64>(10)?,row.get::<_,i64>(11)?))).optional().map_err(sql_error)?;
     let Some((
         id,
         nonce,
         expected_generation,
         target_generation,
         kind,
+        restart_from_name,
+        restart_from_count,
+        restart_from_kind,
         prior,
         applied,
         created_at_ms,
@@ -279,6 +335,26 @@ fn read_operation(
     let kind = match kind.as_str() {
         "restart" => WorkflowOperationKind::Restart,
         "purge" => WorkflowOperationKind::Purge,
+        _ => return Err(invariant()),
+    };
+    let restart_from = match (restart_from_name, restart_from_count, restart_from_kind) {
+        (None, None, None) => None,
+        (Some(name), Some(count), kind) => {
+            let step_type = match kind.as_deref() {
+                None => None,
+                Some("do") => Some(WorkflowRestartStepType::Do),
+                Some("sleep") => Some(WorkflowRestartStepType::Sleep),
+                Some("waitForEvent") => Some(WorkflowRestartStepType::WaitForEvent),
+                _ => return Err(invariant()),
+            };
+            let selector = WorkflowRestartSelector {
+                name,
+                count,
+                step_type,
+            };
+            selector.validate().map_err(|_| invariant())?;
+            Some(selector)
+        }
         _ => return Err(invariant()),
     };
     let prior_state = match prior.as_str() {
@@ -304,6 +380,7 @@ fn read_operation(
         || (kind == WorkflowOperationKind::Restart
             && (row.state != WorkflowRefState::Restarting
                 || expected_generation.checked_add(1) != Some(target_generation)))
+        || (kind == WorkflowOperationKind::Purge && restart_from.is_some())
         || (kind == WorkflowOperationKind::Purge
             && (row.state != WorkflowRefState::Retained
                 || prior_state != WorkflowRefState::Retained
@@ -315,6 +392,7 @@ fn read_operation(
         id,
         identity: row.identity,
         kind,
+        restart_from,
         target_generation,
         prior_state,
         created_at_ms,

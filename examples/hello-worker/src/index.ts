@@ -1,7 +1,3 @@
-interface Env {
-  GREETING: string;
-}
-
 export default {
   fetch(request: Request, env: Env): Response {
     return Response.json({

@@ -173,13 +173,14 @@ export class ImagesBinding {
       throw new TypeError("IMAGE_PROTOCOL_ERROR");
     }
     const info = result as Record<string, unknown>;
+    const { format, fileSize, width, height } = info;
     if (Object.keys(info).some(key => !["format", "fileSize", "width", "height"].includes(key))
-        || !["jpeg", "png", "webp"].includes(String(info.format))
-        || !Number.isSafeInteger(info.fileSize) || (info.fileSize as number) < 1
-        || !Number.isSafeInteger(info.width) || (info.width as number) < 1
-        || !Number.isSafeInteger(info.height) || (info.height as number) < 1) {
+        || (format !== "jpeg" && format !== "png" && format !== "webp")
+        || typeof fileSize !== "number" || !Number.isSafeInteger(fileSize) || fileSize < 1
+        || typeof width !== "number" || !Number.isSafeInteger(width) || width < 1
+        || typeof height !== "number" || !Number.isSafeInteger(height) || height < 1) {
       throw new TypeError("IMAGE_PROTOCOL_ERROR");
     }
-    return info as unknown as ImageInfo;
+    return { format, fileSize, width, height };
   }
 }

@@ -33,8 +33,6 @@ pub struct PlatformReleaseIdentityV1 {
     pub d1_schema_version: u32,
     /// Full platform snapshot format version.
     pub snapshot_format_version: u32,
-    /// Digest of the supported compatibility date and flag policy.
-    pub compatibility_policy_sha256: String,
 }
 
 impl PlatformReleaseIdentityV1 {
@@ -53,7 +51,6 @@ impl PlatformReleaseIdentityV1 {
             && self.kv_schema_version > 0
             && self.d1_schema_version > 0
             && self.snapshot_format_version == 1
-            && is_sha256(&self.compatibility_policy_sha256)
     }
 }
 

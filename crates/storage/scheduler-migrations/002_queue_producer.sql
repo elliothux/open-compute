@@ -32,7 +32,7 @@ CREATE TABLE queue_messages (
   available_at_ms      INTEGER NOT NULL,
   expires_at_ms        INTEGER NOT NULL,
   content_type         TEXT NOT NULL CHECK(content_type IN (
-                         'json', 'text', 'bytes'
+                         'json', 'text', 'bytes', 'v8'
                        )),
   body                 BLOB NOT NULL,
   body_bytes           INTEGER NOT NULL CHECK(body_bytes >= 0),
@@ -102,10 +102,41 @@ BEGIN
   WHERE queue_id = OLD.queue_id;
 END;
 
+CREATE TABLE queue_enqueue_operations (
+  request_id          TEXT PRIMARY KEY
+                      CHECK(length(request_id) = 36 AND request_id = lower(request_id)),
+  queue_id            TEXT NOT NULL REFERENCES queue_state(queue_id),
+  queue_generation    INTEGER NOT NULL CHECK(queue_generation >= 1),
+  fingerprint         BLOB NOT NULL CHECK(length(fingerprint) = 32),
+  response_json       TEXT NOT NULL CHECK(length(response_json) > 0),
+  output_gate         INTEGER NOT NULL CHECK(output_gate IN (0, 1)),
+  retention_seconds   INTEGER NOT NULL CHECK(retention_seconds BETWEEN 60 AND 1209600),
+  created_at_ms       INTEGER NOT NULL,
+  finalized_at_ms     INTEGER,
+  expires_at_ms       INTEGER,
+  CHECK(
+    (output_gate = 0 AND finalized_at_ms = created_at_ms AND expires_at_ms > created_at_ms)
+    OR
+    (output_gate = 1 AND (
+      (finalized_at_ms IS NULL AND expires_at_ms IS NULL)
+      OR
+      (finalized_at_ms IS NOT NULL AND expires_at_ms > finalized_at_ms)
+    ))
+  )
+) STRICT;
+
+CREATE INDEX queue_enqueue_operations_retention
+ON queue_enqueue_operations(expires_at_ms, queue_id);
+
+CREATE INDEX queue_enqueue_operations_queue
+ON queue_enqueue_operations(queue_id, created_at_ms);
+
 CREATE TRIGGER queue_state_delete_guard
 BEFORE DELETE ON queue_state
 WHEN OLD.message_count != 0 OR OLD.message_bytes != 0 OR EXISTS (
   SELECT 1 FROM queue_messages WHERE queue_id = OLD.queue_id
+) OR EXISTS (
+  SELECT 1 FROM queue_enqueue_operations WHERE queue_id = OLD.queue_id
 )
 BEGIN
   SELECT RAISE(ABORT, 'queue state has backlog');

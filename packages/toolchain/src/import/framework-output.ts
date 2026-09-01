@@ -4,7 +4,10 @@ import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path"
 import type { CompiledModule, CompiledModuleType, CompiledWorker } from "../build-worker.ts";
 import type { RuntimeFeatures, WorkerProject, WorkerService } from "../project.ts";
 import { parseRuntimeFeatures, record } from "../project.ts";
+import { loadFormalRuntimeLock, type FormalRuntimeLock } from "../runtime-lock.ts";
 import type { AssetsProject } from "../assets/types.ts";
+
+const CURRENT_DEFAULT_FLAGS = new Set(["nodejs_compat", "nodejs_compat_v2", "rpc", "enable_ctx_exports"]);
 
 const MAX_CONFIG_BYTES = 256 * 1024;
 const MAX_MODULES = 128;
@@ -28,6 +31,32 @@ export interface FrameworkOutput {
   readonly assets?: AssetsProject;
   readonly services: Record<string, WorkerService>;
   readonly runtimeFeatures: RuntimeFeatures;
+}
+
+function assertImportedCompatibility(
+  date: unknown,
+  flags: unknown,
+  lock: FormalRuntimeLock,
+): void {
+  if (date !== lock.effectiveCompatibilityDate) {
+    throw new Error("generated framework compatibility date does not match the pinned runtime lock");
+  }
+  const generated = flags === undefined ? [] : flags;
+  if (!Array.isArray(generated) || !generated.every((item): item is string => typeof item === "string")) {
+    throw new Error("generated framework compatibility flags are invalid");
+  }
+  const seen = new Set<string>();
+  for (const flag of generated) {
+    if (seen.has(flag)) throw new Error("generated framework compatibility flags are duplicated");
+    seen.add(flag);
+    if (flag.startsWith("no_") || flag === "experimental" || lock.systemCompatibilityFlags.includes(flag)) {
+      throw new Error("generated framework compatibility flag is not part of the pinned baseline");
+    }
+    if (CURRENT_DEFAULT_FLAGS.has(flag)) continue;
+    if (!lock.requiredCompatibilityFlags.includes(flag)) {
+      throw new Error("generated framework compatibility flag is not part of the pinned baseline");
+    }
+  }
 }
 
 function within(root: string, value: string): boolean {
@@ -273,12 +302,7 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
   const config = await boundedJson(configPath, "generated framework config");
   const generatedName = config.name;
   if (generatedName !== undefined && generatedName !== project.name) throw new Error("generated framework Worker name does not match the project");
-  if (config.compatibility_date !== project.compatibilityDate) throw new Error("generated framework compatibility date does not match the project");
-  const generatedFlags = config.compatibility_flags ?? [];
-  if (!Array.isArray(generatedFlags) || !generatedFlags.every((item): item is string => typeof item === "string")
-      || [...generatedFlags].sort().join("\0") !== [...project.compatibilityFlags].sort().join("\0")) {
-    throw new Error("generated framework compatibility flags do not match the project");
-  }
+  assertImportedCompatibility(config.compatibility_date, config.compatibility_flags, await loadFormalRuntimeLock());
   if (GENERATED_BINDING_KEYS.some(key => config[key] !== undefined)) {
     throw new Error("generated framework config declares bindings that open-compute cannot import yet");
   }
@@ -321,4 +345,14 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
   const worker = await importModules(outputRoot, configPath, main, assetsDirectory, moduleRules(config.rules));
   return { worker, ...(assets === undefined ? {} : { assets }), services,
     runtimeFeatures: generatedRuntimeFeatures ?? project.runtimeFeatures };
+}
+
+/** Overlay imported framework assets, services, and runtime features onto the validated project. */
+export function applyFrameworkOutput(project: WorkerProject, framework: FrameworkOutput): WorkerProject {
+  return {
+    ...project,
+    ...(framework.assets === undefined ? {} : { assets: framework.assets }),
+    services: framework.services,
+    runtimeFeatures: framework.runtimeFeatures,
+  };
 }

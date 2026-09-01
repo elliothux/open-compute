@@ -84,10 +84,7 @@ pub(super) fn validate_product_counts(
     request: &CreateDeploymentRequest,
 ) -> Result<(), PlatformError> {
     if request.queue_consumers.len() > MAX_QUEUE_CONSUMERS_PER_DEPLOYMENT
-        || request
-            .crons
-            .as_ref()
-            .is_some_and(|crons| crons.len() > MAX_CRONS_PER_DEPLOYMENT)
+        || request.crons.len() > MAX_CRONS_PER_DEPLOYMENT
     {
         return Err(PlatformError::new(
             ErrorCode::QuotaExceeded,
@@ -119,36 +116,52 @@ fn validate_entrypoint(entrypoint: Option<&str>) -> Result<(), PlatformError> {
 
 pub(super) fn prepare_cron_config(
     request: &CreateDeploymentRequest,
+    workflow_bindings: &[open_compute_storage::WorkflowBindingDescriptor],
 ) -> Result<NewCronConfig, PlatformError> {
-    let mode = if request.crons.is_some() {
-        CronDeclarationMode::Replace
-    } else {
-        CronDeclarationMode::Inherit
-    };
-    let mut expressions = request.crons.clone().unwrap_or_default();
-    expressions.sort();
-    expressions.dedup();
-    let mut declarations = Vec::with_capacity(expressions.len());
-    for expression in expressions {
+    let mut targets: BTreeMap<String, (bool, Vec<String>)> = BTreeMap::new();
+    for expression in &request.crons {
+        targets.entry(expression.clone()).or_default().0 = true;
+    }
+    for binding in workflow_bindings {
+        for expression in &binding.schedules {
+            targets
+                .entry(expression.clone())
+                .or_default()
+                .1
+                .push(binding.name.clone());
+        }
+    }
+    if targets.len() > MAX_CRONS_PER_DEPLOYMENT {
+        return Err(PlatformError::new(
+            ErrorCode::QuotaExceeded,
+            "deployment contains too many Cron triggers",
+        ));
+    }
+    let mut declarations = Vec::with_capacity(targets.len());
+    for (expression, (scheduled_handler, mut workflow_bindings)) in targets {
         let parsed = CronSchedule::parse(&expression)?;
+        workflow_bindings.sort();
+        workflow_bindings.dedup();
         declarations.push(NewCronDeclaration {
             id: CronActivationId::generate(),
             expression,
             expression_sha256: Sha256::digest(parsed.normalized().as_bytes()).into(),
             parser_version: CRON_PARSER_VERSION,
+            scheduled_handler,
+            workflow_bindings,
         });
     }
     let descriptor = serde_json::json!({
         "capabilityVersion": 1,
-        "mode": mode,
         "declarations": declarations.iter().map(|declaration| serde_json::json!({
             "expression": declaration.expression,
             "expressionSha256": hex::encode(declaration.expression_sha256),
             "parserVersion": declaration.parser_version,
+            "scheduledHandler": declaration.scheduled_handler,
+            "workflowBindings": declaration.workflow_bindings,
         })).collect::<Vec<_>>(),
     });
     Ok(NewCronConfig {
-        mode,
         capability_version: 1,
         descriptor_sha256: Sha256::digest(
             serde_json::to_vec(&descriptor).map_err(|_| invariant())?,

@@ -494,6 +494,8 @@ async fn queue_control_rename_failure_replay_and_force_delete_are_restart_safe()
         .enqueue_queue(
             &QueueEnqueueRequest {
                 queue_id,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: queue.lifecycle_generation,
                 config_generation: queue.config_generation,
                 batch_delay_seconds: None,

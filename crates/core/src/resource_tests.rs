@@ -57,4 +57,10 @@ fn resource_tokens_and_typed_json_are_strict() {
         serde_json::to_string(&CanonicalBindingConfig::default()).unwrap(),
         "{}"
     );
+    assert_eq!(
+        serde_json::from_str::<CanonicalBindingConfig>(r#"{"workflowSchedules":["0 * * * *"]}"#)
+            .unwrap()
+            .workflow_schedules,
+        ["0 * * * *"]
+    );
 }

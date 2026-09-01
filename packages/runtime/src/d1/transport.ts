@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { BindingEnv, BindingError, ResourceBindingProps } from "../bindings/protocol.js";
-import type { D1QueryMode, D1StatementDto, D1Value } from "./protocol.js";
+import type { D1QueryMode, D1SessionWire, D1StatementDto, D1Value } from "./protocol.js";
 
 const FRAME_CONTENT_TYPE = "application/vnd.open-compute.d1.v1+frame";
 const JSON_CONTENT_TYPE = "application/vnd.open-compute.d1.v1+json";
@@ -59,6 +59,13 @@ class FrameReader {
   u16() { const at = this.offset; this.take(2); return this.view.getUint16(at); }
   u32() { const at = this.offset; this.take(4); return this.view.getUint32(at); }
   i64() { const at = this.offset; this.take(8); return Number(this.view.getBigInt64(at)); }
+  u64() {
+    const at = this.offset;
+    this.take(8);
+    const value = this.view.getBigUint64(at);
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw this.bindingError("D1_INTERNAL_PROTOCOL_ERROR");
+    return Number(value);
+  }
   f64() { const at = this.offset; this.take(8); return this.view.getFloat64(at); }
   bytesValue() { return this.take(this.u32()); }
   text() { return decoder.decode(this.bytesValue()); }
@@ -95,8 +102,11 @@ function readValue(reader: FrameReader): D1Value {
   }
 }
 
-function encodeQuery(mode: D1QueryMode, statements: readonly D1StatementDto[]) {
+function encodeQuery(mode: D1QueryMode, statements: readonly D1StatementDto[], session: D1SessionWire = { kind: 0 }) {
   const modes = { all: 1, run: 2, raw: 3, batch: 4 };
+  if (statements.length > 0xffff || statements.some(statement => statement.params.length > 0xffff)) {
+    throw new TypeError("D1_LIMIT_ERROR");
+  }
   const writer = new FrameWriter();
   writer.add(encoder.encode("D1Q1"));
   writer.u8(modes[mode] || 0);
@@ -105,6 +115,13 @@ function encodeQuery(mode: D1QueryMode, statements: readonly D1StatementDto[]) {
     writer.text(statement.sql);
     writer.u16(statement.params.length);
     for (const value of statement.params) writeValue(writer, value);
+  }
+  writer.u8(session.kind);
+  if (session.kind === 3) {
+    if (typeof session.bookmark !== "string" || session.bookmark.length === 0) {
+      throw new TypeError("D1_SESSION_ERROR");
+    }
+    writer.text(session.bookmark);
   }
   return writer.finish();
 }
@@ -135,8 +152,10 @@ function decodeQuery(buffer: ArrayBuffer, bindingError: BindingError) {
     const meta: unknown = JSON.parse(reader.text());
     results.push({ columns, rows, meta });
   }
+  const bookmarkText = reader.text();
+  const stateVersion = reader.u64();
   reader.done();
-  return { results };
+  return { results, bookmark: bookmarkText.length === 0 ? null : bookmarkText, stateVersion };
 }
 
 export function makeD1TransportBase(bindingError: BindingError, currentStartupGeneration: () => string, tokenHeader: string) {
@@ -183,9 +202,9 @@ export function makeD1TransportBase(bindingError: BindingError, currentStartupGe
       return response;
     }
 
-    async query(mode: D1QueryMode, statements: readonly D1StatementDto[]) {
+    async query(mode: D1QueryMode, statements: readonly D1StatementDto[], session?: D1SessionWire) {
       const response = await this.#request(
-        "query", encodeQuery(mode, statements), "query", FRAME_CONTENT_TYPE,
+        "query", encodeQuery(mode, statements, session), "query", FRAME_CONTENT_TYPE,
       );
       return decodeQuery(await response.arrayBuffer(), bindingError);
     }

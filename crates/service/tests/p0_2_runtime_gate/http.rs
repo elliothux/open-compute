@@ -131,11 +131,8 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     .unwrap();
     let metadata = serde_json::json!({
         "mainModule": "index.js",
-        "compatibilityDate": "2026-08-22",
-        "compatibilityFlags": [],
         "vars": {"MODE": "real"},
         "secrets": {},
-        "limits": {"profile": "default"},
         "promote": true
     })
     .to_string();
@@ -306,11 +303,8 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     .unwrap();
     let disposable_metadata = serde_json::json!({
         "mainModule": "index.js",
-        "compatibilityDate": "2026-08-22",
-        "compatibilityFlags": [],
         "vars": {},
         "secrets": {},
-        "limits": {"profile": "default"},
         "promote": false
     })
     .to_string();

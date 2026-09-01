@@ -1,6 +1,6 @@
 //! SIGKILL covers durable decisions and both-database lifecycle ownership.
 
-use super::super::durable_lifecycle::{create, durable_fixture};
+use super::super::durable_lifecycle::{OBJECT_VALUE, create, durable_fixture};
 use super::*;
 use open_compute_core::{
     WorkflowOperationId,
@@ -12,6 +12,8 @@ use open_compute_storage::scheduler::{
 use open_compute_storage::{WorkflowOperationKind, WorkflowOperationResult};
 
 const DURABLE_CHILD: &str = "workflows::tests::crash_matrix::durable::workflow_durable_crash_child";
+const TRUE_VALUE: &str = "T0NEVgECAw==";
+const SEVEN_VALUE: &str = "T0NEVgECBEAcAAAAAAAA";
 
 fn descriptor() -> WorkflowStepDescriptor {
     WorkflowStepDeclaration {
@@ -20,6 +22,8 @@ fn descriptor() -> WorkflowStepDescriptor {
         name_count: 1,
         kind: WorkflowStepKind::Do,
         config: serde_json::json!({"timeout":1000,"retries":{"limit":1,"delay":100}}),
+        rollback_config: None,
+        rollback_step: false,
         batch_first_ordinal: 0,
         batch_size: 1,
         dependencies: vec![],
@@ -104,8 +108,11 @@ fn workflow_durable_crash_child() {
                 account,
                 definition,
                 identity.instance_id,
-                "approval",
-                "true",
+                WorkflowEventInput {
+                    operation_id: WorkflowOperationId::generate(),
+                    event_type: "approval",
+                    payload_base64: TRUE_VALUE,
+                },
                 13,
             )
             .unwrap();
@@ -165,7 +172,7 @@ fn workflow_durable_crash_child() {
         .settle_workflow_step(
             &run.fence,
             &attempt,
-            WorkflowStepOutcome::Success("7"),
+            WorkflowStepOutcome::Success(SEVEN_VALUE),
             13,
             &limits,
         )
@@ -176,6 +183,8 @@ fn workflow_durable_crash_child() {
         name_count: 1,
         kind: WorkflowStepKind::WaitEvent,
         config: serde_json::json!({"type":"approval","timeout":300000}),
+        rollback_config: None,
+        rollback_step: false,
         batch_first_ordinal: 1,
         batch_size: 1,
         dependencies: vec![0],
@@ -183,7 +192,13 @@ fn workflow_durable_crash_child() {
     .resolve()
     .unwrap();
     scheduler
-        .register_workflow_wait(&run.fence, &wait, 14, &limits)
+        .claim_workflow_batch(
+            &run.fence,
+            std::slice::from_ref(&wait),
+            limits.dispatch_timeout_ms,
+            14,
+            &limits,
+        )
         .unwrap();
     checkpoint(&cut, "wait-registered");
     if cut == "event-committed" {
@@ -192,8 +207,11 @@ fn workflow_durable_crash_child() {
                 account,
                 definition,
                 identity.instance_id,
-                "approval",
-                "true",
+                WorkflowEventInput {
+                    operation_id: WorkflowOperationId::generate(),
+                    event_type: "approval",
+                    payload_base64: TRUE_VALUE,
+                },
                 15,
             )
             .unwrap();
@@ -266,7 +284,7 @@ fn workflow_sigkill_durable_wait_retry_pause_restart_and_purge_boundaries() {
                 .unwrap();
             assert_eq!(record.identity, reservation.identity, "{cut}");
             assert!(record.run_token.is_none(), "{cut}");
-            assert_eq!(record.input_json, r#"{"value":7}"#);
+            assert_eq!(record.input_json, OBJECT_VALUE);
             assert!(repo.instance_referrers_intact(&record.identity).unwrap());
             if cut.starts_with("restart-") {
                 assert_eq!(record.identity.instance_generation, 2);

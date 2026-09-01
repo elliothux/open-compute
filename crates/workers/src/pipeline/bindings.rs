@@ -32,12 +32,10 @@ impl DeploymentController<'_> {
         let mut service_rows = Vec::with_capacity(request.services.len());
         for (name, input) in &request.bindings {
             if input.kind == BindingKind::Workflow {
-                if input.permissions != CanonicalPermissions::default()
-                    || input.config != CanonicalBindingConfig::default()
-                {
+                if input.permissions != CanonicalPermissions::default() {
                     return Err(PlatformError::new(
                         ErrorCode::WorkflowBindingStale,
-                        "Workflow binding does not accept resource permissions or config",
+                        "Workflow binding does not accept resource permissions",
                     ));
                 }
                 let definition = open_compute_core::WorkflowId::from_uuid(input.id.as_uuid())
@@ -48,6 +46,7 @@ impl DeploymentController<'_> {
                         deployment,
                         name,
                         definition,
+                        input.config.workflow_schedules.clone(),
                         request.now_ms,
                     )?;
                 workflow_descriptors.push(binding.descriptor.clone());
@@ -123,7 +122,7 @@ impl DeploymentController<'_> {
                 resource.spec_generation,
                 1,
                 input.permissions,
-                input.config,
+                input.config.clone(),
             )?;
             let permissions_json =
                 serde_json::to_vec(&descriptor.permissions).map_err(|_| invariant())?;

@@ -154,6 +154,22 @@ fn frame_protocol_round_trips_every_shape_and_rejects_ambiguous_inputs() {
         KvCommand::List { prefix, limit: 10, cursor: Some(cursor) }
             if prefix == "pre" && cursor == "next"
     ));
+    assert!(matches!(
+        parse_frame_command(
+            Operation::List,
+            br#"{"prefix":null,"limit":1000,"cursor":null}"#
+        )
+        .unwrap(),
+        KvCommand::List {
+            prefix,
+            limit: 1000,
+            cursor: None
+        } if prefix.is_empty()
+    ));
+    assert!(matches!(
+        parse_frame_command(Operation::List, br#"{"limit":5}"#).unwrap(),
+        KvCommand::List { prefix, limit: 5, cursor: None } if prefix.is_empty()
+    ));
 
     let entry = open_compute_storage::KvEntry {
         value: b"bytes".to_vec(),

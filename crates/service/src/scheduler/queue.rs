@@ -2,7 +2,9 @@
 
 use super::{SchedulerService, decode_pool_state, encode_pool_state, scheduler_task_failed};
 use crate::metrics::{MetricsRegistry, QueueConsumerBatchOutcome, SchedulerClaimOutcome};
-use crate::runtime_bridge::{DispatchTarget, QueueDispatchMessage, QueueDispatchRequest};
+use crate::runtime_bridge::{
+    DispatchTarget, QueueDispatchMessage, QueueDispatchMetadata, QueueDispatchRequest,
+};
 use base64::Engine as _;
 use open_compute_core::{
     ErrorCode, PlatformError, QueueMessageId, RequestId, SchedulerKind, SchedulerPoolState,
@@ -18,7 +20,8 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 impl SchedulerService {
-    pub(crate) async fn claim_queue_consumers(
+    /// Claim the next bounded set of due Queue consumer batches.
+    pub async fn claim_queue_consumers(
         &self,
         batch: u32,
     ) -> Result<Vec<ClaimedQueueBatch>, PlatformError> {
@@ -63,7 +66,8 @@ impl SchedulerService {
         Ok(claimed)
     }
 
-    pub(crate) async fn dispatch_queue_batch(self: Arc<Self>, batch: ClaimedQueueBatch) {
+    /// Dispatch one already claimed Queue batch and commit its durable disposition.
+    pub async fn dispatch_queue_batch(self: Arc<Self>, batch: ClaimedQueueBatch) {
         let started = Instant::now();
         let _in_flight = self
             .metrics
@@ -71,6 +75,7 @@ impl SchedulerService {
             .map(MetricsRegistry::track_queue_consumer);
         let authority = {
             let storage = self.storage.clone();
+            let scheduler = self.store.clone();
             let current = batch.clone();
             tokio::task::spawn_blocking(move || {
                 let workers = WorkerRepository::new(storage.db());
@@ -82,11 +87,16 @@ impl SchedulerService {
                 )?;
                 let queue =
                     QueueRepository::new(storage.db()).get(worker.account_id, current.queue_id)?;
-                Ok::<_, PlatformError>((worker, deployment, queue.name))
+                let metrics = scheduler.queue_metrics(
+                    queue.id,
+                    queue.lifecycle_generation,
+                    queue.config_generation,
+                )?;
+                Ok::<_, PlatformError>((worker, deployment, queue.name, metrics))
             })
             .await
         };
-        let Ok(Ok((worker, deployment, queue_name))) = authority else {
+        let Ok(Ok((worker, deployment, queue_name, metrics))) = authority else {
             if let Some(metrics) = &self.metrics {
                 metrics.observe_queue_consumer_batch(
                     QueueConsumerBatchOutcome::Unknown,
@@ -121,6 +131,7 @@ impl SchedulerService {
                     body_base64: base64::engine::general_purpose::STANDARD.encode(&message.body),
                 })
                 .collect(),
+            metadata: QueueDispatchMetadata::from_queue_metrics(metrics),
         };
         let target = DispatchTarget {
             account_id: worker.account_id,

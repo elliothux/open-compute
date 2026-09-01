@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "p0-2-tls", worker = (
+      compatibilityDate = "2026-08-30",
+      modules = [
+        (name = "worker", esModule = embed "p0-2-tls.js"),
+      ],
+      bindings = [
+        (name = "TLS_PORT", fromEnvironment = "OPEN_COMPUTE_EGRESS_PUBLIC_TLS_PORT"),
+        (name = "PUBLIC_IPV4", fromEnvironment = "OPEN_COMPUTE_EGRESS_PUBLIC_IPV4_HOST"),
+      ],
+    )),
+    (name = "internet", network = (
+      allow = ["public"],
+      tlsOptions = (
+        trustBrowserCas = true,
+        trustedCertificates = [embed "ca.pem"],
+      ),
+    )),
+  ],
+);

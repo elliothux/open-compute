@@ -221,7 +221,6 @@ async fn assets_only_upload_resume_finalize_and_handler_share_one_authority() {
         .unwrap();
     assert_eq!(replayed_put.status(), StatusCode::OK);
     let finalized_body = serde_json::json!({
-        "compatibilityDate": "2026-08-22",
         "promote": true
     });
     let finalize_request = || {
@@ -386,16 +385,12 @@ async fn request_metadata_json_ids_and_idempotency_are_strict() {
 
     let valid = Request::builder()
         .header(IDEMPOTENCY_HEADER, "key-1")
-        .header(
-            DEPLOYMENT_METADATA_HEADER,
-            r#"{"mainModule":"index.js","compatibilityDate":"2026-08-22"}"#,
-        )
+        .header(DEPLOYMENT_METADATA_HEADER, r#"{"mainModule":"index.js"}"#)
         .body(Body::from(r#"{"name":"worker"}"#))
         .unwrap();
     assert_eq!(idempotency_key(&valid).unwrap(), "key-1");
     let metadata = deployment_metadata(&valid).unwrap();
     assert_eq!(metadata.main_module, "index.js");
-    assert_eq!(metadata.limits, default_limits());
     let body: CreateWorkerBody = read_json(valid, MAX_JSON_BODY).await.unwrap();
     assert_eq!(body.name, "worker");
 
@@ -750,9 +745,6 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
             artifact_size: Some(7),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: Vec::new(),
-            limits: serde_json::json!({}),
             worker_code_sha256: [8; 32],
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
@@ -866,9 +858,6 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
             artifact_size: Some(9),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: Vec::new(),
-            limits: serde_json::json!({}),
             worker_code_sha256: [10; 32],
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),

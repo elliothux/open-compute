@@ -167,7 +167,9 @@ impl SchedulerService {
             external_instance_id: run.external_instance_id.clone(),
             definition_name: run.target.definition_name.clone(),
             created_at_ms: run.created_at_ms,
-            payload_json: run.input_json.clone(),
+            payload_base64: run.input_json.clone(),
+            rollback: run.rollback,
+            schedule: run.schedule.clone(),
         };
         let version = run.target.clone();
         let dispatch = self.transport.dispatch_workflow(
@@ -225,15 +227,18 @@ impl SchedulerService {
                         return Ok(None);
                     }
                     WorkflowOutcome::Complete {
-                        output_json,
+                        output_base64,
                         final_ordinal,
                     } => WorkflowCompletion::Complete {
-                        output_json,
+                        output_json: output_base64,
                         final_ordinal,
                     },
                     WorkflowOutcome::Errored { error_code, .. } => WorkflowCompletion::Errored {
                         code: open_compute_core::workflow::terminal_error_code(&error_code)?,
                     },
+                    WorkflowOutcome::Terminated { final_ordinal } => {
+                        WorkflowCompletion::Terminated { final_ordinal }
+                    }
                     WorkflowOutcome::Unknown { .. } => return Err(scheduler_task_failed()),
                 };
                 let state = store.finish_workflow(&run.fence, &completion, now_ms, &config)?;

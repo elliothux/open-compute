@@ -1141,10 +1141,6 @@ pub struct DurableObjectsConfig {
     pub max_namespace_name_bytes: u32,
     /// Maximum UTF-8 bytes accepted by `idFromName()`.
     pub max_object_name_bytes: u32,
-    /// Maximum encoded plain-data RPC request bytes.
-    pub max_rpc_request_bytes: u64,
-    /// Maximum encoded plain-data RPC response bytes.
-    pub max_rpc_response_bytes: u64,
     /// Maximum forwarded fetch request body bytes.
     pub max_fetch_body_bytes: u64,
     /// Foreground dispatch timeout.
@@ -1164,8 +1160,6 @@ impl Default for DurableObjectsConfig {
         Self {
             max_namespace_name_bytes: 128,
             max_object_name_bytes: 1024,
-            max_rpc_request_bytes: 1024 * 1024,
-            max_rpc_response_bytes: 1024 * 1024,
             max_fetch_body_bytes: 32 * 1024 * 1024,
             dispatch_timeout_ms: 30_000,
             max_in_flight_dispatches: 256,
@@ -1182,10 +1176,6 @@ impl DurableObjectsConfig {
             || self.max_namespace_name_bytes > 128
             || self.max_object_name_bytes == 0
             || self.max_object_name_bytes > 1024
-            || self.max_rpc_request_bytes == 0
-            || self.max_rpc_request_bytes > 16 * 1024 * 1024
-            || self.max_rpc_response_bytes == 0
-            || self.max_rpc_response_bytes > 16 * 1024 * 1024
             || self.max_fetch_body_bytes == 0
             || self.max_fetch_body_bytes > 64 * 1024 * 1024
             || self.dispatch_timeout_ms == 0

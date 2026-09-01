@@ -5,7 +5,7 @@ use crate::metrics::MetricsRegistry;
 use axum::body::to_bytes;
 use axum::http::Request;
 use open_compute_artifacts::{
-    MapEnv, MockS3, R2PutOptions, R2UploadSource, S3ArtifactClient, UserObjectKey,
+    MapEnv, MockS3, R2PutOptions, R2UploadSource, S3ArtifactClient, UserObjectKey, hash_bytes,
     resolve_s3_credentials_with,
 };
 use open_compute_core::config::{MetricsConfig, StorageConfig};
@@ -389,14 +389,13 @@ async fn control_api_replays_create_hides_locator_and_recovers_force_delete() {
         .objects
         .locator(resource, &bucket.physical_prefix)
         .unwrap();
-    let key = UserObjectKey::parse("same/key", &locator).unwrap();
+    let key = UserObjectKey::parse("same/key").unwrap();
     let stage = fixture
         .storage
         .data_dir()
         .root()
         .join("r2-control-test-upload");
     std::fs::write(&stage, b"value").unwrap();
-    let md5 = open_compute_artifacts::md5_file(&stage, 5).unwrap();
     fixture
         .objects
         .put_file(
@@ -405,10 +404,11 @@ async fn control_api_replays_create_hides_locator_and_recovers_force_delete() {
             &R2UploadSource {
                 path: stage,
                 length: 5,
-                md5,
+                checksums: hash_bytes(b"value"),
                 version: uuid::Uuid::now_v7().hyphenated().to_string(),
             },
             &R2PutOptions::default(),
+            None,
         )
         .await
         .unwrap();
@@ -541,19 +541,19 @@ async fn lifecycle_reconcile_converges_create_delete_and_marker_crash_boundaries
             .root()
             .join(format!("recovery-{index}"));
         std::fs::write(&path, value).unwrap();
-        let digest = open_compute_artifacts::md5_file(&path, value.len() as u64).unwrap();
         fixture
             .objects
             .put_file(
                 &locator,
-                &UserObjectKey::parse(&format!("key-{index}"), &locator).unwrap(),
+                &UserObjectKey::parse(&format!("key-{index}")).unwrap(),
                 &R2UploadSource {
                     path,
                     length: value.len() as u64,
-                    md5: digest,
-                    version: uuid::Uuid::now_v7().to_string(),
+                    checksums: hash_bytes(value),
+                    version: uuid::Uuid::now_v7().hyphenated().to_string(),
                 },
                 &R2PutOptions::default(),
+                None,
             )
             .await
             .unwrap();

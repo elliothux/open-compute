@@ -52,3 +52,65 @@ WHEN NEW.state = 'tombstoned' AND NEW.kind = 'r2_bucket'
 BEGIN
   DELETE FROM r2_buckets WHERE resource_id = NEW.id;
 END;
+
+CREATE TABLE r2_objects (
+  resource_id TEXT NOT NULL REFERENCES r2_buckets(resource_id) ON DELETE CASCADE,
+  object_key TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  object_version TEXT NOT NULL,
+  ssec_key_md5 TEXT,
+  ssec_envelope TEXT,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (resource_id, object_key),
+  CHECK((ssec_key_md5 IS NULL) = (ssec_envelope IS NULL))
+) STRICT;
+
+CREATE TABLE r2_object_mutations (
+  resource_id TEXT NOT NULL REFERENCES r2_buckets(resource_id) ON DELETE CASCADE,
+  object_key TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('put', 'delete')),
+  pending_version TEXT,
+  pending_ssec_key_md5 TEXT,
+  pending_ssec_envelope TEXT,
+  started_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (resource_id, object_key),
+  CHECK((pending_ssec_key_md5 IS NULL) = (pending_ssec_envelope IS NULL)),
+  CHECK((kind = 'put') = (pending_version IS NOT NULL)),
+  CHECK(kind = 'put' OR (pending_ssec_key_md5 IS NULL AND pending_ssec_envelope IS NULL))
+) STRICT;
+
+CREATE TABLE r2_multipart_uploads (
+  upload_id TEXT PRIMARY KEY,
+  resource_id TEXT NOT NULL REFERENCES r2_buckets(resource_id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL,
+  object_key TEXT NOT NULL,
+  provider_upload_id TEXT,
+  storage_class TEXT NOT NULL CHECK(storage_class IN ('Standard', 'InfrequentAccess')),
+  http_metadata TEXT NOT NULL,
+  custom_metadata TEXT NOT NULL,
+  ssec_key_md5 TEXT,
+  ssec_envelope TEXT,
+  object_version TEXT NOT NULL,
+  completion_manifest TEXT,
+  completed_metadata TEXT,
+  state TEXT NOT NULL CHECK(state IN ('initiating', 'create_unknown', 'open', 'completing', 'completed', 'aborting', 'aborted')),
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  CHECK((ssec_key_md5 IS NULL) = (ssec_envelope IS NULL)),
+  CHECK(state IN ('initiating', 'create_unknown') OR provider_upload_id IS NOT NULL),
+  CHECK((state IN ('completing', 'completed')) = (completion_manifest IS NOT NULL)),
+  CHECK((state = 'completed') = (completed_metadata IS NOT NULL))
+) STRICT;
+
+CREATE INDEX r2_multipart_uploads_resource_state
+  ON r2_multipart_uploads(resource_id, state);
+
+CREATE TABLE r2_multipart_parts (
+  upload_id TEXT NOT NULL REFERENCES r2_multipart_uploads(upload_id) ON DELETE CASCADE,
+  part_number INTEGER NOT NULL CHECK(part_number >= 1 AND part_number <= 10000),
+  etag TEXT NOT NULL,
+  size INTEGER NOT NULL CHECK(size >= 0),
+  uploaded_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (upload_id, part_number)
+) STRICT;

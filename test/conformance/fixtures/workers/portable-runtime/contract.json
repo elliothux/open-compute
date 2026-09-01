@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "workers/portable/runtime",
+  "contracts": ["workers.runtime.common"],
+  "source": "src/index.ts",
+  "bindings": {},
+  "observations": [
+    {
+      "method": "POST",
+      "path": "/runtime?b=2&a=1",
+      "headers": { "x-portable": "yes" },
+      "body": { "text": "portable-body" },
+      "expect": {
+        "status": 200,
+        "json": {
+          "fetch": {
+            "request": true,
+            "headers": true,
+            "body": "portable-body",
+            "url": true,
+            "pattern": true,
+            "response": true
+          },
+          "binary": {
+            "text": "portable",
+            "digest": "01e782826ae5182220bd6158f883d01ceb1bce659dc020e7c511f802a9aa7737",
+            "base64": "cG9ydGFibGU=",
+            "webAssembly": true
+          },
+          "streams": {
+            "transform": "PORTABLE",
+            "compression": "portable",
+            "fixedLength": "hello"
+          },
+          "events": {
+            "custom": "portable",
+            "message": "portable",
+            "aborted": true
+          },
+          "html": "<p>portable</p>",
+          "runtime": {
+            "uuid": true,
+            "performance": true,
+            "navigator": true,
+            "exports": true,
+            "props": true,
+            "webSocketPair": true
+          }
+        }
+      }
+    },
+    { "method": "DELETE", "path": "/cleanup", "expect": { "status": 200, "json": { "cleaned": true } } }
+  ],
+  "normalization": [],
+  "cleanup": { "cloudflare": ["worker"], "openCompute": ["worker"] }
+}

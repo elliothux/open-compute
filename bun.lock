@@ -46,10 +46,13 @@
     "packages/types": {
       "name": "@open-compute/workers-types",
       "version": "0.1.0",
+      "dependencies": {
+        "@cloudflare/workers-types": "catalog:",
+      },
     },
   },
   "catalog": {
-    "@cloudflare/workers-types": "5.20260826.1",
+    "@cloudflare/workers-types": "5.20260830.1",
     "@types/node": "24.13.3",
     "rolldown": "1.2.6",
     "typescript": "7.0.2",
@@ -100,7 +103,7 @@
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
-    "@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260826.1", "", {}, "sha512-hyW0QHvJYKhsMTAx1YZkbhcXBr17Brl1xZwvVExYmB5pAExJCCzAEouKNGwag2H+yBlqLay3X3kZoiJoGu2DRw=="],
+    "@cloudflare/workers-types": ["@cloudflare/workers-types@5.20260830.1", "", {}, "sha512-LBn0wg8kmCbdriUYmz6BSm4ukjFinU4iYGYuBTPaSG6malMhbIFk7Az1gcsFuvBYva2yHxUZFirCwjQY7yBN9A=="],
 
     "@docsearch/css": ["@docsearch/css@3.8.2", "", {}, "sha512-y05ayQFyUmCXze79+56v/4HpycYF3uFqB78pLPrSV5ZKAlDuIAAJNhaRi8tTdRNXh05yxX/TyNnzD6LwSM89vQ=="],
 

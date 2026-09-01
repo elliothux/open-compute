@@ -34,6 +34,21 @@ export default class Caller extends WorkerEntrypoint {
     if (path === "/target-fetch") return this.env.TARGET.fetch("https://preserved.example/worker");
     if (path === "/named-fetch") return this.env.NAMED.fetch("https://named.example/path");
     if (path === "/object-fetch") return this.env.OBJECT.fetch("https://object.example/path");
+    if (path === "/connect" || path === "/connect-ipv6") {
+      const ipv6 = path === "/connect-ipv6";
+      const socket = this.env.TARGET.connect(
+        ipv6 ? { hostname: "2606:4700:4700::1111", port: 7000 } : "service.invalid:7000",
+        { allowHalfOpen: true },
+      );
+      await socket.opened;
+      const writer = socket.writable.getWriter();
+      await writer.write(new Uint8Array(ipv6 ? [10, 11, 12] : [7, 8, 9]));
+      await writer.close();
+      writer.releaseLock();
+      const bytes = new Uint8Array(await new Response(socket.readable).arrayBuffer());
+      await socket.close();
+      return new Response(Array.from(bytes).join(","));
+    }
     if (path === "/default-rpc") return Response.json(await this.env.TARGET.identify());
     if (path === "/named-rpc") return new Response(String(await this.env.NAMED.multiply(6, 7)));
     if (path === "/asset-only-rpc") {
@@ -250,6 +265,44 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         supervisor.last_diagnostics(),
     );
     assert_eq!(first_asset_body.as_ref(), b"asset-v1");
+    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    let connect = dispatch(
+        &transport,
+        account,
+        caller.id,
+        &caller_deployment,
+        "/connect",
+    )
+    .await;
+    let connect_status = connect.status();
+    let connect_body = body(connect).await;
+    assert_eq!(
+        connect_status,
+        StatusCode::OK,
+        "Service connect failed: {}; diagnostics={:?}",
+        String::from_utf8_lossy(&connect_body),
+        supervisor.last_diagnostics(),
+    );
+    assert_eq!(connect_body.as_ref(), b"7,8,9");
+    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    let connect_ipv6 = dispatch(
+        &transport,
+        account,
+        caller.id,
+        &caller_deployment,
+        "/connect-ipv6",
+    )
+    .await;
+    let connect_ipv6_status = connect_ipv6.status();
+    let connect_ipv6_body = body(connect_ipv6).await;
+    assert_eq!(
+        connect_ipv6_status,
+        StatusCode::OK,
+        "IPv6 Service connect failed: {}; diagnostics={:?}",
+        String::from_utf8_lossy(&connect_ipv6_body),
+        supervisor.last_diagnostics(),
+    );
+    assert_eq!(connect_ipv6_body.as_ref(), b"10,11,12");
     wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
@@ -492,6 +545,16 @@ export default class Target extends WorkerEntrypoint {{
     const url = new URL(request.url);
     return new Response(`fetch-${{VERSION}}:${{url.hostname}}:${{url.pathname}}`);
   }}
+  async connect(socket) {{
+    const reader = socket.readable.getReader();
+    const writer = socket.writable.getWriter();
+    const part = await reader.read();
+    if (!part.done) await writer.write(part.value);
+    await writer.close();
+    writer.releaseLock();
+    await reader.cancel();
+    reader.releaseLock();
+  }}
   identify() {{ return {{ version: VERSION, owner: this.env.OWNER }}; }}
   background() {{
     this.ctx.waitUntil(scheduler.wait(750));
@@ -533,16 +596,13 @@ fn worker_request(
             bundle: bundle.into_bytes().into(),
             assets: options.assets,
         },
-        compatibility_date: "2026-08-26".to_owned(),
-        compatibility_flags: Vec::new(),
         vars: options.vars,
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: options.services,
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote: options.promote,
         request_id: RequestId::generate(),
         now_ms: options.now_ms,
@@ -569,16 +629,13 @@ fn assets_request(
         worker_id,
         idempotency_key: key.to_owned(),
         content: DeploymentContent::AssetsOnly { assets },
-        compatibility_date: "2026-08-26".to_owned(),
-        compatibility_flags: Vec::new(),
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote: true,
         request_id: RequestId::generate(),
         now_ms,

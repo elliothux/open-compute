@@ -87,6 +87,22 @@ impl R2ApiState {
                         .get(resource.account_id, resource.id)?;
                     R2BucketRepository::new(self.storage.db())
                         .mark_delete_started(resource.id, now_ms())?;
+                    crate::r2_backend::multipart::reconcile_bucket_multipart(
+                        &self.storage,
+                        &self.objects,
+                        &bucket,
+                        true,
+                        true,
+                        Duration::from_millis(self.config.operation_timeout_ms),
+                    )
+                    .await?;
+                    crate::r2_backend::objects::reconcile_bucket_objects(
+                        &self.storage,
+                        &self.objects,
+                        &bucket,
+                        Duration::from_millis(self.config.operation_timeout_ms),
+                    )
+                    .await?;
                     driver.drain_objects(&bucket).await?;
                     driver.finalize_delete(&bucket).await?;
                     ResourceRepository::new(self.storage.db()).mark_tombstoned(
@@ -99,6 +115,26 @@ impl R2ApiState {
                 ResourceState::Ready | ResourceState::Tombstoned => continue,
             }
             reconciled = reconciled.saturating_add(1);
+        }
+        for bucket in R2BucketRepository::new(self.storage.db()).list_all()? {
+            if bucket.resource.state == ResourceState::Ready {
+                crate::r2_backend::multipart::reconcile_bucket_multipart(
+                    &self.storage,
+                    &self.objects,
+                    &bucket,
+                    true,
+                    false,
+                    Duration::from_millis(self.config.operation_timeout_ms),
+                )
+                .await?;
+                crate::r2_backend::objects::reconcile_bucket_objects(
+                    &self.storage,
+                    &self.objects,
+                    &bucket,
+                    Duration::from_millis(self.config.operation_timeout_ms),
+                )
+                .await?;
+            }
         }
         Ok(reconciled)
     }
@@ -454,6 +490,22 @@ async fn delete(
         let result = async {
             resources.begin_delete(account_id, resource_id, now_ms())?;
             R2BucketRepository::new(api.storage.db()).mark_delete_started(resource_id, now_ms())?;
+            crate::r2_backend::multipart::reconcile_bucket_multipart(
+                &api.storage,
+                &api.objects,
+                &bucket,
+                false,
+                true,
+                Duration::from_millis(api.config.operation_timeout_ms),
+            )
+            .await?;
+            crate::r2_backend::objects::reconcile_bucket_objects(
+                &api.storage,
+                &api.objects,
+                &bucket,
+                Duration::from_millis(api.config.operation_timeout_ms),
+            )
+            .await?;
             if force || resource.state == ResourceState::Deleting {
                 driver.drain_objects(&bucket).await?;
             }

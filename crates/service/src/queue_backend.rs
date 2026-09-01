@@ -14,14 +14,123 @@ use open_compute_storage::{
 use std::str::FromStr as _;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 const DEPLOYMENT_HEADER: &str = "x-open-compute-deployment-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const REQUEST_HEADER: &str = "x-open-compute-request-id";
+const OUTPUT_GATE_HEADER: &str = "x-open-compute-output-gate";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 const FRAME_CONTENT_TYPE: &str = "application/vnd.open-compute.queue.v1+frame";
 const MAX_FRAME_BYTES: usize = 256_000 + 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
+
+#[cfg(any(test, feature = "test-support"))]
+static ENQUEUE_HOLD: Mutex<Option<Arc<QueueEnqueueHold>>> = Mutex::new(None);
+
+/// Test-only admission gate used to freeze Queue enqueue around a process death.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Debug)]
+pub struct QueueEnqueueHold {
+    allow_before: tokio::sync::watch::Sender<bool>,
+    allow_after: tokio::sync::watch::Sender<bool>,
+    seen: tokio::sync::watch::Sender<u32>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl QueueEnqueueHold {
+    /// Create a hold that currently admits enqueue.
+    #[must_use]
+    pub fn new() -> Arc<Self> {
+        let (allow_before, _) = tokio::sync::watch::channel(true);
+        let (allow_after, _) = tokio::sync::watch::channel(true);
+        let (seen, _) = tokio::sync::watch::channel(0);
+        Arc::new(Self {
+            allow_before,
+            allow_after,
+            seen,
+        })
+    }
+
+    /// Install this hold for subsequent private Queue producer requests.
+    pub fn install(self: &Arc<Self>) {
+        *ENQUEUE_HOLD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(self.clone());
+    }
+
+    /// Remove any installed hold.
+    pub fn clear() {
+        *ENQUEUE_HOLD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    /// Block enqueue before durable admission.
+    pub fn block_before(&self) {
+        let _ = self.allow_before.send(false);
+    }
+
+    /// Allow enqueue before durable admission.
+    pub fn release_before(&self) {
+        let _ = self.allow_before.send(true);
+    }
+
+    /// Block the producer response after durable admission.
+    pub fn block_after(&self) {
+        let _ = self.allow_after.send(false);
+    }
+
+    /// Allow the producer response after durable admission.
+    pub fn release_after(&self) {
+        let _ = self.allow_after.send(true);
+    }
+
+    /// Current observed enqueue-attempt count.
+    #[must_use]
+    pub fn seen(&self) -> u32 {
+        *self.seen.borrow()
+    }
+
+    /// Wait until the backend has observed `count` enqueue attempts.
+    pub async fn wait_seen(&self, count: u32) {
+        let mut rx = self.seen.subscribe();
+        while *rx.borrow() < count {
+            rx.changed().await.expect("enqueue hold closed");
+        }
+    }
+
+    async fn wait_before(&self) {
+        let mut rx = self.allow_before.subscribe();
+        while !*rx.borrow() {
+            if rx.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+
+    async fn wait_after(&self) {
+        let mut rx = self.allow_after.subscribe();
+        while !*rx.borrow() {
+            if rx.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+
+    fn mark_seen(&self) {
+        self.seen
+            .send_modify(|value| *value = value.saturating_add(1));
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn current_hold() -> Option<Arc<QueueEnqueueHold>> {
+    ENQUEUE_HOLD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
 
 /// Composed Queue control authorization and durable scheduler authority.
 #[derive(Clone, Debug)]
@@ -78,10 +187,22 @@ impl QueueBindingService {
                 return platform_error(&error);
             }
         };
-        if request.method() != axum::http::Method::POST || !valid_request_id(request.headers()) {
+        if request.method() != axum::http::Method::POST {
             self.observe(operation, false, 0, 0, started);
             return error(ErrorCode::QueueInvariantViolation, StatusCode::BAD_REQUEST);
         }
+        let Some(request_id) = parse_request_id(request.headers()) else {
+            self.observe(operation, false, 0, 0, started);
+            return error(ErrorCode::QueueInvariantViolation, StatusCode::BAD_REQUEST);
+        };
+        let output_gate = match header_text(request.headers(), OUTPUT_GATE_HEADER) {
+            Some("0") => false,
+            Some("1") => true,
+            _ => {
+                self.observe(operation, false, 0, 0, started);
+                return error(ErrorCode::QueueInvariantViolation, StatusCode::BAD_REQUEST);
+            }
+        };
         let Some(deployment_id) = header_text(request.headers(), DEPLOYMENT_HEADER)
             .and_then(|value| DeploymentId::from_str(value).ok())
         else {
@@ -93,7 +214,7 @@ impl QueueBindingService {
             return error(ErrorCode::QueueInvariantViolation, StatusCode::BAD_REQUEST);
         };
         if operation == QueueOperation::Metrics {
-            if !content_type_is(request.headers(), "application/json") {
+            if output_gate || !content_type_is(request.headers(), "application/json") {
                 self.observe(operation, false, 0, 0, started);
                 return error(
                     ErrorCode::QueueInvariantViolation,
@@ -102,6 +223,17 @@ impl QueueBindingService {
             }
             return self
                 .read_metrics(binding_id, deployment_id, descriptor, started)
+                .await;
+        }
+        if operation == QueueOperation::Finalize {
+            if !output_gate || !content_type_is(request.headers(), "application/json") {
+                return error(
+                    ErrorCode::QueueInvariantViolation,
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                );
+            }
+            return self
+                .finalize(binding_id, deployment_id, descriptor, request_id)
                 .await;
         }
         if !content_type_is(request.headers(), FRAME_CONTENT_TYPE) {
@@ -146,6 +278,11 @@ impl QueueBindingService {
         let admission_bytes = frame.messages.iter().fold(64 * 1024_u64, |sum, message| {
             sum.saturating_add(u64::try_from(message.body.len()).unwrap_or(u64::MAX))
         });
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(hold) = current_hold() {
+            hold.mark_seen();
+            hold.wait_before().await;
+        }
         let task = tokio::task::spawn_blocking(move || {
             let authorized = QueueRepository::new(storage.db()).authorize(
                 binding_id,
@@ -156,6 +293,8 @@ impl QueueBindingService {
             scheduler.enqueue_queue(
                 &QueueEnqueueRequest {
                     queue_id: authorized.queue.id,
+                    request_id,
+                    output_gate,
                     lifecycle_generation: authorized.binding.queue_lifecycle_generation,
                     config_generation: authorized.queue.config_generation,
                     batch_delay_seconds: frame.batch_delay_seconds,
@@ -166,6 +305,10 @@ impl QueueBindingService {
         });
         match tokio::time::timeout(TIMEOUT, task).await {
             Ok(Ok(Ok(result))) => {
+                #[cfg(any(test, feature = "test-support"))]
+                if let Some(hold) = current_hold() {
+                    hold.wait_after().await;
+                }
                 self.observe(operation, true, message_count, body_bytes, started);
                 json(&result.metrics)
             }
@@ -182,8 +325,10 @@ impl QueueBindingService {
             }
             Err(_) => {
                 self.observe(operation, false, message_count, body_bytes, started);
-                if let Some(metrics) = &self.metrics {
-                    metrics.inc_queue_result_unknown(operation.metric());
+                if let Some(metrics) = &self.metrics
+                    && let Some(metric) = operation.metric()
+                {
+                    metrics.inc_queue_result_unknown(metric);
                 }
                 error(
                     ErrorCode::QueueSendResultUnknown,
@@ -233,6 +378,38 @@ impl QueueBindingService {
         }
     }
 
+    async fn finalize(
+        &self,
+        binding_id: BindingId,
+        deployment_id: DeploymentId,
+        descriptor: [u8; 32],
+        request_id: Uuid,
+    ) -> Response {
+        let storage = self.storage.clone();
+        let scheduler = self.scheduler.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            let authorized = QueueRepository::new(storage.db()).authorize(
+                binding_id,
+                deployment_id,
+                &descriptor,
+            )?;
+            scheduler.finalize_queue_enqueue(
+                request_id,
+                authorized.queue.id,
+                authorized.binding.queue_lifecycle_generation,
+                unix_ms(),
+            )
+        });
+        match tokio::time::timeout(TIMEOUT, task).await {
+            Ok(Ok(Ok(()))) => json(&serde_json::json!({})),
+            Ok(Ok(Err(value))) => platform_error(&value),
+            _ => error(
+                ErrorCode::QueueStorageUnavailable,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+        }
+    }
+
     fn observe(
         &self,
         operation: QueueOperation,
@@ -241,9 +418,9 @@ impl QueueBindingService {
         body_bytes: u64,
         started: Instant,
     ) {
-        if let Some(metrics) = &self.metrics {
+        if let (Some(metrics), Some(operation)) = (&self.metrics, operation.metric()) {
             metrics.observe_queue_producer(
-                operation.metric(),
+                operation,
                 success,
                 messages,
                 body_bytes,
@@ -312,14 +489,16 @@ enum QueueOperation {
     Send,
     Batch,
     Metrics,
+    Finalize,
 }
 
 impl QueueOperation {
-    const fn metric(self) -> QueueMetricOperation {
+    const fn metric(self) -> Option<QueueMetricOperation> {
         match self {
-            Self::Send => QueueMetricOperation::Send,
-            Self::Batch => QueueMetricOperation::Batch,
-            Self::Metrics => QueueMetricOperation::Metrics,
+            Self::Send => Some(QueueMetricOperation::Send),
+            Self::Batch => Some(QueueMetricOperation::Batch),
+            Self::Metrics => Some(QueueMetricOperation::Metrics),
+            Self::Finalize => None,
         }
     }
 }
@@ -340,6 +519,7 @@ fn parse_path(path: &str) -> Option<(BindingId, QueueOperation)> {
         "send" => QueueOperation::Send,
         "batch" => QueueOperation::Batch,
         "metrics" => QueueOperation::Metrics,
+        "finalize" => QueueOperation::Finalize,
         _ => return None,
     };
     Some((BindingId::from_str(id).ok()?, operation))
@@ -380,6 +560,7 @@ fn parse_frame(bytes: &[u8], operation: QueueOperation) -> Result<ParsedFrame, P
             1 => QueueContentType::Json,
             2 => QueueContentType::Text,
             3 => QueueContentType::Bytes,
+            4 => QueueContentType::V8,
             _ => {
                 return Err(PlatformError::new(
                     ErrorCode::QueueContentTypeUnsupported,
@@ -468,7 +649,8 @@ fn platform_error(value: &PlatformError) -> Response {
         ErrorCode::QueueNotReady
         | ErrorCode::QueueConfigPending
         | ErrorCode::QueueReferenced
-        | ErrorCode::QueueNotEmpty => StatusCode::CONFLICT,
+        | ErrorCode::QueueNotEmpty
+        | ErrorCode::IdempotencyConflict => StatusCode::CONFLICT,
         ErrorCode::QueueMessageTooLarge | ErrorCode::QueueBatchLimitExceeded => {
             StatusCode::PAYLOAD_TOO_LARGE
         }
@@ -480,7 +662,6 @@ fn platform_error(value: &PlatformError) -> Response {
         | ErrorCode::QueueSendResultUnknown
         | ErrorCode::StoragePressure
         | ErrorCode::AdmissionBusy => StatusCode::SERVICE_UNAVAILABLE,
-        ErrorCode::QueueDoOutputGateUnsupported => StatusCode::NOT_IMPLEMENTED,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
     error(value.code(), status)
@@ -511,14 +692,10 @@ fn parse_digest(headers: &HeaderMap) -> Option<[u8; 32]> {
     hex::decode(value).ok()?.try_into().ok()
 }
 
-fn valid_request_id(headers: &HeaderMap) -> bool {
-    let Some(value) = header_text(headers, REQUEST_HEADER) else {
-        return false;
-    };
-    let Ok(parsed) = uuid::Uuid::parse_str(value) else {
-        return false;
-    };
-    parsed.hyphenated().to_string() == value
+fn parse_request_id(headers: &HeaderMap) -> Option<Uuid> {
+    let value = header_text(headers, REQUEST_HEADER)?;
+    let parsed = Uuid::parse_str(value).ok()?;
+    (parsed.hyphenated().to_string() == value).then_some(parsed)
 }
 
 fn content_type_is(headers: &HeaderMap, expected: &str) -> bool {

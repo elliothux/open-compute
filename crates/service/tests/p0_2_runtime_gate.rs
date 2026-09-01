@@ -30,7 +30,9 @@ use open_compute_service::{
     HealthCoordinator, MetricsRegistry, SqliteKvBindingExecutor, bind_binding_backend,
     serve_binding_backend,
 };
-use open_compute_storage::{DeploymentState, PlatformStorage, QueueContentType, WorkerRepository};
+use open_compute_storage::{
+    DeploymentState, PlatformStorage, QueueContentType, SchedulerStore, WorkerRepository,
+};
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
     DeploymentController, DeploymentPins, ModuleInput, ModuleType, ResourcePins, RuntimeSource,
@@ -48,6 +50,8 @@ use tower::ServiceExt;
 
 #[path = "p0_2_runtime_gate/http.rs"]
 mod http;
+#[path = "p0_2_runtime_gate/nodejs.rs"]
+mod nodejs;
 #[path = "p0_2_runtime_gate/worker_toolchain.rs"]
 mod worker_toolchain;
 
@@ -63,6 +67,9 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
+    );
+    let scheduler = Arc::new(
+        SchedulerStore::open(&storage.data_dir().ensure_scheduler_db().unwrap(), 100, 1).unwrap(),
     );
     let mock = MockS3::spawn("open-compute").await;
     let artifacts = artifact_store(&mock);
@@ -170,7 +177,11 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         artifacts.clone(),
         validator,
         BundleLimits::default(),
-    );
+    )
+    .with_product_promoter(open_compute_service::product_promotion_for_test(
+        storage.clone(),
+        scheduler,
+    ));
 
     let a = deploy(
         &controller,
@@ -246,6 +257,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
                         body_base64: base64::engine::general_purpose::STANDARD.encode([0, 255, 7]),
                     },
                 ],
+                metadata: Default::default(),
             },
             Duration::from_secs(5),
         )
@@ -277,6 +289,8 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
             &ScheduledDispatchRequest {
                 scheduled_time_ms: 1_787_700_060_000,
                 cron: "*/5 * * * *".to_owned(),
+                scheduled_handler: true,
+                workflow_bindings: Vec::new(),
             },
             Duration::from_secs(5),
         )
@@ -301,6 +315,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
                         content_type: QueueContentType::Text,
                         body_base64: base64::engine::general_purpose::STANDARD.encode("failure"),
                     }],
+                    metadata: Default::default(),
                 },
                 Duration::from_secs(5),
             )
@@ -315,6 +330,8 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
                 &ScheduledDispatchRequest {
                     scheduled_time_ms: 1_787_700_060_000,
                     cron: cron.to_owned(),
+                    scheduled_handler: true,
+                    workflow_bindings: Vec::new(),
                 },
                 Duration::from_secs(5),
             )
@@ -336,6 +353,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
                     content_type: QueueContentType::Text,
                     body_base64: base64::engine::general_purpose::STANDARD.encode("named"),
                 }],
+                metadata: Default::default(),
             },
             Duration::from_secs(5),
         )
@@ -457,15 +475,85 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     );
 
     let egress_fixture = egress_fixture_from_env();
+    if let Some(fixture) = egress_fixture.as_ref() {
+        run_tls_fixture(&workerd, &root, fixture).await;
+    }
     let egress = deploy_egress(&controller, account, worker.id, egress_fixture.as_ref()).await;
     let denied = dispatch(&transport, account, worker.id, &egress, None, "").await;
-    assert_eq!(denied.status, 200);
+    assert_eq!(
+        denied.status,
+        200,
+        "egress response: {denied:?}; diagnostics: {:?}",
+        supervisor.last_diagnostics()
+    );
     let egress_result: serde_json::Value = serde_json::from_str(&denied.body).unwrap();
     let expected_denied = if egress_fixture.is_some() { 11 } else { 9 };
     assert_eq!(egress_result["denied"], expected_denied);
     let allowed = egress_result["allowed"].as_array().unwrap();
     assert_eq!(allowed.len(), egress_fixture.as_ref().map_or(0, |_| 3));
     assert!(allowed.iter().all(|value| value == "fixture-ok"));
+    assert_eq!(
+        egress_result["ctxExports"]["ok"], true,
+        "ctx.exports connect: {}",
+        egress_result["ctxExports"]
+    );
+    assert_eq!(egress_result["ctxExports"]["bytes"], 96 * 1024);
+    assert_eq!(
+        egress_result["ctxExports"]["localAddress"],
+        "loopback.invalid:7000"
+    );
+    assert_eq!(
+        egress_result["ctxExports"]["remoteAddress"],
+        serde_json::Value::Null
+    );
+    assert!(
+        egress_result["ctxExports"]["chunks"]
+            .as_u64()
+            .is_some_and(|chunks| chunks > 1),
+        "ctx.exports socket echo must cross stream chunks: {}",
+        egress_result["ctxExports"]
+    );
+    if let Some(egress_fixture) = &egress_fixture {
+        assert_raw_tcp_fixture(&egress_result["rawTcp"], egress_fixture);
+        let event_message = QueueMessageId::generate();
+        let event_queue = transport
+            .dispatch_queue(
+                &dispatch_target(account, worker.id, &egress, None),
+                &QueueDispatchRequest {
+                    queue_name: "raw-tcp-event-source".to_owned(),
+                    messages: vec![QueueDispatchMessage {
+                        id: event_message.to_string(),
+                        timestamp_ms: 1_787_700_000_010,
+                        attempts: 1,
+                        content_type: QueueContentType::Text,
+                        body_base64: base64::engine::general_purpose::STANDARD.encode("socket"),
+                    }],
+                    metadata: Default::default(),
+                },
+                Duration::from_secs(10),
+            )
+            .await
+            .expect("Queue raw TCP event source");
+        assert_eq!(event_queue.outcome, "ok");
+        assert!(event_queue.ack_all);
+        let event_scheduled = transport
+            .dispatch_scheduled(
+                &dispatch_target(account, worker.id, &egress, None),
+                &ScheduledDispatchRequest {
+                    scheduled_time_ms: 1_787_700_060_000,
+                    cron: "3 * * * *".to_owned(),
+                    scheduled_handler: true,
+                    workflow_bindings: Vec::new(),
+                },
+                Duration::from_secs(10),
+            )
+            .await
+            .expect("scheduled raw TCP event source");
+        assert_eq!(event_scheduled.outcome, "ok");
+        assert!(event_scheduled.no_retry);
+    } else {
+        assert_eq!(egress_result["rawTcp"], serde_json::Value::Null);
+    }
     let node = deploy_node(&controller, account, worker.id).await;
     let node_response = dispatch(&transport, account, worker.id, &node, None, "").await;
     assert_eq!(node_response.status, 200);
@@ -569,6 +657,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
                     content_type: QueueContentType::Text,
                     body_base64: base64::engine::general_purpose::STANDARD.encode("timeout"),
                 }],
+                metadata: Default::default(),
             },
             Duration::from_millis(100),
         )
@@ -622,6 +711,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
                     content_type: QueueContentType::Text,
                     body_base64: base64::engine::general_purpose::STANDARD.encode("restart"),
                 }],
+                metadata: Default::default(),
             },
             Duration::from_secs(5),
         )
@@ -634,6 +724,8 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
             &ScheduledDispatchRequest {
                 scheduled_time_ms: 1_787_700_060_000,
                 cron: "1 * * * *".to_owned(),
+                scheduled_handler: true,
+                workflow_bindings: Vec::new(),
             },
             Duration::from_secs(5),
         )
@@ -690,39 +782,37 @@ async fn deploy_egress(
         denied_targets.push(fixture.redirect_private_url.clone());
         denied_targets.push(fixture.private_hostname_url.clone());
     }
-    let mut source = String::from(
-        r#"
-export default {
-  async fetch() {
-    const publicTargets = "#,
+    let mut vars = BTreeMap::new();
+    vars.insert(
+        "PUBLIC_TARGETS_JSON".to_owned(),
+        serde_json::json!(serde_json::to_string(&public_targets).unwrap()),
     );
-    source.push_str(&serde_json::to_string(&public_targets).unwrap());
-    source.push_str(";\n    const deniedTargets = ");
-    source.push_str(&serde_json::to_string(&denied_targets).unwrap());
-    source.push_str(
-        r#";
-    const allowed = [];
-    for (const target of publicTargets) {
-      const response = await fetch(target, { signal: AbortSignal.timeout(3000) });
-      if (!response.ok) throw new Error("public fixture status " + response.status);
-      allowed.push(await response.text());
-    }
-    let denied = 0;
-    for (const target of deniedTargets) {
-      try { await fetch(target, { signal: AbortSignal.timeout(1000) }); }
-      catch { denied++; }
-    }
-    return Response.json({ allowed, denied });
-  }
-};
-"#,
+    vars.insert(
+        "DENIED_TARGETS_JSON".to_owned(),
+        serde_json::json!(serde_json::to_string(&denied_targets).unwrap()),
     );
+    if let Some(fixture) = fixture {
+        vars.insert(
+            "RAW_TCP_CONFIG_JSON".to_owned(),
+            serde_json::json!(
+                serde_json::json!({
+                    "ipv4Host": fixture.public_ipv4_host,
+                    "ipv6Host": fixture.public_ipv6_host,
+                    "hostname": fixture.public_hostname,
+                    "privateHostname": fixture.private_hostname,
+                    "tcpPort": fixture.public_tcp_port,
+                    "tlsPort": fixture.public_tls_port,
+                })
+                .to_string()
+            ),
+        );
+    }
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
             name: "index.js".to_owned(),
             module_type: ModuleType::EsModule,
-            bytes: source.into_bytes(),
+            bytes: include_bytes!("../../../test/runtime/fixtures/p0-2-egress.js").to_vec(),
         }],
         BundleLimits::default(),
     )
@@ -735,16 +825,13 @@ export default {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: Vec::new(),
-        vars: BTreeMap::new(),
+        vars,
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: vec!["3 * * * *".to_owned()],
         promote: false,
         request_id: RequestId::generate(),
         now_ms: 20,
@@ -762,15 +849,29 @@ struct EgressFixture {
     public_hostname_url: String,
     redirect_private_url: String,
     private_hostname_url: String,
+    public_ipv4_host: String,
+    public_ipv6_host: String,
+    public_hostname: String,
+    private_hostname: String,
+    public_tcp_port: String,
+    public_tls_port: String,
+    tls_ca_path: PathBuf,
 }
 
 fn egress_fixture_from_env() -> Option<EgressFixture> {
-    const NAMES: [&str; 5] = [
+    const NAMES: [&str; 12] = [
         "OPEN_COMPUTE_EGRESS_PUBLIC_IPV4_URL",
         "OPEN_COMPUTE_EGRESS_PUBLIC_IPV6_URL",
         "OPEN_COMPUTE_EGRESS_PUBLIC_HOSTNAME_URL",
         "OPEN_COMPUTE_EGRESS_REDIRECT_PRIVATE_URL",
         "OPEN_COMPUTE_EGRESS_PRIVATE_HOSTNAME_URL",
+        "OPEN_COMPUTE_EGRESS_PUBLIC_IPV4_HOST",
+        "OPEN_COMPUTE_EGRESS_PUBLIC_IPV6_HOST",
+        "OPEN_COMPUTE_EGRESS_PUBLIC_HOSTNAME",
+        "OPEN_COMPUTE_EGRESS_PRIVATE_HOSTNAME",
+        "OPEN_COMPUTE_EGRESS_PUBLIC_TCP_PORT",
+        "OPEN_COMPUTE_EGRESS_PUBLIC_TLS_PORT",
+        "OPEN_COMPUTE_EGRESS_TLS_CA_PATH",
     ];
     let values = NAMES.map(std::env::var);
     if values.iter().all(Result::is_err) {
@@ -782,6 +883,13 @@ fn egress_fixture_from_env() -> Option<EgressFixture> {
         public_hostname_url,
         redirect_private_url,
         private_hostname_url,
+        public_ipv4_host,
+        public_ipv6_host,
+        public_hostname,
+        private_hostname,
+        public_tcp_port,
+        public_tls_port,
+        tls_ca_path,
     ] = values.map(|value| value.expect("all controlled egress fixture URLs must be set"));
     Some(EgressFixture {
         public_ipv4_url,
@@ -789,7 +897,159 @@ fn egress_fixture_from_env() -> Option<EgressFixture> {
         public_hostname_url,
         redirect_private_url,
         private_hostname_url,
+        public_ipv4_host,
+        public_ipv6_host,
+        public_hostname,
+        private_hostname,
+        public_tcp_port,
+        public_tls_port,
+        tls_ca_path: PathBuf::from(tls_ca_path),
     })
+}
+
+async fn run_tls_fixture(workerd: &Path, root: &Path, fixture: &EgressFixture) {
+    let temp = tempfile::tempdir().expect("TLS fixture tempdir");
+    for name in ["p0-2-tls.wd-test", "p0-2-tls.js"] {
+        std::fs::copy(
+            root.join("test/runtime/fixtures").join(name),
+            temp.path().join(name),
+        )
+        .expect("copy TLS fixture source");
+    }
+    std::fs::copy(&fixture.tls_ca_path, temp.path().join("ca.pem")).expect("copy TLS fixture CA");
+    for test in ["cloudflareTlsOn", "cloudflareStartTls", "nodeTlsLifecycle"] {
+        let mut command = tokio::process::Command::new(workerd);
+        command
+            .arg("test")
+            .arg(temp.path().join("p0-2-tls.wd-test"))
+            .arg("--experimental")
+            .arg(format!("p0-2-tls:{test}"))
+            .env(
+                "OPEN_COMPUTE_EGRESS_PUBLIC_TLS_PORT",
+                &fixture.public_tls_port,
+            )
+            .env(
+                "OPEN_COMPUTE_EGRESS_PUBLIC_IPV4_HOST",
+                &fixture.public_ipv4_host,
+            )
+            .kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(15), command.output())
+            .await
+            .unwrap_or_else(|_| panic!("TLS fixture timed out: {test}"))
+            .unwrap_or_else(|error| panic!("TLS fixture failed to start ({test}): {error}"));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "TLS fixture failed ({test}): {stderr}"
+        );
+        assert!(
+            stderr.contains(&format!("[ PASS ] p0-2-tls:{test}")) && !stderr.contains("[ FAIL ]"),
+            "TLS fixture did not report a clean pass ({test}): {stderr}"
+        );
+    }
+}
+
+fn assert_raw_tcp_fixture(raw: &serde_json::Value, fixture: &EgressFixture) {
+    let sockets = &raw["sockets"];
+    let expected_authorities = [
+        (
+            "ipv4",
+            format!("{}:{}", fixture.public_ipv4_host, fixture.public_tcp_port),
+        ),
+        (
+            "ipv6",
+            format!("[{}]:{}", fixture.public_ipv6_host, fixture.public_tcp_port),
+        ),
+        (
+            "dns",
+            format!("{}:{}", fixture.public_hostname, fixture.public_tcp_port),
+        ),
+    ];
+    for (name, expected_authority) in expected_authorities {
+        assert_eq!(
+            sockets[name]["bytes"],
+            192 * 1024,
+            "{name} socket echo: {}",
+            sockets[name]
+        );
+        assert!(
+            sockets[name]["chunks"]
+                .as_u64()
+                .is_some_and(|chunks| chunks > 1),
+            "{name} socket echo must cross stream chunks: {}",
+            sockets[name]
+        );
+        assert_eq!(
+            sockets[name]["localAddress"],
+            serde_json::Value::Null,
+            "{name} outbound socket must not invent a local address"
+        );
+        assert_eq!(
+            sockets[name]["remoteAddress"], expected_authority,
+            "{name} outbound socket must preserve the requested authority"
+        );
+    }
+    assert_eq!(
+        sockets["ipv4"]["initialDesiredSize"], 4096,
+        "highWaterMark must configure the writable stream"
+    );
+    assert_eq!(
+        sockets["halfOpenFalse"]["marker"], "peer-half-close",
+        "{}",
+        sockets["halfOpenFalse"]
+    );
+    assert_eq!(sockets["halfOpenFalse"]["writeAfterEof"], false);
+    assert_eq!(
+        sockets["halfOpenTrue"]["marker"], "peer-half-close",
+        "{}",
+        sockets["halfOpenTrue"]
+    );
+    assert_eq!(sockets["halfOpenTrue"]["writeAfterEof"], true);
+    assert_eq!(sockets["halfOpenTrue"]["closeError"], false);
+    assert_eq!(
+        sockets["tlsOn"]["certificateRejected"], true,
+        "{}",
+        sockets["tlsOn"]
+    );
+    assert_eq!(sockets["tlsOn"]["initialSecureTransport"], "on");
+    assert_eq!(sockets["tlsOn"]["initialUpgraded"], false);
+    assert_eq!(
+        sockets["startTls"]["certificateRejected"], true,
+        "{}",
+        sockets["startTls"]
+    );
+    assert_eq!(sockets["startTls"]["initialSecureTransport"], "starttls");
+    assert_eq!(sockets["startTls"]["initialUpgraded"], false);
+    assert_eq!(sockets["startTls"]["oldSocketNeutered"], true);
+    for name in ["privateDns", "loopback"] {
+        assert_eq!(sockets[name]["opened"], false, "{name} raw socket");
+        assert_eq!(sockets[name]["denied"], true, "{name} raw socket");
+    }
+
+    let node = &raw["node"];
+    assert_eq!(
+        node["net"]["bytes"],
+        192 * 1024,
+        "node net echo: {}",
+        node["net"]
+    );
+    assert!(
+        node["net"]["chunks"]
+            .as_u64()
+            .is_some_and(|chunks| chunks > 1),
+        "node net echo must cross stream chunks: {}",
+        node["net"]
+    );
+    assert_eq!(node["net"]["destroyed"], true);
+    assert_eq!(node["tls"]["certificateRejected"], true, "{}", node["tls"]);
+    assert_eq!(node["tls"]["errorEvent"], true, "{}", node["tls"]);
+    assert_eq!(node["tls"]["destroyed"], true, "{}", node["tls"]);
+    assert_eq!(node["timeout"]["timedOut"], true);
+    assert_eq!(node["timeout"]["destroyed"], true);
+    for name in ["privateDns", "loopback"] {
+        assert_eq!(node[name]["opened"], false, "node {name}");
+        assert_eq!(node[name]["denied"], true, "node {name}");
+    }
 }
 
 async fn deploy_node(
@@ -817,16 +1077,13 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: vec!["nodejs_compat".to_owned()],
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote: false,
         request_id: RequestId::generate(),
         now_ms: 21,
@@ -957,16 +1214,17 @@ export default {{
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: vec!["rpc".to_owned()],
         vars,
         secrets,
         bindings: BTreeMap::new(),
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: vec![
+            "*/5 * * * *".to_owned(),
+            "1 * * * *".to_owned(),
+            "2 * * * *".to_owned(),
+        ],
         promote,
         request_id: RequestId::generate(),
         now_ms: 2,

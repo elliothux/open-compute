@@ -70,6 +70,8 @@ fn create_replay_config_backlog_and_force_delete_converge() {
         .enqueue_queue(
             &QueueEnqueueRequest {
                 queue_id: created.id,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 2,
                 batch_delay_seconds: None,

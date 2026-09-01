@@ -8,7 +8,7 @@
 发行演练未执行，不能把核心实现完成写成完整 release qualification 通过。
 
 本计划验收的是“单机发行物能否稳定安装、运行和恢复”，不是 Cloudflare API 行为对齐。后者由
-[P3.4 conformance](p3-4-cloudflare-conformance.md)及各产品 Gate 负责；release qualification 通过
+[P3.4 conformance](implemented/p3-4-cloudflare-conformance.md)及各产品 Gate 负责；release qualification 通过
 不能把未验证 contract 写成 supported，反之应用 workload 未运行也不否定发行形态。
 
 ## 剩余工作
@@ -30,6 +30,7 @@ G0 必跑关系和旧路径不构成新的兼容义务；按已验收的 [Day1 �
 - 长时验收放在实现与审查完成、源码冻结后，不作为每次开发迭代的前置条件。
 - 打包、runtime 下载、部署、提权及现有数据变更仍需相应授权；本计划不替代用户授权。
 - 不覆盖已有数据、发行物或失败记录；使用隔离环境，保留实际失败原因，不能重试到通过后隐藏前次结果。
-- [P1.8 调查](implemented/p1-8-results.md)已经以 No-Go 结束，hibernation 当前不支持。
-  本计划不承诺补齐该功能；只有新的明确功能目标才能重新开启相关实现与验收。
+- [P1.8 调查](implemented/p1-8-results.md)保留其当时的 No-Go 事实；后续 Day1 Cloudflare runtime
+  改造已经重新实现并验收 hibernatable WebSocket。发行验收继续使用当前 capability/Gate，不把旧报告
+  当成现行功能边界。
 - 历史验证报告保持原始结果。本计划的完成记录使用新的源码/输入身份，不改写原报告来补齐未运行项。

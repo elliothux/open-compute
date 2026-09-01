@@ -1,5 +1,10 @@
 //! Authorized private data plane for the loaded-isolate R2 facade.
 
+#[path = "r2_backend_multipart.rs"]
+pub(crate) mod multipart;
+#[path = "r2_backend_objects.rs"]
+pub(crate) mod objects;
+
 use crate::metrics::{
     MetricsRegistry, R2Operation, R2ProviderError, R2StreamDirection, R2StreamGuard,
 };
@@ -10,18 +15,18 @@ use axum::response::Response;
 use base64::Engine as _;
 use bytes::Bytes;
 use futures::StreamExt as _;
-use md5::{Digest as _, Md5};
 use open_compute_artifacts::{
-    R2GetResult, R2ObjectMetadata, R2ObjectStore, R2UploadSource, UserObjectKey,
+    R2GetResult, R2ObjectMetadata, R2ObjectStore, R2UploadSource, UserObjectKey, hash_file,
 };
 use open_compute_core::{
     DeploymentId, ErrorCode, OperationClass, PlatformError, R2Config, ResourceId,
 };
 use open_compute_storage::{
-    AuthorizedBinding, BindingRepository, PlatformStorage, R2BucketRepository, R2Staging,
+    AuthorizedBinding, BindingRepository, PlatformStorage, R2BucketRepository, R2ObjectListEntry,
+    R2ObjectRecord, R2ObjectRepository, R2Staging,
 };
 use open_compute_workers::{ResourcePin, ResourcePins};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -82,7 +87,7 @@ impl R2BindingService {
     pub async fn handle(&self, request: axum::extract::Request) -> Response {
         let operation = metric_operation(request.uri().path());
         let started = std::time::Instant::now();
-        let result = self.handle_inner(request).await;
+        let result = Box::pin(self.handle_inner(request)).await;
         if let (Some(metrics), Some(operation)) = (&self.metrics, operation) {
             metrics.observe_r2_operation(operation, result.is_ok(), started.elapsed());
             if let Err(error) = &result {
@@ -140,15 +145,33 @@ impl R2BindingService {
             Operation::Head => {
                 let body = bounded_json(request.into_body(), MAX_METADATA_BYTES).await?;
                 let input: KeyRequest = parse_json(&body)?;
-                let key = UserObjectKey::parse(&input.key, &locator)?;
-                timeout_result(timeout, self.objects.head(&locator, &key))
+                let key = UserObjectKey::parse(&input.key)?;
+                self.authoritative_head(&binding, &locator, &key, timeout)
                     .await?
                     .map_or_else(no_content, json_response)
             }
             Operation::Get => {
                 let body = bounded_json(request.into_body(), MAX_METADATA_BYTES).await?;
                 let input: GetRequest = parse_json(&body)?;
-                let key = UserObjectKey::parse(&input.key, &locator)?;
+                let key = UserObjectKey::parse(&input.key)?;
+                let ssec = parse_ssec(input.options.ssec_key.as_deref())?;
+                let Some((authority, _stored_ssec)) = self
+                    .committed_object(&binding, &locator, &key, timeout)
+                    .await?
+                else {
+                    return Ok(no_content());
+                };
+                if authority.ssec_key_md5.as_deref()
+                    != ssec
+                        .as_ref()
+                        .map(open_compute_artifacts::R2SsecKey::md5_base64)
+                        .as_deref()
+                {
+                    return Err(PlatformError::new(
+                        ErrorCode::R2SsecInvalid,
+                        "R2 SSE-C key is invalid or does not match the object",
+                    ));
+                }
                 let lease = self.downloads.acquire(bucket.resource.id, timeout).await?;
                 match timeout_result(
                     timeout,
@@ -157,12 +180,14 @@ impl R2BindingService {
                         &key,
                         input.options.range,
                         input.options.only_if.as_ref(),
+                        ssec.as_ref(),
                     ),
                 )
                 .await?
                 {
                     R2GetResult::Missing => no_content(),
                     R2GetResult::Precondition(metadata) => {
+                        objects::validate_object_record(&authority, &metadata)?;
                         if let Some(metrics) = &self.metrics {
                             metrics.inc_r2_condition_failure(false);
                         }
@@ -177,6 +202,7 @@ impl R2BindingService {
                     }
                     R2GetResult::Body(download) => {
                         let metadata = download.metadata;
+                        objects::validate_object_record(&authority, &metadata)?;
                         let body = download.body;
                         framed_metadata(
                             &metadata,
@@ -215,20 +241,63 @@ impl R2BindingService {
                     ),
                 )
                 .await?;
-                let key = UserObjectKey::parse(&staged.header.key, &locator)?;
+                let key = UserObjectKey::parse(&staged.header.key)?;
                 let source = R2UploadSource {
                     path: staged.guard.path.clone(),
                     length: staged.length,
-                    md5: staged.md5,
+                    checksums: staged.checksums,
                     version: uuid::Uuid::now_v7().hyphenated().to_string(),
                 };
-                let options = staged.header.options.try_into()?;
+                let options: open_compute_artifacts::R2PutOptions =
+                    staged.header.options.try_into()?;
+                let current = self
+                    .committed_object(&binding, &locator, &key, timeout)
+                    .await?;
+                self.begin_object_put(&binding, &key, &source.version, options.ssec.as_ref())?;
                 let response = mutation_timeout_result(
                     timeout,
-                    self.objects.put_file(&locator, &key, &source, &options),
+                    self.objects.put_file(
+                        &locator,
+                        &key,
+                        &source,
+                        &options,
+                        current.as_ref().and_then(|(_, ssec)| ssec.as_ref()),
+                    ),
                 )
-                .await?;
+                .await;
                 drop(lease);
+                let response = match response {
+                    Ok(Some(metadata)) => {
+                        self.finish_object_put(&binding, &key, &metadata)?;
+                        Some(metadata)
+                    }
+                    Ok(None) => {
+                        R2ObjectRepository::new(self.storage.db()).cancel_put(
+                            binding.account_id,
+                            binding.resource.id,
+                            key.as_str(),
+                        )?;
+                        None
+                    }
+                    Err(error) if error.code() == ErrorCode::R2ResultUnknown => {
+                        self.reconcile_object_key(&binding, &locator, &key, timeout)
+                            .await?;
+                        let metadata = self
+                            .authoritative_head(&binding, &locator, &key, timeout)
+                            .await?
+                            .filter(|metadata| metadata.version == source.version)
+                            .ok_or(error)?;
+                        Some(metadata)
+                    }
+                    Err(error) => {
+                        R2ObjectRepository::new(self.storage.db()).cancel_put(
+                            binding.account_id,
+                            binding.resource.id,
+                            key.as_str(),
+                        )?;
+                        return Err(error);
+                    }
+                };
                 if response.is_none()
                     && let Some(metrics) = &self.metrics
                 {
@@ -239,18 +308,112 @@ impl R2BindingService {
             Operation::Delete => {
                 let body = bounded_json(request.into_body(), MAX_DELETE_BODY_BYTES).await?;
                 let input: DeleteRequest = parse_json(&body)?;
+                if input.keys.len() > open_compute_artifacts::R2_MAX_DELETE_KEYS {
+                    return Err(PlatformError::new(
+                        ErrorCode::R2InvalidOptions,
+                        "R2 delete accepts at most 1000 keys",
+                    ));
+                }
+                let mut seen = HashSet::with_capacity(input.keys.len());
                 let keys = input
                     .keys
                     .iter()
-                    .map(|key| UserObjectKey::parse(key, &locator))
+                    .filter(|key| seen.insert((*key).clone()))
+                    .map(|key| UserObjectKey::parse(key))
                     .collect::<Result<Vec<_>, _>>()?;
-                mutation_timeout_result(timeout, self.objects.delete(&locator, &keys)).await?;
+                let repo = R2ObjectRepository::new(self.storage.db());
+                let mut existing = Vec::new();
+                for key in &keys {
+                    self.ensure_no_object_mutation(&binding, key)?;
+                    if repo
+                        .get(binding.account_id, binding.resource.id, key.as_str())?
+                        .is_some()
+                    {
+                        existing.push(key.clone());
+                    }
+                }
+                if !existing.is_empty() {
+                    let names = existing
+                        .iter()
+                        .map(|key| key.as_str().to_owned())
+                        .collect::<Vec<_>>();
+                    repo.begin_delete(
+                        binding.account_id,
+                        binding.resource.id,
+                        &names,
+                        i64::try_from(unix_ms()?).map_err(|_| protocol_error())?,
+                    )?;
+                    match mutation_timeout_result(timeout, self.objects.delete(&locator, &existing))
+                        .await
+                    {
+                        Ok(()) => {
+                            repo.finish_delete(binding.account_id, binding.resource.id, &names)?;
+                        }
+                        Err(error) if error.code() == ErrorCode::R2ResultUnknown => {
+                            let mut committed_remains = false;
+                            for key in &existing {
+                                self.reconcile_object_key(&binding, &locator, key, timeout)
+                                    .await?;
+                                committed_remains |= repo
+                                    .get(binding.account_id, binding.resource.id, key.as_str())?
+                                    .is_some();
+                            }
+                            if committed_remains {
+                                return Err(error);
+                            }
+                        }
+                        Err(error) => {
+                            for key in &names {
+                                repo.cancel_delete(binding.account_id, binding.resource.id, key)?;
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
                 no_content()
             }
             Operation::List => {
                 let body = bounded_json(request.into_body(), MAX_METADATA_BYTES).await?;
                 let input: ListRequest = parse_json(&body)?;
                 self.list(&binding, &locator, input, timeout).await?
+            }
+            Operation::CreateMultipartUpload => {
+                let body = bounded_json(request.into_body(), MAX_METADATA_BYTES).await?;
+                let input: CreateMultipartRequest = parse_json(&body)?;
+                self.create_multipart(&binding, &locator, input, timeout)
+                    .await?
+            }
+            Operation::UploadPart => {
+                let lease = self.uploads.acquire(bucket.resource.id, timeout).await?;
+                let staged = timeout_result(
+                    timeout,
+                    self.stage_part(
+                        bucket.resource.id,
+                        &request_id,
+                        bucket
+                            .max_object_bytes
+                            .max(open_compute_artifacts::R2_MIN_MULTIPART_PART_BYTES),
+                        request.into_body(),
+                    ),
+                )
+                .await?;
+                let response = self
+                    .upload_part(&binding, &locator, staged, timeout)
+                    .await?;
+                drop(lease);
+                response
+            }
+            Operation::CompleteMultipartUpload => {
+                let body = bounded_json(request.into_body(), MAX_METADATA_BYTES).await?;
+                let input: CompleteMultipartRequest = parse_json(&body)?;
+                self.complete_multipart(&binding, &locator, input, timeout)
+                    .await?
+            }
+            Operation::AbortMultipartUpload => {
+                let body = bounded_json(request.into_body(), MAX_METADATA_BYTES).await?;
+                let input: AbortMultipartRequest = parse_json(&body)?;
+                self.abort_multipart(&binding, &locator, input, timeout)
+                    .await?
             }
         };
         drop(pin);
@@ -271,7 +434,6 @@ impl R2BindingService {
         let mut header = None;
         let mut staged = None;
         let mut length = 0_u64;
-        let mut md5 = Md5::new();
         let mut reservation = StagingReservation::new(
             self.staging_bytes.clone(),
             self.config.max_staging_bytes,
@@ -315,7 +477,6 @@ impl R2BindingService {
                 ensure_storage_headroom(&self.storage, added)?;
                 let (_, file) = staged.as_mut().ok_or_else(protocol_error)?;
                 file.write_all(remaining).await.map_err(|_| overloaded())?;
-                md5.update(remaining);
                 remaining = &[];
             }
         }
@@ -323,10 +484,11 @@ impl R2BindingService {
         let (guard, file) = staged.ok_or_else(protocol_error)?;
         file.sync_all().await.map_err(|_| overloaded())?;
         drop(file);
+        let checksums = hash_file(&guard.path, length)?;
         Ok(StagedPut {
             header,
             length,
-            md5: md5.finalize().into(),
+            checksums,
             guard,
             _reservation: reservation,
         })
@@ -341,53 +503,76 @@ impl R2BindingService {
     ) -> Result<Response, PlatformError> {
         input.validate()?;
         let include_mask = include_mask(&input.include)?;
-        let provider_token = match input.cursor.as_deref() {
+        let cursor_after = match input.cursor.as_deref() {
             Some(cursor) => Some(self.decode_cursor(binding, &input, include_mask, cursor)?),
             None => None,
         };
-        let page = timeout_result(
-            timeout,
-            self.objects.list(
-                locator,
-                &input.prefix,
-                input.delimiter.as_deref(),
-                input.limit,
-                provider_token.as_deref(),
-            ),
-        )
-        .await?;
-        let mut objects = page
-            .objects
-            .iter()
-            .map(minimal_list_metadata)
-            .collect::<Vec<_>>();
-        if include_mask != 0 {
-            if let Some(metrics) = &self.metrics {
-                metrics.add_r2_list_head_fanout(page.objects.len() as u64);
-            }
-            objects = self
-                .head_list_objects(locator, &page.objects, timeout)
-                .await?;
+        let limit = input.limit.max(1);
+        let after = cursor_after
+            .as_ref()
+            .and_then(|value| value.as_deref())
+            .or(input.start_after.as_deref());
+        let page = R2ObjectRepository::new(self.storage.db()).list(
+            binding.account_id,
+            binding.resource.id,
+            &input.prefix,
+            input.delimiter.as_deref(),
+            after,
+            limit,
+        )?;
+        if input.limit == 0 {
+            let truncated = !page.entries.is_empty();
+            let cursor = truncated
+                .then(|| {
+                    self.encode_cursor(binding, &input, include_mask, after.map(str::to_owned))
+                })
+                .transpose()?;
+            return Ok(json_response(ListResponse {
+                objects: Vec::new(),
+                truncated,
+                cursor,
+                delimited_prefixes: Vec::new(),
+            }));
         }
+        let (objects, delimited_prefixes) = page.entries.into_iter().fold(
+            (Vec::new(), Vec::new()),
+            |(mut objects, mut prefixes), entry| {
+                match entry {
+                    R2ObjectListEntry::Object(object) => objects.push(object),
+                    R2ObjectListEntry::DelimitedPrefix(prefix) => prefixes.push(prefix),
+                }
+                (objects, prefixes)
+            },
+        );
+        if let Some(metrics) = &self.metrics {
+            metrics.add_r2_list_head_fanout(objects.len() as u64);
+        }
+        let headed = self
+            .head_list_objects(binding, locator, &objects, timeout)
+            .await?;
+        let objects = headed
+            .into_iter()
+            .map(|metadata| list_object_json(metadata, include_mask))
+            .collect::<Vec<_>>();
         let cursor = page
-            .provider_token
-            .as_deref()
-            .map(|token| self.encode_cursor(binding, &input, include_mask, token))
+            .next_after
+            .map(|after_key| self.encode_cursor(binding, &input, include_mask, Some(after_key)))
             .transpose()?;
         Ok(json_response(ListResponse {
             objects,
             truncated: cursor.is_some(),
             cursor,
-            delimited_prefixes: page.delimited_prefixes,
+            delimited_prefixes,
         }))
     }
 
     async fn head_list_objects(
         &self,
+        binding: &AuthorizedBinding,
         locator: &open_compute_artifacts::R2BucketLocator,
-        objects: &[open_compute_artifacts::R2ListedObject],
+        objects: &[R2ObjectRecord],
         timeout: Duration,
-    ) -> Result<Vec<serde_json::Value>, PlatformError> {
+    ) -> Result<Vec<R2ObjectMetadata>, PlatformError> {
         use futures::{StreamExt as _, stream};
         let fanout = usize::try_from(self.config.max_metadata_head_concurrency)
             .unwrap_or(1)
@@ -395,25 +580,26 @@ impl R2BindingService {
         let owned = objects.to_vec();
         let results = stream::iter(owned.into_iter().enumerate().map(
             |(index, object)| async move {
-                let key = UserObjectKey::parse(&object.key, locator)?;
-                let metadata = timeout_result(timeout, self.objects.head(locator, &key))
+                let key = UserObjectKey::parse(&object.object_key)?;
+                let metadata = self
+                    .authoritative_head(binding, locator, &key, timeout)
                     .await?
                     .ok_or_else(metadata_invalid)?;
-                Ok::<_, PlatformError>((
-                    index,
-                    serde_json::to_value(metadata).map_err(|_| protocol_error())?,
-                ))
+                Ok::<_, PlatformError>((index, metadata))
             },
         ))
         .buffer_unordered(fanout)
         .collect::<Vec<_>>()
         .await;
-        let mut ordered = vec![serde_json::Value::Null; objects.len()];
+        let mut ordered: Vec<Option<R2ObjectMetadata>> = (0..objects.len()).map(|_| None).collect();
         for result in results {
             let (index, value) = result?;
-            ordered[index] = value;
+            ordered[index] = Some(value);
         }
-        Ok(ordered)
+        ordered
+            .into_iter()
+            .map(|value| value.ok_or_else(protocol_error))
+            .collect()
     }
 
     fn encode_cursor(
@@ -421,7 +607,7 @@ impl R2BindingService {
         binding: &AuthorizedBinding,
         input: &ListRequest,
         include_mask: u8,
-        provider_token: &str,
+        after_key: Option<String>,
     ) -> Result<String, PlatformError> {
         let now = unix_ms()?;
         let payload = CursorPayload {
@@ -431,7 +617,8 @@ impl R2BindingService {
             prefix_sha256: digest_text(&input.prefix),
             delimiter_sha256: digest_text(input.delimiter.as_deref().unwrap_or("")),
             include_mask,
-            provider_token: provider_token.to_owned(),
+            start_after_sha256: digest_text(input.start_after.as_deref().unwrap_or("")),
+            after_key,
             expires_at_ms: now.saturating_add(self.config.cursor_ttl_ms),
         };
         let bytes = serde_json::to_vec(&payload).map_err(|_| cursor_invalid())?;
@@ -450,7 +637,7 @@ impl R2BindingService {
         input: &ListRequest,
         include_mask: u8,
         cursor: &str,
-    ) -> Result<String, PlatformError> {
+    ) -> Result<Option<String>, PlatformError> {
         let (payload, signature) = cursor.split_once('.').ok_or_else(cursor_invalid)?;
         if signature.contains('.') {
             return Err(cursor_invalid());
@@ -469,18 +656,26 @@ impl R2BindingService {
             || decoded.prefix_sha256 != digest_text(&input.prefix)
             || decoded.delimiter_sha256 != digest_text(input.delimiter.as_deref().unwrap_or(""))
             || decoded.include_mask != include_mask
+            || decoded.start_after_sha256 != digest_text(input.start_after.as_deref().unwrap_or(""))
             || decoded.expires_at_ms < unix_ms()?
         {
             return Err(cursor_invalid());
         }
-        Ok(decoded.provider_token)
+        Ok(decoded.after_key)
     }
 }
 
 struct StagedPut {
     header: PutHeader,
     length: u64,
-    md5: [u8; 16],
+    checksums: open_compute_artifacts::R2ComputedChecksums,
+    guard: StagingFile,
+    _reservation: StagingReservation,
+}
+
+struct StagedPart {
+    header: UploadPartHeader,
+    length: u64,
     guard: StagingFile,
     _reservation: StagingReservation,
 }

@@ -34,14 +34,14 @@ use open_compute_core::{
     QueueId, RequestId, ResourceId, ResourceState, SecretBytes, SecretString, WorkerId,
 };
 use open_compute_storage::{
-    BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, CronDeclarationMode,
-    DeploymentBuiltinBindingRecord, DeploymentCachePolicyRecord, DeploymentContentKind,
-    DeploymentObjectKind, DeploymentRecord, DeploymentState, DurableObjectRepository,
-    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration,
-    NewDeployment, NewDeploymentAssets, NewDeploymentBinding, NewDeploymentObjectRef,
-    NewDeploymentService, NewQueueConsumerDeclaration, NewQueueProducerBinding, PlatformStorage,
-    QueueAvailability, QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState,
-    ResourceRepository, StoredDeploymentSecret, WorkerRepository,
+    BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, DeploymentBuiltinBindingRecord,
+    DeploymentCachePolicyRecord, DeploymentContentKind, DeploymentObjectKind, DeploymentRecord,
+    DeploymentState, DurableObjectRepository, IdempotencyReservation, LOADER_SCHEMA_VERSION,
+    NewCronConfig, NewCronDeclaration, NewDeployment, NewDeploymentAssets, NewDeploymentBinding,
+    NewDeploymentObjectRef, NewDeploymentService, NewQueueConsumerDeclaration,
+    NewQueueProducerBinding, PlatformStorage, QueueAvailability, QueueConsumerConfig,
+    QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository,
+    StoredDeploymentSecret, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -60,7 +60,7 @@ const MAX_SECRET_TOTAL_BYTES: usize = 64 * 1024;
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_QUEUE_CONSUMER_CONCURRENCY: u32 = 32;
 const MAX_QUEUE_CONSUMERS_PER_DEPLOYMENT: usize = 64;
-const MAX_CRONS_PER_DEPLOYMENT: usize = 64;
+const MAX_CRONS_PER_DEPLOYMENT: usize = 100;
 
 /// Control-plane request for one immutable deployment resource binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -268,10 +268,6 @@ pub struct CreateDeploymentRequest {
     pub idempotency_key: String,
     /// Explicit Worker/Assets deployment content union.
     pub content: DeploymentContent,
-    /// Exact tenant compatibility date.
-    pub compatibility_date: String,
-    /// Tenant compatibility flags.
-    pub compatibility_flags: Vec<String>,
     /// JSON-compatible vars.
     pub vars: BTreeMap<String, serde_json::Value>,
     /// Write-only UTF-8 secrets.
@@ -284,10 +280,8 @@ pub struct CreateDeploymentRequest {
     pub runtime_features: DeploymentRuntimeFeatures,
     /// Immutable Queue push-consumer declarations.
     pub queue_consumers: Vec<QueueConsumerInput>,
-    /// Omitted inherits the current Cron set; present replaces it, including an empty set.
-    pub crons: Option<Vec<String>>,
-    /// Immutable limits profile.
-    pub limits: serde_json::Value,
+    /// Exact Cron set for the Worker's scheduled handler.
+    pub crons: Vec<String>,
     /// Promote only after runtime validation succeeds.
     pub promote: bool,
     /// Audit request identity.
@@ -697,7 +691,7 @@ impl<'a> DeploymentController<'a> {
             service_rows,
         } = self.prepare_bindings(request, deployment_id)?;
         let queue_consumers = self.prepare_queue_consumers(request)?;
-        let cron = prepare_cron_config(request)?;
+        let cron = prepare_cron_config(request, &workflow_binding_descriptors)?;
         let (cache_policy, mut cache_rows, builtin_descriptors, builtin_rows) =
             prepare_runtime_features(&request.runtime_features)?;
         let descriptor = WorkerCodeDescriptorV1::new(
@@ -711,8 +705,6 @@ impl<'a> DeploymentController<'a> {
             content
                 .assets()
                 .map(|assets| (&assets.manifest, &assets.routing)),
-            request.compatibility_date.clone(),
-            request.compatibility_flags.clone(),
             canonical_vars,
             secret_descriptors,
             binding_descriptors,
@@ -721,7 +713,6 @@ impl<'a> DeploymentController<'a> {
             service_descriptors,
             cache_policy,
             builtin_descriptors,
-            request.limits.clone(),
             u32::try_from(LOADER_SCHEMA_VERSION).map_err(|_| invariant())?,
         )?;
         if content.kind() == DeploymentContentKind::AssetsOnly {
@@ -755,9 +746,6 @@ impl<'a> DeploymentController<'a> {
                     .as_ref()
                     .map(|_| WORKER_BUNDLE_SCHEMA_VERSION),
                 main_module: bundle_identity.as_ref().map(|value| value.2.clone()),
-                compatibility_date: request.compatibility_date.clone(),
-                compatibility_flags: descriptor.compatibility_flags.clone(),
-                limits: request.limits.clone(),
                 worker_code_sha256: descriptor_hash,
                 vars: stored_vars,
                 secrets: stored_secrets,
@@ -781,7 +769,8 @@ impl<'a> DeploymentController<'a> {
             self.storage.hardening().max_deployments_per_worker,
         )?;
         drop(artifact_reservation);
-        let requires_product_promoter = !queue_consumers.is_empty() || request.crons.is_some();
+        let requires_product_promoter =
+            !queue_consumers.is_empty() || !cron.declarations.is_empty();
         let queue_entrypoints: Vec<Option<String>> = queue_consumers
             .iter()
             .map(|consumer| consumer.entrypoint.clone())
@@ -849,7 +838,11 @@ impl<'a> DeploymentController<'a> {
         durable_object_classes.dedup();
         let queue_declarations = QueueConsumerRepository::new(self.storage.db())
             .deployment_declarations(deployment_id)?;
-        let requires_product_promoter = !queue_declarations.is_empty() || request.crons.is_some();
+        let cron_declarations = open_compute_storage::CronRepository::new(self.storage.db())
+            .deployment_config(deployment_id)?
+            .declarations;
+        let requires_product_promoter =
+            !queue_declarations.is_empty() || !cron_declarations.is_empty();
         let mut queue_entrypoints = queue_declarations
             .into_iter()
             .map(|consumer| consumer.entrypoint)
@@ -1239,10 +1232,7 @@ fn validate_asset_content(
             || !request.secrets.is_empty()
             || !request.bindings.is_empty()
             || !request.queue_consumers.is_empty()
-            || request
-                .crons
-                .as_ref()
-                .is_some_and(|values| !values.is_empty())
+            || !request.crons.is_empty()
             || matches!(
                 assets.routing.run_worker_first,
                 RunWorkerFirst::All(true) | RunWorkerFirst::Rules(_)

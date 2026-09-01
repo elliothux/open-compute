@@ -391,6 +391,8 @@ async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() 
         .enqueue_queue(
             &QueueEnqueueRequest {
                 queue_id,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 batch_delay_seconds: None,
@@ -452,6 +454,8 @@ async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() 
         .enqueue_queue(
             &QueueEnqueueRequest {
                 queue_id,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 batch_delay_seconds: None,

@@ -1,6 +1,6 @@
 use super::*;
 use crate::workflow_http::tests::{Fixture, fixture};
-use open_compute_core::{RequestId, SecretString, WorkflowId};
+use open_compute_core::{RequestId, SecretString, WorkflowId, WorkflowOperationId};
 use open_compute_storage::scheduler::{WorkflowCompletion, WorkflowState};
 use open_compute_storage::{
     NewDeployment, NewDeploymentProducts, WorkerRepository, WorkflowBindingRecord,
@@ -35,7 +35,7 @@ fn ready_binding(f: &Fixture, definition: WorkflowId) -> WorkflowBindingRecord {
         .unwrap();
     let deployment = DeploymentId::generate();
     let binding = repository
-        .prepare_binding(f.account, deployment, "FLOW", definition, 3)
+        .prepare_binding(f.account, deployment, "FLOW", definition, Vec::new(), 3)
         .unwrap();
     workers
         .insert_staging_deployment(
@@ -48,9 +48,6 @@ fn ready_binding(f: &Fixture, definition: WorkflowId) -> WorkflowBindingRecord {
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".into()),
-                compatibility_date: "2026-08-26".into(),
-                compatibility_flags: vec![],
-                limits: json!({"profile":"default"}),
                 worker_code_sha256: [4; 32],
                 vars: Default::default(),
                 secrets: Default::default(),
@@ -86,6 +83,22 @@ fn caller(binding: &WorkflowBindingRecord) -> HeaderMap {
     ])
 }
 
+fn mutation_caller(binding: &WorkflowBindingRecord) -> HeaderMap {
+    mutation_caller_for(binding, WorkflowOperationId::generate())
+}
+
+fn mutation_caller_for(
+    binding: &WorkflowBindingRecord,
+    operation: WorkflowOperationId,
+) -> HeaderMap {
+    let mut headers = caller(binding);
+    headers.insert(
+        HeaderName::from_static("x-open-compute-request-id"),
+        HeaderValue::from_str(&operation.to_string()).unwrap(),
+    );
+    headers
+}
+
 fn body(fence: &WorkflowFence, fields: Value) -> Value {
     let Value::Object(mut body) = fields else {
         panic!("test body must be an object");
@@ -98,6 +111,443 @@ fn body(fence: &WorkflowFence, fields: Value) -> Value {
             .clone(),
     );
     Value::Object(body)
+}
+
+#[test]
+fn workflow_batch_item_operation_ids_are_stable_and_instance_scoped() {
+    let batch = WorkflowOperationId::generate();
+    let first = workflow_batch_item_operation_id(batch, 0).unwrap();
+    assert_eq!(first, workflow_batch_item_operation_id(batch, 0).unwrap());
+    assert_ne!(first, workflow_batch_item_operation_id(batch, 1).unwrap());
+}
+
+#[test]
+fn prepared_create_replay_reuses_the_committed_per_instance_operation() {
+    let f = fixture();
+    let (definition, binding) = ready(&f);
+    let config = WorkflowsConfig::default();
+    let operation = WorkflowOperationId::generate();
+    let request = json!({"id":"prepared-one","payloadBase64":"T0NEVgECAA=="});
+    let request_json = serde_json::to_vec(&request).unwrap();
+    let repository = WorkflowRepository::new(f.storage.db());
+    let fingerprint = workflow_binding_operation_fingerprint(
+        binding.descriptor.binding_id,
+        "create",
+        &request_json,
+    );
+    assert!(
+        repository
+            .begin_binding_operation(
+                binding.descriptor.binding_id,
+                operation,
+                "create",
+                &fingerprint,
+                &request_json,
+                10,
+            )
+            .unwrap()
+            .is_none()
+    );
+    let committed = WorkflowController::new(&f.storage, &f.scheduler, &config)
+        .create(
+            f.account,
+            definition,
+            operation,
+            Some("prepared-one"),
+            open_compute_workers::WorkflowCreateInput {
+                payload_base64: "T0NEVgECAA==",
+                retention: None,
+                schedule: None,
+            },
+            11,
+        )
+        .unwrap();
+    let restarted =
+        WorkflowBindingService::new(f.storage.clone(), f.scheduler.clone(), config).unwrap();
+    let path = format!(
+        "/internal/bindings/v1/workflow/{}/create",
+        binding.descriptor.binding_id
+    );
+    let headers = mutation_caller_for(&binding, operation);
+    let response = restarted
+        .execute(&path, &headers, request.clone(), 12)
+        .unwrap();
+    assert_eq!(
+        response["instanceId"].as_str().unwrap(),
+        committed.instance_id.to_string()
+    );
+    assert_eq!(
+        restarted.execute(&path, &headers, request, 13).unwrap(),
+        response
+    );
+    let stored = repository
+        .find_instance(definition, "prepared-one")
+        .unwrap();
+    assert_eq!(stored.identity, committed);
+    assert_eq!(stored.identity.creation_operation_id, operation);
+}
+
+#[test]
+fn prepared_create_does_not_block_a_distinct_binding_mutation_after_restart() {
+    let f = fixture();
+    let (definition, binding) = ready(&f);
+    let config = WorkflowsConfig::default();
+    let interrupted_operation = WorkflowOperationId::generate();
+    let interrupted_request = json!({"id":"interrupted","payloadBase64":"T0NEVgECAA=="});
+    let interrupted_json = serde_json::to_vec(&interrupted_request).unwrap();
+    let repository = WorkflowRepository::new(f.storage.db());
+    let fingerprint = workflow_binding_operation_fingerprint(
+        binding.descriptor.binding_id,
+        "create",
+        &interrupted_json,
+    );
+    assert!(
+        repository
+            .begin_binding_operation(
+                binding.descriptor.binding_id,
+                interrupted_operation,
+                "create",
+                &fingerprint,
+                &interrupted_json,
+                10,
+            )
+            .unwrap()
+            .is_none()
+    );
+    let interrupted = WorkflowController::new(&f.storage, &f.scheduler, &config)
+        .create(
+            f.account,
+            definition,
+            interrupted_operation,
+            Some("interrupted"),
+            open_compute_workers::WorkflowCreateInput {
+                payload_base64: "T0NEVgECAA==",
+                retention: None,
+                schedule: None,
+            },
+            11,
+        )
+        .unwrap();
+
+    let restarted =
+        WorkflowBindingService::new(f.storage.clone(), f.scheduler.clone(), config).unwrap();
+    let path = format!(
+        "/internal/bindings/v1/workflow/{}/create",
+        binding.descriptor.binding_id
+    );
+    let next = restarted
+        .execute(
+            &path,
+            &mutation_caller(&binding),
+            json!({"id":"after-restart","payloadBase64":"T0NEVgECAA=="}),
+            12,
+        )
+        .unwrap();
+    assert_eq!(next["id"], "after-restart");
+
+    let replay = restarted
+        .execute(
+            &path,
+            &mutation_caller_for(&binding, interrupted_operation),
+            interrupted_request,
+            13,
+        )
+        .unwrap();
+    assert_eq!(
+        replay["instanceId"].as_str().unwrap(),
+        interrupted.instance_id.to_string()
+    );
+    assert_eq!(
+        repository
+            .find_instance(definition, "after-restart")
+            .unwrap()
+            .identity
+            .external_instance_id,
+        "after-restart"
+    );
+}
+
+#[test]
+fn prepared_create_batch_replay_reuses_the_atomic_committed_group() {
+    let f = fixture();
+    let (definition, binding) = ready(&f);
+    let config = WorkflowsConfig::default();
+    let batch = WorkflowOperationId::generate();
+    let request = json!({"instances":[
+        {"id":"prepared-batch-a","payloadBase64":"T0NEVgECAA=="},
+        {"id":"prepared-batch-b","payloadBase64":"T0NEVgECAA=="}
+    ]});
+    let request_json = serde_json::to_vec(&request).unwrap();
+    let repository = WorkflowRepository::new(f.storage.db());
+    let fingerprint = workflow_binding_operation_fingerprint(
+        binding.descriptor.binding_id,
+        "create-batch",
+        &request_json,
+    );
+    assert!(
+        repository
+            .begin_binding_operation(
+                binding.descriptor.binding_id,
+                batch,
+                "create-batch",
+                &fingerprint,
+                &request_json,
+                20,
+            )
+            .unwrap()
+            .is_none()
+    );
+    let first_operation = workflow_batch_item_operation_id(batch, 0).unwrap();
+    let second_operation = workflow_batch_item_operation_id(batch, 1).unwrap();
+    let create_requests = [
+        (
+            first_operation,
+            Some("prepared-batch-a"),
+            open_compute_workers::WorkflowCreateInput {
+                payload_base64: "T0NEVgECAA==",
+                retention: None,
+                schedule: None,
+            },
+        ),
+        (
+            second_operation,
+            Some("prepared-batch-b"),
+            open_compute_workers::WorkflowCreateInput {
+                payload_base64: "T0NEVgECAA==",
+                retention: None,
+                schedule: None,
+            },
+        ),
+    ];
+    let committed = WorkflowController::new(&f.storage, &f.scheduler, &config)
+        .create_batch(f.account, definition, batch, &create_requests, 21)
+        .unwrap();
+    let restarted =
+        WorkflowBindingService::new(f.storage.clone(), f.scheduler.clone(), config).unwrap();
+    let path = format!(
+        "/internal/bindings/v1/workflow/{}/create-batch",
+        binding.descriptor.binding_id
+    );
+    let headers = mutation_caller_for(&binding, batch);
+    let response = restarted
+        .execute(&path, &headers, request.clone(), 22)
+        .unwrap();
+    assert_eq!(
+        response["instances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["instanceId"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>(),
+        committed
+            .iter()
+            .map(|identity| identity.instance_id.to_string())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        restarted.execute(&path, &headers, request, 23).unwrap(),
+        response
+    );
+    for (ordinal, identity) in committed.iter().enumerate() {
+        assert_eq!(identity.creation_batch_id, batch);
+        assert_eq!(
+            identity.creation_operation_id,
+            workflow_batch_item_operation_id(batch, ordinal).unwrap()
+        );
+        assert_eq!(
+            repository
+                .find_instance(definition, &identity.external_instance_id)
+                .unwrap()
+                .identity,
+            *identity
+        );
+    }
+}
+
+#[test]
+fn terminate_with_rollback_queues_a_durable_rollback_activation() {
+    let f = fixture();
+    let (_definition, binding) = ready(&f);
+    let service = WorkflowBindingService::new(
+        f.storage.clone(),
+        f.scheduler.clone(),
+        WorkflowsConfig::default(),
+    )
+    .unwrap();
+    let path = |operation: &str| {
+        format!(
+            "/internal/bindings/v1/workflow/{}/{operation}",
+            binding.descriptor.binding_id
+        )
+    };
+    let created = service
+        .execute(
+            &path("create"),
+            &mutation_caller(&binding),
+            json!({"id":"rollback-instance","payloadBase64":"T0NEVgECAA=="}),
+            10,
+        )
+        .unwrap();
+    let instance_id: WorkflowInstanceId = created["instanceId"].as_str().unwrap().parse().unwrap();
+    assert_eq!(
+        service
+            .execute(
+                &path("terminate"),
+                &mutation_caller(&binding),
+                json!({"instanceId":instance_id,"rollback":true}),
+                11,
+            )
+            .unwrap(),
+        json!({"ok":true})
+    );
+    let record = f.scheduler.workflow_instance(instance_id).unwrap().unwrap();
+    assert_eq!(record.state, WorkflowState::Queued);
+    assert!(record.durable.rollback_requested);
+    assert!(
+        f.scheduler
+            .claim_workflow(&record.identity, 11, &WorkflowsConfig::default())
+            .unwrap()
+            .unwrap()
+            .rollback
+    );
+}
+
+#[test]
+fn workflow_public_batch_lifecycle_and_validation_use_one_current_path() {
+    let f = fixture();
+    let (_definition, binding) = ready(&f);
+    let service = WorkflowBindingService::new(
+        f.storage.clone(),
+        f.scheduler.clone(),
+        WorkflowsConfig::default(),
+    )
+    .unwrap()
+    .with_metrics(f.metrics.clone());
+    let path = |operation: &str| {
+        format!(
+            "/internal/bindings/v1/workflow/{}/{operation}",
+            binding.descriptor.binding_id
+        )
+    };
+    let created = service
+        .execute(
+            &path("create-batch"),
+            &mutation_caller(&binding),
+            json!({"instances":[
+                {"id":"batch-a","payloadBase64":"T0NEVgECAA==","locationHint":"wnam",
+                 "retention":{"successRetention":"1 hour","errorRetention":"2 hours"}},
+                {"id":"batch-b","payloadBase64":"T0NEVgECAA==","locationHint":"apac-ne"}
+            ]}),
+            10,
+        )
+        .unwrap();
+    let rows = created["instances"].as_array().unwrap();
+    let first: WorkflowInstanceId = rows[0]["instanceId"].as_str().unwrap().parse().unwrap();
+    let second: WorkflowInstanceId = rows[1]["instanceId"].as_str().unwrap().parse().unwrap();
+    assert_eq!(
+        service
+            .execute(
+                &path("pause"),
+                &mutation_caller(&binding),
+                json!({"instanceId":first}),
+                11,
+            )
+            .unwrap(),
+        json!({"ok":true})
+    );
+    assert_eq!(
+        service
+            .execute(
+                &path("status"),
+                &caller(&binding),
+                json!({"instanceId":first}),
+                11,
+            )
+            .unwrap()["status"],
+        "paused"
+    );
+    for operation in ["resume", "send-event", "terminate"] {
+        let body = if operation == "send-event" {
+            json!({"instanceId":first,"type":"ready","payloadBase64":"T0NEVgECAw=="})
+        } else {
+            json!({"instanceId":first})
+        };
+        assert_eq!(
+            service
+                .execute(&path(operation), &mutation_caller(&binding), body, 12,)
+                .unwrap(),
+            json!({"ok":true}),
+            "{operation}"
+        );
+    }
+    assert_eq!(
+        service
+            .execute(
+                &path("delete"),
+                &mutation_caller(&binding),
+                json!({"instanceId":second}),
+                13,
+            )
+            .unwrap(),
+        json!({"ok":true})
+    );
+    let deleted = service
+        .execute(
+            &path("delete-batch"),
+            &mutation_caller(&binding),
+            json!({"instanceIds":["batch-a","missing","batch-a"]}),
+            14,
+        )
+        .unwrap();
+    assert_eq!(deleted["deleted"].as_array().unwrap().len(), 2);
+    assert_eq!(deleted["errors"][0]["id"], "missing");
+
+    for location in [
+        "wnam", "enam", "sam", "weur", "eeur", "apac", "apac-ne", "apac-se", "oc", "afr", "me",
+    ] {
+        validate_location(Some(location)).unwrap();
+    }
+    assert_eq!(
+        validate_location(Some("moon")).unwrap_err().code(),
+        ErrorCode::WorkflowMethodUnsupported
+    );
+    for code in [
+        ErrorCode::WorkflowRuntimeUnavailable,
+        ErrorCode::WorkflowInvariantViolation,
+        ErrorCode::WorkflowInstanceAlreadyExists,
+        ErrorCode::WorkflowInstanceStateConflict,
+        ErrorCode::WorkflowInstanceBusy,
+        ErrorCode::WorkflowInstanceCleanupPending,
+        ErrorCode::WorkflowInstanceNotFound,
+        ErrorCode::WorkflowStateQuotaExceeded,
+        ErrorCode::WorkflowPayloadTooLarge,
+        ErrorCode::WorkflowResultTooLarge,
+        ErrorCode::WorkflowMethodUnsupported,
+        ErrorCode::WorkflowSerializationUnsupported,
+    ] {
+        assert_eq!(workflow_error_code(code.as_str()).unwrap(), code);
+    }
+    assert!(workflow_error_code("PRIVATE_ERROR").is_err());
+    let batch = WorkflowOperationId::generate();
+    assert_eq!(
+        workflow_named_item_operation_id(batch, "batch-a").unwrap(),
+        workflow_named_item_operation_id(batch, "batch-a").unwrap()
+    );
+    for (operation, body) in [
+        ("create-batch", json!({"instances":[]})),
+        ("delete-batch", json!({"instanceIds":[]})),
+        ("pause", json!({"instanceId":first,"rollback":true})),
+        ("unknown", json!({})),
+    ] {
+        assert_eq!(
+            service
+                .execute(&path(operation), &mutation_caller(&binding), body, 15,)
+                .unwrap_err()
+                .code(),
+            ErrorCode::WorkflowMethodUnsupported,
+            "{operation}"
+        );
+    }
 }
 
 #[test]
@@ -120,8 +570,8 @@ fn workflow_caller_uses_current_definition_scope_and_strict_handles() {
     let created = service
         .execute(
             &path(&binding, "create"),
-            &caller(&binding),
-            json!({"id":"original","payloadJson":"null"}),
+            &mutation_caller(&binding),
+            json!({"id":"original","payloadBase64":"T0NEVgECAA=="}),
             10,
         )
         .unwrap();
@@ -166,22 +616,6 @@ fn workflow_caller_uses_current_definition_scope_and_strict_handles() {
         "x-open-compute-workflow-do-context",
         HeaderValue::from_static("1"),
     );
-    for method in [
-        "create",
-        "send-event",
-        "pause",
-        "resume",
-        "terminate",
-        "restart",
-    ] {
-        assert_eq!(
-            service
-                .execute(&path(&second, method), &do_headers, json!({}), 11)
-                .unwrap_err()
-                .code(),
-            ErrorCode::WorkflowDoOutputGateUnsupported
-        );
-    }
     assert_eq!(
         service
             .execute(
@@ -223,8 +657,8 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
     let created = service
         .execute(
             &format!("{path}/create"),
-            &headers,
-            json!({"id":"one","payloadJson":"{\"secret\":1}"}),
+            &mutation_caller(&binding),
+            json!({"id":"one","payloadBase64":"T0NEVgECEQAAAAEAAAAGc2VjcmV0BD/wAAAAAAAA"}),
             10,
         )
         .unwrap();
@@ -240,7 +674,7 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
         service
             .execute(
                 &format!("{path}/status"),
-                &headers,
+                &mutation_caller(&binding),
                 json!({"instanceId":instance_id}),
                 11,
             )
@@ -251,8 +685,8 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
         service
             .execute(
                 &format!("{path}/create"),
-                &headers,
-                json!({"id":"one","payloadJson":"null"}),
+                &mutation_caller(&binding),
+                json!({"id":"one","payloadBase64":"T0NEVgECAA=="}),
                 11,
             )
             .unwrap_err()
@@ -264,18 +698,22 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
         "x-open-compute-workflow-do-context",
         HeaderValue::from_static("1"),
     );
-    assert_eq!(
-        service
-            .execute(
-                &format!("{path}/create"),
-                &do_headers,
-                json!({"id":"do","payloadJson":"null"}),
-                11,
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::WorkflowDoOutputGateUnsupported
-    );
+    let created_in_do = service
+        .execute(
+            &format!("{path}/create"),
+            &{
+                let mut headers = mutation_caller(&binding);
+                headers.insert(
+                    "x-open-compute-workflow-do-context",
+                    HeaderValue::from_static("1"),
+                );
+                headers
+            },
+            json!({"id":"do","payloadBase64":"T0NEVgECAA=="}),
+            11,
+        )
+        .unwrap();
+    assert_eq!(created_in_do["id"], "do");
     assert_eq!(
         service
             .execute(
@@ -291,8 +729,8 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
         service
             .execute(
                 &format!("{path}/create"),
-                &headers,
-                json!({"id":"forged","payloadJson":"null","definitionId":definition}),
+                &mutation_caller(&binding),
+                json!({"id":"forged","payloadBase64":"T0NEVgECAA==","definitionId":definition}),
                 11,
             )
             .unwrap_err()
@@ -303,13 +741,12 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
         service
             .execute(
                 &format!("{path}/restart"),
-                &headers,
+                &mutation_caller(&binding),
                 json!({"instanceId":instance_id}),
                 11,
             )
-            .unwrap_err()
-            .code(),
-        ErrorCode::WorkflowSerializationUnsupported
+            .unwrap(),
+        json!({"ok":true})
     );
     let mut stale = headers.clone();
     stale.insert(
@@ -354,7 +791,7 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
             "ordinal":0,
             "attempt":first["attempt"],
             "stepToken":first["stepToken"],
-            "outputJson":"{\"value\":333333333.33333329}"
+            "outputBase64":"T0NEVgECEQAAAAEAAAAFdmFsdWUEQbPeQ1VVVVU="
         }),
     );
     assert_eq!(
@@ -372,8 +809,8 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
     assert_eq!(
         service
             .run("result", body(&run.fence, json!({"ordinal":0})), 15)
-            .unwrap()["outputJson"],
-        "{\"value\":333333333.3333333}"
+            .unwrap()["outputBase64"],
+        "T0NEVgECEQAAAAEAAAAFdmFsdWUEQbPeQ1VVVVU="
     );
 
     let second_claim = body(
@@ -471,6 +908,187 @@ fn workflow_backend_binding_scope_do_fence_and_private_step_protocol() {
     assert!(rendered.contains("open_compute_workflow_steps_total{outcome=\"success\"} 2"));
     assert!(rendered.contains("open_compute_workflow_steps_total{outcome=\"error\"} 1"));
     assert!(!rendered.contains("private-stack"));
+}
+
+#[test]
+fn workflow_private_dynamic_delay_round_trip_is_durable() {
+    let f = fixture();
+    let (definition, _binding) = ready(&f);
+    let config = WorkflowsConfig::default();
+    let identity = WorkflowController::new(&f.storage, &f.scheduler, &config)
+        .create(
+            f.account,
+            definition,
+            WorkflowOperationId::generate(),
+            Some("dynamic-delay"),
+            open_compute_workers::WorkflowCreateInput {
+                payload_base64: "T0NEVgECAA==",
+                retention: None,
+                schedule: None,
+            },
+            0,
+        )
+        .unwrap();
+    let run = f
+        .scheduler
+        .claim_workflow(&identity, 0, &config)
+        .unwrap()
+        .unwrap();
+    let service =
+        WorkflowBindingService::new(f.storage.clone(), f.scheduler.clone(), config.clone())
+            .unwrap();
+    let claim = service
+        .run(
+            "claim-batch",
+            body(
+                &run.fence,
+                json!({"steps":[{
+                    "ordinal":0,"kind":"do","name":"dynamic","nameCount":1,
+                    "config":{"timeout":5,"retries":{"limit":1,"delay":{"dynamic":true}}},
+                    "dependencies":[],"batchFirstOrdinal":0,"batchSize":1
+                }],"remainingMs":config.dispatch_timeout_ms}),
+            ),
+            0,
+        )
+        .unwrap();
+    let grant = &claim["steps"][0];
+    let timeout = service
+        .run(
+            "timeout",
+            body(
+                &run.fence,
+                json!({
+                    "ordinal":0,
+                    "attempt":grant["attempt"],
+                    "stepToken":grant["stepToken"]
+                }),
+            ),
+            5,
+        )
+        .unwrap();
+    assert_eq!(timeout["state"], "resolve_delay");
+    let resolved = service
+        .run(
+            "resolve-delay",
+            body(
+                &run.fence,
+                json!({
+                    "ordinal":0,"attempt":1,"code":"WORKFLOW_STEP_TIMEOUT",
+                    "resolvedDelayMs":0
+                }),
+            ),
+            5,
+        )
+        .unwrap();
+    assert_eq!(resolved["state"], "suspended");
+    assert_eq!(
+        service
+            .run("yield", body(&run.fence, json!({"finalOrdinal":1025})), 5,)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowStepLimitExceeded
+    );
+    assert_eq!(
+        service
+            .run("unknown", body(&run.fence, json!({})), 5)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowMethodUnsupported
+    );
+}
+
+#[test]
+fn workflow_private_protocol_rejects_shape_drift_and_persists_failure_delay() {
+    let f = fixture();
+    let (definition, _binding) = ready(&f);
+    let config = WorkflowsConfig::default();
+    let identity = WorkflowController::new(&f.storage, &f.scheduler, &config)
+        .create(
+            f.account,
+            definition,
+            WorkflowOperationId::generate(),
+            Some("private-failure-delay"),
+            open_compute_workers::WorkflowCreateInput {
+                payload_base64: "T0NEVgECAA==",
+                retention: None,
+                schedule: None,
+            },
+            0,
+        )
+        .unwrap();
+    let run = f
+        .scheduler
+        .claim_workflow(&identity, 0, &config)
+        .unwrap()
+        .unwrap();
+    let service =
+        WorkflowBindingService::new(f.storage.clone(), f.scheduler.clone(), config.clone())
+            .unwrap();
+    let claim = service
+        .run(
+            "claim-batch",
+            body(
+                &run.fence,
+                json!({"steps":[{
+                    "ordinal":0,"kind":"do","name":"retry","nameCount":1,
+                    "config":{"timeout":10,"retries":{"limit":1,"delay":{"dynamic":true}}},
+                    "dependencies":[],"batchFirstOrdinal":0,"batchSize":1
+                }],"remainingMs":config.dispatch_timeout_ms}),
+            ),
+            0,
+        )
+        .unwrap();
+    let grant = &claim["steps"][0];
+
+    assert_eq!(
+        service
+            .run(
+                "timeout",
+                body(
+                    &run.fence,
+                    json!({
+                        "ordinal":0,"attempt":grant["attempt"],
+                        "stepToken":grant["stepToken"],"extra":true
+                    }),
+                ),
+                1,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowMethodUnsupported
+    );
+    assert_eq!(
+        service
+            .run(
+                "success",
+                body(&run.fence, json!({"ordinal":0,"attempt":1})),
+                1,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowSerializationUnsupported
+    );
+    assert_eq!(
+        service
+            .run("result", json!("not-an-object"), 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowRunStale
+    );
+    let settled = service
+        .run(
+            "failure",
+            body(
+                &run.fence,
+                json!({
+                    "ordinal":0,"attempt":grant["attempt"],"stepToken":grant["stepToken"],
+                    "code":"WORKFLOW_STEP_TIMEOUT","resolvedDelayMs":3
+                }),
+            ),
+            1,
+        )
+        .unwrap();
+    assert_eq!(settled["state"], "suspended");
 }
 
 #[tokio::test]

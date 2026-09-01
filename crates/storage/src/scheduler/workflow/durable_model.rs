@@ -24,9 +24,32 @@ pub enum WorkflowStepGrant {
         config: WorkflowStepConfig,
     },
     /// Immutable output is available through the result operation.
-    Complete,
+    Complete {
+        /// Final successful attempt for a callback replay.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        attempt: Option<u32>,
+        /// Frozen callback policy needed to reconstruct rollback context.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        config: Option<WorkflowStepConfig>,
+    },
     /// Immutable sanitized failure is available through the result operation.
     Failed,
+    /// A timed-out dynamic-delay step must run its immutable delay function
+    /// before scheduler authority can choose retry versus terminal failure.
+    ResolveDelay {
+        /// One-based attempt whose timeout is being resolved.
+        attempt: u32,
+        /// Stable failure category supplied to the delay function.
+        code: String,
+        /// Frozen callback policy; its retry delay is deliberately absent.
+        config: WorkflowStepConfig,
+    },
+    /// Normal replay reached the durable rollback execution frontier.
+    RollbackBoundary {
+        /// First internal rollback descriptor, or the current registration frontier.
+        #[serde(rename = "rollbackOrdinal")]
+        rollback_ordinal: u32,
+    },
     /// Durable waiting or a budget boundary requires a drained yield.
     Suspended,
 }
@@ -37,14 +60,36 @@ pub enum WorkflowStepGrant {
 pub enum WorkflowStepResult {
     /// Canonical callback/event output, absent for sleep's void result.
     Complete {
-        /// Retained JSON bytes; event payload depth is independent of its envelope.
-        #[serde(rename = "outputJson", skip_serializing_if = "Option::is_none")]
-        output_json: Option<String>,
+        /// Retained durable-value bytes, absent for a sleep result.
+        #[serde(rename = "outputBase64", skip_serializing_if = "Option::is_none")]
+        output_base64: Option<String>,
+    },
+    /// A waitForEvent result with trusted metadata and an independently encoded payload.
+    Event {
+        /// Exact admitted event type.
+        #[serde(rename = "type")]
+        event_type: String,
+        /// Canonical durable-value payload.
+        #[serde(rename = "payloadBase64")]
+        payload_base64: String,
+        /// Authority admission timestamp.
+        #[serde(rename = "timestampMs")]
+        timestamp_ms: i64,
     },
     /// A stable failure, with no tenant message or stack.
     Failed {
         /// Frozen error category.
         code: String,
+    },
+    /// The tenant deployment must evaluate its dynamic delay function and
+    /// report the bounded result under the current run fence.
+    ResolveDelay {
+        /// One-based failed attempt.
+        attempt: u32,
+        /// Stable failure category.
+        code: String,
+        /// Frozen callback policy with no persisted callable value.
+        config: WorkflowStepConfig,
     },
     /// The instance must release the activation after sibling callbacks drain.
     Suspended,
@@ -53,8 +98,9 @@ pub enum WorkflowStepResult {
 impl std::fmt::Debug for WorkflowStepResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Complete { .. } => "Complete([REDACTED])",
+            Self::Complete { .. } | Self::Event { .. } => "Complete([REDACTED])",
             Self::Failed { .. } => "Failed",
+            Self::ResolveDelay { .. } => "ResolveDelay",
             Self::Suspended => "Suspended",
         })
     }
@@ -72,13 +118,25 @@ pub struct WorkflowStepAttempt {
     pub step_token: WorkflowToken,
 }
 
+/// Sanitized dynamic-delay result submitted for one timed-out attempt.
+#[derive(Clone, Copy, Debug)]
+pub struct WorkflowDelayResolution {
+    /// Stable failure category evaluated by the tenant delay function.
+    pub failure_code: ErrorCode,
+    /// Bounded delay returned by the tenant function, absent for a rejected function.
+    pub resolved_delay_ms: Option<u64>,
+}
+
 /// Trusted callback report. Raw exception text is deliberately not representable.
 #[derive(Clone, Copy)]
 pub enum WorkflowStepOutcome<'a> {
-    /// Serialize and commit a supported JSON result before resolving the callback.
+    /// Commit an already serialized durable-value result before resolving the callback.
     Success(&'a str),
     /// Sanitized known callback or protocol failure.
     Failure(ErrorCode),
+    /// Sanitized callback failure with a tenant delay-function result. The
+    /// resolved duration is validated and persisted by scheduler authority.
+    FailureWithDelay(ErrorCode, u64),
     /// Trusted host timer observed the persisted attempt deadline.
     Timeout,
 }
@@ -86,7 +144,7 @@ impl std::fmt::Debug for WorkflowStepOutcome<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Success(_) => "Success([REDACTED])",
-            Self::Failure(_) => "Failure",
+            Self::Failure(_) | Self::FailureWithDelay(_, _) => "Failure",
             Self::Timeout => "Timeout",
         })
     }
@@ -100,6 +158,7 @@ pub(super) struct DurableStep {
     pub step_token: Option<WorkflowToken>,
     pub deadline: Option<i64>,
     pub due: Option<i64>,
+    pub retry_delay_ms: Option<u64>,
     pub ceiling: Option<i64>,
     pub output: Option<String>,
     pub failure: Option<String>,
@@ -151,6 +210,7 @@ pub(super) fn read_step(
         step_token: row_token(row, "step_token")?,
         deadline: row.get("attempt_deadline_at_ms").map_err(sql_error)?,
         due: row.get("due_at_ms").map_err(sql_error)?,
+        retry_delay_ms: row.get("retry_delay_ms").map_err(sql_error)?,
         ceiling: row.get("event_buffer_ceiling").map_err(sql_error)?,
         output,
         failure: code,
@@ -181,11 +241,32 @@ pub(super) fn descriptor(
         _ => return Err(error(ErrorCode::WorkflowInvariantViolation)),
     };
     let config_json = text(row, "config_json").map_err(sql_error)?;
+    let mut config_value: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&config_json)
+            .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
+    let rollback_step = config_value
+        .remove("rollbackStep")
+        .and_then(|value| value.as_bool())
+        .ok_or_else(|| error(ErrorCode::WorkflowInvariantViolation))?;
+    let rollback_config = config_value
+        .remove("rollbackConfig")
+        .map(|value| {
+            let config: WorkflowStepConfig = serde_json::from_value(value)
+                .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
+            config
+                .validate()
+                .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?;
+            Ok(config)
+        })
+        .transpose()?;
+    let step_config = serde_json::Value::Object(config_value).to_string();
     let descriptor = WorkflowStepDescriptor {
         ordinal: row.get("ordinal").map_err(sql_error)?,
         name: row.get("name").map_err(sql_error)?,
         name_count: row.get("name_count").map_err(sql_error)?,
-        config: WorkflowDurableConfig::from_canonical(kind, &config_json)?,
+        config: WorkflowDurableConfig::from_canonical(kind, &step_config)?,
+        rollback_config,
+        rollback_step,
         dependencies,
         batch_first_ordinal: row.get("batch_first_ordinal").map_err(sql_error)?,
         batch_size: row.get("batch_size").map_err(sql_error)?,
@@ -193,6 +274,7 @@ pub(super) fn descriptor(
     let config_hash: Vec<u8> = row.get("config_sha256").map_err(sql_error)?;
     let descriptor_hash: Vec<u8> = row.get("descriptor_sha256").map_err(sql_error)?;
     if Sha256::digest(config_json.as_bytes()).as_slice() != config_hash
+        || descriptor.canonical_config_json()? != config_json
         || descriptor
             .sha256()
             .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))?

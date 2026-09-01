@@ -384,6 +384,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
     .unwrap();
     assert_eq!(version["id"], a.id.to_string());
     assert_eq!(version["tag"], "release-A");
+    assert_eq!(version["timestamp"], "1970-01-01T00:00:00.010Z");
     let image: serde_json::Value = serde_json::from_str(
         &dispatch(&transport, &repo, account, target.id, &a, "/images")
             .await
@@ -756,16 +757,13 @@ fn request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-26".to_owned(),
-        compatibility_flags: Vec::new(),
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
         services,
         runtime_features,
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote,
         request_id: RequestId::generate(),
         now_ms,

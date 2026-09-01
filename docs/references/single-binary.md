@@ -86,7 +86,7 @@ data-dir 与 macOS staging 所在文件系统必须允许执行，并为解压�
 
 Linux 官方 workerd 要求 glibc 2.35+；platformd 同时受实际编译主机的 libc 基线约束。
 容器示例与 CI 使用 Ubuntu 24.04，不使用 scratch/Alpine。macOS 与 CPU 要求继承
-[当前 upstream pin 的要求](https://github.com/cloudflare/workerd/tree/v1.20260826.1#running-workerd)。
+[当前 upstream pin 的要求](https://github.com/cloudflare/workerd/tree/v1.20260830.1#running-workerd)。
 服务配置见 examples/systemd、examples/launchd 和 examples/container。
 只替换并校验完整 platformd，不单独替换缓存中的 workerd 或 JS。
 

@@ -1,11 +1,14 @@
 import type { BindingEnv } from "../bindings/protocol.js";
-import type { DoPolicyEnv } from "../durable-objects/protocol.js";
+import type { DoPolicyEnv, DoRouterRpc } from "../durable-objects/protocol.js";
 /** Private system services; this shape must never be copied into tenant env. */
 export interface LoaderEnv extends BindingEnv, DoPolicyEnv {
   LOADER: WorkerLoader;
   RUNTIME_SOURCE: Fetcher;
   INTERNAL_TOKEN: string;
-  DO_ROUTER: Fetcher;
+  DO_ROUTER: DoRouterRpc;
+  PUBLIC_NETWORK: Fetcher;
+  COMPATIBILITY_DATE: string;
+  REQUIRED_COMPATIBILITY_FLAGS: string[];
 }
 interface RuntimeBindingBase {
   name: string;
@@ -28,6 +31,12 @@ export interface RuntimeQueueBinding extends RuntimeBindingBase {
 }
 export interface RuntimeWorkflowBinding extends RuntimeBindingBase {
   kind: "workflow";
+  schedules: string[];
+}
+export interface RuntimeScheduledTarget {
+  cron: string;
+  scheduledHandler: boolean;
+  workflowBindings: string[];
 }
 export type RuntimeBinding = RuntimeResourceBinding | RuntimeQueueBinding | RuntimeWorkflowBinding;
 export interface RuntimeServiceBinding {
@@ -51,11 +60,10 @@ export interface RuntimeSnapshot {
   routeGeneration: number;
   contentKind: "worker" | "assets_only";
   mainModule?: string;
-  compatibilityDate: string;
-  compatibilityFlags: string[];
   modules: RuntimeModule[];
   env: Record<string, unknown>;
   bindings: RuntimeBinding[];
+  scheduledTargets: RuntimeScheduledTarget[];
   services: RuntimeServiceBinding[];
   cachePolicy: {
     enabled: boolean;
@@ -69,7 +77,6 @@ export interface RuntimeSnapshot {
   };
   assetBinding?: { name: string };
   assets?: RuntimeAssets;
-  limits: unknown;
 }
 export interface RuntimeAssetEntry {
   path: string;

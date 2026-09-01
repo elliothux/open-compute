@@ -1,5 +1,5 @@
 import {
-  exports as currentExports, tracing, waitUntil, withEnv, WorkerEntrypoint,
+  exports as currentExports, tracing, waitUntil, withEnv, withExports, WorkerEntrypoint,
 } from "cloudflare:workers";
 import {
   completeServiceScope, decodeServiceValue, encodeServiceValue,
@@ -13,7 +13,7 @@ export type Environment = Record<string, unknown>;
 export type EnvironmentWrapper = (env: Environment) => Environment;
 export interface BindingFactory {
   names: readonly string[];
-  create: new(raw: unknown, durableObject: boolean) => object;
+  create: new(raw: unknown, durableObject: boolean, name: string) => object;
 }
 export interface CacheRuntime {
   readonly context: object;
@@ -37,22 +37,141 @@ export interface TrackedContext<Context extends object = object> {
   readonly context: Context;
   readonly tasks: Promise<unknown>[];
   readonly extendLifetime: (promise: Promise<unknown>) => void;
+  readonly runScope?: <T>(fn: () => T) => T;
+  readonly handoffWebSockets: boolean;
 }
 type Callable = (this: unknown, ...args: unknown[]) => unknown;
+type WorkflowScheduleTrigger = (
+  value: unknown,
+  schedule: { cron: string; scheduledTime: number },
+) => Promise<void>;
+interface ScheduledWorkflowRuntime {
+  readonly targets: readonly {
+    cron: string;
+    scheduledHandler: boolean;
+    workflowBindings: readonly string[];
+  }[];
+  readonly trigger: WorkflowScheduleTrigger;
+}
 const PRIVATE_ALARM_INDEX = "__OPEN_COMPUTE_PRIVATE_ALARM_INDEX";
+const PRIVATE_FACET_MANAGER = "__OPEN_COMPUTE_PRIVATE_FACET_MANAGER";
+const PRIVATE_FACET_AUTHORITY = "__OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY";
+const PRIVATE_FACET_PATH = "__OPEN_COMPUTE_PRIVATE_FACET_PATH";
+const PRIVATE_FACET_PROPS = "__OPEN_COMPUTE_PRIVATE_FACET_PROPS";
 const PRIVATE_CACHE = "__OPEN_COMPUTE_PRIVATE_CACHE";
+const PRIVATE_EXPORT_PREFIX = "__OpenCompute";
 const SERVICE_RPC = "__openComputeServiceRpc";
 const SERVICE_FETCH = "__openComputeServiceFetch";
 const SERVICE_GET = "__openComputeServiceGet";
 const PUBLIC_METHOD = /^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/;
+const SCHEDULED_WORKFLOW_BINDING = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const RESERVED_METHODS = new Set([
   "constructor", "prototype", "__proto__", "then", SERVICE_RPC, SERVICE_FETCH, SERVICE_GET,
 ]);
 const trackedInstances = new WeakMap<object, TrackedContext>();
 const instanceEnvironments = new WeakMap<object, Environment>();
 const instanceCaches = new WeakMap<object, CacheRuntime>();
+const loopbackDurableObjects = new WeakMap<object, { entrypoint: string; props: unknown }>();
 
 function callable(value: unknown): value is Callable { return typeof value === "function"; }
+
+/** Return the trusted export identity captured when a loopback class was constructed. */
+export function loopbackDurableObjectMetadata(value: unknown): { entrypoint: string; props: unknown } | undefined {
+  return value !== null && (typeof value === "object" || typeof value === "function")
+    ? loopbackDurableObjects.get(value)
+    : undefined;
+}
+
+/** Read the full native export table before tenant export filtering begins. */
+export function trustedContextExports(context: unknown): object | undefined {
+  if (context === null || typeof context !== "object") return undefined;
+  const value: unknown = Reflect.get(context, "exports", context);
+  return value !== null && typeof value === "object" ? value : undefined;
+}
+
+function privateExport(property: PropertyKey): boolean {
+  return typeof property === "string" && property.startsWith(PRIVATE_EXPORT_PREFIX);
+}
+
+/** Expose public loopback entrypoints without leaking generated host bridges. */
+function tenantExports(source: object): object {
+  const values = new Map<string, unknown>();
+  const enumerable = new Map<string, boolean>();
+  for (const property of Reflect.ownKeys(source)) {
+    if (typeof property !== "string" || privateExport(property)) continue;
+    values.set(property, Reflect.get(source, property, source));
+    enumerable.set(
+      property,
+      Reflect.getOwnPropertyDescriptor(source, property)?.enumerable ?? false,
+    );
+  }
+  const functions = new Map<string, Callable>();
+  const exposed = (property: PropertyKey): unknown => {
+    if (typeof property !== "string" || privateExport(property)) return undefined;
+    const value = values.get(property);
+    if (!callable(value)) return value;
+    const prior = functions.get(property);
+    if (prior) return prior;
+    const members = new Map<PropertyKey, Callable>();
+    const bound = new Proxy(value, {
+      apply(target, _receiver, args) {
+        const result: unknown = Reflect.apply(target, source, args);
+        if (result !== null && (typeof result === "object" || typeof result === "function")) {
+          const options = args[0];
+          const props = options !== null && typeof options === "object"
+            ? Reflect.get(options, "props")
+            : undefined;
+          loopbackDurableObjects.set(result, Object.freeze({ entrypoint: property, props }));
+        }
+        return result;
+      },
+      construct(target, args, newTarget) { return Reflect.construct(target, args, newTarget); },
+      get(target, member) {
+        const result: unknown = Reflect.get(target, member, target);
+        if (!callable(result)) return result;
+        const cached = members.get(member);
+        if (cached) return cached;
+        const method = new Proxy(result, {
+          apply(operation, _receiver, args) { return Reflect.apply(operation, target, args); },
+          construct(operation, args, newTarget) {
+            return Reflect.construct(operation, args, newTarget);
+          },
+        });
+        members.set(member, method);
+        return method;
+      },
+    });
+    functions.set(property, bound);
+    return bound;
+  };
+  return new Proxy(Object.create(null) as object, {
+    get(_target, property) { return exposed(property); },
+    has(_target, property) {
+      return typeof property === "string" && !privateExport(property) && values.has(property);
+    },
+    ownKeys() {
+      return [...values.keys()];
+    },
+    getOwnPropertyDescriptor(_target, property) {
+      if (typeof property !== "string" || privateExport(property) || !values.has(property)) return undefined;
+      return {
+        configurable: true,
+        enumerable: enumerable.get(property) ?? false,
+        writable: false,
+        value: exposed(property),
+      };
+    },
+    getPrototypeOf() { return null; },
+    set() { return false; },
+    defineProperty() { return false; },
+    deleteProperty() { return false; },
+  });
+}
+
+function withTenantEnvironment<T>(env: Environment, fn: () => T): T {
+  const exports = tenantExports(currentExports);
+  return withEnv(env, () => withExports(exports, fn)) as T;
+}
 
 /** Validate only constructibility; tenant code still runs inside its isolate. */
 export function tenantConstructor(value: unknown): TenantConstructor {
@@ -63,7 +182,10 @@ export function tenantConstructor(value: unknown): TenantConstructor {
     construct(target, args: unknown[], newTarget) {
       const env = args[1];
       if (env === null || typeof env !== "object" || Array.isArray(env)) throw new Error("invalid tenant env");
-      const instance: unknown = withEnv(env, () => Reflect.construct(target, args, newTarget));
+      const instance: unknown = withTenantEnvironment(
+        env as Environment,
+        () => Reflect.construct(target, args, newTarget),
+      );
       if (instance === null || (typeof instance !== "object" && typeof instance !== "function")) {
         throw new Error("invalid tenant constructor result");
       }
@@ -87,12 +209,16 @@ export function createEnvironment(factories: readonly BindingFactory[], durableO
     if (wrapped.has(env)) return env;
     const out: Environment = {};
     for (const [key, value] of Object.entries(env)) {
-      if (key !== PRIVATE_ALARM_INDEX && key !== PRIVATE_CACHE) Object.defineProperty(out, key, {
+      if (key !== PRIVATE_ALARM_INDEX && key !== PRIVATE_FACET_MANAGER
+          && key !== PRIVATE_FACET_AUTHORITY && key !== PRIVATE_FACET_PATH
+          && key !== PRIVATE_FACET_PROPS && key !== PRIVATE_CACHE) Object.defineProperty(out, key, {
         value, enumerable: true, configurable: true, writable: true,
       });
     }
     for (const factory of factories) {
-      for (const name of factory.names) out[name] = new factory.create(out[name], durableObject);
+      for (const name of factory.names) {
+        out[name] = new factory.create(out[name], durableObject, name);
+      }
     }
     wrapped.add(out);
     return out;
@@ -103,25 +229,76 @@ export function createEnvironment(factories: readonly BindingFactory[], durableO
 export function trackExecutionContext<Context extends object>(
   ctx: Context,
   cacheContext?: object,
+  runScope?: <T>(fn: () => T) => T,
+  handoffWebSockets = false,
+  trustedExports?: object,
 ): TrackedContext<Context> {
   const tasks: Promise<unknown>[] = [];
   const nativeWaitUntil: unknown = Reflect.get(ctx, "waitUntil", ctx);
   const extendLifetime = callable(nativeWaitUntil)
     ? (promise: Promise<unknown>) => { Reflect.apply(nativeWaitUntil, ctx, [promise]); }
     : (promise: Promise<unknown>) => { waitUntil(promise); };
-  const context = new Proxy(ctx, {
-    get(target, property) {
+  const exports = tenantExports(trustedExports ?? currentExports);
+  const context = new Proxy(Object.create(null) as Context, {
+    get(_target, property) {
       if (property === "cache" && cacheContext !== undefined) return cacheContext;
+      if (property === "exports") return exports;
       if (property === "waitUntil") return (promise: Promise<unknown>) => {
         const tracked = Promise.resolve(promise);
         tasks.push(tracked);
         extendLifetime(tracked);
       };
-      const value: unknown = Reflect.get(target, property, target);
-      return callable(value) ? value.bind(target) : value;
+      const value: unknown = Reflect.get(ctx, property, ctx);
+      return callable(value) ? value.bind(ctx) : value;
+    },
+    has(_target, property) {
+      if (property === "exports") return true;
+      if (property === "cache" && cacheContext !== undefined) return true;
+      return Reflect.has(ctx, property);
+    },
+    ownKeys() {
+      const keys = Reflect.ownKeys(ctx);
+      if (!keys.includes("exports")) keys.push("exports");
+      return keys;
+    },
+    getOwnPropertyDescriptor(_target, property) {
+      if (property === "exports") {
+        return { configurable: true, enumerable: true, writable: false, value: exports };
+      }
+      if (property === "cache" && cacheContext !== undefined) {
+        return { configurable: true, enumerable: true, writable: false, value: cacheContext };
+      }
+      const descriptor = Reflect.getOwnPropertyDescriptor(ctx, property);
+      if (!descriptor) return undefined;
+      const value: unknown = Reflect.get(ctx, property, ctx);
+      return {
+        configurable: true,
+        enumerable: descriptor.enumerable ?? false,
+        writable: descriptor.writable ?? false,
+        value: callable(value) ? value.bind(ctx) : value,
+      };
+    },
+    getPrototypeOf() { return null; },
+    set(_target, property, value) {
+      if (property === "exports" || property === "cache") return false;
+      return Reflect.set(ctx, property, value, ctx);
+    },
+    defineProperty(_target, property, descriptor) {
+      if (property === "exports" || property === "cache") return false;
+      return Reflect.defineProperty(ctx, property, descriptor);
+    },
+    deleteProperty(_target, property) {
+      if (property === "exports" || property === "cache") return false;
+      return Reflect.deleteProperty(ctx, property);
     },
   });
-  return { context, tasks, extendLifetime };
+  return {
+    context,
+    tasks,
+    extendLifetime,
+    handoffWebSockets,
+    ...(runScope === undefined ? {} : { runScope }),
+  };
 }
 
 function invoke(
@@ -134,14 +311,17 @@ function invoke(
   const frame = rootServiceFrame();
   const tracked = trackedOverride ?? (owner !== null && typeof owner === "object"
     ? trackedInstances.get(owner) : undefined);
-  try {
-    const value = withServiceScope(env, frame, scoped =>
-      withEnv(scoped, () => Reflect.apply(fn, owner, args)));
-    return rootResult(value, env, frame.scopeId, tracked);
-  } catch (error) {
-    scheduleRootCompletion(env, frame.scopeId, tracked);
-    throw error;
-  }
+  const run = () => {
+    try {
+      const value = withServiceScope(env, frame, scoped =>
+        withTenantEnvironment(scoped, () => Reflect.apply(fn, owner, args)));
+      return rootResult(value, env, frame.scopeId, tracked);
+    } catch (error) {
+      scheduleRootCompletion(env, frame.scopeId, tracked);
+      throw error;
+    }
+  };
+  return tracked?.runScope ? tracked.runScope(run) : run();
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -191,9 +371,10 @@ function wrapRootWritable(stream: WritableStream<unknown>, done: () => void): Wr
   });
 }
 
-function resultDrain(value: unknown): { value: unknown; drained: Promise<void> } {
+function resultDrain(value: unknown, handoffWebSockets: boolean): { value: unknown; drained: Promise<void> } {
   if (value instanceof Response) {
     if (value.webSocket) {
+      if (handoffWebSockets) return { value, drained: Promise.resolve() };
       const drained = new Promise<void>(resolve => {
         value.webSocket!.addEventListener("close", () => resolve(), { once: true });
         value.webSocket!.addEventListener("error", () => resolve(), { once: true });
@@ -258,7 +439,7 @@ function rootResult(
 ): unknown {
   if (raw instanceof Promise) {
     return raw.then(value => {
-      const result = resultDrain(value);
+      const result = resultDrain(value, tracked?.handoffWebSockets ?? false);
       scheduleRootCompletion(env, scopeId, tracked, result.drained);
       return result.value;
     }, error => {
@@ -266,7 +447,7 @@ function rootResult(
       throw error;
     });
   }
-  const result = resultDrain(raw);
+  const result = resultDrain(raw, tracked?.handoffWebSockets ?? false);
   scheduleRootCompletion(env, scopeId, tracked, result.drained);
   return result.value;
 }
@@ -307,7 +488,7 @@ async function invokeService(
   try {
     const args = decodeServiceValue(rawArgs, new WeakMap(), reporter);
     if (!Array.isArray(args)) throw new Error("SERVICE_BINDING_DENIED");
-    const value = await withServiceScope(env, frame, scoped => withEnv(scoped, async () => {
+    const value = await withServiceScope(env, frame, scoped => withTenantEnvironment(scoped, async () => {
       const value = await Reflect.apply(serviceMethod(owner, method), owner, args);
       return encodeServiceValue(value, reporter);
     }));
@@ -329,7 +510,7 @@ async function getService(
     throw new Error("SERVICE_ENTRYPOINT_NOT_FOUND");
   }
   try {
-    const value = await withServiceScope(env, frame, scoped => withEnv(scoped, async () => {
+    const value = await withServiceScope(env, frame, scoped => withTenantEnvironment(scoped, async () => {
       const value = await Reflect.get(owner, property, owner);
       return encodeServiceValue(value, reporter);
     }));
@@ -351,7 +532,7 @@ async function fetchService(
   cache?: CacheRuntime,
 ): Promise<unknown> {
   try {
-    const invokeOrigin = () => withServiceScope(env, frame, scoped => withEnv(scoped, () =>
+    const invokeOrigin = () => withServiceScope(env, frame, scoped => withTenantEnvironment(scoped, () =>
       Reflect.apply(fn, owner, objectHandler ? [request, scoped, tracked.context] : [request])));
     const value = await (cache === undefined
       ? invokeOrigin()
@@ -415,12 +596,61 @@ function normalizedEvent(kind: string, event: unknown): unknown {
   });
 }
 
+function scheduledInvocation(event: unknown, targets: ScheduledWorkflowRuntime["targets"]): {
+  controller: unknown;
+  scheduledHandler: boolean;
+  workflowBindings: string[];
+  schedule: { cron: string; scheduledTime: number };
+} {
+  if (event === null || typeof event !== "object") throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+  const cron: unknown = Reflect.get(event, "cron", event);
+  const time: unknown = Reflect.get(event, "scheduledTime", event);
+  let scheduledTime = Number.NaN;
+  try {
+    if (typeof time === "number" || (time !== null && typeof time === "object")) {
+      scheduledTime = Number(time);
+    }
+  } catch { /* rejected below */ }
+  if (typeof cron !== "string" || cron.length < 1 || cron.length > 256
+      || !Number.isSafeInteger(scheduledTime) || scheduledTime < 0
+      || scheduledTime % 60_000 !== 0) {
+    throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+  }
+  const target = targets.find(candidate => candidate.cron === cron);
+  if (!target || typeof target.scheduledHandler !== "boolean"
+      || !Array.isArray(target.workflowBindings) || target.workflowBindings.length > 100
+      || (!target.scheduledHandler && target.workflowBindings.length === 0)
+      || !target.workflowBindings.every((value, index) => typeof value === "string"
+        && SCHEDULED_WORKFLOW_BINDING.test(value)
+        && !value.startsWith("OPEN_COMPUTE_") && !value.startsWith("__")
+        && (index === 0 || target.workflowBindings[index - 1]! < value))) {
+    throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+  }
+  return {
+    controller: normalizedEvent("scheduled", event),
+    scheduledHandler: target.scheduledHandler,
+    workflowBindings: [...target.workflowBindings],
+    schedule: { cron, scheduledTime },
+  };
+}
+
+async function invokeScheduledWorkflows(
+  event: unknown,
+  env: Environment,
+  runtime: ScheduledWorkflowRuntime,
+): Promise<ReturnType<typeof scheduledInvocation>> {
+  const invocation = scheduledInvocation(event, runtime.targets);
+  await Promise.all(invocation.workflowBindings.map(name => runtime.trigger(env[name], invocation.schedule)));
+  return invocation;
+}
+
 function wrapHandler(owner: unknown, fn: Callable, kind: string, wrapEnv: EnvironmentWrapper,
   cache?: CacheRuntimeFactory) {
   return (event: unknown, env: Environment, ctx: ExecutionContext): unknown => {
     const boundCache = cache?.bind(env);
+    const trustedExports = trustedContextExports(ctx);
     const wrapped = wrapEnv(env);
-    const tracked = trackExecutionContext(ctx, boundCache?.context);
+    const tracked = trackExecutionContext(ctx, boundCache?.context, undefined, false, trustedExports);
     const args = [normalizedEvent(kind, event), wrapped, tracked.context];
     if (kind === "fetch" && boundCache !== undefined && event instanceof Request) {
       const operation: Callable = () => boundCache.dispatch(
@@ -434,14 +664,17 @@ function wrapHandler(owner: unknown, fn: Callable, kind: string, wrapEnv: Enviro
 
 /** Wrap class entrypoints without replacing their native inheritance chain. */
 export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, name?: string,
-  cache?: CacheRuntimeFactory): TenantConstructor {
+  cache?: CacheRuntimeFactory, scheduledWorkflows?: ScheduledWorkflowRuntime): TenantConstructor {
   const Base = tenantConstructor(target);
   const Wrapped = class extends Base {
     constructor(ctx: unknown, env: Environment) {
-      const boundCache = cache?.bind(env);
-      const wrapped = wrapEnv(env);
       if (ctx === null || typeof ctx !== "object") throw new Error("invalid execution context");
-      const tracked = trackExecutionContext(ctx as ExecutionContext, boundCache?.context);
+      const boundCache = cache?.bind(env);
+      const trustedExports = trustedContextExports(ctx);
+      const wrapped = wrapEnv(env);
+      const tracked = trackExecutionContext(
+        ctx as ExecutionContext, boundCache?.context, undefined, false, trustedExports,
+      );
       super(tracked.context, wrapped);
       trackedInstances.set(this, tracked);
       instanceEnvironments.set(this, wrapped);
@@ -481,7 +714,19 @@ export function wrapEntrypoint(target: unknown, wrapEnv: EnvironmentWrapper, nam
     }
   };
   if (name !== undefined) Object.defineProperty(Wrapped, "name", { value: name });
-  return Wrapped;
+  if (scheduledWorkflows === undefined) return Wrapped;
+  return class extends Wrapped {
+    async scheduled(event: unknown): Promise<unknown> {
+      const tracked = trackedInstances.get(this);
+      const environment = instanceEnvironments.get(this);
+      if (!tracked || !environment) throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+      const invocation = await invokeScheduledWorkflows(event, environment, scheduledWorkflows);
+      if (!invocation.scheduledHandler) return undefined;
+      const handler: unknown = Reflect.get(Base.prototype, "scheduled", this);
+      if (!callable(handler)) throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+      return invoke(this, handler, [invocation.controller], environment, tracked);
+    }
+  };
 }
 
 /** Give object/function-style defaults an env-aware private Service fetch entrypoint. */
@@ -492,6 +737,7 @@ export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper,
   }
   const owner = raw !== null && typeof raw === "object" ? raw : undefined;
   const fetch = owner === undefined ? raw : Reflect.get(owner, "fetch");
+  const connectHandler = owner === undefined ? undefined : Reflect.get(owner, "connect");
   return class OpenComputeDefaultService extends WorkerEntrypoint<Environment> {
     readonly #environment: Environment;
     readonly #tracked: TrackedContext;
@@ -500,12 +746,26 @@ export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper,
     constructor(ctx: unknown, env: Environment) {
       if (ctx === null || typeof ctx !== "object") throw new Error("invalid execution context");
       const boundCache = cache?.bind(env);
+      const trustedExports = trustedContextExports(ctx);
       const wrapped = wrapEnv(env);
-      const tracked = trackExecutionContext(ctx as ExecutionContext, boundCache?.context);
+      const tracked = trackExecutionContext(
+        ctx as ExecutionContext, boundCache?.context, undefined, false, trustedExports,
+      );
       super(tracked.context, wrapped);
       this.#cache = boundCache;
       this.#environment = wrapped;
       this.#tracked = tracked;
+    }
+
+    async connect(socket: Socket): Promise<void> {
+      if (!callable(connectHandler)) throw new Error("SERVICE_ENTRYPOINT_NOT_FOUND");
+      await invoke(
+        owner,
+        connectHandler,
+        [socket, this.#environment, this.#tracked.context],
+        this.#environment,
+        this.#tracked,
+      );
     }
 
     [SERVICE_FETCH](
@@ -522,12 +782,31 @@ export function wrapDefaultService(raw: unknown, wrapEnv: EnvironmentWrapper,
 }
 
 /** Preserve object handlers, function-style fetch, and class-style Workers. */
-export function wrapDefault(raw: unknown, wrapEnv: EnvironmentWrapper, cache?: CacheRuntimeFactory): unknown {
+export function wrapDefault(raw: unknown, wrapEnv: EnvironmentWrapper, cache?: CacheRuntimeFactory,
+  scheduledWorkflows?: ScheduledWorkflowRuntime): unknown {
   if (raw !== null && typeof raw === "object") {
     const result: Environment = { ...raw };
-    for (const key of ["fetch", "scheduled", "queue", "tail"]) {
+    for (const key of [
+      "fetch", "connect", "scheduled", "queue", "email", "tail", "tailStream", "test", "trace",
+    ]) {
       const handler: unknown = Reflect.get(raw, key);
       if (callable(handler)) result[key] = wrapHandler(raw, handler, key, wrapEnv, cache);
+    }
+    if (scheduledWorkflows !== undefined) {
+      const scheduled: unknown = Reflect.get(raw, "scheduled");
+      result.scheduled = wrapHandler(raw, async (...args: unknown[]) => {
+        const [event, rawEnvironment, rawContext] = args;
+        if (rawEnvironment === null || typeof rawEnvironment !== "object" || Array.isArray(rawEnvironment)
+            || rawContext === null || typeof rawContext !== "object" || Array.isArray(rawContext)) {
+          throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+        }
+        const env = rawEnvironment as Environment;
+        const ctx = rawContext as ExecutionContext;
+        const invocation = await invokeScheduledWorkflows(event, env, scheduledWorkflows);
+        if (!invocation.scheduledHandler) return undefined;
+        if (!callable(scheduled)) throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+        return Reflect.apply(scheduled, raw, [invocation.controller, env, ctx]);
+      }, "scheduled", wrapEnv, cache);
     }
     const fetch: unknown = Reflect.get(raw, "fetch");
     if (callable(fetch)) result[SERVICE_FETCH] = (
@@ -541,8 +820,21 @@ export function wrapDefault(raw: unknown, wrapEnv: EnvironmentWrapper, cache?: C
   }
   if (callable(raw)) {
     return /^\s*class\b/.test(Function.prototype.toString.call(raw))
-      ? wrapEntrypoint(raw, wrapEnv, undefined, cache)
-      : { fetch: wrapHandler(undefined, raw, "fetch", wrapEnv, cache) };
+      ? wrapEntrypoint(raw, wrapEnv, undefined, cache, scheduledWorkflows)
+      : {
+          fetch: wrapHandler(undefined, raw, "fetch", wrapEnv, cache),
+          ...(scheduledWorkflows !== undefined ? {
+            scheduled: wrapHandler(undefined, async (...args: unknown[]) => {
+              const [event, rawEnvironment] = args;
+              if (rawEnvironment === null || typeof rawEnvironment !== "object" || Array.isArray(rawEnvironment)) {
+                throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+              }
+              const env = rawEnvironment as Environment;
+              const invocation = await invokeScheduledWorkflows(event, env, scheduledWorkflows);
+              if (invocation.scheduledHandler) throw new Error("CRON_CUSTOM_EVENT_UNSUPPORTED");
+            }, "scheduled", wrapEnv, cache),
+          } : {}),
+        };
   }
   return raw;
 }

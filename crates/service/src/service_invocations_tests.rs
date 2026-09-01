@@ -109,9 +109,6 @@ fn insert_ready(
             artifact_size: Some(1),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
-            compatibility_date: "2026-08-22".to_owned(),
-            compatibility_flags: vec!["rpc".to_owned()],
-            limits: serde_json::json!({"profile":"default"}),
             worker_code_sha256: worker_digest,
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
@@ -143,6 +140,177 @@ fn resolve_request(
         parent_frame,
         operation: ServiceOperation::Rpc,
     }
+}
+
+fn connect_request(
+    deployment: DeploymentId,
+    binding_name: &str,
+    digest: [u8; 32],
+) -> ServiceResolveRequest {
+    ServiceResolveRequest {
+        operation: ServiceOperation::Connect,
+        ..resolve_request(deployment, binding_name, digest, None)
+    }
+}
+
+#[test]
+fn connect_finalize_is_atomic_idempotent_and_releases_both_deployment_pins() {
+    let fixture = fixture();
+    let pins = DeploymentPins::new();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
+    let admission = registry
+        .resolve(&connect_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+        ))
+        .unwrap();
+    let finalize = ServiceConnectFinalizeRequest {
+        handle: admission.handle,
+        caller_frame: admission.caller_frame,
+    };
+    assert_eq!(registry.counts(), (1, 1, 0));
+    assert_eq!(pins.count(fixture.caller_deployment), 1);
+    assert_eq!(pins.count(fixture.target_deployment), 1);
+
+    registry.finalize_connect(&finalize).unwrap();
+    registry.finalize_connect(&finalize).unwrap();
+
+    assert_eq!(registry.counts(), (0, 0, 0));
+    assert_eq!(pins.count(fixture.caller_deployment), 0);
+    assert_eq!(pins.count(fixture.target_deployment), 0);
+}
+
+#[test]
+fn connect_finalize_rejects_a_non_connect_operation_without_releasing_it() {
+    let fixture = fixture();
+    let pins = DeploymentPins::new();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
+    let admission = registry
+        .resolve(&resolve_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    assert_eq!(
+        registry
+            .finalize_connect(&ServiceConnectFinalizeRequest {
+                handle: admission.handle.clone(),
+                caller_frame: admission.caller_frame.clone(),
+            })
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceBindingDenied
+    );
+    assert_eq!(registry.counts(), (1, 1, 0));
+    registry
+        .complete(&ServiceReleaseRequest {
+            handle: admission.handle,
+        })
+        .unwrap();
+    registry
+        .complete_root(&ServiceRootCompleteRequest {
+            frame: admission.caller_frame,
+        })
+        .unwrap();
+    assert_eq!(pins.count(fixture.caller_deployment), 0);
+    assert_eq!(pins.count(fixture.target_deployment), 0);
+}
+
+#[test]
+fn connect_finalize_rejects_a_caller_frame_from_another_root() {
+    let fixture = fixture();
+    let pins = DeploymentPins::new();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
+    let first = registry
+        .resolve(&connect_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+        ))
+        .unwrap();
+    let second = registry
+        .resolve(&connect_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+        ))
+        .unwrap();
+
+    assert_eq!(
+        registry
+            .finalize_connect(&ServiceConnectFinalizeRequest {
+                handle: first.handle.clone(),
+                caller_frame: second.caller_frame.clone(),
+            })
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceBindingDenied
+    );
+    assert_eq!(registry.counts(), (2, 2, 0));
+    assert_eq!(pins.count(fixture.caller_deployment), 2);
+    assert_eq!(pins.count(fixture.target_deployment), 2);
+
+    for admission in [first, second] {
+        registry
+            .finalize_connect(&ServiceConnectFinalizeRequest {
+                handle: admission.handle,
+                caller_frame: admission.caller_frame,
+            })
+            .unwrap();
+    }
+    assert_eq!(registry.counts(), (0, 0, 0));
+    assert_eq!(pins.count(fixture.caller_deployment), 0);
+    assert_eq!(pins.count(fixture.target_deployment), 0);
+}
+
+#[tokio::test]
+async fn deadline_reaper_releases_an_unfinalized_connect_without_another_request() {
+    let fixture = fixture();
+    let pins = DeploymentPins::new();
+    let registry = ServiceInvocationRegistry::with_deadline(
+        fixture.storage,
+        pins.clone(),
+        Duration::from_millis(5),
+    );
+    let admission = registry
+        .resolve(&connect_request(
+            fixture.caller_deployment,
+            "TARGET",
+            fixture.caller_digest,
+        ))
+        .unwrap();
+    registry
+        .retain(&ServiceRetainRequest {
+            handle: admission.handle,
+            owner: RetentionOwner::Target,
+        })
+        .unwrap();
+    assert_eq!(registry.counts(), (1, 1, 1));
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let reaper_registry = registry.clone();
+    let reaper = tokio::spawn(async move {
+        reaper_registry
+            .reap_deadlines_until_shutdown(Duration::from_millis(1), async move {
+                let _ = shutdown_rx.await;
+            })
+            .await;
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while registry.counts() != (0, 0, 0) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(pins.count(fixture.caller_deployment), 0);
+    assert_eq!(pins.count(fixture.target_deployment), 0);
+    let _ = shutdown_tx.send(());
+    reaper.await.unwrap();
 }
 
 #[test]

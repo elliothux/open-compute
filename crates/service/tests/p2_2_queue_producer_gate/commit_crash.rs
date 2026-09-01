@@ -26,6 +26,8 @@ fn p2_2_queue_commit_child() {
         .enqueue_queue(
             &QueueEnqueueRequest {
                 queue_id: queue,
+                request_id: uuid::Uuid::now_v7(),
+                output_gate: false,
                 lifecycle_generation: 1,
                 config_generation: 1,
                 batch_delay_seconds: None,

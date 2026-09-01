@@ -59,7 +59,7 @@ use service::{service_operation_index, write_service_metrics};
 pub(crate) use workflow::WorkflowOutcome;
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 634;
+pub const REQUIRED_SERIES: u64 = 640;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -269,8 +269,8 @@ struct Inner {
     d1_result_unknown: [u64; 4],
     d1_backup: [u64; 2],
     d1_migration: [u64; 2],
-    do_dispatch: [u64; 4],
-    do_dispatch_duration: [f64; 2],
+    do_dispatch: [u64; 6],
+    do_dispatch_duration: [f64; 3],
     do_active_hosts: u64,
     do_facet_reload: [u64; 3],
     do_reconcile: [u64; 4],
@@ -290,8 +290,8 @@ struct Inner {
     alarm_delivery: [u64; 42],
     alarm_repair: [u64; 6],
     alarm_lag_seconds: f64,
-    service_invocations: [u64; 8],
-    service_invocation_duration: [f64; 4],
+    service_invocations: [u64; 10],
+    service_invocation_duration: [f64; 5],
     service_roots: u64,
     service_operations: u64,
     service_retentions: u64,
@@ -387,8 +387,8 @@ impl MetricsRegistry {
                 d1_result_unknown: [0; 4],
                 d1_backup: [0; 2],
                 d1_migration: [0; 2],
-                do_dispatch: [0; 4],
-                do_dispatch_duration: [0.0; 2],
+                do_dispatch: [0; 6],
+                do_dispatch_duration: [0.0; 3],
                 do_active_hosts: 0,
                 do_facet_reload: [0; 3],
                 do_reconcile: [0; 4],
@@ -408,8 +408,8 @@ impl MetricsRegistry {
                 alarm_delivery: [0; 42],
                 alarm_repair: [0; 6],
                 alarm_lag_seconds: 0.0,
-                service_invocations: [0; 8],
-                service_invocation_duration: [0.0; 4],
+                service_invocations: [0; 10],
+                service_invocation_duration: [0.0; 5],
                 service_roots: 0,
                 service_operations: 0,
                 service_retentions: 0,

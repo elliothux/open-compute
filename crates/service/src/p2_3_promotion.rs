@@ -2,13 +2,12 @@
 
 use open_compute_core::{CronSchedule, ErrorCode, PlatformError, QueueConsumerId, QueueId};
 use open_compute_storage::{
-    CronActivationRecord, CronActivationState, CronDeclaration, CronDeclarationMode,
-    CronRepository, CronScheduleProjection, PlatformStorage, QueueConsumerDeclaration,
-    QueueConsumerProjection, QueueConsumerRecord, QueueConsumerRepository, QueueConsumerState,
-    SchedulerStore, WorkerRepository,
+    CronActivationRecord, CronActivationState, CronRepository, CronScheduleProjection,
+    PlatformStorage, QueueConsumerDeclaration, QueueConsumerProjection, QueueConsumerRecord,
+    QueueConsumerRepository, QueueConsumerState, SchedulerStore, WorkerRepository,
 };
 use open_compute_workers::{ProductPromotionCoordinator, ProductPromotionRequest};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -212,12 +211,6 @@ impl P23PromotionCoordinator {
             let generation = maximum_generation
                 .checked_add(1)
                 .ok_or_else(projection_pending)?;
-            let desired_crons = desired_crons(
-                &cron_config.declarations,
-                cron_config.mode,
-                &old_crons,
-                worker.active_deployment_id,
-            );
             (
                 generation,
                 cron_repo.stage_activations(
@@ -225,7 +218,7 @@ impl P23PromotionCoordinator {
                     request.worker_id,
                     request.deployment_id,
                     generation,
-                    &desired_crons,
+                    &cron_config.declarations,
                     request.now_ms,
                 )?,
             )
@@ -492,37 +485,6 @@ fn queue_projection(
         descriptor_sha256: declaration.descriptor_sha256,
         updated_at_ms: now_ms,
     }
-}
-
-fn desired_crons(
-    declarations: &[CronDeclaration],
-    mode: CronDeclarationMode,
-    old: &[CronActivationRecord],
-    active_deployment_id: Option<open_compute_core::DeploymentId>,
-) -> Vec<CronDeclaration> {
-    let values = match mode {
-        CronDeclarationMode::Replace => declarations.to_vec(),
-        CronDeclarationMode::Inherit => old
-            .iter()
-            .filter(|activation| {
-                activation.state == CronActivationState::Active
-                    && Some(activation.deployment_id) == active_deployment_id
-            })
-            .map(|activation| CronDeclaration {
-                id: activation.id,
-                deployment_id: activation.deployment_id,
-                expression: activation.expression.clone(),
-                expression_sha256: activation.expression_sha256,
-                parser_version: activation.parser_version,
-                created_at_ms: activation.created_at_ms,
-            })
-            .collect(),
-    };
-    let mut seen = HashSet::new();
-    values
-        .into_iter()
-        .filter(|declaration| seen.insert(declaration.expression.clone()))
-        .collect()
 }
 
 #[derive(Debug)]

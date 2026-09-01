@@ -1,5 +1,5 @@
 //! Real pinned-workerd P0.4 KV compatibility and persistence Gate.
-//! The cohesive matrix intentionally shares one runtime generation, two
+//! The cohesive matrix intentionally shares one runtime generation, three
 //! namespaces, a restart, and a final leak audit.
 
 #![cfg(feature = "test-support")]
@@ -157,6 +157,7 @@ async fn p0_4_real_kv_matrix() {
     );
     let primary = create_resource(&resources, account, "primary", "create-primary", 10);
     let secondary = create_resource(&resources, account, "secondary", "create-secondary", 11);
+    let readonly = create_resource(&resources, account, "readonly", "create-readonly", 12);
     let repository = WorkerRepository::new(storage.db());
     let (worker, _) = repository
         .create_worker(account, "kv-gate", RequestId::generate(), 12, 1_000_000)
@@ -166,7 +167,7 @@ async fn p0_4_real_kv_matrix() {
         DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
     let deployment = deploy(
         &deployments,
-        deployment_request(account, worker.id, primary, secondary),
+        deployment_request(account, worker.id, primary, secondary, readonly),
     )
     .await;
 
@@ -195,6 +196,10 @@ async fn p0_4_real_kv_matrix() {
     assert_eq!(value["text"], "hello");
     assert_eq!(value["json"]["ok"], true);
     assert_eq!(value["metadata"], serde_json::json!({"a": 1, "z": 2}));
+    assert_eq!(value["cacheStatus"], serde_json::Value::Null);
+    assert_eq!(value["typedText"], "hello");
+    assert_eq!(value["typedJson"]["ok"], true);
+    assert_eq!(value["optionText"], "hello");
     assert_eq!(value["binary"], serde_json::json!([255, 1]));
     assert_eq!(value["stream"], "stream-value");
     assert_eq!(value["other"], "isolated");
@@ -202,10 +207,16 @@ async fn p0_4_real_kv_matrix() {
         value["many"],
         serde_json::json!([["text", "hello"], ["missing", null]])
     );
+    assert_eq!(value["manyMeta"][0][1]["value"], "hello");
+    assert_eq!(value["manyMeta"][0][1]["metadata"]["a"], 1);
+    assert!(value["manyMeta"][0][1].get("cacheStatus").is_none());
+    assert_eq!(value["manyMeta"][1][1], serde_json::Value::Null);
 
     let first = dispatch(&transport, account, worker.id, &deployment, "/page1", "").await;
     let first: serde_json::Value = serde_json::from_str(&first.body).unwrap();
     assert_eq!(first["list_complete"], false);
+    assert_eq!(first["cacheStatus"], serde_json::Value::Null);
+    assert!(first["cursor"].is_string());
     let cursor = first["cursor"].as_str().unwrap();
     let second = dispatch(
         &transport,
@@ -227,8 +238,146 @@ async fn p0_4_real_kv_matrix() {
         &format!("{cursor}x"),
     )
     .await;
-    assert_eq!(tampered.status, 500);
-    assert!(tampered.body.contains("KV_CURSOR_INVALID"));
+    assert_eq!(tampered.status, 599);
+    assert!(
+        tampered.body.contains("KV GET failed: 400 Invalid cursor"),
+        "{}",
+        tampered.body
+    );
+
+    let complete = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment,
+        "/list-complete",
+        "",
+    )
+    .await;
+    let complete: serde_json::Value = serde_json::from_str(&complete.body).unwrap();
+    assert_eq!(complete["list_complete"], true);
+    assert_eq!(complete["cacheStatus"], serde_json::Value::Null);
+    assert!(complete.get("cursor").is_none());
+    let expiring = dispatch(
+        &transport,
+        account,
+        worker.id,
+        &deployment,
+        "/list-expiring",
+        "",
+    )
+    .await;
+    let expiring: serde_json::Value = serde_json::from_str(&expiring.body).unwrap();
+    assert_eq!(expiring["name"], "expiring");
+    assert_eq!(expiring["hasExpiration"], true);
+    assert_eq!(expiring["list_complete"], true);
+    assert_eq!(expiring["hasCursor"], false);
+    assert_eq!(expiring["cacheStatus"], serde_json::Value::Null);
+
+    let failures = dispatch(&transport, account, worker.id, &deployment, "/failures", "").await;
+    assert_eq!(
+        failures.status,
+        200,
+        "{}; supervisor={:?}; diagnostics={:?}",
+        failures.body,
+        supervisor.snapshot(),
+        supervisor.last_diagnostics()
+    );
+    let failures: serde_json::Value = serde_json::from_str(&failures.body).unwrap();
+    let assert_error = |field: &str, name: &str, message: &str| {
+        assert_eq!(failures[field]["synchronous"], false, "{field}");
+        assert_eq!(failures[field]["name"], name, "{field}");
+        assert_eq!(failures[field]["message"], message, "{field}");
+    };
+    assert_error("emptyKey", "TypeError", "Key name cannot be empty.");
+    assert_error("dot", "TypeError", "\".\" is not allowed as a key name.");
+    assert_error(
+        "dotDot",
+        "TypeError",
+        "\"..\" is not allowed as a key name.",
+    );
+    assert_error(
+        "longKey",
+        "Error",
+        "KV GET failed: 414 UTF-8 encoded length of 513 exceeds key length limit of 512.",
+    );
+    assert_error(
+        "utf16",
+        "Error",
+        "KV GET failed: 400 Could not URL-decode key name",
+    );
+    assert_eq!(failures["numberKey"], serde_json::Value::Null);
+    assert_error(
+        "emptyBulk",
+        "Error",
+        "KV GET_BULK failed: 400 You must request a minimum of 1 key",
+    );
+    assert_error(
+        "emptyBulkKey",
+        "Error",
+        "KV GET_BULK failed: 400 Key name  is not legal",
+    );
+    assert_error(
+        "dotBulkKey",
+        "Error",
+        "KV GET_BULK failed: 400 Key name . is not legal",
+    );
+    assert_error(
+        "longBulkKey",
+        "Error",
+        "KV GET_BULK failed: 414 Encoded length of 513 is too long",
+    );
+    assert_error(
+        "invalidMetadataBulkKey",
+        "Error",
+        "KV GET_BULK failed: 400 Key name .. is not legal",
+    );
+    assert_eq!(failures["utf16Bulk"], serde_json::Value::Null);
+    assert_error(
+        "tooMany",
+        "Error",
+        "KV GET_BULK failed: 400 You can request a maximum of 100 keys",
+    );
+    assert_error(
+        "invalidType",
+        "TypeError",
+        "Unknown response type. Possible types are \"text\", \"arrayBuffer\", \"json\", and \"stream\".",
+    );
+    assert_error(
+        "bulkStream",
+        "Error",
+        "KV GET_BULK failed: 400 \"stream\" is not a valid type. Use \"json\" or \"text\"",
+    );
+    assert_error(
+        "cacheTtl",
+        "Error",
+        "KV GET failed: 400 Invalid cache_ttl of 29. Cache TTL must be at least 30.",
+    );
+    assert_eq!(failures["bothExpiration"], serde_json::Value::Null);
+    assert_error(
+        "ttlLow",
+        "Error",
+        "KV PUT failed: 400 Invalid expiration_ttl of 59. Expiration TTL must be at least 60.",
+    );
+    let invalid_value = "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and ReadableStreams as values.";
+    assert_error("objectValue", "TypeError", invalid_value);
+    assert_error("detached", "TypeError", invalid_value);
+    assert_eq!(failures["extraList"], serde_json::Value::Null);
+    assert_eq!(failures["zeroList"], serde_json::Value::Null);
+    assert_error(
+        "highList",
+        "Error",
+        "KV GET failed: 400 Invalid key_count_limit of 1001. Please specify integer less than 1000.",
+    );
+    assert_eq!(failures["numberPrefix"], serde_json::Value::Null);
+    assert_eq!(failures["utf16Prefix"], serde_json::Value::Null);
+    assert_eq!(failures["jsonError"], "SyntaxError");
+    assert_eq!(failures["rab"], serde_json::json!([9, 8, 7, 6]));
+    if !failures["sab"].is_null() {
+        assert_eq!(failures["sab"], serde_json::json!([1, 2, 3]));
+    }
+    assert_error("readOnlyPut", "Error", "BINDING_PERMISSION_DENIED");
+    assert_eq!(failures["readOnlyGet"], serde_json::Value::Null);
 
     let old_pid = supervisor.snapshot().pid.unwrap();
     supervisor.report_unhealthy();
@@ -255,13 +404,14 @@ async fn p0_4_real_kv_matrix() {
     assert_eq!(missing.body, "null");
     // Content-Length completion can reach the client before the blocking stream
     // producer drops its pin. Await its existing drain notification, not a sleep.
-    for resource in [primary, secondary] {
+    for resource in [primary, secondary, readonly] {
         pins.fence_and_wait(resource, Duration::from_secs(1))
             .await
             .expect("completed KV operations must release their pins before shutdown");
     }
     assert_eq!(pins.count(primary), 0);
     assert_eq!(pins.count(secondary), 0);
+    assert_eq!(pins.count(readonly), 0);
     let write_staging = storage.data_dir().root().join("kv/.staging-write");
     assert!(std::fs::read_dir(write_staging).unwrap().next().is_none());
 
@@ -272,6 +422,7 @@ async fn p0_4_real_kv_matrix() {
     binding_task.await.unwrap().unwrap();
     assert_eq!(pins.count(primary), 0);
     assert_eq!(pins.count(secondary), 0);
+    assert_eq!(pins.count(readonly), 0);
     println!("P0.4 stock-workerd CRUD/stream/list/restart matrix PASS");
 }
 
@@ -314,107 +465,39 @@ fn deployment_request(
     worker_id: open_compute_core::WorkerId,
     primary: ResourceId,
     secondary: ResourceId,
+    readonly: ResourceId,
 ) -> CreateDeploymentRequest {
-    let source = r#"export default {
-  async fetch(request, env) {
-    const path = new URL(request.url).pathname;
-    if (path === "/seed") {
-      await env.CACHE.put("text", "hello", { metadata: { z: 2, a: 1 } });
-      await env.CACHE.put("json", JSON.stringify({ ok: true }), { expirationTtl: 60 });
-      const view = new Uint8Array([9, 255, 1, 8]).subarray(1, 3);
-      await env.CACHE.put("binary", view);
-      await env.CACHE.put("stream", new ReadableStream({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode("stream-"));
-          controller.enqueue(new TextEncoder().encode("value"));
-          controller.close();
-        }
-      }));
-      await env.OTHER.put("text", "isolated");
-      return new Response("seeded");
-    }
-    if (path === "/snapshot") {
-      try {
-        const withMetadata = await env.CACHE.getWithMetadata("text");
-        const binary = Array.from(new Uint8Array(await env.CACHE.get("binary", "arrayBuffer")));
-        const stream = await new Response(await env.CACHE.get("stream", "stream")).text();
-        const many = Array.from((await env.CACHE.get(["text", "missing", "text"])).entries());
-        return Response.json({
-          text: withMetadata.value,
-          metadata: withMetadata.metadata,
-          json: await env.CACHE.get("json", "json"),
-          binary,
-          stream,
-          other: await env.OTHER.get("text"),
-          many,
-        });
-      } catch (error) {
-        return new Response(String(error && error.stack ? error.stack : error), { status: 599 });
-      }
-    }
-    if (path === "/large") {
-      const streamOf = (bytes) => {
-        let emitted = 0;
-        return new ReadableStream({
-          pull(controller) {
-            if (emitted >= bytes) { controller.close(); return; }
-            const size = Math.min(1024 * 1024, bytes - emitted);
-            const chunk = new Uint8Array(size);
-            chunk.fill(7);
-            emitted += size;
-            controller.enqueue(chunk);
-          }
-        });
-      };
-      const limit = 25 * 1024 * 1024;
-      await env.CACHE.put("large", streamOf(limit));
-      let rejected = false;
-      try { await env.CACHE.put("large", streamOf(limit + 1)); } catch { rejected = true; }
-      const reader = (await env.CACHE.get("large", "stream")).getReader();
-      let total = 0;
-      let first = null;
-      let last = null;
-      for (;;) {
-        const next = await reader.read();
-        if (next.done) break;
-        if (first === null && next.value.byteLength) first = next.value[0];
-        if (next.value.byteLength) last = next.value[next.value.byteLength - 1];
-        total += next.value.byteLength;
-      }
-      return new Response(`${total}:${first}:${last}:${rejected}`);
-    }
-    if (path === "/cancel") {
-      const reader = (await env.CACHE.get("large", "stream")).getReader();
-      const first = await reader.read();
-      if (first.done || first.value.byteLength === 0) throw new Error("empty stream");
-      await reader.cancel("tenant cancelled");
-      return new Response("cancelled");
-    }
-    if (path === "/page1") return Response.json(await env.CACHE.list({ limit: 1 }));
-    if (path === "/page2") return Response.json(await env.CACHE.list({ limit: 1, cursor: await request.text() }));
-    if (path === "/delete") { await env.CACHE.delete("text"); return new Response("deleted"); }
-    if (path === "/missing") return new Response(String(await env.CACHE.get("text")));
-    return new Response("missing", { status: 404 });
-  }
-};"#;
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
             name: "index.js".to_owned(),
             module_type: ModuleType::EsModule,
-            bytes: source.as_bytes().to_vec(),
+            bytes: include_str!("fixtures/p0_4_kv_worker.js")
+                .as_bytes()
+                .to_vec(),
         }],
         BundleLimits::default(),
     )
     .unwrap();
     let mut bindings = BTreeMap::new();
-    for (name, id) in [("CACHE", primary), ("OTHER", secondary)] {
+    for (name, id, permissions) in [
+        ("CACHE", primary, CanonicalPermissions::default()),
+        ("OTHER", secondary, CanonicalPermissions::default()),
+        (
+            "READONLY",
+            readonly,
+            CanonicalPermissions {
+                read: true,
+                write: false,
+            },
+        ),
+    ] {
         bindings.insert(
             name.to_owned(),
             DeploymentBindingInput {
                 kind: BindingKind::KvNamespace,
                 id,
-                permissions: CanonicalPermissions::default(),
+                permissions,
                 config: CanonicalBindingConfig::default(),
             },
         );
@@ -427,16 +510,13 @@ fn deployment_request(
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
-        compatibility_date: "2026-08-22".to_owned(),
-        compatibility_flags: vec!["rpc".to_owned()],
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings,
         services: BTreeMap::new(),
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
-        crons: None,
-        limits: serde_json::json!({"profile":"default"}),
+        crons: Vec::new(),
         promote: true,
         request_id: RequestId::generate(),
         now_ms: 20,

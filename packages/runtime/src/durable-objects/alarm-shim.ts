@@ -1,13 +1,61 @@
 import type { AlarmIndexCapability, AlarmProjection } from "./protocol.js";
+import { DoOutputGate } from "./output-gate.js";
 
 interface AlarmRow extends AlarmProjection { id: 1; inFlight: boolean; lastErrorCode: string | null; updatedAtMs: number }
-interface AlarmTransaction { sync: boolean; mutated: boolean }
-interface PreparedAlarm { context: DurableObjectState; storage: DurableObjectStorage; index: AlarmIndexCapability }
+interface AlarmTransaction { mutated: boolean; rolledBack: boolean }
+interface StorageScope { syncDepth: number }
+export interface PreparedAlarm {
+  context: DurableObjectState;
+  storage: DurableObjectStorage;
+  rawStorage: DurableObjectStorage;
+  index: AlarmIndexCapability;
+  gate: DoOutputGate;
+}
 type AlarmSqlRow = Record<string, SqlStorageValue> & { row_token: string; last_error_code: string | null };
 
 const TABLE = "__open_compute_do_alarm";
+const INTERNAL_SQL = /__open_compute_do_/i;
 const ROW_TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const INTERNAL_METHOD = /^__openCompute/;
+const tenantSql = new WeakMap<object, SqlStorage>();
+
+class TenantSqlStorage implements SqlStorage {
+  readonly #raw: SqlStorage;
+  readonly Cursor: typeof SqlStorageCursor;
+  readonly Statement: typeof SqlStorageStatement;
+
+  constructor(raw: SqlStorage) {
+    this.#raw = raw;
+    this.Cursor = raw.Cursor;
+    this.Statement = raw.Statement;
+    Object.freeze(this);
+  }
+
+  exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]): SqlStorageCursor<T> {
+    assertTenantSql(query);
+    return this.#raw.exec<T>(query, ...bindings);
+  }
+
+  prepare(query: string) {
+    assertTenantSql(query);
+    return this.#raw.prepare(query);
+  }
+
+  ingest(query: string) {
+    assertTenantSql(query);
+    return this.#raw.ingest(query);
+  }
+
+  setMaxPageCountForTest(count: number) { this.#raw.setMaxPageCountForTest(count); }
+
+  get databaseSize() { return this.#raw.databaseSize; }
+}
+
+function assertTenantSql(query: string) {
+  if (INTERNAL_SQL.test(query)) {
+    throw new Error("SQLITE_AUTH: internal Durable Object storage is not accessible");
+  }
+}
 
 function alarmFailure(code: string, type: ErrorConstructor = Error) {
   const error = Object.assign(new type(code), { stableCode: code });
@@ -27,6 +75,14 @@ function ensureTable(storage: DurableObjectStorage) {
       updated_at_ms INTEGER NOT NULL
     ) STRICT
   `);
+}
+
+function tenantSqlStorage(sql: SqlStorage): SqlStorage {
+  const cached = tenantSql.get(sql);
+  if (cached) return cached;
+  const guarded = new TenantSqlStorage(sql);
+  tenantSql.set(sql, guarded);
+  return guarded;
 }
 
 function validRow(row: Record<string, SqlStorageValue> | undefined): row is AlarmSqlRow {
@@ -53,8 +109,7 @@ function readRow(storage: DurableObjectStorage): AlarmRow | null {
   if (!rows.length) return null;
   const row = rows[0];
   if (!validRow(row)) {
-    storage.sql.exec(`DELETE FROM ${TABLE} WHERE id = 1`);
-    return null;
+    throw alarmFailure("DO_STORAGE_UNAVAILABLE");
   }
   return {
     id: 1,
@@ -104,8 +159,9 @@ function projection(row: AlarmRow): AlarmProjection {
   };
 }
 
-function setAlarm(storage: DurableObjectStorage, index: AlarmIndexCapability, transaction: AlarmTransaction | null, value: unknown) {
-  if (transaction?.sync) {
+function setAlarm(storage: DurableObjectStorage, index: AlarmIndexCapability, transaction: AlarmTransaction | null,
+  scope: StorageScope, value: unknown) {
+  if (scope.syncDepth > 0) {
     throw new TypeError("setAlarm() is not supported inside transactionSync()");
   }
   return (async () => {
@@ -151,8 +207,9 @@ function getAlarm(storage: DurableObjectStorage, index: AlarmIndexCapability, tr
   })();
 }
 
-function deleteAlarm(storage: DurableObjectStorage, index: AlarmIndexCapability, transaction: AlarmTransaction | null) {
-  if (transaction?.sync) {
+function deleteAlarm(storage: DurableObjectStorage, index: AlarmIndexCapability, transaction: AlarmTransaction | null,
+  scope: StorageScope) {
+  if (scope.syncDepth > 0) {
     throw new TypeError("deleteAlarm() is not supported inside transactionSync()");
   }
   return (async () => {
@@ -196,16 +253,15 @@ async function deleteAllStorage(storage: DurableObjectStorage, transaction: Dura
   }
 }
 
-async function flushTransaction(rootStorage: DurableObjectStorage, index: AlarmIndexCapability, initial: AlarmRow | null, final: AlarmRow | null) {
+async function flushTransaction(index: AlarmIndexCapability, initial: AlarmRow | null, final: AlarmRow | null) {
   try {
     if (final) {
       await index.upsert(projection(final));
     }
     else if (initial) await index.delete(initial.rowToken);
   } catch {
-    if (final) exactDelete(rootStorage, final.rowToken);
-    else restoreIfAbsent(rootStorage, initial);
-    throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
+    // The object-local row is authoritative and already committed atomically with
+    // the tenant transaction. Activation and periodic repair converge the index.
   }
 }
 
@@ -217,36 +273,86 @@ function sameProjection(left: AlarmRow | null, right: AlarmRow | null): boolean 
 }
 
 function wrapStorage<T extends DurableObjectStorage | DurableObjectTransaction>(storage: T, index: AlarmIndexCapability,
-  transaction: AlarmTransaction | null, rootStorage: DurableObjectStorage): T {
+  transaction: AlarmTransaction | null, rootStorage: DurableObjectStorage, gate: DoOutputGate,
+  scope: StorageScope): T {
   return new Proxy(storage, {
     get(target, property) {
       const alarmStorage = rootStorage;
-      if (property === "setAlarm") return (value: unknown) => setAlarm(alarmStorage, index, transaction, value);
-      if (property === "getAlarm") return () => getAlarm(alarmStorage, index, transaction);
-      if (property === "deleteAlarm") return () => deleteAlarm(alarmStorage, index, transaction);
+      if (property === "sql" && "sql" in target) {
+        return tenantSqlStorage(target.sql);
+      }
+      if (property === "setAlarm") {
+        return (value: unknown, _options?: unknown) => setAlarm(alarmStorage, index, transaction, scope, value);
+      }
+      if (property === "getAlarm") {
+        return (_options?: unknown) => getAlarm(alarmStorage, index, transaction);
+      }
+      if (property === "deleteAlarm") {
+        return (_options?: unknown) => deleteAlarm(alarmStorage, index, transaction, scope);
+      }
       if (property === "transactionSync") {
         if (!("transactionSync" in target)) throw new TypeError("nested transactionSync() is unsupported");
-        return (callback: (storage: T) => unknown) => target.transactionSync(() => callback(
-          wrapStorage(target, index, { sync: true, mutated: false }, rootStorage),
-        ));
+        return (callback: () => unknown) => {
+          gate.enterTransaction(true);
+          scope.syncDepth += 1;
+          try {
+            const value = target.transactionSync(() => callback());
+            gate.exitTransactionSync();
+            return value;
+          } catch (error) {
+            gate.exitTransactionSync();
+            throw error;
+          } finally {
+            scope.syncDepth -= 1;
+          }
+        };
       }
       if (property === "transaction") {
         if (!("transaction" in target)) throw new TypeError("nested transaction() is unsupported");
         return async (callback: (storage: DurableObjectTransaction) => unknown) => {
           const initial = readRow(target);
-          const committed: { value?: { mutated: boolean; final: AlarmRow | null } } = {};
-          const result = await target.transaction(async nativeTransaction => {
-            const attempt = { sync: false, mutated: false };
-            const value = await callback(
-              wrapStorage(nativeTransaction, index, attempt, rootStorage),
-            );
-            committed.value = { mutated: attempt.mutated, final: readRow(rootStorage) };
-            return value;
-          });
-          if (committed.value?.mutated && !sameProjection(initial, committed.value.final)) {
-            await flushTransaction(rootStorage, index, initial, committed.value.final);
+          const committed: { value?: { mutated: boolean; rolledBack: boolean; final: AlarmRow | null } } = {};
+          let txnCommitted = false;
+          let attemptStarted = false;
+          try {
+            const result = await target.transaction(async nativeTransaction => {
+              if (attemptStarted) gate.retryTransaction();
+              else {
+                gate.enterTransaction();
+                attemptStarted = true;
+              }
+              const attempt = { mutated: false, rolledBack: false };
+              const value = await callback(
+                wrapStorage(nativeTransaction, index, attempt, rootStorage, gate, scope),
+              );
+              committed.value = {
+                mutated: attempt.mutated,
+                rolledBack: attempt.rolledBack,
+                final: readRow(rootStorage),
+              };
+              return value;
+            });
+            txnCommitted = true;
+            if (committed.value?.rolledBack) {
+              await gate.exitTransaction("explicit-rollback");
+              return result;
+            }
+            await gate.exitTransaction("committed");
+            if (committed.value?.mutated && !sameProjection(initial, committed.value.final)) {
+              await flushTransaction(index, initial, committed.value.final);
+            }
+            return result;
+          } catch (error) {
+            if (!txnCommitted && attemptStarted) await gate.exitTransaction("failed");
+            throw error;
           }
-          return result;
+        };
+      }
+      if (property === "rollback") {
+        const native: unknown = Reflect.get(target, property, target);
+        return (...args: unknown[]): unknown => {
+          if (transaction) transaction.rolledBack = true;
+          return typeof native === "function" ? Reflect.apply(native, target, args) : undefined;
         };
       }
       if (property === "deleteAll") {
@@ -254,16 +360,22 @@ function wrapStorage<T extends DurableObjectStorage | DurableObjectTransaction>(
         return async (...args: unknown[]) => {
           if (args.length > 1) throw new TypeError("deleteAll() accepts at most one options argument");
           const row = readRow(target);
-          await target.transaction(transaction => deleteAllStorage(target, transaction));
-          if (row) {
-            try {
-              await index.delete(row.rowToken);
-            } catch {
-              throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
-            }
-          } else {
-            try { await index.clear(); } catch { /* no alarm authority existed */ }
+          try {
+            if (row) await index.delete(row.rowToken);
+            else await index.clear();
+          } catch {
+            throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
           }
+          try {
+            await target.transaction(txn => deleteAllStorage(target, txn));
+          } catch (error) {
+            if (row) {
+              try { await index.upsert(projection(row)); } catch { /* activation repair owns convergence */ }
+            }
+            throw error;
+          }
+          ensureTable(rootStorage);
+          gate.ensureTable();
         };
       }
       const value: unknown = Reflect.get(target, property, target);
@@ -275,8 +387,10 @@ function wrapStorage<T extends DurableObjectStorage | DurableObjectTransaction>(
 /// Install the class-specific storage proxy before tenant construction.
 export function prepareDurableObjectContext(ctx: DurableObjectState, index: AlarmIndexCapability): PreparedAlarm {
   if (!ctx?.storage || !index) throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
-  ensureTable(ctx.storage);
-  const storage = wrapStorage(ctx.storage, index, null, ctx.storage);
+  const rawStorage = ctx.storage;
+  ensureTable(rawStorage);
+  const gate = new DoOutputGate(rawStorage);
+  const storage = wrapStorage(rawStorage, index, null, rawStorage, gate, { syncDepth: 0 });
   let context = ctx;
   try {
     Object.defineProperty(ctx, "storage", { value: storage, configurable: true });
@@ -289,25 +403,26 @@ export function prepareDurableObjectContext(ctx: DurableObjectState, index: Alar
       },
     });
   }
-  return Object.freeze({ context, storage, index });
+  return Object.freeze({ context, storage, rawStorage, index, gate });
 }
 
 /// Queue activation repair without exposing its private capability to tenant code.
-export function activateDurableObjectAlarm(prepared: PreparedAlarm) {
+export function activateDurableObjectAlarm(prepared: PreparedAlarm, env: Record<string, unknown> = {}) {
   prepared.context.blockConcurrencyWhile(async () => {
-    const row = readRow(prepared.storage);
+    const row = readRow(prepared.rawStorage);
     try {
       if (row) await prepared.index.upsert(projection(row));
       else await prepared.index.clear();
     } catch {
       // Repair is deliberately lower availability than ordinary DO dispatch.
     }
+    await prepared.gate.recover(env);
   });
 }
 
 /// Return the strict object-local DTO used by startup and periodic projection repair.
 export async function repairDurableObjectAlarm(prepared: PreparedAlarm) {
-  const row = readRow(prepared.storage);
+  const row = readRow(prepared.rawStorage);
   if (!row) return { exists: false };
   return {
     exists: true,
@@ -325,7 +440,7 @@ export async function dispatchDurableObjectAlarm(instance: unknown, handler: unk
       || payload.retryCount > 6) {
     throw alarmFailure("SCHEDULER_INTERNAL_PROTOCOL_ERROR");
   }
-  const row = readRow(prepared.storage);
+  const row = readRow(prepared.rawStorage);
   if (!row || row.rowToken !== payload.rowToken) return { outcome: "stale" };
   const now = Date.now();
   if (row.scheduledTimeMs > now) {
@@ -335,7 +450,7 @@ export async function dispatchDurableObjectAlarm(instance: unknown, handler: unk
       retryCount: row.retryCount,
     };
   }
-  prepared.storage.sql.exec(
+  prepared.rawStorage.sql.exec(
     `UPDATE ${TABLE} SET in_flight = 1, retry_count = ?, updated_at_ms = ?
      WHERE id = 1 AND row_token = ?`,
     payload.retryCount,
@@ -349,18 +464,18 @@ export async function dispatchDurableObjectAlarm(instance: unknown, handler: unk
         isRetry: payload.retryCount > 0,
       }]);
     }
-    exactDelete(prepared.storage, payload.rowToken);
+    exactDelete(prepared.rawStorage, payload.rowToken);
     return { outcome: "success" };
   } catch {
-    const current = readRow(prepared.storage);
+    const current = readRow(prepared.rawStorage);
     if (!current || current.rowToken !== payload.rowToken) return { outcome: "stale" };
     if (payload.retryCount >= 6) {
-      exactDelete(prepared.storage, payload.rowToken);
+      exactDelete(prepared.rawStorage, payload.rowToken);
       return { outcome: "exhausted", errorCode: "DO_RUNTIME_EXCEPTION" };
     }
     const retryCount = payload.retryCount + 1;
     const scheduledTimeMs = Date.now() + 2000 * (2 ** payload.retryCount);
-    prepared.storage.sql.exec(
+    prepared.rawStorage.sql.exec(
       `UPDATE ${TABLE} SET scheduled_time_ms = ?, retry_count = ?, in_flight = 0,
               last_error_code = 'DO_RUNTIME_EXCEPTION', updated_at_ms = ?
        WHERE id = 1 AND row_token = ?`,

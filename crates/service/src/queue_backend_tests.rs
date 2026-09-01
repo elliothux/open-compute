@@ -9,6 +9,7 @@ fn private_request(method: &str, path: &str, content_type: Option<&str>, body: V
         .method(method)
         .uri(path)
         .header(REQUEST_HEADER, "550e8400-e29b-41d4-a716-446655440000")
+        .header(OUTPUT_GATE_HEADER, "0")
         .header(DEPLOYMENT_HEADER, DeploymentId::generate().to_string())
         .header(DESCRIPTOR_HEADER, "00".repeat(32));
     if let Some(content_type) = content_type {
@@ -87,16 +88,27 @@ fn frame(operation: u8, batch_delay: i32, messages: &[(u8, i32, &[u8])]) -> Vec<
 
 #[test]
 fn queue_frame_preserves_content_order_and_explicit_zero_delay() {
-    let bytes = frame(2, 5, &[(1, -1, b"{}"), (2, 0, b"text"), (3, 8, &[1, 2])]);
+    let bytes = frame(
+        2,
+        5,
+        &[
+            (1, -1, b"{}"),
+            (2, 0, b"text"),
+            (3, 8, &[1, 2]),
+            (4, -1, b"OCDV"),
+        ],
+    );
     let parsed = parse_frame(&bytes, QueueOperation::Batch).unwrap();
     assert_eq!(parsed.batch_delay_seconds, Some(5));
-    assert_eq!(parsed.messages.len(), 3);
+    assert_eq!(parsed.messages.len(), 4);
     assert_eq!(parsed.messages[0].content_type, QueueContentType::Json);
     assert_eq!(parsed.messages[0].delay_seconds, None);
     assert_eq!(parsed.messages[1].content_type, QueueContentType::Text);
     assert_eq!(parsed.messages[1].delay_seconds, Some(0));
     assert_eq!(parsed.messages[2].content_type, QueueContentType::Bytes);
     assert_eq!(parsed.messages[2].body, vec![1, 2]);
+    assert_eq!(parsed.messages[3].content_type, QueueContentType::V8);
+    assert_eq!(parsed.messages[3].body, b"OCDV");
 }
 
 #[test]
@@ -105,6 +117,10 @@ fn queue_frame_and_private_path_reject_ambiguous_or_oversized_inputs() {
     assert_eq!(
         parse_path(&format!("/internal/bindings/v1/queue/{binding}/send")),
         Some((binding, QueueOperation::Send))
+    );
+    assert_eq!(
+        parse_path(&format!("/internal/bindings/v1/queue/{binding}/finalize")),
+        Some((binding, QueueOperation::Finalize))
     );
     assert!(parse_path(&format!("/internal/bindings/v1/queue/{binding}/pull")).is_none());
     assert_eq!(
@@ -149,17 +165,17 @@ fn queue_private_request_id_accepts_canonical_transport_uuids_only() {
         REQUEST_HEADER,
         HeaderValue::from_static("550e8400-e29b-41d4-a716-446655440000"),
     );
-    assert!(valid_request_id(&headers));
+    assert!(parse_request_id(&headers).is_some());
 
     headers.insert(
         REQUEST_HEADER,
         HeaderValue::from_static("550E8400-E29B-41D4-A716-446655440000"),
     );
-    assert!(!valid_request_id(&headers));
+    assert!(parse_request_id(&headers).is_none());
     headers.insert(REQUEST_HEADER, HeaderValue::from_static("not-a-uuid"));
-    assert!(!valid_request_id(&headers));
+    assert!(parse_request_id(&headers).is_none());
     headers.remove(REQUEST_HEADER);
-    assert!(!valid_request_id(&headers));
+    assert!(parse_request_id(&headers).is_none());
 }
 
 #[test]
@@ -398,10 +414,6 @@ fn queue_frame_limits_and_error_status_mapping_are_complete() {
             StatusCode::TOO_MANY_REQUESTS,
         ),
         (ErrorCode::StoragePressure, StatusCode::SERVICE_UNAVAILABLE),
-        (
-            ErrorCode::QueueDoOutputGateUnsupported,
-            StatusCode::NOT_IMPLEMENTED,
-        ),
         (ErrorCode::Internal, StatusCode::UNPROCESSABLE_ENTITY),
     ] {
         assert_eq!(

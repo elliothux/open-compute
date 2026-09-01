@@ -27,7 +27,8 @@ pub use admission::{
     AdmissionReservation, AdmissionReservations, AdmissionSnapshotV1, OperationClass, PlatformMode,
 };
 pub use capability::{
-    CapabilityStatus, PlatformCapabilitiesV1, ProductCapabilityV1, RuntimeCapabilityV1,
+    CapabilityInventoryV1, CapabilityMemberV1, CapabilityStatus, PlatformCapabilitiesV1,
+    ProductCapabilityV1, ProductKind, RuntimeCapabilityV1, TypeSourceIdentityV1,
 };
 pub use clock::{Clock, SystemClock};
 pub use config::{
@@ -66,7 +67,7 @@ pub use snapshot_manifest::{
     PlatformSnapshotManifestV1, SnapshotFileRole, SnapshotFileV1, SnapshotImmutableReferenceV1,
     SnapshotTotalsV1, valid_restore_path,
 };
-pub use workflow::{WorkflowFence, WorkflowToken, WorkflowsConfig};
+pub use workflow::{WorkflowCronSchedule, WorkflowFence, WorkflowToken, WorkflowsConfig};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use clock::DeterministicClock;
