@@ -107,6 +107,11 @@ jobs:
         run: bun scripts/prepare-workerd.ts --dest "$RUNNER_TEMP/open-compute-build-runtime" --download >> "$GITHUB_ENV"
       - name: Enforce 90 percent Rust line coverage
         run: ./test/coverage.sh --jobs 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-gate-evidence
+          path: .temp/gate-run/
 
   integration:
     # The final runner owns the ordinary workspace pass and timing repetitions.
