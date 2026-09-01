@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -145,16 +146,21 @@ test("inventories KV union, R2 composite, D1 intersection, DurableObjectStub com
 });
 
 test("pinned socket metadata distinguishes outbound peers from inbound connect authority", async () => {
-  const sockets = await readFile(join(ROOT, "references/workerd/src/workerd/api/sockets.c++"), "utf8");
-  assert.match(
-    sockets,
-    /setupSocket\(js,[\s\S]{0,320}kj::mv\(addressStr\),\s*kj::none \/\* localAddress \*\//,
-  );
-  const globalScope = await readFile(join(ROOT, "references/workerd/src/workerd/api/global-scope.c++"), "utf8");
-  assert.match(
-    globalScope,
-    /setupSocket\(js,[\s\S]{0,320}kj::none \/\* remoteAddress \*\/,[\s\n]*kj::mv\(host\)/,
-  );
+  const socketsPath = join(ROOT, "references/workerd/src/workerd/api/sockets.c++");
+  const globalScopePath = join(ROOT, "references/workerd/src/workerd/api/global-scope.c++");
+  // CI and default clones do not check out gitignored /references/workerd.
+  if (existsSync(socketsPath) && existsSync(globalScopePath)) {
+    const sockets = await readFile(socketsPath, "utf8");
+    assert.match(
+      sockets,
+      /setupSocket\(js,[\s\S]{0,320}kj::mv\(addressStr\),\s*kj::none \/\* localAddress \*\//,
+    );
+    const globalScope = await readFile(globalScopePath, "utf8");
+    assert.match(
+      globalScope,
+      /setupSocket\(js,[\s\S]{0,320}kj::none \/\* remoteAddress \*\/,[\s\n]*kj::mv\(host\)/,
+    );
+  }
   const serviceTransport = await readFile(
     join(ROOT, "packages/runtime/src/services/transport.ts"), "utf8",
   );

@@ -1,5 +1,7 @@
 //! Real pinned-workerd P0.2 dynamic Worker data-plane gate.
 
+#![cfg(feature = "test-support")]
+
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, header};
 use base64::Engine as _;
