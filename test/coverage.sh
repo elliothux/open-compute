@@ -32,6 +32,8 @@ esac
 export OPEN_COMPUTE_TEST_WORKERD="$workerd"
 
 cd "$root"
+# Gate compiles with --offline; fetch the locked crate graph while network is allowed.
+"$cargo_bin" fetch --locked
 # Use cargo-llvm-cov's external-runner contract in its own existing build cache.
 # Profile names include process/module identity, so parallel processes cannot collide.
 ./test/gate.py --workspace --list "$@" >/dev/null
