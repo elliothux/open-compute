@@ -34,13 +34,16 @@ export OPEN_COMPUTE_TEST_WORKERD="$workerd"
 cd "$root"
 # Gate compiles with --offline; fetch the locked crate graph while network is allowed.
 "$cargo_bin" fetch --locked
-# Use cargo-llvm-cov's external-runner contract in its own existing build cache.
+# Keep the instrumented target dir so rust-cache can reuse compiled artifacts.
+# Do not `cargo llvm-cov clean --workspace`; that cargo-cleans the target.
 # Profile names include process/module identity, so parallel processes cannot collide.
-./test/gate.py --workspace --list "$@" >/dev/null
 export CARGO_TARGET_DIR="$root/target/llvm-cov-target"
+mkdir -p "$CARGO_TARGET_DIR"
+find "$CARGO_TARGET_DIR" \( -name '*.profraw' -o -name '*.profdata' \) -delete
+# Use cargo-llvm-cov's external-runner contract in its own existing build cache.
+./test/gate.py --workspace --list "$@" >/dev/null
 coverage_env=$("$cargo_bin" llvm-cov show-env --sh)
 eval "$coverage_env"
-"$cargo_bin" llvm-cov clean --workspace
 ./test/gate.py --workspace "$@"
 
 mkdir -p "$report_dir"
