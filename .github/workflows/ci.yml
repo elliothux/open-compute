@@ -16,7 +16,7 @@ jobs:
   msrv:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
@@ -34,7 +34,7 @@ jobs:
         os: [ubuntu-24.04, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
@@ -61,7 +61,7 @@ jobs:
   coverage:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: llvm-cov
@@ -72,7 +72,7 @@ jobs:
         run: bun run build
       - name: Enforce 90 percent Rust line coverage
         run: ./test/coverage.sh --jobs 2
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-gate-evidence
@@ -88,7 +88,7 @@ jobs:
         os: [ubuntu-24.04, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
@@ -100,7 +100,7 @@ jobs:
       - name: Final workspace and controlled egress (Linux, explicit privilege authorization)
         if: runner.os == 'Linux'
         run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh --workspace --jobs 2
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: gate-evidence-${{ matrix.os }}

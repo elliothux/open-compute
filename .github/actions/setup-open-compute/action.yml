@@ -31,7 +31,7 @@ runs:
   steps:
     - name: Set up Python
       if: ${{ inputs.python == 'true' }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: "3.12"
 
@@ -42,12 +42,12 @@ runs:
 
     - name: Set up Node
       if: ${{ inputs.node == 'true' }}
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
-        node-version: 24.10.0
+        node-version: 26.8.1
 
     - name: Cache bun install
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.bun/install/cache
         key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
@@ -79,7 +79,7 @@ runs:
         cache-all-crates: true
 
     - name: Cache workerd archive
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       id: workerd-archive
       with:
         path: ${{ runner.temp }}/open-compute-workerd-cache

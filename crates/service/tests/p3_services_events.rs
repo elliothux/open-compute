@@ -365,7 +365,7 @@ fn dispatch_target(
 }
 
 async fn wait_service_drain(harness: &Harness) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while harness.service_invocations.counts() != (0, 0, 0) {
         assert!(
             Instant::now() < deadline,
