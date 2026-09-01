@@ -591,7 +591,7 @@ async fn p0_7_real_durable_objects_matrix() {
             worker.id,
             &deployment_a,
             generation_a,
-            "/hold?name=left&ms=250",
+            "/hold?name=left&ms=250&window=1",
         ),
         dispatch(
             &transport,
@@ -599,11 +599,27 @@ async fn p0_7_real_durable_objects_matrix() {
             worker.id,
             &deployment_a,
             generation_a,
-            "/hold?name=right&ms=250",
+            "/hold?name=right&ms=250&window=1",
         ),
     );
-    assert_eq!((left.status, right.status), (200, 200));
-    assert!(parallel_start.elapsed() < Duration::from_millis(450));
+    assert_eq!(
+        (left.status, right.status),
+        (200, 200),
+        "left={} right={}",
+        left.body,
+        right.body
+    );
+    let left_hold: serde_json::Value = serde_json::from_str(&left.body).expect("left hold json");
+    let right_hold: serde_json::Value = serde_json::from_str(&right.body).expect("right hold json");
+    let left_t0 = left_hold["t0"].as_i64().expect("left t0");
+    let left_t1 = left_hold["t1"].as_i64().expect("left t1");
+    let right_t0 = right_hold["t0"].as_i64().expect("right t0");
+    let right_t1 = right_hold["t1"].as_i64().expect("right t1");
+    assert!(
+        left_t0 < right_t1 && right_t0 < left_t1,
+        "parallel DO holds must overlap: left={left_hold} right={right_hold} wall={:?}",
+        parallel_start.elapsed(),
+    );
 
     let mut missing_class = deployment_request(
         account,
