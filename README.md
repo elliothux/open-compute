@@ -10,6 +10,9 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/elliothux/open-compute/actions/workflows/ci.yml">
+    <img src="https://github.com/elliothux/open-compute/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" />
+  </a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0" />
   <img src="https://img.shields.io/badge/runtime-stock%20workerd-f38020" alt="stock workerd" />
   <img src="https://img.shields.io/badge/API%20surface-2%2C097%20members-success" alt="2097 members" />
