@@ -26,14 +26,10 @@ pub(crate) fn require_current_serving_schema(loaded: &LoadedConfig) -> Result<()
         &path,
         loaded.config.storage.sqlite_busy_timeout_ms,
     )?;
-    let actual = open_compute_storage::migrations::inspect_schema(&db)?;
-    let target = open_compute_storage::migrations::current_schema_version();
-    if actual != target {
-        return Err(PlatformError::new(
-            ErrorCode::SchemaUnsupported,
-            "ocd run requires the current schema; restore a snapshot from this exact release",
-        ));
-    }
+    // inspect_schema already refuses too-new schemas and checksum mismatches.
+    // A prefix of this binary's lineage (including user_version 0) is an
+    // unfinished first start; bootstrap apply() continues those migrations.
+    open_compute_storage::migrations::inspect_schema(&db)?;
     Ok(())
 }
 

@@ -85,12 +85,18 @@ export class Counter extends DurableObject {
       return new Response(orderLabel);
     }
     const hold = Number(url.searchParams.get("hold") || 0);
+    let holdWindow = null;
     if (hold > 0) {
       this.ctx.storage.kv.put("fetch-hold-started", true);
+      const t0 = Date.now();
       await scheduler.wait(hold);
+      holdWindow = { t0, t1: Date.now() };
     }
     const value = this.ctx.storage.transactionSync(() => increment(this.ctx.storage.sql));
     await this.ctx.storage.sync();
+    if (holdWindow) {
+      return Response.json({ ...holdWindow, value: `${this.env.RELEASE}:${value}` });
+    }
     return new Response(`${this.env.RELEASE}:${value}`);
   }
   async connect(socket) {
@@ -726,6 +732,11 @@ export default {
       return new Response(`text:${text === "ping"},binary:${binaryOk}`);
     }
     const hold = url.pathname === "/hold" ? url.searchParams.get("ms") || "0" : "0";
-    return stub.fetch(`https://object.invalid/?hold=${hold}`);
+    const response = await stub.fetch(`https://object.invalid/?hold=${hold}`);
+    if (url.pathname === "/hold" && hold !== "0" && url.searchParams.get("window") !== "1") {
+      const payload = await response.json();
+      return new Response(payload.value, { status: response.status });
+    }
+    return response;
   }
 };

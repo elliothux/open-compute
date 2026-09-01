@@ -2056,6 +2056,17 @@ async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority()
     assert!(crate::run::p1::require_current_serving_schema(&fresh).is_ok());
     fs::write(fresh_root.join("control.sqlite"), b"").unwrap();
     assert!(crate::run::p1::require_current_serving_schema(&fresh).is_ok());
+    drop(
+        open_compute_storage::ControlDb::open(
+            &fresh_root.join("control.sqlite"),
+            loaded.config.storage.sqlite_busy_timeout_ms,
+        )
+        .unwrap(),
+    );
+    assert!(
+        crate::run::p1::require_current_serving_schema(&fresh).is_ok(),
+        "unmigrated control.sqlite must still first-start"
+    );
     assert!(crate::run::p1::require_current_serving_schema(&loaded).is_ok());
 
     let data_dir = DataDir::acquire_existing_offline(&loaded.config.storage).unwrap();

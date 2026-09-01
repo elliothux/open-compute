@@ -492,7 +492,16 @@ async fn run_image(
     })?;
     let pid = child.id() as i32;
     let mut owned = OwnedChild::new(child, pid);
-    verify_self_pgid(pid)?;
+    // `--version` can exit before getpgid. spawn already used process_group(0).
+    // Skip only the *read* failure when the pid is already gone; leader mismatch still fails.
+    match verify_self_pgid(pid) {
+        Ok(()) => {}
+        Err(err) => {
+            if err.message() != "failed to read runtime process group" || !pid_already_gone(pid) {
+                return Err(err);
+            }
+        }
+    }
     let stdout = owned.take_stdout();
     let stderr = owned.take_stderr();
 
@@ -568,12 +577,15 @@ pub(crate) fn verify_self_pgid(pid: i32) -> Result<(), PlatformError> {
             "runtime process pid is invalid",
         ));
     };
-    let pgid = getpgid(Some(raw)).map_err(|_| {
-        PlatformError::new(
-            ErrorCode::RuntimeInvalid,
-            "failed to read runtime process group",
-        )
-    })?;
+    let pgid = match getpgid(Some(raw)) {
+        Ok(pgid) => pgid,
+        Err(_) => {
+            return Err(PlatformError::new(
+                ErrorCode::RuntimeInvalid,
+                "failed to read runtime process group",
+            ));
+        }
+    };
     if pgid.as_raw_nonzero().get() != pid {
         return Err(PlatformError::new(
             ErrorCode::RuntimeInvalid,
@@ -1201,6 +1213,13 @@ pub fn assert_reaped(pid: Option<i32>) -> Result<(), PlatformError> {
 #[cfg(any(test, feature = "test-support"))]
 pub fn set_reap_probe_fail(fail: bool) {
     REAP_PROBE_FAIL.store(fail, Ordering::SeqCst);
+}
+
+fn pid_already_gone(pid: i32) -> bool {
+    let Some(raw) = Pid::from_raw(pid) else {
+        return true;
+    };
+    matches!(test_kill_process(raw), Err(err) if err == rustix::io::Errno::SRCH)
 }
 
 /// Wait until `pid` is gone or `deadline` elapses.

@@ -402,7 +402,9 @@ def build_targets(targets, directory, workspace):
     with (directory / 'build.jsonl').open('x') as output:
         output.write(result.stdout)
     if result.returncode:
-        raise RuntimeError(f'build failed; see {directory / "build.stderr.log"}')
+        errors_path = directory / 'build.stderr.log'
+        sys.stderr.write(errors_path.read_text(errors='replace'))
+        raise RuntimeError(f'build failed; see {errors_path}')
     for line in result.stdout.splitlines():
         item = json.loads(line)
         if item.get('reason') == 'compiler-artifact' and item.get('executable') and item['profile']['test']:

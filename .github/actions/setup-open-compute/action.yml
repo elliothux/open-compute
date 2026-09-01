@@ -1,0 +1,109 @@
+name: Set up open-compute
+description: Install pinned toolchains, restore shared caches, and prepare the pinned workerd archive
+
+inputs:
+  rust-components:
+    description: Extra rustup components (comma-separated)
+    required: false
+    default: ""
+  rust-cache-key:
+    description: rust-cache shared-key; default or llvm-cov
+    required: true
+  rust-workspaces:
+    description: rust-cache workspace to target-dir mapping
+    required: false
+    default: ". -> target"
+  python:
+    description: Install Python 3.12
+    required: false
+    default: "true"
+  node:
+    description: Install Node.js (bun install cache is a separate step)
+    required: false
+    default: "true"
+  llvm-cov:
+    description: Install cargo-llvm-cov
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      if: ${{ inputs.python == 'true' }}
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.3.14
+
+    - name: Set up Node
+      if: ${{ inputs.node == 'true' }}
+      uses: actions/setup-node@v7
+      with:
+        node-version: 26.8.1
+
+    - name: Cache bun install
+      uses: actions/cache@v6
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+        restore-keys: ${{ runner.os }}-bun-
+
+    - name: Install locked JavaScript tooling
+      shell: bash
+      run: bun install --frozen-lockfile --ignore-scripts
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.98.0
+        components: ${{ inputs.rust-components }}
+
+    - name: Install cargo-llvm-cov
+      if: ${{ inputs.llvm-cov == 'true' }}
+      uses: taiki-e/install-action@cargo-llvm-cov
+
+    - name: Cache Rust
+      uses: Swatinem/rust-cache@v2
+      with:
+        cache-targets: true
+        cache-on-failure: true
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+        add-job-id-key: false
+        shared-key: ${{ inputs.rust-cache-key }}
+        workspaces: ${{ inputs.rust-workspaces }}
+        cache-all-crates: true
+
+    - name: Cache workerd archive
+      uses: actions/cache@v6
+      id: workerd-archive
+      with:
+        path: ${{ runner.temp }}/open-compute-workerd-cache
+        key: workerd-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/runtime/workerd.lock.json') }}
+
+    - name: Prepare pinned workerd
+      shell: bash
+      run: |
+        set -euo pipefail
+        dest="${RUNNER_TEMP}/open-compute-build-runtime"
+        cache_dir="${RUNNER_TEMP}/open-compute-workerd-cache"
+        mkdir -p "$cache_dir"
+        shopt -s nullglob
+        gz_files=("$cache_dir"/*.gz)
+        if [ "${#gz_files[@]}" -eq 1 ]; then
+          bun scripts/prepare-workerd.ts --dest "$dest" --archive "${gz_files[0]}" >> "$GITHUB_ENV"
+        else
+          output="$(bun scripts/prepare-workerd.ts --dest "$dest" --download)"
+          printf '%s\n' "$output" >> "$GITHUB_ENV"
+          archive="$(printf '%s\n' "$output" | sed -n 's/^OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=//p')"
+          if [ -z "$archive" ] || [ ! -f "$archive" ]; then
+            echo "prepare-workerd did not emit OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE" >&2
+            exit 1
+          fi
+          rm -f "$cache_dir"/*.gz
+          cp "$archive" "$cache_dir/"
+        fi
