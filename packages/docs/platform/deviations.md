@@ -1,70 +1,70 @@
 # 行为差异
 
-Worker 侧 API 与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 一致。下列差异来自单节点拓扑与固定版本的 `workerd`。未提供的 Cloudflare 产品见[不支持](/platform/unsupported)。
+Worker API 与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 一致。下列差异源于单机部署以及锁定版本的开源 `workerd`。未提供的 Cloudflare 产品见[不支持](/platform/unsupported)。
 
 ## Workers
 
 | 主题 | 行为 | 文档 |
 | --- | --- | --- |
-| 出站 `fetch` / sockets / `node:net` | 共用 stock workerd `Network(allow=["public"])` | [TCP sockets](/workers/runtime-apis/tcp-sockets) |
-| 命名 Service/DO `Fetcher.connect` | 声明式 capability tunnel，不是第二条通用出站 | |
-| CF IP 段封禁 / self-connect 检测 / SMTP 25 | 不提供 | |
-| runtime / binding 后端 / workerd 内部 listener | 固定 loopback | |
-| control / data listener | 默认 loopback，运维可显式对外暴露 | |
-| 公开入口与额外公网 / SMTP egress 策略 | 由运维负责 | |
-| request-scoped CPU / subrequest / simultaneous-connection 配额 | 固定版本开源 workerd 独立进程不执行 | [Workers limits](/workers/platform/limits) |
-| `LimitEnforcer` subrequest 记账 | 空操作；`getLimitsExceeded()` 始终未超限 | |
-| 无效的 `WorkerLoader.ResourceLimits` | 不当成已执行 | |
-| 公网地址边界、产品耐久限额、handle 清理、进程监督 | 仍然有效 | |
-| 其它数字上限 | 见[限制](/platform/limits) | |
-| 部署权威 | 一份本地 SQLite 与一个受监督的 runtime generation | [版本与部署](/workers/versions-and-deployments/) |
-| 全球 rollout / placement / 流量拆分 / 账号管理 / 计费控制面 | 不提供 | |
-| Static Assets | 单节点上不可变的 S3 部署内容；路由和 binding 已覆盖 | [静态资源](/workers/static-assets/) |
-| 全球 CDN placement / 复制 / purge 传播 / 产品配额 | 不提供 | |
-| Service Bindings | 同一平台权威内 default / named fetch 与 RPC | [Bindings](/workers/runtime-apis/bindings) |
-| 跨地域 placement / 全球服务发现 | 不提供 | |
-| 目标准入、deployment pin、capability 生命周期、恢复 | 本地，失败即关闭 | |
-| Cron | UTC、五个字段，以及已文档化的本机 Quartz-like 扩展 | [Cron 触发器](/workers/configuration/cron-triggers) |
-| Cron 恢复 | 最多投影 misfire grace 内最新的一个 slot，不重放完整停机历史 | |
-| Cron 已知失败 | 配置里的有界本机重试，除非调用了 `noRetry()` | |
+| 出站 `fetch` / sockets / `node:net` | 共用开源 workerd 的 `Network(allow=["public"])` | [TCP sockets](/workers/runtime-apis/tcp-sockets) |
+| 命名 Service / DO 的 `Fetcher.connect` | 使用绑定声明的连接，而非第二条通用出站通道 | |
+| Cloudflare 自有 IP 封禁、自连接检测、默认 SMTP 25 拦截 | 不提供 | |
+| workerd 内部监听 | 绑定 loopback | |
+| 控制面 / 数据面监听 | 默认 loopback，运维可改为对外暴露 | |
+| 公网入口与 SMTP 出站策略 | 由运维负责 | |
+| 单请求 CPU / 子请求 / 并发连接配额 | 该开源 workerd 不执行 Cloudflare 托管环境的配额 | [Workers 限制](/workers/platform/limits) |
+| 子请求计数 | 不计数；`getLimitsExceeded()` 始终报告未超限 | |
+| `WorkerLoader.ResourceLimits` | 设置后不会作为已执行的限制 | |
+| 公网地址边界、存储限额、句柄清理、进程监督 | 仍然有效 | |
+| 其他数字上限 | 见[限制](/platform/limits) | |
+| 部署状态 | 本机 SQLite；`ocd` 监督当前 workerd 进程 | [版本与部署](/workers/versions-and-deployments/) |
+| 全球灰度、就近放置、流量拆分、账号与计费 | 不提供 | |
+| 静态资源 | 随部署存放于本机使用的 S3 | [静态资源](/workers/static-assets/) |
+| 全球 CDN、复制、purge 传播、CDN 配额 | 不提供 | |
+| Service Bindings | 同一平台内的 fetch 与 RPC | [Bindings](/workers/runtime-apis/bindings) |
+| 跨地区放置、全球服务发现 | 不提供 | |
+| 调用方准入与部署钉扎 | 在本机判定；失败则关闭 | |
+| Cron | UTC 五字段，以及文档所述本机扩展 | [Cron 触发器](/workers/configuration/cron-triggers) |
+| 错过的 Cron | 宽限时间内最多补最近一次，不回放停机期间的全部触发 | |
+| Cron 失败重试 | 按配置有限次重试；调用 `noRetry()` 除外 | |
 
-## Storage
-
-| 主题 | 行为 | 文档 |
-| --- | --- | --- |
-| KV 拓扑 | 单节点 SQLite 权威；没有全球复制或边缘缓存传播时延 | [KV](/kv/) |
-| R2 | 对象字节由配置的 S3-compatible provider 持有 | [R2](/r2/) |
-| R2 全球 placement / replication | 不提供 | |
-| D1 拓扑 | 单个本地主 SQLite authority | [D1](/d1/) |
-| D1 read replica / region routing | 不提供 | |
-| D1 `served_by` / region / colo metadata / 计费计数 | 不提供 | |
-| D1 bookmark | opaque bookmark 保证同一数据库的本地顺序可见性 | |
-| D1 `rows_read` / `rows_written` | 稳定的本地 SQLite 执行计数 | |
-| D1 `dump()` | 当前拒绝 hosted 非 alpha 的 `dump()` | |
-
-## Compute
+## 存储
 
 | 主题 | 行为 | 文档 |
 | --- | --- | --- |
-| Durable Objects 放置 | 落在本地这一个 workerd 进程 | [Durable Objects](/durable-objects/) |
-| location hint / jurisdiction / 全球迁移 | 无地理调度效果 | |
-| Queues 耐久性 | 单节点 `scheduler.sqlite`；投递 at-least-once | [Queues](/queues/) |
-| Queues 全球 FIFO | 不提供 | |
-| Queues 未知 native dispatch | 保留 lease，不消耗租户重试预算；后续投递可能重复同一 attempt number | |
-| Workflows 执行 | 本地 SQLite authority | [Workflows](/workflows/) |
-| Workflows callback | 结果提交前 at-least-once；replay 跳过已耐久完成的 callback | |
-| Workflows 外部副作用 | 不随 Workflow snapshot 回滚 | |
-| Workflows 跨地域执行 / 全球 placement / dashboard / observability | 不提供 | |
+| KV | 本机 SQLite；不提供全球复制或边缘缓存 | [KV](/kv/) |
+| R2 对象 | 存放在配置的 S3 兼容存储 | [R2](/r2/) |
+| R2 全球就近存放 / 复制 | 不提供 | |
+| D1 | 本机一份 SQLite | [D1](/d1/) |
+| D1 只读副本 / 按区域路由 | 不提供 | |
+| D1 `served_by` / 地域 / colo / 计费计数 | 不提供 | |
+| D1 bookmark | 不透明 token，保证同一数据库上的顺序 | |
+| D1 `rows_read` / `rows_written` | 本地 SQLite 执行计数 | |
+| D1 `dump()` | 与托管非 alpha 相同，拒绝该接口 | |
 
-## Media
+## 计算
 
 | 主题 | 行为 | 文档 |
 | --- | --- | --- |
-| Cache 权威 | Workers Cache 与 Cache API 为单节点本机权威 | [Workers Cache](/workers/cache/)、[Cache API](/workers/runtime-apis/cache) |
+| Durable Objects 位置 | 本机单个 workerd 进程 | [Durable Objects](/durable-objects/) |
+| location hint / jurisdiction / 全球迁移 | 不产生地理调度效果 | |
+| Queues 存储 | 本机 `scheduler.sqlite`；投递语义为 at-least-once | [Queues](/queues/) |
+| Queues 全局 FIFO | 不提供 | |
+| 无法识别的 native dispatch | 可能保留消息 lease；后续投递可能使用同一 attempt 编号 | |
+| Workflows | 步骤状态位于本机 SQLite | [Workflows](/workflows/) |
+| Workflows 步骤回调 | 结果提交前可能重复执行；已持久化的步骤在重放时跳过 | |
+| Workflows 外部副作用 | 不随快照回滚 | |
+| Workflows 跨地区执行、控制台与可观测性 | 不提供 | |
+
+## 媒体
+
+| 主题 | 行为 | 文档 |
+| --- | --- | --- |
+| Cache | Workers Cache 与 Cache API 仅在本机 | [Workers Cache](/workers/cache/)、[Cache API](/workers/runtime-apis/cache) |
 | 自动缓存 | 需要显式 `s-maxage` 或 `max-age` | |
-| 启发式 TTL / 全球复制 / purge 传播 | 不提供 | |
-| tiered cache / Cache Rules / Cache Deception Armor / 套餐行为 | 不提供 | |
-| 默认对象大小 | 每对象 16 MiB；每 Worker 1 GiB 逻辑 body 字节 | |
-| 运行中精确值 | `ocd capabilities --json`；见[限制](/platform/limits) | |
-| Images | 有界的本机光栅变换 binding，不是托管的 Cloudflare Images | [Images](/images/) |
-| 托管投递 / 上传 / 签名、URL transform、视频、AI upscale、产品配额 | 不在范围内 | |
+| 启发式 TTL、全球复制、purge 传播 | 不提供 | |
+| 分层缓存、Cache Rules、Cache Deception Armor、按套餐行为 | 不提供 | |
+| 默认大小 | 每对象 16 MiB；每 Worker 逻辑 body 1 GiB | |
+| 运行中的精确值 | `ocd capabilities --json`，见[限制](/platform/limits) | |
+| Images | 对本机请求体中的图像做变换，不是 Cloudflare 托管 Images | [Images](/images/) |
+| 图像库、上传、签名、URL 变换、视频、AI 放大、托管配额 | 不提供 | |

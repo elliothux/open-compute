@@ -30,4 +30,4 @@ await env.KV.delete("user:1");
 
 bulk get：`env.KV.get(["a", "b"])`。stream 值不要经 JSON 膨胀；上限仍是 25 MiB。完整方法见 [Cloudflare KV API](https://developers.cloudflare.com/kv/api/)。
 
-写入后立即在该节点可见。无全球传播等待。
+写入后立即在本机可见。无全球传播等待。

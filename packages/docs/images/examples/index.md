@@ -23,4 +23,4 @@ export default {
 }
 ```
 
-链是 `input` / `transform` / `draw` / `output` / `response()` / `info()`。完整选项见[指南](/images/guides/)。这是有界本机光栅变换 binding，不是托管 Cloudflare Images。配置见[上手](/images/get-started/)。
+链是 `input` / `transform` / `draw` / `output` / `response()` / `info()`。完整选项见[指南](/images/guides/)。这是本机图像变换（有大小限制） binding，不是托管 Cloudflare Images。配置见[上手](/images/get-started/)。

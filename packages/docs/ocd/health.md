@@ -6,7 +6,7 @@
 
 | 路径 | 成功 | 失败 | 用途 |
 | --- | --- | --- | --- |
-| `GET /health/live` | 进程在跑就 `200` | 连不上 / 进程已死 | 存活。可以据此重启 |
+| `GET /health/live` | 进程存活则返回 `200` | 连不上 / 进程已死 | 存活。可以据此重启 |
 | `GET /health/ready` | 准入成功 `200` | `503`，body `{"code":"<REASON>"}` | 是否接流量。**不要**当重启依据 |
 | `GET /health/status` | JSON：`readiness`、`components`、脱敏 `supervisor` | 若配置了 admin auth 且未带对的 Bearer，则 `401` | 看组件状态，不是探针 |
 
@@ -31,7 +31,7 @@
 | --- | --- | --- |
 | 目的 | 默认只读检查 | 授权 S3 canary 和一次临时 workerd 编译/启动/停止 |
 | 是否初始化 data-dir | 否 | 否 |
-| 锁 | 另一实例持有锁时，SQLite/schema 等检查会 skip | 必须拿到 data-dir 排他锁；服务在跑时不要跑 full |
+| 锁 | 另一实例持有锁时，SQLite/schema 等检查会 skip | 必须拿到 data-dir 排他锁；服务运行时不要执行 full |
 | 时机 | 随时只读探查 | **首次成功 `run` 且干净停机之后** |
 
 `--full` 在锁被占或 data-dir 不存在时会 skip `s3_canary`、`r2_canary`、`runtime_cycle`。普通 doctor 也会把这三项标成 skip，并写明需要 full doctor。

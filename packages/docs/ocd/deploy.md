@@ -1,6 +1,6 @@
 # 部署
 
-本节只覆盖如何把**已经发行的**匹配 OS/CPU `ocd` 文件跑成长期服务：container、systemd、launchd。不是 Worker 代码部署（那是 `oc run` / `oc deploy`，见[开始](/get-started)）。不讲如何从源码编出这个文件。
+本节只覆盖如何将**已发行的**、匹配 OS/CPU 的 `ocd` 作为长期服务运行：container、systemd、launchd。不是 Worker 代码部署（那是 `oc run` / `oc deploy`，见[开始](/get-started)）。不讲如何从源码编出这个文件。
 
 共同契约：一个 `ocd`、一份绝对路径配置、一块可写可执行的 data-dir、外接 S3。永远不要把凭据写进镜像、unit、plist 或发行包；用配置里的 env/file 引用。重启依据是进程退出或 `/health/live` 失败，**不要**因 `/health/ready` 的 503 重启。
 
@@ -36,7 +36,7 @@ plist 见 `examples/launchd/dev.open-compute.ocd.plist`。
 - `Label`：`dev.open-compute.ocd`，来自项目域名 `open-compute.dev` 的 reverse-DNS 标识
 - 参数：`/opt/open-compute/ocd --config /usr/local/etc/open-compute/config.toml run`
 - `WorkingDirectory`：`/usr/local/var/open-compute`
-- `RunAtLoad` true；`KeepAlive` 在非 SuccessfulExit 时拉起；`ThrottleInterval` 2；`ExitTimeOut` 30
+- `RunAtLoad` true；`KeepAlive` 在非 SuccessfulExit 时启动；`ThrottleInterval` 2；`ExitTimeOut` 30
 - 日志：`/usr/local/var/log/open-compute/ocd.out.log` 与 `.err.log`
 
 同样不要把密钥写进 plist。KeepAlive 对应进程退出，不要另接 readiness 503 去 unload/load。

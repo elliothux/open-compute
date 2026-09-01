@@ -23,7 +23,7 @@ export default {
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
 | `caches.default` / `caches.open` / `put` / `match` / `delete` | 是，见 [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | 是 |
-| 条件请求、Vary、Range | 是 | 按 pinned workerd 与本节点 cache authority |
+| 条件请求、Vary、Range | 是 | 按 pinned workerd 与本机 cache |
 | 缓存范围 | 全球 / colo CDN | 单节点 |
 | 自动缓存 TTL | 可含启发式 TTL | 需要显式 `s-maxage` 或 `max-age`；无启发式 TTL |
 | 全球 purge / Cache Tags | 是 | 不提供 |

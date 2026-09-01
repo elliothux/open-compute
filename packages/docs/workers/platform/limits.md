@@ -1,6 +1,6 @@
 # Limits
 
-数值上限以该节点上 `ocd capabilities --json` 的 `limits` 为准。
+数值上限以本机上 `ocd capabilities --json` 的 `limits` 为准。
 
 ```sh
 ocd capabilities --json

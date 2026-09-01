@@ -1,6 +1,6 @@
 # 备份与保留
 
-触发信号：计划维护窗口、当前 release 恢复演练或 RPO 要求到期。影响面是本地 control / KV / D1 / DO / scheduler 权威数据。R2 只绑定当前外部 S3，不是对象存储的时间点拷贝。runtime 解压缓存不属于 snapshot authority。
+触发信号：计划维护窗口、当前 release 恢复演练或 RPO 要求到期。影响面是本地 control / KV / D1 / DO / scheduler 数据。R2 只绑定当前外部 S3，不是对象存储的时间点拷贝。runtime 解压缓存不属于 snapshot authority。
 
 备份和恢复是离线操作：先停 service，再拿 data-dir 锁。
 
@@ -50,6 +50,6 @@ manifest 最后删除。回滚是不删除旧 manifest。
 
 ## 验证
 
-重新 `backup list` / `backup inspect --verify`，并确认 doctor 能读 `last-snapshot.json`。没有实际跑过的验证不要记成成功。
+重新 `backup list` / `backup inspect --verify`，并确认 doctor 能读 `last-snapshot.json`。未经实际执行的验证不要记为成功。
 
 恢复步骤见 [故障手册](/ocd/incidents/)：当前 release 恢复、全新主机恢复。恢复不会撤销快照之后已发生的外部副作用（包括 R2 当前状态）。

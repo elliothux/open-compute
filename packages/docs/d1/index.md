@@ -1,12 +1,12 @@
 # D1
 
-D1 是 SQLite SQL 数据库，用于从 Worker 查询关系数据。本平台上，每个 database 是运行 ocd 的该节点上的一份本地主 SQLite。
+D1 是 Worker 可查询的 SQLite 数据库。在 open-compute 上，每个 database 是运行 `ocd` 的主机上的一份 SQLite，不提供只读副本。
 
 例如：
 
 - 从 Worker 查询关系数据
 - 导入 schema 并执行 SQL
-- 在一次事务中 batch 多条语句
+- 在同一事务中执行多条语句
 
 ```ts
 export default {
@@ -19,7 +19,7 @@ export default {
 } satisfies ExportedHandler<{ DB: D1Database }>;
 ```
 
-在 `open-compute.json` 中绑定已有的 database。普通产品 binding 为 `{ type, id, permissions? }`：
+在 `open-compute.json` 中绑定已存在的 database：
 
 ```json
 {
@@ -31,21 +31,21 @@ export default {
 }
 ```
 
-`id` 是本平台上已存在的 database。绑定语法见 [bindings](/workers/configuration/bindings)。CLI 为 `oc` / `oc run` / `oc types`。
+`id` 必须指向平台上已有的 database。语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
 
 ## 兼容性
 
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
-| Worker API | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | 相同：`prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`、session、opaque bookmark、prepared-statement / result / meta |
-| 拓扑 | 托管 D1，含 read replica | 运行 ocd 的该节点上的本地主 SQLite |
-| Read replica | 提供 | 不提供 |
-| Region routing | 提供 | 不提供 |
-| `served_by` 地理 | region / colo metadata | 不提供；`served_by_*` 不是地理产品 |
-| Bookmark | 跨副本因果 | 同一数据库的本地顺序 |
+| Worker API | [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) | 相同：`prepare` / `bind` / `run` / `all` / `first` / `raw` / `exec` / `batch`、session、bookmark、prepared-statement / result / meta |
+| 存储位置 | 托管 D1（可含只读副本） | 本机一份 SQLite |
+| 只读副本 | 提供 | 不提供 |
+| 按区域路由 | 提供 | 不提供 |
+| `served_by` 地域信息 | region / colo | 不提供；`served_by_*` 不表示地域产品 |
+| Bookmark | 跨副本因果顺序 | 同一数据库上的本地顺序 |
 | `rows_read` / `rows_written` | 计费计数 | 本地 SQLite 执行计数 |
-| `dump()` | hosted 非 alpha 拒绝 | 同样拒绝（`D1_DUMP_ERROR`） |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker binding |
+| `dump()` | 托管非 alpha 拒绝 | 同样拒绝（`D1_DUMP_ERROR`） |
+| REST / `client.v4` | 提供 | 不提供；使用 Worker 绑定 |
 
 ## 本节
 

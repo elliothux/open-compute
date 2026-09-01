@@ -13,4 +13,4 @@ R2 的 Worker API 与 Cloudflare 对齐；对象字节落在配置的 S3-compati
 | Jurisdictional restrictions | 提供 | 不提供 |
 | REST / `client.v4` | 提供 | 不提供；使用 Worker binding 或 provider 的 S3 API |
 
-见 [Compatibility](/platform/compatibility)。
+见[兼容性](/platform/compatibility)。

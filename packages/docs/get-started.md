@@ -1,14 +1,14 @@
 # 开始
 
-本指南把一个 hello Worker 跑到已经就绪的 `ocd` 上。
+将仓库中的 hello Worker 部署到已就绪的 `ocd`。
 
 ## 1. 安装 ocd，确认 `/health/ready`
 
-先按[安装与首次启动](/ocd/get-started)把 `ocd` 跑起来。本页假设 `GET /health/ready` 已经返回 200。`oc run` 不会再启动一个 workerd；它把 Worker 激活到已经在跑的本地平台。
+按[安装与首次启动](/ocd/get-started)运行 `ocd`。本页假定 `GET /health/ready` 已返回 200。`oc run` 不会再启动 workerd；它将 Worker 部署到已在运行的本地平台。
 
 ## 2. Hello Worker
 
-用仓库里的 `examples/hello-worker`。项目文件是 `open-compute.json`：
+使用仓库中的 `examples/hello-worker`。项目文件为 `open-compute.json`：
 
 ```json
 {
@@ -20,7 +20,7 @@
 }
 ```
 
-入口是模块 Worker：
+入口为模块 Worker：
 
 ```ts
 export default {
@@ -33,18 +33,18 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 3. 打印一个 URL
+## 3. 获取 Worker URL
 
-在仓库根目录：
+在仓库根目录执行：
 
 ```sh
 bun run oc run --config examples/hello-worker/open-compute.json --ocd <path-to-ocd>
 ```
 
-成功时打印 Worker URL。把 `<path-to-ocd>` 换成 `ocd` 二进制的路径（或设 `OPEN_COMPUTE_OCD`）。
+成功时打印 Worker URL。将 `<path-to-ocd>` 替换为 `ocd` 二进制路径，或设置环境变量 `OPEN_COMPUTE_OCD`。
 
 ## `open-compute.json` 不是 `wrangler.jsonc`
 
-配置借用了 Wrangler 的部分字段名（`name`、`main`、`vars`），但 **`open-compute.json` 不是 `wrangler.jsonc`**。未知字段直接拒绝。项目 JSON 没有 `compatibilityDate`：compatibility date 由平台冻结，见 `ocd capabilities --json` 的 `runtime.effective_compatibility_date`。
+配置借用了 Wrangler 的部分字段名（`name`、`main`、`vars`），但 **`open-compute.json` 不是完整的 `wrangler.jsonc`**。未知字段将被拒绝。项目 JSON 不含 `compatibilityDate`：兼容日期由平台锁定，见 `ocd capabilities --json` 中的 `runtime.effective_compatibility_date`。
 
-下一步：[产品目录](/directory)。还要把 `ocd` 当服务跑时，去[运维](/ocd/)。
+下一步：[产品目录](/directory)。将 `ocd` 作为服务运行时，见[运维](/ocd/)。

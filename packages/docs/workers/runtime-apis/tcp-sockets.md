@@ -25,7 +25,7 @@ export default {
 | `connect(address, options?)` 返回带 `readable` / `writable` / `opened` / `closed` / `close()` / `startTls()` 的 `Socket` | 是 | 是 |
 | `secureTransport`：`off` \| `on` \| `starttls` | 是 | 是 |
 | 租户通用出站 `fetch()`、`cloudflare:sockets.connect()`、`node:net` | Cloudflare 托管网络策略 | 共享唯一的 stock-workerd `Network(allow=["public"])` |
-| 命名 Service/DO 的 `Fetcher.connect()` | 托管策略 | 使用已声明的 capability tunnel，不是第二条通用出站 |
+| 命名 Service/DO 的 `Fetcher.connect()` | 托管策略 | 使用绑定声明的连接，而非第二条通用出站通道 |
 | Cloudflare 自有 IP 段封禁 / Worker self-connect（TCP Loop）/ 默认 SMTP 25 封禁 | 是，见 [troubleshooting](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/#troubleshooting) | 不提供 |
 | private / loopback / link-local / metadata / Unix | 拒绝 | public 地址层拒绝 |
 

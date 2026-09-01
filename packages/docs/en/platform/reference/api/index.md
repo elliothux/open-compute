@@ -1,22 +1,22 @@
 # API reference
 
-This is the entry for the generated member index. A generator will fill per-product pages later; for now, counts only.
+Worker signatures follow [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/). This page lists shipped products and their docs. Differences from Cloudflare's hosted environment: [Behavior differences](/en/platform/deviations).
 
-Where signatures match Cloudflare, read [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/). Single-node topology and behavior differences: [Behavior differences](/en/platform/deviations).
+| Product | Docs |
+| --- | --- |
+| Workers | [Workers](/en/workers/), [Runtime APIs](/en/workers/runtime-apis/) |
+| KV | [KV](/en/kv/) |
+| R2 | [R2](/en/r2/) |
+| D1 | [D1](/en/d1/) |
+| Durable Objects | [Durable Objects](/en/durable-objects/) |
+| Alarms | [Alarms](/en/durable-objects/alarms) |
+| Queues | [Queues](/en/queues/) |
+| Cron | [Cron triggers](/en/workers/configuration/cron-triggers) |
+| Workflows | [Workflows](/en/workflows/) |
+| Cache API | [Cache API](/en/workers/runtime-apis/cache) |
+| Workers Cache | [Workers Cache](/en/workers/cache/) |
+| Images | [Images](/en/images/) |
+| Version Metadata | [Bindings](/en/workers/runtime-apis/bindings) |
+| WebSocket hibernation | [WebSockets](/en/workers/runtime-apis/websockets) |
 
-| Product | Members |
-| --- | ---: |
-| workers | 1580 |
-| kv | 52 |
-| r2 | 110 |
-| d1 | 36 |
-| durable_objects | 115 |
-| alarms | 7 |
-| queues | 63 |
-| cron | 26 |
-| workflows | 72 |
-| cache_api | 14 |
-| version_metadata | 3 |
-| websocket_hibernation | 19 |
-
-Total 2,097. Release identity still comes from `ocd capabilities --json` on the running binary.
+Release identity comes from `ocd capabilities --json` on the running binary.

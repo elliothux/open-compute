@@ -24,7 +24,7 @@ DO hibernation：`state.acceptWebSocket`、tags、`webSocketMessage` / `webSocke
 | --- | --- | --- |
 | `WebSocketPair`、`accept()`、消息与关闭 | 是 | 是 |
 | hibernation：accept / tags / get、auto-response、attachment 重建 | 是 | 是 |
-| 连接落地 | 全球边缘升级 | 该节点上的一个 workerd |
+| 连接落地 | Cloudflare 边缘网络升级 | 本机一个 workerd |
 | duration 计费 | 是 | 不提供 |
-| Durable Object 位置 | 全球 placement | 该节点 |
+| Durable Object 位置 | 全球 placement | 本机 |
 

@@ -1,6 +1,6 @@
 # Runtime APIs
 
-Worker 在本节点 workerd isolate 中运行与 Cloudflare Workers 对齐的 runtime 表面。完整成员以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。
+Worker 在本机 workerd isolate 中运行与 Cloudflare Workers 对齐的 runtime 表面。完整成员以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。
 
 ```ts
 export default {

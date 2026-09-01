@@ -1,6 +1,6 @@
 # 不支持
 
-open-compute 不提供下列 Cloudflare 产品。部署时会在边界拒绝它们。不要因为 upstream types 里有同名符号就当作已注入的 binding。
+open-compute 不提供下列 Cloudflare 产品。部署时会在边界拒绝它们。不要仅因 upstream types 中存在同名符号，就将其视为已注入的 binding。
 
 | 名称 | Cloudflare 产品 |
 | --- | --- |

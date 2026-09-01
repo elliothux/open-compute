@@ -15,4 +15,4 @@
 | 全球 placement | 提供 | 不提供 |
 | Jurisdictional restrictions | 提供 | 不提供 |
 | 公开 bucket 域名 | Cloudflare 托管 | 不提供 |
-| 平台备份 | 对象存储 PITR | 覆盖本机 SQLite 权威，不是对象存储 PITR |
+| 平台备份 | 对象存储 PITR | 覆盖本机 SQLite 数据，不是对象存储 PITR |

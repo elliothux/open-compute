@@ -15,6 +15,6 @@ ocd capabilities --json
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
 | 日期选定 workerd 可观察行为 | 是 | 是 |
-| 每个项目设置 `compatibility_date` / `compatibilityDate` | 是 | 不允许；写入 `open-compute.json` 会作为未知字段被拒绝 |
+| 每个项目设置 `compatibility_date` / `compatibilityDate` | 是 | 不允许；写入 `open-compute.json` 将作为未知字段被拒绝 |
 | 更改日期的方式 | 项目配置 | 更换平台 pin（`workerd.lock.json`） |
 

@@ -1,11 +1,11 @@
 # Queues
 
-Queues 把消息从 producer Worker 投递给 consumer Worker。投递是 at-least-once。耐久性来自该节点上的 `scheduler.sqlite`。
+Queues 将消息从生产者 Worker 投递给消费者 Worker。投递语义为 at-least-once：在崩溃或重试时，消息可能被重复处理。队列状态存储在本机 `scheduler.sqlite`。
 
 例如：
 
-- 解耦 producer 与 consumer Worker
-- 缓冲异步处理
+- 解耦生产者与消费者 Worker
+- 缓冲异步任务
 - 失败后重试投递
 
 ```ts
@@ -23,7 +23,7 @@ export default {
 } satisfies ExportedHandler<{ QUEUE: Queue }>;
 ```
 
-在 `open-compute.json` 中绑定 producer。普通产品 binding 为 `{ type, id, permissions? }`：
+在 `open-compute.json` 中绑定生产者：
 
 ```json
 {
@@ -35,19 +35,19 @@ export default {
 }
 ```
 
-Consumer 是 Worker 的 `queue` handler。`open-compute.json` 不使用 Wrangler 的 `[[queues.consumers]]`。绑定语法见 [bindings](/workers/configuration/bindings)。CLI 为 `oc` / `oc run` / `oc types`。
+消费者为 Worker 的 `queue` 处理函数。`open-compute.json` 不使用 Wrangler 的 `[[queues.consumers]]`。语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
 
 ## 兼容性
 
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
-| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | 相同：`send` / `sendBatch`、`contentType`（json / text / bytes / v8）、`delaySeconds`、`metrics`、consumer `MessageBatch` / `ack` / `retry` |
-| 耐久性 | 全球复制 | 该节点上的 `scheduler.sqlite` |
-| 投递 | at-least-once | at-least-once |
-| 全球 FIFO | 提供 | 不提供 |
-| 未知 native dispatch | — | 可能保留 lease；后续投递可能重复同一 attempt number |
+| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | 相同：`send` / `sendBatch`、`contentType`（json / text / bytes / v8）、`delaySeconds`、`metrics`、消费者 `MessageBatch` / `ack` / `retry` |
+| 存储位置 | 全球复制 | 本机 `scheduler.sqlite` |
+| 投递语义 | at-least-once | at-least-once；不提供 exactly-once |
+| 全局 FIFO | 提供 | 不提供 |
+| 无法识别的 native dispatch | — | 可能保留消息 lease，后续投递可能使用同一 attempt 编号 |
 | Pull consumer | 提供 | 不提供 |
-| Binding | wrangler `queues` | producer `{ type, id, permissions? }`；consumer 为 Worker `queue` handler |
+| 绑定 | wrangler `queues` | 生产者 `{ type, id, permissions? }`；消费者为 Worker `queue` 处理函数 |
 
 ## 本节
 

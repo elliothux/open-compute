@@ -28,4 +28,4 @@ export default {
 }
 ```
 
-`send` / `sendBatch`、`contentType`、`delaySeconds`、`ack` / `retry` 与 [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) 对齐。耐久性来自该节点上的 `scheduler.sqlite`。投递是 at-least-once。不提供全球 FIFO 或 exactly-once。创建 Queue 见[上手](/queues/get-started/)。
+`send` / `sendBatch`、`contentType`、`delaySeconds`、`ack` / `retry` 与 [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) 对齐。耐久性来自本机 `scheduler.sqlite`。消息可能被处理多次。不提供全局先进先出 或 exactly-once。创建 Queue 见[上手](/queues/get-started/)。

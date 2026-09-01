@@ -39,7 +39,7 @@ bun run oc types --config open-compute.json
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
 | 租户只看见声明过的名字 | 是 | 是 |
-| KV / R2 / D1 / DO / Queue / Workflow / Service / Assets / Images / Version Metadata 的 Worker 侧 API | 是，见 [Cloudflare bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | 同一套符号 |
+| KV / R2 / D1 / DO / Queue / Workflow / Service / Assets / Images / Version Metadata 的 Worker 里用的 API | 是，见 [Cloudflare bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | 同一套符号 |
 | 配置形态 | Wrangler 分产品顶层数组（`kv_namespaces` 等） | `bindings` 对象，值为 `{type, id, permissions?}` |
 | Service Bindings | 同账户 Worker | `services: [{binding, service, entrypoint?}]`；部署时解析同账户 Worker 名并冻结目标 ID；仅限本平台 |
 | Workers AI、Vectorize、Hyperdrive、mTLS、Rate Limiting、Secrets Store、Analytics Engine、Browser Rendering | 是 | 不提供 |

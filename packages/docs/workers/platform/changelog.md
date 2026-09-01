@@ -1,6 +1,6 @@
 # Changelog
 
-以该节点上的发行身份为准，不以本页文字为准。
+以本机发行身份为准，不以本页文字为准。
 
 ```sh
 ocd capabilities --json

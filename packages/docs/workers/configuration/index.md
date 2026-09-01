@@ -42,7 +42,7 @@ Worker 项目文件是 `open-compute.json`。必须包含 `name`，并选择一�
 | 模块 Worker 的 `main` 指向 TS/JS 入口 | 是 | 是 |
 | `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags` | 是 | 不允许 |
 | `workers_dev`、Custom Domains、`routes`、placement、observability、AI、vectorize | 是 | 不提供；未知键失败，不会忽略 |
-| 控制面 | Cloudflare 控制面 | 本节点 `ocd` HTTP API |
+| 控制面 | Cloudflare 控制面 | 本机 `ocd` HTTP API |
 
 ## 本节
 

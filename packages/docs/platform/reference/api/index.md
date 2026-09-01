@@ -1,22 +1,22 @@
 # API 参考
 
-本页是生成成员索引的入口。生成器稍后会按产品填充分页；现在列出各产品的成员计数。
+Worker 签名以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。本页列出已提供产品及其文档入口。与托管环境的差异见[行为差异](/platform/deviations)。
 
-Worker 侧签名与 Cloudflare 文档一致的，以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。单节点拓扑与行为差异见[行为差异](/platform/deviations)。
+| 产品 | 文档 |
+| --- | --- |
+| Workers | [Workers](/workers/)、[运行时 API](/workers/runtime-apis/) |
+| KV | [KV](/kv/) |
+| R2 | [R2](/r2/) |
+| D1 | [D1](/d1/) |
+| Durable Objects | [Durable Objects](/durable-objects/) |
+| Alarms | [Alarms](/durable-objects/alarms) |
+| Queues | [Queues](/queues/) |
+| Cron | [Cron 触发器](/workers/configuration/cron-triggers) |
+| Workflows | [Workflows](/workflows/) |
+| Cache API | [Cache API](/workers/runtime-apis/cache) |
+| Workers Cache | [Workers Cache](/workers/cache/) |
+| Images | [Images](/images/) |
+| Version Metadata | [Bindings](/workers/runtime-apis/bindings) |
+| WebSocket hibernation | [WebSockets](/workers/runtime-apis/websockets) |
 
-| 产品 | 成员 |
-| --- | ---: |
-| workers | 1580 |
-| kv | 52 |
-| r2 | 110 |
-| d1 | 36 |
-| durable_objects | 115 |
-| alarms | 7 |
-| queues | 63 |
-| cron | 26 |
-| workflows | 72 |
-| cache_api | 14 |
-| version_metadata | 3 |
-| websocket_hibernation | 19 |
-
-合计 2,097。运行中的发行身份仍以 `ocd capabilities --json` 为准。
+运行中的发行身份以 `ocd capabilities --json` 为准。

@@ -1,11 +1,11 @@
 # Durable Objects
 
-Durable Objects 把计算和强一致存储绑在一个对象上。本平台上，所有对象都落在本地这一个 `workerd` 进程。
+Durable Object 将计算与强一致存储绑定在同一对象上。在 open-compute 上，所有对象运行在本机的单个 `workerd` 进程中。
 
 例如：
 
 - 在多个客户端之间协调状态
-- 每个对象的强一致存储
+- 每个对象独立的强一致存储
 - Alarms 与 WebSocket hibernation
 
 ```ts
@@ -26,7 +26,7 @@ export default {
 } satisfies ExportedHandler<{ COUNTER: DurableObjectNamespace }>;
 ```
 
-在 `open-compute.json` 中绑定。Durable Object 必须提供 `className`：
+在 `open-compute.json` 中绑定。Durable Object 必须指定 `className`：
 
 ```json
 {
@@ -38,18 +38,18 @@ export default {
 }
 ```
 
-`className` 只用于核对 class 语义，不作为资源 ID 发给平台。语法见 [bindings](/workers/configuration/bindings)。CLI 为 `oc` / `oc run` / `oc types`。
+`className` 仅用于核对 class，不会作为资源 ID 提交给平台。语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
 
 ## 兼容性
 
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
-| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`、stub `fetch` / RPC、`state.storage` KV 与 SQL、transaction、output gate |
-| 放置 | 地理调度，`locationHint` / jurisdiction / migration | 全部对象在本地这一个 workerd；`locationHint` / jurisdiction / migration 无地理效果 |
-| Alarms | 提供 | 支持 7 个方法：`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` handler |
-| Hibernation | 提供 | 支持 |
-| Binding | wrangler `durable_objects` | `{ type, id, className }`；`className` 必填 |
-| `Fetcher.connect()` | 通用出网 | 声明的 capability tunnel |
+| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`、stub `fetch` / RPC、`state.storage` 的 KV 与 SQL、transaction、output gate |
+| 对象位置 | 按地区调度，`locationHint` / jurisdiction / migration | 全部位于本机单个 workerd；`locationHint` / jurisdiction / migration 不产生地理效果 |
+| Alarms | 提供 | 提供：`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` |
+| Hibernation | 提供 | 提供 |
+| 绑定 | wrangler `durable_objects` | `{ type, id, className }`，必须指定 `className` |
+| `Fetcher.connect()` | 通用出站 | 使用绑定声明的连接，而非第二条通用出站通道 |
 
 ## 本节
 

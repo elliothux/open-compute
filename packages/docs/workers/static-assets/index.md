@@ -25,7 +25,7 @@
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
 | HTML trailing slash、SPA、Worker-first、`_headers` / `_redirects` 路由概念 | 是，见 [Cloudflare Static Assets](https://developers.cloudflare.com/workers/static-assets/) | 对齐 |
-| 对象存储 | 全球 CDN | 该节点上的不可变 S3 对象，不是全球 CDN |
+| 对象存储 | 全球 CDN | 本机不可变 S3 对象，不是全球 CDN |
 | 全球 CDN placement / 复制 / purge 传播 / 产品配额 | 是 | 不提供 |
 | Pages 产品迁移向导 | 是 | 不提供 |
 

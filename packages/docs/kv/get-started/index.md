@@ -4,7 +4,7 @@
 
 ## 1. 创建 namespace
 
-资源必须先在本平台上存在；写入 `open-compute.json` 不会创建 KV。以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
+资源必须先在open-compute 上存在；写入 `open-compute.json` 不会创建 KV。以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')

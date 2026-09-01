@@ -11,6 +11,6 @@ Durable Objects 的 Worker / class API 与 Cloudflare 对齐；所有对象落�
 | Alarms | 提供 | 支持 7 个方法 |
 | Hibernation | 提供 | 支持 |
 | Binding | wrangler `durable_objects` | `{ type, id, className }`；`className` 必填 |
-| `Fetcher.connect()` | 通用出网 | 声明的 capability tunnel |
+| `Fetcher.connect()` | 通用出网 | 绑定声明的连接 |
 
-见 [Compatibility](/platform/compatibility)。
+见[兼容性](/platform/compatibility)。

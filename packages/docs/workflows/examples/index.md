@@ -30,4 +30,4 @@ export default {
 }
 ```
 
-`create` / `get` / `step.do` / `status` 与 [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) 对齐。`className` 必须有。执行权威是本地 SQLite。创建 definition 见[上手](/workflows/get-started/)。
+`create` / `get` / `step.do` / `status` 与 [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) 对齐。`className` 必须有。步骤状态存在本机 SQLite。创建 definition 见[上手](/workflows/get-started/)。

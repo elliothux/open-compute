@@ -19,6 +19,6 @@ HTTP 请求到达绑定了该 Worker 的路径后，由 `fetch` handler 处理�
 | [workers.dev](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/) | 是 | 不提供 |
 | Cloudflare zone Routes / Page Rules | 是 | 不提供 |
 | 项目文件中的 `routes` / `workers_dev` | 是 | 不允许 |
-| 预览 URL | `*.workers.dev` / Cloudflare preview | `oc run` 打印的本节点 URL |
-| 部署与路由权威 | Cloudflare 控制面 | 本节点 SQLite 与一份受监督的 runtime generation |
+| 预览 URL | `*.workers.dev` / Cloudflare preview | `oc run` 打印的本机 URL |
+| 部署与路由数据源 | Cloudflare 控制面 | 本机 SQLite；`ocd` 监督当前 workerd 进程 |
 

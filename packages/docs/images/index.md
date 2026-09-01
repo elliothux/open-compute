@@ -1,12 +1,12 @@
 # Images
 
-Images 是有界的本机光栅变换 binding。输入是请求体字节；变换在运行 ocd 的该节点上完成。不是托管的 Cloudflare Images。
+Images 在运行 `ocd` 的主机上对请求体中的图像执行变换，并受尺寸与并发限制。这不是 Cloudflare 托管 Images：不提供图像库、上传签名或 URL 变换。
 
 例如：
 
-- 缩放与转换请求体中的图像
-- overlay 并输出 jpeg / png / webp / avif
-- 用 `info()` 读取格式
+- 缩放请求体中的图像
+- 叠加图像，输出 jpeg / png / webp / avif
+- 使用 `info()` 读取格式信息
 
 ```ts
 export default {
@@ -21,7 +21,7 @@ export default {
 } satisfies ExportedHandler<{ IMAGES: ImagesBinding }>;
 ```
 
-在 `open-compute.json` 中声明。Images 不是 `bindings` 里的资源 ID，只用顶层 `"images": { "binding": "IMAGES" }`：
+在 `open-compute.json` 中声明。Images 不是 `bindings` 中的资源 ID，使用顶层字段：
 
 ```json
 {
@@ -31,20 +31,20 @@ export default {
 }
 ```
 
-见 [bindings](/workers/configuration/bindings)。CLI 为 `oc` / `oc run` / `oc types`。
+语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
 
 ## 兼容性
 
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
-| Binding API | Images binding 链 | 相同链：`input` → `transform` / `draw` → `output` → `response()`，以及 `info()` |
-| 产品 | 托管 Cloudflare Images | 有界本机光栅 binding |
+| Binding API | Images 调用链 | 相同：`input` → `transform` / `draw` → `output` → `response()`，以及 `info()` |
+| 产品形态 | 托管 Cloudflare Images | 对本机请求体中的图像做变换 |
 | 输入 | 托管图像 ID 或 URL | `ReadableStream` 字节 |
 | 上传 / 签名 | 提供 | 不提供 |
-| URL transform | 提供 | 不提供 |
+| URL 变换 | 提供 | 不提供 |
 | 视频 | 提供 | 不提供 |
-| AI upscale | 提供 | 不提供 |
-| Binding | wrangler `images` | `"images": { "binding": "IMAGES" }` |
+| AI 放大 | 提供 | 不提供 |
+| 配置 | wrangler `images` | `"images": { "binding": "IMAGES" }` |
 
 ## 本节
 

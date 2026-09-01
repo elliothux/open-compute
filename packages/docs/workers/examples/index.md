@@ -1,6 +1,6 @@
 # 示例
 
-以下示例可在本节点的 workerd 上运行。Cloudflare 的 [geolocation / country-code](https://developers.cloudflare.com/workers/examples/geolocation-hello-world/) 示例依赖全球 Anycast 与 `request.cf.country`；本平台不提供该边缘地理产品。
+以下示例可在本机 workerd 上运行。Cloudflare 的 [geolocation / country-code](https://developers.cloudflare.com/workers/examples/geolocation-hello-world/) 示例依赖全球 Anycast 与 `request.cf.country`；本平台不提供该边缘地理产品。
 
 ## Hello JSON
 
@@ -27,7 +27,7 @@ export default {
 
 ## KV get / put
 
-Worker 侧 KV API 与 [KV](/kv/) 对齐。权威是该节点上的一份 SQLite 数据库，不提供全球复制。
+Worker 中的 KV API 与 [KV](/kv/) 对齐。数据位于本机一份 SQLite，不提供全球复制。
 
 ```ts
 export default {
@@ -69,7 +69,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-表达式为 UTC 五字段，并支持已文档化的本节点 Quartz-like 扩展。misfire 恢复时最多投影 grace 内最新的一个 slot。平台部署元数据字段为 `crons`（字符串数组）。`open-compute.json` 没有 Wrangler 的 `triggers` 键；写入该键会作为未知字段被拒绝。
+表达式为 UTC 五字段，并支持已文档化的本机 Quartz-like 扩展。错过触发后，宽限时间内最多补最近一次。平台部署元数据字段为 `crons`（字符串数组）。`open-compute.json` 没有 Wrangler 的 `triggers` 键；写入该键将作为未知字段被拒绝。
 
 ## Service Binding `fetch`
 
@@ -103,6 +103,6 @@ export default {
 | `request.cf.country` 边缘地理 / geolocation 示例 | 是 | 不提供 |
 | workers.dev | 是 | 不提供 |
 | Analytics Engine / Workers AI / Turnstile 示例 | 是 | 不提供 |
-| 状态存储位置 | 全球复制产品 | 该节点 |
+| 状态存储位置 | 全球复制产品 | 本机 |
 
 下一步：[配置](/workers/configuration/)、[Runtime APIs](/workers/runtime-apis/)。

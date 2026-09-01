@@ -75,7 +75,7 @@ ocd --config /etc/open-compute/config.toml doctor --full --json
 | `backup cleanup-incomplete` | 清超过 grace 的不完整上传 |
 | `backup restore --snapshot <uuid>` | 恢复到**空的**新 data-dir |
 | `backup cleanup-restore --staging <uuid>` | 按失败 receipt 精确清 staging |
-| `backup attest-restore-smoke --snapshot <uuid> --passed` | 记录产品 smoke 已通过；不能替代真正跑过的 smoke |
+| `backup attest-restore-smoke --snapshot <uuid> --passed` | 记录产品 smoke 已通过；不能替代实际执行过的 smoke |
 
 均需 `--config`；均可 `--json`。流程见 [备份与保留](/ocd/backup) 和 [故障手册](/ocd/incidents/)。
 
@@ -86,6 +86,6 @@ ocd --config /etc/open-compute/config.toml support-bundle --output /var/tmp/open
 ocd --config /etc/open-compute/config.toml scheduler recover-corrupt --backup-name scheduler-corrupt-20260826
 ```
 
-`support-bundle`：`--output` 必须是绝对路径、目标不存在、不是符号链接。`scheduler recover-corrupt` 仅用于 control 可验证且没有 Queue/Cron/Workflow 权威的 alarm-only 目录。完整停止条件见 [故障手册](/ocd/incidents/)。
+`support-bundle`：`--output` 必须是绝对路径、目标不存在、不是符号链接。`scheduler recover-corrupt` 仅用于 control 可验证且不含 Queue/Cron/Workflow 状态的 alarm-only 目录。完整停止条件见 [故障手册](/ocd/incidents/)。
 
 `ocd worker bundle` 是离线开发者工具，从 stdin 读版本化 build JSON、向 stdout 写 bundle。运维装机用不到。Worker 编程面见[开始](/get-started)与[兼容性](/platform/compatibility)。

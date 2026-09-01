@@ -1,6 +1,6 @@
 # 快速开始
 
-使用 CLI 将模块 Worker 编译、校验并激活到已运行的本节点 `ocd`。`oc run` 不会再启动一个 workerd。平台尚未启动时，先完成 [ocd 上手](/ocd/get-started)。
+使用 CLI 将模块 Worker 编译、校验并激活到已运行的本机 `ocd`。`oc run` 不会再启动一个 workerd。平台尚未启动时，先完成 [ocd 上手](/ocd/get-started)。
 
 ```sh
 bun run oc run --config examples/hello-worker/open-compute.json \
@@ -54,7 +54,7 @@ bun run oc types --config examples/hello-worker/open-compute.json
 | handler 签名、`Response.json`、`env` 注入 | 是，见 [Workers CLI 上手](https://developers.cloudflare.com/workers/get-started/guide/) | 是 |
 | 类型包 | `@cloudflare/workers-types` | pinned `@open-compute/workers-types` |
 | CLI | Wrangler | `oc`（`bun run oc ...`） |
-| 项目文件 | wrangler.jsonc | `open-compute.json`（未知字段拒绝） |
+| 项目文件 | wrangler.jsonc | `open-compute.json`（未知字段将被拒绝） |
 | C3 脚手架 / Cloudflare 登录 / workers.dev 预览 / 控制台 | 是 | 不提供 |
 | `--ocd` / `OPEN_COMPUTE_OCD` | 不适用 | 必须指向匹配版本的 `ocd`，用于编码 bundle；`run` 要求平台已在监听 |
 
