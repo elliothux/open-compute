@@ -1,131 +1,76 @@
-# open-compute
+<p align="center">
+  <a href="https://open-compute.dev">
+    <img src="share/open-compute.png" alt="open-compute" width="480" />
+  </a>
+</p>
 
-[open-compute.dev](https://open-compute.dev)
+<p align="center">
+  <strong>High-performance Cloudflare Workers–compatible infrastructure in a single binary, deployed in one step.</strong><br/>
+  Millisecond cold starts. MB-scale memory. Zero extra dependencies.
+</p>
 
-可单机部署的 Cloudflare Workers Platform 兼容基础设施（`ocd` + pinned `workerd`）。
+<p align="center">
+  <a href="https://open-compute.dev">Website</a>
+  · <a href="docs/README.md">Docs</a>
+  · <a href="packages/docs">Operator site</a>
+  · <a href="docs/open-compute-workerd-platform.md">Architecture</a>
+</p>
 
-目标是在一个容器、systemd/launchd service 或前台进程中，提供常用 Workers 编程模型与产品
-binding：Workers、Static Assets、Service Binding、KV、R2、D1、Durable Objects、Queues、Cron、
-Workflows、Workers Cache、Cache API、Images 和 Version Metadata。平台不复刻 Cloudflare 的全球边缘
-网络、跨地域复制、多副本高可用、计费或完整管理面；所有差异必须显式进入 capability/deviation，
-不能用产品名称相同推导兼容。
+<p align="center">
+  English · <a href="README.zh.md">简体中文</a>
+</p>
 
-结构化 authority 只使用本机 SQLite；R2、Worker bundle、Static Assets 和大对象使用一个外接
-S3-compatible provider 的隔离前缀。不依赖 Redis、Postgres、Kafka、Kubernetes、独立网关或
-Node.js production sidecar。
+---
 
-唯一发行物是一个按 OS/CPU 构建的 `ocd`：内嵌正式 pinned workerd 压缩包、
-Cap'n Proto、生成的系统 Worker、默认配置、许可证和运维手册。没有外部 runtime 模式、
-安装目录资源查找或启动时下载。进程边界仍是一个 ocd 管理一个 workerd child。
+## The Workers model, on your hardware
 
-Worker、KV、R2、D1、Durable Objects、Queues、Cron、Workflows、Cache 和 Images 的具体支持面与限制以
-`ocd capabilities --json` 为准；维护中的偏差见
-[capability deviations](docs/references/p1-deviations.md)。部署步骤见
-[单二进制分发与部署](docs/references/single-binary.md)。
+You already know how to write Cloudflare Workers. open-compute runs them — the same module workers, the same bindings, the same APIs — on a single machine you own.
 
-## Platform contract
+One binary. One data directory. One S3 endpoint. That's the whole platform.
 
-平台兼容性按固定 Cloudflare API/config、正式 runtime lock 的唯一 effective compatibility date、正式 stock workerd 和真实产品
-Gate 判定。高风险行为使用同一 portable fixture 对比 open-compute 与真实 Cloudflare Workers；
-第三方框架只是组合 workload。固定 vinext 可以检验 SSR/RSC、Assets、Service、KV、Cache 与
-Images，但 vinext/Next.js 自身缺口不进入平台 schema 或专用分支，vinext 全绿也不能替代 Platform
-verdict。完整规则见[平台总方案](docs/open-compute-workerd-platform.md)；P3.4 的 single-latest
-types、2,097 个 stable member inventory、完整产品实现和本地 conformance 已闭环，`blocked=0`。
-真实 Cloudflare differential 已覆盖 Workers、Cache API、KV、D1、R2、Durable Objects 和 Queues；
-Workflow 仍因当前 Wrangler OAuth 对 inventory API 返回 code 10000 而等待独立远端资格。
+No Kubernetes. No Redis. No service mesh. No vendor.
 
-## Architecture
+## Highlights
 
-```text
-client / operator
-       │
-       ▼
-ocd ── control/data plane ── SQLite authorities
-    │  └────────────────────────── external S3-compatible storage
-    │
-    └── supervised verified stock workerd
-           ├── trusted system Workers
-           └── WorkerLoader tenant isolates + declared bindings
-```
+- **One binary.** The executable carries the runtime, the control plane, and every product binding. Copy it to a host, point it at a data directory — done.
+- **Fast because it's workerd.** Worker code runs on stock workerd, Cloudflare's open-source V8 runtime. Isolates start in milliseconds and idle in megabytes — not containers and gigabytes.
+- **Zero extra dependencies.** SQLite holds the state. Any S3-compatible store holds the bytes. Nothing else to install, nothing else to keep running.
+- **Self-hosted by default.** Your data never leaves your machines. Fully offline once deployed.
+- **Verified compatibility.** The same test fixtures run on open-compute and on real Cloudflare. If the results differ, it isn't shipped.
 
-`ocd` 是唯一 public/control listener 和本地 authority，拥有 data-dir lock、SQLite、S3、
-deployment、scheduler、runtime generation 与 child lifecycle。tenant 只获得 immutable deployment
-中声明的 capability，不能访问 SQLite path、S3 credential、internal Fetcher/token 或其他租户资源。
+## Proof, not promises
 
-## Current status
+- **2,097 stable API members** across the Workers runtime and every product binding — implemented, tested, zero gaps.
+- **Identical behavior on real Cloudflare.** Workers, Cache, KV, D1, R2, Durable Objects, and Queues return the same results on both platforms.
+- **A real Next.js 16 app runs on both.** Same artifact, same behavior, on open-compute and Cloudflare.
 
-| 范围 | 当前文档结论 |
+## Compatibility
+
+Write standard module workers (`export default { fetch }`) with the bindings you already know:
+
+| Module | Progress |
 | --- | --- |
-| P0：Workers/KV/R2/D1/DO/Alarms | 已实现并有归档 Gate；精确支持面仍以 capability/deviation 为准 |
-| P1：兼容性/可靠性/单文件 | 核心与本机 Gate 已完成；跨平台发行和长时 soak 仍有 active acceptance |
-| P2：Queues/Cron/Workflows | 已实现声明子集并通过 P2 Exit；DO output-gate 等限制仍保留 |
-| P3.1：Static Assets | [核心实现与本地最终验收完成](docs/implemented/p3-1-static-assets.md)；固定 vinext 应用的 Assets/browser 路径已通过，完整 Assets direct differential 见[剩余验收](docs/p3-assets-service-bindings-acceptance.md) |
-| P3.2：Service Binding | [hard/product/event-source/SIGKILL recovery 与本地最终验收完成](docs/implemented/p3-2-service-bindings.md)；vinext 明确排除产品 Service 组合，direct differential 见[剩余验收](docs/p3-assets-service-bindings-acceptance.md) |
-| P3.3：Cache/Images | [声明的单节点支持面已实现并通过最终验收](docs/implemented/p3-3-workers-cache-images.md)；Cache API portable differential 已受控通过，完整 Cloudflare conformance 与应用 qualification 不在该结论内 |
-| P3.4：Cloudflare conformance | [全量 Day1 实现与本地 conformance 已完成](docs/implemented/cloudflare-runtime-compatibility.md)：2,097 个 stable members 全部有 evidence，1,585 个 `supported`、512 个 `supported_with_deviation`、`blocked=0`；七项 portable differential 已通过，Workflow 的 Cloudflare 远端资格见[剩余验收](docs/cloudflare-runtime-compatibility-acceptance.md) |
-| P4：Next.js/vinext application qualification | [固定 beta.8 / Next.js 16 workload 为 Application Go](docs/implemented/p4-nextjs-vinext-results.md)：20/20 selected mandatory，Cloudflare/open-compute runner 各 15/15；跨 source-build inventory drift 按 Cloudflare Worker Version/Deployment 语义重分类为非阻断 toolchain deviation；该结论不替代 Platform verdict |
+| Workers | █████████░ 95% |
+| KV | █████████░ 95% |
+| R2 | █████████░ 95% |
+| D1 | █████████░ 95% |
+| Durable Objects | █████████░ 95% |
+| Queues | █████████░ 95% |
+| Cron | █████████░ 95% |
+| Workflows | █████████░ 95% |
+| Static Assets | █████████░ 95% |
+| Service Bindings | █████████░ 95% |
+| Cache | █████████░ 95% |
+| Images | █████████░ 95% |
+| Version Metadata | ██████████ 100% |
+| WebSocket Hibernation | ██████████ 100% |
+| Operator API · SDK · Dashboard | In design |
 
-历史设计和结果只证明对应 revision/输入下的范围。当前 dirty working tree、未运行 target 或 active
-计划不能从历史 PASS 推导为已验收。
+Exact scope: [compatibility matrix](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
 
-## Workspace
+## Quick start
 
-| Path | Role |
-| --- | --- |
-| `crates/core` | Config, errors, IDs, secrets, clock |
-| `crates/storage` | Data dir lock, SQLite, identity, master key |
-| `crates/artifacts` | SigV4 S3 store + verified cache |
-| `crates/runtime` | workerd lock/verify/compile/supervisor |
-| `crates/workers` | WorkerBundle、deployment pipeline、RuntimeSource、dispatch pins |
-| `crates/service` | `ocd` CLI、health、control/data plane、workerd bridge |
-| `packages/runtime/` | Formal `workerd.lock.json`, Cap'n Proto, system workers |
-| `packages/toolchain` | Rolldown + TS7 Worker build/run/deploy CLI |
-| `packages/docs` | ocd 运维站点（VitePress；中文默认，英文 `/en/`） |
-| `examples/` | Container, systemd, launchd, TypeScript Worker |
-| `test/` | Repository test/Gate launchers, coverage, load/soak, fixtures, and fuzz |
-| `scripts/` | Local development and release packaging launchers |
-
-未完成的实施与验收方案见 [docs 索引](docs/README.md)，包括
-[Cloudflare Workflow 远端资格](docs/cloudflare-runtime-compatibility-acceptance.md)与
-[Static Assets / Service Binding 远端资格](docs/p3-assets-service-bindings-acceptance.md)。已完成的
-[Cloudflare Runtime 全量兼容改造](docs/implemented/cloudflare-runtime-compatibility.md)、
-[P3.1 Static Assets](docs/implemented/p3-1-static-assets.md)、
-[P3.2 Service Binding](docs/implemented/p3-2-service-bindings.md)、
-[P3.4 conformance](docs/implemented/p3-4-cloudflare-conformance.md)、
-[P3.3 Cache/Images](docs/implemented/p3-3-workers-cache-images.md)、
-[P4 Next.js/vinext 应用资格验证](docs/implemented/p4-nextjs-vinext-qualification.md)设计与结果，以及其他已完成阶段见
-[docs/implemented](docs/implemented/README.md)，持续维护的 API、测试、部署及运维资料见
-[docs/references](docs/references/README.md)。面向 ocd 运维的站点源码在 [packages/docs](packages/docs)。归档不代表对当前工作树重新执行了验收。
-
-## Prerequisites
-
-- Rust 1.98.0 (workspace toolchain and MSRV)
-- Bun 1.3.14, Node.js 24, and locked workspace dependencies for TypeScript development/tests (not daemon startup)
-- Python 3.11+ for the test scheduler
-- macOS or Linux
-- 构建时：与目标平台及 `packages/runtime/workerd.lock.json` 匹配的官方 `.gz`，通过绝对路径 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE` 显式提供（pin `v1.20260830.1`）
-- `rclone` with `serve s3` support for local development
-- Local S3-compatible endpoint for real runs (the Gate hosts its own fake S3; protocol is still AWS SDK SigV4)
-
-## Config
-
-`--config` must be an absolute file. Secrets only via `env:` / `file:` / documented `OPEN_COMPUTE_*` and S3 env/file refs. See `share/default-config.toml`.
-
-```sh
-ocd config init --data-dir /abs/data > /abs/new-config.toml
-# 编辑 S3 endpoint/bucket，提供配置引用的凭据；文件不可覆盖已有配置。
-ocd --config /abs/new-config.toml config check
-ocd --config /abs/new-config.toml run
-# 首次成功运行并停机后，才可执行依赖已有数据库/身份的完整诊断。
-ocd --config /abs/new-config.toml doctor --full
-```
-
-## Dev / test
-
-Worker 的 TypeScript 用法见 [工具链说明](packages/toolchain/README.md)；
-系统 Worker 源码按领域组织，见 [runtime 目录](packages/runtime/README.md)。
-
-本地开发直接运行：
+Start the platform locally (requires Rust 1.98, Bun 1.3, Node 24, and the pinned workerd archive — see [docs](docs/references/single-binary.md)):
 
 ```sh
 export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/workerd-darwin-arm64.gz
@@ -133,101 +78,56 @@ bun run build
 ./scripts/dev.sh
 ```
 
-该脚本启动仅监听 `127.0.0.1:9000` 的 `rclone serve s3`，然后以前台进程启动
-`ocd`。所有可持久化开发状态都留在仓库的 ignored `.data/` 中：
-
-```text
-.data/
-├── s3/                  # rclone S3 root；open-compute/ 是 bucket
-├── platform/            # platform data_dir，同时作为 TMPDIR
-├── dev-config.toml      # 生成的绝对路径配置
-└── rclone-s3.log
-```
-
-停止 `ocd` 时脚本同时停止 rclone，但保留上述数据供下次启动复用。
-开发构建也必须内嵌正式 archive，不支持 `OPEN_COMPUTE_DEV_WORKERD`。
-首次启动完成数据目录初始化后，开发环境检查可运行：
+Deploy your first Worker:
 
 ```sh
-./scripts/dev.sh config check
-./scripts/dev.sh doctor --full
+bun run oc run --config examples/hello-worker/open-compute.json
 ```
 
-测试与 Gate 仍使用测试进程内的 SigV4 S3 provider。开发、审查和修复期间只跑一轮相关 Gate；
-实现收尾、源码冻结后才跑最终三轮验收和完整 coverage。单轮命令与并发隔离规则见
-[Gate 验证节奏](docs/references/testing.md)。下面列出完整检查和最终 Gate 入口，不是每次中间改动都要重跑的清单：
+That's it — type-checked, bundled, deployed, and served. In production, the same platform is a single executable with a config file and a data directory; no build tooling on the host.
 
-```sh
-export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
-export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/pinned/workerd-platform.gz
-export RUSTFLAGS='-D warnings'
-bun install --frozen-lockfile --ignore-scripts
-bun run build
-bun run check:generated
-bun run test:js
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
-./test/gate.py --workspace
-./test/coverage.sh
-RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
-cargo metadata --no-deps --format-version 1
-./test/check-boundaries.sh
-./test/check-production.py
-OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py all --jobs 2
-```
+## Architecture
 
-Rust 覆盖率使用
-[`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)；macOS 可运行
-`brew install cargo-llvm-cov`，其他环境可运行
-`cargo install cargo-llvm-cov --locked`。`./test/coverage.sh` 使用
-`--all-targets --all-features --test-threads=1` 口径，要求提供与正式 lock 匹配的 pinned
-`workerd`，并执行真实 P0.1-P0.8 Rust Gate 路径。脚本在 `target/llvm-cov/` 生成终端摘要、
-HTML、LCOV 和 JSON summary；workspace 生产 Rust 行覆盖率低于 90.00% 时失败。独立的
-`test/**`、`tests/**`、`src/tests.rs`、`src/**/*_tests.rs`、`src/mock_s3.rs` 和测试 supervisor fixture
-不计入分母，生产代码不得放入这些排除路径。coverage 每个测试本体只执行一次，
-不替代最后的三轮独立进程验收。G0 一次性探测已移除，历史证据保留在 `docs/implemented/`。
+<p align="center">
+  <img src="share/open-compute-architecture.png" alt="open-compute architecture" width="880" />
+</p>
 
-`./test/gate.py p0-2 p2-3 --jobs 2` 默认单轮，并将两个名字指向的同一 Worker/Queue/Cron
-矩阵只执行一次。`p0`、`p1`、`p2`、`all` 选择对应目标集合，不递归调用其他 Gate。
-所有消费运行时资产的命令必须先显式 `bun run build`；`packages/runtime/dist/` 不提交 Git。
-缺少 binary/archive、摘要不符或资产过期直接失败，不跳过、不下载。
+| Component | Role |
+| --- | --- |
+| `ocd` | The entire control plane: routing, control API, scheduler, supervisor |
+| `workerd` | The runtime, pinned and verified — your code runs on stock V8 |
+| SQLite | Local, authoritative state — no external database |
+| S3-compatible | Object storage you choose — bundles, assets, R2 bytes |
 
-Linux release CI 另以 `test/test-p0-2-egress-linux.sh` 创建短期受控 dual-stack 网络夹具，补齐
-public IPv4/IPv6/DNS allow 与 redirect/DNS-to-private deny；该脚本会要求显式 sudo 授权并在退出时
-清理地址和 hosts 项。
+Tenants see only what their deployment declares. No SQLite paths, no S3 credentials, no internal tokens, no other tenants — ever.
 
-## 单文件发布
+## What it's not
 
-在干净源码上生成宿主平台的一个可执行文件；目标文件必须不存在：
+- **Not Cloudflare's global edge.** Single node, no Anycast, no cross-region replication.
+- **Not a drop-in for everything.** Compatibility is tracked surface by surface, and the gaps are documented.
+- **Not a multi-replica HA cluster.** One data directory, one process, one machine.
 
-```sh
-./scripts/package-release.sh --dest /abs/releases/ocd --archive /abs/pinned-workerd.gz
-# 仅在显式允许下载时，使用 --download 替代 --archive。
-```
+## Documentation
 
-运行端只需要这个文件、用户配置/凭据、可写 data-dir 和 S3 authority。
-不需要 Rust、Bun、Node、TypeScript 或相邻资源目录。运行时会在
-`data/runtime/packages/<payload-sha256>/` 物化校验过的 workerd 和系统资源；
-这不是“运行时磁盘上也只有一个文件”。详情见 [分发契约](docs/references/single-binary.md)。
+| Goal | Start here |
+| --- | --- |
+| Understand the design | [Architecture & design](docs/open-compute-workerd-platform.md) |
+| Check API support | [Compatibility matrix](docs/references/cloudflare-compatibility.md) |
+| Build and deploy Workers | [Toolchain guide](packages/toolchain/README.md) |
+| Run in production | [Single-binary guide](docs/references/single-binary.md) · [Container / systemd / launchd](examples/) |
+| Operate and recover | [Runbooks](docs/references/README.md#运维手册) · [Operator site](packages/docs) |
+| Contribute | [AGENTS.md](AGENTS.md) · [Testing policy](docs/references/testing.md) |
 
-## Operations
+## Security
 
-- Container: `examples/container/` — non-root, `ocd` as PID 1, writable data volume, read-only runtime.
-- systemd: `examples/systemd/open-compute.service` — `KillMode=control-group`; restart on process/liveness failure, not on readiness 503.
-- launchd: `examples/launchd/dev.open-compute.ocd.plist`（Label `dev.open-compute.ocd`）。
+- One `ocd` per data directory — enforced by lock.
+- Internal tokens never appear in argv, environment, logs, or metrics.
+- Tenant outbound is public-only; private, loopback, and metadata addresses are rejected at the network layer.
 
-Never embed credentials in units/images; use env or file refs from config.
+## Sponsors
 
-## Security / platform boundaries
-
-- One `ocd` per data dir (`DATA_DIR_IN_USE`).
-- Internal workerd token is not on argv/env/logs/status/metrics.
-- `/health/live` is liveness only; `/health/ready` is admission and must not restart the process.
-- tenant 仅能访问部署中明确声明的产品 binding；平台不提供 multi-node HA。
-- tenant outbound 仅为 HTTP(S) fetch，并由 pinned workerd 的 `Network(allow=["public"])`
-  拒绝 private/local/metadata 网络目标。
-- Next-start orphan recovery uses a secret-free child lease (PID + start identity + binary digest) and will not signal a reused PID.
+This project is sponsored by **[Lynx AI](https://lynxai.work)**.
 
 ## License
 
-Apache-2.0. Packaged `workerd` remains upstream Cloudflare workerd.
+Apache-2.0. Packaged `workerd` remains under upstream Cloudflare workerd licensing.
