@@ -171,6 +171,7 @@ Honest boundaries beat surprises in production:
 | Understand the design | [Architecture & design](docs/open-compute-workerd-platform.md) |
 | Check API support | [Compatibility matrix](docs/references/cloudflare-compatibility.md) |
 | Build and deploy Workers | [Toolchain guide](packages/toolchain/README.md) |
+| Download and release | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [Release process](docs/references/releasing.md) |
 | Run in production | [Single-binary guide](docs/references/single-binary.md) · [Container / systemd / launchd](examples/) |
 | Operate and recover | [Runbooks](docs/references/README.md#运维手册) · [Operator site](packages/docs) |
 | Contribute | [AGENTS.md](AGENTS.md) · [Testing policy](docs/references/testing.md) |

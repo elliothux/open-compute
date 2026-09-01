@@ -55,7 +55,17 @@ try {
   await unlink(temporary);
   const parent = await open(dirname(destination), "r");
   try { await parent.sync(); } finally { await parent.close(); }
-  console.log(JSON.stringify({ destination, target: pin.target, revision, workerd: pin.release, bytes: size, sha256: sha256(bytes) }));
+  console.log(JSON.stringify({
+    schemaVersion: 1,
+    destination,
+    target: pin.target,
+    version: release.platform_version,
+    revision,
+    workerd: pin.release,
+    workerdLockSha256: pin.lockSha256,
+    bytes: size,
+    sha256: sha256(bytes),
+  }));
 } finally {
   if (ownsTemporary) await rm(temporary, { force: true });
   await rm(work, { recursive: true, force: true });

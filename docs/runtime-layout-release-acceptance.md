@@ -9,14 +9,17 @@ Workers API conformance；平台契约与 portable differential 由
 
 ## 待验证
 
-- [ ] 在 CI 配置的 Linux/macOS 宿主上，从无 dist 的检出执行显式构建、静态检查、coverage
+- [ ] 触发并保存一次真实 `vX.Y.Z` tag release workflow 结果。在已经配置的 Linux/macOS 宿主上，
+  从无 dist 的检出执行显式构建、静态检查、coverage
   和统一最终 workspace Gate（完整一轮、时序用例三轮），记录实际 CPU/架构、源码、工具链、
   输入摘要、逐轮用例与目标次数；规则见[测试节奏](references/testing.md)。
 - [ ] 获得明确授权后，运行 Linux 受控 dual-stack/DNS/redirect egress 夹具；记录 loopback、
   hosts 和进程清理结果，不以 macOS 的普通 egress 测试代替。
 - [ ] 对需要发行的目标逐一授权打包，使用唯一 [正式 pin](../packages/runtime/workerd.lock.json)，
   核对单文件版本、体积、SHA-256、无 JS 工具链的隔离离线首启/重启及损坏拒绝。
-- [ ] 汇总支持宿主上的实际结果；未运行的目标保留未验证状态，不用 CI 配置存在代表 CI 已通过。
+- [ ] 核对[版本与发布流程](references/releasing.md)生成的四个 GitHub Release assets、
+  `release.json`、`SHA256SUMS` 和 Draft 回读结果；未运行的目标保留未验证状态，不用 CI 配置存在
+  代表 CI 已通过。
 
 打包前需明确源码 revision、目标平台、workerd pin、绝对且未占用的输出路径，以及下载/权限
 影响和排除的无关修改。此计划不是下载、sudo、打包、发布或部署授权，不触碰已有发行物和数据。

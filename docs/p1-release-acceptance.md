@@ -18,7 +18,8 @@
 - [ ] 24 小时 release-candidate mixed soak：保留完整运行身份、故障计划、稳定性指标和失败证据；
   不能用 10 分钟 smoke 或普通 Gate 的通过结果代替。
 - [ ] 当前发行形态的操作演练：针对明确目标平台和已授权生成的单个 `ocd`，验证隔离环境
-  首次启动、service/container 运行、备份和 fresh-host restore，以及当前发行替换与失败恢复流程。
+  首次启动、service/container 运行、备份和 fresh-host restore，以及当前发行替换与失败恢复流程；
+  版本和公开 artifacts 必须来自[版本与发布流程](references/releasing.md)，不能用手工旁路产物替代。
 - [ ] 汇总实际命令、基线、持续时间、逐项结果和限制；只在约定验收实际完成后归档本计划及新结果。
 
 这些任务需要在执行前核对现行脚本和支持范围。历史 P1 设计中的旧发行布局、旧平台版本迁移、

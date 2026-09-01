@@ -22,6 +22,7 @@ Workflow 远端资格记录在[Workflow 验收计划](../cloudflare-runtime-comp
 | [能力偏差](p1-deviations.md) | 当前 capability deviation ID 与实际支持边界 |
 | [Fuzz 所有权](p1-fuzz-ownership.md) | 各类输入的测试归属和回归要求 |
 | [单二进制分发与部署](single-binary.md) | 构建输入、离线启动、资源物化和发行契约 |
+| [版本与发布流程](releasing.md) | 稳定版本、tag 约束、CI/release workflow、四平台 assets、校验与失败处理 |
 
 P0.2 的阶段性支持范围见归档的 [API 矩阵](../implemented/p0-2-api-matrix.md)；
 不要用该阶段“尚未接入产品绑定”的描述替代当前平台的 capability 输出。

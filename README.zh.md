@@ -181,6 +181,7 @@ readiness 探测、进程组、有界输出捕获、优雅与强制停止、回�
 | 理解设计 | [架构设计](docs/open-compute-workerd-platform.md) |
 | 查看 API 支持 | [兼容矩阵](docs/references/cloudflare-compatibility.md) |
 | 构建与部署 Worker | [工具链指南](packages/toolchain/README.md) |
+| 下载与发版 | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [发版流程](docs/references/releasing.md) |
 | 生产部署 | [单二进制指南](docs/references/single-binary.md) · [容器 / systemd / launchd](examples/) |
 | 运维与恢复 | [运维手册](docs/references/README.md#运维手册) · [运维站点](packages/docs) |
 | 参与贡献 | [AGENTS.md](AGENTS.md) · [测试策略](docs/references/testing.md) |

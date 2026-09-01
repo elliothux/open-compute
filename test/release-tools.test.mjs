@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { assembleRelease, releaseTargets, stableVersionFromTag, workspaceVersion } from "../scripts/assemble-release.ts";
 import { absoluteDestination, hostTarget, loadPin, prepareWorkerd, sha256, sourceArguments } from "../scripts/workerd-archive.ts";
 
 test("build inputs require one explicit source and a pinned supported host", async () => {
@@ -45,5 +46,61 @@ test("wrong archives fail without download, execution, or publication", async ()
     await assert.rejects(prepareWorkerd(root, undefined, false), /exactly one/);
     await assert.rejects(readFile(join(root, "workerd")));
     assert.equal(sha256(Buffer.from("abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("release tags are stable SemVer and match the workspace version", () => {
+  assert.equal(stableVersionFromTag("v0.1.0"), "0.1.0");
+  assert.equal(workspaceVersion("[workspace]\n\n[workspace.package]\nversion = \"12.3.4\"\n\n[dependencies]\n"), "12.3.4");
+  for (const tag of ["0.1.0", "v0.1", "v01.2.3", "v1.2.3-alpha.1", "v1.2.3+build"]) {
+    assert.throws(() => stableVersionFromTag(tag));
+  }
+});
+
+test("release assembly requires and describes the exact four native executables", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-release-assembly-test-"));
+  const identity = {
+    version: "1.2.3",
+    revision: "0123456789abcdef0123456789abcdef01234567",
+    workerd: "v1.20260830.1",
+    workerdLockSha256: "a".repeat(64),
+  };
+  try {
+    for (const target of releaseTargets) {
+      const filename = `ocd-v1.2.3-${target}`;
+      const bytes = Buffer.from(`native-${target}`);
+      await writeFile(join(root, filename), bytes);
+      await writeFile(join(root, `release-report-${target}.json`), JSON.stringify({
+        schemaVersion: 1,
+        destination: join(root, filename),
+        target,
+        ...identity,
+        bytes: bytes.length,
+        sha256: sha256(bytes),
+      }));
+    }
+    const badReportPath = join(root, "release-report-linux-x64.json");
+    const badReport = JSON.parse(await readFile(badReportPath, "utf8"));
+    badReport.revision = "f".repeat(40);
+    await writeFile(badReportPath, JSON.stringify(badReport));
+    await assert.rejects(assembleRelease(root, "v1.2.3", identity), /does not match/);
+    badReport.revision = identity.revision;
+    await writeFile(badReportPath, JSON.stringify(badReport));
+    await assembleRelease(root, "v1.2.3", identity);
+    assert.deepEqual((await readdir(root)).sort(), [
+      "SHA256SUMS",
+      ...releaseTargets.map((target) => `ocd-v1.2.3-${target}`),
+      ...releaseTargets.map((target) => `release-report-${target}.json`),
+      "release.json",
+    ].sort());
+    const manifest = JSON.parse(await readFile(join(root, "release.json"), "utf8"));
+    assert.equal(manifest.schemaVersion, 1);
+    assert.equal(manifest.tag, "v1.2.3");
+    assert.equal(manifest.gitRevision, identity.revision);
+    assert.deepEqual(manifest.artifacts.map((artifact) => artifact.target), releaseTargets);
+    const checksums = await readFile(join(root, "SHA256SUMS"), "utf8");
+    assert.equal(checksums.trim().split("\n").length, 5);
+    assert.match(checksums, /  release\.json$/m);
+    await assert.rejects(assembleRelease(root, "v1.2.3", identity), /exact four binaries/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -1,21 +1,79 @@
 name: release
 
 on:
-  workflow_dispatch:
   push:
     tags:
       - "v*"
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
 jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Validate immutable stable release identity
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "release tags must be stable SemVer in the form vX.Y.Z" >&2
+            exit 1
+          fi
+          if [ "$(git cat-file -t "$tag")" != tag ]; then
+            echo "release tags must be annotated tags" >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse "$tag^{}")" != "$GITHUB_SHA" ] || [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
+            echo "the checked-out revision does not match the release tag" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "the release revision must already be reachable from origin/main" >&2
+            exit 1
+          fi
+          version="$(awk '
+            $0 == "[workspace.package]" { section = 1; next }
+            section && /^\[/ { exit }
+            section && /^version = "/ {
+              value = $0
+              sub(/^version = "/, "", value)
+              sub(/"$/, "", value)
+              print value
+              found = 1
+            }
+            END { if (!found) exit 1 }
+          ' Cargo.toml)"
+          if [ "$tag" != "v$version" ]; then
+            echo "tag $tag does not match workspace version $version" >&2
+            exit 1
+          fi
+          test -z "$(git status --porcelain --untracked-files=all)"
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
   msrv:
+    needs: validate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -30,10 +88,11 @@ jobs:
         run: cargo check --workspace --all-targets
 
   lint-test:
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -50,7 +109,7 @@ jobs:
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
       - name: no-default-features
         run: cargo check --workspace --no-default-features
       - name: metadata
@@ -61,7 +120,8 @@ jobs:
         run: chmod +x test/check-boundaries.sh && ./test/check-boundaries.sh
 
   coverage:
-    runs-on: macos-14
+    needs: validate
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-open-compute
@@ -81,39 +141,137 @@ jobs:
           path: .temp/gate-run/
 
   integration:
-    needs: [msrv, lint-test]
+    needs: [validate, msrv, lint-test]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
-      - name: Package one pinned offline executable
-        run: ./scripts/package-release.sh --dest "$RUNNER_TEMP/platformd" --archive "$OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE"
       - name: Final workspace once and product timing cases three times (macOS)
         if: runner.os == 'macOS'
-        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" ./test/gate.py --workspace --jobs 2
+        run: OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py --workspace --jobs 2
       - name: Final workspace and controlled egress (Linux, explicit privilege authorization)
         if: runner.os == 'Linux'
-        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh --workspace --jobs 2
+        run: OPEN_COMPUTE_GATE_ROUNDS=3 OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh --workspace --jobs 2
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: gate-evidence-${{ matrix.os }}
           path: .temp/gate-run/
 
-  release:
-    if: always()
-    needs: [msrv, lint-test, coverage, integration]
-    runs-on: ubuntu-24.04
+  package:
+    needs: [validate, msrv, lint-test, coverage, integration]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            os: macos-15
+          - target: darwin-x64
+            os: macos-15-intel
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+          - target: linux-x64
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Require every upstream job
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-open-compute
+        with:
+          rust-cache-key: release-${{ matrix.target }}
+      - name: Package and verify the native single executable
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_TARGET: ${{ matrix.target }}
         run: |
-          test "${{ needs.msrv.result }}" = success
-          test "${{ needs.lint-test.result }}" = success
-          test "${{ needs.coverage.result }}" = success
-          test "${{ needs.integration.result }}" = success
+          set -euo pipefail
+          destination="$RUNNER_TEMP/ocd-$RELEASE_TAG-$RELEASE_TARGET"
+          report="$RUNNER_TEMP/release-report-$RELEASE_TARGET.json"
+          ./scripts/package-release.sh \
+            --dest "$destination" \
+            --archive "$OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE" | tee "$report"
+          REPORT="$report" bun -e '
+            const report = await Bun.file(process.env.REPORT).json();
+            if (report.schemaVersion !== 1 || report.target !== process.env.RELEASE_TARGET
+                || report.version !== process.env.RELEASE_TAG.slice(1)
+                || report.revision !== process.env.GITHUB_SHA) {
+              throw new Error("packaged release identity does not match the matrix");
+            }
+          '
+          OPEN_COMPUTE_TEST_OCD="$destination" \
+            cargo test --locked --offline -p open-compute-service \
+              --test single_binary -- --test-threads=1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/ocd-${{ needs.validate.outputs.tag }}-${{ matrix.target }}
+            ${{ runner.temp }}/release-report-${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  publish:
+    needs: [validate, package]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: .temp/release-assets
+          merge-multiple: true
+      - name: Assemble the immutable release manifest
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: bun scripts/assemble-release.ts --tag "$RELEASE_TAG" --dir "$GITHUB_WORKSPACE/.temp/release-assets"
+      - name: Create a draft, verify uploaded bytes, and publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          assets="$GITHUB_WORKSPACE/.temp/release-assets"
+          mapfile -t files < <(find "$assets" -maxdepth 1 -type f \
+            \( -name "ocd-$RELEASE_TAG-*" -o -name SHA256SUMS -o -name release.json \) \
+            -print | sort)
+          if [ "${#files[@]}" -ne 6 ]; then
+            echo "expected four executables, SHA256SUMS, and release.json" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --latest \
+            --generate-notes \
+            --title "open-compute $RELEASE_VERSION"
+          verify="$RUNNER_TEMP/release-download"
+          mkdir "$verify"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$verify"
+          if [ "$(find "$verify" -maxdepth 1 -type f | wc -l | tr -d ' ')" -ne 6 ]; then
+            echo "the draft release does not contain the exact asset set" >&2
+            exit 1
+          fi
+          for source in "${files[@]}"; do
+            cmp "$source" "$verify/$(basename "$source")"
+          done
+          (cd "$verify" && sha256sum --check SHA256SUMS)
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --latest

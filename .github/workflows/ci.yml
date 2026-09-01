@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -46,7 +49,7 @@ jobs:
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
       - name: no-default-features
         run: cargo check --workspace --no-default-features
       - name: metadata
@@ -57,8 +60,8 @@ jobs:
         run: chmod +x test/check-boundaries.sh && ./test/check-boundaries.sh
 
   integration:
-    # Push/PR: one Ubuntu workspace round. Full OS matrix, 3 rounds, coverage,
-    # and vinext live in the release workflow.
+    # Push/PR: one Ubuntu workspace round. Cross-platform qualification, timing
+    # rounds, coverage, and release packaging belong to the tag workflow.
     needs: [msrv, lint-test]
     runs-on: ubuntu-24.04
     steps:
@@ -66,10 +69,8 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
-      - name: Package one pinned offline executable
-        run: ./scripts/package-release.sh --dest "$RUNNER_TEMP/platformd" --archive "$OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE"
       - name: Final workspace once (Linux, explicit privilege authorization)
-        run: OPEN_COMPUTE_GATE_ROUNDS=1 OPEN_COMPUTE_TEST_PLATFORMD="$RUNNER_TEMP/platformd" OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh --workspace --jobs 2
+        run: OPEN_COMPUTE_GATE_ROUNDS=1 OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh --workspace --jobs 2
       - uses: actions/upload-artifact@v7
         if: always()
         with:

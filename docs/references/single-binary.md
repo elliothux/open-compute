@@ -18,7 +18,7 @@ TS 源码、Bun、Node、Rolldown、用户 bundle、数据库、master key、S3 
 许可证用 `ocd licenses` 查看；`ocd docs` 列出手册，
 `ocd docs install-and-first-start` 输出指定手册。
 
-## 构建与发布
+## 构建与打包
 
 构建机器需要 Rust 1.98、Bun 1.3.14 和锁定的 workspace 依赖。
 每个目标嵌入自己的 archive；不能把一个二进制横跨 OS/CPU 使用。
@@ -35,7 +35,7 @@ Cargo build script 检查目标、压缩包与解压二进制的 SHA-256、大�
 、文件集合及源码/锁文件摘要，再把同一批已验证字节编入程序。
 检出目录使用 `packages/runtime/`，离线物化仍使用内部 `runtime/`；`dist/` 必须显式构建。没有构建输入时直接报错，不搜索 PATH/缓存。
 
-正式发布在干净 checkout 中显式执行：
+在干净 checkout 中显式打包当前宿主目标：
 
 ```sh
 ./scripts/package-release.sh --dest /abs/releases/ocd --archive /abs/pinned-workerd.gz
@@ -46,6 +46,11 @@ Cargo build script 检查目标、压缩包与解压二进制的 SHA-256、大�
 脚本使用原生目标 release 构建，验证 workerd 版本、ocd 版本、源码 revision 和内嵌
 release identity，再 fsync、原子无覆盖发布单文件，输出大小与 SHA-256。
 不生成相邻资源目录、安装脚本、launcher、兼容布局或第二个服务。
+
+公开发版不靠 maintainer 手工拼装文件。合并 version PR 后，annotated `vX.Y.Z` tag push 触发
+GitHub Actions；所有资格校验成功后，四个平台分别运行同一打包脚本和正式单文件测试，聚合生成
+`release.json`/`SHA256SUMS`，以 Draft 上传并回读验证，最后才公开 GitHub Release。版本规则、
+精确 asset 名称、权限边界和失败处理见[版本与发布流程](releasing.md)。
 
 本地开发、测试和 CI 的输入准备可显式运行
 `bun scripts/prepare-workerd.ts --dest /abs/new-build-input --download`；
