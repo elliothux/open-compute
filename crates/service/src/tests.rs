@@ -128,7 +128,7 @@ max_series = 1024
 fn package_and_cli_shape() {
     assert_eq!(env!("CARGO_PKG_NAME"), "open-compute-service");
     let help = Cli::command().render_help().to_string();
-    assert!(help.contains("platformd"));
+    assert!(help.contains("ocd"));
     assert!(help.contains("run"));
     assert!(help.contains("config"));
     assert!(help.contains("doctor"));
@@ -137,10 +137,10 @@ fn package_and_cli_shape() {
     assert!(help.contains("backup"));
     assert!(!help.contains("upgrade"));
     assert!(help.contains("support-bundle"));
-    let parsed = parse_from(["platformd", "run", "--config", "/tmp/config.toml"]).unwrap();
+    let parsed = parse_from(["ocd", "run", "--config", "/tmp/config.toml"]).unwrap();
     assert!(matches!(parsed.command, Command::Run));
     let parsed = parse_from([
-        "platformd",
+        "ocd",
         "config",
         "check",
         "--config",
@@ -155,7 +155,7 @@ fn package_and_cli_shape() {
         }
     ));
     let parsed = parse_from([
-        "platformd",
+        "ocd",
         "backup",
         "create",
         "--name",
@@ -172,7 +172,7 @@ fn package_and_cli_shape() {
         }
     ));
     let parsed = parse_from([
-        "platformd",
+        "ocd",
         "backup",
         "cleanup-restore",
         "--staging",
@@ -189,7 +189,7 @@ fn package_and_cli_shape() {
         }
     ));
     let parsed = parse_from([
-        "platformd",
+        "ocd",
         "backup",
         "attest-restore-smoke",
         "--snapshot",
@@ -210,9 +210,9 @@ fn package_and_cli_shape() {
             }
         }
     ));
-    assert!(parse_from(["platformd", "upgrade"]).is_err());
+    assert!(parse_from(["ocd", "upgrade"]).is_err());
     let parsed = parse_from([
-        "platformd",
+        "ocd",
         "doctor",
         "--config",
         "/tmp/config.toml",
@@ -228,7 +228,7 @@ fn package_and_cli_shape() {
         }
     ));
     let parsed = parse_from([
-        "platformd",
+        "ocd",
         "scheduler",
         "recover-corrupt",
         "--backup-name",
@@ -253,7 +253,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
 
     for json in [false, true] {
         let mut args = vec![
-            "platformd".to_owned(),
+            "ocd".to_owned(),
             "--config".to_owned(),
             path.display().to_string(),
             "config".to_owned(),
@@ -282,7 +282,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
     fs::write(&scheduler_path, b"corrupt scheduler").unwrap();
     drop(storage);
     let recovery = parse_from([
-        "platformd",
+        "ocd",
         "--config",
         path.to_str().unwrap(),
         "scheduler",
@@ -318,7 +318,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let missing_config = parse_from(["platformd", "config", "check"]).unwrap();
+    let missing_config = parse_from(["ocd", "config", "check"]).unwrap();
     let code = execute(missing_config, &mut stdout, &mut stderr).await;
     assert_ne!(code, std::process::ExitCode::SUCCESS);
     assert!(
@@ -327,11 +327,11 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
             .contains("CONFIG_PATH_INVALID")
     );
 
-    assert!(parse_from(["platformd", "package-release"]).is_err());
+    assert!(parse_from(["ocd", "package-release"]).is_err());
 
     for json in [false, true] {
         let mut args = vec![
-            "platformd".to_owned(),
+            "ocd".to_owned(),
             "--config".to_owned(),
             path.display().to_string(),
             "doctor".to_owned(),
@@ -362,14 +362,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
             Ok(())
         }
     }
-    let cli = parse_from([
-        "platformd",
-        "--config",
-        path.to_str().unwrap(),
-        "config",
-        "check",
-    ])
-    .unwrap();
+    let cli = parse_from(["ocd", "--config", path.to_str().unwrap(), "config", "check"]).unwrap();
     let mut stdout = RejectWrites;
     let mut stderr = Vec::new();
     assert_ne!(
@@ -437,7 +430,7 @@ async fn listener_plan_and_task_join_errors_are_stable() {
 #[test]
 fn config_path_rejections_do_not_echo_secrets() {
     let dir = TempDir::new().unwrap();
-    let rel = parse_from(["platformd", "run", "--config", "relative.toml"]).unwrap();
+    let rel = parse_from(["ocd", "run", "--config", "relative.toml"]).unwrap();
     let err = load_platform_config(rel.config.as_ref().unwrap()).unwrap_err();
     assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
     assert!(!err.to_string().contains("AKIA"));

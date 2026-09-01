@@ -1,6 +1,6 @@
 # Cloudflare compatibility deviations
 
-This file owns the stable deviation identifiers emitted by `platformd capabilities --json`.
+This file owns the stable deviation identifiers emitted by `ocd capabilities --json`.
 It records verified single-node topology or pinned stock-runtime capacity differences, not a claim that unlisted
 Cloudflare behavior is supported.
 Functional gaps are blocked inventory members, never deviation IDs. The current Day1 inventory has no blocked target
@@ -26,5 +26,5 @@ advertised capability against this registry.
 - `OC-CRON-001`: Cron is UTC-only with five fields and the documented local Quartz-like extensions. Recovery projects at most the newest slot within the configured misfire grace rather than replaying complete downtime history; known failures use the configured bounded local retry policy unless `noRetry()` is called.
 - `OC-WORKFLOW-001`: Workflow execution uses local SQLite authority. Callbacks are at-least-once until their result commits; replay skips durably completed callbacks, and external product effects do not roll back with Workflow snapshots. The platform does not claim cross-region execution, global placement, or Cloudflare dashboard/observability.
 - `OC-CACHE-001`: Workers Cache and Cache API are single-node local authority. Automatic caching requires an explicit `s-maxage` or `max-age`; heuristic TTL, global replication/purge propagation, tiered cache, Cache Rules, Cache Deception Armor, and plan-dependent behavior are unsupported.
-- `OC-CACHE-002`: The operator-configured default is 16 MiB per cached object and 1 GiB of logical body bytes per Worker, not Cloudflare's larger product quota. The exact active values are emitted by `platformd capabilities --json`.
+- `OC-CACHE-002`: The operator-configured default is 16 MiB per cached object and 1 GiB of logical body bytes per Worker, not Cloudflare's larger product quota. The exact active values are emitted by `ocd capabilities --json`.
 - `OC-IMAGES-001`: Images is a bounded local raster transform binding, not hosted Cloudflare Images. Hosted delivery/upload/signing, URL transforms, video, AI upscale, and Cloudflare product quotas are out of scope.

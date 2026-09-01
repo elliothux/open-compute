@@ -1,4 +1,4 @@
-//! Shared real platformd process ownership and private failure evidence for Workflow Gates.
+//! Shared real ocd process ownership and private failure evidence for Workflow Gates.
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
@@ -52,7 +52,7 @@ impl Drop for Process {
         }
         let _ = self.0.wait();
         // Normal crash cuts deliberately leave orphan recovery to the next
-        // platformd. On assertion failure, clean only the formally identified
+        // ocd. On assertion failure, clean only the formally identified
         // child before retaining the rest of the failure evidence.
         if std::thread::panicking()
             && let Err(error) = open_compute_runtime::recover_orphan_for_test(&self.1, &self.2)
@@ -95,7 +95,7 @@ pub(crate) fn spawn(config: &Path, log: &Path) -> Process {
         .open(log)
         .unwrap();
     Process(
-        Command::new(env!("CARGO_BIN_EXE_platformd"))
+        Command::new(env!("CARGO_BIN_EXE_ocd"))
             .args(["run", "--config"])
             .arg(config)
             .stdin(Stdio::null())
@@ -113,7 +113,7 @@ pub(crate) async fn ready(client: &Client, admin: SocketAddr, child: &mut Proces
     loop {
         assert!(
             child.0.try_wait().unwrap().is_none(),
-            "platformd exited before readiness"
+            "ocd exited before readiness"
         );
         if response(client, admin, "/health/ready", "GET")
             .await

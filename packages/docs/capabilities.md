@@ -3,7 +3,7 @@
 以这台机器上的二进制为准，不要用产品名字推导 Cloudflare 全量行为。未出现在 `capabilities --json` 里的 Cloudflare 功能视为不支持。本页不是一份完整 Cloudflare 矩阵。
 
 ```sh
-platformd --config /etc/open-compute/config.toml capabilities --json
+ocd --config /etc/open-compute/config.toml capabilities --json
 ```
 
 `--config` 对 `capabilities` 是可选的。省略时，`limits` 来自内嵌默认配置；给出绝对路径配置时，`limits` 反映该文件。JSON 顶层字段如下。
@@ -100,7 +100,7 @@ Workers Cache 和 Cache API 是单节点本机权威。自动缓存需要显式 
 
 ### OC-CACHE-002
 
-运维配置的默认值是每个缓存对象 16 MiB、每个 Worker 1 GiB 逻辑 body 字节，不是 Cloudflare 更大的产品配额。运行中的精确值由 `platformd capabilities --json` 给出。
+运维配置的默认值是每个缓存对象 16 MiB、每个 Worker 1 GiB 逻辑 body 字节，不是 Cloudflare 更大的产品配额。运行中的精确值由 `ocd capabilities --json` 给出。
 
 ### OC-IMAGES-001
 

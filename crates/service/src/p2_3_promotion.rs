@@ -22,7 +22,7 @@ pub(crate) struct P23PromotionCoordinator {
 }
 
 impl P23PromotionCoordinator {
-    /// Bind promotion authority to the two databases owned by this platformd process.
+    /// Bind promotion authority to the two databases owned by this ocd process.
     #[must_use]
     pub(crate) fn new(
         storage: Arc<PlatformStorage>,

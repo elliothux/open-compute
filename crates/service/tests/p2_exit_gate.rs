@@ -66,7 +66,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         writeln!(file, "\n[{section}]\n{policy}").unwrap();
     }
     drop(file);
-    let log = root.join("platformd.log");
+    let log = root.join("ocd.log");
     let client: Client =
         hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .build_http();
@@ -165,7 +165,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         2
     );
 
-    // Kill an actual platformd while a callback owns an uncommitted attempt.
+    // Kill an actual ocd while a callback owns an uncommitted attempt.
     // Its completed sibling remains immutable, while Unknown reissues the same attempt.
     crash(&mut process);
     process = spawn(&config, &log);
@@ -229,7 +229,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     );
 
     // A paused Workflow retains the accepted event and original sleep deadline.
-    // Both its deadline and the DO's native alarm become due while platformd is down.
+    // Both its deadline and the DO's native alarm become due while ocd is down.
     crash(&mut process);
     let delay = u64::try_from(due.saturating_sub(p0_exit_support::now_ms()).max(0)).unwrap();
     tokio::time::sleep(Duration::from_millis(delay.max(2200))).await;
@@ -368,7 +368,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
             assert!(exit.success());
             break;
         }
-        assert!(Instant::now() < deadline, "platformd did not stop");
+        assert!(Instant::now() < deadline, "ocd did not stop");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(tokio::net::TcpStream::connect(public).await.is_err());
@@ -394,7 +394,7 @@ async fn wait<T>(process: &mut Process, phase: &str, mut inspect: impl FnMut() -
     loop {
         assert!(
             process.0.try_wait().unwrap().is_none(),
-            "platformd exited during {phase}"
+            "ocd exited during {phase}"
         );
         if let Some(value) = inspect() {
             return value;

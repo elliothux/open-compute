@@ -162,7 +162,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
   const accountAlias = safeAlias(required("OPEN_COMPUTE_CF_ACCOUNT_ALIAS"));
   const token = process.env.CLOUDFLARE_API_TOKEN;
   const wrangler = await executable("OPEN_COMPUTE_CF_WRANGLER");
-  const platformd = await executable("OPEN_COMPUTE_PLATFORMD");
+  const ocd = await executable("OPEN_COMPUTE_OCD");
   const endpoint = new URL(required("OPEN_COMPUTE_ENDPOINT"));
   if (endpoint.pathname !== "/" || endpoint.search || endpoint.hash
       || (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname)))) {
@@ -332,7 +332,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
           ), null, 2)}\n`, { mode: 0o600 });
           openComputeOwned = true;
           const bootstrap = await deployOpenComputeProject(
-            ocBootstrapConfig, platformd, endpoint, openComputeAccount, adminToken,
+            ocBootstrapConfig, ocd, endpoint, openComputeAccount, adminToken,
           );
           workerId = bootstrap.workerId;
           deploymentId = bootstrap.deploymentId;
@@ -492,7 +492,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         }
         openComputeOwned = true;
         const deployedOpenCompute = await deployOpenComputeProject(
-          ocConfig, platformd, endpoint, openComputeAccount, adminToken,
+          ocConfig, ocd, endpoint, openComputeAccount, adminToken,
         );
         if (workerId !== undefined && deployedOpenCompute.workerId !== workerId) {
           throw new Error("open-compute bootstrap changed Worker identity");
@@ -761,14 +761,14 @@ interface OpenComputeDeploymentResult {
 
 async function deployOpenComputeProject(
   config: string,
-  platformd: string,
+  ocd: string,
   endpoint: URL,
   accountId: string,
   token: string | undefined,
 ): Promise<OpenComputeDeploymentResult> {
   const deployed = await command(process.execPath, [
     join(ROOT, "packages/toolchain/src/bin.ts"), "deploy", "--config", config,
-    "--platformd", platformd, "--endpoint", endpoint.href, "--account", accountId,
+    "--ocd", ocd, "--endpoint", endpoint.href, "--account", accountId,
     "--token-env", "OPEN_COMPUTE_ADMIN_TOKEN", "--json",
   ], {
     cwd: ROOT,

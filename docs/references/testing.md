@@ -148,7 +148,7 @@ workspace 宿主，第二、三轮只运行登记的产品时序用例。库、�
 不被机械重复；它替代同一冻结输入上“workspace 一次再额外完整 Gate 三次”的重复调度。
 core/storage/artifacts/workers/service 五个库的故障钩子均
 为进程私有，staging/数据库归属独立 TMPDIR，已经并发验证。runtime 库的 1–2 秒进程故障
-窗口在并行实测中失败，因此保留独占，不放宽时限。CLI 先独占执行，使实际 platformd 的首次
+窗口在并行实测中失败，因此保留独占，不放宽时限。CLI 先独占执行，使实际 ocd 的首次
 加载不与定时 runtime probe 重叠；新增未审查目标保守独占。无需安装额外 Rust 测试运行器。
 
 ## 完整检查与最终验收
@@ -203,5 +203,5 @@ POC 一次性上游探测已退役；删除分类与保留回归见 [迁移记�
 
 Linux 受控 egress 仍需显式 `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`，执行
 `OPEN_COMPUTE_GATE_ROUNDS=3 ./test/test-p0-2-egress-linux.sh`；它变更 loopback 与 `/etc/hosts`，
-不能在未授权宿主上运行。正式发行文件需另行授权构建，再以 `OPEN_COMPUTE_TEST_PLATFORMD`
+不能在未授权宿主上运行。正式发行文件需另行授权构建，再以 `OPEN_COMPUTE_TEST_OCD`
 传给 `single-binary`，本地未包装的二进制测试不能声称正式发布已通过。

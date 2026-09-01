@@ -156,7 +156,7 @@ async fn cli(project: &Path, args: &[&str], with_secret: bool) -> Output {
     command
         .arg(repo_root().join("packages/toolchain/src/bin.ts"))
         .args(args)
-        .args(["--platformd", env!("CARGO_BIN_EXE_platformd")])
+        .args(["--ocd", env!("CARGO_BIN_EXE_ocd")])
         .current_dir(project)
         .env_remove("OPEN_COMPUTE_ADMIN_TOKEN")
         .env_remove("OPEN_COMPUTE_TS_FIXTURE_SECRET")

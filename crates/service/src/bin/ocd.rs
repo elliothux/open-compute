@@ -1,4 +1,4 @@
-//! Thin `platformd` binary: parse, log, exit-code adapter.
+//! Thin `ocd` binary: parse, log, exit-code adapter.
 
 use clap::Parser;
 use open_compute_service::cli::{Cli, execute};

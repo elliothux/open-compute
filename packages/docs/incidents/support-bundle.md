@@ -5,13 +5,13 @@
 只读诊断：确认输出父目录存在、目标文件不存在且不是 symlink：
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 ```
 
 允许的 mutation：
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml support-bundle --output /var/tmp/open-compute-support-20260826.tar --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml support-bundle --output /var/tmp/open-compute-support-20260826.tar --json
 /usr/bin/shasum -a 256 /var/tmp/open-compute-support-20260826.tar
 ```
 

@@ -21,8 +21,8 @@ The listen address comes from `server.public_bind` (default `127.0.0.1:8787`). O
 ## `doctor` vs `doctor --full`
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --json
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --full --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --full --json
 ```
 
 Both require an absolute `--config`. JSON has `schema_version` (1), `command` (`doctor`), `result` (`ok` / `failed`), and `checks[]` (`name`, `status`: `ok` / `warning` / `failed` / `skipped`, `code`, `message`, optional non-secret `value`). Any `failed` check exits with the doctor failure code.

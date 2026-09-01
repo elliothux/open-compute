@@ -5,13 +5,13 @@ Trigger: need an offline diagnosis of release, doctor, metrics, schema, or recen
 Read-only diagnosis: confirm the output parent exists, the target file does not exist, and it is not a symlink:
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 ```
 
 Allowed mutation:
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml support-bundle --output /var/tmp/open-compute-support-20260826.tar --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml support-bundle --output /var/tmp/open-compute-support-20260826.tar --json
 /usr/bin/shasum -a 256 /var/tmp/open-compute-support-20260826.tar
 ```
 

@@ -1,4 +1,4 @@
-//! Subprocess CLI shape tests for `platformd`.
+//! Subprocess CLI shape tests for `ocd`.
 
 use std::fs;
 use std::io::Write;
@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 #[test]
 fn help_subcommands() {
-    let bin = env!("CARGO_BIN_EXE_platformd");
+    let bin = env!("CARGO_BIN_EXE_ocd");
     for args in [
         vec!["--help"],
         vec!["config", "check", "--help"],
@@ -27,7 +27,7 @@ fn help_subcommands() {
 
 #[test]
 fn worker_bundle_reads_stdin_without_loading_platform_configuration() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_platformd"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ocd"))
         .args(["worker", "bundle"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -63,7 +63,7 @@ fn worker_bundle_reads_stdin_without_loading_platform_configuration() {
 
 #[test]
 fn missing_and_relative_config_exit_codes_do_not_echo_secrets() {
-    let bin = env!("CARGO_BIN_EXE_platformd");
+    let bin = env!("CARGO_BIN_EXE_ocd");
     let rel = Command::new(bin)
         .args(["config", "check", "--config", "relative.toml"])
         .output()
@@ -88,7 +88,7 @@ fn missing_and_relative_config_exit_codes_do_not_echo_secrets() {
 
 #[test]
 fn config_check_json_is_deterministic_and_secret_free() {
-    let bin = env!("CARGO_BIN_EXE_platformd");
+    let bin = env!("CARGO_BIN_EXE_ocd");
     let dir = TempDir::new().unwrap();
     let data = dir.path().join("data");
     fs::create_dir_all(&data).unwrap();

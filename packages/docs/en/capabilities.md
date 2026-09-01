@@ -3,7 +3,7 @@
 Trust the binary on this machine. Do not infer full Cloudflare behavior from product names. Cloudflare features that do not appear in `capabilities --json` are unsupported. This page is not a complete Cloudflare matrix.
 
 ```sh
-platformd --config /etc/open-compute/config.toml capabilities --json
+ocd --config /etc/open-compute/config.toml capabilities --json
 ```
 
 `--config` is optional for `capabilities`. Without it, `limits` come from the embedded default config; with an absolute config path, `limits` reflect that file. Top-level JSON fields:
@@ -100,7 +100,7 @@ Workers Cache and Cache API are single-node local authority. Automatic caching r
 
 ### OC-CACHE-002
 
-The operator-configured default is 16 MiB per cached object and 1 GiB of logical body bytes per Worker, not Cloudflare's larger product quota. The exact active values are emitted by `platformd capabilities --json`.
+The operator-configured default is 16 MiB per cached object and 1 GiB of logical body bytes per Worker, not Cloudflare's larger product quota. The exact active values are emitted by `ocd capabilities --json`.
 
 ### OC-IMAGES-001
 

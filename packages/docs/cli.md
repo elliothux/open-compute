@@ -1,6 +1,6 @@
 # 常用命令
 
-以 `platformd --help` 和当前二进制为准。`--config` 是全局选项，必须是绝对路径；不从 cwd 或 `$HOME` 搜索。下面不编造未实现的 flag。
+以 `ocd --help` 和当前二进制为准。`--config` 是全局选项，必须是绝对路径；不从 cwd 或 `$HOME` 搜索。下面不编造未实现的 flag。
 
 不需要配置即可运行：`--help`、`--version`、`docs`、`licenses`、`capabilities`、`config init`、`worker bundle`。其余子命令都要 `--config`。
 
@@ -9,20 +9,20 @@
 列出或打印打进二进制的运维手册。仓库目录怎么改都不改变手册名。
 
 ```sh
-platformd docs
-platformd docs install-and-first-start
+ocd docs
+ocd docs install-and-first-start
 ```
 
 手册名（无 `.md`）：`backup-and-retention`、`collect-support-bundle`、`disk-pressure`、`fresh-host-restore`、`install-and-first-start`、`master-key-loss-and-recovery`、`s3-outage`、`scheduler-recovery`、`sqlite-corruption`、`current-release-recovery`、`workerd-crash-loop`。
 
-站点页面是给运维读的正文；`platformd docs` 输出的是内嵌 runbook。两者命令应一致。若 runbook 示例写成 `platform.toml`，仍用你的绝对 `--config` 路径。
+站点页面是给运维读的正文；`ocd docs` 输出的是内嵌 runbook。两者命令应一致。若 runbook 示例写成 `platform.toml`，仍用你的绝对 `--config` 路径。
 
 ## `licenses`
 
 打印打进本可执行文件的许可证（Open Compute 与内嵌 Cloudflare workerd）。
 
 ```sh
-platformd licenses
+ocd licenses
 ```
 
 ## `capabilities`
@@ -30,16 +30,16 @@ platformd licenses
 打印版本化的产品与发行契约。`--json` 输出 `schema_version`、`release`、`runtime`、`products`、`limits`。读法见 [能力与限制](/capabilities)。
 
 ```sh
-platformd capabilities --json
-platformd --config /etc/open-compute/config.toml capabilities --json
+ocd capabilities --json
+ocd --config /etc/open-compute/config.toml capabilities --json
 ```
 
 ## `config init` / `config check`
 
 ```sh
-platformd config init --data-dir /var/lib/open-compute
-platformd --config /etc/open-compute/config.toml config check
-platformd --config /etc/open-compute/config.toml config check --json
+ocd config init --data-dir /var/lib/open-compute
+ocd --config /etc/open-compute/config.toml config check
+ocd --config /etc/open-compute/config.toml config check --json
 ```
 
 `init`：`--data-dir` 绝对路径；完整 starter TOML 写到 stdout；不建文件、不写密钥。JSON check 成功形如 `{"schema_version":1,"command":"config_check","result":"ok"}`，人读输出是 `CONFIG_OK`。
@@ -49,7 +49,7 @@ platformd --config /etc/open-compute/config.toml config check --json
 启动平台进程。首次运行在拿到锁之后生成身份、数据库和 master key，并物化内嵌 runtime。
 
 ```sh
-platformd --config /etc/open-compute/config.toml run
+ocd --config /etc/open-compute/config.toml run
 ```
 
 ## `doctor`
@@ -57,8 +57,8 @@ platformd --config /etc/open-compute/config.toml run
 默认只读。`--full` 授权 S3 canary 和临时 workerd 编译/启动/停止。`--json` 输出版本化报告。详见 [健康检查](/health)。
 
 ```sh
-platformd --config /etc/open-compute/config.toml doctor --json
-platformd --config /etc/open-compute/config.toml doctor --full --json
+ocd --config /etc/open-compute/config.toml doctor --json
+ocd --config /etc/open-compute/config.toml doctor --full --json
 ```
 
 ## `backup`
@@ -82,10 +82,10 @@ platformd --config /etc/open-compute/config.toml doctor --full --json
 ## 事故时才会用到的命令
 
 ```sh
-platformd --config /etc/open-compute/config.toml support-bundle --output /var/tmp/open-compute-support-20260826.tar --json
-platformd --config /etc/open-compute/config.toml scheduler recover-corrupt --backup-name scheduler-corrupt-20260826
+ocd --config /etc/open-compute/config.toml support-bundle --output /var/tmp/open-compute-support-20260826.tar --json
+ocd --config /etc/open-compute/config.toml scheduler recover-corrupt --backup-name scheduler-corrupt-20260826
 ```
 
 `support-bundle`：`--output` 必须是绝对路径、目标不存在、不是符号链接。`scheduler recover-corrupt` 仅用于 control 可验证且没有 Queue/Cron/Workflow 权威的 alarm-only 目录。完整停止条件见 [故障手册](/incidents/)。
 
-`platformd worker bundle` 是离线开发者工具，从 stdin 读版本化 build JSON、向 stdout 写 bundle。运维装机用不到；本站点不覆盖 Worker 编程 API。
+`ocd worker bundle` 是离线开发者工具，从 stdin 读版本化 build JSON、向 stdout 写 bundle。运维装机用不到；本站点不覆盖 Worker 编程 API。

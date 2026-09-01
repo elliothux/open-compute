@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>io.opencompute.platformd</string>
+  <string>dev.open-compute.ocd</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/open-compute/platformd</string>
+    <string>/opt/open-compute/ocd</string>
     <string>--config</string>
     <string>/usr/local/etc/open-compute/config.toml</string>
     <string>run</string>
@@ -25,8 +25,8 @@
   <key>ExitTimeOut</key>
   <integer>30</integer>
   <key>StandardOutPath</key>
-  <string>/usr/local/var/log/open-compute/platformd.out.log</string>
+  <string>/usr/local/var/log/open-compute/ocd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/usr/local/var/log/open-compute/platformd.err.log</string>
+  <string>/usr/local/var/log/open-compute/ocd.err.log</string>
 </dict>
 </plist>

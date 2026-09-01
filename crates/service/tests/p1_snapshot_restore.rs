@@ -99,7 +99,7 @@ max_series = 1024
 
 async fn run_cli_json(config: &Path, args: &[&str]) -> serde_json::Value {
     let mut argv = vec![
-        "platformd".to_owned(),
+        "ocd".to_owned(),
         "--config".to_owned(),
         config.to_string_lossy().into_owned(),
     ];
@@ -120,7 +120,7 @@ async fn run_cli_json(config: &Path, args: &[&str]) -> serde_json::Value {
 
 async fn run_cli_human(config: &Path, args: &[&str]) -> String {
     let mut argv = vec![
-        "platformd".to_owned(),
+        "ocd".to_owned(),
         "--config".to_owned(),
         config.to_string_lossy().into_owned(),
     ];

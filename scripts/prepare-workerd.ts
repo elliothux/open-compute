@@ -1,4 +1,4 @@
-// Explicit build/test input acquisition; never shipped or invoked by platformd.
+// Explicit build/test input acquisition; never shipped or invoked by ocd.
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { absoluteDestination, prepareWorkerd, sourceArguments } from "./workerd-archive.ts";

@@ -2,8 +2,8 @@
 
 `oc` 是单机 Cloudflare Workers Platform 的开发与部署客户端。它在开发端用 TS7 严格检查普通
 Worker，再用 Rolldown 编译和打包；也可以导入已构建的框架产物，或部署 Static Assets-only
-项目。产物由匹配版本的 `platformd worker bundle` 编码，复用 Rust 的 canonical bundle 格式与
-大小限制。部署走统一的校验、持久化与激活接口；生产 `platformd` 启动和请求路径不调用 Bun、
+项目。产物由匹配版本的 `ocd worker bundle` 编码，复用 Rust 的 canonical bundle 格式与
+大小限制。部署走统一的校验、持久化与激活接口；生产 `ocd` 启动和请求路径不调用 Bun、
 Node 或编译器。
 
 配置借用 Cloudflare/Wrangler 的常见字段和语义，但 `open-compute.json` 不是完整 `wrangler.jsonc`
@@ -19,7 +19,7 @@ Node 或编译器。
 
 ```sh
 bun run oc run --config examples/hello-worker/open-compute.json \
-  --platformd "$PWD/target/debug/platformd"
+  --ocd "$PWD/target/debug/ocd"
 ```
 
 命令会检查 TS、编译、创建或复用同名 Worker、校验并激活新部署，最后打印可访问 URL。
@@ -30,13 +30,13 @@ bun run oc run --config examples/hello-worker/open-compute.json \
 
 ```sh
 bun run oc build --config examples/hello-worker/open-compute.json \
-  --platformd "$PWD/target/debug/platformd" --out /absolute/new-worker.bundle
+  --ocd "$PWD/target/debug/ocd" --out /absolute/new-worker.bundle
 ```
 
 输出必须是新文件，已有文件不会被覆盖。`--json` 可输出公开的结果字段。
 这两个命令都不会安装依赖、下载 workerd 或执行项目配置代码。
 
-从已验证的项目配置生成 `Env` 类型，不需要 `platformd`：
+从已验证的项目配置生成 `Env` 类型，不需要 `ocd`：
 
 ```sh
 bun run oc types --config examples/hello-worker/open-compute.json
@@ -87,7 +87,7 @@ ESM 静态依赖、动态 import 的 chunks 和具名导出会保留；当前 pi
 因此 `node:` 导入无需额外参数。工具链不提供 Node 运行环境、不填补未实现的产品 API，也不下载远程 import。
 项目 JSON 不得包含 `compatibilityDate` 或 `compatibilityFlags`。
 运行时仍按平台当前的兼容性日期、capability/deviation 与资源限制校验产物。Cache/Images 的精确
-支持面、单节点限制与资源预算见 P3.3 文档和 `platformd capabilities --json`。
+支持面、单节点限制与资源预算见 P3.3 文档和 `ocd capabilities --json`。
 
 ## 检查
 

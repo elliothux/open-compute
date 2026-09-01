@@ -1,4 +1,4 @@
-//! Provision real product resources before transferring exclusive ownership to platformd.
+//! Provision real product resources before transferring exclusive ownership to ocd.
 
 use crate::p0_exit_support::{
     GateStack, admin_json, admin_router, deploy, now_ms, open_scheduler, repo_root, storage_config,

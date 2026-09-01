@@ -17,11 +17,11 @@ const HELP = `Usage: oc <build|run|deploy|types> [entry.ts] [options]
   build    Type-check and write a canonical Worker bundle without network access
   run      Compile and serve a Worker through an already-running local platform
   deploy   Compile, validate, and activate a Worker on the configured platform
-  types    Generate Env types from the project configuration without platformd
+  types    Generate Env types from the project configuration without ocd
 
 Options:
   --config <file>       Project JSON (default: open-compute.json)
-  --platformd <file>    Matching platformd binary for Worker code, or OPEN_COMPUTE_PLATFORMD
+  --ocd <file>          Matching ocd binary for Worker code, or OPEN_COMPUTE_OCD
   --out <file>          New bundle for build, or types destination for types
   --endpoint <origin>   Override the platform origin
   --account <id>        Override the platform's default account
@@ -55,7 +55,7 @@ export async function runCli(args: readonly string[]): Promise<void> {
     args: [...args], allowPositionals: true, strict: true,
     options: {
       config: { type: "string", default: "open-compute.json" },
-      platformd: { type: "string" }, out: { type: "string" },
+      ocd: { type: "string" }, out: { type: "string" },
       endpoint: { type: "string" }, account: { type: "string" },
       "token-env": { type: "string", default: "OPEN_COMPUTE_ADMIN_TOKEN" },
       json: { type: "boolean", default: false }, help: { type: "boolean", default: false },
@@ -65,7 +65,7 @@ export async function runCli(args: readonly string[]): Promise<void> {
   const [command, entry] = positionals;
   if (command === "types") {
     if (positionals.length !== 1) throw new Error("types does not accept an entry argument");
-    for (const name of ["platformd", "endpoint", "account", "token-env", "json"] as const) {
+    for (const name of ["ocd", "endpoint", "account", "token-env", "json"] as const) {
       if (hasOption(args, name)) throw new Error(`types does not accept --${name}`);
     }
     const { project } = await configuredProject(values.config);
@@ -84,16 +84,16 @@ export async function runCli(args: readonly string[]): Promise<void> {
     throw new Error("an entry argument cannot override frameworkOutput");
   }
   const main = entry ?? project.main;
-  const binary = values.platformd ?? process.env.OPEN_COMPUTE_PLATFORMD;
-  if (main !== undefined && !binary) throw new Error("set --platformd or OPEN_COMPUTE_PLATFORMD to encode Worker code");
+  const binary = values.ocd ?? process.env.OPEN_COMPUTE_OCD;
+  if (main !== undefined && !binary) throw new Error("set --ocd or OPEN_COMPUTE_OCD to encode Worker code");
   const assets = project.assets === undefined
     ? undefined : await scanAssets(project.project, project.assets);
   let artifact: Awaited<ReturnType<typeof encodeWorker>> | undefined;
   if (framework !== undefined) {
-    if (binary === undefined) throw new Error("platformd is required to encode framework Worker code");
+    if (binary === undefined) throw new Error("ocd is required to encode framework Worker code");
     artifact = await encodeWorker(framework.worker, resolve(binary));
   } else if (main !== undefined) {
-    if (binary === undefined) throw new Error("platformd is required to encode Worker code");
+    if (binary === undefined) throw new Error("ocd is required to encode Worker code");
     artifact = await encodeWorker(await compileWorker({
       project: project.project, entry: main, tsconfig: project.tsconfig,
     }), resolve(binary));

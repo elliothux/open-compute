@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run platformd with repository-local persistent development state.
+# Run ocd with repository-local persistent development state.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -107,4 +107,4 @@ echo "open-compute dev: platform data $platform_data"
 echo "open-compute dev: config        $config"
 
 cd "$root"
-cargo run -p open-compute-service --bin platformd -- --config "$config" "$@"
+cargo run -p open-compute-service --bin ocd -- --config "$config" "$@"

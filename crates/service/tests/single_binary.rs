@@ -55,11 +55,9 @@ impl Drop for Evidence {
 }
 
 fn isolated_binary(root: &Path) -> PathBuf {
-    let binary = root.join("platformd");
-    let source = std::env::var_os("OPEN_COMPUTE_TEST_PLATFORMD").map_or_else(
-        || PathBuf::from(env!("CARGO_BIN_EXE_platformd")),
-        PathBuf::from,
-    );
+    let binary = root.join("ocd");
+    let source = std::env::var_os("OPEN_COMPUTE_TEST_OCD")
+        .map_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_ocd")), PathBuf::from);
     assert!(source.is_absolute());
     fs::copy(source, &binary).unwrap();
     fs::set_permissions(&binary, fs::Permissions::from_mode(0o500)).unwrap();
@@ -197,7 +195,7 @@ impl Process {
         loop {
             assert!(
                 self.child.try_wait().unwrap().is_none(),
-                "platformd exited: {}",
+                "ocd exited: {}",
                 fs::read_to_string(&self.log).unwrap()
             );
             if let Ok(Ok(true)) =
@@ -226,10 +224,7 @@ impl Process {
                 );
                 break;
             }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "platformd did not stop"
-            );
+            assert!(tokio::time::Instant::now() < deadline, "ocd did not stop");
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         assert!(

@@ -35,7 +35,7 @@ pub enum ErrorCode {
     RuntimeExitedBeforeReady,
     /// workerd exited while handling a request; result may be unknown.
     RuntimeExitedInFlight,
-    /// platformd was SIGKILL'd; only fsynced state is promised.
+    /// ocd was SIGKILL'd; only fsynced state is promised.
     ProcessKilled,
     /// Data directory free space reached the hard limit.
     DiskHardLimit,

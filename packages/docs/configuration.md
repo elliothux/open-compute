@@ -5,13 +5,13 @@
 本页路径示例使用 `/etc/open-compute/config.toml`。部分内嵌 runbook 写成 `platform.toml`；命令行只有 `--config`，没有按文件名切换的第二套格式。
 
 ```sh
-platformd config init --data-dir /var/lib/open-compute > /etc/open-compute/config.toml
-platformd --config /etc/open-compute/config.toml config check
+ocd config init --data-dir /var/lib/open-compute > /etc/open-compute/config.toml
+ocd --config /etc/open-compute/config.toml config check
 ```
 
 `config init` 把指定绝对 `data-dir` 写进模板并打印到 stdout，不创建目录、不写密钥。`config check` 只做静态解析与校验。
 
-内嵌默认模板与 `share/default-config.toml` 同结构。运行中的数值上限以 `platformd --config /abs/config.toml capabilities --json` 的 `limits` 为准。
+内嵌默认模板与 `share/default-config.toml` 同结构。运行中的数值上限以 `ocd --config /abs/config.toml capabilities --json` 的 `limits` 为准。
 
 ## 密钥
 
@@ -37,7 +37,7 @@ platformd --config /etc/open-compute/config.toml config check
 | `free_space_soft_bytes` | 低于此值健康降级 |
 | `free_space_hard_bytes` | 低于此值拒绝 mutation；必须 ≤ soft |
 
-一个 `platformd` 管一个 data-dir。排他锁是 `<data_dir>/platform.lock`。第二实例会得到 `DATA_DIR_IN_USE`，不要绕过。data-dir 必须可写且可执行（解压后的 workerd 要在这里跑）。
+一个 `ocd` 管一个 data-dir。排他锁是 `<data_dir>/platform.lock`。第二实例会得到 `DATA_DIR_IN_USE`，不要绕过。data-dir 必须可写且可执行（解压后的 workerd 要在这里跑）。
 
 ## S3（SigV4）
 

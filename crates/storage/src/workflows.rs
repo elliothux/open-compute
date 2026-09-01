@@ -34,7 +34,7 @@ pub struct WorkflowRepository<'a> {
 }
 
 impl<'a> WorkflowRepository<'a> {
-    /// Borrow the control database owned by platformd.
+    /// Borrow the control database owned by ocd.
     #[must_use]
     pub const fn new(db: &'a ControlDb) -> Self {
         Self { db }

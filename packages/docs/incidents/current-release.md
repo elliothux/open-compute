@@ -5,8 +5,8 @@
 只读诊断：核对二进制 capability 的完整 release 身份及当前配置，不修改已有数据库：
 
 ```sh
-/opt/open-compute/platformd capabilities --json
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --json
+/opt/open-compute/ocd capabilities --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 ```
 
 允许的 mutation：经 operator 确认后停止 service，使用同一 release 的已验证二进制，按[全新主机恢复](/incidents/fresh-host)将经过认证的快照恢复到明确指定的新目录。恢复前必须满足 source release、配置策略、master key、S3 authority 和完整 schema 身份校验。不得直接覆盖、降级、自行修复或清空现有目录。发行构建、下载 runtime 和替换二进制仍需单独批准。

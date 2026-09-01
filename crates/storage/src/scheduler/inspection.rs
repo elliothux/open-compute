@@ -58,7 +58,7 @@ pub struct CronInspectionSummary {
     pub invalid_next_fire: u64,
 }
 
-/// Read-only scheduler database facts used by `platformd doctor`.
+/// Read-only scheduler database facts used by `ocd doctor`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SchedulerInspection {

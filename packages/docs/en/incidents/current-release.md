@@ -5,8 +5,8 @@ Trigger: current binary is corrupt, host recovery, or schema/runtime identity ch
 Read-only diagnosis: compare the binary capability's full release identity with the current config; do not modify existing databases:
 
 ```sh
-/opt/open-compute/platformd capabilities --json
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --json
+/opt/open-compute/ocd capabilities --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 ```
 
 Allowed mutation: after operator confirmation, stop the service, use a verified binary of the **same** release, and restore an authenticated snapshot into an explicitly new directory using [fresh-host restore](/en/incidents/fresh-host). Source release, config policy, master key, S3 authority, and full schema identity must match first. Do not overwrite, downgrade, self-repair, or empty the existing directory. Building a release, downloading a runtime, and replacing the binary still need separate approval.

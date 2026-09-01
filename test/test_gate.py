@@ -181,7 +181,7 @@ class GateTests(unittest.TestCase):
                 {'name': 'open_compute_service', 'kind': ['lib'], 'test': True},
                 {'name': 'p0_2_runtime_gate', 'kind': ['test'], 'test': True},
                 {'name': 'new_test', 'kind': ['test'], 'test': True},
-                {'name': 'platformd', 'kind': ['bin'], 'test': True},
+                {'name': 'ocd', 'kind': ['bin'], 'test': True},
                 {'name': 'build-script-build', 'kind': ['custom-build'], 'test': False},
             ],
         }, {'id': 'runtime', 'name': 'open-compute-runtime',
@@ -192,7 +192,7 @@ class GateTests(unittest.TestCase):
             targets = gate.resolve_targets([], True)
         self.assertEqual({target.name for target in targets.values()},
                          {'cli', 'open_compute_service', 'open_compute_runtime',
-                          'p0_2_runtime_gate', 'new_test', 'platformd', 'p3-contract'})
+                          'p0_2_runtime_gate', 'new_test', 'ocd', 'p3-contract'})
         self.assertNotIn('p3-cf-diff', targets)
         self.assertEqual(next(iter(targets)), 'open-compute-service.test.cli')
         self.assertTrue(targets['open-compute-service.test.cli'].exclusive)

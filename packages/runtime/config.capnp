@@ -18,7 +18,7 @@ const config :Workerd.Config = (
     (name = "loader-host", worker = .loaderHostWorker),
     (name = "do-router", worker = .doHostWorker),
     (name = "do-storage", disk = (writable = true, allowDotfiles = true)),
-    # The address is deliberately omitted from the compiled config. platformd
+    # The address is deliberately omitted from the compiled config. ocd
     # injects a generation-local loopback listener with --external-addr.
     (name = "runtime-source", external = (http = ())),
     (name = "binding-backend", external = (http = ())),

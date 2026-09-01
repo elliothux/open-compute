@@ -8,7 +8,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ComponentName {
-    /// `platformd` process event loop.
+    /// `ocd` process event loop.
     Process,
     /// Data directory lock and layout.
     DataDir,

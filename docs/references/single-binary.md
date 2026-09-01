@@ -1,6 +1,6 @@
 # 单二进制分发与部署
 
-Open Compute 只有一种生产发行形式：按平台构建的单个 `platformd` 可执行文件。
+Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可执行文件。
 不发布 Rust crate，不提供“外部 workerd”“外部资源目录”或自动下载模式。
 `runtime.binary`、`runtime.lock_file`、`runtime.assets_dir` 是未知配置项，启动前即拒绝。
 
@@ -15,8 +15,8 @@ Open Compute 只有一种生产发行形式：按平台构建的单个 `platform
 - Rust 中已有的 SQL schema 和其他编译期资源。
 
 TS 源码、Bun、Node、Rolldown、用户 bundle、数据库、master key、S3 与凭据不打入二进制。
-许可证用 `platformd licenses` 查看；`platformd docs` 列出手册，
-`platformd docs install-and-first-start` 输出指定手册。
+许可证用 `ocd licenses` 查看；`ocd docs` 列出手册，
+`ocd docs install-and-first-start` 输出指定手册。
 
 ## 构建与发布
 
@@ -28,7 +28,7 @@ TS 源码、Bun、Node、Rolldown、用户 bundle、数据库、master key、S3 
 export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/workerd-darwin-arm64.gz
 bun run build
 bun run check:generated
-cargo build --locked --release -p open-compute-service --bin platformd
+cargo build --locked --release -p open-compute-service --bin ocd
 ```
 
 Cargo build script 检查目标、压缩包与解压二进制的 SHA-256、大小上限、生成 manifest
@@ -38,26 +38,26 @@ Cargo build script 检查目标、压缩包与解压二进制的 SHA-256、大�
 正式发布在干净 checkout 中显式执行：
 
 ```sh
-./scripts/package-release.sh --dest /abs/releases/platformd --archive /abs/pinned-workerd.gz
+./scripts/package-release.sh --dest /abs/releases/ocd --archive /abs/pinned-workerd.gz
 ```
 
 `--dest` 是一个必须不存在的文件，不是目录。也可以明确使用 `--download` 替代
 `--archive`；下载只访问 formal lock 的官方 archive，生产程序没有下载代码。
-脚本使用原生目标 release 构建，验证 workerd 版本、platformd 版本、源码 revision 和内嵌
+脚本使用原生目标 release 构建，验证 workerd 版本、ocd 版本、源码 revision 和内嵌
 release identity，再 fsync、原子无覆盖发布单文件，输出大小与 SHA-256。
 不生成相邻资源目录、安装脚本、launcher、兼容布局或第二个服务。
 
 本地开发、测试和 CI 的输入准备可显式运行
 `bun scripts/prepare-workerd.ts --dest /abs/new-build-input --download`；
-它输出构建和底层运行时测试所需的两个环境变量。此工具不分发、不由 platformd 调用。
+它输出构建和底层运行时测试所需的两个环境变量。此工具不分发、不由 ocd 调用。
 下载和正式包装属于显式运维操作，不能用作默认本地检查。
 
 ## 运行契约
 
-1. 把匹配平台的文件安装到固定绝对路径，例如 `/opt/open-compute/platformd`。
+1. 把匹配平台的文件安装到固定绝对路径，例如 `/opt/open-compute/ocd`。
 2. 用 `config init --data-dir /abs/data` 生成 TOML 到 stdout，保存到新的配置文件，
    填入 S3 endpoint/bucket、凭据引用、监听地址与需要的 admin auth。
-3. `platformd --config /abs/config.toml config check`，然后执行同一路径的 `run`。
+3. `ocd --config /abs/config.toml config check`，然后执行同一路径的 `run`。
 
 S3 是平台 authority 的一部分，仍需用户预置；单文件不是内嵌对象存储。
 首次运行自动初始化当前 schema、身份和 key。不要在首次初始化前要求 `doctor --full` 成功。
@@ -68,7 +68,7 @@ S3 是平台 authority 的一部分，仍需用户预置；单文件不是内嵌
 ## 磁盘与进程
 
 ```text
-platformd（用户下载的唯一文件）
+ocd（用户下载的唯一文件）
   └─ data/runtime/packages/<payload-sha256>/
        ├─ workerd
        └─ runtime/{workerd.lock.json,config.capnp,dist/...}
@@ -84,17 +84,17 @@ workerd 仍是受监督子进程。Linux 执行已验证 fd；macOS 还会创建
 运行时磁盘会产生独立文件；“单二进制”指分发物，不指单进程或零磁盘写入。
 data-dir 与 macOS staging 所在文件系统必须允许执行，并为解压文件、执行副本及业务状态留足空间。
 
-Linux 官方 workerd 要求 glibc 2.35+；platformd 同时受实际编译主机的 libc 基线约束。
+Linux 官方 workerd 要求 glibc 2.35+；ocd 同时受实际编译主机的 libc 基线约束。
 容器示例与 CI 使用 Ubuntu 24.04，不使用 scratch/Alpine。macOS 与 CPU 要求继承
 [当前 upstream pin 的要求](https://github.com/cloudflare/workerd/tree/v1.20260830.1#running-workerd)。
 服务配置见 examples/systemd、examples/launchd 和 examples/container。
-只替换并校验完整 platformd，不单独替换缓存中的 workerd 或 JS。
+只替换并校验完整 ocd，不单独替换缓存中的 workerd 或 JS。
 
 ## 验收
 
 `crates/service/tests/single_binary.rs` 把实际程序复制到隔离目录，清空 PATH/环境，
 检查只读命令无物化、首次启动、排他锁、重启复用、孤儿恢复及损坏缓存拒绝。
-`OPEN_COMPUTE_TEST_PLATFORMD=/abs/platformd` 可让这项测试验证正式发布文件。
+`OPEN_COMPUTE_TEST_OCD=/abs/ocd` 可让这项测试验证正式发布文件。
 它不替代真实产品行为、snapshot/restore 和按改动范围选择的最终产品 Gate。
 历史 G0 能力调查已经退役，不作为日常或最终验收的必跑项。
 任何目标平台的构建、签名或部署未实际验证时，不能把其他平台的通过结果当成它的证据。

@@ -21,13 +21,13 @@ MARKERS = (
 def main():
     result = subprocess.run([os.environ.get('CARGO', 'cargo'), 'build', '--locked', '--offline',
                              '--no-default-features', '-p', 'open-compute-service', '--bin',
-                             'platformd', '--message-format=json'], cwd=ROOT,
+                             'ocd', '--message-format=json'], cwd=ROOT,
                             stdout=subprocess.PIPE, text=True, check=True)
     binaries = [item['executable'] for line in result.stdout.splitlines()
                 if (item := json.loads(line)).get('reason') == 'compiler-artifact'
-                and item.get('executable') and item['target']['name'] == 'platformd']
+                and item.get('executable') and item['target']['name'] == 'ocd']
     if len(binaries) != 1:
-        raise SystemExit('Cargo did not produce exactly one production platformd')
+        raise SystemExit('Cargo did not produce exactly one production ocd')
     data = Path(binaries[0]).read_bytes()
     if any(marker in data for marker in MARKERS):
         raise SystemExit('production executable contains a test marker; no release packaging was performed')

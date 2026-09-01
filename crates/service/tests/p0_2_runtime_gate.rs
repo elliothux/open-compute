@@ -1,5 +1,7 @@
 //! Real pinned-workerd P0.2 dynamic Worker data-plane gate.
 
+#![cfg(feature = "test-support")]
+
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, header};
 use base64::Engine as _;
@@ -395,7 +397,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     }
 
     // The platform proxy keeps both directions streaming. The echo path does
-    // not materialize the request in platformd, and an early tenant response
+    // not materialize the request in ocd, and an early tenant response
     // cancels a request producer that has not reached EOF.
     let stream_payload = vec![b's'; 4 * 1024 * 1024];
     let stream = futures::stream::iter(
@@ -643,7 +645,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     .await;
 
     // Once response headers/body have started, a runtime crash truncates the
-    // stream. platformd must not rewrite or replay it as a clean JSON error.
+    // stream. ocd must not rewrite or replay it as a clean JSON error.
     let crash_pid = supervisor.snapshot().pid.unwrap();
     let timeout = transport
         .dispatch_queue(

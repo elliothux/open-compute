@@ -53,7 +53,7 @@ max_series = 1024
 }
 
 fn capabilities(config: &Path) -> Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_platformd"))
+    let output = Command::new(env!("CARGO_BIN_EXE_ocd"))
         .args([
             "--config",
             config.to_str().expect("config utf8"),
@@ -61,7 +61,7 @@ fn capabilities(config: &Path) -> Value {
             "--json",
         ])
         .output()
-        .expect("run platformd");
+        .expect("run ocd");
     assert!(
         output.status.success(),
         "{}",

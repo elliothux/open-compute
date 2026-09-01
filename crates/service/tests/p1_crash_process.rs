@@ -118,28 +118,28 @@ max_series = 1024
     config
 }
 
-fn spawn_platformd(config: &Path, log: &Path) -> Child {
+fn spawn_ocd(config: &Path, log: &Path) -> Child {
     let stderr = OpenOptions::new()
         .create(true)
         .append(true)
         .mode(0o600)
         .open(log)
         .expect("open bounded process log");
-    Command::new(env!("CARGO_BIN_EXE_platformd"))
+    Command::new(env!("CARGO_BIN_EXE_ocd"))
         .args(["run", "--config"])
         .arg(config)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(stderr))
         .spawn()
-        .expect("spawn platformd")
+        .expect("spawn ocd")
 }
 
 fn signal(child: &Child, name: &str) {
     let status = Command::new("/bin/kill")
         .args([name, &child.id().to_string()])
         .status()
-        .expect("signal platformd");
+        .expect("signal ocd");
     assert!(status.success(), "signal {name} failed");
 }
 
@@ -148,7 +148,7 @@ async fn wait_ready(address: SocketAddr, child: &mut Child) {
     loop {
         assert!(
             child.try_wait().expect("child state").is_none(),
-            "platformd exited"
+            "ocd exited"
         );
         if let Ok(Ok(mut stream)) = tokio::time::timeout(
             Duration::from_millis(500),
@@ -170,7 +170,7 @@ async fn wait_ready(address: SocketAddr, child: &mut Child) {
                 }
             }
         }
-        assert!(Instant::now() < deadline, "platformd did not become ready");
+        assert!(Instant::now() < deadline, "ocd did not become ready");
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -181,7 +181,7 @@ async fn wait_exit(child: &mut Child, timeout: Duration) -> std::process::ExitSt
         if let Some(status) = child.try_wait().expect("child state") {
             return status;
         }
-        assert!(Instant::now() < deadline, "platformd did not exit");
+        assert!(Instant::now() < deadline, "ocd did not exit");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -277,7 +277,7 @@ fn seed_resource_recovery(config: &PlatformConfig) -> Vec<(ResourceRecord, Resou
 }
 
 fn assert_recovered_resources(data_dir: &Path, expected: &[(ResourceRecord, ResourceState)]) {
-    // Only inspect through a WAL-aware read-only connection while platformd owns
+    // Only inspect through a WAL-aware read-only connection while ocd owns
     // the data directory. No second writer or lifecycle owner is introduced.
     let db = ControlDb::open_readonly_wal_aware(&data_dir.join("control.sqlite"), 5_000)
         .expect("read serving authority");
@@ -300,7 +300,7 @@ fn assert_recovered_resources(data_dir: &Path, expected: &[(ResourceRecord, Reso
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly() {
+async fn p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly() {
     let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
         .map(PathBuf::from)
         .expect("OPEN_COMPUTE_TEST_WORKERD");
@@ -312,18 +312,18 @@ async fn p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly() {
     let public = unused_addr();
     let admin = unused_addr();
     let config = write_config(&root, &data_dir, &mock, public, admin);
-    let process_log = root.join("platformd.log");
+    let process_log = root.join("ocd.log");
     let loaded = load_platform_config(&config).expect("load config");
     let resources = seed_resource_recovery(&loaded.config);
 
-    let mut first = ChildGuard(spawn_platformd(&config, &process_log));
+    let mut first = ChildGuard(spawn_ocd(&config, &process_log));
     wait_ready(admin, first.child_mut()).await;
     assert_recovered_resources(&data_dir, &resources);
     signal(first.child(), "-KILL");
     let first_status = wait_exit(first.child_mut(), Duration::from_secs(5)).await;
     assert!(!first_status.success());
 
-    let mut second = ChildGuard(spawn_platformd(&config, &process_log));
+    let mut second = ChildGuard(spawn_ocd(&config, &process_log));
     wait_ready(admin, second.child_mut()).await;
     assert_recovered_resources(&data_dir, &resources);
     signal(second.child(), "-TERM");

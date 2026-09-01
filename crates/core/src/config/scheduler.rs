@@ -135,7 +135,7 @@ pub struct SchedulerConfig {
     pub max_in_flight: u32,
     /// Persisted claim lease duration.
     pub claim_lease_ms: u64,
-    /// Maximum time platformd waits for one workerd alarm dispatch.
+    /// Maximum time ocd waits for one workerd alarm dispatch.
     pub dispatch_timeout_ms: u64,
     /// Safety interval between dispatch timeout and claim expiry.
     pub lease_guard_ms: u64,

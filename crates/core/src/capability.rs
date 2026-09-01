@@ -212,7 +212,7 @@ impl TypeSourceIdentityV1 {
     }
 }
 
-/// Checked-in machine inventory deserialized by `platformd`.
+/// Checked-in machine inventory deserialized by `ocd`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityInventoryV1 {

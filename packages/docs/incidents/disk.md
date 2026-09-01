@@ -5,7 +5,7 @@
 只读诊断：
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 /usr/bin/df -k /var/lib/open-compute
 ```
 

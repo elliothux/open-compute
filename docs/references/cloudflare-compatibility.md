@@ -2,7 +2,7 @@
 
 本页是 [`share/cloudflare-capabilities.json`](../../share/cloudflare-capabilities.json) 与
 [`test/conformance/catalog.json`](../../test/conformance/catalog.json) 的人类可读索引，不建立第二份
-能力真值。`platformd capabilities --json`、类型 inventory、contract catalog 和 Gate 共同定义当前
+能力真值。`ocd capabilities --json`、类型 inventory、contract catalog 和 Gate 共同定义当前
 支持面。完成设计和 conformance 方案见
 [Cloudflare Runtime 全量兼容改造](../implemented/cloudflare-runtime-compatibility.md)与
 [P3.4 Cloudflare conformance](../implemented/p3-4-cloudflare-conformance.md)；尚待外部账号条件解除的

@@ -12,7 +12,7 @@ if (command("git", ["status", "--porcelain", "--untracked-files=all"]).trim()) {
 const revision = command("git", ["rev-parse", "--verify", "HEAD"]).trim();
 const work = await mkdtemp(join(tmpdir(), "open-compute-release-"));
 let ownsTemporary = false;
-const temporary = join(dirname(destination), `.platformd-${randomUUID()}`);
+const temporary = join(dirname(destination), `.ocd-${randomUUID()}`);
 try {
   const pin = await prepareWorkerd(work, input.archive, input.download);
   const target = { "darwin-arm64": "aarch64-apple-darwin", "darwin-x64": "x86_64-apple-darwin",
@@ -20,14 +20,14 @@ try {
   if (!target) throw new Error("unsupported native Cargo target");
   command("bun", ["run", "build"]);
   command("bun", ["run", "check:generated"]);
-  command("cargo", ["build", "--locked", "--release", "--target", target, "-p", "open-compute-service", "--bin", "platformd"], {
+  command("cargo", ["build", "--locked", "--release", "--target", target, "-p", "open-compute-service", "--bin", "ocd"], {
     ...process.env,
     OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE: pin.archive,
     OPEN_COMPUTE_GIT_REVISION: revision,
     // One native target and one fresh build directory contract; never select arbitrary stale output.
     CARGO_TARGET_DIR: join(repository, "target"),
   });
-  const source = join(repository, "target", target, "release/platformd");
+  const source = join(repository, "target", target, "release/ocd");
   const bytes = await readFile(source);
   const file = await open(temporary, "wx", 0o500);
   ownsTemporary = true;
@@ -41,7 +41,7 @@ try {
     || !("workerd_version" in release) || release.workerd_version !== pin.expectedVersion
     || !("workerd_lock_sha256" in release) || release.workerd_lock_sha256 !== pin.lockSha256
     || !("platform_version" in release) || typeof release.platform_version !== "string"
-    || command(temporary, ["--version"]).trim() !== `platformd ${release.platform_version}`) {
+    || command(temporary, ["--version"]).trim() !== `ocd ${release.platform_version}`) {
     throw new Error("single executable release identity does not match the build inputs");
   }
   command(temporary, ["licenses"]);

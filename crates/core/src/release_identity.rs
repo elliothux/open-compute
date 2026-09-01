@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 pub struct PlatformReleaseIdentityV1 {
     /// Format version.
     pub schema_version: u32,
-    /// `platformd` semantic version.
+    /// `ocd` semantic version.
     pub platform_version: String,
     /// Source revision embedded by the build, or `unknown` for an unversioned local build.
     pub git_revision: String,

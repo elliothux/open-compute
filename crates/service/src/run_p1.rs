@@ -31,7 +31,7 @@ pub(crate) fn require_current_serving_schema(loaded: &LoadedConfig) -> Result<()
     if actual != target {
         return Err(PlatformError::new(
             ErrorCode::SchemaUnsupported,
-            "platformd run requires the current schema; restore a snapshot from this exact release",
+            "ocd run requires the current schema; restore a snapshot from this exact release",
         ));
     }
     Ok(())

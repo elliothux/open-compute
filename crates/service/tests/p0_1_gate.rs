@@ -1,5 +1,5 @@
 //! P0.1 process-level Gate: one fresh-process scenario against the
-//! real `platformd` binary, pinned stock workerd, and a local `SigV4` S3 server.
+//! real `ocd` binary, pinned stock workerd, and a local `SigV4` S3 server.
 
 use bytes::Bytes;
 use futures::stream;
@@ -110,11 +110,11 @@ async fn round_drop_recovers_orphan_without_platform_handle() {
     let staging_before = staging_directories();
     let s3 = MockS3::spawn("open-compute").await;
     let mut round = setup_round(90, &s3, &lock);
-    let bin = env!("CARGO_BIN_EXE_platformd");
+    let bin = env!("CARGO_BIN_EXE_ocd");
     let env_id = "OC_S3_ID_90";
     let env_secret = "OC_S3_SECRET_90";
 
-    spawn_platformd(&mut round, bin, env_id, env_secret);
+    spawn_ocd(&mut round, bin, env_id, env_secret);
     wait_ready(&mut round, PLATFORM_READY_TIMEOUT_SECS);
     let platform_pid = round.child.as_ref().unwrap().id() as i32;
     let workerd_pid = child_pids(platform_pid)
@@ -128,7 +128,7 @@ async fn round_drop_recovers_orphan_without_platform_handle() {
     let mut platform = round.child.take().unwrap();
     let _ = kill_process(Pid::from_raw(platform_pid).unwrap(), Signal::KILL);
     let _ = platform.wait();
-    assert_gone(platform_pid, "SIGKILL platformd");
+    assert_gone(platform_pid, "SIGKILL ocd");
     assert!(pid_alive(workerd_pid), "fixture must create a live orphan");
 
     round.ok = true;
@@ -156,13 +156,13 @@ async fn round_drop_recovers_orphan_without_platform_handle() {
 
 async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
     let mut round = setup_round(n, s3, lock);
-    let bin = env!("CARGO_BIN_EXE_platformd");
+    let bin = env!("CARGO_BIN_EXE_ocd");
     let env_id = format!("OC_S3_ID_{n}");
     let env_secret = format!("OC_S3_SECRET_{n}");
 
     s3.clear_recorded();
     let mut starting_seen = false;
-    spawn_platformd(&mut round, bin, &env_id, &env_secret);
+    spawn_ocd(&mut round, bin, &env_id, &env_secret);
     let pid = round.child.as_ref().unwrap().id();
     let mut ready_ok = false;
     let deadline = Instant::now() + Duration::from_secs(PLATFORM_READY_TIMEOUT_SECS);
@@ -189,7 +189,7 @@ async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
         }
         if let Some(status) = round.child.as_mut().unwrap().try_wait().unwrap() {
             panic!(
-                "round {n} platformd exited before readiness with {status}; stderr={}",
+                "round {n} ocd exited before readiness with {status}; stderr={}",
                 read_lossy(&round.stderr)
             );
         }
@@ -252,7 +252,7 @@ async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
     let key1 = fs::read(&round.key).unwrap();
     term_and_wait(&mut round);
     assert_no_leaks(&round, s3);
-    spawn_platformd(&mut round, bin, &env_id, &env_secret);
+    spawn_ocd(&mut round, bin, &env_id, &env_secret);
     wait_ready(&mut round, PLATFORM_READY_TIMEOUT_SECS);
     let id2 = {
         let port = public_health_port(round.child.as_ref().unwrap().id() as i32).unwrap();
@@ -407,7 +407,7 @@ max_artifact_bytes = 65536
     }
 }
 
-fn spawn_platformd(round: &mut Round, bin: &str, env_id: &str, env_secret: &str) {
+fn spawn_ocd(round: &mut Round, bin: &str, env_id: &str, env_secret: &str) {
     let err = fs::File::create(&round.stderr).unwrap();
     let child = Command::new(bin)
         .args(["--config", round.config.to_str().unwrap(), "run"])
@@ -416,7 +416,7 @@ fn spawn_platformd(round: &mut Round, bin: &str, env_id: &str, env_secret: &str)
         .stdout(Stdio::null())
         .stderr(Stdio::from(err))
         .spawn()
-        .expect("spawn platformd");
+        .expect("spawn ocd");
     round.child = Some(child);
 }
 
@@ -433,7 +433,7 @@ fn wait_ready(round: &mut Round, secs: u64) {
         if let Some(child) = round.child.as_mut()
             && child.try_wait().ok().flatten().is_some()
         {
-            panic!("platformd exited early: {}", read_lossy(&round.stderr));
+            panic!("ocd exited early: {}", read_lossy(&round.stderr));
         }
         std::thread::sleep(Duration::from_millis(40));
     }
@@ -464,7 +464,7 @@ fn term_and_wait(round: &mut Round) {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert_gone(pid, "platformd after SIGTERM");
+    assert_gone(pid, "ocd after SIGTERM");
     for tracked in round.tracked_pids.clone() {
         assert_gone(tracked, "tracked child after SIGTERM");
     }
@@ -474,7 +474,7 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
     // Start with a fresh supervisor so the ordinary crash assertion earlier in
     // the round cannot consume this subcase's rolling budget.
     term_and_wait(round);
-    spawn_platformd(round, bin, env_id, env_secret);
+    spawn_ocd(round, bin, env_id, env_secret);
     wait_ready(round, PLATFORM_READY_TIMEOUT_SECS);
     let pid = round.child.as_ref().unwrap().id() as i32;
     let port = public_health_port(pid).expect("public port");
@@ -545,7 +545,7 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
         std::thread::sleep(Duration::from_millis(50));
     }
     term_and_wait(round);
-    spawn_platformd(round, bin, env_id, env_secret);
+    spawn_ocd(round, bin, env_id, env_secret);
     wait_ready(round, PLATFORM_READY_TIMEOUT_SECS);
 }
 
@@ -582,9 +582,9 @@ fn term_ignore_kill_deadline(round: &mut Round, bin: &str, env_id: &str, env_sec
         elapsed < Duration::from_secs(8),
         "must finish within outer deadline, elapsed={elapsed:?}"
     );
-    assert_gone(pid, "platformd after forced KILL path");
+    assert_gone(pid, "ocd after forced KILL path");
     assert_gone(wpid, "stopped workerd after KILL path");
-    spawn_platformd(round, bin, env_id, env_secret);
+    spawn_ocd(round, bin, env_id, env_secret);
     wait_ready(round, PLATFORM_READY_TIMEOUT_SECS);
 }
 
@@ -598,12 +598,12 @@ fn orphan_sigkill_recovery(round: &mut Round, bin: &str, env_id: &str, env_secre
     let mut child = round.child.take().unwrap();
     let _ = kill_process(Pid::from_raw(pid).unwrap(), Signal::KILL);
     let _ = child.wait();
-    assert_gone(pid, "SIGKILL platformd");
+    assert_gone(pid, "SIGKILL ocd");
     assert!(
         pid_alive(wpid),
-        "workerd orphan must outlive SIGKILL of platformd"
+        "workerd orphan must outlive SIGKILL of ocd"
     );
-    spawn_platformd(round, bin, env_id, env_secret);
+    spawn_ocd(round, bin, env_id, env_secret);
     wait_ready(round, PLATFORM_READY_TIMEOUT_SECS);
     assert_gone(
         wpid,
@@ -694,12 +694,12 @@ fn recover_partial_state(
     s3: &MockS3,
     boundary: &str,
 ) {
-    spawn_platformd(round, bin, env_id, env_secret);
+    spawn_ocd(round, bin, env_id, env_secret);
     wait_ready(round, PLATFORM_READY_TIMEOUT_SECS);
     let identity = platform_id(&round.data);
     term_and_wait(round);
     assert_no_leaks(round, s3);
-    spawn_platformd(round, bin, env_id, env_secret);
+    spawn_ocd(round, bin, env_id, env_secret);
     wait_ready(round, PLATFORM_READY_TIMEOUT_SECS);
     assert_eq!(
         platform_id(&round.data),
@@ -716,7 +716,7 @@ fn kill_before_ready(
     boundary: &str,
     wait: impl FnOnce(&Round, i32),
 ) {
-    spawn_platformd(round, bin, env_id, env_secret);
+    spawn_ocd(round, bin, env_id, env_secret);
     let pid = round.child.as_ref().unwrap().id() as i32;
     wait(round, pid);
     note_tree(round, pid);

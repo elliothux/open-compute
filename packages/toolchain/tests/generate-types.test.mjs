@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -228,7 +228,7 @@ test("cli types uses imported framework Env without claiming a TypeScript main m
   await writeFile(join(directory, "dist", "server", "chunks", "page-abc.js"), "export const page = 1;");
   await writeFile(join(directory, "dist", "client", "index.html"), "<main>app</main>");
   await writeFile(join(directory, "dist", "client", "assets", "app-abc.js"), "globalThis.client = true;");
-  const env = { ...process.env, OPEN_COMPUTE_PLATFORMD: "/missing/platformd" };
+  const env = { ...process.env, OPEN_COMPUTE_OCD: "/missing/ocd" };
   const { stdout } = await execFileAsync(process.execPath, [bin, "types", "--config", filename], { env });
   const output = join(directory, "worker-configuration.d.ts");
   assert.equal(stdout, `Wrote ${output}\n`);
@@ -244,12 +244,12 @@ test("cli types uses imported framework Env without claiming a TypeScript main m
   assert.doesNotMatch(generated, /ABSENT_PROJECT_SECRET|release-1/);
 });
 
-test("cli types writes default and explicit outputs without platformd", async t => {
+test("cli types writes default and explicit outputs without ocd", async t => {
   const { directory, filename } = await fixture(t, {
     name: "hello", main: "src/index.ts", 
     vars: { GREETING: "Hello from TypeScript" },
   });
-  const env = { ...process.env, OPEN_COMPUTE_PLATFORMD: "/missing/platformd" };
+  const env = { ...process.env, OPEN_COMPUTE_OCD: "/missing/ocd" };
   const { stdout } = await execFileAsync(process.execPath, [bin, "types", "--config", filename], { env });
   const defaultOutput = join(directory, "worker-configuration.d.ts");
   assert.equal(stdout, `Wrote ${defaultOutput}\n`);
@@ -259,8 +259,33 @@ test("cli types writes default and explicit outputs without platformd", async t 
   assert.equal(explicitRun.stdout, `Wrote ${explicit}\n`);
   assert.match(await readFile(explicit, "utf8"), /mainModule: typeof import\("\.\.\/src\/index"\)/);
   await assert.rejects(runCli(["types", "src/index.ts", "--config", filename]), /entry argument/);
-  await assert.rejects(runCli(["types", "--config", filename, "--platformd", "/missing/platformd"]), /--platformd/);
+  await assert.rejects(runCli(["types", "--config", filename, "--ocd", "/missing/ocd"]), /--ocd/);
   await assert.rejects(runCli(["types", "--config", filename, "--json"]), /--json/);
+});
+
+test("cli build accepts the ocd option and environment variable", async t => {
+  const { directory, filename } = await fixture(t, { name: "hello", main: "src/index.ts" });
+  await writeFile(join(directory, "src", "index.ts"), "export default { fetch: () => new Response('ok') };\n");
+  await writeFile(join(directory, "tsconfig.json"), JSON.stringify({
+    compilerOptions: {
+      target: "ES2024", module: "Preserve", moduleResolution: "Bundler",
+      lib: ["ES2024", "DOM"], types: [], strict: true, noEmit: true,
+    },
+    include: ["src/**/*.ts"],
+  }));
+  const ocd = join(directory, "ocd");
+  await writeFile(ocd, "#!/bin/sh\ntest \"$1\" = worker || exit 31\ntest \"$2\" = bundle || exit 32\ncat >/dev/null\nprintf bundle-v1\n");
+  await chmod(ocd, 0o700);
+
+  const optionOutput = join(directory, "option.bundle");
+  await execFileAsync(process.execPath, [bin, "build", "--config", filename, "--ocd", ocd, "--out", optionOutput]);
+  assert.equal(await readFile(optionOutput, "utf8"), "bundle-v1");
+
+  const environmentOutput = join(directory, "environment.bundle");
+  await execFileAsync(process.execPath, [bin, "build", "--config", filename, "--out", environmentOutput], {
+    env: { ...process.env, OPEN_COMPUTE_OCD: ocd },
+  });
+  assert.equal(await readFile(environmentOutput, "utf8"), "bundle-v1");
 });
 
 test("generated declarations compile against pinned Workers types", async t => {

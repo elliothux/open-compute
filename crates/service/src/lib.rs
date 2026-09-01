@@ -1,4 +1,4 @@
-//! Production `platformd` service library: config load, health, metrics, doctor, and run.
+//! Production `ocd` service library: config load, health, metrics, doctor, and run.
 
 #![deny(missing_docs)]
 

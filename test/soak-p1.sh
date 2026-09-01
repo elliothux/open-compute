@@ -56,7 +56,7 @@ workerd_lock_sha256=$(/usr/bin/shasum -a 256 "$root/packages/runtime/workerd.loc
 config_sha256=$(/usr/bin/shasum -a 256 "$root/share/default-config.toml" | /usr/bin/awk '{print $1}')
 host=$(/usr/bin/uname -srm | /usr/bin/tr -c 'A-Za-z0-9_.-' '_')
 result="$result_dir/result.json"
-printf '{"schema_version":1,"profile":"mixed","fault_schedule":"fixed_p0_combined_then_platformd_sigkill_then_reliability","run_id":"%s","duration":"%s","revision":"%s","workerd_lock_sha256":"%s","default_config_sha256":"%s","host":"%s","elapsed_seconds":%s,"iterations":%s,"bounded_event_lines":400,"verdict":"pass"}\n' \
+printf '{"schema_version":1,"profile":"mixed","fault_schedule":"fixed_p0_combined_then_ocd_sigkill_then_reliability","run_id":"%s","duration":"%s","revision":"%s","workerd_lock_sha256":"%s","default_config_sha256":"%s","host":"%s","elapsed_seconds":%s,"iterations":%s,"bounded_event_lines":400,"verdict":"pass"}\n' \
   "$run_id" "$duration" "$revision" "$workerd_lock_sha256" "$config_sha256" "$host" \
   "$((finish - start))" "$iterations" >"$result"
 /bin/cat "$result"

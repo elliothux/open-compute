@@ -1,14 +1,14 @@
 # Overview
 
-open-compute gives you a Workers platform on one machine: a single `platformd` process, with a pinned `workerd`, exposing the control plane and the data plane.
+open-compute gives you a Workers platform on one machine: a single `ocd` process, with a pinned `workerd`, exposing the control plane and the data plane.
 
-It is compatible with the declared subset of the Workers programming model (Worker, KV, R2, D1, Durable Objects, Queues, Cron, Workflows, Static Assets, Service Binding, Cache, Images). Compatibility is not "same name, same behavior". Global edge, cross-region replication, multi-replica high availability, billing, and the full Cloudflare management plane are out of scope. What is actually enabled, and which differences are intentional, is defined by `platformd capabilities --json` on that machine.
+It is compatible with the declared subset of the Workers programming model (Worker, KV, R2, D1, Durable Objects, Queues, Cron, Workflows, Static Assets, Service Binding, Cache, Images). Compatibility is not "same name, same behavior". Global edge, cross-region replication, multi-replica high availability, billing, and the full Cloudflare management plane are out of scope. What is actually enabled, and which differences are intentional, is defined by `ocd capabilities --json` on that machine.
 
 ## What you get
 
-The issued artifact is one file: a `platformd` matching the OS/CPU. workerd, system Workers, the default config, and the operator runbooks are embedded. The running process will not download a runtime, and you must not place a separate workerd next to it.
+The issued artifact is one file: a `ocd` matching the OS/CPU. workerd, system Workers, the default config, and the operator runbooks are embedded. The running process will not download a runtime, and you must not place a separate workerd next to it.
 
-The process boundary is fixed: one `platformd` owns one data-dir and one workerd child. Do not start a second `platformd` on the same data-dir.
+The process boundary is fixed: one `ocd` owns one data-dir and one workerd child. Do not start a second `ocd` on the same data-dir.
 
 ## What you still provide
 

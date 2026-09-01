@@ -11,8 +11,8 @@ export interface WorkerArtifact {
 }
 
 /** Encode in a separate offline command; no platform config, S3, or workerd is opened. */
-export function encodeWorker(worker: CompiledWorker, platformd: string): Promise<WorkerArtifact> {
-  if (!isAbsolute(platformd)) throw new Error("platformd binary path must be absolute");
+export function encodeWorker(worker: CompiledWorker, ocd: string): Promise<WorkerArtifact> {
+  if (!isAbsolute(ocd)) throw new Error("ocd binary path must be absolute");
   const input = JSON.stringify({
     schemaVersion: 1,
     mainModule: worker.mainModule,
@@ -21,10 +21,10 @@ export function encodeWorker(worker: CompiledWorker, platformd: string): Promise
     })),
   });
   return new Promise((accept, reject) => {
-    const child = execFile(platformd, ["worker", "bundle"], {
+    const child = execFile(ocd, ["worker", "bundle"], {
       encoding: null, maxBuffer: 17 * 1024 * 1024, timeout: 30_000, killSignal: "SIGKILL",
     }, (error, stdout) => {
-      if (error) reject(new Error("Worker bundle encoding failed; use a matching platformd build"));
+      if (error) reject(new Error("Worker bundle encoding failed; use a matching ocd build"));
       else accept({ mainModule: worker.mainModule, bytes: stdout,
         sha256: createHash("sha256").update(stdout).digest("hex") });
     });

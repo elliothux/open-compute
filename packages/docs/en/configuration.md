@@ -5,13 +5,13 @@
 Path examples on this page use `/etc/open-compute/config.toml`. Some embedded runbooks write `platform.toml`; the flag is only `--config`, not a second format keyed by filename.
 
 ```sh
-platformd config init --data-dir /var/lib/open-compute > /etc/open-compute/config.toml
-platformd --config /etc/open-compute/config.toml config check
+ocd config init --data-dir /var/lib/open-compute > /etc/open-compute/config.toml
+ocd --config /etc/open-compute/config.toml config check
 ```
 
 `config init` writes the given absolute `data-dir` into the template and prints it to stdout. It does not create directories or write secrets. `config check` is static parse and validation only.
 
-The embedded default template matches `share/default-config.toml`. Live numeric limits come from `platformd --config /abs/config.toml capabilities --json` `limits`.
+The embedded default template matches `share/default-config.toml`. Live numeric limits come from `ocd --config /abs/config.toml capabilities --json` `limits`.
 
 ## Secrets
 
@@ -37,7 +37,7 @@ A non-loopback admin listener requires `server.admin_auth`.
 | `free_space_soft_bytes` | Health degrades below this |
 | `free_space_hard_bytes` | Mutations refused below this; must be ≤ soft |
 
-One `platformd` per data-dir. The exclusive lock is `<data_dir>/platform.lock`. A second instance gets `DATA_DIR_IN_USE`; do not bypass it. The data-dir must be writable and executable (the extracted workerd runs from here).
+One `ocd` per data-dir. The exclusive lock is `<data_dir>/platform.lock`. A second instance gets `DATA_DIR_IN_USE`; do not bypass it. The data-dir must be writable and executable (the extracted workerd runs from here).
 
 ## S3 (SigV4)
 

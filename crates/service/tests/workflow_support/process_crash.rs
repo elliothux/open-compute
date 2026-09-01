@@ -1,4 +1,4 @@
-//! Actual platformd SIGKILL after a durable step, followed by orphan recovery and replay.
+//! Actual ocd SIGKILL after a durable step, followed by orphan recovery and replay.
 
 pub(super) use super::platform_process::Evidence;
 use super::platform_process::{Client, address, config, ready, spawn, tenant_json};
@@ -9,7 +9,7 @@ use std::process::Command;
 use std::time::Instant;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback() {
+async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
     let mut harness = Harness::start().await;
     let store = Arc::new(
         SchedulerStore::open(
@@ -82,7 +82,7 @@ async fn workflow_platformd_sigkill_after_step_commit_replays_without_callback()
     let public = address();
     let admin = address();
     let config = config(root, &data, &mock.endpoint, public, admin);
-    let log = root.join("platformd.log");
+    let log = root.join("ocd.log");
     let client: Client =
         hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .build_http();

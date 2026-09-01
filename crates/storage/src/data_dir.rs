@@ -306,7 +306,7 @@ impl DataDir {
     /// Explicitly quarantine an uninspectable scheduler database and create an empty replacement.
     ///
     /// The exclusive data-directory lock must be held by this [`DataDir`], so a running
-    /// `platformd` cannot race the recovery. Only a verified alarm-only control authority
+    /// `ocd` cannot race the recovery. Only a verified alarm-only control authority
     /// permits rebuilding: Queue, Cron, and Workflow history require a full snapshot restore.
     /// The caller must subsequently run bounded alarm repair from live Durable Objects.
     pub fn recover_corrupt_scheduler_db(

@@ -22,6 +22,7 @@
 
 - This file applies to the entire repository. Do not add nested `AGENTS.md` files.
 - Treat this repository as the source of truth for `open-compute`; do not edit the parent Lynx OS project unless the user explicitly includes it in scope.
+- The authoritative project and documentation origin is `https://open-compute.dev`; reverse-DNS service identifiers use the `dev.open-compute` prefix.
 - `crates/**`, `packages/**`, and `share/**` own production sources, tooling, and assets; `test/**` owns repository-level test/Gate scripts, fixtures, and fuzz tooling; `scripts/**` and `examples/**` are operator/release surfaces. Keep crate-local and package-local tests beside their owning code. The TypeScript runtime lives in `packages/runtime/`; its generated `dist/` is not tracked. See [Runtime and test layout](docs/implemented/runtime-and-test-layout.md) for scope and acceptance evidence.
 - Completed POC upstream-capability probes are disposable one-time code, not recurring acceptance Gates. Delete them in the scoped cleanup; move surviving product regression tests and their required harness/fixtures from `poc/` into `test/`, consolidating equivalent coverage instead of retaining a second prototype implementation. Do not keep an old `poc/g0` compatibility entry point.
 - Preserve `docs/implemented/g0-results.md` and other historical evidence as records of their actual runs. Do not hand-edit them, rewrite them to claim new acceptance, or require their old generator to survive the POC cleanup. Deleting probe code does not authorize deleting retained run evidence or data.
@@ -51,7 +52,7 @@
 
 ## Architecture and Ownership
 
-- Preserve the single-process model: one `platformd` owns config, the data-dir lock, SQLite authority, master-key lifecycle, S3 artifacts/cache, HTTP control/data planes, and one supervised pinned `workerd` child.
+- Preserve the single-process model: one `ocd` owns config, the data-dir lock, SQLite authority, master-key lifecycle, S3 artifacts/cache, HTTP control/data planes, and one supervised pinned `workerd` child.
 - Keep each concern in its owning crate:
   - `core`: dependency foundation for config, errors, IDs, secrets, health, and clocks;
   - `storage`: data directory, locks, SQLite, migrations, identity, and secret crypto;
@@ -104,7 +105,7 @@
 - Treat a workerd pin change as a coordinated dependency update: update the formal lock and runtime assets, validate affected upstream behavior and maintained product Gates against stock workerd, record fresh evidence/API compatibility findings, and verify packaged layouts on supported hosts. Historical G0 results do not prove a new pin, and targeted investigation does not require retaining or restoring the retired POC suite.
 - Keep upstream `workerd` unmodified. Compile the checked-in Cap'n Proto configuration with the verified binary; never interpolate tenant input into Cap'n Proto source.
 - Runtime/internal listeners stay loopback-only and capability-scoped. Per-generation internal tokens must never appear in argv, environment variables, logs, status, metrics, errors, or tenant-visible responses, and old-generation tokens must become invalid after restart.
-- `platformd` owns the complete child lifecycle: readiness, process group, bounded stdout/stderr capture, graceful stop, forced stop, reaping, restart backoff, and secret-free orphan recovery. Never signal a PID without validating its start identity and binary digest.
+- `ocd` owns the complete child lifecycle: readiness, process group, bounded stdout/stderr capture, graceful stop, forced stop, reaping, restart backoff, and secret-free orphan recovery. Never signal a PID without validating its start identity and binary digest.
 - Preserve readiness as both successful control-fd listen evidence and an HTTP probe. `/health/live` is process liveness; `/health/ready` is admission state and must not become a restart signal.
 
 ## Persistence and Filesystem
@@ -113,13 +114,13 @@
 - Platform-owned SQL schema files define the current Day1 schema, not a production upgrade history. Revise or consolidate existing schema/migration definitions directly when the design changes; do not require append-only migrations or backfills to preserve old development databases. User-facing D1 database migrations are a separate product capability, not a reason to retain historical platform schema upgrades.
 - Keep the current SQL sequence contiguous, checksummed, and transactional. Update SQL, build-time checksum wiring, schema versions/dispatch, invariants, fixtures, and fault/restart coverage together. Reject unsupported or corrupt persisted state; never add runtime schema self-healing or downgrade paths. Resetting existing local databases still requires user authorization.
 - Keep SQLite foreign keys enabled and transaction callbacks synchronous. Perform filesystem, S3, process, and other async I/O outside database transactions.
-- Preserve one `platformd` owner per data directory and existing atomic-write, fsync, permission, symlink, and path-containment guarantees. Do not replace security-sensitive filesystem helpers with unchecked convenience APIs.
+- Preserve one `ocd` owner per data directory and existing atomic-write, fsync, permission, symlink, and path-containment guarantees. Do not replace security-sensitive filesystem helpers with unchecked convenience APIs.
 - Artifacts and ready deployments are immutable and content-addressed. Verify digests before cache admission or execution; promotion/rollback changes an active pointer rather than mutating deployment content.
 - Store secrets only as validated env/file references or encrypted values with their existing AEAD context. Never persist or expose plaintext secrets through GET APIs, artifacts, caches, diagnostics, logs, metrics, argv, or errors.
 
 ## Worker Security Boundaries
 
-- `platformd` is the only public listener. It generates trusted request/deployment identity and overwrites or strips conflicting external internal headers.
+- `ocd` is the only public listener. It generates trusted request/deployment identity and overwrites or strips conflicting external internal headers.
 - Tenant loader keys are immutable deployment identities. Resolve modules, vars, secrets, compatibility metadata, and future bindings from the persisted authority, not request-supplied scope or host-memory registries.
 - Tenant `env` exposes only explicitly declared vars, secrets, and supported product bindings. Never leak RuntimeSource, S3, SQLite, internal fetchers/tokens, control APIs, or platform services into an isolate.
 - Tenant general outbound is public-address-only and backed by the single platform-owned `Network(allow = ["public"])` capability shared by `fetch()`, `cloudflare:sockets.connect()`, `node:net`, and `Fetcher.connect()`. Reject private, loopback, link-local, metadata, Unix, DNS-to-private, IPv4-mapped private IPv6, redirect-to-private, and every platform-owned listener at the address layer; do not add a hostname pre-resolution check, a second outbound gateway, or a broader host-network capability.
@@ -147,7 +148,7 @@
 
 - `scripts/package-release.sh` may download only the formally pinned upstream archive during packaging. It requires an explicit absolute destination, refuses checksum/version mismatch and overwrite, and must never be treated as a normal local validation command.
 - When requesting the Operating Contract's confirmation for packaging, publishing, or deployment, state the source revision, target platform, exact workerd pin, destination, network/privilege effects, and excluded unrelated changes.
-- The only production release artifact is one native `platformd` executable embedding the verified workerd archive, matching runtime lock/config/system Workers, licenses, default config, and operator docs. Do not retain sidecar layouts, external runtime overrides, or startup downloads. Verify version, size, SHA-256, and isolated offline startup of that single executable; its persistent runtime cache belongs to its exclusively owned data directory, not the distribution.
+- The only production release artifact is one native `ocd` executable embedding the verified workerd archive, matching runtime lock/config/system Workers, licenses, default config, and operator docs. Do not retain sidecar layouts, external runtime overrides, or startup downloads. Verify version, size, SHA-256, and isolated offline startup of that single executable; its persistent runtime cache belongs to its exclusively owned data directory, not the distribution.
 - Keep container, systemd, and launchd examples on the same binary/config/data-dir contract. Never embed credentials in images, service units, examples, or release archives.
 
 ## Verification and Git

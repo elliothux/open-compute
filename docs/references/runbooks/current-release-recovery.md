@@ -6,8 +6,8 @@
 只读诊断：核对二进制 capability 的完整 release 身份及当前配置，不修改已有数据库：
 
 ```bash
-/opt/open-compute/platformd capabilities --json
-/opt/open-compute/platformd --config /etc/open-compute/platform.toml doctor --json
+/opt/open-compute/ocd capabilities --json
+/opt/open-compute/ocd --config /etc/open-compute/platform.toml doctor --json
 ```
 
 允许的 mutation：经 operator 确认后停止 service，使用同一 release 的已验证二进制，

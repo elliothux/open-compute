@@ -6,7 +6,7 @@
 ## 已完成前提
 
 - `workflows/portable/lifecycle` 与其它 portable fixtures 共用 typed runner、唯一资源前缀、精确清理和
-  absent 复查；open-compute 端真实 `platformd`、stock workerd、SQLite authority 和恢复路径已实现。
+  absent 复查；open-compute 端真实 `ocd`、stock workerd、SQLite authority 和恢复路径已实现。
 - capability/catalog 的 72 个 Workflow stable members 全部为 `supported_with_deviation`，目标 inventory
   的 `blocked=0`；`OC-WORKFLOW-001` 只描述单机执行拓扑，不掩盖功能缺口。
 - Workers、Cache API、KV、D1、R2、Durable Objects 和 Queues 的同源 portable fixtures 已与真实

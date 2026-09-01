@@ -90,14 +90,14 @@ TIMING = {
     'p0-7': ('p0_7_real_durable_objects_matrix',),
     'p0-8': ('p0_8_real_scheduler_alarm_matrix',),
     'p0-exit': ('p0_real_combined_exit_matrix',),
-    'p1-crash': ('p1_platformd_sigkill_reclaims_orphan_and_restarts_cleanly',),
+    'p1-crash': ('p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly',),
     'p2-2': (
         'p2_2_real_queue_producer_matrix',
         'scheduler::p2_2_real_queue_scheduler_matrix',
     ),
     'workflow-runtime': ('workflow_runtime_suspension_timeout_parallel_and_native_errors',),
     'workflow-recovery': (
-        'process_crash::workflow_platformd_sigkill_after_step_commit_replays_without_callback',
+        'process_crash::workflow_ocd_sigkill_after_step_commit_replays_without_callback',
         # Also owns in-flight external-effect crashes and concurrent scheduler backlog.
         'product_bindings::workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effects',
         'transport_faults::workflow_fixture_drop_waits_for_child_reaping',

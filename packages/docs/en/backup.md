@@ -7,15 +7,15 @@ Backup and restore are offline: stop the service, then take the data-dir lock.
 ## Read-only diagnosis
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --json
-/opt/open-compute/platformd --config /etc/open-compute/config.toml backup list --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml backup list --json
 ```
 
 ## Create and verify
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml backup create --name nightly-20260826 --json
-/opt/open-compute/platformd --config /etc/open-compute/config.toml backup inspect --snapshot 0198f000-0000-7000-8000-000000000001 --verify --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml backup create --name nightly-20260826 --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml backup inspect --snapshot 0198f000-0000-7000-8000-000000000001 --verify --json
 ```
 
 `--name` is a bounded human audit label. `--snapshot` is a UUIDv7. `--verify` streams and hashes every owned object and immutable reference.
@@ -29,7 +29,7 @@ Expected output includes snapshot ID, exact bytes/files, and `verified=true`. Da
 Only after **another verified snapshot already satisfies RPO** may you delete by exact ID:
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml backup delete --snapshot 0198f000-0000-7000-8000-000000000001 --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml backup delete --snapshot 0198f000-0000-7000-8000-000000000001 --json
 ```
 
 Delete the manifest last. Rollback is: do not delete the old manifest.
@@ -37,7 +37,7 @@ Delete the manifest last. Rollback is: do not delete the old manifest.
 Generate a delete plan without deleting objects:
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml backup retention-plan --keep-last 7 --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml backup retention-plan --keep-last 7 --json
 ```
 
 Optional `--max-age-seconds` and repeatable `--keep-label`. After reviewing the plan, `backup delete` each listed ID. Do not write your own S3 bulk delete against the snapshot prefix.
@@ -45,7 +45,7 @@ Optional `--max-age-seconds` and repeatable `--keep-label`. After reviewing the 
 Incomplete uploads older than the configured grace:
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml backup cleanup-incomplete --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml backup cleanup-incomplete --json
 ```
 
 ## Verification

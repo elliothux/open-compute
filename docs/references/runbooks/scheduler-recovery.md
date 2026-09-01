@@ -5,7 +5,7 @@
 只读诊断：
 
 ```bash
-/opt/open-compute/platformd --config /etc/open-compute/platform.toml doctor --json
+/opt/open-compute/ocd --config /etc/open-compute/platform.toml doctor --json
 ```
 
 优先等待 token/expiry recovery 和 bounded repair。先使用 `/v1/scheduler`、`/v1/operator/workflows` 检查各 pool；Workflow 的 Unknown dispatch 保留 lease，不能把它当成可立即重试的业务失败。
@@ -23,7 +23,7 @@ Workflow 的 waiting/paused 不占执行并发；`/v1/operator/workflows` 包含
 允许的 mutation：以下命令仅用于 **control 可验证且没有上述产品 authority** 的 alarm-only 数据目录，并要求 scheduler DB 确认损坏、service 已停止。命令会在移动文件前拒绝持有产品 authority 的目录：
 
 ```bash
-/opt/open-compute/platformd --config /etc/open-compute/platform.toml scheduler recover-corrupt --backup-name scheduler-corrupt-20260826
+/opt/open-compute/ocd --config /etc/open-compute/platform.toml scheduler recover-corrupt --backup-name scheduler-corrupt-20260826
 ```
 
 预期旧 DB 被精确隔离，空 projection 从 DO alarm authority repair，不伪造已投递。control/DO authority 也损坏、未知 token 重复 commit或 backlog 不收敛是停止条件，并转整机 restore。回滚是保留隔离副本并恢复整机 snapshot。验证是 repair dry-run、alarm sentinel、lease expiry、重启和 lag 回到界限。

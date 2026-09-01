@@ -1,4 +1,4 @@
-//! Private `RuntimeSource` listener and streaming platformd-to-workerd transport.
+//! Private `RuntimeSource` listener and streaming ocd-to-workerd transport.
 
 use axum::Router;
 use axum::body::{Body, to_bytes};

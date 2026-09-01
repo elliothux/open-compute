@@ -4,7 +4,7 @@ use open_compute_core::{ErrorCode, PlatformError};
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-/// Documented nonzero exit classes for `platformd`.
+/// Documented nonzero exit classes for `ocd`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum ExitClass {

@@ -1,4 +1,4 @@
-//! Clap derive CLI for `platformd`.
+//! Clap derive CLI for `ocd`.
 
 use crate::backup_cli::{
     backup_attest_restore_smoke, backup_cleanup_incomplete, backup_cleanup_restore, backup_create,
@@ -20,9 +20,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// `platformd` command line.
+/// `ocd` command line.
 #[derive(Debug, Parser)]
-#[command(name = "platformd", version, about = "Open Compute platform daemon")]
+#[command(name = "ocd", version, about = "Open Compute daemon")]
 pub struct Cli {
     /// Absolute configuration file path. Never searched from cwd or `$HOME`.
     #[arg(long, global = true)]
@@ -94,7 +94,7 @@ pub enum Command {
     },
 }
 
-/// `platformd config` subcommands.
+/// `ocd config` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
     /// Write a complete starter TOML to stdout, without initializing files or secrets.
@@ -111,14 +111,14 @@ pub enum ConfigCommand {
     },
 }
 
-/// `platformd worker` developer-tool subcommands.
+/// `ocd worker` developer-tool subcommands.
 #[derive(Debug, Subcommand)]
 pub enum WorkerCommand {
     /// Read versioned build JSON on stdin and write a canonical binary bundle to stdout.
     Bundle,
 }
 
-/// `platformd backup` subcommands.
+/// `ocd backup` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum BackupCommand {
     /// Create and fully verify a committed offline snapshot.
@@ -210,7 +210,7 @@ pub enum BackupCommand {
     },
 }
 
-/// `platformd scheduler` subcommands.
+/// `ocd scheduler` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum SchedulerCommand {
     /// Quarantine an uninspectable scheduler database and create an empty replacement.

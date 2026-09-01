@@ -3,8 +3,9 @@ name = "open-compute-service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
-description = "platformd production service, health, doctor, and CLI"
+description = "Open Compute daemon, health, doctor, and CLI"
 publish.workspace = true
 
 [features]
@@ -67,8 +68,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "sig
 tower = { version = "0.5.2", features = ["util"] }
 
 [[bin]]
-name = "platformd"
-path = "src/bin/platformd.rs"
+name = "ocd"
+path = "src/bin/ocd.rs"
 
 [lints]
 workspace = true

@@ -21,8 +21,8 @@
 ## `doctor` 与 `doctor --full`
 
 ```sh
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --json
-/opt/open-compute/platformd --config /etc/open-compute/config.toml doctor --full --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
+/opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --full --json
 ```
 
 两者都要 `--config` 绝对路径。JSON 含 `schema_version`（1）、`command`（`doctor`）、`result`（`ok` / `failed`）和 `checks[]`（`name`、`status`：`ok` / `warning` / `failed` / `skipped`、`code`、`message`、可选非密钥 `value`）。任一项 `failed` 则命令以 doctor 失败码退出。
