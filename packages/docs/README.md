@@ -14,3 +14,12 @@ bun run docs:preview
 也可以在本目录运行 `bun run dev` / `build` / `preview`。
 
 生成输出在 `.vitepress/dist/`，缓存在 `.vitepress/cache/`，二者都不提交。
+
+Cloudflare Workers Builds（项目名 `open-compute-docs`）根目录设为 `packages/docs`：
+
+```
+Build command: bun run build
+Deploy command: bunx wrangler deploy
+```
+
+静态资源目录写在 `wrangler.jsonc` 的 `assets.directory`（`.vitepress/dist`）。不要让 Wrangler 在 CI 里走交互式自动配置。
