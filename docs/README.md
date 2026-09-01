@@ -9,6 +9,8 @@
 | 文档 | 当前状态 |
 | --- | --- |
 | [Operator API 与可选 Dashboard](operator-api-dashboard.md) | 方案完成，尚未收敛管理路径、强制管理员鉴权或实现 React SPA |
+| [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md) | Research/Day1 方案完成；Vectorize、AI provider、AI Search、恢复与兼容 Gate 尚未实现 |
+| [P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md) | Research/Day1 方案完成；CF-compatible `env.AI.toMarkdown`/AI Search API、Xberg parser child、38-file corpus 与四平台 Gate 尚未实现 |
 
 已完成的 `ocd` Day1 命名改造见[设计归档](implemented/ocd-day1-rename.md)与
 [完成记录](implemented/ocd-day1-rename-results.md)。
