@@ -577,15 +577,12 @@ pub(crate) fn verify_self_pgid(pid: i32) -> Result<(), PlatformError> {
             "runtime process pid is invalid",
         ));
     };
-    let pgid = match getpgid(Some(raw)) {
-        Ok(pgid) => pgid,
-        Err(_) => {
-            return Err(PlatformError::new(
-                ErrorCode::RuntimeInvalid,
-                "failed to read runtime process group",
-            ));
-        }
-    };
+    let pgid = getpgid(Some(raw)).map_err(|_| {
+        PlatformError::new(
+            ErrorCode::RuntimeInvalid,
+            "failed to read runtime process group",
+        )
+    })?;
     if pgid.as_raw_nonzero().get() != pid {
         return Err(PlatformError::new(
             ErrorCode::RuntimeInvalid,
