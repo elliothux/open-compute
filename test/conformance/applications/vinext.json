@@ -38,8 +38,7 @@
     "name": "chromium",
     "playwrightVersion": "1.62.1",
     "playwrightRevision": "1234",
-    "browserVersion": "151.0.7922.34",
-    "executableSha256": "a596b1cfc6353e987fcec8d71a23a28cd6a9e7a6b4e20b908e4c4fcffe51158e"
+    "browserVersion": "151.0.7922.34"
   },
   "platformBaseline": {
     "reportSha256": "f5838726aa3d662c2b566b909c551327465d78fc32af28921628079c7d0e89e6",

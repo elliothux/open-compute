@@ -26,13 +26,6 @@ function record(value: unknown, label: string): JsonRecord {
   return value as JsonRecord;
 }
 
-function properties(value: unknown, label: string): JsonRecord {
-  if ((typeof value !== "object" || value === null) && typeof value !== "function") {
-    throw new Error(`${label} must expose properties`);
-  }
-  return value as JsonRecord;
-}
-
 function array(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
   return value;
@@ -144,19 +137,30 @@ function validateCases(manifest: JsonRecord, matrix: JsonRecord): JsonRecord[] {
 
 function validateBrowser(manifest: JsonRecord): void {
   const browser = record(manifest.browser, "manifest.browser");
-  const fixtureRequire = createRequire(join(ROOT, APPLICATION, "package.json"));
-  const playwright = properties(fixtureRequire("@playwright/test"), "@playwright/test");
-  const chromium = properties(playwright.chromium, "@playwright/test.chromium");
-  if (typeof chromium.executablePath !== "function") throw new Error("Playwright Chromium executable resolver is missing");
-  const executable = chromium.executablePath() as unknown;
-  const path = string(executable, "Chromium executable path");
-  if (!existsSync(path) || digestAbsolute(path) !== string(browser.executableSha256, "browser.executableSha256")) {
-    throw new Error("fixed Chromium executable is missing or changed");
+  if (string(browser.name, "browser.name") !== "chromium") {
+    throw new Error("fixed browser name is missing or changed");
   }
-}
-
-function digestAbsolute(path: string): string {
-  return sha256(readFileSync(path));
+  const fixtureRequire = createRequire(join(ROOT, APPLICATION, "package.json"));
+  const playwrightPackage = record(fixtureRequire("@playwright/test/package.json"), "@playwright/test/package.json");
+  if (string(playwrightPackage.version, "@playwright/test.version") !== string(browser.playwrightVersion, "browser.playwrightVersion")) {
+    throw new Error("Playwright package version is missing or changed");
+  }
+  const playwrightRequire = createRequire(fixtureRequire.resolve("@playwright/test/package.json"));
+  const browsersManifest = record(
+    createRequire(playwrightRequire.resolve("playwright-core/package.json"))("./browsers.json"),
+    "playwright-core/browsers.json",
+  );
+  const chromium = array(browsersManifest.browsers, "browsers.json.browsers")
+    .map((item, index) => record(item, `browsers.json.browsers[${index}]`))
+    .find(entry => entry.name === "chromium");
+  if (!chromium) throw new Error("Playwright Chromium inventory is missing");
+  const revision = typeof chromium.revision === "number" ? String(chromium.revision) : string(chromium.revision, "chromium.revision");
+  if (revision !== string(browser.playwrightRevision, "browser.playwrightRevision")) {
+    throw new Error("Playwright Chromium revision is missing or changed");
+  }
+  if (string(chromium.browserVersion, "chromium.browserVersion") !== string(browser.browserVersion, "browser.browserVersion")) {
+    throw new Error("Playwright Chromium browserVersion is missing or changed");
+  }
 }
 
 function validateRunner(cases: readonly JsonRecord[]): void {

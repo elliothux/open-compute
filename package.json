@@ -21,6 +21,7 @@
     "build": "bun run --filter @open-compute/toolchain build && bun run --filter @open-compute/runtime build && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
     "typecheck": "bun run --filter @open-compute/runtime typecheck && bun run --filter @open-compute/toolchain typecheck && tsc --project examples/hello-worker/tsconfig.json --noEmit && tsc --project scripts/tsconfig.json --noEmit && tsc --project test/conformance/tsconfig.json --noEmit && tsc --project test/conformance/fixtures/tsconfig.json --noEmit",
     "test:js": "node --test 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs' 'test/conformance/*.test.mjs'",
+    "test:js:ci": "node --test 'packages/runtime/tests/**/*.test.mjs' 'packages/toolchain/tests/**/*.test.mjs' 'test/*.test.mjs' 'test/conformance/adapters.test.mjs' 'test/conformance/case-evidence.test.mjs' 'test/conformance/inventory.test.mjs'",
     "check:generated": "bun run --filter @open-compute/runtime check:generated",
     "docs:dev": "bun run --filter @open-compute/docs dev",
     "docs:build": "bun run --filter @open-compute/docs build",
