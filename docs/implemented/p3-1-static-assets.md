@@ -1,17 +1,18 @@
 # P3.1：Static Assets 与框架产物导入
 
-状态（2026-08-30）：**声明支持面的本地 Contract Gate 已完成；Assets 直接 Cloudflare
-differential 尚未执行**。
+状态（2026-09-01）：**Day1 核心实现与本地最终验收完成，设计已归档；Assets 直接 Cloudflare
+differential 由[独立验收计划](../p3-assets-service-bindings-acceptance.md)继续追踪**。
 当前维护 Gate 已覆盖声明的本地产品矩阵；Static Assets 已映射到 P3.4 固定 catalog、capability、
 deviation 和 contract report。共享 runner 已在真实 Cloudflare 上完成一项 Cache API fixture，但该
-结果不覆盖 Assets routing/binding，因此不能给扩展目标的最终 Platform Go。vinext App/Pages、真实浏览器
-hydration 与框架产物报告未运行，只影响独立 Application verdict，不否定或替代平台核心证据。
+结果不覆盖 Assets routing/binding，因此不能给扩展目标的 hosted verdict。后续固定 vinext workload
+已经取得 Application Go，证明选定应用的 Assets/browser 路径；它仍不替代完整 Assets contract 的
+direct differential。
 
 本阶段把静态文件纳入现有不可变 deployment：框架构建产物经过导入、校验和上传后，代码、
 资源 manifest、路由配置一起 ready、promote、rollback。请求仍由一个 `platformd` 和一个
 受监督的 stock workerd 处理；不增加静态服务器、Node SSR 进程、Redis 或第二套 S3 配置。
 
-本文细化[总方案](open-compute-workerd-platform.md)的 P3.1，向
+本文细化[总方案](../open-compute-workerd-platform.md)的 P3.1，向
 [Service Binding 方案](p3-2-service-bindings.md)提供统一的默认 HTTP 路由。P3.2 的 Node API
 适配、P3.3 的通用 Cache/Images 和 P3.4 的 Cloudflare conformance 仍是独立工作，不以本阶段通过代替。
 
@@ -30,7 +31,7 @@ hydration 与框架产物报告未运行，只影响独立 Application verdict�
 | `packages/runtime/src/loader/host.ts`：每次 resolve 后再 WorkerLoader get | 在默认 fetch 前接资源路由，命名入口和非 HTTP 事件不受影响 |
 | `crates/service/src/workers_http.rs`：public route 和响应 body pin | 扩展为 deployment dispatch；核实执行、后台任务与 body 的完整存活期 |
 
-遵循已验收的 [Day1 约束](implemented/day1-architecture-cleanup.md)：直接修改当前 schema、descriptor、工具链和
+遵循已验收的 [Day1 约束](day1-architecture-cleanup.md)：直接修改当前 schema、descriptor、工具链和
 测试；不增加旧 open-compute deployment/manifest 双读、V1/V2 引擎或历史升级适配。
 当前源码仍有历史命名不意味着新增实现应复制这些模式。平台 SQL 按当前模型整理，并同步
 校验和、装配和测试；不自动重置使用者的数据目录。
@@ -48,10 +49,10 @@ revision、正式 workerd pin、compatibility date/flags 与 portable fixtures�
 规范。开始该应用验收前，必须另行补齐包锁、React/Vite/RSC 插件、浏览器、构建工具、用例清单
 及 open-compute revision 的完整输入元组，不能声称已经安装或运行。
 
-正式运行时使用 [workerd lock](../packages/runtime/workerd.lock.json)；当前为
+正式运行时使用 [workerd lock](../../packages/runtime/workerd.lock.json)；当前为
 `v1.20260826.1`。本阶段不隐式升级或下载运行时。接入点按
-[runtime 布局](implemented/runtime-and-test-layout.md)与[测试规范](references/testing.md)执行；布局实测
-[本机完整验收与实测](implemented/runtime-and-test-layout-results.md)，不将局部结果扩写为全部通过。
+[runtime 布局](runtime-and-test-layout.md)与[测试规范](../references/testing.md)执行；布局实测
+[本机完整验收与实测](runtime-and-test-layout-results.md)，不将局部结果扩写为全部通过。
 
 ## 2. 交付范围
 
@@ -483,7 +484,8 @@ Rust 静态检查与 coverage（保持 90% 门槛），最后统一验收：完�
 也不能因它未运行就抹去已有平台产品 Gate。
 
 阶段报告记录固定输入、逐项用例结果、失败/未运行项、配额测量、cold/warm 延迟、字节与
-内存/磁盘峰值、GC/恢复证据和来源许可证。完成后再把设计与结果归档 `docs/implemented/`。
+内存/磁盘峰值、GC/恢复证据和来源许可证。核心实现完成后归档设计；外部资格拆到 active
+acceptance，不因远端条件继续把已完成设计留在 `docs/` 根目录。
 
 ## 11. 参考实现
 
@@ -521,7 +523,7 @@ deploy 协议，受信任默认 HTTP router 与显式 assets binding，以及 de
 SA-0/SA-5 的本地 conformance qualification 已完成：仓库已有 P3.4 固定 contract catalog、能力与
 deviation 双射，`assets.binding.routing` 在最终 contract report 中由真实 `p3-assets` 产品 Gate
 证明通过。共享 portable runner 已实现并取得 Cache API 对照证据，但尚无 Assets routing/binding
-直接对照，因此本文保持在 `docs/`，不归档到 `docs/implemented/`。
-vinext/React/Vite/RSC/browser 的独立应用输入元组也不存在，Application verdict 为“未评估”；它
-不是 Platform Go 的前置条件。上述两项都不否定当前平台实现和维护 Gate，也不能由这些 Gate 推导为
-Cloudflare differential 或真实框架浏览器验收已经完成。
+直接对照；该缺口现由[独立验收计划](../p3-assets-service-bindings-acceptance.md)追踪，不再阻止核心设计
+归档。截至 2026-08-29 当次实施记录，vinext/React/Vite/RSC/browser 输入元组尚不存在；后续 P4
+[Application Go](p4-nextjs-vinext-results.md)补充了固定应用和浏览器证据，但仍不能由应用结果推导为
+完整 Assets Cloudflare differential。

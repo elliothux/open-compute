@@ -1,22 +1,22 @@
 # P3.2：Service Binding 与原生 Worker 调用
 
-状态（2026-08-30）：**声明支持面的本地 Contract Gate 已完成；Service 直接 Cloudflare
-differential 尚未执行**。
+状态（2026-09-01）：**Day1 核心实现与本地最终验收完成，设计已归档；Service 直接 Cloudflare
+differential 由[独立验收计划](../p3-assets-service-bindings-acceptance.md)继续追踪**。
 SB-0 至 SB-5 的本地部分已落到当前 Day1 schema、工具链、stock workerd 原生 RPC、调用预算、
 deployment pin、generation 回收与有界指标；`p3-services-hard`、`p3-services-product`、
 `p3-services-events` 和 `p3-services-recovery` 均已通过。事件源矩阵实际覆盖 Queue、Cron、Durable
 Object 与 Workflow 内的 Service 调用；独立进程 Gate 以 SIGKILL 证明真实 workerd 退出后在途
 handle/pin 回收和替换进程恢复。Service contract 已进入 P3.4 catalog；共享 runner 已在真实
 Cloudflare 上完成一项 Cache API fixture，但它不覆盖 Service fetch/RPC/event-source/lifecycle，
-因此不能给扩展目标的最终 Platform Go。选定 vinext workload 未固定，
-只表示 Application verdict 未评估，不是平台阻塞项。本文保持 active，等待共同 qualification 后归档。
+因此不能给扩展目标的 hosted verdict。后续固定 vinext workload 已取得 Application Go，但产品
+Service Binding 组合在其 excluded case 中，不构成 Service differential 证据。
 
 本阶段让 Worker 通过声明的 binding 调用同账户其他 Worker 或自己，支持默认/命名入口的
 fetch 与原生 RPC。绑定冻结目标 Worker ID；每次新的 service 调用解析目标当前 active
 deployment，再固定这次调用。整个数据调用留在现有 stock workerd 中，不经公网路由，不
 引入 HTTP JSON RPC、注册中心、额外网关或新的数据库。
 
-本文细化[总方案](open-compute-workerd-platform.md) P3.2 中的 Service Binding 部分。
+本文细化[总方案](../open-compute-workerd-platform.md) P3.2 中的 Service Binding 部分。
 [Static Assets 方案](p3-1-static-assets.md)提供目标默认 HTTP 路由；P3.2 的完整 Node API
 清单和 P3.3 缓存/Images 仍需分别完成。Service Binding 通过不等于 P3 平台或应用验收完成。
 
@@ -50,15 +50,16 @@ WebSocket、`waitUntil` 和 capability 分别以可观察的 drain/close/dispose
 | `p3-services-events` | Queue、Cron、Durable Object、Workflow 四类真实事件源调用，保持各自 root/attempt/ack 生命周期 |
 | `p3-services-recovery` | 持有 RPC capability/stream 后 SIGKILL workerd，证明退出边界清除 registry 与 deployment pin，替换 generation 的新调用成功 |
 
-仍未完成的 qualification 项目：
+核心实现之外仍未完成的 qualification 项目：
 
 - P3.4 已提供固定 Service Binding contract catalog、能力/类型映射和本地产品证据；共享 portable
   runner 的 Cache API 对照不覆盖 Service Binding，仍需直接 differential qualification，因此当前
   产品 Gate 不能单独给最终 Platform Go。
 - S14/S15 的本地缺口已经由 `p3-services-recovery` 与 `p3-services-events` 补齐；两项都使用正式
   stock workerd 与生产 authority 路径，不再以 watcher 单测或 scope wiring 间接代替实际行为。
-- vinext 应用产物、选定 workload 断言和浏览器输入尚未固定；不能自造 fixture 数量或用改框架/
-  关闭功能代替。该项只阻止对应 Application Go，不阻止通过独立 contract 证据给出 Platform verdict。
+- 截至 2026-08-30 当次证据，vinext 应用产物、workload 和浏览器输入尚未固定；后续 P4 已取得
+  Application Go，但其产品 Service Binding 组合明确 excluded，因此不替代本计划要求的 direct
+  differential。
 
 ## 1. 基线、范围与优先风险
 
@@ -73,10 +74,10 @@ WebSocket、`waitUntil` 和 capability 分别以可观察的 drain/close/dispose
 | `crates/workers/src/pins.rs` 提供进程内删除 fence/pin | 扩展为可由可信 runtime controller 持有的调用存活引用 |
 | public ingress 当前 pin 直接附着于 Rust body | 新增没有 Rust body 的原生 RPC/内部 fetch 存活协议 |
 
-按已验收的 [Day1 约束](implemented/day1-architecture-cleanup.md)修改当前 schema/descriptor/wrapper，不保留
+按已验收的 [Day1 约束](day1-architecture-cleanup.md)修改当前 schema/descriptor/wrapper，不保留
 旧开发版绑定形状或两套 RPC 引擎。生产仍是一个 `platformd`、一个 verified workerd，正式
-pin 来自 [workerd.lock.json](../packages/runtime/workerd.lock.json)，当前为 `v1.20260826.1`。
-布局与验收按 [runtime 布局](implemented/runtime-and-test-layout.md)和[测试规范](references/testing.md)。
+pin 来自 [workerd.lock.json](../../packages/runtime/workerd.lock.json)，当前为 `v1.20260826.1`。
+布局与验收按 [runtime 布局](runtime-and-test-layout.md)和[测试规范](../references/testing.md)。
 
 平台支持面以 Cloudflare Service Binding/RPC 官方契约、固定 workerd pin 与 P3.4 catalog 为准。
 可选 vinext qualification 沿用总方案的
@@ -550,7 +551,7 @@ OPEN_COMPUTE_GATE_ROUNDS=3 ./test/gate.py p3-assets p3-services
 
 结果保存 `.temp/gate-run/` 与正式结果文档，列出源码/lock/artifact/测试 executable 身份、
 逐项支持面、失败/未运行、限额、实际 pin drain 证据及应用测试映射。两个能力完成并不自动
-代表 P3.4 Cloudflare conformance；完成后再归档 `docs/implemented/`。
+代表 P3.4 Cloudflare conformance。核心实现完成后归档设计；外部资格拆到 active acceptance。
 
 ## 9. 关键选择与交付判断
 
