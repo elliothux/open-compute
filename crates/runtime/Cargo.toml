@@ -3,6 +3,7 @@ name = "open-compute-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 description = "Pinned workerd supply chain, binary verification, and static config compilation"
 publish.workspace = true

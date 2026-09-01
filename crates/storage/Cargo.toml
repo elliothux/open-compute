@@ -3,6 +3,7 @@ name = "open-compute-storage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 description = "Secure data directory, control database, identity, and secret crypto"
 publish.workspace = true

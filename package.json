@@ -1,5 +1,6 @@
 {
   "name": "open-compute",
+  "homepage": "https://open-compute.dev",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",

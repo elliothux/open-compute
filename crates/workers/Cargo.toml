@@ -3,6 +3,7 @@ name = "open-compute-workers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 description = "Worker bundles, immutable deployments, routing, and runtime source"
 publish.workspace = true

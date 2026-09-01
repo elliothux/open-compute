@@ -3,6 +3,7 @@ name = "open-compute-images"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 description.workspace = true
 publish.workspace = true

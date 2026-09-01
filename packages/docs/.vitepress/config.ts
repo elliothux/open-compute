@@ -84,6 +84,7 @@ const enSidebar = [
 
 export default defineConfig({
   title: "open-compute",
+  sitemap: { hostname: "https://open-compute.dev" },
   lastUpdated: false,
   srcExclude: ["README.md"],
   vite: {
@@ -97,7 +98,7 @@ export default defineConfig({
     root: {
       label: "简体中文",
       lang: "zh-CN",
-      description: "platformd 运维文档",
+      description: "open-compute.dev 的 ocd 运维文档",
       themeConfig: {
         nav: [{ text: "概述", link: "/" }, { text: "故障手册", link: "/incidents/" }],
         sidebar: zhSidebar,
@@ -112,7 +113,7 @@ export default defineConfig({
     en: {
       label: "English",
       lang: "en-US",
-      description: "platformd operator documentation",
+      description: "ocd operator documentation for open-compute.dev",
       themeConfig: {
         nav: [{ text: "Overview", link: "/en/" }, { text: "Incident handbook", link: "/en/incidents/" }],
         sidebar: enSidebar,

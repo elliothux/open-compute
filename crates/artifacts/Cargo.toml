@@ -3,6 +3,7 @@ name = "open-compute-artifacts"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 description = "SigV4 S3-compatible artifact store, preflight, and verified local cache"
 publish.workspace = true
