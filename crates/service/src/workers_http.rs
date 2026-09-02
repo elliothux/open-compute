@@ -41,6 +41,7 @@ use uuid::Uuid;
 mod control;
 pub use control::control_router;
 mod uploads;
+pub(crate) mod v4;
 use uploads::{
     abort_version_upload, create_version_upload, finalize_version_upload, get_version_upload,
     put_version_upload_object,
@@ -570,7 +571,9 @@ async fn create_version(
             runtime_features: metadata.runtime_features,
             queue_consumers: metadata.queue_consumers,
             crons: metadata.crons,
-            promote: metadata.promote,
+            deployment_source: metadata
+                .promote
+                .then_some(open_compute_storage::DeploymentSource::VersionsApi),
             request_id,
             now_ms: now_ms(),
         })
@@ -579,7 +582,7 @@ async fn create_version(
         Ok(CreateVersionOutcome::Applied(result)) => json_bytes(
             serde_json::to_vec(&serde_json::json!({
                 "version": result.version.to_api_json(),
-                "promoted": result.promoted,
+                "promoted": result.deployment.is_some(),
             }))
             .unwrap_or_else(|_| b"{}".to_vec()),
             StatusCode::CREATED,
@@ -757,6 +760,7 @@ async fn promotion_impl(
                         account_id,
                         worker_id,
                         version_id: body.target_version_id,
+                        source: open_compute_storage::DeploymentSource::VersionsApi,
                         request_id,
                         now_ms: promoted_at_ms,
                     })

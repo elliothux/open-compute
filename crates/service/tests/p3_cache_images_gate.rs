@@ -764,7 +764,7 @@ fn request(
         runtime_features,
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote,
+        deployment_source: promote.then_some(open_compute_storage::DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms,
     }

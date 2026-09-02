@@ -176,11 +176,11 @@ pub use vectorize::{
     VectorizeIndexRepository, VectorizePaths, VectorizeReadSnapshot,
 };
 pub use workers::{
-    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewVersion, NewVersionProducts,
-    RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot, SYSTEM_DASHBOARD_WORKER_NAME,
-    StoredVersionSecret, SystemOwnedVersionKind, SystemOwnedVersionRecord, VersionContentKind,
-    VersionRecord, VersionReferrer, VersionSnapshot, VersionState, WorkerOwnership, WorkerRecord,
-    WorkerRepository,
+    DeploymentRecord, DeploymentSource, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewVersion,
+    NewVersionProducts, RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot,
+    SYSTEM_DASHBOARD_WORKER_NAME, StoredVersionSecret, SystemOwnedVersionKind,
+    SystemOwnedVersionRecord, VersionContentKind, VersionRecord, VersionReferrer, VersionSnapshot,
+    VersionState, WorkerOwnership, WorkerRecord, WorkerRepository,
 };
 pub use workflows::{
     WorkflowAppliedOperation, WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition,

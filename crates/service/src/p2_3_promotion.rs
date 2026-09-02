@@ -252,12 +252,13 @@ impl P23PromotionCoordinator {
         }
 
         if !already_promoted {
-            workers.promote_checked(
+            workers.create_deployment_checked(
                 request.account_id,
                 request.worker_id,
                 request.version_id,
                 worker.active_version_id,
                 Some(worker.route_generation),
+                request.source,
                 request.request_id,
                 request.now_ms,
             )?;

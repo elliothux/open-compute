@@ -162,7 +162,14 @@ pub(super) fn request_fingerprint(
         &mut canonical,
         &serde_json::to_vec(&request.crons).map_err(|_| invariant())?,
     )?;
-    canonical.push(u8::from(request.promote));
+    canonical.extend_from_slice(
+        request
+            .deployment_source
+            .map(DeploymentSource::as_str)
+            .unwrap_or("")
+            .as_bytes(),
+    );
+    canonical.push(0);
     let mut domain = Sha256::new();
     domain.update(b"open-compute/version-request/v1");
     domain.update(request.account_id.as_uuid().as_bytes());

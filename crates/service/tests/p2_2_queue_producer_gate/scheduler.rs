@@ -951,7 +951,7 @@ fn consumer_request(
             dead_letter_queue: Some(dlq_id),
         }],
         crons: Vec::new(),
-        promote: true,
+        deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms,
     }
@@ -995,7 +995,7 @@ fn caller_request(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote: true,
+        deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms,
     }

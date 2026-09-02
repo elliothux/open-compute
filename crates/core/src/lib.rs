@@ -27,8 +27,11 @@ pub use admission::{
     AdmissionReservation, AdmissionReservations, AdmissionSnapshotV1, OperationClass, PlatformMode,
 };
 pub use capability::{
-    CapabilityInventoryV1, CapabilityMemberV1, CapabilityStatus, PlatformCapabilitiesV1,
+    CapabilityInventoryV1, CapabilityMemberV1, CapabilityStatus, InterfaceCapabilityStatus,
+    LegacyManagementRouteV1, ManagementApiCapabilitiesV1, ManagementApiMethod,
+    ManagementApiRequestMediaType, ManagementApiRouteV1, PlatformCapabilitiesV1,
     ProductCapabilityV1, ProductKind, RuntimeCapabilityV1, TypeSourceIdentityV1,
+    WranglerCapabilitiesV1, WranglerCapabilityItemV1,
 };
 pub use clock::{Clock, SystemClock};
 pub use config::{

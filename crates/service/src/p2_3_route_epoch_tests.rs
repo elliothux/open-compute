@@ -93,7 +93,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
                 dead_letter_queue: None,
             }],
             crons: vec!["*/5 * * * *".into()],
-            promote: true,
+            deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_000,
         })
@@ -151,6 +151,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
             account_id: account,
             worker_id: worker.id,
             version_id: result.version.id,
+            source: open_compute_storage::DeploymentSource::VersionsApi,
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_002,
         })

@@ -41,7 +41,7 @@ fn assets_only_request(assets: &VersionAssets) -> CreateVersionRequest {
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote: false,
+        deployment_source: None,
         request_id: RequestId::generate(),
         now_ms: 1,
     }

@@ -572,7 +572,9 @@ fn worker_request(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote: options.promote,
+        deployment_source: options
+            .promote
+            .then_some(open_compute_storage::DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms: options.now_ms,
     }
@@ -605,7 +607,7 @@ fn assets_request(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote: true,
+        deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms,
     }

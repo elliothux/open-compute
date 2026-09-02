@@ -702,6 +702,9 @@ impl RuntimeSource {
         if let Some(bundle) = &bundle {
             modules.reserve(bundle.manifest().modules.len());
             for module in &bundle.manifest().modules {
+                if module.module_type == ModuleType::SourceMap {
+                    continue;
+                }
                 modules.push(RuntimeModule {
                     name: module.name.clone(),
                     module_type: module.module_type,

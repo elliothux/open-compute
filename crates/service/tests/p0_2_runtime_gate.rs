@@ -834,7 +834,7 @@ async fn deploy_egress(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: vec!["3 * * * *".to_owned()],
-        promote: false,
+        deployment_source: None,
         request_id: RequestId::generate(),
         now_ms: 20,
     };
@@ -1086,7 +1086,7 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote: false,
+        deployment_source: None,
         request_id: RequestId::generate(),
         now_ms: 21,
     };

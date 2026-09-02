@@ -4,9 +4,10 @@ use crate::config_load::LoadedConfig;
 use crate::embedded_dashboard::embedded_dashboard_assets_sha256;
 use open_compute_core::{
     CacheConfig, CapabilityInventoryV1, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig,
-    KvConfig, PlatformCapabilitiesV1, PlatformConfig, PlatformError, PlatformReleaseIdentityV1,
-    PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config, ReleaseSchemaDefinitionV1,
-    RuntimeCapabilityV1, SchedulerConfig, TypeSourceIdentityV1, WorkersConfig,
+    KvConfig, ManagementApiCapabilitiesV1, PlatformCapabilitiesV1, PlatformConfig, PlatformError,
+    PlatformReleaseIdentityV1, PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config,
+    ReleaseSchemaDefinitionV1, RuntimeCapabilityV1, SchedulerConfig, TypeSourceIdentityV1,
+    WorkersConfig, WranglerCapabilitiesV1,
 };
 use open_compute_runtime::{embedded_runtime_assets_sha256, embedded_runtime_lock};
 use open_compute_storage::{
@@ -72,7 +73,7 @@ pub fn platform_capabilities(
         ai_search_schema_version: AI_SEARCH_SCHEMA_VERSION,
         snapshot_format_version: SNAPSHOT_FORMAT_VERSION,
     };
-    let (type_source, products) = product_registry()?;
+    let (type_source, products, management_api, wrangler) = product_registry()?;
     let limits = limit_registry(config);
     let capabilities = PlatformCapabilitiesV1 {
         schema_version: 1,
@@ -87,6 +88,8 @@ pub fn platform_capabilities(
             workers_types_ast_sha256: type_source.ast_sha256,
         },
         products,
+        management_api,
+        wrangler,
         limits,
     };
     if !capabilities.validate() {
@@ -207,8 +210,15 @@ pub fn write_capabilities(
     Ok(())
 }
 
-fn product_registry()
--> Result<(TypeSourceIdentityV1, BTreeMap<String, ProductCapabilityV1>), PlatformError> {
+fn product_registry() -> Result<
+    (
+        TypeSourceIdentityV1,
+        BTreeMap<String, ProductCapabilityV1>,
+        ManagementApiCapabilitiesV1,
+        WranglerCapabilitiesV1,
+    ),
+    PlatformError,
+> {
     let inventory: CapabilityInventoryV1 = serde_json::from_slice(include_bytes!(
         "../../../share/cloudflare-capabilities.json"
     ))
@@ -216,7 +226,12 @@ fn product_registry()
     if !inventory.validate() {
         return Err(capability_invalid());
     }
-    Ok((inventory.source, inventory.products))
+    Ok((
+        inventory.source,
+        inventory.products,
+        inventory.management_api,
+        inventory.wrangler,
+    ))
 }
 
 fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {

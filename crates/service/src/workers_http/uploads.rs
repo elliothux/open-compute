@@ -412,7 +412,9 @@ async fn complete_reserved_finalize(
                 runtime_features: metadata.runtime_features,
                 queue_consumers: metadata.queue_consumers,
                 crons: metadata.crons,
-                promote: metadata.promote,
+                deployment_source: metadata
+                    .promote
+                    .then_some(open_compute_storage::DeploymentSource::VersionsApi),
                 request_id,
                 now_ms: now_ms(),
             },
@@ -423,7 +425,7 @@ async fn complete_reserved_finalize(
     match outcome? {
         CreateVersionOutcome::Applied(result) => serde_json::to_vec(&serde_json::json!({
             "version": result.version.to_api_json(),
-            "promoted": result.promoted,
+            "promoted": result.deployment.is_some(),
         }))
         .map_err(|_| internal()),
         CreateVersionOutcome::Replay(bytes) => Ok(bytes),

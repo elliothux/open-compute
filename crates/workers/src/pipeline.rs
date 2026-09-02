@@ -34,13 +34,13 @@ use open_compute_core::{
     ResourceId, ResourceState, SecretBytes, SecretString, VersionId, WorkerId,
 };
 use open_compute_storage::{
-    BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, DurableObjectRepository,
-    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration,
-    NewQueueConsumerDeclaration, NewQueueProducerBinding, NewVersion, NewVersionAssets,
-    NewVersionBinding, NewVersionObjectRef, NewVersionService, PlatformStorage, QueueAvailability,
-    QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository,
-    StoredVersionSecret, VersionBuiltinBindingRecord, VersionCachePolicyRecord, VersionContentKind,
-    VersionObjectKind, VersionRecord, VersionState, WorkerRepository,
+    BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, DeploymentRecord, DeploymentSource,
+    DurableObjectRepository, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig,
+    NewCronDeclaration, NewQueueConsumerDeclaration, NewQueueProducerBinding, NewVersion,
+    NewVersionAssets, NewVersionBinding, NewVersionObjectRef, NewVersionService, PlatformStorage,
+    QueueAvailability, QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState,
+    ResourceRepository, StoredVersionSecret, VersionBuiltinBindingRecord, VersionCachePolicyRecord,
+    VersionContentKind, VersionObjectKind, VersionRecord, VersionState, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -271,6 +271,8 @@ pub struct ProductPromotionRequest {
     pub worker_id: WorkerId,
     /// Validated ready target version.
     pub version_id: VersionId,
+    /// Exact v4 operation that creates the immutable Deployment.
+    pub source: DeploymentSource,
     /// Audit request identity.
     pub request_id: RequestId,
     /// Control-plane wall time.
@@ -315,8 +317,8 @@ pub struct CreateVersionRequest {
     pub queue_consumers: Vec<QueueConsumerInput>,
     /// Exact Cron set for the Worker's scheduled handler.
     pub crons: Vec<String>,
-    /// Promote only after runtime validation succeeds.
-    pub promote: bool,
+    /// Create a 100-percent Deployment only after runtime validation succeeds.
+    pub deployment_source: Option<DeploymentSource>,
     /// Audit request identity.
     pub request_id: RequestId,
     /// Current wall-clock milliseconds.
@@ -493,8 +495,8 @@ impl PreparedBundle {
 pub struct CreateVersionResult {
     /// Created version.
     pub version: VersionRecord,
-    /// Whether the same operation promoted it.
-    pub promoted: bool,
+    /// Deployment created by the same operation, if requested.
+    pub deployment: Option<DeploymentRecord>,
 }
 
 /// New result or exact persisted response bytes for replay.
@@ -663,7 +665,7 @@ impl<'a> VersionController<'a> {
             Ok(result) => {
                 let response = serde_json::to_vec(&serde_json::json!({
                     "version": result.version.to_api_json(),
-                    "promoted": result.promoted,
+                    "deployment": result.deployment,
                 }))
                 .map_err(|_| invariant())?;
                 repo.complete_idempotency_with_version_ref(
@@ -985,12 +987,17 @@ impl<'a> VersionController<'a> {
             version.state = VersionState::Ready;
             version.ready_at_ms = Some(request.now_ms);
         }
-        if request.promote {
+        let deployment = if let Some(source) = request.deployment_source {
             let worker = repo.get_worker(request.account_id, request.worker_id)?;
             if worker.active_version_id == Some(version.id) {
+                let deployment_id = worker.active_deployment_id.ok_or_else(invariant)?;
                 return Ok(CreateVersionResult {
                     version,
-                    promoted: true,
+                    deployment: Some(repo.get_deployment(
+                        request.account_id,
+                        request.worker_id,
+                        deployment_id,
+                    )?),
                 });
             }
             for route in repo.list_worker_routes(request.account_id, request.worker_id)? {
@@ -1006,6 +1013,7 @@ impl<'a> VersionController<'a> {
                         account_id: request.account_id,
                         worker_id: request.worker_id,
                         version_id: version.id,
+                        source,
                         request_id: request.request_id,
                         now_ms: request.now_ms,
                     })
@@ -1016,20 +1024,26 @@ impl<'a> VersionController<'a> {
                     "Queue/Cron promotion coordinator is unavailable",
                 ));
             } else {
-                repo.promote_worker_checked(
+                repo.create_deployment_checked(
                     request.account_id,
                     request.worker_id,
                     version.id,
                     None,
                     Some(worker.route_generation),
+                    source,
                     request.request_id,
                     request.now_ms,
                 )?;
             }
-        }
+            let worker = repo.get_worker(request.account_id, request.worker_id)?;
+            let deployment_id = worker.active_deployment_id.ok_or_else(invariant)?;
+            Some(repo.get_deployment(request.account_id, request.worker_id, deployment_id)?)
+        } else {
+            None
+        };
         let result = CreateVersionResult {
             version,
-            promoted: request.promote,
+            deployment,
         };
         Ok(result)
     }

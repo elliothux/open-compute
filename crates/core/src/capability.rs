@@ -18,6 +18,221 @@ pub enum CapabilityStatus {
     Blocked,
 }
 
+/// Support verdict used by the Cloudflare management API and Wrangler inventory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InterfaceCapabilityStatus {
+    /// The declared contract is implemented and covered by the P6 acceptance surface.
+    Supported,
+    /// The contract is implemented with a documented, stable deviation.
+    SupportedWithDeviation,
+    /// The contract is frozen but implementation or evidence belongs to a later stage.
+    Planned,
+    /// The contract is intentionally unavailable and must fail closed.
+    Unsupported,
+}
+
+/// HTTP method declared by one management API route.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum ManagementApiMethod {
+    /// Read a resource.
+    Get,
+    /// Create a resource or invoke an action.
+    Post,
+    /// Replace a resource.
+    Put,
+    /// Partially update a resource.
+    Patch,
+    /// Delete a resource.
+    Delete,
+}
+
+impl ManagementApiMethod {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Delete => "DELETE",
+        }
+    }
+}
+
+/// Request body media family consumed by one management API route.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagementApiRequestMediaType {
+    /// A JSON request body.
+    Json,
+    /// A multipart form request body.
+    Multipart,
+    /// An uninterpreted byte request body.
+    Raw,
+    /// No request body.
+    None,
+}
+
+/// One frozen Cloudflare-compatible or vendor management API route.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagementApiRouteV1 {
+    /// Stable `METHOD /path` route identity.
+    pub id: String,
+    /// HTTP method.
+    pub method: ManagementApiMethod,
+    /// Route path relative to `/client/v4`.
+    pub path: String,
+    /// Implementation status.
+    pub status: InterfaceCapabilityStatus,
+    /// Frozen authority that supplied this route.
+    pub source: String,
+    /// Official Cloudflare OpenAPI operation identity when the route has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    /// Digest of the canonical official OpenAPI operation when the route has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_sha256: Option<String>,
+    /// Request body media family.
+    pub request_media_type: ManagementApiRequestMediaType,
+    /// Later implementation stage for an intentionally deferred route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    /// Stable support-scope constraint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
+}
+
+impl ManagementApiRouteV1 {
+    /// Validate route identity and its optional OpenAPI provenance.
+    pub fn validate(&self) -> bool {
+        self.id == format!("{} {}", self.method.as_str(), self.path)
+            && self.path.starts_with('/')
+            && !self.source.is_empty()
+            && optional_nonempty(&self.stage)
+            && optional_nonempty(&self.constraint)
+            && match (&self.operation_id, &self.operation_sha256) {
+                (Some(operation_id), Some(digest)) => !operation_id.is_empty() && is_sha256(digest),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+/// One retired pre-Day1 route prefix that must remain unavailable.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyManagementRouteV1 {
+    /// Retired path or path prefix.
+    pub id: String,
+    /// Required unsupported verdict.
+    pub status: InterfaceCapabilityStatus,
+    /// Negative route inventory authority.
+    pub source: String,
+}
+
+impl LegacyManagementRouteV1 {
+    fn validate(&self) -> bool {
+        self.id.starts_with('/')
+            && !self.source.is_empty()
+            && self.status == InterfaceCapabilityStatus::Unsupported
+    }
+}
+
+/// Frozen management API route inventory served by `ocd`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagementApiCapabilitiesV1 {
+    /// Cloudflare-compatible API root.
+    pub root: String,
+    /// Positive and explicit fail-closed route inventory.
+    pub routes: Vec<ManagementApiRouteV1>,
+    /// Retired route prefixes that must not be mounted.
+    pub legacy_routes: Vec<LegacyManagementRouteV1>,
+}
+
+impl ManagementApiCapabilitiesV1 {
+    /// Validate the API root and unique route inventories.
+    pub fn validate(&self) -> bool {
+        self.root == "/client/v4"
+            && !self.routes.is_empty()
+            && self.routes.iter().all(ManagementApiRouteV1::validate)
+            && self
+                .legacy_routes
+                .iter()
+                .all(LegacyManagementRouteV1::validate)
+            && unique_nonempty(
+                &self
+                    .routes
+                    .iter()
+                    .map(|route| route.id.clone())
+                    .collect::<Vec<_>>(),
+            )
+            && unique_nonempty(
+                &self
+                    .legacy_routes
+                    .iter()
+                    .map(|route| route.id.clone())
+                    .collect::<Vec<_>>(),
+            )
+    }
+}
+
+/// One Wrangler field, binding, or command support record.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WranglerCapabilityItemV1 {
+    /// Stable field, binding, or command identity.
+    pub id: String,
+    /// Implementation status.
+    pub status: InterfaceCapabilityStatus,
+    /// Frozen authority that supplied this item.
+    pub source: String,
+    /// Later implementation stage for an intentionally deferred item.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    /// Stable support-scope constraint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
+}
+
+impl WranglerCapabilityItemV1 {
+    fn validate(&self) -> bool {
+        !self.id.is_empty()
+            && !self.source.is_empty()
+            && optional_nonempty(&self.stage)
+            && optional_nonempty(&self.constraint)
+    }
+}
+
+/// Frozen Wrangler CLI, configuration, and binding inventory served by `ocd`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WranglerCapabilitiesV1 {
+    /// Exact Wrangler version traced for P6.
+    pub version: String,
+    /// Digest of the traced Wrangler configuration schema.
+    pub config_schema_sha256: String,
+    /// Wrangler configuration fields.
+    pub fields: Vec<WranglerCapabilityItemV1>,
+    /// Wrangler multipart binding kinds.
+    pub bindings: Vec<WranglerCapabilityItemV1>,
+    /// Wrangler commands.
+    pub commands: Vec<WranglerCapabilityItemV1>,
+}
+
+impl WranglerCapabilitiesV1 {
+    /// Validate the frozen Wrangler pin and unique item inventories.
+    pub fn validate(&self) -> bool {
+        self.version == "4.127.1"
+            && is_sha256(&self.config_schema_sha256)
+            && validate_wrangler_items(&self.fields)
+            && validate_wrangler_items(&self.bindings)
+            && validate_wrangler_items(&self.commands)
+    }
+}
+
 /// How a product relates to the Cloudflare target inventory.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -222,6 +437,11 @@ pub struct CapabilityInventoryV1 {
     pub source: TypeSourceIdentityV1,
     /// Product entries keyed by stable product name.
     pub products: BTreeMap<String, ProductCapabilityV1>,
+    /// Frozen Cloudflare-compatible management API inventory.
+    #[serde(rename = "managementApi")]
+    pub management_api: ManagementApiCapabilitiesV1,
+    /// Frozen Wrangler CLI, configuration, and binding inventory.
+    pub wrangler: WranglerCapabilitiesV1,
 }
 
 impl CapabilityInventoryV1 {
@@ -232,6 +452,8 @@ impl CapabilityInventoryV1 {
             && required_products_present(&self.products)
             && self.products.values().all(ProductCapabilityV1::validate)
             && unique_member_ids(&self.products)
+            && self.management_api.validate()
+            && self.wrangler.validate()
     }
 }
 
@@ -279,6 +501,11 @@ pub struct PlatformCapabilitiesV1 {
     pub runtime: RuntimeCapabilityV1,
     /// Product entries keyed by stable product name.
     pub products: BTreeMap<String, ProductCapabilityV1>,
+    /// Frozen Cloudflare-compatible management API inventory.
+    #[serde(rename = "managementApi")]
+    pub management_api: ManagementApiCapabilitiesV1,
+    /// Frozen Wrangler CLI, configuration, and binding inventory.
+    pub wrangler: WranglerCapabilitiesV1,
     /// Frozen configured limit names and values; never contains secret values.
     pub limits: BTreeMap<String, u64>,
 }
@@ -292,13 +519,15 @@ impl PlatformCapabilitiesV1 {
             && required_products_present(&self.products)
             && self.products.values().all(ProductCapabilityV1::validate)
             && unique_member_ids(&self.products)
+            && self.management_api.validate()
+            && self.wrangler.validate()
     }
 }
 
 fn required_products_present(products: &BTreeMap<String, ProductCapabilityV1>) -> bool {
     const REQUIRED: [&str; 25] = [
         "workers",
-        "versions",
+        "deployments",
         "static_assets",
         "service_bindings",
         "kv",
@@ -339,6 +568,16 @@ fn unique_nonempty(values: &[String]) -> bool {
         .iter()
         .enumerate()
         .all(|(index, value)| !value.is_empty() && !values[..index].contains(value))
+}
+
+fn optional_nonempty(value: &Option<String>) -> bool {
+    value.as_ref().is_none_or(|value| !value.is_empty())
+}
+
+fn validate_wrangler_items(items: &[WranglerCapabilityItemV1]) -> bool {
+    !items.is_empty()
+        && items.iter().all(WranglerCapabilityItemV1::validate)
+        && unique_nonempty(&items.iter().map(|item| item.id.clone()).collect::<Vec<_>>())
 }
 
 fn is_sha256(value: &str) -> bool {

@@ -40,9 +40,22 @@ fn snapshot_policy_covers_the_current_workflow_configuration() {
 
 #[test]
 fn workflow_capabilities_report_current_model_and_operator_limits() {
-    let (source, products) = product_registry().unwrap();
+    let inventory: CapabilityInventoryV1 = serde_json::from_slice(include_bytes!(
+        "../../../share/cloudflare-capabilities.json"
+    ))
+    .unwrap();
+    assert!(inventory.management_api.validate());
+    assert!(inventory.wrangler.validate());
+    assert!(inventory.source.validate());
+    for (name, product) in &inventory.products {
+        assert!(product.validate(), "invalid product: {name}");
+    }
+    assert!(inventory.validate());
+    let (source, products, management_api, wrangler) = product_registry().unwrap();
     assert!(!source.workers_types_version.is_empty());
     assert_eq!(source.ast_sha256.len(), 64);
+    assert!(management_api.validate());
+    assert!(wrangler.validate());
     for product in products.values() {
         if matches!(
             product.status,

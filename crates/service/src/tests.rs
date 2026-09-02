@@ -2653,7 +2653,8 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
                 dead_letter_queue: None,
             }],
             crons: vec![cron.to_owned()],
-            promote,
+            deployment_source: promote
+                .then_some(open_compute_storage::DeploymentSource::VersionsApi),
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_000,
         }
@@ -2694,6 +2695,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             account_id: account,
             worker_id: worker.id,
             version_id: first_id,
+            source: open_compute_storage::DeploymentSource::VersionsApi,
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_001,
         })
@@ -3181,6 +3183,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             account_id: account,
             worker_id: worker.id,
             version_id: third_id,
+            source: open_compute_storage::DeploymentSource::VersionsApi,
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_003,
         })

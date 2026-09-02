@@ -87,7 +87,7 @@ impl RuntimeFeatureFixture {
             runtime_features: features,
             queue_consumers: Vec::new(),
             crons: Vec::new(),
-            promote: true,
+            deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
             request_id: RequestId::generate(),
             now_ms: 1_000,
         };

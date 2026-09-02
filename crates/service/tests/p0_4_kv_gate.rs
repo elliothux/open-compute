@@ -500,7 +500,7 @@ fn version_request(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote: true,
+        deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms: 20,
     }

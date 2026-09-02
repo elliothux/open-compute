@@ -64,6 +64,52 @@ fn supported_member(status: CapabilityStatus) -> CapabilityMemberV1 {
     }
 }
 
+fn management_api() -> ManagementApiCapabilitiesV1 {
+    ManagementApiCapabilitiesV1 {
+        root: "/client/v4".to_owned(),
+        routes: vec![ManagementApiRouteV1 {
+            id: "GET /user".to_owned(),
+            method: ManagementApiMethod::Get,
+            path: "/user".to_owned(),
+            status: InterfaceCapabilityStatus::Planned,
+            source: "cloudflare-openapi".to_owned(),
+            operation_id: Some("user-user-details".to_owned()),
+            operation_sha256: Some("f".repeat(64)),
+            request_media_type: ManagementApiRequestMediaType::None,
+            stage: None,
+            constraint: None,
+        }],
+        legacy_routes: vec![LegacyManagementRouteV1 {
+            id: "/operator/api/**".to_owned(),
+            status: InterfaceCapabilityStatus::Unsupported,
+            source: "day1-negative-route-inventory".to_owned(),
+        }],
+    }
+}
+
+fn wrangler() -> WranglerCapabilitiesV1 {
+    let item = WranglerCapabilityItemV1 {
+        id: "name".to_owned(),
+        status: InterfaceCapabilityStatus::Planned,
+        source: "wrangler-config-schema".to_owned(),
+        stage: None,
+        constraint: None,
+    };
+    WranglerCapabilitiesV1 {
+        version: "4.127.1".to_owned(),
+        config_schema_sha256: "e".repeat(64),
+        fields: vec![item.clone()],
+        bindings: vec![WranglerCapabilityItemV1 {
+            id: "plain_text".to_owned(),
+            ..item.clone()
+        }],
+        commands: vec![WranglerCapabilityItemV1 {
+            id: "deploy".to_owned(),
+            ..item
+        }],
+    }
+}
+
 #[test]
 fn capability_status_serialization_and_contract_are_strict() {
     assert_eq!(
@@ -99,7 +145,7 @@ fn capability_status_serialization_and_contract_are_strict() {
     let mut products = BTreeMap::new();
     for name in [
         "workers",
-        "versions",
+        "deployments",
         "static_assets",
         "service_bindings",
         "kv",
@@ -126,7 +172,10 @@ fn capability_status_serialization_and_contract_are_strict() {
     ] {
         products.insert(name.to_owned(), unsupported_product());
     }
-    products.insert("versions".to_owned(), platform_product(&["OC-DEPLOY-001"]));
+    products.insert(
+        "deployments".to_owned(),
+        platform_product(&["OC-DEPLOY-001"]),
+    );
     products.insert(
         "kv".to_owned(),
         ProductCapabilityV1 {
@@ -150,6 +199,8 @@ fn capability_status_serialization_and_contract_are_strict() {
             workers_types_ast_sha256: "d".repeat(64),
         },
         products,
+        management_api: management_api(),
+        wrangler: wrangler(),
         limits: BTreeMap::new(),
     };
     assert!(capabilities.validate());

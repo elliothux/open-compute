@@ -1084,10 +1084,17 @@ fn version_request(
 ) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
-        vec![module(
-            "index.js",
-            b"export default { fetch() { return new Response('hello'); } };",
-        )],
+        vec![
+            module(
+                "index.js",
+                b"export default { fetch() { return new Response('hello'); } };",
+            ),
+            ModuleInput {
+                name: "index.js.map".to_owned(),
+                module_type: ModuleType::SourceMap,
+                bytes: br#"{"version":3,"sources":["index.ts"],"names":[],"mappings":""}"#.to_vec(),
+            },
+        ],
         BundleLimits::default(),
     )
     .unwrap();
@@ -1110,7 +1117,7 @@ fn version_request(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote: true,
+        deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms: 10_000,
     }
@@ -1162,7 +1169,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     let first = controller.create_version(request.clone()).await.unwrap();
     let (version_id, descriptor_hash) = match first {
         CreateVersionOutcome::Applied(result) => {
-            assert!(result.promoted);
+            assert!(result.deployment.is_some());
             assert_eq!(result.version.state, VersionState::Ready);
             (
                 result.version.id,
@@ -1494,7 +1501,7 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote: true,
+        deployment_source: Some(open_compute_storage::DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms: 10,
     };
@@ -1592,7 +1599,7 @@ async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons()
         dead_letter_queue: Some(dlq),
     };
     let mut valid = version_request(account, worker.id, "products-valid", "secret");
-    valid.promote = false;
+    valid.deployment_source = None;
     valid.queue_consumers = vec![consumer.clone()];
     valid.crons = vec!["*/5 * * * *".to_owned(), "*/5 * * * *".to_owned()];
     let version = match controller.create_version(valid).await.unwrap() {
@@ -1613,12 +1620,12 @@ async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons()
 
     let mut cases = Vec::new();
     let mut duplicate = version_request(account, worker.id, "products-duplicate", "secret");
-    duplicate.promote = false;
+    duplicate.deployment_source = None;
     duplicate.queue_consumers = vec![consumer.clone(), consumer.clone()];
     cases.push((duplicate, ErrorCode::QueueConsumerConflict));
 
     let mut self_dlq = version_request(account, worker.id, "products-self-dlq", "secret");
-    self_dlq.promote = false;
+    self_dlq.deployment_source = None;
     self_dlq.queue_consumers = vec![QueueConsumerInput {
         dead_letter_queue: Some(source),
         ..consumer.clone()
@@ -1626,7 +1633,7 @@ async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons()
     cases.push((self_dlq, ErrorCode::QueueDlqInvalid));
 
     let mut pending_dlq = version_request(account, worker.id, "products-pending-dlq", "secret");
-    pending_dlq.promote = false;
+    pending_dlq.deployment_source = None;
     pending_dlq.queue_consumers = vec![QueueConsumerInput {
         dead_letter_queue: Some(pending),
         ..consumer.clone()
@@ -1634,7 +1641,7 @@ async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons()
     cases.push((pending_dlq, ErrorCode::QueueDlqInvalid));
 
     let mut bad_entry = version_request(account, worker.id, "products-entry", "secret");
-    bad_entry.promote = false;
+    bad_entry.deployment_source = None;
     bad_entry.queue_consumers = vec![QueueConsumerInput {
         entrypoint: Some("1-invalid".to_owned()),
         ..consumer.clone()
@@ -1642,7 +1649,7 @@ async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons()
     cases.push((bad_entry, ErrorCode::EntrypointNotFound));
 
     let mut not_ready = version_request(account, worker.id, "products-not-ready", "secret");
-    not_ready.promote = false;
+    not_ready.deployment_source = None;
     not_ready.queue_consumers = vec![QueueConsumerInput {
         queue: pending,
         dead_letter_queue: None,
@@ -1651,7 +1658,7 @@ async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons()
     cases.push((not_ready, ErrorCode::QueueConsumerNotReady));
 
     let mut invalid_config = version_request(account, worker.id, "products-config", "secret");
-    invalid_config.promote = false;
+    invalid_config.deployment_source = None;
     invalid_config.queue_consumers = vec![QueueConsumerInput {
         config: open_compute_storage::QueueConsumerConfig {
             max_concurrency: 3,
@@ -1662,12 +1669,12 @@ async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons()
     cases.push((invalid_config, ErrorCode::LimitInvalid));
 
     let mut invalid_cron = version_request(account, worker.id, "products-cron", "secret");
-    invalid_cron.promote = false;
+    invalid_cron.deployment_source = None;
     invalid_cron.crons = vec!["not a cron".to_owned()];
     cases.push((invalid_cron, ErrorCode::CronExpressionInvalid));
 
     let mut too_many = version_request(account, worker.id, "products-count", "secret");
-    too_many.promote = false;
+    too_many.deployment_source = None;
     too_many.queue_consumers = vec![consumer; 65];
     cases.push((too_many, ErrorCode::QuotaExceeded));
 
@@ -1725,9 +1732,9 @@ async fn shared_artifact_gc_waits_for_last_version_reference() {
         BundleLimits::default(),
     );
     let mut first = version_request(account, first_worker.id, "gc-first", "same-secret");
-    first.promote = false;
+    first.deployment_source = None;
     let mut second = version_request(account, second_worker.id, "gc-second", "same-secret");
-    second.promote = false;
+    second.deployment_source = None;
     let first = match controller.create_version(first).await.unwrap() {
         CreateVersionOutcome::Applied(result) => result.version,
         CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),

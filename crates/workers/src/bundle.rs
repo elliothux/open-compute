@@ -58,6 +58,8 @@ pub enum ModuleType {
     Json,
     /// WebAssembly module.
     Wasm,
+    /// Verified source map retained in the immutable artifact but never exposed as a module.
+    SourceMap,
 }
 
 /// Caller-provided module before canonicalization.
@@ -188,7 +190,10 @@ impl StagedBundle {
         for module in &manifest.modules {
             let mut remaining = module.size;
             let mut module_hasher = Sha256::new();
-            let needs_text = matches!(module.module_type, ModuleType::Text | ModuleType::Json);
+            let needs_text = matches!(
+                module.module_type,
+                ModuleType::Text | ModuleType::Json | ModuleType::SourceMap
+            );
             let mut text = if needs_text {
                 Vec::with_capacity(usize::try_from(module.size).map_err(|_| too_large())?)
             } else {
@@ -216,7 +221,7 @@ impl StagedBundle {
             if needs_text && std::str::from_utf8(&text).is_err() {
                 return Err(invalid("text and JSON modules must be valid UTF-8"));
             }
-            if module.module_type == ModuleType::Json
+            if matches!(module.module_type, ModuleType::Json | ModuleType::SourceMap)
                 && serde_json::from_slice::<serde_json::Value>(&text).is_err()
             {
                 return Err(invalid("JSON module is invalid"));
@@ -289,12 +294,14 @@ impl CanonicalBundle {
             if total > limits.max_total_module_bytes {
                 return Err(too_large());
             }
-            if matches!(module.module_type, ModuleType::Text | ModuleType::Json)
-                && std::str::from_utf8(&module.bytes).is_err()
+            if matches!(
+                module.module_type,
+                ModuleType::Text | ModuleType::Json | ModuleType::SourceMap
+            ) && std::str::from_utf8(&module.bytes).is_err()
             {
                 return Err(invalid("text and JSON modules must be valid UTF-8"));
             }
-            if module.module_type == ModuleType::Json
+            if matches!(module.module_type, ModuleType::Json | ModuleType::SourceMap)
                 && serde_json::from_slice::<serde_json::Value>(&module.bytes).is_err()
             {
                 return Err(invalid("JSON module is invalid"));
@@ -317,8 +324,11 @@ impl CanonicalBundle {
             .iter()
             .find(|module| module.name == canonical_main)
             .ok_or_else(|| invalid("main module was not found"))?;
-        if main.module_type != ModuleType::EsModule {
-            return Err(invalid("main module must be an ES module"));
+        if !matches!(
+            main.module_type,
+            ModuleType::EsModule | ModuleType::CommonJsModule
+        ) {
+            return Err(invalid("main module must be JavaScript"));
         }
 
         let mut offset = 0_u64;
@@ -432,19 +442,24 @@ impl CanonicalBundle {
                     "module digest does not match the canonical manifest",
                 ));
             }
-            if matches!(module.module_type, ModuleType::Text | ModuleType::Json)
-                && std::str::from_utf8(raw).is_err()
+            if matches!(
+                module.module_type,
+                ModuleType::Text | ModuleType::Json | ModuleType::SourceMap
+            ) && std::str::from_utf8(raw).is_err()
             {
                 return Err(invalid("text and JSON modules must be valid UTF-8"));
             }
-            if module.module_type == ModuleType::Json
+            if matches!(module.module_type, ModuleType::Json | ModuleType::SourceMap)
                 && serde_json::from_slice::<serde_json::Value>(raw).is_err()
             {
                 return Err(invalid("JSON module is invalid"));
             }
             if module.name == manifest.main_module {
-                if module.module_type != ModuleType::EsModule {
-                    return Err(invalid("main module must be an ES module"));
+                if !matches!(
+                    module.module_type,
+                    ModuleType::EsModule | ModuleType::CommonJsModule
+                ) {
+                    return Err(invalid("main module must be JavaScript"));
                 }
                 saw_main = true;
             }
@@ -552,8 +567,11 @@ fn parse_manifest(
             return Err(too_large());
         }
         if module.name == manifest.main_module {
-            if module.module_type != ModuleType::EsModule {
-                return Err(invalid("main module must be an ES module"));
+            if !matches!(
+                module.module_type,
+                ModuleType::EsModule | ModuleType::CommonJsModule
+            ) {
+                return Err(invalid("main module must be JavaScript"));
             }
             saw_main = true;
         }
