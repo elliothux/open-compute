@@ -268,13 +268,16 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     .await;
     assert!(completed_at >= due);
     assert_eq!(count(&database, "SELECT count(*) FROM workflow_steps"), 3);
-    assert_eq!(
-        count(
+    // Maintenance can still hold a run lease briefly while settling the due
+    // sleep. Wait for the lease to clear before asserting quiescence.
+    wait(&mut process, "paused sleep releases its run lease", || {
+        (count(
             &database,
-            "SELECT count(*) FROM workflow_instances WHERE run_token IS NOT NULL"
-        ),
-        0
-    );
+            "SELECT count(*) FROM workflow_instances WHERE run_token IS NOT NULL",
+        ) == 0)
+        .then_some(())
+    })
+    .await;
     request(&client, public, "/resume/chain", json!({})).await;
     wait(
         &mut process,
