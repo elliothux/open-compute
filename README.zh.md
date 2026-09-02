@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://open-compute.dev">
-    <img src="share/open-compute.png" alt="open-compute" width="480" />
+    <img src="share/brand/open-compute.png" alt="open-compute" width="480" />
   </a>
 </p>
 
