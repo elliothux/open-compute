@@ -17,13 +17,13 @@ ocd --config /etc/open-compute/config.toml config check
 
 密钥只走引用，不要写进 unit、镜像、仓库或配置明文。
 
-- `server.admin_auth`：`env` 和/或绝对路径 `file`（TOML 里的 secret 对象）。
+- `server.admin_auth`、`server.deployer_auth`、`server.read_only_auth`：三类必填且解析后互不相同的 Bearer token reference，使用 `env` 和/或绝对路径 `file`（TOML 里的 secret 对象）。
 - S3：`access_key_id_env` / `access_key_id_file` 与 `secret_access_key_env` / `secret_access_key_file`，每对至少提供一种。
 - master key：`storage.master_key_file`（绝对路径）；可选 `storage.master_key_env`。
 - 环境变量名必须是非空的大写 ASCII、数字和下划线，且不能以数字开头。
 - 租户 binding 名不得以 `OPEN_COMPUTE_` 开头；那是平台保留前缀，不是让你把密钥写进配置正文的借口。
 
-非 loopback 的 admin 监听必须配置 `server.admin_auth`。
+所有 admin listener（包括 loopback）都必须配置三类角色 token；解析后 token 值相同会拒绝启动，不按匹配顺序降权。
 
 ## data-dir 与锁
 

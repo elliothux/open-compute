@@ -17,13 +17,13 @@ The embedded default template matches `share/default-config.toml`. Live numeric 
 
 Secrets are references only. Do not put them in units, images, the repository, or config plaintext.
 
-- `server.admin_auth`: `env` and/or an absolute `file` (the TOML secret object).
+- `server.admin_auth`, `server.deployer_auth`, and `server.read_only_auth`: three required, mutually distinct Bearer token references using `env` and/or an absolute `file` (the TOML secret object).
 - S3: `access_key_id_env` / `access_key_id_file` and `secret_access_key_env` / `secret_access_key_file`; each pair needs at least one.
 - Master key: `storage.master_key_file` (absolute); optional `storage.master_key_env`.
 - Environment variable names must be non-empty ASCII uppercase, digits, and underscore, and must not start with a digit.
 - Tenant binding names must not start with `OPEN_COMPUTE_`; that prefix is reserved by the platform, not a license to inline secrets.
 
-A non-loopback admin listener requires `server.admin_auth`.
+Every admin listener, including loopback, requires all three role tokens. Startup rejects equal resolved token values instead of relying on match order.
 
 ## Data-dir and lock
 

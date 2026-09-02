@@ -197,12 +197,26 @@ async fn test_support_runtime_restart_requires_auth_ack_and_an_attached_hook() {
 fn state_constructor_resolves_file_auth_and_debug_is_redacted() {
     let dir = tempfile::tempdir().unwrap();
     let secret = dir.path().join("admin.secret");
+    let deployer = dir.path().join("deployer.secret");
+    let read_only = dir.path().join("read-only.secret");
     fs::write(&secret, b"admin-secret").unwrap();
-    fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&deployer, b"deployer-secret").unwrap();
+    fs::write(&read_only, b"read-only-secret").unwrap();
+    for path in [&secret, &deployer, &read_only] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let server = ServerConfig {
         admin_auth: SecretReference {
             env: None,
             file: Some(secret),
+        },
+        deployer_auth: SecretReference {
+            env: None,
+            file: Some(deployer),
+        },
+        read_only_auth: SecretReference {
+            env: None,
+            file: Some(read_only),
         },
         ..ServerConfig::default()
     };

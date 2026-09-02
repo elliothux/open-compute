@@ -2,6 +2,9 @@
 
 [server]
 public_bind = "127.0.0.1:8787"
+admin_auth = { env = "OPEN_COMPUTE_ADMIN_TOKEN" }
+deployer_auth = { env = "OPEN_COMPUTE_DEPLOYER_TOKEN" }
+read_only_auth = { env = "OPEN_COMPUTE_READ_ONLY_TOKEN" }
 
 [storage]
 data_dir = "/var/lib/open-compute"

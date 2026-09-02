@@ -17,6 +17,7 @@ pub mod cache_backend;
 pub(crate) mod cache_images_http;
 pub mod capabilities;
 pub mod cli;
+mod cloudflare_v4;
 pub mod config_load;
 pub mod d1_backend;
 pub mod d1_http;

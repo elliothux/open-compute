@@ -586,6 +586,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                 .and_then(|g| g.as_ref().map(|s| SanitizedSupervisor::from(&s.snapshot())))
         }),
     )?
+    .with_cloudflare_v4_account(crate::cloudflare_v4::accounts::AccountAuthority::new(
+        storage.identity().platform_id,
+        storage.identity().default_account_id,
+        storage.identity().created_at_ms,
+    ))
     .with_dashboard_dispatch(dashboard_dispatch.clone())
     .with_worker_api(worker_api)
     .with_kv_api(

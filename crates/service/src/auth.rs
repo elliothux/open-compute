@@ -14,25 +14,32 @@ const MAX_SECRET_BYTES: usize = 256;
 
 /// Resolve `server.admin_auth` from env and/or a 0600 no-follow file.
 pub fn resolve_admin_auth(reference: &SecretReference) -> Result<SecretString, PlatformError> {
+    resolve_bearer_auth(reference)
+}
+
+/// Resolve one Bearer token using the same bounded env/file authority.
+pub(crate) fn resolve_bearer_auth(
+    reference: &SecretReference,
+) -> Result<SecretString, PlatformError> {
     let from_env = match &reference.env {
         Some(name) => match std::env::var(name) {
             Ok(value) if !value.is_empty() && value.len() <= MAX_SECRET_BYTES => Some(value),
             Ok(value) if value.len() > MAX_SECRET_BYTES => {
                 return Err(PlatformError::new(
                     ErrorCode::SecretRefInvalid,
-                    "admin auth secret exceeds the bounded size",
+                    "Bearer auth secret exceeds the bounded size",
                 ));
             }
             Ok(_) => {
                 return Err(PlatformError::new(
                     ErrorCode::SecretRefInvalid,
-                    "admin auth environment value is empty",
+                    "Bearer auth environment value is empty",
                 ));
             }
             Err(_) if reference.file.is_none() => {
                 return Err(PlatformError::new(
                     ErrorCode::SecretRefInvalid,
-                    "admin auth environment variable is missing",
+                    "Bearer auth environment variable is missing",
                 ));
             }
             Err(_) => None,
@@ -47,12 +54,12 @@ pub fn resolve_admin_auth(reference: &SecretReference) -> Result<SecretString, P
         (Some(a), Some(b)) if a == b => Ok(SecretString::new(a)),
         (Some(_), Some(_)) => Err(PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth env and file values do not match",
+            "Bearer auth env and file values do not match",
         )),
         (Some(a), None) | (None, Some(a)) => Ok(SecretString::new(a)),
         (None, None) => Err(PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth reference is missing",
+            "Bearer auth reference is missing",
         )),
     }
 }
@@ -65,7 +72,7 @@ fn read_secret_file(path: &Path) -> Result<String, PlatformError> {
     {
         return Err(PlatformError::new(
             ErrorCode::PathInvalid,
-            "configured path must be an absolute path",
+            "configured Bearer auth path must be absolute",
         ));
     }
     let fd = rustix::fs::open(
@@ -76,32 +83,32 @@ fn read_secret_file(path: &Path) -> Result<String, PlatformError> {
     .map_err(|_| {
         PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth file could not be opened without following links",
+            "Bearer auth file could not be opened without following links",
         )
     })?;
     let file = File::from(fd);
     let meta = file.metadata().map_err(|_| {
         PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth file could not be inspected",
+            "Bearer auth file could not be inspected",
         )
     })?;
     if !meta.file_type().is_file() {
         return Err(PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth file must be a regular file",
+            "Bearer auth file must be a regular file",
         ));
     }
     if meta.permissions().mode() & 0o777 != 0o600 {
         return Err(PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth file must have mode 0600",
+            "Bearer auth file must have mode 0600",
         ));
     }
     if meta.len() == 0 || meta.len() as usize > MAX_SECRET_BYTES {
         return Err(PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth secret exceeds the bounded size",
+            "Bearer auth secret exceeds the bounded size",
         ));
     }
     let mut buf = String::new();
@@ -109,14 +116,14 @@ fn read_secret_file(path: &Path) -> Result<String, PlatformError> {
     file.read_to_string(&mut buf).map_err(|_| {
         PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth file is not valid UTF-8",
+            "Bearer auth file is not valid UTF-8",
         )
     })?;
     let trimmed = buf.trim_end_matches(['\n', '\r']);
     if trimmed.is_empty() {
         return Err(PlatformError::new(
             ErrorCode::SecretRefInvalid,
-            "admin auth file is empty",
+            "Bearer auth file is empty",
         ));
     }
     Ok(trimmed.to_string())

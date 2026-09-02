@@ -143,6 +143,14 @@ env = "ADMIN_TOKEN"
         loopback.server.admin_auth.env.as_deref(),
         Some("OPEN_COMPUTE_ADMIN_TOKEN")
     );
+    assert_eq!(
+        loopback.server.deployer_auth.env.as_deref(),
+        Some("OPEN_COMPUTE_DEPLOYER_TOKEN")
+    );
+    assert_eq!(
+        loopback.server.read_only_auth.env.as_deref(),
+        Some("OPEN_COMPUTE_READ_ONLY_TOKEN")
+    );
 }
 
 #[test]

@@ -241,6 +241,10 @@ pub struct ServerConfig {
     pub admin_bind: Option<String>,
     /// Required admin auth secret reference.
     pub admin_auth: SecretReference,
+    /// Required Worker/resource deployment token reference.
+    pub deployer_auth: SecretReference,
+    /// Required read-only catalog and status token reference.
+    pub read_only_auth: SecretReference,
 }
 
 impl Default for ServerConfig {
@@ -250,6 +254,14 @@ impl Default for ServerConfig {
             admin_bind: None,
             admin_auth: SecretReference {
                 env: Some("OPEN_COMPUTE_ADMIN_TOKEN".to_string()),
+                file: None,
+            },
+            deployer_auth: SecretReference {
+                env: Some("OPEN_COMPUTE_DEPLOYER_TOKEN".to_string()),
+                file: None,
+            },
+            read_only_auth: SecretReference {
+                env: Some("OPEN_COMPUTE_READ_ONLY_TOKEN".to_string()),
                 file: None,
             },
         }
@@ -265,6 +277,8 @@ impl ServerConfig {
         };
         let _admin_addr = admin.unwrap_or(public);
         self.admin_auth.validate("server.admin_auth")?;
+        self.deployer_auth.validate("server.deployer_auth")?;
+        self.read_only_auth.validate("server.read_only_auth")?;
         Ok(())
     }
 

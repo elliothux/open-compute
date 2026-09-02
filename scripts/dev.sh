@@ -48,7 +48,11 @@ export TMPDIR="$platform_data"
 export S3_ACCESS_KEY_ID=open-compute-dev
 export S3_SECRET_ACCESS_KEY=open-compute-dev-secret
 : "${OPEN_COMPUTE_ADMIN_TOKEN:=dev-admin-token}"
+: "${OPEN_COMPUTE_DEPLOYER_TOKEN:=dev-deployer-token}"
+: "${OPEN_COMPUTE_READ_ONLY_TOKEN:=dev-read-only-token}"
 export OPEN_COMPUTE_ADMIN_TOKEN
+export OPEN_COMPUTE_DEPLOYER_TOKEN
+export OPEN_COMPUTE_READ_ONLY_TOKEN
 
 config_tmp="$config.tmp.$$"
 trap 'rm -f "$config_tmp"; exit 129' HUP
@@ -59,6 +63,8 @@ cat >"$config_tmp" <<EOF
 [server]
 public_bind = "127.0.0.1:8787"
 admin_auth = { env = "OPEN_COMPUTE_ADMIN_TOKEN" }
+deployer_auth = { env = "OPEN_COMPUTE_DEPLOYER_TOKEN" }
+read_only_auth = { env = "OPEN_COMPUTE_READ_ONLY_TOKEN" }
 
 [storage]
 data_dir = "$platform_data"

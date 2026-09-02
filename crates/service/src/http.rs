@@ -1,21 +1,20 @@
 //! Fixed health/metrics HTTP surface.
 
-use crate::auth::{bearer_matches, resolve_admin_auth};
-use crate::cache_images_http::{self, CacheImagesApiState};
-use crate::d1_http::{self, D1ApiState};
+use crate::auth::{bearer_matches, resolve_admin_auth, resolve_bearer_auth};
+use crate::cache_images_http::CacheImagesApiState;
+use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::d1_http::D1ApiState;
 use crate::dashboard::DashboardDispatch;
-use crate::do_http::{self, DoApiState};
-use crate::embedded_dashboard::embedded_dashboard_assets_sha256;
+use crate::do_http::DoApiState;
 use crate::health::HealthCoordinator;
 use crate::kv_http::{self, KvApiState};
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
-use crate::queue_http::{self, QueueApiState};
+use crate::queue_http::QueueApiState;
 use crate::r2_http::{self, R2ApiState};
 use crate::scheduler::SchedulerService;
-use crate::scheduler_http;
-use crate::search_http::{self, SearchApiState};
+use crate::search_http::SearchApiState;
 use crate::workers_http::{self, WorkerApiState};
-use crate::workflow_http::{self, WorkflowApiState};
+use crate::workflow_http::WorkflowApiState;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
@@ -55,6 +54,9 @@ pub struct HttpState {
     metrics_enabled: bool,
     dashboard_enabled: bool,
     admin_secret: Option<Arc<SecretString>>,
+    deployer_secret: Option<Arc<SecretString>>,
+    read_only_secret: Option<Arc<SecretString>>,
+    cloudflare_v4_account: Option<Arc<AccountAuthority>>,
     supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
     #[cfg(any(test, feature = "test-support"))]
     test_runtime_restart: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
@@ -77,6 +79,12 @@ impl std::fmt::Debug for HttpState {
             .field("metrics_enabled", &self.metrics_enabled)
             .field("dashboard_enabled", &self.dashboard_enabled)
             .field("admin_auth", &self.admin_secret.is_some())
+            .field("deployer_auth", &self.deployer_secret.is_some())
+            .field("read_only_auth", &self.read_only_secret.is_some())
+            .field(
+                "cloudflare_v4_account",
+                &self.cloudflare_v4_account.is_some(),
+            )
             .field(
                 "test_runtime_restart",
                 &cfg!(any(test, feature = "test-support")),
@@ -128,12 +136,26 @@ impl HttpState {
         supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
     ) -> Result<Self, PlatformError> {
         let admin_secret = Arc::new(resolve_admin_auth(&server.admin_auth)?);
+        let deployer_secret = Arc::new(resolve_bearer_auth(&server.deployer_auth)?);
+        let read_only_secret = Arc::new(resolve_bearer_auth(&server.read_only_auth)?);
+        if admin_secret.expose() == deployer_secret.expose()
+            || admin_secret.expose() == read_only_secret.expose()
+            || deployer_secret.expose() == read_only_secret.expose()
+        {
+            return Err(PlatformError::new(
+                ErrorCode::SecretRefInvalid,
+                "server Bearer tokens must be distinct",
+            ));
+        }
         Ok(Self {
             health,
             metrics,
             metrics_enabled,
             dashboard_enabled,
             admin_secret: Some(admin_secret),
+            deployer_secret: Some(deployer_secret),
+            read_only_secret: Some(read_only_secret),
+            cloudflare_v4_account: None,
             supervisor,
             #[cfg(any(test, feature = "test-support"))]
             test_runtime_restart: None,
@@ -175,6 +197,9 @@ impl HttpState {
             metrics_enabled,
             dashboard_enabled: false,
             admin_secret: admin_secret.map(Arc::new),
+            deployer_secret: None,
+            read_only_secret: None,
+            cloudflare_v4_account: None,
             supervisor: Arc::new(|| None),
             test_runtime_restart: None,
             worker_api: None,
@@ -354,6 +379,50 @@ impl HttpState {
     pub(crate) fn search_api(&self) -> Option<&Arc<SearchApiState>> {
         self.search_api.as_ref()
     }
+
+    /// Borrow the resolved admin capability without exposing its value.
+    #[must_use]
+    pub(crate) fn admin_secret(&self) -> Option<&SecretString> {
+        self.admin_secret.as_deref()
+    }
+
+    /// Borrow the resolved deployer capability without exposing its value.
+    #[must_use]
+    pub(crate) fn deployer_secret(&self) -> Option<&SecretString> {
+        self.deployer_secret.as_deref()
+    }
+
+    /// Borrow the resolved read-only capability without exposing its value.
+    #[must_use]
+    pub(crate) fn read_only_secret(&self) -> Option<&SecretString> {
+        self.read_only_secret.as_deref()
+    }
+
+    /// Attach three distinct v4 Bearer capabilities in test-support builds.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub(crate) fn with_v4_tokens(
+        mut self,
+        deployer: SecretString,
+        read_only: SecretString,
+    ) -> Self {
+        self.deployer_secret = Some(Arc::new(deployer));
+        self.read_only_secret = Some(Arc::new(read_only));
+        self
+    }
+
+    /// Attach the stable one-account Cloudflare v4 identity mapping.
+    #[must_use]
+    pub(crate) fn with_cloudflare_v4_account(mut self, authority: AccountAuthority) -> Self {
+        self.cloudflare_v4_account = Some(Arc::new(authority));
+        self
+    }
+
+    /// Borrow the stable one-account Cloudflare v4 identity mapping.
+    #[must_use]
+    pub(crate) fn cloudflare_v4_account(&self) -> Option<&AccountAuthority> {
+        self.cloudflare_v4_account.as_deref()
+    }
 }
 
 /// Public routes only.
@@ -362,6 +431,7 @@ pub fn public_router(state: HttpState) -> Router {
     Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
+        .merge(removed_management_router(true))
         .fallback(workers_http::public_ingress)
         .layer(middleware::from_fn_with_state(
             middleware_state,
@@ -370,39 +440,19 @@ pub fn public_router(state: HttpState) -> Router {
         .with_state(state)
 }
 
-fn operator_api_router(state: HttpState) -> Router<HttpState> {
-    let auth_state = state.clone();
-    Router::new()
-        .route("/v1/meta", get(operator_meta))
-        .route("/v1/system/status", get(status))
-        .merge(workers_http::control_router())
-        .merge(kv_http::control_router())
-        .merge(d1_http::control_router())
-        .merge(do_http::control_router())
-        .merge(r2_http::control_router())
-        .merge(scheduler_http::control_router())
-        .merge(queue_http::control_router())
-        .merge(workflow_http::control_router())
-        .merge(cache_images_http::control_router())
-        .merge(search_http::control_router())
-        .merge(test_control_router())
-        .route("/v1/{*rest}", any(operator_api_not_found))
-        .layer(middleware::from_fn_with_state(
-            auth_state,
-            operator_auth_middleware,
-        ))
-        .with_state(state)
-}
-
 /// Admin routes, including public health plus operator API and metrics.
 pub fn admin_router(state: HttpState) -> Router {
     let metrics_enabled = state.metrics_enabled;
     let middleware_state = state.clone();
-    let api_state = state.clone();
+    let v4_state = state.clone();
     let mut router = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
-        .nest("/operator/api", operator_api_router(api_state));
+        .nest(
+            "/client/v4",
+            crate::cloudflare_v4::router(v4_state, Router::new()),
+        )
+        .merge(removed_management_router(false));
     if metrics_enabled {
         router = router.route("/operator/metrics", get(metrics_handler));
     }
@@ -424,11 +474,15 @@ pub fn admin_router(state: HttpState) -> Router {
 pub fn merged_router(state: HttpState) -> Router {
     let metrics_enabled = state.metrics_enabled;
     let middleware_state = state.clone();
-    let api_state = state.clone();
+    let v4_state = state.clone();
     let mut router = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
-        .nest("/operator/api", operator_api_router(api_state));
+        .nest(
+            "/client/v4",
+            crate::cloudflare_v4::router(v4_state, Router::new()),
+        )
+        .merge(removed_management_router(false));
     if metrics_enabled {
         router = router.route("/operator/metrics", get(metrics_handler));
     }
@@ -443,29 +497,6 @@ pub fn merged_router(state: HttpState) -> Router {
             bounds_middleware,
         ))
         .with_state(state)
-}
-
-async fn operator_meta() -> Response {
-    Json(serde_json::json!({
-        "release": env!("CARGO_PKG_VERSION"),
-        "apiVersion": "v1",
-        "dashboardAssetsSha256": embedded_dashboard_assets_sha256(),
-        "capabilities": [
-            "workers",
-            "kv",
-            "d1",
-            "r2",
-            "durable-objects",
-            "queues",
-            "workflows",
-            "scheduler",
-            "cache",
-            "images",
-            "vectorize",
-            "ai-search",
-        ],
-    }))
-    .into_response()
 }
 
 async fn live() -> StatusCode {
@@ -485,15 +516,22 @@ async fn ready(State(state): State<HttpState>) -> Response {
     }
 }
 
-async fn status(State(state): State<HttpState>) -> Response {
-    let snap = state.health.snapshot();
-    let supervisor = (state.supervisor)();
-    Json(serde_json::json!({
-        "readiness": snap.readiness,
-        "components": snap.components,
-        "supervisor": supervisor,
-    }))
-    .into_response()
+fn removed_management_router(reserve_v4: bool) -> Router<HttpState> {
+    let mut router = Router::new()
+        .route("/operator/api", any(neutral_not_found))
+        .route("/operator/api/{*rest}", any(neutral_not_found))
+        .route("/v1", any(neutral_not_found))
+        .route("/v1/{*rest}", any(neutral_not_found));
+    if reserve_v4 {
+        router = router
+            .route("/client/v4", any(neutral_not_found))
+            .route("/client/v4/{*rest}", any(neutral_not_found));
+    }
+    router
+}
+
+async fn neutral_not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
 }
 
 async fn metrics_handler(State(state): State<HttpState>, request: Request) -> Response {
@@ -642,32 +680,12 @@ pub(crate) fn authorize(state: &HttpState, request: &Request) -> bool {
     bearer_matches(header, secret)
 }
 
-async fn operator_api_not_found(request: Request) -> Response {
-    let error = PlatformError::new(ErrorCode::ResourceNotFound, "operator API route not found");
-    operator_error_response(&error, operator_request_id(&request))
-}
-
 fn operator_request_id(request: &Request) -> RequestId {
     request
         .extensions()
         .get::<RequestId>()
         .copied()
         .unwrap_or_else(RequestId::generate)
-}
-
-async fn operator_auth_middleware(
-    State(state): State<HttpState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    if !authorize(&state, &request) {
-        let error = PlatformError::new(
-            ErrorCode::AdminAuthRequired,
-            "admin authentication is required",
-        );
-        return operator_error_response(&error, operator_request_id(&request));
-    }
-    next.run(request).await
 }
 
 pub(crate) fn operator_error_response(error: &PlatformError, request_id: RequestId) -> Response {
