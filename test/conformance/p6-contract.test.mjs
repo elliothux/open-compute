@@ -5,6 +5,7 @@ import { validateCommitted } from "./p6-contract.mjs";
 import { assertSanitizedTrace, sanitizeTrace } from "./p6-trace.mjs";
 
 const capability = JSON.parse(readFileSync(new URL("../../openapi/p6-capability.json", import.meta.url)));
+const extension = JSON.parse(readFileSync(new URL("../../openapi/open-compute-extension.json", import.meta.url)));
 const catalog = JSON.parse(readFileSync(new URL("./catalog.json", import.meta.url)));
 
 test("P6 pinned OpenAPI subset and capability projection are internally reproducible", () => {
@@ -13,6 +14,35 @@ test("P6 pinned OpenAPI subset and capability projection are internally reproduc
   assert.equal(catalog.wrangler.fieldCount, capability.wrangler.fields.length);
   assert.equal(catalog.wrangler.bindingCount, capability.wrangler.bindings.length);
   assert.equal(catalog.wrangler.commandCount, capability.wrangler.commands.length);
+});
+
+test("vendor extension operations have stable typed envelopes and bodyless requests", () => {
+  const operations = Object.entries(extension.paths).flatMap(([path, methods]) =>
+    Object.entries(methods).map(([method, operation]) => ({ path, method, operation })),
+  );
+  assert.equal(operations.length, 18);
+  assert.equal(operations.filter(({ method }) => method === "post").length, 8);
+  assert.equal(new Set(operations.map(({ operation }) => operation.operationId)).size, 18);
+  assert.ok(operations.every(({ operation }) => operation["x-open-compute-capability-status"] === "planned"));
+  assert.ok(operations.every(({ operation }) =>
+    operation["x-open-compute-request-body"] === "none" && operation.requestBody === undefined));
+  for (const { operation } of operations) {
+    assert.equal(operation.responses["4XX"].content["application/json"].schema.$ref,
+      "#/components/schemas/ErrorEnvelope");
+    assert.equal(operation.responses["5XX"].content["application/json"].schema.$ref,
+      "#/components/schemas/ErrorEnvelope");
+    const success = Object.entries(operation.responses).filter(([status]) => status.startsWith("2"));
+    assert.ok(success.length >= 1);
+    for (const [, response] of success) {
+      const name = response.content["application/json"].schema.$ref.split("/").at(-1);
+      const schema = extension.components.schemas[name];
+      assert.equal(schema.properties.success.const, true);
+      assert.notDeepEqual(schema.properties.result, {});
+    }
+  }
+  assert.equal(extension.components.schemas.ErrorEnvelope.properties.success.const, false);
+  assert.equal(extension.components.schemas.ErrorEnvelope.properties.result.type, "null");
+  assert.equal(extension.components.schemas.ErrorEnvelope.properties.errors.minItems, 1);
 });
 
 test("settings surfaces, asset upload variants, and old routes are classified exactly", () => {

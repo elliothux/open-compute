@@ -16,23 +16,34 @@
         "operationId": "open-compute-get-open-compute-capabilities",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -45,23 +56,34 @@
         "operationId": "open-compute-get-open-compute-system-status",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/SystemStatusResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -74,23 +96,34 @@
         "operationId": "open-compute-get-open-compute-scheduler",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/SchedulerStatusResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -103,34 +136,34 @@
         "operationId": "open-compute-post-open-compute-scheduler-pause",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/SchedulerStatusResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -143,34 +176,34 @@
         "operationId": "open-compute-post-open-compute-scheduler-resume",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/SchedulerStatusResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -183,34 +216,34 @@
         "operationId": "open-compute-post-open-compute-scheduler-repair",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/SchedulerStatusResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -223,23 +256,34 @@
         "operationId": "open-compute-get-open-compute-cache",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/CacheStatusResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -252,34 +296,34 @@
         "operationId": "open-compute-post-open-compute-cache-garbage-collection",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/CacheStatusResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -292,23 +336,34 @@
         "operationId": "open-compute-get-open-compute-images-capacity",
         "x-open-compute-capability-status": "planned",
         "parameters": [],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ImageCapacityResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -326,8 +381,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           },
           {
@@ -335,28 +389,38 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/WorkerEndpointsResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -374,28 +438,38 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/DurableObjectNamespacesResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -413,8 +487,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           },
           {
@@ -422,28 +495,38 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/DurableObjectRecordsResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -461,8 +544,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           },
           {
@@ -470,39 +552,48 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "201": {
+            "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -518,8 +609,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           },
           {
@@ -527,28 +617,38 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupsResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -566,8 +666,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           },
           {
@@ -575,39 +674,48 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "201": {
+            "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -625,8 +733,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           },
           {
@@ -634,39 +741,48 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "201": {
+            "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -682,8 +798,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           },
           {
@@ -691,28 +806,38 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupsResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -730,8 +855,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           },
           {
@@ -739,39 +863,48 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/components/schemas/PathSegment"
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false
-              }
-            }
-          }
-        },
+        "x-open-compute-request-body": "none",
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupResponse"
                 }
               }
             }
           },
-          "default": {
-            "description": "Cloudflare-style or vendor-reserved error",
+          "201": {
+            "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope"
+                  "$ref": "#/components/schemas/BackupResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Cloudflare-style or vendor-reserved error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -782,6 +915,11 @@
   },
   "components": {
     "schemas": {
+      "PathSegment": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!\\.{1,2}$).+$"
+      },
       "Error": {
         "type": "object",
         "additionalProperties": false,
@@ -801,6 +939,7 @@
           "source": {
             "type": "object",
             "additionalProperties": false,
+            "required": [],
             "properties": {
               "pointer": {
                 "type": "string"
@@ -809,7 +948,278 @@
           }
         }
       },
-      "Envelope": {
+      "Message": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "release",
+          "wrangler_version",
+          "compatibility_date",
+          "compatibility_flags",
+          "endpoints",
+          "deviations"
+        ],
+        "properties": {
+          "release": {
+            "type": "string",
+            "minLength": 1
+          },
+          "wrangler_version": {
+            "type": "string",
+            "const": "4.127.1"
+          },
+          "compatibility_date": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "minimum",
+              "maximum"
+            ],
+            "properties": {
+              "minimum": {
+                "type": "string",
+                "format": "date"
+              },
+              "maximum": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          "compatibility_flags": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "endpoints": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "supported",
+                "supported_with_deviation",
+                "unsupported"
+              ]
+            }
+          },
+          "deviations": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SystemStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "version",
+          "components"
+        ],
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "state"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SchedulerStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "pending",
+          "running"
+        ],
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "running": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CacheStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entries",
+          "bytes"
+        ],
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ImageCapacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "queued",
+          "running",
+          "capacity"
+        ],
+        "properties": {
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "running": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "WorkerEndpoint": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "path",
+          "created_on"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DurableObjectNamespace": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "script_name",
+          "class_name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "script_name": {
+            "type": "string"
+          },
+          "class_name": {
+            "type": "string"
+          }
+        }
+      },
+      "DurableObjectRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "namespace_id",
+          "created_on"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "namespace_id": {
+            "type": "string"
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Backup": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "created_on",
+          "state",
+          "size"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ErrorEnvelope": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -820,18 +1230,356 @@
         ],
         "properties": {
           "success": {
-            "type": "boolean"
+            "type": "boolean",
+            "const": false
           },
-          "result": {},
+          "result": {
+            "type": "null"
+          },
           "errors": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "$ref": "#/components/schemas/Error"
             }
           },
           "messages": {
             "type": "array",
-            "items": {}
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "CapabilitiesResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/Capabilities"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "SystemStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/SystemStatus"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "SchedulerStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/SchedulerStatus"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "CacheStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/CacheStatus"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "ImageCapacityResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/ImageCapacity"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "WorkerEndpointsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkerEndpoint"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "DurableObjectNamespacesResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DurableObjectNamespace"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "DurableObjectRecordsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DurableObjectRecord"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "BackupResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/Backup"
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "BackupsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Backup"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
           }
         }
       }

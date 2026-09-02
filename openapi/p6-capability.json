@@ -1384,7 +1384,7 @@
         "path": "/open-compute/scheduler/pause",
         "status": "planned",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "none"
       },
       {
         "id": "POST /open-compute/scheduler/resume",
@@ -1392,7 +1392,7 @@
         "path": "/open-compute/scheduler/resume",
         "status": "planned",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "none"
       },
       {
         "id": "POST /open-compute/scheduler/repair",
@@ -1400,7 +1400,7 @@
         "path": "/open-compute/scheduler/repair",
         "status": "planned",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "none"
       },
       {
         "id": "GET /open-compute/cache",
@@ -1416,7 +1416,7 @@
         "path": "/open-compute/cache/garbage-collection",
         "status": "planned",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "none"
       },
       {
         "id": "GET /open-compute/images/capacity",
@@ -1456,7 +1456,7 @@
         "path": "/accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
         "status": "planned",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "none"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
@@ -1472,7 +1472,7 @@
         "path": "/accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore",
         "status": "planned",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "none"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
@@ -1480,7 +1480,7 @@
         "path": "/accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
         "status": "planned",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "none"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
@@ -1496,7 +1496,7 @@
         "path": "/accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore",
         "status": "planned",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "none"
       }
     ],
     "legacyRoutes": [

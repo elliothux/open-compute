@@ -140,7 +140,7 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
   for (const id of source.managementApi.vendorRoutes) {
     const [method, path] = operationKey(id);
     routes.push({ id, method: method.toUpperCase(), path, status: "planned", source: "open-compute-extension",
-      requestMediaType: method === "get" ? "none" : "json" });
+      requestMediaType: "none" });
   }
   const topFields = Object.keys(configSchema.definitions?.RawConfig?.properties ?? {});
   if (topFields.length === 0) throw new Error("Wrangler RawConfig field inventory is empty");
@@ -186,29 +186,149 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
   };
 }
 
+const EXTENSION_OPERATIONS = {
+  "GET /open-compute/capabilities": ["open-compute-get-open-compute-capabilities", "CapabilitiesResponse", ["200"]],
+  "GET /open-compute/system/status": ["open-compute-get-open-compute-system-status", "SystemStatusResponse", ["200"]],
+  "GET /open-compute/scheduler": ["open-compute-get-open-compute-scheduler", "SchedulerStatusResponse", ["200"]],
+  "POST /open-compute/scheduler/pause": ["open-compute-post-open-compute-scheduler-pause", "SchedulerStatusResponse", ["200"]],
+  "POST /open-compute/scheduler/resume": ["open-compute-post-open-compute-scheduler-resume", "SchedulerStatusResponse", ["200"]],
+  "POST /open-compute/scheduler/repair": ["open-compute-post-open-compute-scheduler-repair", "SchedulerStatusResponse", ["200"]],
+  "GET /open-compute/cache": ["open-compute-get-open-compute-cache", "CacheStatusResponse", ["200"]],
+  "POST /open-compute/cache/garbage-collection": ["open-compute-post-open-compute-cache-garbage-collection", "CacheStatusResponse", ["200"]],
+  "GET /open-compute/images/capacity": ["open-compute-get-open-compute-images-capacity", "ImageCapacityResponse", ["200"]],
+  "GET /accounts/{account_id}/open-compute/workers/{script_name}/endpoints": ["open-compute-get-accounts-account-id-open-compute-workers-script-name-endpoints", "WorkerEndpointsResponse", ["200"]],
+  "GET /accounts/{account_id}/open-compute/durable-objects": ["open-compute-get-accounts-account-id-open-compute-durable-objects", "DurableObjectNamespacesResponse", ["200"]],
+  "GET /accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects": ["open-compute-get-accounts-account-id-open-compute-durable-objects-namespace-id-objects", "DurableObjectRecordsResponse", ["200"]],
+  "POST /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups": ["open-compute-post-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups", "BackupResponse", ["200", "201"]],
+  "GET /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups": ["open-compute-get-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups", "BackupsResponse", ["200"]],
+  "POST /accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore": ["open-compute-post-accounts-account-id-open-compute-kv-backups-backup-id-restore", "BackupResponse", ["200", "201"]],
+  "POST /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups": ["open-compute-post-accounts-account-id-open-compute-d1-databases-database-id-backups", "BackupResponse", ["200", "201"]],
+  "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups": ["open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-backups", "BackupsResponse", ["200"]],
+  "POST /accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore": ["open-compute-post-accounts-account-id-open-compute-d1-backups-backup-id-restore", "BackupResponse", ["200", "201"]],
+};
+
+function successEnvelope(result) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["success", "result", "errors", "messages"],
+    properties: {
+      success: { type: "boolean", const: true },
+      result,
+      errors: { type: "array", maxItems: 0, items: { $ref: "#/components/schemas/Error" } },
+      messages: { type: "array", items: { $ref: "#/components/schemas/Message" } },
+    },
+  };
+}
+
+function objectSchema(required, properties) {
+  return { type: "object", additionalProperties: false, required, properties };
+}
+
+function extensionSchemas() {
+  const string = { type: "string" };
+  const nonNegativeInteger = { type: "integer", minimum: 0 };
+  const schemas = {
+    PathSegment: { type: "string", minLength: 1, pattern: "^(?!\\.{1,2}$).+$" },
+    Error: objectSchema(["code", "message"], {
+      code: { type: "integer", minimum: 9_100_000, maximum: 9_199_999 },
+      message: string,
+      source: objectSchema([], { pointer: string }),
+    }),
+    Message: objectSchema(["code", "message"], { code: { type: "integer" }, message: string }),
+    Capabilities: objectSchema(
+      ["release", "wrangler_version", "compatibility_date", "compatibility_flags", "endpoints", "deviations"],
+      {
+        release: { type: "string", minLength: 1 },
+        wrangler_version: { type: "string", const: "4.127.1" },
+        compatibility_date: objectSchema(["minimum", "maximum"], {
+          minimum: { type: "string", format: "date" }, maximum: { type: "string", format: "date" },
+        }),
+        compatibility_flags: { type: "array", uniqueItems: true, items: string },
+        endpoints: { type: "object", additionalProperties: {
+          type: "string", enum: ["supported", "supported_with_deviation", "unsupported"],
+        } },
+        deviations: { type: "array", uniqueItems: true, items: string },
+      },
+    ),
+    SystemStatus: objectSchema(["state", "version", "components"], {
+      state: string,
+      version: string,
+      components: { type: "array", items: objectSchema(["name", "state"], {
+        name: string, state: string, message: string,
+      }) },
+    }),
+    SchedulerStatus: objectSchema(["state", "pending", "running"], {
+      state: string, pending: nonNegativeInteger, running: nonNegativeInteger,
+    }),
+    CacheStatus: objectSchema(["entries", "bytes"], {
+      entries: nonNegativeInteger, bytes: nonNegativeInteger,
+    }),
+    ImageCapacity: objectSchema(["queued", "running", "capacity"], {
+      queued: nonNegativeInteger, running: nonNegativeInteger, capacity: nonNegativeInteger,
+    }),
+    WorkerEndpoint: objectSchema(["id", "path", "created_on"], {
+      id: string, path: string, created_on: { type: "string", format: "date-time" },
+    }),
+    DurableObjectNamespace: objectSchema(["id", "script_name", "class_name"], {
+      id: string, script_name: string, class_name: string,
+    }),
+    DurableObjectRecord: objectSchema(["id", "namespace_id", "created_on"], {
+      id: string, namespace_id: string, created_on: { type: "string", format: "date-time" },
+    }),
+    Backup: objectSchema(["id", "created_on", "state", "size"], {
+      id: string, created_on: { type: "string", format: "date-time" }, state: string, size: nonNegativeInteger,
+    }),
+  };
+  schemas.ErrorEnvelope = objectSchema(["success", "result", "errors", "messages"], {
+    success: { type: "boolean", const: false },
+    result: { type: "null" },
+    errors: { type: "array", minItems: 1, items: { $ref: "#/components/schemas/Error" } },
+    messages: { type: "array", items: { $ref: "#/components/schemas/Message" } },
+  });
+  for (const [name, result] of Object.entries({
+    CapabilitiesResponse: { $ref: "#/components/schemas/Capabilities" },
+    SystemStatusResponse: { $ref: "#/components/schemas/SystemStatus" },
+    SchedulerStatusResponse: { $ref: "#/components/schemas/SchedulerStatus" },
+    CacheStatusResponse: { $ref: "#/components/schemas/CacheStatus" },
+    ImageCapacityResponse: { $ref: "#/components/schemas/ImageCapacity" },
+    WorkerEndpointsResponse: { type: "array", items: { $ref: "#/components/schemas/WorkerEndpoint" } },
+    DurableObjectNamespacesResponse: { type: "array", items: { $ref: "#/components/schemas/DurableObjectNamespace" } },
+    DurableObjectRecordsResponse: { type: "array", items: { $ref: "#/components/schemas/DurableObjectRecord" } },
+    BackupResponse: { $ref: "#/components/schemas/Backup" },
+    BackupsResponse: { type: "array", items: { $ref: "#/components/schemas/Backup" } },
+  })) schemas[name] = successEnvelope(result);
+  return schemas;
+}
+
 export function buildExtension(source) {
+  const expected = new Set(source.managementApi.vendorRoutes);
+  if (expected.size !== Object.keys(EXTENSION_OPERATIONS).length
+      || Object.keys(EXTENSION_OPERATIONS).some(id => !expected.has(id))) {
+    throw new Error("vendor extension operation contract differs from the route authority");
+  }
   const paths = {};
   for (const id of source.managementApi.vendorRoutes) {
     const [method, path] = operationKey(id);
+    const [operationId, responseSchema, successStatuses] = EXTENSION_OPERATIONS[id];
     const parameters = [...path.matchAll(/\{([^}]+)\}/g)].map(match => ({
-      name: match[1], in: "path", required: true, schema: { type: "string", minLength: 1 },
+      name: match[1], in: "path", required: true, schema: { $ref: "#/components/schemas/PathSegment" },
     }));
     paths[path] ??= {};
     paths[path][method] = {
-      operationId: `open-compute-${method}-${path.replaceAll(/[^a-zA-Z0-9]+/g, "-").replaceAll(/^-|-$/g, "")}`,
+      operationId,
       "x-open-compute-capability-status": "planned",
       parameters,
-      ...(method === "post" ? { requestBody: { required: true, content: {
-        "application/json": { schema: { type: "object", additionalProperties: false } },
-      } } } : {}),
-      responses: {
-        "200": { description: "Successful vendor extension response", content: {
-          "application/json": { schema: { $ref: "#/components/schemas/Envelope" } },
-        } },
-        default: { description: "Cloudflare-style or vendor-reserved error", content: {
-          "application/json": { schema: { $ref: "#/components/schemas/Envelope" } },
-        } },
-      },
+      "x-open-compute-request-body": "none",
+      responses: Object.fromEntries([
+        ...successStatuses.map(status => [status, { description: "Successful vendor extension response", content: {
+          "application/json": { schema: { $ref: `#/components/schemas/${responseSchema}` } },
+        } }]),
+        ...["4XX", "5XX"].map(status => [status, {
+          description: "Cloudflare-style or vendor-reserved error response",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } },
+        }]),
+      ]),
     };
   }
   return {
@@ -217,16 +337,7 @@ export function buildExtension(source) {
       description: "Source schema for vendor-only routes. Planned operations are not an implementation claim." },
     servers: [{ url: "/client/v4" }],
     paths,
-    components: { schemas: {
-      Error: { type: "object", additionalProperties: false, required: ["code", "message"], properties: {
-        code: { type: "integer", minimum: 9_100_000, maximum: 9_199_999 }, message: { type: "string" },
-        source: { type: "object", additionalProperties: false, properties: { pointer: { type: "string" } } },
-      } },
-      Envelope: { type: "object", additionalProperties: false, required: ["success", "result", "errors", "messages"], properties: {
-        success: { type: "boolean" }, result: {}, errors: { type: "array", items: { $ref: "#/components/schemas/Error" } },
-        messages: { type: "array", items: {} },
-      } },
-    } },
+    components: { schemas: extensionSchemas() },
   };
 }
 
@@ -278,10 +389,38 @@ export function validateCommitted({ openapiPath, wranglerRoot, sdkRoot } = {}) {
   }
   const capability = json(CAPABILITY_PATH);
   const extension = json(EXTENSION_PATH);
-  const expectedVendorPaths = new Set(json(CAPABILITY_SOURCE_PATH).managementApi.vendorRoutes.map(id => operationKey(id)[1]));
+  const capabilitySource = json(CAPABILITY_SOURCE_PATH);
+  const expectedExtension = `${JSON.stringify(buildExtension(capabilitySource), null, 2)}\n`;
+  if (expectedExtension !== readFileSync(EXTENSION_PATH, "utf8")) {
+    throw new Error("vendor extension schema is not reproducible");
+  }
+  const expectedVendorPaths = new Set(capabilitySource.managementApi.vendorRoutes.map(id => operationKey(id)[1]));
   if (Object.keys(extension.paths).length !== expectedVendorPaths.size
       || Object.keys(extension.paths).some(path => !expectedVendorPaths.has(path))) {
     throw new Error("vendor extension schema route inventory drift");
+  }
+  const extensionOperations = Object.values(extension.paths).flatMap(path => Object.values(path));
+  const operationIds = extensionOperations.map(operation => operation.operationId);
+  if (extensionOperations.length !== capabilitySource.managementApi.vendorRoutes.length
+      || new Set(operationIds).size !== operationIds.length) {
+    throw new Error("vendor extension operation IDs are incomplete or duplicated");
+  }
+  for (const operation of extensionOperations) {
+    if (operation["x-open-compute-capability-status"] !== "planned"
+        || operation["x-open-compute-request-body"] !== "none"
+        || operation.requestBody !== undefined) {
+      throw new Error(`vendor extension operation contract drift: ${operation.operationId}`);
+    }
+    for (const [status, response] of Object.entries(operation.responses)) {
+      const reference = response.content?.["application/json"]?.schema?.$ref;
+      if (status === "4XX" || status === "5XX") {
+        if (reference !== "#/components/schemas/ErrorEnvelope") {
+          throw new Error(`vendor extension error envelope drift: ${operation.operationId}`);
+        }
+      } else if (!status.startsWith("2") || reference === undefined || reference.endsWith("/ErrorEnvelope")) {
+        throw new Error(`vendor extension success envelope drift: ${operation.operationId}`);
+      }
+    }
   }
   const routeIds = capability.managementApi.routes.map(item => item.id);
   for (const id of [...manifest.operations, ...manifest.deferredOperations.map(item => item.operation),
