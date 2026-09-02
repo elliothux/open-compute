@@ -13,7 +13,7 @@ use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use open_compute_core::{
-    AccountId, CronSchedule, DeploymentId, ErrorCode, PlatformError, QueueMessageId, RequestId,
+    AccountId, CronSchedule, ErrorCode, PlatformError, QueueMessageId, RequestId, VersionId,
     WorkerId,
 };
 use open_compute_runtime::{
@@ -23,7 +23,7 @@ use open_compute_storage::{
     AuthorizedDurableObjectDelete, ClaimedJob, QUEUE_MAX_MESSAGE_BYTES, QueueContentType,
 };
 use open_compute_workers::{
-    DeploymentPins, RuntimeScope, RuntimeSource, RuntimeValidator, ValidationCandidate, loader_key,
+    RuntimeScope, RuntimeSource, RuntimeValidator, ValidationCandidate, VersionPins, loader_key,
     validate_env_name,
 };
 use serde::Deserialize;
@@ -41,7 +41,7 @@ mod workflow;
 pub use workflow::{WorkflowDispatchResult, WorkflowOutcome, WorkflowRunRequest};
 mod custom_events;
 
-const SOURCE_PATH: &str = "/internal/runtime/v1/deployments/resolve";
+const SOURCE_PATH: &str = "/internal/runtime/v1/versions/resolve";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 const MAX_SOURCE_REQUEST: usize = 4096;
 const DEFAULT_MAX_TENANT_BODY: usize = 16 * 1024 * 1024;
@@ -220,7 +220,7 @@ pub struct QueueDispatchResult {
 pub struct ScheduledDispatchRequest {
     /// Logical UTC slot in Unix milliseconds.
     pub scheduled_time_ms: i64,
-    /// Exact deployment-declared expression.
+    /// Exact version-declared expression.
     pub cron: String,
     /// Whether the tenant Worker's scheduled handler owns this expression.
     pub scheduled_handler: bool,
@@ -250,15 +250,15 @@ struct AlarmObjectRequest<'a> {
     retry_count: Option<u8>,
 }
 
-/// Immutable target frozen by route resolution or deployment validation.
+/// Immutable target frozen by route resolution or version validation.
 #[derive(Clone, Debug)]
 pub struct DispatchTarget {
     /// Account authority.
     pub account_id: AccountId,
     /// Worker authority.
     pub worker_id: WorkerId,
-    /// Deployment authority.
-    pub deployment_id: DeploymentId,
+    /// Version authority.
+    pub version_id: VersionId,
     /// Expected immutable descriptor digest.
     pub worker_code_sha256: String,
     /// Optional named entrypoint.
@@ -271,7 +271,7 @@ pub struct DispatchTarget {
 
 impl DispatchTarget {
     fn loader_key(&self) -> String {
-        loader_key(self.account_id, self.worker_id, self.deployment_id)
+        loader_key(self.account_id, self.worker_id, self.version_id)
     }
 }
 
@@ -386,10 +386,10 @@ async fn resolve(State(state): State<SourceState>, request: Request) -> Response
 #[allow(clippy::needless_pass_by_value)]
 fn source_platform_error(error: PlatformError) -> Response {
     let status = match error.code() {
-        ErrorCode::DeploymentNotReady => StatusCode::CONFLICT,
+        ErrorCode::VersionNotReady => StatusCode::CONFLICT,
         ErrorCode::ArtifactUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::ArtifactIntegrityError
-        | ErrorCode::DeploymentInvariantViolation
+        | ErrorCode::VersionInvariantViolation
         | ErrorCode::BundleInvalid
         | ErrorCode::BundleRuntimeInvalid => StatusCode::UNPROCESSABLE_ENTITY,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -415,7 +415,7 @@ pub struct WorkerdTransport {
     auth: GenerationAuthRegistry,
     supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     max_request_body: usize,
-    deployment_pins: Option<DeploymentPins>,
+    version_pins: Option<VersionPins>,
     workflow_quarantine: Arc<Mutex<Option<open_compute_runtime::GenerationCredential>>>,
     #[cfg(test)]
     test_endpoint: Option<u16>,
@@ -444,7 +444,7 @@ impl WorkerdTransport {
             auth,
             supervisor,
             max_request_body: DEFAULT_MAX_TENANT_BODY,
-            deployment_pins: None,
+            version_pins: None,
             workflow_quarantine: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_endpoint: None,
@@ -465,14 +465,14 @@ impl WorkerdTransport {
         self
     }
 
-    /// Attach the conservative execution-lifetime authority used for deployment deletion.
+    /// Attach the conservative execution-lifetime authority used for version deletion.
     #[must_use]
-    pub fn with_deployment_pins(mut self, pins: DeploymentPins) -> Self {
-        self.deployment_pins = Some(pins);
+    pub fn with_version_pins(mut self, pins: VersionPins) -> Self {
+        self.version_pins = Some(pins);
         self
     }
 
-    /// Dispatch a public request to an already-frozen deployment target.
+    /// Dispatch a public request to an already-frozen version target.
     pub async fn dispatch(
         &self,
         target: DispatchTarget,
@@ -666,7 +666,7 @@ impl WorkerdTransport {
         let target = DispatchTarget {
             account_id: candidate.account_id,
             worker_id: candidate.worker_id,
-            deployment_id: candidate.deployment_id,
+            version_id: candidate.version_id,
             worker_code_sha256: hex::encode(candidate.worker_code_sha256),
             entrypoint,
             route_generation: 0,
@@ -686,7 +686,7 @@ impl WorkerdTransport {
             )),
             StatusCode::UNPROCESSABLE_ENTITY => Err(PlatformError::new(
                 ErrorCode::BundleRuntimeInvalid,
-                "real workerd rejected deployment startup",
+                "real workerd rejected version startup",
             )),
             _ => Err(runtime_unavailable()),
         }
@@ -729,8 +729,8 @@ impl WorkerdTransport {
         )?;
         insert_header(
             &mut headers,
-            "x-open-compute-deployment-id",
-            &target.deployment_id.to_string(),
+            "x-open-compute-version-id",
+            &target.version_id.to_string(),
         )?;
         insert_header(
             &mut headers,
@@ -809,8 +809,8 @@ impl WorkerdTransport {
         } else {
             None
         };
-        if execution_started && let Some(pins) = &self.deployment_pins {
-            pins.retain_until_restart(target.deployment_id)?;
+        if execution_started && let Some(pins) = &self.version_pins {
+            pins.retain_until_restart(target.version_id)?;
         }
         sanitize_response_headers(&mut parts.headers);
         if let Some(length) = asset_representation_length {
@@ -1066,7 +1066,7 @@ impl RuntimeValidator for WorkerdTransport {
             let target = DispatchTarget {
                 account_id: candidate.account_id,
                 worker_id: candidate.worker_id,
-                deployment_id: candidate.deployment_id,
+                version_id: candidate.version_id,
                 worker_code_sha256: hex::encode(candidate.worker_code_sha256),
                 entrypoint: Some(class_name),
                 route_generation: 0,

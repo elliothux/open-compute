@@ -10,11 +10,11 @@ use std::collections::BTreeSet;
 mod handler;
 pub use handler::{AssetRequest, AssetResponsePlan, plan_asset_response};
 
-/// Maximum number of logical asset paths in one deployment.
+/// Maximum number of logical asset paths in one version.
 pub const MAX_ASSET_FILES: usize = 20_000;
 /// Maximum bytes in one asset.
 pub const MAX_ASSET_FILE_BYTES: u64 = 25 * 1024 * 1024;
-/// Maximum logical bytes across one deployment.
+/// Maximum logical bytes across one version.
 pub const MAX_ASSET_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 /// Maximum canonical manifest size.
 pub const MAX_ASSET_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
@@ -43,7 +43,7 @@ impl AssetEntryV1 {
     }
 }
 
-/// Canonical, path-sorted manifest for one immutable deployment.
+/// Canonical, path-sorted manifest for one immutable version.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssetManifestV1 {
@@ -123,7 +123,7 @@ impl AssetManifestV1 {
     }
 }
 
-/// Worker-first selection for the deployment's default HTTP route.
+/// Worker-first selection for the version's default HTTP route.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RunWorkerFirst {
@@ -200,7 +200,7 @@ pub struct AssetRedirectRule {
     pub status: u16,
 }
 
-/// Canonical route behavior frozen with a deployment.
+/// Canonical route behavior frozen with a version.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssetRoutingConfigV1 {
@@ -288,16 +288,16 @@ impl AssetRoutingConfigV1 {
         Ok(())
     }
 
-    /// Canonical JSON bytes included in the deployment descriptor.
+    /// Canonical JSON bytes included in the version descriptor.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, PlatformError> {
         self.validate()?;
         serde_json::to_vec(self).map_err(|_| config_unsupported())
     }
 }
 
-/// Static-asset content supplied to the unified deployment pipeline.
+/// Static-asset content supplied to the unified version pipeline.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeploymentAssets {
+pub struct VersionAssets {
     /// Canonical manifest whose objects are already uploaded or uploaded by the caller.
     pub manifest: AssetManifestV1,
     /// Immutable route and optional binding behavior.
@@ -443,7 +443,7 @@ fn manifest_invalid() -> PlatformError {
 fn asset_limit_exceeded() -> PlatformError {
     PlatformError::new(
         ErrorCode::AssetLimitExceeded,
-        "asset deployment exceeds a fixed limit",
+        "asset version exceeds a fixed limit",
     )
 }
 

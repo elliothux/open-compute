@@ -26,13 +26,13 @@ use open_compute_service::{
     serve_binding_backend,
 };
 use open_compute_storage::{
-    D1_DATABASE_SCHEMA_VERSION, DeploymentRecord, PlatformStorage, R2_SCHEMA_VERSION,
-    ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, WorkerRepository,
+    D1_DATABASE_SCHEMA_VERSION, PlatformStorage, R2_SCHEMA_VERSION, ReserveResourceCreate,
+    ResourceCreateReservation, ResourceRepository, VersionRecord, WorkerRepository,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    D1ResourceDriver, DeploymentBindingInput, DeploymentController, ModuleInput, ModuleType,
-    R2ResourceDriver, ResourceDriver, ResourcePins, RuntimeSource, RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, D1ResourceDriver,
+    ModuleInput, ModuleType, R2ResourceDriver, ResourceDriver, ResourcePins, RuntimeSource,
+    RuntimeValidator, VersionBindingInput, VersionController,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -179,14 +179,13 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     let bucket = create_bucket(&storage, &objects, &r2_config, account).await;
     let repository = WorkerRepository::new(storage.db());
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let deployments =
-        DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
+    let versions = VersionController::new(&storage, artifacts, validator, BundleLimits::default());
     let (worker, _) = repository
         .create_worker(account, "d1-matrix", RequestId::generate(), 20, 1_000_000)
         .unwrap();
-    let deployment = deploy(
-        &deployments,
-        deployment_request(
+    let version = deploy(
+        &versions,
+        version_request(
             account,
             worker.id,
             database,
@@ -199,7 +198,7 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
         &supervisor,
     )
     .await;
-    let cold = dispatch(&transport, account, worker.id, &deployment, None, "/matrix").await;
+    let cold = dispatch(&transport, account, worker.id, &version, None, "/matrix").await;
     assert_eq!(cold.status, 200, "{}", cold.body);
     assert_eq!(cold.loader_outcome, Some(LoaderOutcome::Cold));
     let matrix: serde_json::Value = serde_json::from_str(&cold.body).unwrap();
@@ -221,17 +220,9 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     assert_eq!(matrix["resultUnknown"], true);
     assert_eq!(matrix["limitMatrix"], true);
 
-    let dump = dispatch(&transport, account, worker.id, &deployment, None, "/dump").await;
+    let dump = dispatch(&transport, account, worker.id, &version, None, "/dump").await;
     assert_eq!((dump.status, dump.body.as_str()), (200, "true"));
-    let session = dispatch(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        None,
-        "/session",
-    )
-    .await;
+    let session = dispatch(&transport, account, worker.id, &version, None, "/session").await;
     assert_eq!(session.status, 200, "{}", session.body);
     let session_json: serde_json::Value = serde_json::from_str(&session.body).unwrap();
     for key in [
@@ -255,21 +246,21 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         None,
         "/batch-loss",
     )
     .await;
     assert_eq!((batch_loss.status, batch_loss.body.as_str()), (200, "true"));
 
-    let warm = dispatch(&transport, account, worker.id, &deployment, None, "/count").await;
+    let warm = dispatch(&transport, account, worker.id, &version, None, "/count").await;
     assert_eq!((warm.status, warm.body.as_str()), (200, "2"));
     assert_eq!(warm.loader_outcome, Some(LoaderOutcome::Warm));
     let named = dispatch(
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         Some("Named"),
         "/shape",
     )
@@ -284,8 +275,8 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
             .create_worker(account, name, RequestId::generate(), now, 1_000_000)
             .unwrap();
         let shape = deploy(
-            &deployments,
-            deployment_request(
+            &versions,
+            version_request(
                 account,
                 shape_worker.id,
                 database,
@@ -305,13 +296,13 @@ async fn p0_6_real_d1_facade_and_backend_matrix() {
     let old_pid = supervisor.snapshot().pid.unwrap();
     supervisor.report_unhealthy();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
-    let restarted = dispatch(&transport, account, worker.id, &deployment, None, "/count").await;
+    let restarted = dispatch(&transport, account, worker.id, &version, None, "/count").await;
     assert_eq!((restarted.status, restarted.body.as_str()), (200, "2"));
     let resumed = dispatch(
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         None,
         &format!("/resume?b={bookmark}"),
     )
@@ -412,27 +403,27 @@ fn reserve(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
     supervisor: &WorkerdSupervisor,
-) -> DeploymentRecord {
+) -> VersionRecord {
     match controller
-        .create_deployment(request)
+        .create_version(request)
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "deployment failed: {error:?}; runtime={:?}; diagnostics={:?}",
+                "version failed: {error:?}; runtime={:?}; diagnostics={:?}",
                 supervisor.snapshot(),
                 supervisor.last_diagnostics()
             )
         }) {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn deployment_request(
+fn version_request(
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     database: ResourceId,
@@ -441,7 +432,7 @@ fn deployment_request(
     key: &str,
     source: &str,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -456,7 +447,7 @@ fn deployment_request(
     for name in ["DB", "DB_ALIAS"] {
         bindings.insert(
             name.to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::D1Database,
                 id: database,
                 permissions: CanonicalPermissions::default(),
@@ -467,7 +458,7 @@ fn deployment_request(
     if let Some(other) = other {
         bindings.insert(
             "OTHER".to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::D1Database,
                 id: other,
                 permissions: CanonicalPermissions::default(),
@@ -478,7 +469,7 @@ fn deployment_request(
     if let Some(bucket) = bucket {
         bindings.insert(
             "BUCKET".to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::R2Bucket,
                 id: bucket,
                 permissions: CanonicalPermissions::default(),
@@ -486,11 +477,11 @@ fn deployment_request(
             },
         );
     }
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -537,7 +528,7 @@ async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     entrypoint: Option<&str>,
     path: &str,
 ) -> DispatchResponse {
@@ -552,8 +543,8 @@ async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: entrypoint.map(str::to_owned),
                 route_generation: 1,
                 request_id: RequestId::generate(),

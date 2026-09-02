@@ -3,12 +3,12 @@ import type { AiTransportProps, BindingEnv } from "../bindings/protocol.js";
 import { bindingJson, expectBindingStatus, isRecord } from "../bindings/private-transport.js";
 import { bindingError, BINDING_TOKEN_HEADER, currentStartupGeneration, systemRequestId } from "../loader/shared.js";
 
-/** Private deployment-scoped Markdown Conversion transport. */
+/** Private version-scoped Markdown Conversion transport. */
 export class AiTransport extends WorkerEntrypoint<BindingEnv, AiTransportProps> {
   #headers(): Record<string, string> {
     const props = this.ctx.props;
     if (!props || typeof props.accountId !== "string" || typeof props.workerId !== "string"
-        || typeof props.deploymentId !== "string" || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) {
+        || typeof props.versionId !== "string" || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) {
       throw bindingError("AI_PROTOCOL_ERROR");
     }
     return {
@@ -16,7 +16,7 @@ export class AiTransport extends WorkerEntrypoint<BindingEnv, AiTransportProps> 
       "x-open-compute-startup-generation": currentStartupGeneration(),
       "x-open-compute-account-id": props.accountId,
       "x-open-compute-worker-id": props.workerId,
-      "x-open-compute-deployment-id": props.deploymentId,
+      "x-open-compute-version-id": props.versionId,
       "x-open-compute-descriptor-sha256": props.descriptorSha256,
       "x-open-compute-request-id": systemRequestId(),
       "content-type": "application/json",

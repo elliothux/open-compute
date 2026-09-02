@@ -187,11 +187,11 @@ impl WorkflowRepository<'_> {
                     creation_operation_id:operation,creation_batch_id:batch_operation,created_at_ms: now_ms,
                     schedule };
                 tx.execute("INSERT INTO workflow_instance_referrers(instance_id,definition_id,definition_name,external_instance_id,
-                    version_id,deployment_id,instance_generation,creation_nonce,creation_operation_id,creation_batch_id,state,
+                    workflow_version_id,worker_version_id,instance_generation,creation_nonce,creation_operation_id,creation_batch_id,state,
                     trigger_cron,trigger_scheduled_time_ms,created_at_ms,updated_at_ms)
                     VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,'creating',?10,?11,?12,?12)", params![identity.instance_id.to_string(),definition.to_string(),
-                    identity.target.definition_name,identity.external_instance_id,identity.target.version_id.to_string(),
-                    identity.target.deployment_id.to_string(),identity.creation_nonce.as_bytes().as_slice(),operation.to_string(),
+                    identity.target.definition_name,identity.external_instance_id,identity.target.workflow_version_id.to_string(),
+                    identity.target.worker_version_id.to_string(),identity.creation_nonce.as_bytes().as_slice(),operation.to_string(),
                     batch_operation.to_string(),identity.schedule.as_ref().map(|value| &value.cron),
                     identity.schedule.as_ref().map(|value| value.scheduled_time),now_ms]).map_err(sql_error)?;
                 reservations.push(WorkflowReservation { identity,state: WorkflowRefState::Creating,updated_at_ms: now_ms });
@@ -435,8 +435,8 @@ impl WorkflowRepository<'_> {
             let reservation = tx.query_row(&format!("{RESERVATION_SELECT} WHERE r.instance_id=?1"),
                 [identity.instance_id.to_string()],reservation_row).optional().map_err(sql_error)?.ok_or_else(invariant)?;
             if reservation.identity != *identity || !matches!(reservation.state,WorkflowRefState::Creating|WorkflowRefState::Live) { return Err(invariant()); }
-            tx.execute("INSERT OR IGNORE INTO deployment_referrers(deployment_id,kind,ref_id,created_at_ms) VALUES(?1,'workflow_instance',?2,?3)",
-                params![identity.target.deployment_id.to_string(),identity.instance_id.to_string(),identity.created_at_ms]).map_err(sql_error)?;
+            tx.execute("INSERT OR IGNORE INTO version_referrers(version_id,kind,ref_id,created_at_ms) VALUES(?1,'workflow_instance',?2,?3)",
+                params![identity.target.worker_version_id.to_string(),identity.instance_id.to_string(),identity.created_at_ms]).map_err(sql_error)?;
             tx.execute("INSERT OR IGNORE INTO workflow_referrers(definition_id,referrer_kind,referrer_id,created_at_ms) VALUES(?1,'instance',?2,?3)",
                 params![identity.target.definition_id.to_string(),identity.instance_id.to_string(),identity.created_at_ms]).map_err(sql_error)?;
             Ok(())
@@ -444,11 +444,11 @@ impl WorkflowRepository<'_> {
     }
 }
 
-pub(super) const RESERVATION_SELECT: &str = "SELECT f.account_id,r.definition_id,r.definition_name,r.version_id,v.worker_id,r.deployment_id,
+pub(super) const RESERVATION_SELECT: &str = "SELECT f.account_id,r.definition_id,r.definition_name,r.workflow_version_id,v.worker_id,r.worker_version_id,
     v.worker_code_sha256,v.class_name,v.loader_schema_version,v.capability_version,v.descriptor_sha256,
     r.instance_id,r.external_instance_id,r.instance_generation,r.creation_nonce,r.state,r.created_at_ms,r.updated_at_ms,
     r.creation_operation_id,r.creation_batch_id,r.trigger_cron,r.trigger_scheduled_time_ms
-    FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.version_id
+    FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.workflow_version_id
     JOIN workflow_definitions f ON f.id=r.definition_id";
 
 pub(super) fn verify_identity(
@@ -476,10 +476,10 @@ pub(super) fn referrers_intact(
     conn: &rusqlite::Connection,
     identity: &WorkflowInstanceIdentity,
 ) -> Result<bool, PlatformError> {
-    conn.query_row("SELECT EXISTS(SELECT 1 FROM deployment_referrers
-        WHERE deployment_id=?1 AND kind='workflow_instance' AND ref_id=?2 AND created_at_ms=?4)
+    conn.query_row("SELECT EXISTS(SELECT 1 FROM version_referrers
+        WHERE version_id=?1 AND kind='workflow_instance' AND ref_id=?2 AND created_at_ms=?4)
         AND EXISTS(SELECT 1 FROM workflow_referrers WHERE definition_id=?3 AND referrer_kind='instance' AND referrer_id=?2 AND created_at_ms=?4)",
-        params![identity.target.deployment_id.to_string(),identity.instance_id.to_string(),identity.target.definition_id.to_string(),identity.created_at_ms],
+        params![identity.target.worker_version_id.to_string(),identity.instance_id.to_string(),identity.target.definition_id.to_string(),identity.created_at_ms],
         |row|row.get(0)).map_err(sql_error)
 }
 

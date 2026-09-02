@@ -13,9 +13,9 @@ use open_compute_service::service_invocations::ServiceInvocationRegistry;
 use open_compute_storage::WorkerRepository;
 use open_compute_workers::{
     AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, BundleLimits, CanonicalBundle,
-    CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentAssets, DeploymentContent,
-    DeploymentController, DeploymentPins, DeploymentServiceInput, HtmlHandling, ModuleInput,
-    ModuleType, NotFoundHandling, RunWorkerFirst, RuntimeValidator,
+    CreateVersionOutcome, CreateVersionRequest, HtmlHandling, ModuleInput, ModuleType,
+    NotFoundHandling, RunWorkerFirst, RuntimeValidator, VersionAssets, VersionContent,
+    VersionController, VersionPins, VersionServiceInput,
 };
 use p3_services_support::Harness;
 use sha2::{Digest, Sha256};
@@ -107,7 +107,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
     let artifacts = harness.artifacts.clone();
     let transport = harness.transport.clone();
     let supervisor = harness.supervisor.clone();
-    let deployment_pins = harness.deployment_pins.clone();
+    let version_pins = harness.version_pins.clone();
     let service_invocations = harness.service_invocations.clone();
 
     let account = storage.identity().default_account_id;
@@ -143,7 +143,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         )
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts.clone(),
         validator,
@@ -167,7 +167,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         ),
     )
     .await;
-    let asset_deployment = deploy(
+    let asset_version = deploy(
         &controller,
         assets_request(
             account,
@@ -178,7 +178,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         ),
     )
     .await;
-    let object_deployment = deploy(
+    let object_version = deploy(
         &controller,
         worker_request(
             account,
@@ -202,41 +202,41 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
     let services = BTreeMap::from([
         (
             "TARGET".to_owned(),
-            DeploymentServiceInput {
+            VersionServiceInput {
                 target_worker_id: target.id,
                 entrypoint: None,
             },
         ),
         (
             "NAMED".to_owned(),
-            DeploymentServiceInput {
+            VersionServiceInput {
                 target_worker_id: target.id,
                 entrypoint: Some("NamedApi".to_owned()),
             },
         ),
         (
             "ASSET_ONLY".to_owned(),
-            DeploymentServiceInput {
+            VersionServiceInput {
                 target_worker_id: asset_only.id,
                 entrypoint: None,
             },
         ),
         (
             "OBJECT".to_owned(),
-            DeploymentServiceInput {
+            VersionServiceInput {
                 target_worker_id: object_target.id,
                 entrypoint: None,
             },
         ),
         (
             "SELF".to_owned(),
-            DeploymentServiceInput {
+            VersionServiceInput {
                 target_worker_id: caller.id,
                 entrypoint: None,
             },
         ),
     ]);
-    let caller_deployment = deploy(
+    let caller_version = deploy(
         &controller,
         worker_request(
             account,
@@ -254,7 +254,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
     )
     .await;
 
-    let first_asset = dispatch(&transport, account, caller.id, &caller_deployment, "/asset").await;
+    let first_asset = dispatch(&transport, account, caller.id, &caller_version, "/asset").await;
     let first_asset_status = first_asset.status();
     let first_asset_body = body(first_asset).await;
     assert_eq!(
@@ -265,15 +265,8 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         supervisor.last_diagnostics(),
     );
     assert_eq!(first_asset_body.as_ref(), b"asset-v1");
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
-    let connect = dispatch(
-        &transport,
-        account,
-        caller.id,
-        &caller_deployment,
-        "/connect",
-    )
-    .await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
+    let connect = dispatch(&transport, account, caller.id, &caller_version, "/connect").await;
     let connect_status = connect.status();
     let connect_body = body(connect).await;
     assert_eq!(
@@ -284,12 +277,12 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         supervisor.last_diagnostics(),
     );
     assert_eq!(connect_body.as_ref(), b"7,8,9");
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     let connect_ipv6 = dispatch(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/connect-ipv6",
     )
     .await;
@@ -303,58 +296,52 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         supervisor.last_diagnostics(),
     );
     assert_eq!(connect_ipv6_body.as_ref(), b"10,11,12");
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/object-fetch",
         "object:object-v1:object.example",
     )
     .await;
-    wait_pin_count(
-        &deployment_pins,
-        &service_invocations,
-        object_deployment.id,
-        0,
-    )
-    .await;
+    wait_pin_count(&version_pins, &service_invocations, object_version.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/asset-only",
         "only-asset",
     )
     .await;
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/target-fetch",
         "fetch-v1:preserved.example:/worker",
     )
     .await;
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/named-fetch",
         "named-fetch-v1:named.example",
     )
     .await;
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     let identity = dispatch(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/default-rpc",
     )
     .await;
@@ -364,60 +351,54 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         identity,
         serde_json::json!({"version":"v1","owner":"target-v1"})
     );
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/named-rpc",
         "42",
     )
     .await;
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/asset-only-rpc",
         "SERVICE_ENTRYPOINT_NOT_FOUND",
     )
     .await;
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/background",
         "background-v1",
     )
     .await;
-    assert_eq!(deployment_pins.count(target_v1.id), 1);
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
+    assert_eq!(version_pins.count(target_v1.id), 1);
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/failure",
         "business-failure-v1",
     )
     .await;
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
-    wait_pin_count(
-        &deployment_pins,
-        &service_invocations,
-        caller_deployment.id,
-        1,
-    )
-    .await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 1).await;
     let capability = dispatch(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/capability",
     )
     .await;
@@ -430,14 +411,8 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
             "second":"label:v1:cap:nested",
         }),
     );
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
-    wait_pin_count(
-        &deployment_pins,
-        &service_invocations,
-        caller_deployment.id,
-        1,
-    )
-    .await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 1).await;
 
     let target_v2 = deploy(
         &controller,
@@ -456,7 +431,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         ),
     )
     .await;
-    let held = dispatch(&transport, account, caller.id, &caller_deployment, "/hold").await;
+    let held = dispatch(&transport, account, caller.id, &caller_version, "/hold").await;
     assert_eq!(held.status(), StatusCode::OK);
     let mut held_body = held.into_body().into_data_stream();
     let ready = held_body.next().await.unwrap().unwrap();
@@ -464,8 +439,8 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
     let held_counts = service_invocations.counts();
     assert_eq!((held_counts.0, held_counts.2), (1, 1));
     assert!(held_counts.1 <= 1);
-    assert_eq!(deployment_pins.count(target_v1.id), 1);
-    assert_eq!(deployment_pins.count(caller_deployment.id), 2);
+    assert_eq!(version_pins.count(target_v1.id), 1);
+    assert_eq!(version_pins.count(caller_version.id), 2);
     repository
         .promote(
             account,
@@ -481,19 +456,13 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         held_tail.extend_from_slice(&chunk.unwrap());
     }
     assert_eq!(held_tail, b"v1:held:later");
-    wait_pin_count(&deployment_pins, &service_invocations, target_v1.id, 0).await;
-    wait_pin_count(
-        &deployment_pins,
-        &service_invocations,
-        caller_deployment.id,
-        1,
-    )
-    .await;
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
+    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 1).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/asset",
         "asset-v2",
     )
@@ -502,7 +471,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/default-rpc",
     )
     .await;
@@ -511,19 +480,19 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
         identity,
         serde_json::json!({"version":"v2","owner":"target-v2"})
     );
-    assert_eq!(deployment_pins.count(target_v1.id), 0);
-    wait_pin_count(&deployment_pins, &service_invocations, target_v2.id, 0).await;
+    assert_eq!(version_pins.count(target_v1.id), 0);
+    wait_pin_count(&version_pins, &service_invocations, target_v2.id, 0).await;
     assert_body(
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/limit",
         "SERVICE_LIMIT_EXCEEDED",
     )
     .await;
     wait_service_counts(&service_invocations, (0, 0, 0)).await;
-    assert!(deployment_pins.count(asset_deployment.id) <= 1);
+    assert!(version_pins.count(asset_version.id) <= 1);
 
     harness.stop().await;
 }
@@ -577,7 +546,7 @@ fn worker_request(
     key: &str,
     source: &str,
     options: WorkerRequestOptions,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -588,11 +557,11 @@ fn worker_request(
         BundleLimits::default(),
     )
     .unwrap();
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: DeploymentContent::Worker {
+        content: VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: options.assets,
         },
@@ -610,9 +579,9 @@ fn worker_request(
 }
 
 struct WorkerRequestOptions {
-    assets: Option<DeploymentAssets>,
+    assets: Option<VersionAssets>,
     vars: BTreeMap<String, serde_json::Value>,
-    services: BTreeMap<String, DeploymentServiceInput>,
+    services: BTreeMap<String, VersionServiceInput>,
     promote: bool,
     now_ms: i64,
 }
@@ -621,14 +590,14 @@ fn assets_request(
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
-    assets: DeploymentAssets,
+    assets: VersionAssets,
     now_ms: i64,
-) -> CreateDeploymentRequest {
-    CreateDeploymentRequest {
+) -> CreateVersionRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: DeploymentContent::AssetsOnly { assets },
+        content: VersionContent::AssetsOnly { assets },
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         bindings: BTreeMap::new(),
@@ -642,7 +611,7 @@ fn assets_request(
     }
 }
 
-async fn single_asset(artifacts: &ArtifactStore, path: &str, content: &[u8]) -> DeploymentAssets {
+async fn single_asset(artifacts: &ArtifactStore, path: &str, content: &[u8]) -> VersionAssets {
     let digest = hex::encode(Sha256::digest(content));
     artifacts
         .put_verified(
@@ -652,7 +621,7 @@ async fn single_asset(artifacts: &ArtifactStore, path: &str, content: &[u8]) -> 
         )
         .await
         .unwrap();
-    DeploymentAssets {
+    VersionAssets {
         manifest: AssetManifestV1 {
             schema_version: 1,
             entries: vec![AssetEntryV1 {
@@ -675,12 +644,12 @@ async fn single_asset(artifacts: &ArtifactStore, path: &str, content: &[u8]) -> 
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
-) -> open_compute_storage::DeploymentRecord {
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
+) -> open_compute_storage::VersionRecord {
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
@@ -688,7 +657,7 @@ async fn dispatch(
     transport: &WorkerdTransport,
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     path: &str,
 ) -> axum::response::Response {
     transport
@@ -696,8 +665,8 @@ async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: 1,
                 request_id: RequestId::generate(),
@@ -717,11 +686,11 @@ async fn assert_body(
     transport: &WorkerdTransport,
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     path: &str,
     expected: &str,
 ) {
-    let response = dispatch(transport, account_id, worker_id, deployment, path).await;
+    let response = dispatch(transport, account_id, worker_id, version, path).await;
     let status = response.status();
     let headers = response.headers().clone();
     let actual = body(response).await;
@@ -741,17 +710,17 @@ async fn body(response: axum::response::Response) -> Bytes {
 }
 
 async fn wait_pin_count(
-    pins: &DeploymentPins,
+    pins: &VersionPins,
     registry: &ServiceInvocationRegistry,
-    deployment: open_compute_core::DeploymentId,
+    version: open_compute_core::VersionId,
     count: usize,
 ) {
     let deadline = Instant::now() + Duration::from_secs(30);
-    while pins.count(deployment) != count {
+    while pins.count(version) != count {
         assert!(
             Instant::now() < deadline,
-            "deployment {deployment} pin did not drain: actual={}; registry={:?}; pins={pins:?}",
-            pins.count(deployment),
+            "version {version} pin did not drain: actual={}; registry={:?}; pins={pins:?}",
+            pins.count(version),
             registry.counts(),
         );
         tokio::time::sleep(Duration::from_millis(10)).await;

@@ -1,8 +1,8 @@
--- Current Day1 Workflow catalog and immutable deployment reachability.
+-- Current Day1 Workflow catalog and immutable version reachability.
 
 CREATE TABLE workflow_bindings (
   id TEXT PRIMARY KEY,
-  deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
+  version_id TEXT NOT NULL REFERENCES worker_versions(id),
   name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 64),
   definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
   definition_lifecycle_generation INTEGER NOT NULL CHECK(definition_lifecycle_generation >= 1),
@@ -10,7 +10,7 @@ CREATE TABLE workflow_bindings (
   schedules_json BLOB NOT NULL CHECK(length(schedules_json) BETWEEN 2 AND 32768),
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   created_at_ms INTEGER NOT NULL,
-  UNIQUE(deployment_id,name)
+  UNIQUE(version_id,name)
 ) STRICT;
 
 CREATE TABLE workflow_binding_operations (
@@ -93,8 +93,8 @@ CREATE TABLE workflow_instance_referrers (
   definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
   definition_name TEXT NOT NULL,
   external_instance_id TEXT NOT NULL CHECK(length(external_instance_id) BETWEEN 1 AND 100),
-  version_id TEXT NOT NULL REFERENCES workflow_versions(id),
-  deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
+  workflow_version_id TEXT NOT NULL REFERENCES workflow_versions(id),
+  worker_version_id TEXT NOT NULL REFERENCES worker_versions(id),
   instance_generation INTEGER NOT NULL CHECK(instance_generation >= 1),
   creation_nonce BLOB NOT NULL CHECK(length(creation_nonce) = 32),
   creation_operation_id TEXT NOT NULL UNIQUE,
@@ -126,7 +126,7 @@ CREATE TABLE workflow_versions (
   version_number INTEGER NOT NULL CHECK(version_number > 0),
   state TEXT NOT NULL CHECK(state IN ('staging','validating','ready','rejected','deleting','tombstoned')),
   worker_id TEXT NOT NULL REFERENCES workers(id),
-  deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
+  worker_version_id TEXT NOT NULL REFERENCES worker_versions(id),
   class_name TEXT NOT NULL CHECK(length(class_name) BETWEEN 1 AND 128),
   worker_code_sha256 BLOB NOT NULL CHECK(length(worker_code_sha256) = 32),
   loader_schema_version INTEGER NOT NULL CHECK(loader_schema_version > 0),
@@ -153,8 +153,8 @@ CREATE TRIGGER workflow_binding_add_ref AFTER INSERT ON workflow_bindings
 BEGIN INSERT INTO workflow_referrers VALUES(NEW.definition_id,'binding',NEW.id,NEW.created_at_ms); END;
 
 CREATE TRIGGER workflow_binding_delete_guard BEFORE DELETE ON workflow_bindings
-WHEN NOT EXISTS (SELECT 1 FROM worker_deployments WHERE id = OLD.deployment_id AND state IN ('staging','rejected','deleting'))
-BEGIN SELECT RAISE(ABORT,'workflow binding deployment is immutable'); END;
+WHEN NOT EXISTS (SELECT 1 FROM worker_versions WHERE id = OLD.version_id AND state IN ('staging','rejected','deleting'))
+BEGIN SELECT RAISE(ABORT,'workflow binding version is immutable'); END;
 
 CREATE TRIGGER workflow_binding_immutable BEFORE UPDATE ON workflow_bindings
 BEGIN SELECT RAISE(ABORT,'workflow binding is immutable'); END;
@@ -165,17 +165,17 @@ BEGIN
     OR NEW.name GLOB 'OPEN_COMPUTE_*' OR NEW.name GLOB '__*'
     THEN RAISE(ABORT,'workflow binding name') END;
   SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM worker_deployments d JOIN workers w ON w.id = d.worker_id
+    SELECT 1 FROM worker_versions d JOIN workers w ON w.id = d.worker_id
     JOIN workflow_definitions f ON f.account_id = w.account_id
-    WHERE d.id = NEW.deployment_id AND d.state = 'staging' AND f.id = NEW.definition_id
+    WHERE d.id = NEW.version_id AND d.state = 'staging' AND f.id = NEW.definition_id
       AND f.state = 'ready' AND f.availability = 'healthy'
       AND f.lifecycle_generation = NEW.definition_lifecycle_generation
   ) THEN RAISE(ABORT,'workflow binding authority') END;
   SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM deployment_vars WHERE deployment_id = NEW.deployment_id AND name = NEW.name
-    UNION ALL SELECT 1 FROM deployment_secrets WHERE deployment_id = NEW.deployment_id AND name = NEW.name
-    UNION ALL SELECT 1 FROM deployment_bindings WHERE deployment_id = NEW.deployment_id AND name = NEW.name
-    UNION ALL SELECT 1 FROM queue_producer_bindings WHERE deployment_id = NEW.deployment_id AND name = NEW.name
+    SELECT 1 FROM version_vars WHERE version_id = NEW.version_id AND name = NEW.name
+    UNION ALL SELECT 1 FROM version_secrets WHERE version_id = NEW.version_id AND name = NEW.name
+    UNION ALL SELECT 1 FROM version_bindings WHERE version_id = NEW.version_id AND name = NEW.name
+    UNION ALL SELECT 1 FROM queue_producer_bindings WHERE version_id = NEW.version_id AND name = NEW.name
   ) THEN RAISE(ABORT,'workflow binding name conflict') END;
 END;
 
@@ -217,16 +217,16 @@ WHEN NEW.state != OLD.state AND NOT (
 CREATE TRIGGER workflow_definition_terminal_guard BEFORE UPDATE ON workflow_definitions
 WHEN OLD.state = 'tombstoned' BEGIN SELECT RAISE(ABORT,'workflow tombstone is immutable'); END;
 
-CREATE TRIGGER workflow_deployment_referrer_guard BEFORE DELETE ON deployment_referrers
+CREATE TRIGGER workflow_version_referrer_guard BEFORE DELETE ON version_referrers
 WHEN (OLD.kind = 'workflow_version' AND EXISTS (SELECT 1 FROM workflow_versions
        WHERE id = OLD.ref_id AND state NOT IN ('deleting','tombstoned')))
   OR (OLD.kind = 'workflow_instance' AND EXISTS (SELECT 1 FROM workflow_instance_referrers
        WHERE instance_id = OLD.ref_id AND state != 'released'))
-BEGIN SELECT RAISE(ABORT,'workflow deployment is referenced'); END;
+BEGIN SELECT RAISE(ABORT,'workflow version is referenced'); END;
 
 CREATE TRIGGER workflow_instance_add_ref AFTER INSERT ON workflow_instance_referrers
 BEGIN
-  INSERT INTO deployment_referrers VALUES(NEW.deployment_id,'workflow_instance',NEW.instance_id,NEW.created_at_ms);
+  INSERT INTO version_referrers VALUES(NEW.worker_version_id,'workflow_instance',NEW.instance_id,NEW.created_at_ms);
   INSERT INTO workflow_referrers VALUES(NEW.definition_id,'instance',NEW.instance_id,NEW.created_at_ms);
 END;
 
@@ -239,7 +239,7 @@ WHEN NOT (OLD.state='restarting' AND NEW.state='live' AND OLD.instance_generatio
 BEGIN SELECT RAISE(ABORT,'workflow restart generation requires exact intent'); END;
 
 CREATE TRIGGER workflow_instance_ref_identity_guard BEFORE UPDATE OF instance_id,definition_id,
-  definition_name,external_instance_id,version_id,deployment_id,creation_nonce,creation_operation_id,creation_batch_id,created_at_ms
+  definition_name,external_instance_id,workflow_version_id,worker_version_id,creation_nonce,creation_operation_id,creation_batch_id,created_at_ms
 ON workflow_instance_referrers BEGIN SELECT RAISE(ABORT,'workflow instance identity is immutable'); END;
 
 CREATE TRIGGER workflow_instance_ref_insert_guard BEFORE INSERT ON workflow_instance_referrers
@@ -247,7 +247,7 @@ BEGIN
   SELECT CASE WHEN NEW.state != 'creating' OR NEW.instance_generation != 1 OR NOT EXISTS (
     SELECT 1 FROM workflow_definitions f JOIN workflow_versions v ON v.id = f.current_version_id
     WHERE f.id = NEW.definition_id AND f.state = 'ready' AND f.availability = 'healthy'
-      AND v.id = NEW.version_id AND v.state = 'ready' AND v.deployment_id = NEW.deployment_id
+      AND v.id = NEW.workflow_version_id AND v.state = 'ready' AND v.worker_version_id = NEW.worker_version_id
   ) THEN RAISE(ABORT,'workflow creation authority') END;
 END;
 
@@ -274,7 +274,7 @@ WHEN OLD.state = 'released' BEGIN SELECT RAISE(ABORT,'workflow released history 
 CREATE TRIGGER workflow_instance_release_ref AFTER UPDATE OF state ON workflow_instance_referrers
 WHEN NEW.state = 'released'
 BEGIN
-  DELETE FROM deployment_referrers WHERE deployment_id = NEW.deployment_id AND kind = 'workflow_instance' AND ref_id = NEW.instance_id;
+  DELETE FROM version_referrers WHERE version_id = NEW.worker_version_id AND kind = 'workflow_instance' AND ref_id = NEW.instance_id;
   DELETE FROM workflow_referrers WHERE definition_id = NEW.definition_id AND referrer_kind = 'instance' AND referrer_id = NEW.instance_id;
 END;
 
@@ -286,7 +286,7 @@ BEGIN SELECT RAISE(ABORT,'workflow history requires a proven purge'); END;
 
 CREATE TRIGGER workflow_instance_reservation_remove_ref AFTER DELETE ON workflow_instance_referrers
 BEGIN
-  DELETE FROM deployment_referrers WHERE deployment_id = OLD.deployment_id AND kind = 'workflow_instance' AND ref_id = OLD.instance_id;
+  DELETE FROM version_referrers WHERE version_id = OLD.worker_version_id AND kind = 'workflow_instance' AND ref_id = OLD.instance_id;
   DELETE FROM workflow_referrers WHERE definition_id = OLD.definition_id AND referrer_kind = 'instance' AND referrer_id = OLD.instance_id;
 END;
 
@@ -310,11 +310,11 @@ BEGIN SELECT RAISE(ABORT,'workflow operation is immutable'); END;
 
 CREATE TRIGGER workflow_operation_insert_guard BEFORE INSERT ON workflow_instance_operations
 WHEN NEW.applied!=0 OR NOT EXISTS(
-  SELECT 1 FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.version_id
+  SELECT 1 FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.workflow_version_id
   WHERE r.instance_id=NEW.instance_id AND r.creation_nonce=NEW.creation_nonce
     AND r.instance_generation=NEW.expected_generation AND r.state=NEW.prior_ref_state
     AND v.capability_version=1 AND (NEW.kind='purge' OR (v.state='ready' AND EXISTS(
-      SELECT 1 FROM workflow_definitions f JOIN worker_deployments d ON d.id=r.deployment_id
+      SELECT 1 FROM workflow_definitions f JOIN worker_versions d ON d.id=r.worker_version_id
       JOIN workers w ON w.id=d.worker_id WHERE f.id=r.definition_id AND f.state='ready' AND f.availability='healthy'
         AND d.state='ready' AND w.deleted_at_ms IS NULL))))
 BEGIN SELECT RAISE(ABORT,'workflow operation identity'); END;
@@ -333,13 +333,13 @@ WHEN NEW.operation_sequence!=OLD.operation_sequence+1 OR OLD.operation_sequence=
 BEGIN SELECT RAISE(ABORT,'workflow operation sequence requires a free intent slot'); END;
 
 CREATE TRIGGER workflow_queue_conflict BEFORE INSERT ON queue_producer_bindings
-WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE deployment_id = NEW.deployment_id AND name = NEW.name)
+WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE version_id = NEW.version_id AND name = NEW.name)
 BEGIN SELECT RAISE(ABORT,'workflow queue name conflict'); END;
 
 CREATE TRIGGER workflow_referrer_guard BEFORE DELETE ON workflow_referrers
 WHEN (OLD.referrer_kind = 'binding' AND EXISTS (
       SELECT 1 FROM workflow_bindings b
-      JOIN worker_deployments d ON d.id=b.deployment_id
+      JOIN worker_versions d ON d.id=b.version_id
       JOIN workers w ON w.id=d.worker_id
       WHERE b.id=OLD.referrer_id AND w.deleted_at_ms IS NULL
     ))
@@ -347,39 +347,39 @@ WHEN (OLD.referrer_kind = 'binding' AND EXISTS (
       WHERE instance_id = OLD.referrer_id AND state != 'released'))
 BEGIN SELECT RAISE(ABORT,'workflow is referenced'); END;
 
-CREATE TRIGGER workflow_resource_conflict BEFORE INSERT ON deployment_bindings
-WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE deployment_id = NEW.deployment_id AND name = NEW.name)
+CREATE TRIGGER workflow_resource_conflict BEFORE INSERT ON version_bindings
+WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE version_id = NEW.version_id AND name = NEW.name)
 BEGIN SELECT RAISE(ABORT,'workflow resource name conflict'); END;
 
-CREATE TRIGGER workflow_secret_conflict BEFORE INSERT ON deployment_secrets
-WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE deployment_id = NEW.deployment_id AND name = NEW.name)
+CREATE TRIGGER workflow_secret_conflict BEFORE INSERT ON version_secrets
+WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE version_id = NEW.version_id AND name = NEW.name)
 BEGIN SELECT RAISE(ABORT,'workflow secret name conflict'); END;
 
-CREATE TRIGGER workflow_var_conflict BEFORE INSERT ON deployment_vars
-WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE deployment_id = NEW.deployment_id AND name = NEW.name)
+CREATE TRIGGER workflow_var_conflict BEFORE INSERT ON version_vars
+WHEN EXISTS(SELECT 1 FROM workflow_bindings WHERE version_id = NEW.version_id AND name = NEW.name)
 BEGIN SELECT RAISE(ABORT,'workflow variable name conflict'); END;
 
 CREATE TRIGGER workflow_version_add_ref AFTER INSERT ON workflow_versions
-BEGIN INSERT INTO deployment_referrers VALUES(NEW.deployment_id,'workflow_version',NEW.id,NEW.created_at_ms); END;
+BEGIN INSERT INTO version_referrers VALUES(NEW.worker_version_id,'workflow_version',NEW.id,NEW.created_at_ms); END;
 
 CREATE TRIGGER workflow_version_delete_guard BEFORE UPDATE OF state ON workflow_versions
 WHEN NEW.state IN ('deleting','tombstoned') AND (
   EXISTS (SELECT 1 FROM workflow_definitions WHERE current_version_id = OLD.id) OR
-  EXISTS (SELECT 1 FROM workflow_instance_referrers WHERE version_id = OLD.id AND state != 'released')
+  EXISTS (SELECT 1 FROM workflow_instance_referrers WHERE workflow_version_id = OLD.id AND state != 'released')
 ) BEGIN SELECT RAISE(ABORT,'workflow version is referenced'); END;
 
 CREATE TRIGGER workflow_version_identity_guard BEFORE UPDATE OF id,definition_id,version_number,worker_id,
-  deployment_id,class_name,worker_code_sha256,loader_schema_version,capability_version,descriptor_sha256,created_at_ms
+  worker_version_id,class_name,worker_code_sha256,loader_schema_version,capability_version,descriptor_sha256,created_at_ms
 ON workflow_versions BEGIN SELECT RAISE(ABORT,'workflow frozen version is immutable'); END;
 
 CREATE TRIGGER workflow_version_insert_guard BEFORE INSERT ON workflow_versions
 BEGIN
   SELECT CASE WHEN NEW.state != 'staging' OR NOT EXISTS (
     SELECT 1 FROM workflow_definitions f JOIN workers w ON w.account_id = f.account_id
-    JOIN worker_deployments d ON d.worker_id = w.id
+    JOIN worker_versions d ON d.worker_id = w.id
     WHERE f.id = NEW.definition_id AND f.state IN ('creating','ready')
       AND w.id = NEW.worker_id AND w.deleted_at_ms IS NULL
-      AND d.id = NEW.deployment_id AND d.state = 'ready'
+      AND d.id = NEW.worker_version_id AND d.state = 'ready'
       AND d.worker_code_sha256 = NEW.worker_code_sha256 AND d.loader_schema_version = NEW.loader_schema_version
   ) THEN RAISE(ABORT,'workflow version authority') END;
 END;
@@ -389,7 +389,7 @@ BEGIN SELECT RAISE(ABORT,'workflow version history cannot be deleted'); END;
 
 CREATE TRIGGER workflow_version_release_ref AFTER UPDATE OF state ON workflow_versions
 WHEN NEW.state = 'deleting'
-BEGIN DELETE FROM deployment_referrers WHERE deployment_id = OLD.deployment_id AND kind = 'workflow_version' AND ref_id = OLD.id; END;
+BEGIN DELETE FROM version_referrers WHERE version_id = OLD.worker_version_id AND kind = 'workflow_version' AND ref_id = OLD.id; END;
 
 CREATE TRIGGER workflow_version_state_guard BEFORE UPDATE OF state ON workflow_versions
 WHEN NEW.state != OLD.state AND NOT (

@@ -198,12 +198,12 @@ impl SchedulerStore {
             let target = &identity.target;
             let initial_bytes = initial_state_bytes(identity, input.len());
             tx.execute("INSERT INTO workflow_instances(id,account_id,definition_id,definition_name,external_instance_id,
-                version_id,worker_id,deployment_id,worker_code_sha256,loader_schema_version,capability_version,descriptor_sha256,
+                workflow_version_id,worker_id,worker_version_id,worker_code_sha256,loader_schema_version,capability_version,descriptor_sha256,
                 class_name,creation_nonce,creation_operation_id,creation_batch_id,instance_generation,state,input_json,next_run_at_ms,state_bytes,created_at_ms,updated_at_ms,
                 trigger_cron,trigger_scheduled_time_ms,success_retention_ms,error_retention_ms)
                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,1,'queued',?17,?18,?19,?18,?18,?20,?21,?22,?23)",
                 params![identity.instance_id.to_string(),target.account_id.to_string(),target.definition_id.to_string(),target.definition_name,
-                    identity.external_instance_id,target.version_id.to_string(),target.worker_id.to_string(),target.deployment_id.to_string(),
+                    identity.external_instance_id,target.workflow_version_id.to_string(),target.worker_id.to_string(),target.worker_version_id.to_string(),
                     target.worker_code_sha256.as_slice(),target.loader_schema_version,target.capability_version,target.descriptor_sha256.as_slice(),
                     target.class_name,identity.creation_nonce.as_bytes().as_slice(),identity.creation_operation_id.to_string(),identity.creation_batch_id.to_string(),
                     input.as_bytes(),identity.created_at_ms,initial_bytes,

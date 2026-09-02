@@ -1,8 +1,8 @@
-//! Runtime-generation fences for process-local deployment resources.
+//! Runtime-generation fences for process-local version resources.
 
 use crate::service_invocations::ServiceInvocationRegistry;
 use open_compute_runtime::{SupervisorSnapshot, SupervisorState};
-use open_compute_workers::DeploymentPins;
+use open_compute_workers::VersionPins;
 
 /// Observable effects of applying one supervisor snapshot.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -17,18 +17,18 @@ pub struct RuntimeGenerationUpdate {
 #[derive(Debug)]
 pub struct RuntimeGenerationResources {
     services: ServiceInvocationRegistry,
-    deployment_pins: DeploymentPins,
+    version_pins: VersionPins,
     running_pid: Option<i32>,
     running_generation: Option<String>,
 }
 
 impl RuntimeGenerationResources {
-    /// Bind cleanup to the same Service authority and deployment-pin registry used for dispatch.
+    /// Bind cleanup to the same Service authority and version-pin registry used for dispatch.
     #[must_use]
-    pub fn new(services: ServiceInvocationRegistry, deployment_pins: DeploymentPins) -> Self {
+    pub fn new(services: ServiceInvocationRegistry, version_pins: VersionPins) -> Self {
         Self {
             services,
-            deployment_pins,
+            version_pins,
             running_pid: None,
             running_generation: None,
         }
@@ -74,6 +74,6 @@ impl RuntimeGenerationResources {
 
     fn clear(&self) {
         self.services.clear_after_child_exit();
-        self.deployment_pins.clear_generation_retentions();
+        self.version_pins.clear_generation_retentions();
     }
 }

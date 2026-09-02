@@ -1,15 +1,15 @@
 //! Immutable cross-Worker Service declarations and dynamic target authority.
 
-use crate::{ControlDb, DeploymentContentKind, DeploymentState};
-use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, WorkerId};
+use crate::{ControlDb, VersionContentKind, VersionState};
+use open_compute_core::{AccountId, ErrorCode, PlatformError, VersionId, WorkerId};
 use rusqlite::{OptionalExtension, Transaction, params};
 use std::str::FromStr;
 
-/// One immutable Service declaration frozen into a caller deployment.
+/// One immutable Service declaration frozen into a caller version.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeploymentServiceRecord {
-    /// Owning caller deployment.
-    pub deployment_id: DeploymentId,
+pub struct VersionServiceRecord {
+    /// Owning caller version.
+    pub version_id: VersionId,
     /// Tenant environment binding name.
     pub binding_name: String,
     /// Frozen logical target Worker identity.
@@ -22,9 +22,9 @@ pub struct DeploymentServiceRecord {
     pub created_at_ms: i64,
 }
 
-/// Service declaration inserted atomically with a staging deployment.
+/// Service declaration inserted atomically with a staging version.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NewDeploymentService {
+pub struct NewVersionService {
     /// Tenant environment binding name.
     pub binding_name: String,
     /// Existing same-account target Worker identity.
@@ -39,19 +39,19 @@ pub struct NewDeploymentService {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedServiceTarget {
     /// Verified immutable declaration.
-    pub service: DeploymentServiceRecord,
+    pub service: VersionServiceRecord,
     /// Same account shared by caller and target.
     pub account_id: AccountId,
     /// Caller Worker owning the declaration.
     pub caller_worker_id: WorkerId,
-    /// Active target deployment selected for this call.
-    pub target_deployment_id: DeploymentId,
+    /// Active target version selected for this call.
+    pub target_version_id: VersionId,
     /// Target descriptor digest required by `RuntimeSource`.
     pub target_worker_code_sha256: [u8; 32],
     /// Current target route generation.
     pub target_route_generation: u64,
     /// Target content discriminator used for fast unsupported-path rejection.
-    pub target_content_kind: DeploymentContentKind,
+    pub target_content_kind: VersionContentKind,
 }
 
 /// Bounded inbound declaration shown when target Worker deletion is denied.
@@ -59,8 +59,8 @@ pub struct ResolvedServiceTarget {
 pub struct ServiceReferrer {
     /// Caller Worker.
     pub caller_worker_id: WorkerId,
-    /// Retained caller deployment.
-    pub caller_deployment_id: DeploymentId,
+    /// Retained caller version.
+    pub caller_version_id: VersionId,
     /// Caller environment name.
     pub binding_name: String,
 }
@@ -79,36 +79,37 @@ impl<'a> ServiceRepository<'a> {
     }
 
     /// Read declarations in canonical binding-name order.
-    pub fn deployment_services(
+    pub fn version_services(
         &self,
-        deployment_id: DeploymentId,
-    ) -> Result<Vec<DeploymentServiceRecord>, PlatformError> {
+        version_id: VersionId,
+    ) -> Result<Vec<VersionServiceRecord>, PlatformError> {
         self.db
-            .with_read(|conn| read_deployment_services_conn(conn, deployment_id))
+            .with_read(|conn| read_version_services_conn(conn, version_id))
     }
 
-    /// Re-authorize a declaration and select the target's current active deployment.
+    /// Re-authorize a declaration and select the target's current active version.
     pub fn resolve(
         &self,
-        caller_deployment_id: DeploymentId,
+        caller_version_id: VersionId,
         binding_name: &str,
         descriptor_sha256: &[u8; 32],
     ) -> Result<ResolvedServiceTarget, PlatformError> {
         self.db.with_read(|conn| {
             let row = conn
                 .query_row(
-                    "SELECT s.deployment_id, s.binding_name, s.target_worker_id, s.entrypoint,
+                    "SELECT s.version_id, s.binding_name, s.target_worker_id, s.entrypoint,
                             s.descriptor_sha256, s.created_at_ms,
                             caller.account_id, caller.id, caller.deleted_at_ms, cd.state,
                             target.deleted_at_ms, target.route_generation,
                             td.id, td.content_kind, td.state, td.worker_code_sha256
-                     FROM deployment_services s
-                     JOIN worker_deployments cd ON cd.id = s.deployment_id
+                     FROM version_services s
+                     JOIN worker_versions cd ON cd.id = s.version_id
                      JOIN workers caller ON caller.id = cd.worker_id
                      JOIN workers target ON target.id = s.target_worker_id
-                     LEFT JOIN worker_deployments td ON td.id = target.active_deployment_id
-                     WHERE s.deployment_id = ?1 AND s.binding_name = ?2",
-                    params![caller_deployment_id.to_string(), binding_name],
+                     LEFT JOIN worker_deployments active ON active.id = target.active_deployment_id
+                     LEFT JOIN worker_versions td ON td.id = active.version_id
+                     WHERE s.version_id = ?1 AND s.binding_name = ?2",
+                    params![caller_version_id.to_string(), binding_name],
                     |row| {
                         let service = map_service(row)?;
                         let account: String = row.get(6)?;
@@ -117,7 +118,7 @@ impl<'a> ServiceRepository<'a> {
                         let caller_state: String = row.get(9)?;
                         let target_deleted: Option<i64> = row.get(10)?;
                         let route_generation: i64 = row.get(11)?;
-                        let target_deployment: Option<String> = row.get(12)?;
+                        let target_version: Option<String> = row.get(12)?;
                         let content_kind: Option<String> = row.get(13)?;
                         let target_state: Option<String> = row.get(14)?;
                         let target_digest: Option<Vec<u8>> = row.get(15)?;
@@ -129,7 +130,7 @@ impl<'a> ServiceRepository<'a> {
                             caller_state,
                             target_deleted,
                             route_generation,
-                            target_deployment,
+                            target_version,
                             content_kind,
                             target_state,
                             target_digest,
@@ -146,7 +147,7 @@ impl<'a> ServiceRepository<'a> {
                 caller_state,
                 target_deleted,
                 route_generation,
-                target_deployment,
+                target_version,
                 content_kind,
                 target_state,
                 target_digest,
@@ -156,31 +157,30 @@ impl<'a> ServiceRepository<'a> {
             };
             if service.descriptor_sha256 != *descriptor_sha256
                 || caller_deleted.is_some()
-                || caller_state != DeploymentState::Ready.as_str()
+                || caller_state != VersionState::Ready.as_str()
             {
                 return Err(denied());
             }
             if target_deleted.is_some()
-                || target_state.as_deref() != Some(DeploymentState::Ready.as_str())
+                || target_state.as_deref() != Some(VersionState::Ready.as_str())
             {
                 return Err(target_not_ready());
             }
-            let target_deployment = target_deployment.ok_or_else(target_not_ready)?;
+            let target_version = target_version.ok_or_else(target_not_ready)?;
             let content_kind = content_kind.ok_or_else(target_not_ready)?;
             let target_digest = target_digest.ok_or_else(target_not_ready)?;
             Ok(ResolvedServiceTarget {
                 service,
                 account_id: AccountId::from_str(&account).map_err(|_| invariant())?,
                 caller_worker_id: WorkerId::from_str(&caller_worker).map_err(|_| invariant())?,
-                target_deployment_id: DeploymentId::from_str(&target_deployment)
-                    .map_err(|_| invariant())?,
+                target_version_id: VersionId::from_str(&target_version).map_err(|_| invariant())?,
                 target_worker_code_sha256: target_digest
                     .as_slice()
                     .try_into()
                     .map_err(|_| invariant())?,
                 target_route_generation: u64::try_from(route_generation)
                     .map_err(|_| invariant())?,
-                target_content_kind: DeploymentContentKind::parse(&content_kind)
+                target_content_kind: VersionContentKind::parse(&content_kind)
                     .map_err(|_| invariant())?,
             })
         })
@@ -203,8 +203,8 @@ impl<'a> ServiceRepository<'a> {
             let mut statement = conn
                 .prepare(
                     "SELECT caller.id, d.id, s.binding_name
-                     FROM deployment_services s
-                     JOIN worker_deployments d ON d.id = s.deployment_id
+                     FROM version_services s
+                     JOIN worker_versions d ON d.id = s.version_id
                      JOIN workers caller ON caller.id = d.worker_id
                      JOIN workers target ON target.id = s.target_worker_id
                      WHERE s.target_worker_id = ?1
@@ -225,11 +225,11 @@ impl<'a> ServiceRepository<'a> {
                     ],
                     |row| {
                         let caller: String = row.get(0)?;
-                        let deployment: String = row.get(1)?;
+                        let version: String = row.get(1)?;
                         Ok(ServiceReferrer {
                             caller_worker_id: WorkerId::from_str(&caller)
                                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                            caller_deployment_id: DeploymentId::from_str(&deployment)
+                            caller_version_id: VersionId::from_str(&version)
                                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
                             binding_name: row.get(2)?,
                         })
@@ -243,18 +243,18 @@ impl<'a> ServiceRepository<'a> {
 
 pub(crate) fn insert_staging_services(
     tx: &Transaction<'_>,
-    deployment_id: DeploymentId,
-    services: &[NewDeploymentService],
+    version_id: VersionId,
+    services: &[NewVersionService],
     now_ms: i64,
 ) -> Result<(), PlatformError> {
     for service in services {
         tx.execute(
-            "INSERT INTO deployment_services
-             (deployment_id, binding_name, target_worker_id, entrypoint,
+            "INSERT INTO version_services
+             (version_id, binding_name, target_worker_id, entrypoint,
               descriptor_sha256, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
-                deployment_id.to_string(),
+                version_id.to_string(),
                 service.binding_name,
                 service.target_worker_id.to_string(),
                 service.entrypoint,
@@ -267,30 +267,29 @@ pub(crate) fn insert_staging_services(
     Ok(())
 }
 
-pub(crate) fn read_deployment_services_conn(
+pub(crate) fn read_version_services_conn(
     conn: &rusqlite::Connection,
-    deployment_id: DeploymentId,
-) -> Result<Vec<DeploymentServiceRecord>, PlatformError> {
+    version_id: VersionId,
+) -> Result<Vec<VersionServiceRecord>, PlatformError> {
     let mut statement = conn
         .prepare(
-            "SELECT deployment_id, binding_name, target_worker_id, entrypoint,
+            "SELECT version_id, binding_name, target_worker_id, entrypoint,
                     descriptor_sha256, created_at_ms
-             FROM deployment_services WHERE deployment_id = ?1 ORDER BY binding_name",
+             FROM version_services WHERE version_id = ?1 ORDER BY binding_name",
         )
         .map_err(|_| db_error())?;
     let rows = statement
-        .query_map([deployment_id.to_string()], map_service)
+        .query_map([version_id.to_string()], map_service)
         .map_err(|_| db_error())?;
     collect(rows)
 }
 
-fn map_service(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentServiceRecord> {
-    let deployment: String = row.get(0)?;
+fn map_service(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionServiceRecord> {
+    let version: String = row.get(0)?;
     let target: String = row.get(2)?;
     let digest: Vec<u8> = row.get(4)?;
-    Ok(DeploymentServiceRecord {
-        deployment_id: DeploymentId::from_str(&deployment)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+    Ok(VersionServiceRecord {
+        version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
         binding_name: row.get(1)?,
         target_worker_id: WorkerId::from_str(&target).map_err(|_| rusqlite::Error::InvalidQuery)?,
         entrypoint: row.get(3)?,
@@ -322,13 +321,13 @@ fn denied() -> PlatformError {
 fn target_not_ready() -> PlatformError {
     PlatformError::new(
         ErrorCode::ServiceTargetNotReady,
-        "Service target has no callable active deployment",
+        "Service target has no callable active version",
     )
 }
 
 fn invariant() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentInvariantViolation,
+        ErrorCode::VersionInvariantViolation,
         "persisted Service binding invariant failed",
     )
 }

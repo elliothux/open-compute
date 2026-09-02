@@ -136,7 +136,7 @@ impl SchedulerStore {
                         durable_waits::settle(&tx, &instance, &step, now_ms, limits)?;
                     } else if step.state == "delay_pending" {
                         // The next tenant activation resolves the persisted
-                        // dynamic delay function under the current deployment.
+                        // dynamic delay function under the current version.
                     } else {
                         durable_settlement::timeout(
                             &tx,

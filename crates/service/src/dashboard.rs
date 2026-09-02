@@ -5,15 +5,15 @@ use crate::runtime_bridge::{DispatchTarget, WorkerdTransport};
 use bytes::Bytes;
 use futures::stream;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactRef, ArtifactStore};
-use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, RequestId};
+use open_compute_core::{AccountId, ErrorCode, PlatformError, RequestId, VersionId};
 use open_compute_storage::{
-    DeploymentAssetsRepository, DeploymentState, PlatformStorage, SystemOwnedDeploymentKind,
-    SystemOwnedDeploymentRecord, WorkerOwnership, WorkerRepository,
+    PlatformStorage, SystemOwnedVersionKind, SystemOwnedVersionRecord, VersionAssetsRepository,
+    VersionState, WorkerOwnership, WorkerRepository,
 };
 use open_compute_workers::{
-    AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, BundleLimits, CreateDeploymentOutcome,
-    CreateDeploymentRequest, DeploymentAssets, DeploymentContent, DeploymentController,
-    HtmlHandling, NotFoundHandling, RunWorkerFirst, RuntimeValidator,
+    AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, BundleLimits, CreateVersionOutcome,
+    CreateVersionRequest, HtmlHandling, NotFoundHandling, RunWorkerFirst, RuntimeValidator,
+    VersionAssets, VersionContent, VersionController,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use open_compute_storage::SYSTEM_DASHBOARD_WORKER_NAME;
 
-/// Frozen dashboard deployment target installed at startup.
+/// Frozen dashboard version target installed at startup.
 #[derive(Clone, Debug)]
 pub struct DashboardDispatch {
     target: DispatchTarget,
@@ -42,7 +42,7 @@ impl DashboardDispatch {
     }
 }
 
-/// Bootstrap or refresh the system-owned dashboard deployment when enabled.
+/// Bootstrap or refresh the system-owned dashboard version when enabled.
 pub async fn bootstrap_dashboard(
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
@@ -62,18 +62,18 @@ pub async fn bootstrap_dashboard(
     }
 
     let assets_sha256 = decode_assets_sha256(embedded_dashboard_assets_sha256())?;
-    let deployment = if let Some(pin) =
-        repo.get_system_owned_deployment(SystemOwnedDeploymentKind::Dashboard)?
+    let version = if let Some(pin) =
+        repo.get_system_owned_version(SystemOwnedVersionKind::Dashboard)?
         && pin.assets_sha256 == assets_sha256
-        && worker.active_deployment_id == pin.active_deployment_id
-        && let Some(active) = worker.active_deployment_id
+        && worker.active_version_id == pin.active_version_id
+        && let Some(active) = worker.active_version_id
     {
-        let deployment = repo.get_worker_deployment(account_id, worker.id, active)?;
-        if deployment.state == DeploymentState::Ready && deployment.deleted_at_ms.is_none() {
-            ensure_dashboard_artifacts(&storage, &artifacts, deployment.id).await?;
-            deployment
+        let version = repo.get_worker_version(account_id, worker.id, active)?;
+        if version.state == VersionState::Ready && version.deleted_at_ms.is_none() {
+            ensure_dashboard_artifacts(&storage, &artifacts, version.id).await?;
+            version
         } else {
-            create_dashboard_deployment(
+            create_dashboard_version(
                 &storage,
                 &artifacts,
                 &transport,
@@ -84,7 +84,7 @@ pub async fn bootstrap_dashboard(
             .await?
         }
     } else {
-        create_dashboard_deployment(
+        create_dashboard_version(
             &storage,
             &artifacts,
             &transport,
@@ -95,22 +95,22 @@ pub async fn bootstrap_dashboard(
         .await?
     };
 
-    let pinned = SystemOwnedDeploymentRecord {
-        kind: SystemOwnedDeploymentKind::Dashboard,
+    let pinned = SystemOwnedVersionRecord {
+        kind: SystemOwnedVersionKind::Dashboard,
         account_id,
         worker_id: worker.id,
-        active_deployment_id: Some(deployment.id),
+        active_version_id: Some(version.id),
         assets_sha256,
         updated_at_ms: now_ms(),
     };
-    repo.pin_system_owned_deployment(&pinned)?;
+    repo.pin_system_owned_version(&pinned)?;
 
     let worker = repo.get_worker(account_id, worker.id)?;
     let target = DispatchTarget {
         account_id,
         worker_id: worker.id,
-        deployment_id: deployment.id,
-        worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+        version_id: version.id,
+        worker_code_sha256: hex::encode(version.worker_code_sha256),
         entrypoint: None,
         route_generation: i64::try_from(worker.route_generation).unwrap_or(i64::MAX),
         request_id: RequestId::generate(),
@@ -118,25 +118,24 @@ pub async fn bootstrap_dashboard(
     Ok(DashboardDispatch::new(target, transport))
 }
 
-async fn create_dashboard_deployment(
+async fn create_dashboard_version(
     storage: &PlatformStorage,
     artifacts: &ArtifactStore,
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     bundle_limits: BundleLimits,
-) -> Result<open_compute_storage::DeploymentRecord, PlatformError> {
+) -> Result<open_compute_storage::VersionRecord, PlatformError> {
     let assets = upload_embedded_assets(artifacts).await?;
     let idempotency_key = format!("system-dashboard:{}", embedded_dashboard_assets_sha256());
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let controller =
-        DeploymentController::new(storage, artifacts.clone(), validator, bundle_limits);
+    let controller = VersionController::new(storage, artifacts.clone(), validator, bundle_limits);
     let outcome = controller
-        .create_deployment(CreateDeploymentRequest {
+        .create_version(CreateVersionRequest {
             account_id,
             worker_id,
             idempotency_key,
-            content: DeploymentContent::AssetsOnly { assets },
+            content: VersionContent::AssetsOnly { assets },
             vars: Default::default(),
             secrets: Default::default(),
             bindings: Default::default(),
@@ -150,21 +149,21 @@ async fn create_dashboard_deployment(
         })
         .await?;
     match outcome {
-        CreateDeploymentOutcome::Applied(result) => Ok(result.deployment),
-        CreateDeploymentOutcome::Replay(_) => {
+        CreateVersionOutcome::Applied(result) => Ok(result.version),
+        CreateVersionOutcome::Replay(_) => {
             let repo = WorkerRepository::new(storage.db());
             let active = repo
                 .get_worker(account_id, worker_id)?
-                .active_deployment_id
+                .active_version_id
                 .ok_or_else(|| {
                     PlatformError::new(
                         ErrorCode::Internal,
-                        "dashboard deployment replay has no active deployment",
+                        "dashboard version replay has no active version",
                     )
                 })?;
-            let deployment = repo.get_worker_deployment(account_id, worker_id, active)?;
-            ensure_dashboard_artifacts(storage, artifacts, deployment.id).await?;
-            Ok(deployment)
+            let version = repo.get_worker_version(account_id, worker_id, active)?;
+            ensure_dashboard_artifacts(storage, artifacts, version.id).await?;
+            Ok(version)
         }
     }
 }
@@ -172,9 +171,9 @@ async fn create_dashboard_deployment(
 async fn ensure_dashboard_artifacts(
     storage: &PlatformStorage,
     artifacts: &ArtifactStore,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
 ) -> Result<(), PlatformError> {
-    if dashboard_artifacts_available(storage, artifacts, deployment_id).await? {
+    if dashboard_artifacts_available(storage, artifacts, version_id).await? {
         return Ok(());
     }
     upload_embedded_assets(artifacts).await?;
@@ -184,9 +183,9 @@ async fn ensure_dashboard_artifacts(
 async fn dashboard_artifacts_available(
     storage: &PlatformStorage,
     artifacts: &ArtifactStore,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
 ) -> Result<bool, PlatformError> {
-    let blobs = DeploymentAssetsRepository::new(storage.db()).list_asset_blobs(deployment_id)?;
+    let blobs = VersionAssetsRepository::new(storage.db()).list_asset_blobs(version_id)?;
     if blobs.is_empty() {
         return Ok(false);
     }
@@ -202,9 +201,7 @@ async fn dashboard_artifacts_available(
     Ok(true)
 }
 
-async fn upload_embedded_assets(
-    artifacts: &ArtifactStore,
-) -> Result<DeploymentAssets, PlatformError> {
+async fn upload_embedded_assets(artifacts: &ArtifactStore) -> Result<VersionAssets, PlatformError> {
     let mut entries = Vec::with_capacity(embedded_dashboard_files().len());
     for (relative, bytes) in embedded_dashboard_files() {
         let path = format!("/{}", relative.trim_start_matches('/'));
@@ -226,7 +223,7 @@ async fn upload_embedded_assets(
         });
     }
     entries.sort_by(|left, right| left.path.as_bytes().cmp(right.path.as_bytes()));
-    Ok(DeploymentAssets {
+    Ok(VersionAssets {
         manifest: AssetManifestV1 {
             schema_version: 1,
             entries,

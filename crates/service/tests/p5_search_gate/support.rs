@@ -1,4 +1,4 @@
-//! Host fixtures, resource setup, deployment dispatch, and local provider helpers.
+//! Host fixtures, resource setup, version dispatch, and local provider helpers.
 
 use super::*;
 use sha2::{Digest as _, Sha256};
@@ -145,13 +145,13 @@ pub(super) fn create_metadata_index(
     .unwrap();
 }
 
-pub(super) fn deployment_request(
+pub(super) fn version_request(
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
     vectorize: open_compute_core::ResourceId,
     search: open_compute_core::ResourceId,
     direct_search: open_compute_core::ResourceId,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -165,7 +165,7 @@ pub(super) fn deployment_request(
     let bindings = BTreeMap::from([
         (
             "VECTOR".to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::VectorizeIndex,
                 id: vectorize,
                 permissions: CanonicalPermissions::default(),
@@ -174,7 +174,7 @@ pub(super) fn deployment_request(
         ),
         (
             "SEARCH".to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::AiSearchNamespace,
                 id: search,
                 permissions: CanonicalPermissions::default(),
@@ -183,7 +183,7 @@ pub(super) fn deployment_request(
         ),
         (
             "DIRECT_SEARCH".to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::AiSearchInstance,
                 id: direct_search,
                 permissions: CanonicalPermissions::default(),
@@ -191,11 +191,11 @@ pub(super) fn deployment_request(
             },
         ),
     ]);
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id: account,
         worker_id: worker,
-        idempotency_key: "p5-deployment".to_owned(),
-        content: DeploymentContent::Worker {
+        idempotency_key: "p5-version".to_owned(),
+        content: VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -203,11 +203,11 @@ pub(super) fn deployment_request(
         secrets: BTreeMap::new(),
         bindings,
         services: BTreeMap::new(),
-        runtime_features: DeploymentRuntimeFeatures {
-            ai: Some(DeploymentAiInput {
+        runtime_features: VersionRuntimeFeatures {
+            ai: Some(VersionAiInput {
                 binding: "AI".to_owned(),
             }),
-            ..DeploymentRuntimeFeatures::default()
+            ..VersionRuntimeFeatures::default()
         },
         queue_consumers: Vec::new(),
         crons: Vec::new(),
@@ -218,21 +218,21 @@ pub(super) fn deployment_request(
 }
 
 pub(super) async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
     supervisor: &WorkerdSupervisor,
-) -> open_compute_storage::DeploymentRecord {
+) -> open_compute_storage::VersionRecord {
     match controller
-        .create_deployment(request)
+        .create_version(request)
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "deployment failed: {error:?}; diagnostics={:?}",
+                "version failed: {error:?}; diagnostics={:?}",
                 supervisor.last_diagnostics()
             )
         }) {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
@@ -241,7 +241,7 @@ pub(super) async fn dispatch(
     workers: &WorkerRepository<'_>,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     uri: &str,
 ) -> (u16, String) {
     let route_generation = i64::try_from(
@@ -256,8 +256,8 @@ pub(super) async fn dispatch(
             DispatchTarget {
                 account_id: account,
                 worker_id: worker,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation,
                 request_id: RequestId::generate(),

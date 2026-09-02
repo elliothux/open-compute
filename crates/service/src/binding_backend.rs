@@ -11,8 +11,8 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use open_compute_core::{
-    BindingId, BindingKind, DeploymentId, DurableObjectId, DurableObjectsConfig, ErrorCode,
-    OperationClass, PlatformError, QueuesConfig, ResourceId,
+    BindingId, BindingKind, DurableObjectId, DurableObjectsConfig, ErrorCode, OperationClass,
+    PlatformError, QueuesConfig, ResourceId, VersionId,
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
@@ -40,7 +40,7 @@ pub use search_composition::serve_binding_backend_with_document_parser;
 
 const TOKEN_HEADER: &str = "x-open-compute-binding-token";
 const GENERATION_HEADER: &str = "x-open-compute-startup-generation";
-const DEPLOYMENT_HEADER: &str = "x-open-compute-deployment-id";
+const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const REQUEST_HEADER: &str = "x-open-compute-request-id";
 const ROUTE_GENERATION_HEADER: &str = "x-open-compute-route-generation";
@@ -178,7 +178,7 @@ pub async fn serve_binding_backend(
     .await
 }
 
-/// Serve every product plane plus the deployment-scoped static-assets binding backend.
+/// Serve every product plane plus the version-scoped static-assets binding backend.
 #[allow(clippy::too_many_arguments)]
 pub async fn serve_binding_backend_with_assets(
     listener: TcpListener,
@@ -585,7 +585,7 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
         }
         response
     };
-    let deployment_id = match parse_header::<DeploymentId>(headers, DEPLOYMENT_HEADER) {
+    let version_id = match parse_header::<VersionId>(headers, VERSION_HEADER) {
         Ok(value) => value,
         Err(error) => return observe(platform_error(&error)),
     };
@@ -614,7 +614,7 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
         tokio::task::spawn_blocking(move || {
             BindingRepository::new(storage.db()).authorize(
                 binding_id,
-                deployment_id,
+                version_id,
                 &descriptor_sha256,
             )
         }),
@@ -860,7 +860,7 @@ async fn handle_alarm_index(state: BackendState, request: Request) -> Response {
                         object_generation: body.object_generation,
                         row_token,
                         due_at_ms,
-                        target_deployment_id: authority.deployment_id,
+                        target_version_id: authority.version_id,
                         execution_generation: authority.route_generation,
                         retry_count,
                     },
@@ -933,8 +933,7 @@ async fn acknowledge_durable_object(state: BackendState, request: Request) -> Re
     {
         return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
     }
-    let Ok(deployment_id) = parse_header::<DeploymentId>(request.headers(), DEPLOYMENT_HEADER)
-    else {
+    let Ok(version_id) = parse_header::<VersionId>(request.headers(), VERSION_HEADER) else {
         return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
     };
     let Ok(descriptor) = parse_digest(request.headers()) else {
@@ -954,11 +953,8 @@ async fn acknowledge_durable_object(state: BackendState, request: Request) -> Re
     };
     let storage = state.storage.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let binding = BindingRepository::new(storage.db()).authorize(
-            binding_id,
-            deployment_id,
-            &descriptor,
-        )?;
+        let binding =
+            BindingRepository::new(storage.db()).authorize(binding_id, version_id, &descriptor)?;
         if binding.binding.kind != BindingKind::DoNamespace
             || binding.resource.id != body.namespace_resource_id
         {
@@ -1004,8 +1000,7 @@ async fn resolve_durable_object(state: BackendState, request: Request) -> Respon
     {
         return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
     }
-    let Ok(deployment_id) = parse_header::<DeploymentId>(request.headers(), DEPLOYMENT_HEADER)
-    else {
+    let Ok(version_id) = parse_header::<VersionId>(request.headers(), VERSION_HEADER) else {
         return backend_error(ErrorCode::DoInternalProtocolError, StatusCode::BAD_REQUEST);
     };
     let Ok(descriptor) = parse_digest(request.headers()) else {
@@ -1059,7 +1054,7 @@ async fn resolve_durable_object(state: BackendState, request: Request) -> Respon
     let result = tokio::task::spawn_blocking(move || {
         DurableObjectRepository::new(&storage).authorize_dispatch(
             binding_id,
-            deployment_id,
+            version_id,
             &descriptor,
             route_generation,
             object_id,
@@ -1164,7 +1159,7 @@ fn platform_error(error: &PlatformError) -> Response {
         ErrorCode::ResourceNotReady
         | ErrorCode::ResourceReferenced
         | ErrorCode::DoObjectDeleting
-        | ErrorCode::DoDeploymentStale
+        | ErrorCode::DoVersionStale
         | ErrorCode::DoNamespaceNotEmpty => StatusCode::CONFLICT,
         ErrorCode::ServiceTargetNotReady => StatusCode::CONFLICT,
         ErrorCode::ResourceUnavailable

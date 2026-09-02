@@ -24,7 +24,9 @@ impl SchedulerService {
                 .map_err(|_| scheduler_task_failed())?;
             let versions = WorkflowRepository::new(self.storage.db())
                 .pending_versions(*cursor, limit.min(32))?;
-            *cursor = versions.last().map(|version| version.target.version_id);
+            *cursor = versions
+                .last()
+                .map(|version| version.target.workflow_version_id);
             versions
         };
         for version in versions {

@@ -13,7 +13,7 @@ use open_compute_artifacts::{
     AiSearchObjectStore, MockS3, S3ArtifactClient, SnapshotObjectStore, resolve_s3_credentials,
 };
 use open_compute_core::{
-    CronActivationId, DeploymentId, ErrorCode, PlatformSnapshotManifestV1, RequestId, SystemClock,
+    CronActivationId, ErrorCode, PlatformSnapshotManifestV1, RequestId, SystemClock, VersionId,
     WorkerId,
 };
 use open_compute_service::backup_cli::{
@@ -243,13 +243,13 @@ async fn snapshot_restore_gate() {
         .expect("enqueue snapshot Queue message");
     let consumer_id = open_compute_core::QueueConsumerId::generate();
     let worker_id = WorkerId::generate();
-    let deployment_id = DeploymentId::generate();
+    let version_id = VersionId::generate();
     scheduler
         .ensure_queue_consumer_projection(&open_compute_storage::QueueConsumerProjection {
             consumer_id,
             queue_id: snapshot_queue,
             consumer_generation: 1,
-            deployment_id,
+            version_id,
             worker_id,
             execution_generation: 1,
             entrypoint: None,
@@ -278,7 +278,7 @@ async fn snapshot_restore_gate() {
             activation_id,
             account_id,
             worker_id,
-            deployment_id,
+            version_id,
             execution_generation: 1,
             activation_generation: 1,
             expression: "* * * * *".to_owned(),

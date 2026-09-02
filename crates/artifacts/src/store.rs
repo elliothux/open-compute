@@ -86,18 +86,18 @@ pub struct ArtifactCandidate {
 #[derive(Debug, Clone)]
 pub struct ArtifactStore {
     client: S3ArtifactClient,
-    deployment_gc_gate: Arc<RwLock<()>>,
+    version_gc_gate: Arc<RwLock<()>>,
 }
 
-/// Read-side reservation held from deployment upload through authority commit.
-pub struct ArtifactDeploymentReservation {
+/// Read-side reservation held from version upload through authority commit.
+pub struct ArtifactVersionReservation {
     _guard: OwnedRwLockReadGuard<()>,
 }
 
-impl std::fmt::Debug for ArtifactDeploymentReservation {
+impl std::fmt::Debug for ArtifactVersionReservation {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("ArtifactDeploymentReservation")
+            .debug_struct("ArtifactVersionReservation")
             .finish_non_exhaustive()
     }
 }
@@ -121,21 +121,21 @@ impl ArtifactStore {
     pub fn new(client: S3ArtifactClient) -> Self {
         Self {
             client,
-            deployment_gc_gate: Arc::new(RwLock::new(())),
+            version_gc_gate: Arc::new(RwLock::new(())),
         }
     }
 
-    /// Fence artifact GC while a deployment uploads and commits its authoritative reference.
-    pub async fn reserve_deployment_artifact(&self) -> ArtifactDeploymentReservation {
-        ArtifactDeploymentReservation {
-            _guard: self.deployment_gc_gate.clone().read_owned().await,
+    /// Fence artifact GC while a version uploads and commits its authoritative reference.
+    pub async fn reserve_version_artifact(&self) -> ArtifactVersionReservation {
+        ArtifactVersionReservation {
+            _guard: self.version_gc_gate.clone().read_owned().await,
         }
     }
 
-    /// Fence new deployment uploads while GC takes its final reference snapshot and deletes.
-    pub async fn fence_deployment_gc(&self) -> ArtifactGcFence {
+    /// Fence new version uploads while GC takes its final reference snapshot and deletes.
+    pub async fn fence_version_gc(&self) -> ArtifactGcFence {
         ArtifactGcFence {
-            _guard: self.deployment_gc_gate.clone().write_owned().await,
+            _guard: self.version_gc_gate.clone().write_owned().await,
         }
     }
 

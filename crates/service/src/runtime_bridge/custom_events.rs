@@ -84,10 +84,7 @@ impl WorkerdTransport {
             .header(header::CONTENT_TYPE, "application/json")
             .header("x-open-compute-account-id", target.account_id.to_string())
             .header("x-open-compute-worker-id", target.worker_id.to_string())
-            .header(
-                "x-open-compute-deployment-id",
-                target.deployment_id.to_string(),
-            )
+            .header("x-open-compute-version-id", target.version_id.to_string())
             .header("x-open-compute-loader-key", target.loader_key())
             .header(
                 "x-open-compute-worker-code-sha256",
@@ -105,9 +102,9 @@ impl WorkerdTransport {
             .body(Body::from(bytes))
             .map_err(|_| custom_event_protocol_error())?;
         if !matches!(path, "/internal/validate-workflow")
-            && let Some(pins) = &self.deployment_pins
+            && let Some(pins) = &self.version_pins
         {
-            pins.retain_until_restart(target.deployment_id)?;
+            pins.retain_until_restart(target.version_id)?;
         }
         let response = self
             .body_client

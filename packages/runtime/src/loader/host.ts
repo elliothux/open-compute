@@ -23,11 +23,13 @@ import type { AlarmIdentity, AlarmProjection } from "../durable-objects/protocol
 import type { DispatchEnvelope, LoaderEnv, RuntimeModule } from "./protocol.js";
 import {
   assembleOnce, bindingError, BINDING_TOKEN_HEADER, currentStartupGeneration,
-  doPolicy, INTERNAL_HEADERS, lockWorkerCode, resolveSnapshot, tenantGlobalOutbound,
+  doPolicy, INTERNAL_HEADERS, lockWorkerCode, resolveSnapshot, snapshotWorkerCode,
+  tenantGlobalOutbound,
   TOKEN_HEADER,
 } from "./shared.js";
 export {
   bindingError, currentStartupGeneration, doPolicy, lockWorkerCode, resolveSnapshot,
+  snapshotWorkerCode,
   tenantGlobalOutbound,
 } from "./shared.js";
 export { ServiceTransport } from "../services/transport.js";
@@ -152,7 +154,7 @@ export class QueueTransport extends WorkerEntrypoint<BindingEnv, QueueBindingPro
   #props() {
     const props = this.ctx.props;
     if (!props || typeof props.bindingId !== "string"
-        || typeof props.deploymentId !== "string" || typeof props.queueId !== "string"
+        || typeof props.versionId !== "string" || typeof props.queueId !== "string"
         || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
         || !Number.isSafeInteger(props.queueLifecycleGeneration)
         || props.queueLifecycleGeneration < 1) {
@@ -177,7 +179,7 @@ export class QueueTransport extends WorkerEntrypoint<BindingEnv, QueueBindingPro
             : "application/vnd.open-compute.queue.v1+frame",
           [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
           "x-open-compute-startup-generation": currentStartupGeneration(),
-          "x-open-compute-deployment-id": props.deploymentId,
+          "x-open-compute-version-id": props.versionId,
           "x-open-compute-descriptor-sha256": props.descriptorSha256,
           "x-open-compute-request-id": operationId ?? crypto.randomUUID(),
           "x-open-compute-output-gate": operationId === undefined ? "0" : "1",
@@ -216,10 +218,10 @@ export class QueueTransport extends WorkerEntrypoint<BindingEnv, QueueBindingPro
 export class AssetTransport extends WorkerEntrypoint<BindingEnv, AssetBindingProps> {
   #props() {
     const props = this.ctx.props;
-    if (!props || typeof props.deploymentId !== "string"
+    if (!props || typeof props.versionId !== "string"
         || typeof props.descriptorSha256 !== "string"
         || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) {
-      throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+      throw bindingError("VERSION_INVARIANT_VIOLATION");
     }
     return props;
   }
@@ -250,7 +252,7 @@ export class AssetTransport extends WorkerEntrypoint<BindingEnv, AssetBindingPro
     for (const name of INTERNAL_HEADERS) headers.delete(name);
     headers.set(BINDING_TOKEN_HEADER, this.env.BINDING_BACKEND_TOKEN);
     headers.set("x-open-compute-startup-generation", currentStartupGeneration());
-    headers.set("x-open-compute-deployment-id", props.deploymentId);
+    headers.set("x-open-compute-version-id", props.versionId);
     headers.set("x-open-compute-descriptor-sha256", props.descriptorSha256);
     headers.set("x-open-compute-request-id", crypto.randomUUID());
     headers.set("x-open-compute-asset-method", request.method);
@@ -280,7 +282,7 @@ export class AssetTransport extends WorkerEntrypoint<BindingEnv, AssetBindingPro
 
 function doTransportProps(props: ResourceBindingProps | undefined): ResourceBindingProps {
     if (!props || typeof props.accountId !== "string" || typeof props.workerId !== "string"
-        || typeof props.bindingId !== "string" || typeof props.deploymentId !== "string"
+        || typeof props.bindingId !== "string" || typeof props.versionId !== "string"
         || typeof props.namespaceResourceId !== "string"
         || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
         || !Number.isSafeInteger(props.routeGeneration) || props.routeGeneration < 1) {
@@ -306,7 +308,7 @@ function doTransportHeaders(
       "x-open-compute-account-id": props.accountId,
       "x-open-compute-worker-id": props.workerId,
       "x-open-compute-binding-id": props.bindingId,
-      "x-open-compute-deployment-id": props.deploymentId,
+      "x-open-compute-version-id": props.versionId,
       "x-open-compute-descriptor-sha256": props.descriptorSha256,
       "x-open-compute-route-generation": String(props.routeGeneration),
       "x-open-compute-namespace-resource-id": props.namespaceResourceId,
@@ -558,11 +560,11 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
     const internalToken = request.headers.get(TOKEN_HEADER) || "";
     // Resolve and verify on every path, including a warm WorkerLoader key.
     const snapshot = await resolveSnapshot(env, envelope, validation, Boolean(entrypoint), internalToken);
-    const deploymentId = envelope.loaderKey.split("/")[2]!;
+    const versionId = envelope.loaderKey.split("/")[2]!;
     const tenant = validation ? undefined : tenantRequest(request);
     if (!validation && !entrypoint && tenant && routeDefaultHttp(snapshot, tenant) === "asset") {
       const response = await ctx.exports.AssetTransport({ props: Object.freeze({
-        deploymentId,
+        versionId,
         descriptorSha256: snapshot.workerCodeSha256,
       }) }).fetch(tenant);
       const headers = new Headers(response.headers);
@@ -582,20 +584,20 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
       if (representationLength) forwarded.headers.set("content-length", representationLength);
       return forwarded;
     }
-    if (snapshot.contentKind !== "worker") throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    if (snapshot.contentKind !== "worker") throw bindingError("VERSION_INVARIANT_VIOLATION");
     const prior = seenHashes.get(envelope.runtimeKey);
     if (prior && prior !== snapshot.workerCodeSha256) {
-      throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+      throw bindingError("VERSION_INVARIANT_VIOLATION");
     }
     seenHashes.set(envelope.runtimeKey, snapshot.workerCodeSha256);
     const code = await assembleOnce(envelope.runtimeKey, async () => {
       const built = modulesFor(snapshot, validation, entrypoint);
       return {
-        ...lockWorkerCode(env),
+        ...snapshotWorkerCode(snapshot),
         mainModule: built.mainModule,
         modules: built.modules,
         env: validation ? {} : tenantEnv(
-          snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
+          snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
         ),
         globalOutbound: tenantGlobalOutbound(env, validation),
       };
@@ -628,7 +630,7 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
   } catch (error) {
     const stable = stableCode(error);
     if (stable) {
-      const status = stable === "DEPLOYMENT_NOT_READY" ? 409
+      const status = stable === "VERSION_NOT_READY" ? 409
         : stable === "ARTIFACT_UNAVAILABLE" ? 503
         : stable === "BUNDLE_RUNTIME_INVALID" ? 422
         : 500;
@@ -715,18 +717,18 @@ async function customEventTarget(request: Request, env: LoaderEnv, ctx: Executio
   const snapshot = await resolveSnapshot(env, envelope, false, Boolean(entrypoint), internalToken);
   const prior = seenHashes.get(envelope.runtimeKey);
   if (prior && prior !== snapshot.workerCodeSha256) {
-    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   seenHashes.set(envelope.runtimeKey, snapshot.workerCodeSha256);
   const code = await assembleOnce(envelope.runtimeKey, async () => {
     const built = modulesFor(snapshot, false, entrypoint);
-    const deploymentId = envelope.loaderKey.split("/")[2]!;
+    const versionId = envelope.loaderKey.split("/")[2]!;
     return {
-      ...lockWorkerCode(env),
+      ...snapshotWorkerCode(snapshot),
       mainModule: built.mainModule,
       modules: built.modules,
       env: tenantEnv(
-        snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
+        snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
       ),
       globalOutbound: tenantGlobalOutbound(env, false),
     };
@@ -848,7 +850,7 @@ async function validateDurableObjectClass(request: Request, env: LoaderEnv) {
   }
   const built = modulesFor(snapshot, false, className, true);
   const code = {
-    ...lockWorkerCode(env),
+    ...snapshotWorkerCode(snapshot),
     mainModule: built.mainModule,
     modules: built.modules,
     env: {},

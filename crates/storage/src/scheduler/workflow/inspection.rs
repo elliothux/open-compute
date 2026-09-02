@@ -114,7 +114,7 @@ impl SchedulerStore {
     }
 }
 
-const INSTANCE_INSPECTION_SELECT: &str = "SELECT id,external_instance_id,version_id,deployment_id,class_name,instance_generation,state,
+const INSTANCE_INSPECTION_SELECT: &str = "SELECT id,external_instance_id,workflow_version_id,worker_version_id,class_name,instance_generation,state,
     completed_step_count,(SELECT COUNT(*) FROM workflow_steps s WHERE s.instance_id=i.id),state_bytes,
     CASE WHEN run_lease_until_ms IS NOT NULL THEN MAX(0,run_lease_until_ms-?5) END,created_at_ms,terminal_at_ms,error_code,capability_version,
     pause_requested,yield_requested,next_wake_at_ms,registered_step_count,settled_step_count,success_retention_ms,error_retention_ms,
@@ -140,8 +140,8 @@ fn inspection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowInstanceI
     Ok(WorkflowInstanceInspection {
         id: parse(row, 0)?,
         external_instance_id: row.get(1)?,
-        version_id: parse(row, 2)?,
-        deployment_id: parse(row, 3)?,
+        workflow_version_id: parse(row, 2)?,
+        worker_version_id: parse(row, 3)?,
         class_name: row.get(4)?,
         generation: row.get(5)?,
         status,

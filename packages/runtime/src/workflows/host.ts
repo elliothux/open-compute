@@ -46,7 +46,7 @@ export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: Exec
     const snapshot = await resolveSnapshot(env, { loaderKey, expected }, validation, true,
       request.headers.get("x-open-compute-internal-token"));
     const built = modulesFor(snapshot, false, className, false, true);
-    const deploymentId = loaderKey.split("/")[2]!;
+    const versionId = loaderKey.split("/")[2]!;
     let cold = false;
     const key = `workflow/${validation}/${loaderKey}/${expected}/${className}/${body.versionDescriptorSha256}`;
     const loaded = env.LOADER.get(key, () => {
@@ -54,7 +54,7 @@ export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: Exec
       return {
         ...lockWorkerCode(env),
         mainModule: built.mainModule, modules: built.modules,
-        env: validation ? {} : tenantEnv(snapshot, ctx, deploymentId, doPolicy(env), false, false),
+        env: validation ? {} : tenantEnv(snapshot, ctx, versionId, doPolicy(env), false, false),
         globalOutbound: tenantGlobalOutbound(env, validation),
       };
     });
@@ -79,7 +79,7 @@ export async function handleWorkflow(request: Request, env: LoaderEnv, ctx: Exec
     }
   } catch (error) {
     const code = stableCode(error);
-    if (code === "ARTIFACT_INTEGRITY_ERROR" || code === "DEPLOYMENT_INVARIANT_VIOLATION") {
+    if (code === "ARTIFACT_INTEGRITY_ERROR" || code === "VERSION_INVARIANT_VIOLATION") {
       return new Response(null, { status: 422, headers: { "x-open-compute-error-code":
         code === "ARTIFACT_INTEGRITY_ERROR" ? code : "WORKFLOW_INVARIANT_VIOLATION" } });
     }

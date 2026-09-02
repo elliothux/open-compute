@@ -4,9 +4,7 @@ use axum::body::to_bytes;
 use axum::extract::Request;
 use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use open_compute_core::{
-    BindingId, BindingKind, DeploymentId, ErrorCode, PlatformError, ResourceId,
-};
+use open_compute_core::{BindingId, BindingKind, ErrorCode, PlatformError, ResourceId, VersionId};
 use open_compute_search::{
     ExactCandidate, ExactTopK, MAX_TOP_K, MAX_TOP_K_WITH_VALUES, compile_filter, validate_metadata,
 };
@@ -115,7 +113,7 @@ impl VectorizeBindingService {
 
     fn authorize(&self, headers: &HeaderMap) -> Result<AuthorizedBinding, PlatformError> {
         let binding_id = parse_header::<BindingId>(headers, "x-open-compute-binding-id")?;
-        let deployment_id = parse_header::<DeploymentId>(headers, "x-open-compute-deployment-id")?;
+        let version_id = parse_header::<VersionId>(headers, "x-open-compute-version-id")?;
         let resource_id = parse_header::<ResourceId>(headers, "x-open-compute-resource-id")?;
         let generation = header_text(headers, "x-open-compute-resource-generation")?
             .parse::<u64>()
@@ -124,7 +122,7 @@ impl VectorizeBindingService {
         let _: open_compute_core::RequestId = parse_header(headers, "x-open-compute-request-id")?;
         let binding = BindingRepository::new(self.storage.db()).authorize(
             binding_id,
-            deployment_id,
+            version_id,
             &descriptor,
         )?;
         if binding.binding.kind != BindingKind::VectorizeIndex

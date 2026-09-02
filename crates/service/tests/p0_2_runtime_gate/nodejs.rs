@@ -156,8 +156,7 @@ async fn exercise(
         .create_worker(account, "nodejs-gate", RequestId::generate(), 1, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let controller =
-        DeploymentController::new(storage, artifacts, validator, BundleLimits::default());
+    let controller = VersionController::new(storage, artifacts, validator, BundleLimits::default());
 
     let bundle = CanonicalBundle::build(
         "index.js",
@@ -178,11 +177,11 @@ async fn exercise(
     );
     let mut secrets = BTreeMap::new();
     secrets.insert("TOKEN".to_owned(), SecretString::new(TENANT_SECRET));
-    let request = CreateDeploymentRequest {
+    let request = CreateVersionRequest {
         account_id: account,
         worker_id: worker.id,
         idempotency_key: "deploy-nodejs-default".to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -197,11 +196,11 @@ async fn exercise(
         request_id: RequestId::generate(),
         now_ms: 21,
     };
-    let deployment = match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected replay"),
+    let version = match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
     };
-    let response = dispatch(transport, account, worker.id, &deployment, None, "").await;
+    let response = dispatch(transport, account, worker.id, &version, None, "").await;
     assert_eq!(
         response.status, 200,
         "unexpected Node dispatch response: {response:?}"
@@ -257,7 +256,7 @@ async fn exercise(
         transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         None,
         "raw-tcp-negative",
     )

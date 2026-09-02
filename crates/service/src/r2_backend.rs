@@ -19,8 +19,8 @@ use open_compute_artifacts::{
     R2GetResult, R2ObjectMetadata, R2ObjectStore, R2UploadSource, UserObjectKey, hash_file,
 };
 use open_compute_core::{
-    AccountId, BindingKind, DeploymentId, ErrorCode, OperationClass, PlatformError, R2Config,
-    RequestId, ResourceId,
+    AccountId, BindingKind, ErrorCode, OperationClass, PlatformError, R2Config, RequestId,
+    ResourceId, VersionId,
 };
 use open_compute_storage::{
     AuthorizedBinding, BindingRepository, PlatformStorage, R2BucketRepository, R2ObjectListEntry,
@@ -123,7 +123,7 @@ impl R2BindingService {
         }
         let (binding_id, operation) = parse_path(request.uri().path())?;
         let headers = request.headers();
-        let deployment = parse_header::<DeploymentId>(headers, "x-open-compute-deployment-id")?;
+        let version = parse_header::<VersionId>(headers, "x-open-compute-version-id")?;
         let descriptor = parse_digest(headers)?;
         let request_id = parse_request_id(headers)?;
         if !content_type_matches(headers, operation) {
@@ -131,7 +131,7 @@ impl R2BindingService {
         }
         let binding = BindingRepository::new(self.storage.db()).authorize(
             binding_id,
-            deployment,
+            version,
             &descriptor,
         )?;
         validate_binding(&binding, operation)?;

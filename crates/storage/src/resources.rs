@@ -1,4 +1,4 @@
-//! Typed resource lifecycle and immutable deployment-binding repository.
+//! Typed resource lifecycle and immutable version-binding repository.
 
 use crate::ControlDb;
 use open_compute_core::{
@@ -228,7 +228,7 @@ impl<'a> ResourceRepository<'a> {
             tx.execute(
                 "INSERT INTO control_idempotency
                  (account_id, scope, idempotency_key, fingerprint_key_id,
-                  request_fingerprint, response_json, deployment_id, state,
+                  request_fingerprint, response_json, version_id, state,
                   created_at_ms, expires_at_ms, resource_id)
                  VALUES (?1, 'resource.create', ?2, ?3, ?4, NULL, NULL,
                          'running', ?5, ?6, ?7)",
@@ -421,7 +421,7 @@ impl<'a> ResourceRepository<'a> {
             tx.execute(
                 "INSERT INTO control_idempotency
                  (account_id, scope, idempotency_key, fingerprint_key_id,
-                  request_fingerprint, response_json, deployment_id, state,
+                  request_fingerprint, response_json, version_id, state,
                   created_at_ms, expires_at_ms, resource_id)
                  VALUES (?1, 'resource.delete', ?2, ?3, ?4, NULL, NULL,
                          'running', ?5, ?6, ?7)",

@@ -404,7 +404,7 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
   const facetAuthority = {
     accountId: "account",
     workerId: "worker",
-    deploymentId: "deployment",
+    versionId: "version",
     workerCodeSha256: "a".repeat(64),
     className: "Object",
   };
@@ -450,7 +450,7 @@ test("Durable Object WebSocket responses hand ownership to native hibernation", 
     __OPEN_COMPUTE_PRIVATE_FACET_AUTHORITY: {
       accountId: "account",
       workerId: "worker",
-      deploymentId: "deployment",
+      versionId: "version",
       workerCodeSha256: "a".repeat(64),
       className: "SocketObject",
     },

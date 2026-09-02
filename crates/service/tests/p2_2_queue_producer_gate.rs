@@ -25,13 +25,13 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_service::{SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend};
 use open_compute_storage::{
-    DeploymentRecord, PlatformStorage, QueueConfig, QueueContentType, QueueRepository,
-    SchedulerStore, WorkerRepository,
+    PlatformStorage, QueueConfig, QueueContentType, QueueRepository, SchedulerStore, VersionRecord,
+    WorkerRepository,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    CreateQueueOutcome, CreateQueueRequest, DeploymentBindingInput, DeploymentController,
-    ModuleInput, ModuleType, QueueController, ResourcePins, RuntimeSource, RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateQueueOutcome, CreateQueueRequest, CreateVersionOutcome,
+    CreateVersionRequest, ModuleInput, ModuleType, QueueController, ResourcePins, RuntimeSource,
+    RuntimeValidator, VersionBindingInput, VersionController,
 };
 use rusqlite::{Connection, params};
 use std::collections::BTreeMap;
@@ -166,11 +166,10 @@ async fn p2_2_real_queue_producer_matrix() {
         .create_worker(account, "queue-gate", RequestId::generate(), 10, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let deployments =
-        DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
+    let versions = VersionController::new(&storage, artifacts, validator, BundleLimits::default());
 
-    let collision = deployments
-        .create_deployment(deployment_request(
+    let collision = versions
+        .create_version(version_request(
             account,
             worker.id,
             queue,
@@ -193,8 +192,8 @@ async fn p2_2_real_queue_producer_matrix() {
             1_000_000,
         )
         .unwrap();
-    let cross_account = deployments
-        .create_deployment(deployment_request(
+    let cross_account = versions
+        .create_version(version_request(
             foreign,
             foreign_worker.id,
             queue,
@@ -207,9 +206,9 @@ async fn p2_2_real_queue_producer_matrix() {
         .unwrap_err();
     assert_eq!(cross_account.code(), ErrorCode::QueueNotFound);
 
-    let deployment = deploy(
-        &deployments,
-        deployment_request(account, worker.id, queue, "queue-bound", true, false, 30),
+    let version = deploy(
+        &versions,
+        version_request(account, worker.id, queue, "queue-bound", true, false, 30),
     )
     .await;
     let generation = i64::try_from(
@@ -220,13 +219,7 @@ async fn p2_2_real_queue_producer_matrix() {
     )
     .unwrap();
     let matrix = dispatch(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        generation,
-        None,
-        "/matrix",
+        &transport, account, worker.id, &version, generation, None, "/matrix",
     )
     .await;
     assert_eq!(matrix.status, 200, "{}", matrix.body);
@@ -244,7 +237,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         Some("Named"),
         "/",
@@ -257,7 +250,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         None,
         "/operator/metrics",
@@ -285,8 +278,8 @@ async fn p2_2_real_queue_producer_matrix() {
             &DispatchTarget {
                 account_id: account,
                 worker_id: worker.id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: generation,
                 request_id: RequestId::generate(),
@@ -324,8 +317,8 @@ async fn p2_2_real_queue_producer_matrix() {
             &DispatchTarget {
                 account_id: account,
                 worker_id: worker.id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: generation,
                 request_id: RequestId::generate(),
@@ -354,7 +347,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         None,
         "/operator/metrics",
@@ -385,7 +378,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         None,
         "/send-one",
@@ -408,7 +401,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         None,
         "/send-one",
@@ -432,7 +425,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         None,
         "/operator/metrics",
@@ -444,19 +437,19 @@ async fn p2_2_real_queue_producer_matrix() {
     assert!(empty_metrics.get("oldestMessageTimestamp").is_none());
 
     let plain = deploy(
-        &deployments,
-        deployment_request(account, worker.id, queue, "queue-plain", false, false, 50),
+        &versions,
+        version_request(account, worker.id, queue, "queue-plain", false, false, 50),
     )
     .await;
-    assert_ne!(plain.id, deployment.id);
+    assert_ne!(plain.id, version.id);
     workers
         .prune_expired_idempotency(24 * 60 * 60 * 1_000 + 100, 100)
         .unwrap();
     workers
-        .begin_deployment_delete(account, worker.id, deployment.id)
+        .begin_version_delete(account, worker.id, version.id)
         .unwrap();
     workers
-        .finalize_deployment_delete(account, worker.id, deployment.id, RequestId::generate(), 51)
+        .finalize_version_delete(account, worker.id, version.id, RequestId::generate(), 51)
         .unwrap();
     let retired = QueueController::new(&storage, scheduler.clone())
         .delete(account, queue, 1, false, RequestId::generate(), 52)
@@ -504,17 +497,17 @@ fn create_queue(
 }
 
 pub(crate) async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
-) -> DeploymentRecord {
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
+) -> VersionRecord {
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn deployment_request(
+fn version_request(
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     queue_id: QueueId,
@@ -522,7 +515,7 @@ fn deployment_request(
     bound: bool,
     collision: bool,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -541,7 +534,7 @@ fn deployment_request(
     if bound {
         bindings.insert(
             "EVENTS".to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::QueueProducer,
                 id: ResourceId::from_uuid(queue_id.as_uuid()).unwrap(),
                 permissions: CanonicalPermissions::default(),
@@ -549,11 +542,11 @@ fn deployment_request(
             },
         );
     }
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -581,7 +574,7 @@ pub(crate) async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     route_generation: i64,
     entrypoint: Option<&str>,
     path: &str,
@@ -597,8 +590,8 @@ pub(crate) async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: entrypoint.map(str::to_owned),
                 route_generation,
                 request_id: RequestId::generate(),

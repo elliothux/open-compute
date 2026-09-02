@@ -1,7 +1,7 @@
 //! Real pinned-workerd P0 aggregate Exit Gate.
 //!
-//! One Worker deployment owns every P0 product binding so cross-product composition, resource
-//! isolation, backup/rebind, deployment fencing, process recovery, and failure isolation are
+//! One Worker version owns every P0 product binding so cross-product composition, resource
+//! isolation, backup/rebind, version fencing, process recovery, and failure isolation are
 //! proven together rather than inferred from independent product Gates.
 
 #![cfg(feature = "test-support")]
@@ -22,7 +22,7 @@ use open_compute_service::backup_cli::{
 };
 use open_compute_service::doctor::{DoctorMode, doctor_report};
 use open_compute_storage::{PlatformStorage, ResourceRepository, WorkerRepository};
-use open_compute_workers::{BundleLimits, DeploymentController, ResourcePins, RuntimeValidator};
+use open_compute_workers::{BundleLimits, ResourcePins, RuntimeValidator, VersionController};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use std::fs;
@@ -32,8 +32,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{
     GateStack, ProductBindings, admin_json, admin_router, capacity_summary, corrupt_d1, deploy,
-    deployment_request, dispatch, kill_workerd, now_ms, open_scheduler, repo_root,
-    reset_capacity_samples, storage_config, stores, wait_pid_change,
+    dispatch, kill_workerd, now_ms, open_scheduler, repo_root, reset_capacity_samples,
+    storage_config, stores, version_request, wait_pid_change,
 };
 
 struct PlatformConfigInput<'a> {
@@ -176,9 +176,9 @@ async fn p0_real_combined_exit_matrix_inner() {
     assert_control_catalogs(&router, account).await;
     apply_primary_d1_migration(&router, account, bindings.d1).await;
 
-    let deployment_a = {
+    let version_a = {
         let validator: Arc<dyn RuntimeValidator> = Arc::new(stack.transport.clone());
-        let controller = DeploymentController::new(
+        let controller = VersionController::new(
             &storage,
             artifacts.clone(),
             validator,
@@ -186,7 +186,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         );
         deploy(
             &controller,
-            deployment_request(
+            version_request(
                 account,
                 worker.id,
                 bindings,
@@ -208,7 +208,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         &stack.transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/seed",
     )
@@ -223,7 +223,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/websocket",
         )
@@ -236,7 +236,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/snapshot",
         )
@@ -280,7 +280,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/mutate",
         )
@@ -311,7 +311,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             &format!("/set-alarm?time={due}"),
         )
@@ -322,9 +322,9 @@ async fn p0_real_combined_exit_matrix_inner() {
         d1: restored_d1,
         ..bindings
     };
-    let deployment_b = {
+    let version_b = {
         let validator: Arc<dyn RuntimeValidator> = Arc::new(stack.transport.clone());
-        let controller = DeploymentController::new(
+        let controller = VersionController::new(
             &storage,
             artifacts.clone(),
             validator,
@@ -332,7 +332,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         );
         deploy(
             &controller,
-            deployment_request(
+            version_request(
                 account,
                 worker.id,
                 bindings_b,
@@ -351,7 +351,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         .route_generation;
     assert!(generation_b > generation_a);
     assert_eq!(stack.scheduler.poll_once().await.unwrap(), 1);
-    let alarm_b = alarm_status(&stack, account, worker.id, &deployment_b, generation_b).await;
+    let alarm_b = alarm_status(&stack, account, worker.id, &version_b, generation_b).await;
     assert_eq!(alarm_b["alarmDeliveries"], 1);
     assert_eq!(alarm_b["alarmRelease"], "B");
     assert_eq!(alarm_b["alarmRetryCount"], 0);
@@ -362,7 +362,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_b,
+            &version_b,
             generation_b,
             "/snapshot",
         )
@@ -375,7 +375,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_b,
+            &version_b,
             generation_b,
             &format!("/set-alarm?time={due}"),
         )
@@ -385,8 +385,8 @@ async fn p0_real_combined_exit_matrix_inner() {
         .promote_checked(
             account,
             worker.id,
-            deployment_a.id,
-            Some(deployment_b.id),
+            version_a.id,
+            Some(version_b.id),
             Some(generation_b),
             RequestId::generate(),
             40,
@@ -397,14 +397,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         .unwrap()
         .route_generation;
     assert_eq!(stack.scheduler.poll_once().await.unwrap(), 1);
-    let alarm_a = alarm_status(
-        &stack,
-        account,
-        worker.id,
-        &deployment_a,
-        generation_rollback,
-    )
-    .await;
+    let alarm_a = alarm_status(&stack, account, worker.id, &version_a, generation_rollback).await;
     assert_eq!(alarm_a["alarmDeliveries"], 2);
     assert_eq!(alarm_a["alarmRelease"], "A");
     let rolled_back = response_json(
@@ -412,7 +405,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             "/snapshot",
         )
@@ -428,7 +421,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             "/snapshot",
         )
@@ -441,7 +434,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             &format!("/set-alarm?time={due}"),
         )
@@ -481,17 +474,11 @@ async fn p0_real_combined_exit_matrix_inner() {
     let persisted_worker = WorkerRepository::new(storage.db())
         .get_worker(account, worker.id)
         .unwrap();
-    assert_eq!(persisted_worker.active_deployment_id, Some(deployment_a.id));
+    assert_eq!(persisted_worker.active_version_id, Some(version_a.id));
     assert_eq!(persisted_worker.route_generation, generation_rollback);
     assert_eq!(stack.scheduler.poll_once().await.unwrap(), 1);
-    let after_platform_restart = alarm_status(
-        &stack,
-        account,
-        worker.id,
-        &deployment_a,
-        generation_rollback,
-    )
-    .await;
+    let after_platform_restart =
+        alarm_status(&stack, account, worker.id, &version_a, generation_rollback).await;
     assert_eq!(after_platform_restart["alarmDeliveries"], 3);
     assert_eq!(after_platform_restart["alarmRelease"], "A");
     let persisted = response_json(
@@ -499,7 +486,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             "/snapshot",
         )
@@ -580,14 +567,14 @@ async fn p0_real_combined_exit_matrix_inner() {
     let restored_worker = WorkerRepository::new(storage.db())
         .get_worker(account, worker.id)
         .unwrap();
-    assert_eq!(restored_worker.active_deployment_id, Some(deployment_a.id));
+    assert_eq!(restored_worker.active_version_id, Some(version_a.id));
     assert_eq!(restored_worker.route_generation, generation_rollback);
     let restored_snapshot = response_json(
         &dispatch(
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             "/snapshot",
         )
@@ -597,13 +584,13 @@ async fn p0_real_combined_exit_matrix_inner() {
 
     let s3_request = tokio::spawn({
         let transport = stack.transport.clone();
-        let deployment = deployment_a.clone();
+        let version = version_a.clone();
         async move {
             dispatch(
                 &transport,
                 account,
                 worker.id,
-                &deployment,
+                &version,
                 generation_rollback,
                 "/s3-fault?delay=250",
             )
@@ -642,7 +629,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             "/snapshot",
         )
@@ -656,7 +643,7 @@ async fn p0_real_combined_exit_matrix_inner() {
             &stack.transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             "/corruption",
         )
@@ -682,7 +669,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         &stack.transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
         "/delete-r2",
     )
@@ -911,14 +898,14 @@ async fn alarm_status(
     stack: &GateStack,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     generation: u64,
 ) -> Value {
     let response = dispatch(
         &stack.transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/alarm-status",
     )

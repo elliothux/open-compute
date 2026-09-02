@@ -10,7 +10,7 @@ pub(super) fn eligible_consumers_tx(
 ) -> Result<Vec<ConsumerRow>, PlatformError> {
     let mut statement = tx
         .prepare(
-            "SELECT c.consumer_id, c.queue_id, q.account_id, c.consumer_generation, c.deployment_id,
+            "SELECT c.consumer_id, c.queue_id, q.account_id, c.consumer_generation, c.version_id,
                     c.worker_id, c.execution_generation, c.entrypoint, c.max_batch_size,
                     c.max_batch_timeout_ms, c.max_retries, c.retry_delay_seconds,
                     c.max_concurrency, c.dlq_queue_id, c.dlq_queue_generation
@@ -49,7 +49,7 @@ pub(super) fn map_consumer(row: &rusqlite::Row<'_>) -> rusqlite::Result<Consumer
     let consumer_id: String = row.get(0)?;
     let queue_id: String = row.get(1)?;
     let account_id: String = row.get(2)?;
-    let deployment_id: String = row.get(4)?;
+    let version_id: String = row.get(4)?;
     let worker_id: String = row.get(5)?;
     let dlq: Option<String> = row.get(13)?;
     let dlq_generation: Option<i64> = row.get(14)?;
@@ -65,7 +65,7 @@ pub(super) fn map_consumer(row: &rusqlite::Row<'_>) -> rusqlite::Result<Consumer
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         consumer_generation: u64::try_from(row.get::<_, i64>(3)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        deployment_id: deployment_id
+        version_id: version_id
             .parse()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: worker_id
@@ -104,7 +104,7 @@ pub(super) fn read_consumer_tx(
 ) -> Result<ConsumerRow, PlatformError> {
     tx.query_row(
         "SELECT c.consumer_id, c.queue_id, q.account_id, c.consumer_generation,
-                c.deployment_id, c.worker_id,
+                c.version_id, c.worker_id,
                 execution_generation, entrypoint, max_batch_size, max_batch_timeout_ms,
                 max_retries, retry_delay_seconds, max_concurrency, dlq_queue_id,
                 dlq_queue_generation FROM queue_consumer_state c

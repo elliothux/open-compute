@@ -1,6 +1,6 @@
 //! Canonical cache identity and response metadata.
 
-use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, WorkerId};
+use open_compute_core::{AccountId, ErrorCode, PlatformError, VersionId, WorkerId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,7 +10,7 @@ use std::str::FromStr;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheSurface {
-    /// Deployment-configured automatic response cache.
+    /// Version-configured automatic response cache.
     Automatic,
     /// Explicit `caches.default` namespace.
     CacheApiDefault,
@@ -46,7 +46,7 @@ pub struct CacheIdentity {
     pub surface: CacheSurface,
     /// Automatic-cache entrypoint, absent for Cache API namespaces.
     pub entrypoint: Option<String>,
-    /// Deployment ID or `shared` for automatic cache; always `shared` for Cache API.
+    /// Version ID or `shared` for automatic cache; always `shared` for Cache API.
     pub version_scope: String,
     /// Named-cache namespace, present only for `cache_api_named`.
     pub cache_name: Option<String>,
@@ -74,7 +74,7 @@ impl CacheIdentity {
                 if !valid_entrypoint(entrypoint)
                     || self.cache_name.is_some()
                     || (self.version_scope != "shared"
-                        && DeploymentId::from_str(&self.version_scope).is_err())
+                        && VersionId::from_str(&self.version_scope).is_err())
                 {
                     return Err(key_invalid());
                 }

@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse as _, Response};
 use open_compute_core::workflow::WorkflowStepDeclaration;
 use open_compute_core::{
-    BindingId, DeploymentId, ErrorCode, PlatformError, SchedulerClock as _, WorkflowFence,
+    BindingId, ErrorCode, PlatformError, SchedulerClock as _, VersionId, WorkflowFence,
     WorkflowInstanceId, WorkflowOperationId, WorkflowsConfig,
 };
 use open_compute_runtime::GenerationAuthRegistry;
@@ -123,7 +123,7 @@ impl WorkflowBindingService {
         let binding: BindingId = binding
             .parse()
             .map_err(|_| failure(ErrorCode::WorkflowBindingStale))?;
-        let deployment: DeploymentId = header(headers, "x-open-compute-deployment-id")?
+        let version: VersionId = header(headers, "x-open-compute-version-id")?
             .parse()
             .map_err(|_| failure(ErrorCode::WorkflowBindingStale))?;
         let digest = header(headers, "x-open-compute-descriptor-sha256")?;
@@ -138,7 +138,7 @@ impl WorkflowBindingService {
         hex::decode_to_slice(digest, &mut expected)
             .map_err(|_| failure(ErrorCode::WorkflowBindingStale))?;
         let repository = WorkflowRepository::new(self.storage.db());
-        let (account, binding) = repository.authorize_binding(binding, deployment, &expected)?;
+        let (account, binding) = repository.authorize_binding(binding, version, &expected)?;
         let definition = binding.descriptor.definition_id;
         let capability = binding.descriptor.capability_version;
         if capability != 1 {

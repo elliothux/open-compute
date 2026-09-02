@@ -81,7 +81,7 @@ impl WorkflowRepository<'_> {
         self.db.with_read(|conn| {
             let remaining:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_instance_referrers WHERE instance_id=?1)
                 OR EXISTS(SELECT 1 FROM workflow_instance_operations WHERE instance_id=?1)
-                OR EXISTS(SELECT 1 FROM deployment_referrers WHERE kind='workflow_instance' AND ref_id=?1)
+                OR EXISTS(SELECT 1 FROM version_referrers WHERE kind='workflow_instance' AND ref_id=?1)
                 OR EXISTS(SELECT 1 FROM workflow_referrers WHERE referrer_kind='instance' AND referrer_id=?1)",
                 [receipt.instance_id.to_string()],|row|row.get(0)).map_err(sql_error)?;
             if remaining {return Err(error(ErrorCode::WorkflowInstanceBusy));}

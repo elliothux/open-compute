@@ -29,10 +29,9 @@ use open_compute_service::{
 };
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::{
-    DeploymentAssetsRepository, SYSTEM_DASHBOARD_WORKER_NAME, SystemOwnedDeploymentKind,
-    WorkerRepository,
+    SYSTEM_DASHBOARD_WORKER_NAME, SystemOwnedVersionKind, VersionAssetsRepository, WorkerRepository,
 };
-use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins, RuntimeSource};
+use open_compute_workers::{BundleLimits, ResourcePins, RuntimeSource, VersionPins};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -73,7 +72,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
     let source_addr = source_listener.local_addr().unwrap();
     let binding_listener = bind_binding_backend().await.unwrap();
     let binding_addr = binding_listener.local_addr().unwrap();
-    let deployment_pins = DeploymentPins::new();
+    let version_pins = VersionPins::new();
     let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown.subscribe();
     let source_task = tokio::spawn({
@@ -90,7 +89,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
     let binding_task = tokio::spawn({
         let storage = storage.clone();
         let auth = binding_auth.clone();
-        let pins = deployment_pins.clone();
+        let pins = version_pins.clone();
         let asset_service = Arc::new(AssetBindingService::new(
             storage.clone(),
             artifacts.clone(),
@@ -142,7 +141,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
     .with_binding_generation_auth(binding_auth.clone());
     let supervisor_slot = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_deployment_pins(deployment_pins.clone());
+        .with_version_pins(version_pins.clone());
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -207,12 +206,12 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
     );
 
     let mut system_pin = repo
-        .get_system_owned_deployment(SystemOwnedDeploymentKind::Dashboard)
+        .get_system_owned_version(SystemOwnedVersionKind::Dashboard)
         .unwrap()
-        .expect("dashboard deployment pin");
-    let deployment_id = system_pin.active_deployment_id.expect("active dashboard");
-    let (digest, size) = DeploymentAssetsRepository::new(storage.db())
-        .list_asset_blobs(deployment_id)
+        .expect("dashboard version pin");
+    let version_id = system_pin.active_version_id.expect("active dashboard");
+    let (digest, size) = VersionAssetsRepository::new(storage.db())
+        .list_asset_blobs(version_id)
         .unwrap()
         .into_iter()
         .next()
@@ -224,7 +223,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
         .await
         .unwrap();
     system_pin.assets_sha256 = [0; 32];
-    repo.pin_system_owned_deployment(&system_pin).unwrap();
+    repo.pin_system_owned_version(&system_pin).unwrap();
     let _replayed_dispatch = bootstrap_dashboard(
         storage.clone(),
         artifacts.clone(),
@@ -242,7 +241,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
         BundleLimits::default(),
     )
     .await
-    .expect("unchanged dashboard bootstrap must reuse the ready deployment");
+    .expect("unchanged dashboard bootstrap must reuse the ready version");
 
     let direct = dispatch
         .dispatch(

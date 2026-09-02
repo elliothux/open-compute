@@ -43,7 +43,7 @@ async fn production_batches_enforce_join_limits_and_replay_large_outputs() {
         harness.transport.clone(),
         limits.clone(),
     )
-    .create_version(account, definition.id, target.deployment_id, "Flow".into())
+    .create_version(account, definition.id, target.version_id, "Flow".into())
     .await
     .unwrap();
     let controller = WorkflowController::new(&harness.storage, &store, &limits);

@@ -2,24 +2,24 @@
 
 use super::*;
 
-fn current(storage: &PlatformStorage, deployment: DeploymentId) -> WorkflowDefinition {
+fn current(storage: &PlatformStorage, version: VersionId) -> WorkflowDefinition {
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
     let definition = repo.create_definition(account, "durable", 0).unwrap();
     let version = repo
-        .stage_version(account, definition.id, deployment, "Flow", 1)
+        .stage_version(account, definition.id, version, "Flow", 1)
         .unwrap();
-    repo.finish_version(account, version.target.version_id, true, 2)
+    repo.finish_version(account, version.target.workflow_version_id, true, 2)
         .unwrap();
     repo.definition(account, definition.id).unwrap()
 }
 
 #[test]
 fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() {
-    let (_temp, storage, deployment) = setup();
+    let (_temp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
-    let definition = current(&storage, deployment);
+    let definition = current(&storage, version);
     let limits = WorkflowsConfig {
         max_active_per_account: 1,
         ..Default::default()
@@ -33,7 +33,7 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
     let binding = repo
         .prepare_binding(
             account,
-            DeploymentId::generate(),
+            VersionId::generate(),
             "FLOW",
             definition.id,
             Vec::new(),
@@ -168,7 +168,7 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
                 "DELETE FROM workflow_instance_operations",
                 "DELETE FROM workflow_instance_referrers",
                 "DELETE FROM workflow_referrers",
-                "DELETE FROM deployment_referrers WHERE kind='workflow_instance'",
+                "DELETE FROM version_referrers WHERE kind='workflow_instance'",
             ] {
                 assert!(conn.execute(sql, []).is_err(), "{sql}");
             }
@@ -180,8 +180,8 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
 
 #[test]
 fn operation_finalize_is_atomic_and_idempotent_and_purge_releases_external_identity() {
-    let (_temp, storage, deployment) = setup();
-    let definition = current(&storage, deployment);
+    let (_temp, storage, version) = setup();
+    let definition = current(&storage, version);
     let account = storage.identity().default_account_id;
     let repo = WorkflowRepository::new(storage.db());
     let limits = WorkflowsConfig::default();

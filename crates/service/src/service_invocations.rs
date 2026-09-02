@@ -1,8 +1,8 @@
-//! Generation-local Service invocation budgets, authority, and deployment leases.
+//! Generation-local Service invocation budgets, authority, and version leases.
 
-use open_compute_core::{DeploymentId, ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, PlatformError, VersionId};
 use open_compute_storage::{ResolvedServiceTarget, ServiceRepository};
-use open_compute_workers::{DeploymentPin, DeploymentPins};
+use open_compute_workers::{VersionPin, VersionPins};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
@@ -35,8 +35,8 @@ pub enum ServiceOperation {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ServiceResolveRequest {
-    /// Caller deployment frozen into the raw system capability.
-    pub caller_deployment_id: DeploymentId,
+    /// Caller version frozen into the raw system capability.
+    pub caller_version_id: VersionId,
     /// Persisted environment binding name.
     pub binding_name: String,
     /// Lowercase canonical descriptor digest.
@@ -57,7 +57,7 @@ pub struct CapabilityBeginRequest {
     pub parent_frame: Option<String>,
 }
 
-/// Which deployment owns a capability crossing the current call.
+/// Which version owns a capability crossing the current call.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RetentionOwner {
@@ -114,7 +114,7 @@ pub struct ServiceTargetPayload {
     /// Target route generation.
     pub route_generation: u64,
     /// Target content discriminator.
-    pub content_kind: open_compute_storage::DeploymentContentKind,
+    pub content_kind: open_compute_storage::VersionContentKind,
     /// Persisted optional named entrypoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
@@ -159,8 +159,8 @@ struct Root {
 
 struct Owner {
     root: String,
-    deployment_id: DeploymentId,
-    _pin: DeploymentPin,
+    version_id: VersionId,
+    _pin: VersionPin,
     operations: u32,
     retentions: u32,
     anchor: bool,
@@ -171,7 +171,7 @@ impl std::fmt::Debug for Owner {
         formatter
             .debug_struct("Owner")
             .field("root", &self.root)
-            .field("deployment_id", &self.deployment_id)
+            .field("version_id", &self.version_id)
             .field("operations", &self.operations)
             .field("retentions", &self.retentions)
             .field("anchor", &self.anchor)
@@ -216,7 +216,7 @@ struct Inner {
 #[derive(Clone)]
 pub struct ServiceInvocationRegistry {
     storage: Arc<open_compute_storage::PlatformStorage>,
-    pins: DeploymentPins,
+    pins: VersionPins,
     call_deadline: Duration,
     inner: Arc<Mutex<Inner>>,
 }
@@ -238,9 +238,9 @@ impl std::fmt::Debug for ServiceInvocationRegistry {
 }
 
 impl ServiceInvocationRegistry {
-    /// Bind persistent authority to the one process-local deployment pin registry.
+    /// Bind persistent authority to the one process-local version pin registry.
     #[must_use]
-    pub fn new(storage: Arc<open_compute_storage::PlatformStorage>, pins: DeploymentPins) -> Self {
+    pub fn new(storage: Arc<open_compute_storage::PlatformStorage>, pins: VersionPins) -> Self {
         Self {
             storage,
             pins,
@@ -252,7 +252,7 @@ impl ServiceInvocationRegistry {
     #[cfg(test)]
     fn with_deadline(
         storage: Arc<open_compute_storage::PlatformStorage>,
-        pins: DeploymentPins,
+        pins: VersionPins,
         call_deadline: Duration,
     ) -> Self {
         Self {
@@ -287,7 +287,7 @@ impl ServiceInvocationRegistry {
     ) -> Result<ServiceAdmission, PlatformError> {
         let digest = parse_digest(&request.descriptor_sha256)?;
         let target = self.resolve_and_pin(request, &digest)?;
-        let target_deployment_id = target.0.target_deployment_id;
+        let target_version_id = target.0.target_version_id;
         let target_worker_id = target.0.service.target_worker_id;
         let target_pin = target.1;
 
@@ -300,7 +300,7 @@ impl ServiceInvocationRegistry {
             Some(parent) => {
                 let frame = inner.frames.get(parent).ok_or_else(denied)?;
                 let owner = inner.owners.get(&frame.owner).ok_or_else(denied)?;
-                if owner.deployment_id != request.caller_deployment_id {
+                if owner.version_id != request.caller_version_id {
                     return Err(denied());
                 }
                 (
@@ -311,14 +311,14 @@ impl ServiceInvocationRegistry {
                 )
             }
             None => {
-                let caller_pin = self.pins.pin(request.caller_deployment_id)?;
+                let caller_pin = self.pins.pin(request.caller_version_id)?;
                 let root_id = token();
                 let anchor_owner = token();
                 inner.owners.insert(
                     anchor_owner.clone(),
                     Owner {
                         root: root_id.clone(),
-                        deployment_id: request.caller_deployment_id,
+                        version_id: request.caller_version_id,
                         _pin: caller_pin,
                         operations: 0,
                         retentions: 0,
@@ -355,7 +355,7 @@ impl ServiceInvocationRegistry {
             owner_id.clone(),
             Owner {
                 root: root_id.clone(),
-                deployment_id: target_deployment_id,
+                version_id: target_version_id,
                 _pin: target_pin,
                 operations: 1,
                 retentions: 0,
@@ -389,7 +389,7 @@ impl ServiceInvocationRegistry {
             target: ServiceTargetPayload {
                 loader_key: format!(
                     "{}/{}/{}",
-                    target.0.account_id, target_worker_id, target_deployment_id
+                    target.0.account_id, target_worker_id, target_version_id
                 ),
                 worker_code_sha256: hex::encode(target.0.target_worker_code_sha256),
                 route_generation: target.0.target_route_generation,
@@ -466,7 +466,7 @@ impl ServiceInvocationRegistry {
         })
     }
 
-    /// Retain the target or caller deployment for a returned/delegated capability.
+    /// Retain the target or caller version for a returned/delegated capability.
     pub fn retain(&self, request: &ServiceRetainRequest) -> Result<String, PlatformError> {
         let mut inner = self
             .inner
@@ -639,7 +639,7 @@ impl ServiceInvocationRegistry {
         }
     }
 
-    /// Drop every invocation, capability, frame, and deployment pin after workerd exits.
+    /// Drop every invocation, capability, frame, and version pin after workerd exits.
     ///
     /// The process supervisor owns this unconditional transition and calls it only after the
     /// previously running child is confirmed absent, or immediately before admitting a known
@@ -656,11 +656,11 @@ impl ServiceInvocationRegistry {
         &self,
         request: &ServiceResolveRequest,
         digest: &[u8; 32],
-    ) -> Result<(ResolvedServiceTarget, DeploymentPin), PlatformError> {
+    ) -> Result<(ResolvedServiceTarget, VersionPin), PlatformError> {
         let repository = ServiceRepository::new(self.storage.db());
         for _ in 0..3 {
             let target =
-                repository.resolve(request.caller_deployment_id, &request.binding_name, digest)?;
+                repository.resolve(request.caller_version_id, &request.binding_name, digest)?;
             match (request.operation, target.service.entrypoint.as_ref()) {
                 (ServiceOperation::DefaultFetch, Some(_))
                 | (ServiceOperation::NamedFetch, None) => return Err(denied()),
@@ -671,22 +671,22 @@ impl ServiceInvocationRegistry {
             }
             if request.operation != ServiceOperation::DefaultFetch
                 && target.target_content_kind
-                    == open_compute_storage::DeploymentContentKind::AssetsOnly
+                    == open_compute_storage::VersionContentKind::AssetsOnly
             {
                 return Err(PlatformError::new(
                     ErrorCode::ServiceEntrypointNotFound,
                     "Assets-only Service target has no RPC entrypoint",
                 ));
             }
-            let pin = self.pins.pin(target.target_deployment_id).map_err(|_| {
+            let pin = self.pins.pin(target.target_version_id).map_err(|_| {
                 PlatformError::new(
                     ErrorCode::ServiceTargetNotReady,
                     "Service target is fenced for deletion",
                 )
             })?;
             let confirmed =
-                repository.resolve(request.caller_deployment_id, &request.binding_name, digest)?;
-            if confirmed.target_deployment_id == target.target_deployment_id
+                repository.resolve(request.caller_version_id, &request.binding_name, digest)?;
+            if confirmed.target_version_id == target.target_version_id
                 && confirmed.target_worker_code_sha256 == target.target_worker_code_sha256
             {
                 return Ok((confirmed, pin));

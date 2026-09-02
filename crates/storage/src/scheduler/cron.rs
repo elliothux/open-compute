@@ -2,7 +2,7 @@
 
 use super::{SchedulerStore, map_sql_error};
 use open_compute_core::{
-    AccountId, CronActivationId, CronRunId, CronSchedule, DeploymentId, ErrorCode, PlatformError,
+    AccountId, CronActivationId, CronRunId, CronSchedule, ErrorCode, PlatformError, VersionId,
     WorkerId, WorkloadSummary,
 };
 use rand::TryRngCore as _;
@@ -17,8 +17,8 @@ pub struct CronScheduleProjection {
     pub account_id: AccountId,
     /// Owning Worker.
     pub worker_id: WorkerId,
-    /// Frozen deployment target.
-    pub deployment_id: DeploymentId,
+    /// Frozen version target.
+    pub version_id: VersionId,
     /// Frozen execution generation.
     pub execution_generation: u64,
     /// Monotonic activation set generation.
@@ -48,8 +48,8 @@ pub struct ClaimedCronRun {
     pub account_id: AccountId,
     /// Owning Worker.
     pub worker_id: WorkerId,
-    /// Frozen deployment target.
-    pub deployment_id: DeploymentId,
+    /// Frozen version target.
+    pub version_id: VersionId,
     /// Frozen execution generation.
     pub execution_generation: u64,
     /// Exact declared expression.
@@ -113,7 +113,7 @@ impl SchedulerStore {
         connection
             .execute(
                 "INSERT OR IGNORE INTO cron_schedules
-                 (activation_id, account_id, worker_id, deployment_id, execution_generation,
+                 (activation_id, account_id, worker_id, version_id, execution_generation,
                   activation_generation, expression, expression_sha256, parser_version, state,
                   next_fire_at_ms, updated_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'staged', ?10, ?11)",
@@ -121,7 +121,7 @@ impl SchedulerStore {
                     projection.activation_id.to_string(),
                     projection.account_id.to_string(),
                     projection.worker_id.to_string(),
-                    projection.deployment_id.to_string(),
+                    projection.version_id.to_string(),
                     as_i64(projection.execution_generation)?,
                     as_i64(projection.activation_generation)?,
                     projection.expression,
@@ -135,14 +135,14 @@ impl SchedulerStore {
         let exact: bool = connection
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM cron_schedules WHERE activation_id = ?1
-                   AND account_id = ?2 AND worker_id = ?3 AND deployment_id = ?4
+                   AND account_id = ?2 AND worker_id = ?3 AND version_id = ?4
                    AND execution_generation = ?5 AND activation_generation = ?6
                    AND expression = ?7 AND expression_sha256 = ?8 AND parser_version = ?9)",
                 params![
                     projection.activation_id.to_string(),
                     projection.account_id.to_string(),
                     projection.worker_id.to_string(),
-                    projection.deployment_id.to_string(),
+                    projection.version_id.to_string(),
                     as_i64(projection.execution_generation)?,
                     as_i64(projection.activation_generation)?,
                     projection.expression,
@@ -264,7 +264,7 @@ impl SchedulerStore {
                     .execute(
                         "INSERT OR IGNORE INTO cron_runs
                          (id, activation_id, activation_generation, scheduled_at_ms,
-                          deployment_id, execution_generation, expression, state, attempt,
+                          version_id, execution_generation, expression, state, attempt,
                           no_retry, next_attempt_at_ms, claim_token, claimed_at_ms,
                           claim_until_ms, error_code, created_at_ms, completed_at_ms)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'ready', 0, 0, ?4,
@@ -274,7 +274,7 @@ impl SchedulerStore {
                             schedule.activation_id.to_string(),
                             as_i64(schedule.activation_generation)?,
                             scheduled_at_ms,
-                            schedule.deployment_id.to_string(),
+                            schedule.version_id.to_string(),
                             as_i64(schedule.execution_generation)?,
                             schedule.expression,
                             now_ms,
@@ -613,7 +613,7 @@ impl SchedulerStore {
 struct DueSchedule {
     activation_id: CronActivationId,
     activation_generation: u64,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
     execution_generation: u64,
     expression: String,
 }
@@ -625,7 +625,7 @@ fn due_schedules_tx(
 ) -> Result<Vec<DueSchedule>, PlatformError> {
     let mut statement = tx
         .prepare(
-            "SELECT activation_id, activation_generation, deployment_id,
+            "SELECT activation_id, activation_generation, version_id,
                     execution_generation, expression FROM cron_schedules
              WHERE state = 'accepting' AND next_fire_at_ms <= ?1
              ORDER BY next_fire_at_ms, activation_id LIMIT ?2",
@@ -634,16 +634,14 @@ fn due_schedules_tx(
     statement
         .query_map(params![now_ms, i64::from(limit)], |row| {
             let activation: String = row.get(0)?;
-            let deployment: String = row.get(2)?;
+            let version: String = row.get(2)?;
             Ok(DueSchedule {
                 activation_id: activation
                     .parse()
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 activation_generation: u64::try_from(row.get::<_, i64>(1)?)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                deployment_id: deployment
-                    .parse()
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                version_id: version.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
                 execution_generation: u64::try_from(row.get::<_, i64>(3)?)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 expression: row.get(4)?,
@@ -662,7 +660,7 @@ fn read_claimed_run_tx(
 ) -> Result<ClaimedCronRun, PlatformError> {
     tx.query_row(
         "SELECT r.id, r.activation_id, r.activation_generation, s.account_id, s.worker_id,
-                r.deployment_id, r.execution_generation, r.expression, r.scheduled_at_ms,
+                r.version_id, r.execution_generation, r.expression, r.scheduled_at_ms,
                 r.attempt FROM cron_runs r JOIN cron_schedules s
                   ON s.activation_id = r.activation_id WHERE r.id = ?1 AND r.state = 'claimed'",
         [id],
@@ -671,7 +669,7 @@ fn read_claimed_run_tx(
             let activation: String = row.get(1)?;
             let account: String = row.get(3)?;
             let worker: String = row.get(4)?;
-            let deployment: String = row.get(5)?;
+            let version: String = row.get(5)?;
             Ok(ClaimedCronRun {
                 id: run.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
                 activation_id: activation
@@ -681,9 +679,7 @@ fn read_claimed_run_tx(
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 account_id: account.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
                 worker_id: worker.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
-                deployment_id: deployment
-                    .parse()
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                version_id: version.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
                 execution_generation: u64::try_from(row.get::<_, i64>(6)?)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 expression: row.get(7)?,

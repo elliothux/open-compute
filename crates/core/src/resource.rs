@@ -1,4 +1,4 @@
-//! Shared resource lifecycle and deployment-binding value types.
+//! Shared resource lifecycle and version-binding value types.
 
 use crate::{ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};
@@ -172,7 +172,7 @@ impl Default for CanonicalPermissions {
 /// Canonical product configuration carried by an immutable binding.
 ///
 /// Fields are admitted only by their owning product adapter; a non-Workflow
-/// binding rejects `workflow_schedules` even though deployment input shares
+/// binding rejects `workflow_schedules` even though version input shares
 /// this closed wire shape.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

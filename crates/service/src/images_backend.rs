@@ -9,12 +9,11 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use http_body_util::BodyExt as _;
 use open_compute_core::{
-    AccountId, AdmissionReservation, DeploymentId, ErrorCode, ImagesConfig, PlatformError, WorkerId,
+    AccountId, AdmissionReservation, ErrorCode, ImagesConfig, PlatformError, VersionId, WorkerId,
 };
 use open_compute_images::{ImageEngine, ImageJob, ImageOperation, OutputOptions};
 use open_compute_storage::{
-    BuiltinBindingKind, DeploymentState, PlatformStorage, WorkerRepository,
-    deployment_runtime_features,
+    BuiltinBindingKind, PlatformStorage, VersionState, WorkerRepository, version_runtime_features,
 };
 use options::{DrawRequest, TransformRequest};
 use serde::Serialize;
@@ -31,7 +30,7 @@ use uuid::Uuid;
 
 const ACCOUNT_HEADER: &str = "x-open-compute-account-id";
 const WORKER_HEADER: &str = "x-open-compute-worker-id";
-const DEPLOYMENT_HEADER: &str = "x-open-compute-deployment-id";
+const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const GENERATION_HEADER: &str = "x-open-compute-startup-generation";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
@@ -189,17 +188,17 @@ impl ImageBindingService {
     fn authorize(&self, headers: &HeaderMap) -> Result<ImageAuthority, PlatformError> {
         let account = parse_header::<AccountId>(headers, ACCOUNT_HEADER)?;
         let worker = parse_header::<WorkerId>(headers, WORKER_HEADER)?;
-        let deployment = parse_header::<DeploymentId>(headers, DEPLOYMENT_HEADER)?;
+        let version = parse_header::<VersionId>(headers, VERSION_HEADER)?;
         let digest = hex::decode(text_header(headers, DESCRIPTOR_HEADER)?)
             .ok()
             .and_then(|value| <[u8; 32]>::try_from(value).ok())
             .ok_or_else(protocol)?;
         let record =
-            WorkerRepository::new(self.storage.db()).get_deployment(account, worker, deployment)?;
-        if record.state != DeploymentState::Ready || record.deleted_at_ms.is_some() {
+            WorkerRepository::new(self.storage.db()).get_version(account, worker, version)?;
+        if record.state != VersionState::Ready || record.deleted_at_ms.is_some() {
             return Err(protocol());
         }
-        let (_, bindings) = deployment_runtime_features(self.storage.db(), deployment)?;
+        let (_, bindings) = version_runtime_features(self.storage.db(), version)?;
         if !bindings.iter().any(|binding| {
             binding.kind == BuiltinBindingKind::Images && binding.descriptor_sha256 == digest
         }) {
@@ -208,7 +207,7 @@ impl ImageBindingService {
         Ok(ImageAuthority {
             account,
             worker,
-            deployment,
+            version,
             descriptor: text_header(headers, DESCRIPTOR_HEADER)?.to_owned(),
             generation: text_header(headers, GENERATION_HEADER)?.to_owned(),
         })
@@ -225,7 +224,7 @@ impl ImageBindingService {
             .map_err(|_| limit())?;
         let mut staged = stage_body(
             request.into_body(),
-            self.storage.data_dir().deployment_staging_dir(),
+            self.storage.data_dir().version_staging_dir(),
             self.config.max_input_bytes,
             "image-input",
         )
@@ -274,7 +273,7 @@ impl ImageBindingService {
             .map_err(|_| limit())?;
         let staged = stage_body(
             request.into_body(),
-            self.storage.data_dir().deployment_staging_dir(),
+            self.storage.data_dir().version_staging_dir(),
             self.config.max_input_bytes,
             "image-info",
         )
@@ -336,7 +335,7 @@ impl ImageBindingService {
             .map_err(|_| limit())?;
         let mut staged = stage_framed(
             request.into_body(),
-            self.storage.data_dir().deployment_staging_dir(),
+            self.storage.data_dir().version_staging_dir(),
             self.config.max_input_bytes,
             "image-overlay",
         )
@@ -464,7 +463,7 @@ impl ImageBindingService {
 struct ImageAuthority {
     account: AccountId,
     worker: WorkerId,
-    deployment: DeploymentId,
+    version: VersionId,
     descriptor: String,
     generation: String,
 }

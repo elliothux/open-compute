@@ -27,7 +27,7 @@ const { AiTransport } = await import(moduleUrl(await compileRuntime("ai/host.ts"
 })));
 
 const props = {
-  accountId: "account", workerId: "worker", deploymentId: "deployment",
+  accountId: "account", workerId: "worker", versionId: "version",
   descriptorSha256: "ab".repeat(32),
 };
 

@@ -154,7 +154,7 @@ class Transformer {
   }
 }
 
-/** Strict public Images chain over one deployment-scoped native transport. */
+/** Strict public Images chain over one version-scoped native transport. */
 export class ImagesBinding {
   readonly #transport: ImageTransport;
   constructor(raw: unknown) {

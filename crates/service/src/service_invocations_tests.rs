@@ -3,16 +3,16 @@ use open_compute_core::clock::SystemClock;
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{AccountId, RequestId, WorkerId};
 use open_compute_storage::{
-    DeploymentContentKind, NewDeployment, NewDeploymentProducts, NewDeploymentService,
-    PlatformStorage, WorkerRepository,
+    NewVersion, NewVersionProducts, NewVersionService, PlatformStorage, VersionContentKind,
+    WorkerRepository,
 };
 use std::collections::BTreeMap;
 
 struct Fixture {
     _temp: tempfile::TempDir,
     storage: Arc<PlatformStorage>,
-    caller_deployment: DeploymentId,
-    target_deployment: DeploymentId,
+    caller_version: VersionId,
+    target_version: VersionId,
     caller_digest: [u8; 32],
     target_digest: [u8; 32],
 }
@@ -46,12 +46,12 @@ fn fixture() -> Fixture {
         .unwrap()
         .0;
     let target_digest = [4; 32];
-    let target_deployment = insert_ready(
+    let target_version = insert_ready(
         repo,
         account,
         target.id,
         [2; 32],
-        &[NewDeploymentService {
+        &[NewVersionService {
             binding_name: "SELF".to_owned(),
             target_worker_id: target.id,
             entrypoint: None,
@@ -60,15 +60,15 @@ fn fixture() -> Fixture {
         request,
         3,
     );
-    repo.promote(account, target.id, target_deployment, None, request, 5)
+    repo.promote(account, target.id, target_version, None, request, 5)
         .unwrap();
     let caller_digest = [7; 32];
-    let caller_deployment = insert_ready(
+    let caller_version = insert_ready(
         repo,
         account,
         caller.id,
         [3; 32],
-        &[NewDeploymentService {
+        &[NewVersionService {
             binding_name: "TARGET".to_owned(),
             target_worker_id: target.id,
             entrypoint: None,
@@ -77,13 +77,13 @@ fn fixture() -> Fixture {
         request,
         6,
     );
-    repo.promote(account, caller.id, caller_deployment, None, request, 8)
+    repo.promote(account, caller.id, caller_version, None, request, 8)
         .unwrap();
     Fixture {
         _temp: temp,
         storage,
-        caller_deployment,
-        target_deployment,
+        caller_version,
+        target_version,
         caller_digest,
         target_digest,
     }
@@ -94,47 +94,49 @@ fn insert_ready(
     account: AccountId,
     worker: WorkerId,
     worker_digest: [u8; 32],
-    services: &[NewDeploymentService],
+    services: &[NewVersionService],
     request: RequestId,
     now_ms: i64,
-) -> DeploymentId {
-    let deployment = DeploymentId::generate();
-    repo.insert_staging_deployment(
-        &NewDeployment {
-            id: deployment,
+) -> VersionId {
+    let version = VersionId::generate();
+    repo.insert_staging_version(
+        &NewVersion {
+            id: version,
             account_id: account,
             worker_id: worker,
-            content_kind: DeploymentContentKind::Worker,
+            content_kind: VersionContentKind::Worker,
             artifact_sha256: Some(worker_digest),
             artifact_size: Some(1),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: worker_digest,
+            compatibility_date: "2026-08-30".into(),
+            compatibility_flags: Vec::new(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,
             now_ms,
         },
-        &NewDeploymentProducts {
+        &NewVersionProducts {
             services,
-            ..NewDeploymentProducts::default()
+            ..NewVersionProducts::default()
         },
         1_000,
     )
     .unwrap();
-    repo.begin_validation(deployment).unwrap();
-    repo.mark_ready(deployment, now_ms + 1).unwrap();
-    deployment
+    repo.begin_validation(version).unwrap();
+    repo.mark_ready(version, now_ms + 1).unwrap();
+    version
 }
 
 fn resolve_request(
-    deployment: DeploymentId,
+    version: VersionId,
     binding_name: &str,
     digest: [u8; 32],
     parent_frame: Option<String>,
 ) -> ServiceResolveRequest {
     ServiceResolveRequest {
-        caller_deployment_id: deployment,
+        caller_version_id: version,
         binding_name: binding_name.to_owned(),
         descriptor_sha256: hex::encode(digest),
         parent_frame,
@@ -143,24 +145,24 @@ fn resolve_request(
 }
 
 fn connect_request(
-    deployment: DeploymentId,
+    version: VersionId,
     binding_name: &str,
     digest: [u8; 32],
 ) -> ServiceResolveRequest {
     ServiceResolveRequest {
         operation: ServiceOperation::Connect,
-        ..resolve_request(deployment, binding_name, digest, None)
+        ..resolve_request(version, binding_name, digest, None)
     }
 }
 
 #[test]
-fn connect_finalize_is_atomic_idempotent_and_releases_both_deployment_pins() {
+fn connect_finalize_is_atomic_idempotent_and_releases_both_version_pins() {
     let fixture = fixture();
-    let pins = DeploymentPins::new();
+    let pins = VersionPins::new();
     let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
     let admission = registry
         .resolve(&connect_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
         ))
@@ -170,25 +172,25 @@ fn connect_finalize_is_atomic_idempotent_and_releases_both_deployment_pins() {
         caller_frame: admission.caller_frame,
     };
     assert_eq!(registry.counts(), (1, 1, 0));
-    assert_eq!(pins.count(fixture.caller_deployment), 1);
-    assert_eq!(pins.count(fixture.target_deployment), 1);
+    assert_eq!(pins.count(fixture.caller_version), 1);
+    assert_eq!(pins.count(fixture.target_version), 1);
 
     registry.finalize_connect(&finalize).unwrap();
     registry.finalize_connect(&finalize).unwrap();
 
     assert_eq!(registry.counts(), (0, 0, 0));
-    assert_eq!(pins.count(fixture.caller_deployment), 0);
-    assert_eq!(pins.count(fixture.target_deployment), 0);
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
 }
 
 #[test]
 fn connect_finalize_rejects_a_non_connect_operation_without_releasing_it() {
     let fixture = fixture();
-    let pins = DeploymentPins::new();
+    let pins = VersionPins::new();
     let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
     let admission = registry
         .resolve(&resolve_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
             None,
@@ -215,25 +217,25 @@ fn connect_finalize_rejects_a_non_connect_operation_without_releasing_it() {
             frame: admission.caller_frame,
         })
         .unwrap();
-    assert_eq!(pins.count(fixture.caller_deployment), 0);
-    assert_eq!(pins.count(fixture.target_deployment), 0);
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
 }
 
 #[test]
 fn connect_finalize_rejects_a_caller_frame_from_another_root() {
     let fixture = fixture();
-    let pins = DeploymentPins::new();
+    let pins = VersionPins::new();
     let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
     let first = registry
         .resolve(&connect_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
         ))
         .unwrap();
     let second = registry
         .resolve(&connect_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
         ))
@@ -250,8 +252,8 @@ fn connect_finalize_rejects_a_caller_frame_from_another_root() {
         ErrorCode::ServiceBindingDenied
     );
     assert_eq!(registry.counts(), (2, 2, 0));
-    assert_eq!(pins.count(fixture.caller_deployment), 2);
-    assert_eq!(pins.count(fixture.target_deployment), 2);
+    assert_eq!(pins.count(fixture.caller_version), 2);
+    assert_eq!(pins.count(fixture.target_version), 2);
 
     for admission in [first, second] {
         registry
@@ -262,14 +264,14 @@ fn connect_finalize_rejects_a_caller_frame_from_another_root() {
             .unwrap();
     }
     assert_eq!(registry.counts(), (0, 0, 0));
-    assert_eq!(pins.count(fixture.caller_deployment), 0);
-    assert_eq!(pins.count(fixture.target_deployment), 0);
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
 }
 
 #[tokio::test]
 async fn deadline_reaper_releases_an_unfinalized_connect_without_another_request() {
     let fixture = fixture();
-    let pins = DeploymentPins::new();
+    let pins = VersionPins::new();
     let registry = ServiceInvocationRegistry::with_deadline(
         fixture.storage,
         pins.clone(),
@@ -277,7 +279,7 @@ async fn deadline_reaper_releases_an_unfinalized_connect_without_another_request
     );
     let admission = registry
         .resolve(&connect_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
         ))
@@ -307,8 +309,8 @@ async fn deadline_reaper_releases_an_unfinalized_connect_without_another_request
     .await
     .unwrap();
 
-    assert_eq!(pins.count(fixture.caller_deployment), 0);
-    assert_eq!(pins.count(fixture.target_deployment), 0);
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
     let _ = shutdown_tx.send(());
     reaper.await.unwrap();
 }
@@ -316,18 +318,18 @@ async fn deadline_reaper_releases_an_unfinalized_connect_without_another_request
 #[test]
 fn returned_capability_holds_both_root_and_target_until_native_release() {
     let fixture = fixture();
-    let pins = DeploymentPins::new();
+    let pins = VersionPins::new();
     let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
     let admission = registry
         .resolve(&resolve_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
             None,
         ))
         .unwrap();
-    assert_eq!(pins.count(fixture.caller_deployment), 1);
-    assert_eq!(pins.count(fixture.target_deployment), 1);
+    assert_eq!(pins.count(fixture.caller_version), 1);
+    assert_eq!(pins.count(fixture.target_version), 1);
     let retention = registry
         .retain(&ServiceRetainRequest {
             handle: admission.handle.clone(),
@@ -360,17 +362,17 @@ fn returned_capability_holds_both_root_and_target_until_native_release() {
         .release(&ServiceReleaseRequest { handle: retention })
         .unwrap();
     assert_eq!(registry.counts(), (0, 0, 0));
-    assert_eq!(pins.count(fixture.caller_deployment), 0);
-    assert_eq!(pins.count(fixture.target_deployment), 0);
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
 }
 
 #[test]
 fn recursive_self_calls_share_one_depth_budget_and_reject_the_seventeenth_hop() {
     let fixture = fixture();
-    let registry = ServiceInvocationRegistry::new(fixture.storage, DeploymentPins::new());
+    let registry = ServiceInvocationRegistry::new(fixture.storage, VersionPins::new());
     let first = registry
         .resolve(&resolve_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
             None,
@@ -381,7 +383,7 @@ fn recursive_self_calls_share_one_depth_budget_and_reject_the_seventeenth_hop() 
     for _ in 1..MAX_DEPTH {
         let admission = registry
             .resolve(&resolve_request(
-                fixture.target_deployment,
+                fixture.target_version,
                 "SELF",
                 fixture.target_digest,
                 Some(parent),
@@ -393,7 +395,7 @@ fn recursive_self_calls_share_one_depth_budget_and_reject_the_seventeenth_hop() 
     assert_eq!(
         registry
             .resolve(&resolve_request(
-                fixture.target_deployment,
+                fixture.target_version,
                 "SELF",
                 fixture.target_digest,
                 Some(parent),
@@ -418,10 +420,10 @@ fn recursive_self_calls_share_one_depth_budget_and_reject_the_seventeenth_hop() 
 #[test]
 fn sibling_concurrency_is_bounded_per_root_without_cross_root_interference() {
     let fixture = fixture();
-    let registry = ServiceInvocationRegistry::new(fixture.storage, DeploymentPins::new());
+    let registry = ServiceInvocationRegistry::new(fixture.storage, VersionPins::new());
     let first = registry
         .resolve(&resolve_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
             None,
@@ -432,7 +434,7 @@ fn sibling_concurrency_is_bounded_per_root_without_cross_root_interference() {
         handles.push(
             registry
                 .resolve(&resolve_request(
-                    fixture.target_deployment,
+                    fixture.target_version,
                     "SELF",
                     fixture.target_digest,
                     Some(first.frame.clone()),
@@ -444,7 +446,7 @@ fn sibling_concurrency_is_bounded_per_root_without_cross_root_interference() {
     assert_eq!(
         registry
             .resolve(&resolve_request(
-                fixture.target_deployment,
+                fixture.target_version,
                 "SELF",
                 fixture.target_digest,
                 Some(first.frame),
@@ -456,7 +458,7 @@ fn sibling_concurrency_is_bounded_per_root_without_cross_root_interference() {
 
     let independent = registry
         .resolve(&resolve_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
             None,
@@ -489,10 +491,10 @@ fn sibling_concurrency_is_bounded_per_root_without_cross_root_interference() {
 #[test]
 fn sequential_calls_share_one_total_budget_even_after_each_operation_drains() {
     let fixture = fixture();
-    let registry = ServiceInvocationRegistry::new(fixture.storage, DeploymentPins::new());
+    let registry = ServiceInvocationRegistry::new(fixture.storage, VersionPins::new());
     let first = registry
         .resolve(&resolve_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
             None,
@@ -506,7 +508,7 @@ fn sequential_calls_share_one_total_budget_even_after_each_operation_drains() {
     for _ in 1..MAX_TOTAL_CALLS {
         let admission = registry
             .resolve(&resolve_request(
-                fixture.caller_deployment,
+                fixture.caller_version,
                 "TARGET",
                 fixture.caller_digest,
                 Some(first.caller_frame.clone()),
@@ -521,7 +523,7 @@ fn sequential_calls_share_one_total_budget_even_after_each_operation_drains() {
     assert_eq!(
         registry
             .resolve(&resolve_request(
-                fixture.caller_deployment,
+                fixture.caller_version,
                 "TARGET",
                 fixture.caller_digest,
                 Some(first.caller_frame.clone()),
@@ -541,12 +543,12 @@ fn sequential_calls_share_one_total_budget_even_after_each_operation_drains() {
 #[test]
 fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
     let fixture = fixture();
-    let pins = DeploymentPins::new();
+    let pins = VersionPins::new();
     let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
     registry.activate_generation("generation-a");
     let admission = registry
         .resolve(&resolve_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
             None,
@@ -565,8 +567,8 @@ fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
     registry.clear_after_child_exit();
 
     assert_eq!(registry.counts(), (0, 0, 0));
-    assert_eq!(pins.count(fixture.caller_deployment), 0);
-    assert_eq!(pins.count(fixture.target_deployment), 0);
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
     assert_eq!(
         registry
             .begin_capability(&CapabilityBeginRequest {
@@ -581,7 +583,7 @@ fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
     registry.activate_generation("generation-a");
     let current = registry
         .resolve(&resolve_request(
-            fixture.caller_deployment,
+            fixture.caller_version,
             "TARGET",
             fixture.caller_digest,
             None,
@@ -589,8 +591,8 @@ fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
         .unwrap();
     registry.activate_generation("generation-b");
     assert_eq!(registry.counts(), (0, 0, 0));
-    assert_eq!(pins.count(fixture.caller_deployment), 0);
-    assert_eq!(pins.count(fixture.target_deployment), 0);
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
     registry.clear_generation("generation-a");
     assert_eq!(registry.counts(), (0, 0, 0));
     assert_eq!(

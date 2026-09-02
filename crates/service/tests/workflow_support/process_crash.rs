@@ -30,7 +30,7 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
         harness.transport.clone(),
         Default::default(),
     )
-    .create_version(account, definition.id, target.deployment_id, "Flow".into())
+    .create_version(account, definition.id, target.version_id, "Flow".into())
     .await
     .unwrap();
     let caller = harness
@@ -39,7 +39,7 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
             "Flow",
             BTreeMap::from([(
                 "FLOW".into(),
-                DeploymentBindingInput {
+                VersionBindingInput {
                     kind: BindingKind::Workflow,
                     id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                     permissions: CanonicalPermissions::default(),
@@ -53,7 +53,7 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
         .promote(
             account,
             caller.worker_id,
-            caller.deployment_id,
+            caller.version_id,
             None,
             RequestId::generate(),
             now(),
@@ -66,7 +66,7 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
             "workflow.example",
             "/",
             None,
-            Some(caller.deployment_id),
+            Some(caller.version_id),
             RequestId::generate(),
             now(),
             1_000_000,

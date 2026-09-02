@@ -59,6 +59,8 @@ export interface RuntimeSnapshot {
   loaderKey: string;
   workerCodeSha256: string;
   routeGeneration: number;
+  compatibilityDate: string;
+  compatibilityFlags: string[];
   contentKind: "worker" | "assets_only";
   mainModule?: string;
   modules: RuntimeModule[];

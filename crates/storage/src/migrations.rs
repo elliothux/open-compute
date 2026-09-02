@@ -363,17 +363,17 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
     if version >= 2 {
         tables.extend([
             "workers",
-            "worker_deployments",
-            "deployment_vars",
-            "deployment_secrets",
+            "worker_versions",
+            "version_vars",
+            "version_secrets",
             "worker_routes",
             "control_idempotency",
-            "deployment_referrers",
+            "version_referrers",
             "control_audit_events",
         ]);
     }
     if version >= 3 {
-        tables.extend(["resources", "deployment_bindings", "resource_referrers"]);
+        tables.extend(["resources", "version_bindings", "resource_referrers"]);
     }
     if version >= 4 {
         tables.extend(["kv_namespaces", "kv_backups"]);
@@ -391,12 +391,12 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
         tables.extend(["queues", "queue_producer_bindings", "queue_referrers"]);
     }
     if version >= 9 {
-        tables.extend(["deployment_queue_consumers", "queue_consumers"]);
+        tables.extend(["version_queue_consumers", "queue_consumers"]);
     }
     if version >= 10 {
         tables.extend([
-            "deployment_cron_configs",
-            "deployment_cron_declarations",
+            "version_cron_configs",
+            "version_cron_declarations",
             "cron_activations",
         ]);
     }
@@ -424,20 +424,20 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
     }
     if version >= 12 {
         tables.extend([
-            "deployment_assets",
-            "deployment_object_refs",
-            "deployment_uploads",
-            "deployment_upload_objects",
+            "version_assets",
+            "version_object_refs",
+            "version_uploads",
+            "version_upload_objects",
         ]);
     }
     if version >= 13 {
-        tables.push("deployment_services");
+        tables.push("version_services");
     }
     if version >= 14 {
-        tables.extend(["deployment_cache_policies", "deployment_builtin_bindings"]);
+        tables.extend(["version_cache_policies", "version_builtin_bindings"]);
     }
     if version >= 17 {
-        tables.push("system_owned_deployments");
+        tables.push("system_owned_versions");
     }
     for table in tables {
         let sql: String = tx

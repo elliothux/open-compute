@@ -1,8 +1,8 @@
 //! Shared durable Workflow catalog and execution identities.
 
-use crate::DeploymentState;
+use crate::VersionState;
 use open_compute_core::{
-    AccountId, BindingId, DeploymentId, ResourceAvailability, ResourceState, WorkerId, WorkflowId,
+    AccountId, BindingId, ResourceAvailability, ResourceState, VersionId, WorkerId, WorkflowId,
     WorkflowInstanceId, WorkflowOperationId, WorkflowToken, WorkflowVersionId,
 };
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,7 @@ pub struct WorkflowDefinition {
     pub updated_at_ms: i64,
 }
 
-/// Immutable class, deployment, and capability identity copied into each instance.
+/// Immutable class, version, and capability identity copied into each instance.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowTarget {
@@ -44,11 +44,11 @@ pub struct WorkflowTarget {
     /// Definition name at the time this target is frozen.
     pub definition_name: String,
     /// Immutable Workflow version identity.
-    pub version_id: WorkflowVersionId,
+    pub workflow_version_id: WorkflowVersionId,
     /// Owning Worker identity.
     pub worker_id: WorkerId,
-    /// Immutable ready deployment.
-    pub deployment_id: DeploymentId,
+    /// Immutable ready version.
+    pub worker_version_id: VersionId,
     /// Exact `WorkerCode` descriptor digest.
     pub worker_code_sha256: [u8; 32],
     /// Validated `WorkflowEntrypoint` named export.
@@ -69,15 +69,15 @@ pub struct WorkflowVersion {
     pub target: WorkflowTarget,
     /// Monotonic logical definition version number.
     pub version_number: i64,
-    /// Same staging/validation/ready/retirement lifecycle as deployments.
-    pub state: DeploymentState,
+    /// Same staging/validation/ready/retirement lifecycle as versions.
+    pub state: VersionState,
     /// Creation timestamp.
     pub created_at_ms: i64,
     /// Sanitized permanent validation rejection.
     pub rejection_code: Option<String>,
 }
 
-/// Immutable caller binding descriptor; this exact shape is hashed once at deployment creation.
+/// Immutable caller binding descriptor; this exact shape is hashed once at version creation.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowBindingDescriptor {
@@ -104,8 +104,8 @@ pub struct WorkflowBindingDescriptor {
 pub struct WorkflowBindingRecord {
     /// Canonical descriptor.
     pub descriptor: WorkflowBindingDescriptor,
-    /// Caller deployment owning the binding.
-    pub deployment_id: DeploymentId,
+    /// Caller version owning the binding.
+    pub version_id: VersionId,
     /// Exact descriptor digest.
     pub descriptor_sha256: [u8; 32],
     /// Creation timestamp.
@@ -120,7 +120,7 @@ pub enum WorkflowRefState {
     Creating,
     /// Both authorities committed; instance may execute.
     Live,
-    /// Terminal history still pins its immutable deployment until proven purge.
+    /// Terminal history still pins its immutable version until proven purge.
     Retained,
     /// A durable restart intent owns the active quota and blocks dispatch.
     Restarting,

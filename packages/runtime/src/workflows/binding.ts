@@ -31,7 +31,7 @@ async function request(
   body: object,
   operationId?: string,
 ): Promise<Record<string, unknown>> {
-  if (!props || typeof props.bindingId !== "string" || typeof props.deploymentId !== "string"
+  if (!props || typeof props.bindingId !== "string" || typeof props.versionId !== "string"
       || !/^[0-9a-f]{64}$/.test(props.descriptorSha256) || typeof props.durableObject !== "boolean") {
     throw bindingError("WORKFLOW_BINDING_STALE");
   }
@@ -45,7 +45,7 @@ async function request(
           "content-type": "application/json",
           "x-open-compute-binding-token": env.BINDING_BACKEND_TOKEN,
           "x-open-compute-startup-generation": currentStartupGeneration(),
-          "x-open-compute-deployment-id": props.deploymentId,
+          "x-open-compute-version-id": props.versionId,
           "x-open-compute-descriptor-sha256": props.descriptorSha256,
           "x-open-compute-request-id": operationId ?? crypto.randomUUID(),
           "x-open-compute-workflow-do-context": props.durableObject ? "1" : "0",

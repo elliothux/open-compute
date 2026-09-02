@@ -41,9 +41,9 @@ CREATE TABLE workflow_instances (
   definition_id TEXT NOT NULL,
   definition_name TEXT NOT NULL,
   external_instance_id TEXT NOT NULL,
-  version_id TEXT NOT NULL,
+  workflow_version_id TEXT NOT NULL,
   worker_id TEXT NOT NULL,
-  deployment_id TEXT NOT NULL,
+  worker_version_id TEXT NOT NULL,
   worker_code_sha256 BLOB NOT NULL CHECK(length(worker_code_sha256)=32),
   loader_schema_version INTEGER NOT NULL CHECK(loader_schema_version>0),
   capability_version INTEGER NOT NULL CHECK(capability_version = 1),
@@ -528,7 +528,7 @@ WHEN OLD.capability_version=1 AND NOT EXISTS(SELECT 1 FROM workflow_mutation_con
 ) BEGIN SELECT RAISE(ABORT,'workflow durable unsettled frontier'); END;
 
 CREATE TRIGGER workflow_instance_identity_guard BEFORE UPDATE OF id,account_id,definition_id,definition_name,
-  external_instance_id,version_id,worker_id,deployment_id,worker_code_sha256,class_name,creation_nonce,creation_operation_id,creation_batch_id,
+  external_instance_id,workflow_version_id,worker_id,worker_version_id,worker_code_sha256,class_name,creation_nonce,creation_operation_id,creation_batch_id,
   loader_schema_version,capability_version,descriptor_sha256,input_json,created_at_ms,success_retention_ms,error_retention_ms
 ON workflow_instances WHEN OLD.capability_version=1
 BEGIN SELECT RAISE(ABORT,'workflow durable identity is immutable'); END;

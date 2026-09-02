@@ -39,7 +39,7 @@ impl P23PromotionCoordinator {
     fn coordinate(&self, request: ProductPromotionRequest) -> Result<(), PlatformError> {
         let workers = WorkerRepository::new(self.storage.db());
         let worker = workers.get_worker(request.account_id, request.worker_id)?;
-        let already_promoted = worker.active_deployment_id == Some(request.deployment_id);
+        let already_promoted = worker.active_version_id == Some(request.version_id);
         let execution_generation = if already_promoted {
             worker.route_generation
         } else {
@@ -50,7 +50,7 @@ impl P23PromotionCoordinator {
         };
 
         let queue_repo = QueueConsumerRepository::new(self.storage.db());
-        let declarations = queue_repo.deployment_declarations(request.deployment_id)?;
+        let declarations = queue_repo.version_declarations(request.version_id)?;
         let desired: HashMap<QueueId, QueueConsumerDeclaration> = declarations
             .into_iter()
             .map(|declaration| (declaration.queue_id, declaration))
@@ -67,7 +67,7 @@ impl P23PromotionCoordinator {
             let record = if let Some(mut current) = current {
                 if current.state == QueueConsumerState::Deleting
                     || (current.state == QueueConsumerState::Activating
-                        && current.deployment_id != request.deployment_id)
+                        && current.version_id != request.version_id)
                 {
                     self.finish_queue_removal(queue_repo, &current, request.now_ms)?;
                     queue_repo.create_attachment(
@@ -77,7 +77,7 @@ impl P23PromotionCoordinator {
                         request.now_ms,
                     )?
                 } else {
-                    if current.deployment_id != request.deployment_id {
+                    if current.version_id != request.version_id {
                         if matches!(
                             current.state,
                             QueueConsumerState::Active | QueueConsumerState::Paused
@@ -172,7 +172,7 @@ impl P23PromotionCoordinator {
         }
 
         let cron_repo = CronRepository::new(self.storage.db());
-        let cron_config = cron_repo.deployment_config(request.deployment_id)?;
+        let cron_config = cron_repo.version_config(request.version_id)?;
         let old_crons = cron_repo.live_for_worker(request.worker_id)?;
         let maximum_generation = old_crons
             .iter()
@@ -182,7 +182,7 @@ impl P23PromotionCoordinator {
         let reusable_generation = old_crons
             .iter()
             .filter(|activation| {
-                activation.deployment_id == request.deployment_id
+                activation.version_id == request.version_id
                     && matches!(
                         activation.state,
                         CronActivationState::Staging | CronActivationState::Active
@@ -197,7 +197,7 @@ impl P23PromotionCoordinator {
                 old_crons
                     .iter()
                     .filter(|activation| {
-                        activation.deployment_id == request.deployment_id
+                        activation.version_id == request.version_id
                             && activation.activation_generation == generation
                             && matches!(
                                 activation.state,
@@ -216,7 +216,7 @@ impl P23PromotionCoordinator {
                 cron_repo.stage_activations(
                     request.account_id,
                     request.worker_id,
-                    request.deployment_id,
+                    request.version_id,
                     generation,
                     &cron_config.declarations,
                     request.now_ms,
@@ -230,7 +230,7 @@ impl P23PromotionCoordinator {
                     activation_id: activation.id,
                     account_id: activation.account_id,
                     worker_id: activation.worker_id,
-                    deployment_id: activation.deployment_id,
+                    version_id: activation.version_id,
                     execution_generation: self
                         .scheduler
                         .cron_execution_generation(activation.id, activation.activation_generation)?
@@ -255,8 +255,8 @@ impl P23PromotionCoordinator {
             workers.promote_checked(
                 request.account_id,
                 request.worker_id,
-                request.deployment_id,
-                worker.active_deployment_id,
+                request.version_id,
+                worker.active_version_id,
                 Some(worker.route_generation),
                 request.request_id,
                 request.now_ms,
@@ -474,7 +474,7 @@ fn queue_projection(
         consumer_id: record.id,
         queue_id: declaration.queue_id,
         consumer_generation: record.consumer_generation,
-        deployment_id: declaration.deployment_id,
+        version_id: declaration.version_id,
         worker_id: record.worker_id,
         execution_generation,
         entrypoint: declaration.entrypoint.clone(),

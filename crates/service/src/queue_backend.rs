@@ -5,7 +5,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse as _, Response};
-use open_compute_core::{BindingId, DeploymentId, ErrorCode, PlatformError, QueuesConfig};
+use open_compute_core::{BindingId, ErrorCode, PlatformError, QueuesConfig, VersionId};
 use open_compute_storage::{
     QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES, QUEUE_MAX_DELAY_SECONDS,
     QUEUE_MAX_MESSAGE_BYTES, QueueContentType, QueueEnqueueRequest, QueueMessageInput,
@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-const DEPLOYMENT_HEADER: &str = "x-open-compute-deployment-id";
+const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const REQUEST_HEADER: &str = "x-open-compute-request-id";
 const OUTPUT_GATE_HEADER: &str = "x-open-compute-output-gate";
@@ -203,8 +203,8 @@ impl QueueBindingService {
                 return error(ErrorCode::QueueInvariantViolation, StatusCode::BAD_REQUEST);
             }
         };
-        let Some(deployment_id) = header_text(request.headers(), DEPLOYMENT_HEADER)
-            .and_then(|value| DeploymentId::from_str(value).ok())
+        let Some(version_id) = header_text(request.headers(), VERSION_HEADER)
+            .and_then(|value| VersionId::from_str(value).ok())
         else {
             self.observe(operation, false, 0, 0, started);
             return error(ErrorCode::QueueInvariantViolation, StatusCode::BAD_REQUEST);
@@ -222,7 +222,7 @@ impl QueueBindingService {
                 );
             }
             return self
-                .read_metrics(binding_id, deployment_id, descriptor, started)
+                .read_metrics(binding_id, version_id, descriptor, started)
                 .await;
         }
         if operation == QueueOperation::Finalize {
@@ -233,7 +233,7 @@ impl QueueBindingService {
                 );
             }
             return self
-                .finalize(binding_id, deployment_id, descriptor, request_id)
+                .finalize(binding_id, version_id, descriptor, request_id)
                 .await;
         }
         if !content_type_is(request.headers(), FRAME_CONTENT_TYPE) {
@@ -286,7 +286,7 @@ impl QueueBindingService {
         let task = tokio::task::spawn_blocking(move || {
             let authorized = QueueRepository::new(storage.db()).authorize(
                 binding_id,
-                deployment_id,
+                version_id,
                 &descriptor,
             )?;
             let _admission = storage.reserve_mutation(admission_bytes)?;
@@ -341,7 +341,7 @@ impl QueueBindingService {
     async fn read_metrics(
         &self,
         binding_id: BindingId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         descriptor: [u8; 32],
         started: Instant,
     ) -> Response {
@@ -350,7 +350,7 @@ impl QueueBindingService {
         let task = tokio::task::spawn_blocking(move || {
             let authorized = QueueRepository::new(storage.db()).authorize(
                 binding_id,
-                deployment_id,
+                version_id,
                 &descriptor,
             )?;
             scheduler.queue_metrics(
@@ -381,7 +381,7 @@ impl QueueBindingService {
     async fn finalize(
         &self,
         binding_id: BindingId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         descriptor: [u8; 32],
         request_id: Uuid,
     ) -> Response {
@@ -390,7 +390,7 @@ impl QueueBindingService {
         let task = tokio::task::spawn_blocking(move || {
             let authorized = QueueRepository::new(storage.db()).authorize(
                 binding_id,
-                deployment_id,
+                version_id,
                 &descriptor,
             )?;
             scheduler.finalize_queue_enqueue(

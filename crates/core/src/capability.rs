@@ -298,7 +298,7 @@ impl PlatformCapabilitiesV1 {
 fn required_products_present(products: &BTreeMap<String, ProductCapabilityV1>) -> bool {
     const REQUIRED: [&str; 25] = [
         "workers",
-        "deployments",
+        "versions",
         "static_assets",
         "service_bindings",
         "kv",

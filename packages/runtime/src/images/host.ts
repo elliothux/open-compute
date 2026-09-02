@@ -7,19 +7,19 @@ import {
   bindingError, BINDING_TOKEN_HEADER, currentStartupGeneration,
 } from "../loader/shared.js";
 
-/** Private deployment-scoped Images transport; never exposed directly to tenant code. */
+/** Private version-scoped Images transport; never exposed directly to tenant code. */
 export class ImageTransport extends WorkerEntrypoint<BindingEnv, ImageTransportProps> {
   #headers() {
     const props = this.ctx.props;
     if (!props || typeof props.accountId !== "string" || typeof props.workerId !== "string"
-        || typeof props.deploymentId !== "string"
+        || typeof props.versionId !== "string"
         || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) throw bindingError("IMAGE_PROTOCOL_ERROR");
     return {
       [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
       "x-open-compute-startup-generation": currentStartupGeneration(),
       "x-open-compute-account-id": props.accountId,
       "x-open-compute-worker-id": props.workerId,
-      "x-open-compute-deployment-id": props.deploymentId,
+      "x-open-compute-version-id": props.versionId,
       "x-open-compute-descriptor-sha256": props.descriptorSha256,
       "x-open-compute-request-id": crypto.randomUUID(),
     };

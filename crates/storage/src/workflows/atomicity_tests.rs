@@ -4,8 +4,8 @@ use super::*;
 
 #[test]
 fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
-    let (_temp, storage, deployment) = setup();
-    let definition = ready(&storage, deployment);
+    let (_temp, storage, worker_version) = setup();
+    let definition = ready(&storage, worker_version);
     let repository = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
     let limits = WorkflowsConfig::default();
@@ -26,7 +26,7 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
     let workers = WorkerRepository::new(storage.db());
     workers.begin_validation(replacement).unwrap();
     workers.mark_ready(replacement, 12).unwrap();
-    let version = repository
+    let workflow_version = repository
         .stage_version(account, definition.id, replacement, "Replacement", 13)
         .unwrap();
     storage.db().with_read(|connection| {
@@ -36,7 +36,12 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
     }).unwrap();
     assert!(
         repository
-            .finish_version(account, version.target.version_id, true, 14)
+            .finish_version(
+                account,
+                workflow_version.target.workflow_version_id,
+                true,
+                14
+            )
             .is_err()
     );
     assert_eq!(
@@ -48,10 +53,10 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
     );
     assert_eq!(
         repository
-            .version(account, version.target.version_id)
+            .version(account, workflow_version.target.workflow_version_id)
             .unwrap()
             .state,
-        DeploymentState::Validating
+        VersionState::Validating
     );
     assert_eq!(
         repository
@@ -71,7 +76,12 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
         })
         .unwrap();
     repository
-        .finish_version(account, version.target.version_id, true, 15)
+        .finish_version(
+            account,
+            workflow_version.target.workflow_version_id,
+            true,
+            15,
+        )
         .unwrap();
     let next = repository
         .reserve_instance(
@@ -83,8 +93,11 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
             16,
         )
         .unwrap();
-    assert_eq!(next.identity.target.deployment_id, replacement);
-    assert_eq!(next.identity.target.version_id, version.target.version_id);
+    assert_eq!(next.identity.target.worker_version_id, replacement);
+    assert_eq!(
+        next.identity.target.workflow_version_id,
+        workflow_version.target.workflow_version_id
+    );
     assert_eq!(
         repository
             .reservation(original.identity.instance_id)
@@ -92,8 +105,8 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
             .unwrap()
             .identity
             .target
-            .deployment_id,
-        deployment
+            .worker_version_id,
+        worker_version
     );
     assert_eq!(repository.retire_unused_versions(32, 17).unwrap(), 0);
     assert!(
@@ -105,8 +118,8 @@ fn workflow_version_switch_failure_preserves_current_and_frozen_instances() {
 
 #[test]
 fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_retention() {
-    let (_temp, storage, deployment) = setup();
-    let definition = ready(&storage, deployment);
+    let (_temp, storage, version) = setup();
+    let definition = ready(&storage, version);
     let repository = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
     let limits = WorkflowsConfig::default();
@@ -148,7 +161,7 @@ fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_retention
             for sql in [
                 "SELECT COUNT(*) FROM workflow_instance_referrers",
                 "SELECT COUNT(*) FROM workflow_referrers WHERE referrer_kind='instance'",
-                "SELECT COUNT(*) FROM deployment_referrers WHERE kind='workflow_instance'",
+                "SELECT COUNT(*) FROM version_referrers WHERE kind='workflow_instance'",
             ] {
                 assert_eq!(
                     connection
@@ -243,8 +256,8 @@ fn workflow_control_commit_failure_rolls_back_reservation_finalize_and_retention
 
 #[test]
 fn workflow_create_batch_reservation_and_publication_are_atomic_and_replayable() {
-    let (_temp, storage, deployment) = setup();
-    let definition = ready(&storage, deployment);
+    let (_temp, storage, version) = setup();
+    let definition = ready(&storage, version);
     let repository = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
     let limits = WorkflowsConfig::default();

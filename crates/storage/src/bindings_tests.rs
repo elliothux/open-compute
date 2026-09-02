@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    NewDeployment, NewQueueProducerBinding, PlatformStorage, QueueConfig, QueueRepository,
+    NewQueueProducerBinding, NewVersion, PlatformStorage, QueueConfig, QueueRepository,
     ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, WorkerRepository,
 };
 use open_compute_core::config::StorageConfig;
@@ -22,21 +22,19 @@ fn storage() -> (tempfile::TempDir, PlatformStorage) {
     (temp, storage)
 }
 
-fn deployment(
-    account_id: AccountId,
-    worker_id: WorkerId,
-    deployment_id: DeploymentId,
-) -> NewDeployment {
-    NewDeployment {
-        id: deployment_id,
+fn version(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) -> NewVersion {
+    NewVersion {
+        id: version_id,
         account_id,
         worker_id,
-        content_kind: crate::DeploymentContentKind::Worker,
+        content_kind: crate::VersionContentKind::Worker,
         artifact_sha256: Some([1; 32]),
         artifact_size: Some(1),
         artifact_schema_version: Some(1),
         main_module: Some("index.js".to_owned()),
         worker_code_sha256: [2; 32],
+        compatibility_date: "2026-08-30".into(),
+        compatibility_flags: Vec::new(),
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         request_id: RequestId::generate(),
@@ -76,10 +74,10 @@ fn binding_insert_referrer_authorize_and_worker_release_are_atomic() {
     let (worker, _) = workers
         .create_worker(account, "bound", RequestId::generate(), 12, 1_000_000)
         .unwrap();
-    let deployment_id = DeploymentId::generate();
+    let version_id = VersionId::generate();
     let binding_id = BindingId::generate();
     let descriptor = [9; 32];
-    let binding = NewDeploymentBinding {
+    let binding = NewVersionBinding {
         id: binding_id,
         name: "CACHE".to_owned(),
         kind: BindingKind::KvNamespace,
@@ -91,9 +89,9 @@ fn binding_insert_referrer_authorize_and_worker_release_are_atomic() {
         descriptor_sha256: descriptor,
     };
     workers
-        .insert_staging_deployment(
-            &deployment(account, worker.id, deployment_id),
-            &crate::NewDeploymentProducts {
+        .insert_staging_version(
+            &version(account, worker.id, version_id),
+            &crate::NewVersionProducts {
                 bindings: std::slice::from_ref(&binding),
                 ..Default::default()
             },
@@ -108,22 +106,16 @@ fn binding_insert_referrer_authorize_and_worker_release_are_atomic() {
             .code(),
         ErrorCode::ResourceReferenced
     );
-    workers.begin_validation(deployment_id).unwrap();
-    workers.mark_ready(deployment_id, 22).unwrap();
+    workers.begin_validation(version_id).unwrap();
+    workers.mark_ready(version_id, 22).unwrap();
     let authorized = BindingRepository::new(storage.db())
-        .authorize(binding_id, deployment_id, &descriptor)
+        .authorize(binding_id, version_id, &descriptor)
         .unwrap();
     assert_eq!(authorized.resource.id, resource_id);
     assert!(!authorized.binding.permissions.write);
 
     workers
-        .delete_worker(
-            account,
-            worker.id,
-            &[deployment_id],
-            RequestId::generate(),
-            23,
-        )
+        .delete_worker(account, worker.id, &[version_id], RequestId::generate(), 23)
         .unwrap();
     assert!(resources.referrers(resource_id).unwrap().is_empty());
     resources.begin_delete(account, resource_id, 24).unwrap();
@@ -144,7 +136,7 @@ fn queue_producer_referrer_is_released_when_its_worker_is_deleted() {
     let (worker, _) = workers
         .create_worker(account, "queue-bound", RequestId::generate(), 12, 1_000_000)
         .unwrap();
-    let deployment_id = DeploymentId::generate();
+    let version_id = VersionId::generate();
     let binding = NewQueueProducerBinding {
         id: BindingId::generate(),
         name: "EVENTS".to_owned(),
@@ -154,17 +146,17 @@ fn queue_producer_referrer_is_released_when_its_worker_is_deleted() {
         descriptor_sha256: [3; 32],
     };
     workers
-        .insert_staging_deployment(
-            &deployment(account, worker.id, deployment_id),
-            &crate::NewDeploymentProducts {
+        .insert_staging_version(
+            &version(account, worker.id, version_id),
+            &crate::NewVersionProducts {
                 queue_bindings: std::slice::from_ref(&binding),
                 ..Default::default()
             },
             1_000_000,
         )
         .unwrap();
-    workers.begin_validation(deployment_id).unwrap();
-    workers.mark_ready(deployment_id, 13).unwrap();
+    workers.begin_validation(version_id).unwrap();
+    workers.mark_ready(version_id, 13).unwrap();
     assert_eq!(
         queues
             .begin_delete(account, queue_id, 1, 14)
@@ -174,13 +166,7 @@ fn queue_producer_referrer_is_released_when_its_worker_is_deleted() {
     );
 
     workers
-        .delete_worker(
-            account,
-            worker.id,
-            &[deployment_id],
-            RequestId::generate(),
-            15,
-        )
+        .delete_worker(account, worker.id, &[version_id], RequestId::generate(), 15)
         .unwrap();
     queues.begin_delete(account, queue_id, 1, 16).unwrap();
 }
@@ -215,9 +201,9 @@ fn binding_triggers_reject_cross_kind_and_runtime_forgery() {
     let (worker, _) = workers
         .create_worker(account, "bound", RequestId::generate(), 12, 1_000_000)
         .unwrap();
-    let deployment_id = DeploymentId::generate();
+    let version_id = VersionId::generate();
     let binding_id = BindingId::generate();
-    let bad = NewDeploymentBinding {
+    let bad = NewVersionBinding {
         id: binding_id,
         name: "CACHE".to_owned(),
         kind: BindingKind::R2Bucket,
@@ -230,9 +216,9 @@ fn binding_triggers_reject_cross_kind_and_runtime_forgery() {
     };
     assert_eq!(
         workers
-            .insert_staging_deployment(
-                &deployment(account, worker.id, deployment_id),
-                &crate::NewDeploymentProducts {
+            .insert_staging_version(
+                &version(account, worker.id, version_id),
+                &crate::NewVersionProducts {
                     bindings: &[bad],
                     ..Default::default()
                 },
@@ -244,7 +230,7 @@ fn binding_triggers_reject_cross_kind_and_runtime_forgery() {
     );
     assert_eq!(
         BindingRepository::new(storage.db())
-            .authorize(binding_id, deployment_id, &[5; 32])
+            .authorize(binding_id, version_id, &[5; 32])
             .unwrap_err()
             .code(),
         ErrorCode::BindingNotFound

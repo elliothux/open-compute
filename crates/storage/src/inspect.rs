@@ -47,8 +47,8 @@ pub struct ControlInventory {
     pub accounts: u64,
     /// Live Workers.
     pub workers: u64,
-    /// Non-tombstoned deployments.
-    pub deployments: u64,
+    /// Non-tombstoned versions.
+    pub versions: u64,
     /// Active routes.
     pub routes: u64,
     /// Non-tombstoned KV namespaces.
@@ -209,9 +209,9 @@ pub fn inspect_control_inventory(db: &ControlDb) -> Result<ControlInventory, Pla
                 connection,
                 "SELECT COUNT(*) FROM workers WHERE deleted_at_ms IS NULL",
             )?,
-            deployments: query_count(
+            versions: query_count(
                 connection,
-                "SELECT COUNT(*) FROM worker_deployments WHERE state != 'tombstoned'",
+                "SELECT COUNT(*) FROM worker_versions WHERE state != 'tombstoned'",
             )?,
             routes: query_count(
                 connection,
@@ -277,22 +277,22 @@ pub fn inspect_snapshot_immutable_references(
     let db = ControlDb::open_readonly(path, busy_timeout_ms)?;
     db.with_read(|connection| {
         let mut references = Vec::new();
-        let mut deployments = connection
+        let mut versions = connection
             .prepare(
                 "SELECT sha256, size FROM (
                    SELECT r.sha256 AS sha256, r.size AS size
-                   FROM deployment_object_refs r
-                   JOIN worker_deployments d ON d.id = r.deployment_id
+                   FROM version_object_refs r
+                   JOIN worker_versions d ON d.id = r.version_id
                    WHERE d.state != 'tombstoned'
                    UNION
                    SELECT o.sha256 AS sha256, o.size AS size
-                   FROM deployment_upload_objects o
-                   JOIN deployment_uploads u ON u.id = o.session_id
+                   FROM version_upload_objects o
+                   JOIN version_uploads u ON u.id = o.session_id
                    WHERE u.status IN ('open', 'finalizing') AND o.verified = 1
                  ) ORDER BY sha256, size",
             )
             .map_err(|_| inspect_error())?;
-        let rows = deployments
+        let rows = versions
             .query_map([], |row| {
                 Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
             })
@@ -301,7 +301,7 @@ pub fn inspect_snapshot_immutable_references(
             let (digest, size) = row.map_err(|_| inspect_error())?;
             let sha256 = valid_digest(&digest)?;
             references.push(SnapshotImmutableReferenceV1 {
-                role: "deployment_artifact".to_owned(),
+                role: "version_artifact".to_owned(),
                 object_key: format!(
                     "{system_prefix}artifacts/v1/sha256/{}/{rest}",
                     &sha256[..2],

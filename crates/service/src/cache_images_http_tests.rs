@@ -11,17 +11,17 @@ use open_compute_storage::{
     CacheBodyRef, CacheHeader, CacheIdentity, CacheMethod, CachePut, CacheStoredResponse,
     CacheSurface,
 };
-use open_compute_workers::{DeploymentImagesInput, DeploymentRuntimeFeatures};
+use open_compute_workers::{VersionImagesInput, VersionRuntimeFeatures};
 use std::collections::BTreeMap;
 use tower::ServiceExt as _;
 
 #[tokio::test]
 async fn operator_auth_stats_purge_gc_and_images_capacity_are_bounded() {
-    let fixture = RuntimeFeatureFixture::create(DeploymentRuntimeFeatures {
-        images: Some(DeploymentImagesInput {
+    let fixture = RuntimeFeatureFixture::create(VersionRuntimeFeatures {
+        images: Some(VersionImagesInput {
             binding: "IMAGES".to_owned(),
         }),
-        ..DeploymentRuntimeFeatures::default()
+        ..VersionRuntimeFeatures::default()
     })
     .await;
     let cache = Arc::new(

@@ -923,7 +923,7 @@ async fn remote_corruption_and_orphan_gc() {
     let referenced = HashSet::new();
     let deleted = store
         .gc_unreferenced(
-            &store.fence_deployment_gc().await,
+            &store.fence_version_gc().await,
             &referenced,
             SystemTime::now() + Duration::from_secs(1),
         )
@@ -947,7 +947,7 @@ async fn remote_corruption_and_orphan_gc() {
     mock2.set_omit_last_modified(true);
     let deleted2 = store2
         .gc_unreferenced(
-            &store2.fence_deployment_gc().await,
+            &store2.fence_version_gc().await,
             &HashSet::new(),
             SystemTime::now() + Duration::from_secs(1),
         )
@@ -958,21 +958,21 @@ async fn remote_corruption_and_orphan_gc() {
 }
 
 #[tokio::test]
-async fn deployment_commit_reservation_fences_artifact_gc() {
+async fn version_commit_reservation_fences_artifact_gc() {
     let mock = MockS3::spawn("open-compute").await;
     let store = ArtifactStore::new(client_for(&mock).await);
-    let reservation = store.reserve_deployment_artifact().await;
+    let reservation = store.reserve_version_artifact().await;
     let (acquired_tx, mut acquired_rx) = tokio::sync::oneshot::channel();
     let gc_store = store.clone();
     let gc = tokio::spawn(async move {
-        let _fence = gc_store.fence_deployment_gc().await;
+        let _fence = gc_store.fence_version_gc().await;
         let _ = acquired_tx.send(());
     });
     assert!(
         tokio::time::timeout(Duration::from_millis(20), &mut acquired_rx)
             .await
             .is_err(),
-        "GC must wait until the deployment reference can be committed"
+        "GC must wait until the version reference can be committed"
     );
     drop(reservation);
     tokio::time::timeout(Duration::from_secs(1), &mut acquired_rx)
@@ -1909,7 +1909,7 @@ async fn artifact_listing_skips_invalid_keys_and_gc_respects_missing_time() {
     assert_eq!(
         store
             .gc_unreferenced(
-                &store.fence_deployment_gc().await,
+                &store.fence_version_gc().await,
                 &referenced,
                 SystemTime::now(),
             )
@@ -1920,7 +1920,7 @@ async fn artifact_listing_skips_invalid_keys_and_gc_respects_missing_time() {
     assert_eq!(
         store
             .gc_unreferenced(
-                &store.fence_deployment_gc().await,
+                &store.fence_version_gc().await,
                 &HashSet::new(),
                 SystemTime::UNIX_EPOCH,
             )
@@ -1933,7 +1933,7 @@ async fn artifact_listing_skips_invalid_keys_and_gc_respects_missing_time() {
     assert_eq!(
         store
             .gc_unreferenced(
-                &store.fence_deployment_gc().await,
+                &store.fence_version_gc().await,
                 &HashSet::new(),
                 SystemTime::now(),
             )

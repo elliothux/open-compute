@@ -18,7 +18,7 @@ test("tenant outbound selects one host-only capability and validation stays offl
   assert.equal(tenantGlobalOutbound({}, true), null);
   assert.throws(
     () => tenantGlobalOutbound({}, false),
-    error => error?.stableCode === "DEPLOYMENT_INVARIANT_VIOLATION",
+    error => error?.stableCode === "VERSION_INVARIANT_VIOLATION",
   );
 });
 

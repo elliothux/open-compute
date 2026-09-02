@@ -1,6 +1,6 @@
-//! In-process deployment dispatch pins and deletion fence.
+//! In-process version dispatch pins and deletion fence.
 
-use open_compute_core::{DeploymentId, ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, PlatformError, VersionId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,63 +15,64 @@ struct Entry {
 
 #[derive(Debug, Default)]
 struct Inner {
-    entries: Mutex<HashMap<DeploymentId, Entry>>,
+    entries: Mutex<HashMap<VersionId, Entry>>,
     changed: Notify,
 }
 
-/// Process-local authority that freezes deployment identity for in-flight work.
+/// Process-local authority that freezes version identity for in-flight work.
 #[derive(Clone, Debug, Default)]
-pub struct DeploymentPins {
+pub struct VersionPins {
     inner: Arc<Inner>,
 }
 
-impl DeploymentPins {
+impl VersionPins {
     /// Construct an empty pin registry.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Acquire a pin unless deletion already fenced the deployment.
-    pub fn pin(&self, deployment_id: DeploymentId) -> Result<DeploymentPin, PlatformError> {
+    /// Acquire a pin unless deletion already fenced the version.
+    pub fn pin(&self, version_id: VersionId) -> Result<VersionPin, PlatformError> {
         let mut entries = self
             .inner
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let entry = entries.entry(deployment_id).or_default();
+        let entry = entries.entry(version_id).or_default();
         if entry.fenced {
             return Err(PlatformError::new(
-                ErrorCode::DeploymentNotReady,
-                "deployment is fenced for deletion",
+                ErrorCode::VersionNotReady,
+                "version is fenced for deletion",
             ));
         }
-        entry.count = entry.count.checked_add(1).ok_or_else(|| {
-            PlatformError::new(ErrorCode::Internal, "deployment pin count overflow")
-        })?;
-        Ok(DeploymentPin {
-            deployment_id,
+        entry.count = entry
+            .count
+            .checked_add(1)
+            .ok_or_else(|| PlatformError::new(ErrorCode::Internal, "version pin count overflow"))?;
+        Ok(VersionPin {
+            version_id,
             inner: self.inner.clone(),
             released: false,
         })
     }
 
-    /// Conservatively retain one deployment until this platform process and workerd generation end.
+    /// Conservatively retain one version until this platform process and workerd generation end.
     ///
     /// Stock workerd does not expose an acknowledgement that every tenant `waitUntil()` task
-    /// completed. Retaining the immutable deployment for the owning process lifetime prevents
+    /// completed. Retaining the immutable version for the owning process lifetime prevents
     /// deletion from racing background execution without guessing a time-to-live.
-    pub fn retain_until_restart(&self, deployment_id: DeploymentId) -> Result<(), PlatformError> {
+    pub fn retain_until_restart(&self, version_id: VersionId) -> Result<(), PlatformError> {
         let mut entries = self
             .inner
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let entry = entries.entry(deployment_id).or_default();
+        let entry = entries.entry(version_id).or_default();
         if entry.fenced {
             return Err(PlatformError::new(
-                ErrorCode::DeploymentNotReady,
-                "deployment is fenced for deletion",
+                ErrorCode::VersionNotReady,
+                "version is fenced for deletion",
             ));
         }
         entry.retained_until_restart = true;
@@ -99,16 +100,16 @@ impl DeploymentPins {
     /// Fence new pins and wait for current work to drain to zero.
     pub async fn fence_and_wait(
         &self,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         deadline: Duration,
     ) -> Result<(), PlatformError> {
-        self.fence_many_and_wait(&[deployment_id], deadline).await
+        self.fence_many_and_wait(&[version_id], deadline).await
     }
 
-    /// Atomically fence a Worker deployment set, then wait for every current pin to drain.
+    /// Atomically fence a Worker version set, then wait for every current pin to drain.
     pub async fn fence_many_and_wait(
         &self,
-        deployment_ids: &[DeploymentId],
+        version_ids: &[VersionId],
         deadline: Duration,
     ) -> Result<(), PlatformError> {
         {
@@ -117,8 +118,8 @@ impl DeploymentPins {
                 .entries
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            for deployment_id in deployment_ids {
-                entries.entry(*deployment_id).or_default().fenced = true;
+            for version_id in version_ids {
+                entries.entry(*version_id).or_default().fenced = true;
             }
         }
         let wait = async {
@@ -130,7 +131,7 @@ impl DeploymentPins {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .iter()
-                    .filter(|(id, _)| deployment_ids.contains(id))
+                    .filter(|(id, _)| version_ids.contains(id))
                     .all(|(_, entry)| entry.count == 0 && !entry.retained_until_restart);
                 if empty {
                     return;
@@ -140,77 +141,77 @@ impl DeploymentPins {
         };
         tokio::time::timeout(deadline, wait).await.map_err(|_| {
             PlatformError::new(
-                ErrorCode::DeploymentReferenced,
-                "deployment set still has in-flight requests",
+                ErrorCode::VersionReferenced,
+                "version set still has in-flight requests",
             )
         })
     }
 
     /// Remove a fence when the database transition could not be committed.
-    pub fn unfence(&self, deployment_id: DeploymentId) {
+    pub fn unfence(&self, version_id: VersionId) {
         let mut entries = self
             .inner
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(entry) = entries.get_mut(&deployment_id) {
+        if let Some(entry) = entries.get_mut(&version_id) {
             entry.fenced = false;
             if entry.count == 0 && !entry.retained_until_restart {
-                entries.remove(&deployment_id);
+                entries.remove(&version_id);
             }
         }
         self.inner.changed.notify_waiters();
     }
 
-    /// Forget a drained fence after `SQLite` committed the deployment tombstone.
+    /// Forget a drained fence after `SQLite` committed the version tombstone.
     ///
     /// A stale route snapshot can no longer reach tenant code because
-    /// `RuntimeSource` independently rejects tombstoned deployments.
-    pub fn retire_fence(&self, deployment_id: DeploymentId) {
+    /// `RuntimeSource` independently rejects tombstoned versions.
+    pub fn retire_fence(&self, version_id: VersionId) {
         let mut entries = self
             .inner
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if entries
-            .get(&deployment_id)
+            .get(&version_id)
             .is_some_and(|entry| entry.fenced && entry.count == 0 && !entry.retained_until_restart)
         {
-            entries.remove(&deployment_id);
+            entries.remove(&version_id);
         }
         self.inner.changed.notify_waiters();
     }
 
     /// Return the current in-flight count for tests and diagnostics.
     #[must_use]
-    pub fn count(&self, deployment_id: DeploymentId) -> usize {
+    pub fn count(&self, version_id: VersionId) -> usize {
         self.inner
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&deployment_id)
+            .get(&version_id)
             .map_or(0, |entry| {
                 entry.count + usize::from(entry.retained_until_restart)
             })
     }
 }
 
-/// RAII deployment execution pin.
-pub struct DeploymentPin {
-    deployment_id: DeploymentId,
+/// RAII version execution pin.
+pub struct VersionPin {
+    version_id: VersionId,
     inner: Arc<Inner>,
     released: bool,
 }
 
-impl std::fmt::Debug for DeploymentPin {
+impl std::fmt::Debug for VersionPin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeploymentPin")
-            .field("deployment_id", &self.deployment_id)
+        f.debug_struct("VersionPin")
+            .field("version_id", &self.version_id)
             .finish_non_exhaustive()
     }
 }
 
-impl Drop for DeploymentPin {
+impl Drop for VersionPin {
     fn drop(&mut self) {
         if self.released {
             return;
@@ -221,10 +222,10 @@ impl Drop for DeploymentPin {
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(entry) = entries.get_mut(&self.deployment_id) {
+        if let Some(entry) = entries.get_mut(&self.version_id) {
             entry.count = entry.count.saturating_sub(1);
             if entry.count == 0 && !entry.fenced && !entry.retained_until_restart {
-                entries.remove(&self.deployment_id);
+                entries.remove(&self.version_id);
             }
         }
         drop(entries);

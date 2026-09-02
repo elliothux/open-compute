@@ -1,7 +1,7 @@
 //! Independent SQLite authority for the bounded P0.8 scheduler projection.
 
 use open_compute_core::{
-    DeploymentId, DurableObjectId, ErrorCode, PlatformError, ResourceId, WorkloadSummary,
+    DurableObjectId, ErrorCode, PlatformError, ResourceId, VersionId, WorkloadSummary,
 };
 use rand::TryRngCore as _;
 use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
@@ -99,8 +99,8 @@ pub struct AlarmProjection {
     pub row_token: String,
     /// Persisted Unix due time in milliseconds.
     pub due_at_ms: i64,
-    /// Deployment observed by the trusted projection backend.
-    pub target_deployment_id: DeploymentId,
+    /// Version observed by the trusted projection backend.
+    pub target_version_id: VersionId,
     /// Worker execution generation observed by the projection backend.
     pub execution_generation: u64,
     /// Handler retry count already consumed.
@@ -123,8 +123,8 @@ pub struct ClaimedJob {
     pub row_token: String,
     /// Persisted due time.
     pub due_at_ms: i64,
-    /// Deployment recorded on the projection.
-    pub target_deployment_id: DeploymentId,
+    /// Version recorded on the projection.
+    pub target_version_id: VersionId,
     /// Execution generation recorded on the projection.
     pub execution_generation: u64,
     /// Handler retry count already consumed.
@@ -333,14 +333,14 @@ impl SchedulerStore {
             .execute(
                 "INSERT INTO scheduled_jobs
                  (id, kind, namespace_resource_id, object_id, object_generation, row_token,
-                  due_at_ms, target_deployment_id, execution_generation, state, retry_count,
+                  due_at_ms, target_version_id, execution_generation, state, retry_count,
                   claim_token, claim_until_ms, last_error_code, created_at_ms, updated_at_ms)
                  VALUES (?1, 'do_alarm', ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'scheduled', ?9,
                          NULL, NULL, NULL, ?10, ?10)
                  ON CONFLICT(namespace_resource_id, object_id, object_generation) DO UPDATE SET
                    row_token = excluded.row_token,
                    due_at_ms = excluded.due_at_ms,
-                   target_deployment_id = excluded.target_deployment_id,
+                   target_version_id = excluded.target_version_id,
                    execution_generation = excluded.execution_generation,
                    state = 'scheduled', retry_count = excluded.retry_count,
                    claim_token = NULL, claim_until_ms = NULL, last_error_code = NULL,
@@ -352,7 +352,7 @@ impl SchedulerStore {
                     i64::try_from(projection.object_generation).map_err(|_| invalid())?,
                     projection.row_token,
                     projection.due_at_ms,
-                    projection.target_deployment_id.to_string(),
+                    projection.target_version_id.to_string(),
                     i64::try_from(projection.execution_generation).map_err(|_| invalid())?,
                     i64::from(projection.retry_count),
                     now_ms,
@@ -585,22 +585,22 @@ impl SchedulerStore {
         Ok(affected == 1)
     }
 
-    /// Retarget a live claim to the current deployment without weakening its token fences.
+    /// Retarget a live claim to the current version without weakening its token fences.
     pub fn retarget_claim(
         &self,
         job: &ClaimedJob,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         execution_generation: u64,
         now_ms: i64,
     ) -> Result<bool, PlatformError> {
         let connection = self.lock()?;
         let affected = connection
             .execute(
-                "UPDATE scheduled_jobs SET target_deployment_id = ?1,
+                "UPDATE scheduled_jobs SET target_version_id = ?1,
                         execution_generation = ?2, updated_at_ms = ?3
                  WHERE id = ?4 AND state = 'claimed' AND claim_token = ?5 AND row_token = ?6",
                 params![
-                    deployment_id.to_string(),
+                    version_id.to_string(),
                     i64::try_from(execution_generation).map_err(|_| invalid())?,
                     now_ms,
                     job.id,
@@ -654,7 +654,7 @@ fn read_claimed(connection: &Connection, id: &str) -> Result<ClaimedJob, Platfor
     connection
         .query_row(
             "SELECT id, namespace_resource_id, object_id, object_generation, row_token,
-                    due_at_ms, target_deployment_id, execution_generation, retry_count,
+                    due_at_ms, target_version_id, execution_generation, retry_count,
                     claim_token, claim_until_ms
              FROM scheduled_jobs WHERE id = ?1 AND state = 'claimed'",
             [id],
@@ -662,7 +662,7 @@ fn read_claimed(connection: &Connection, id: &str) -> Result<ClaimedJob, Platfor
                 let namespace: String = row.get(1)?;
                 let object: String = row.get(2)?;
                 let object_generation: i64 = row.get(3)?;
-                let deployment: String = row.get(6)?;
+                let version: String = row.get(6)?;
                 let execution_generation: i64 = row.get(7)?;
                 let retry_count: i64 = row.get(8)?;
                 Ok(ClaimedJob {
@@ -675,7 +675,7 @@ fn read_claimed(connection: &Connection, id: &str) -> Result<ClaimedJob, Platfor
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
                     row_token: row.get(4)?,
                     due_at_ms: row.get(5)?,
-                    target_deployment_id: DeploymentId::from_str(&deployment)
+                    target_version_id: VersionId::from_str(&version)
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
                     execution_generation: u64::try_from(execution_generation)
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,

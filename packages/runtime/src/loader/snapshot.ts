@@ -5,7 +5,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 function invalid(): never {
-  throw Object.assign(new Error("DEPLOYMENT_INVARIANT_VIOLATION"), { stableCode: "DEPLOYMENT_INVARIANT_VIOLATION" });
+  throw Object.assign(new Error("VERSION_INVARIANT_VIOLATION"), { stableCode: "VERSION_INVARIANT_VIOLATION" });
 }
 
 /** Check the internal wire shape; Rust remains the authority for identity and policy. */

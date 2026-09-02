@@ -30,12 +30,11 @@ use open_compute_service::{
     serve_binding_backend,
 };
 use open_compute_storage::{
-    D1DatabaseRepository, D1Paths, DeploymentRecord, PlatformStorage, SchedulerStore,
+    D1DatabaseRepository, D1Paths, PlatformStorage, SchedulerStore, VersionRecord,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentBindingInput, DeploymentController, ModuleInput, ModuleType, ResourcePins,
-    RuntimeSource,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, ResourcePins, RuntimeSource, VersionBindingInput, VersionController,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -428,29 +427,29 @@ pub(super) async fn admin_json(
 }
 
 pub(super) async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
     supervisor: &WorkerdSupervisor,
-) -> DeploymentRecord {
+) -> VersionRecord {
     let started = Instant::now();
     let result = match controller
-        .create_deployment(request)
+        .create_version(request)
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "deployment failed: {error:?}; runtime={:?}; diagnostics={:?}",
+                "version failed: {error:?}; runtime={:?}; diagnostics={:?}",
                 supervisor.snapshot(),
                 supervisor.last_diagnostics()
             )
         }) {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     };
-    record_capacity("deployment", started);
+    record_capacity("version", started);
     result
 }
 
-pub(super) fn deployment_request(
+pub(super) fn version_request(
     account_id: AccountId,
     worker_id: WorkerId,
     bindings: ProductBindings,
@@ -458,7 +457,7 @@ pub(super) fn deployment_request(
     release: &str,
     promote: bool,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         std::iter::once(("index.js", WORKER_SOURCE))
@@ -500,7 +499,7 @@ pub(super) fn deployment_request(
     ] {
         resources.insert(
             name.to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind,
                 id,
                 permissions: CanonicalPermissions::default(),
@@ -508,11 +507,11 @@ pub(super) fn deployment_request(
             },
         );
     }
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: idempotency_key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -533,7 +532,7 @@ pub(super) async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     route_generation: u64,
     path: &str,
 ) -> DispatchResponse {
@@ -544,8 +543,8 @@ pub(super) async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: i64::try_from(route_generation).unwrap(),
                 request_id: RequestId::generate(),

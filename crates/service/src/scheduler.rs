@@ -27,9 +27,9 @@ use kernel::{
     AdmissionTracker, InfrastructureBackoff, PoolRuntime, bounded_drain, permanent_pool_error,
 };
 use open_compute_core::{
-    AccountId, ComponentName, ComponentState, CronActivationId, DeploymentId, DurableObjectId,
-    ErrorCode, PlatformError, QueueConsumerId, QueueId, ReadinessReason, ResourceId,
-    SchedulerClock, SchedulerConfig, SchedulerKind, SchedulerPoolState, WorkerId,
+    AccountId, ComponentName, ComponentState, CronActivationId, DurableObjectId, ErrorCode,
+    PlatformError, QueueConsumerId, QueueId, ReadinessReason, ResourceId, SchedulerClock,
+    SchedulerConfig, SchedulerKind, SchedulerPoolState, VersionId, WorkerId,
 };
 use open_compute_storage::{
     CronActivationState, DurableObjectRecord, PlatformStorage, QueueConsumerState, SchedulerStore,
@@ -153,10 +153,10 @@ pub struct QueueConsumerInspect {
     pub queue_id: QueueId,
     /// Owning Worker.
     pub worker_id: WorkerId,
-    /// Frozen target deployment.
-    pub deployment_id: DeploymentId,
+    /// Frozen target version.
+    pub version_id: VersionId,
     /// Persisted next target while the old generation drains.
-    pub pending_deployment_id: Option<DeploymentId>,
+    pub pending_version_id: Option<VersionId>,
     /// Exact completion/claim generation.
     pub generation: u64,
     /// Control lifecycle state.
@@ -187,8 +187,8 @@ pub struct CronActivationInspect {
     pub account_id: AccountId,
     /// Owning Worker.
     pub worker_id: WorkerId,
-    /// Frozen target deployment.
-    pub deployment_id: DeploymentId,
+    /// Frozen target version.
+    pub version_id: VersionId,
     /// Exact declared expression.
     pub expression: String,
     /// Parser contract version.

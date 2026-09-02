@@ -2,8 +2,7 @@
 
 use crate::ControlDb;
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, QueueConsumerId, QueueId, RequestId,
-    WorkerId,
+    AccountId, ErrorCode, PlatformError, QueueConsumerId, QueueId, RequestId, VersionId, WorkerId,
 };
 use rusqlite::{OptionalExtension as _, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -67,7 +66,7 @@ impl QueueConsumerConfig {
     }
 }
 
-/// Immutable staging row inserted with a deployment.
+/// Immutable staging row inserted with a version.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewQueueConsumerDeclaration {
     /// Platform-generated declaration identity.
@@ -88,14 +87,14 @@ pub struct NewQueueConsumerDeclaration {
     pub descriptor_sha256: [u8; 32],
 }
 
-/// Immutable deployment Queue consumer declaration.
+/// Immutable version Queue consumer declaration.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueConsumerDeclaration {
     /// Declaration identity.
     pub id: QueueConsumerId,
-    /// Owning deployment.
-    pub deployment_id: DeploymentId,
+    /// Owning version.
+    pub version_id: VersionId,
     /// Source Queue identity.
     pub queue_id: QueueId,
     /// Frozen source Queue lifecycle generation.
@@ -179,12 +178,12 @@ pub struct QueueConsumerRecord {
     pub worker_id: WorkerId,
     /// Current declaration identity.
     pub declaration_id: QueueConsumerId,
-    /// Current frozen deployment.
-    pub deployment_id: DeploymentId,
+    /// Current frozen version.
+    pub version_id: VersionId,
     /// Desired declaration persisted before the old generation starts draining.
     pub pending_declaration_id: Option<QueueConsumerId>,
-    /// Desired deployment retained until the generation switch commits.
-    pub pending_deployment_id: Option<DeploymentId>,
+    /// Desired version retained until the generation switch commits.
+    pub pending_version_id: Option<VersionId>,
     /// Monotonic consumer generation.
     pub consumer_generation: u64,
     /// Lifecycle state.
@@ -220,7 +219,7 @@ impl<'a> QueueConsumerRepository<'a> {
             connection
                 .query_row(
                     "SELECT id, account_id, queue_id, worker_id, declaration_id,
-                            deployment_id, pending_declaration_id, pending_deployment_id,
+                            version_id, pending_declaration_id, pending_version_id,
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE id = ?1",
@@ -239,12 +238,12 @@ impl<'a> QueueConsumerRepository<'a> {
         self.db.with_read(|connection| {
             connection
                 .query_row(
-                    "SELECT id, deployment_id, queue_id, queue_lifecycle_generation,
+                    "SELECT id, version_id, queue_id, queue_lifecycle_generation,
                             entrypoint, max_batch_size, max_batch_timeout_seconds,
                             max_retries, retry_delay_seconds, max_concurrency,
                             dlq_queue_id, dlq_lifecycle_generation, capability_version,
                             descriptor_sha256, created_at_ms
-                     FROM deployment_queue_consumers WHERE id = ?1",
+                     FROM version_queue_consumers WHERE id = ?1",
                     [id.to_string()],
                     map_declaration,
                 )
@@ -261,7 +260,7 @@ impl<'a> QueueConsumerRepository<'a> {
             let mut statement = connection
                 .prepare(
                     "SELECT id, account_id, queue_id, worker_id, declaration_id,
-                            deployment_id, pending_declaration_id, pending_deployment_id,
+                            version_id, pending_declaration_id, pending_version_id,
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE state != 'tombstoned'
@@ -275,25 +274,25 @@ impl<'a> QueueConsumerRepository<'a> {
         })
     }
 
-    /// Read immutable declarations for one deployment.
-    pub fn deployment_declarations(
+    /// Read immutable declarations for one version.
+    pub fn version_declarations(
         &self,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
     ) -> Result<Vec<QueueConsumerDeclaration>, PlatformError> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT id, deployment_id, queue_id, queue_lifecycle_generation,
+                    "SELECT id, version_id, queue_id, queue_lifecycle_generation,
                             entrypoint, max_batch_size, max_batch_timeout_seconds,
                             max_retries, retry_delay_seconds, max_concurrency,
                             dlq_queue_id, dlq_lifecycle_generation, capability_version,
                             descriptor_sha256, created_at_ms
-                     FROM deployment_queue_consumers WHERE deployment_id = ?1
+                     FROM version_queue_consumers WHERE version_id = ?1
                      ORDER BY queue_id, id",
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
-                .query_map([deployment_id.to_string()], map_declaration)
+                .query_map([version_id.to_string()], map_declaration)
                 .map_err(|_| invariant())?;
             collect(rows)
         })
@@ -308,7 +307,7 @@ impl<'a> QueueConsumerRepository<'a> {
             connection
                 .query_row(
                     "SELECT id, account_id, queue_id, worker_id, declaration_id,
-                            deployment_id, pending_declaration_id, pending_deployment_id,
+                            version_id, pending_declaration_id, pending_version_id,
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE queue_id = ?1 AND state != 'tombstoned'",
@@ -329,7 +328,7 @@ impl<'a> QueueConsumerRepository<'a> {
             let mut statement = connection
                 .prepare(
                     "SELECT id, account_id, queue_id, worker_id, declaration_id,
-                            deployment_id, pending_declaration_id, pending_deployment_id,
+                            version_id, pending_declaration_id, pending_version_id,
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE worker_id = ?1 AND state != 'tombstoned'
@@ -361,7 +360,7 @@ impl<'a> QueueConsumerRepository<'a> {
         self.db.with_immediate(|tx| {
             tx.execute(
                 "INSERT INTO queue_consumers
-                 (id, account_id, queue_id, worker_id, declaration_id, deployment_id,
+                 (id, account_id, queue_id, worker_id, declaration_id, version_id,
                   consumer_generation, state, availability, availability_code,
                   created_at_ms, updated_at_ms, deleted_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'activating', 'degraded',
@@ -372,7 +371,7 @@ impl<'a> QueueConsumerRepository<'a> {
                     declaration.queue_id.to_string(),
                     worker_id.to_string(),
                     declaration.id.to_string(),
-                    declaration.deployment_id.to_string(),
+                    declaration.version_id.to_string(),
                     now_ms,
                 ],
             )
@@ -457,7 +456,7 @@ impl<'a> QueueConsumerRepository<'a> {
                 .execute(
                     "UPDATE queue_consumers
                      SET consumer_generation = ?1, state = 'updating', availability = 'degraded',
-                         pending_declaration_id = ?2, pending_deployment_id = ?3,
+                         pending_declaration_id = ?2, pending_version_id = ?3,
                          availability_code = CASE state
                            WHEN 'paused' THEN 'QUEUE_CONSUMER_DRAINING_PAUSED'
                            ELSE 'QUEUE_CONSUMER_DRAINING'
@@ -468,7 +467,7 @@ impl<'a> QueueConsumerRepository<'a> {
                     params![
                         as_i64(next)?,
                         declaration.id.to_string(),
-                        declaration.deployment_id.to_string(),
+                        declaration.version_id.to_string(),
                         now_ms,
                         id.to_string(),
                         declaration.queue_id.to_string(),
@@ -491,15 +490,15 @@ impl<'a> QueueConsumerRepository<'a> {
         self.db.with_immediate(|tx| {
             let changed = tx
                 .execute(
-                    "UPDATE queue_consumers SET declaration_id = ?1, deployment_id = ?2,
-                            pending_declaration_id = NULL, pending_deployment_id = NULL,
+                    "UPDATE queue_consumers SET declaration_id = ?1, version_id = ?2,
+                            pending_declaration_id = NULL, pending_version_id = NULL,
                             updated_at_ms = ?3
                      WHERE id = ?4 AND queue_id = ?5 AND consumer_generation = ?6
                        AND state = 'updating' AND pending_declaration_id = ?1
-                       AND pending_deployment_id = ?2",
+                       AND pending_version_id = ?2",
                     params![
                         declaration.id.to_string(),
-                        declaration.deployment_id.to_string(),
+                        declaration.version_id.to_string(),
                         now_ms,
                         id.to_string(),
                         declaration.queue_id.to_string(),
@@ -554,7 +553,7 @@ impl<'a> QueueConsumerRepository<'a> {
         })
     }
 
-    /// Retire a fully drained attachment and release its deployment referrer.
+    /// Retire a fully drained attachment and release its version referrer.
     pub fn finish_delete(
         &self,
         id: QueueConsumerId,
@@ -567,7 +566,7 @@ impl<'a> QueueConsumerRepository<'a> {
                     "UPDATE queue_consumers SET state = 'tombstoned', availability = 'unavailable',
                             availability_code = 'QUEUE_CONSUMER_DELETED', updated_at_ms = ?1,
                             deleted_at_ms = ?1, pending_declaration_id = NULL,
-                            pending_deployment_id = NULL
+                            pending_version_id = NULL
                      WHERE id = ?2 AND consumer_generation = ?3 AND state = 'deleting'",
                     params![now_ms, id.to_string(), as_i64(generation)?],
                 )
@@ -641,7 +640,7 @@ fn audit_operator_action(
 
 pub(crate) fn insert_staging_declarations(
     tx: &Transaction<'_>,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
     declarations: &[NewQueueConsumerDeclaration],
     now_ms: i64,
 ) -> Result<(), PlatformError> {
@@ -652,15 +651,15 @@ pub(crate) fn insert_staging_declarations(
                 (Some(id.to_string()), Some(generation))
             });
         tx.execute(
-            "INSERT INTO deployment_queue_consumers
-             (id, deployment_id, queue_id, queue_lifecycle_generation, entrypoint,
+            "INSERT INTO version_queue_consumers
+             (id, version_id, queue_id, queue_lifecycle_generation, entrypoint,
               max_batch_size, max_batch_timeout_seconds, max_retries, retry_delay_seconds,
               max_concurrency, dlq_queue_id, dlq_lifecycle_generation, capability_version,
               descriptor_sha256, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 declaration.id.to_string(),
-                deployment_id.to_string(),
+                version_id.to_string(),
                 declaration.queue_id.to_string(),
                 as_i64(declaration.queue_lifecycle_generation)?,
                 declaration.entrypoint,
@@ -686,8 +685,8 @@ fn read_record_tx(
     id: QueueConsumerId,
 ) -> Result<QueueConsumerRecord, PlatformError> {
     tx.query_row(
-        "SELECT id, account_id, queue_id, worker_id, declaration_id, deployment_id,
-                pending_declaration_id, pending_deployment_id, consumer_generation,
+        "SELECT id, account_id, queue_id, worker_id, declaration_id, version_id,
+                pending_declaration_id, pending_version_id, consumer_generation,
                 state, availability, availability_code,
                 created_at_ms, updated_at_ms, deleted_at_ms
          FROM queue_consumers WHERE id = ?1",
@@ -700,7 +699,7 @@ fn read_record_tx(
 fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerDeclaration> {
     Ok(QueueConsumerDeclaration {
         id: parse(&row.get::<_, String>(0)?)?,
-        deployment_id: parse(&row.get::<_, String>(1)?)?,
+        version_id: parse(&row.get::<_, String>(1)?)?,
         queue_id: parse(&row.get::<_, String>(2)?)?,
         queue_lifecycle_generation: unsigned(row.get(3)?)?,
         entrypoint: row.get(4)?,
@@ -730,13 +729,13 @@ fn map_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerRecord> 
         queue_id: parse(&row.get::<_, String>(2)?)?,
         worker_id: parse(&row.get::<_, String>(3)?)?,
         declaration_id: parse(&row.get::<_, String>(4)?)?,
-        deployment_id: parse(&row.get::<_, String>(5)?)?,
+        version_id: parse(&row.get::<_, String>(5)?)?,
         pending_declaration_id: row
             .get::<_, Option<String>>(6)?
             .as_deref()
             .map(parse)
             .transpose()?,
-        pending_deployment_id: row
+        pending_version_id: row
             .get::<_, Option<String>>(7)?
             .as_deref()
             .map(parse)

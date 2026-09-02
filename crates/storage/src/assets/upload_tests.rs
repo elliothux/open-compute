@@ -18,16 +18,16 @@ fn new_upload<'a>(
     worker_id: WorkerId,
     idempotency_key: &'a str,
     fingerprint: [u8; 32],
-    objects: &'a [NewDeploymentUploadObject],
+    objects: &'a [NewVersionUploadObject],
     now_ms: i64,
-) -> NewDeploymentUpload<'a> {
-    NewDeploymentUpload {
-        id: DeploymentUploadId::generate(),
+) -> NewVersionUpload<'a> {
+    NewVersionUpload {
+        id: VersionUploadId::generate(),
         account_id,
         worker_id,
         idempotency_key,
         input_fingerprint: fingerprint,
-        content_kind: DeploymentContentKind::AssetsOnly,
+        content_kind: VersionContentKind::AssetsOnly,
         bundle: None,
         manifest_sha256: [1; 32],
         manifest_json: b"{}",
@@ -50,21 +50,21 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
         .unwrap()
         .0;
     let objects = vec![
-        NewDeploymentUploadObject {
+        NewVersionUploadObject {
             sha256: [1; 32],
-            kind: DeploymentObjectKind::AssetManifest,
+            kind: VersionObjectKind::AssetManifest,
             size: 2,
         },
-        NewDeploymentUploadObject {
+        NewVersionUploadObject {
             sha256: [2; 32],
-            kind: DeploymentObjectKind::AssetBlob,
+            kind: VersionObjectKind::AssetBlob,
             size: 7,
         },
     ];
-    let repo = DeploymentUploadRepository::new(storage.db());
+    let repo = VersionUploadRepository::new(storage.db());
     let first_input = new_upload(account, worker.id, "same", [3; 32], &objects, 10);
     let first = repo.create_or_get(&first_input, 2, 4).unwrap();
-    assert_eq!(first.status, DeploymentUploadStatus::Open);
+    assert_eq!(first.status, VersionUploadStatus::Open);
     assert_eq!(first.objects.len(), 2);
 
     let replay_input = new_upload(account, worker.id, "same", [3; 32], &objects, 11);
@@ -83,17 +83,17 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
         repo.get(AccountId::generate(), worker.id, first.id, 11)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotFound
+        ErrorCode::VersionNotFound
     );
 
     repo.mark_object_verified(account, worker.id, first.id, &[1; 32], 2, 12)
         .unwrap();
     assert_eq!(
-        repo.begin_finalize(BeginDeploymentUploadFinalize {
+        repo.begin_finalize(BeginVersionUploadFinalize {
             account_id: account,
             worker_id: worker.id,
             upload_id: first.id,
-            deployment_id: DeploymentId::generate(),
+            version_id: VersionId::generate(),
             finalize_fingerprint: [9; 32],
             owner_startup_id: storage.data_dir().startup_id(),
             now_ms: 13,
@@ -104,13 +104,13 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
     );
     repo.mark_object_verified(account, worker.id, first.id, &[2; 32], 7, 14)
         .unwrap();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let finalizing = repo
-        .begin_finalize(BeginDeploymentUploadFinalize {
+        .begin_finalize(BeginVersionUploadFinalize {
             account_id: account,
             worker_id: worker.id,
             upload_id: first.id,
-            deployment_id: deployment,
+            version_id: version,
             finalize_fingerprint: [9; 32],
             owner_startup_id: storage.data_dir().startup_id(),
             now_ms: 15,
@@ -118,16 +118,16 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
         .unwrap();
     assert_eq!(
         finalizing.disposition,
-        DeploymentUploadFinalizeDisposition::Reserved
+        VersionUploadFinalizeDisposition::Reserved
     );
-    assert_eq!(finalizing.upload.status, DeploymentUploadStatus::Finalizing);
-    assert_eq!(finalizing.upload.deployment_id, Some(deployment));
+    assert_eq!(finalizing.upload.status, VersionUploadStatus::Finalizing);
+    assert_eq!(finalizing.upload.version_id, Some(version));
     assert_eq!(
-        repo.begin_finalize(BeginDeploymentUploadFinalize {
+        repo.begin_finalize(BeginVersionUploadFinalize {
             account_id: account,
             worker_id: worker.id,
             upload_id: first.id,
-            deployment_id: deployment,
+            version_id: version,
             finalize_fingerprint: [8; 32],
             owner_startup_id: storage.data_dir().startup_id(),
             now_ms: 16,
@@ -143,37 +143,23 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
         ErrorCode::AssetUploadConflict
     );
     assert_eq!(
-        repo.mark_committed(
-            account,
-            worker.id,
-            first.id,
-            deployment,
-            br#"{"ok":true}"#,
-            18
-        )
-        .unwrap()
-        .status,
-        DeploymentUploadStatus::Committed
+        repo.mark_committed(account, worker.id, first.id, version, br#"{"ok":true}"#, 18)
+            .unwrap()
+            .status,
+        VersionUploadStatus::Committed
     );
     assert_eq!(
-        repo.mark_committed(
-            account,
-            worker.id,
-            first.id,
-            deployment,
-            br#"{"ok":true}"#,
-            19
-        )
-        .unwrap()
-        .status,
-        DeploymentUploadStatus::Committed
+        repo.mark_committed(account, worker.id, first.id, version, br#"{"ok":true}"#, 19)
+            .unwrap()
+            .status,
+        VersionUploadStatus::Committed
     );
     let replay = repo
-        .begin_finalize(BeginDeploymentUploadFinalize {
+        .begin_finalize(BeginVersionUploadFinalize {
             account_id: account,
             worker_id: worker.id,
             upload_id: first.id,
-            deployment_id: deployment,
+            version_id: version,
             finalize_fingerprint: [9; 32],
             owner_startup_id: storage.data_dir().startup_id(),
             now_ms: 20,
@@ -181,7 +167,7 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
         .unwrap();
     assert_eq!(
         replay.disposition,
-        DeploymentUploadFinalizeDisposition::Committed
+        VersionUploadFinalizeDisposition::Committed
     );
     assert_eq!(
         replay.upload.finalize_response_json.unwrap(),
@@ -200,12 +186,12 @@ fn upload_session_quota_and_expiration_fail_closed() {
         .create_worker(account, "quota", RequestId::generate(), 1, 100)
         .unwrap()
         .0;
-    let objects = [NewDeploymentUploadObject {
+    let objects = [NewVersionUploadObject {
         sha256: [1; 32],
-        kind: DeploymentObjectKind::AssetManifest,
+        kind: VersionObjectKind::AssetManifest,
         size: 2,
     }];
-    let repo = DeploymentUploadRepository::new(storage.db());
+    let repo = VersionUploadRepository::new(storage.db());
     for (index, key) in ["one", "two"].into_iter().enumerate() {
         repo.create_or_get(
             &new_upload(account, worker.id, key, [index as u8; 32], &objects, 10),
@@ -237,7 +223,7 @@ fn upload_session_quota_and_expiration_fail_closed() {
         repo.get(account, worker.id, created.id, 301)
             .unwrap()
             .status,
-        DeploymentUploadStatus::Expired
+        VersionUploadStatus::Expired
     );
     assert_eq!(
         repo.object_for_upload(account, worker.id, created.id, &[1; 32], 302)

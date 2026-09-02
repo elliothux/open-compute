@@ -11,18 +11,17 @@ use axum::response::{IntoResponse, Response};
 use http_body_util::BodyExt as _;
 use open_compute_artifacts::{ArtifactCache, ArtifactStore};
 use open_compute_core::{
-    AccountId, BindingKind, DeploymentId, ErrorCode, PlatformError, RequestId, SecretString,
-    WorkerId,
+    AccountId, BindingKind, ErrorCode, PlatformError, RequestId, SecretString, VersionId, WorkerId,
 };
 use open_compute_storage::{
-    BindingRepository, CatalogDirection, CatalogSort, DEFAULT_CATALOG_LIST_LIMIT, DeploymentRecord,
-    PlatformStorage, WorkerRepository, decode_catalog_cursor, normalize_catalog_limit,
+    BindingRepository, CatalogDirection, CatalogSort, DEFAULT_CATALOG_LIST_LIMIT, PlatformStorage,
+    VersionRecord, WorkerRepository, decode_catalog_cursor, normalize_catalog_limit,
 };
 use open_compute_workers::{
-    BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBindingInput,
-    DeploymentBundle, DeploymentContent, DeploymentController, DeploymentPins,
-    DeploymentRuntimeFeatures, DeploymentServiceInput, ProductPromotionCoordinator,
+    BundleLimits, CreateVersionOutcome, CreateVersionRequest, ProductPromotionCoordinator,
     ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, StagedBundle,
+    VersionBindingInput, VersionBundle, VersionContent, VersionController, VersionPins,
+    VersionRuntimeFeatures, VersionServiceInput,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -43,13 +42,13 @@ mod control;
 pub use control::control_router;
 mod uploads;
 use uploads::{
-    abort_deployment_upload, create_deployment_upload, finalize_deployment_upload,
-    get_deployment_upload, put_deployment_upload_object,
+    abort_version_upload, create_version_upload, finalize_version_upload, get_version_upload,
+    put_version_upload_object,
 };
 
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
-pub(crate) const DEPLOYMENT_METADATA_HEADER: &str = "x-open-compute-deployment-metadata";
-pub(crate) const MAX_DEPLOYMENT_METADATA_HEADER_BYTES: usize = 1024 * 1024;
+pub(crate) const VERSION_METADATA_HEADER: &str = "x-open-compute-version-metadata";
+pub(crate) const MAX_VERSION_METADATA_HEADER_BYTES: usize = 1024 * 1024;
 const MAX_JSON_BODY: usize = 4096;
 pub(crate) const HARD_MAX_BUNDLE_BODY: usize = 64 * 1024 * 1024;
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
@@ -62,7 +61,7 @@ pub struct WorkerApiState {
     cache: Option<Arc<ArtifactCache>>,
     response_cache: Option<Arc<open_compute_storage::CacheManager>>,
     transport: WorkerdTransport,
-    pins: DeploymentPins,
+    pins: VersionPins,
     bundle_limits: BundleLimits,
     delete_drain_timeout: Duration,
     max_queue_consumer_concurrency: u32,
@@ -87,7 +86,7 @@ impl WorkerApiState {
         storage: Arc<PlatformStorage>,
         artifacts: ArtifactStore,
         transport: WorkerdTransport,
-        pins: DeploymentPins,
+        pins: VersionPins,
         bundle_limits: BundleLimits,
         delete_drain_timeout: Duration,
     ) -> Self {
@@ -140,7 +139,7 @@ impl WorkerApiState {
 
     /// Process-local dispatch/deletion pin registry.
     #[must_use]
-    pub fn pins(&self) -> &DeploymentPins {
+    pub fn pins(&self) -> &VersionPins {
         &self.pins
     }
 }
@@ -217,7 +216,7 @@ struct WorkerCatalogEntry {
     worker: open_compute_storage::WorkerRecord,
     route_count: usize,
     primary_route: Option<open_compute_storage::RouteRecord>,
-    deployment_source: Option<&'static str>,
+    version_source: Option<&'static str>,
     traffic: WorkerTrafficSummary,
 }
 
@@ -340,7 +339,7 @@ async fn list_workers(
             workers.push(WorkerCatalogEntry {
                 route_count: routes.len(),
                 primary_route: routes.into_iter().next(),
-                deployment_source: worker.active_deployment_id.map(|_| "operator_api"),
+                version_source: worker.active_version_id.map(|_| "operator_api"),
                 traffic: traffic.summary(worker.id),
                 worker,
             });
@@ -414,41 +413,41 @@ async fn delete_worker(
         || async {
             let _admission = api.storage.reserve_mutation(64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
-            let deployments = repo
-                .list_deployments(account_id, worker_id)?
+            let versions = repo
+                .list_versions(account_id, worker_id)?
                 .into_iter()
-                .filter(|deployment| deployment.deleted_at_ms.is_none())
-                .map(|deployment| deployment.id)
+                .filter(|version| version.deleted_at_ms.is_none())
+                .map(|version| version.id)
                 .collect::<Vec<_>>();
             if let Err(error) = api
                 .pins
-                .fence_many_and_wait(&deployments, api.delete_drain_timeout)
+                .fence_many_and_wait(&versions, api.delete_drain_timeout)
                 .await
             {
-                for deployment in &deployments {
-                    api.pins.unfence(*deployment);
+                for version in &versions {
+                    api.pins.unfence(*version);
                 }
                 return Err(error);
             }
             if let Some(cache) = &api.response_cache
                 && let Err(error) = cache.purge_worker(account_id, worker_id, now_ms())
             {
-                for deployment in &deployments {
-                    api.pins.unfence(*deployment);
+                for version in &versions {
+                    api.pins.unfence(*version);
                 }
                 return Err(error);
             }
             if let Err(error) =
-                repo.delete_worker(account_id, worker_id, &deployments, request_id, now_ms())
+                repo.delete_worker(account_id, worker_id, &versions, request_id, now_ms())
             {
-                for deployment in &deployments {
-                    api.pins.unfence(*deployment);
+                for version in &versions {
+                    api.pins.unfence(*version);
                 }
                 return Err(error);
             }
             api.traffic.remove(worker_id);
-            for deployment in deployments {
-                api.pins.retire_fence(deployment);
+            for version in versions {
+                api.pins.retire_fence(version);
             }
             Ok(serde_json::json!({ "workerId": worker_id, "state": "tombstoned" }))
         },
@@ -459,18 +458,18 @@ async fn delete_worker(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DeploymentMetadata {
+struct VersionMetadata {
     main_module: String,
     #[serde(default)]
     vars: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     secrets: BTreeMap<String, SecretString>,
     #[serde(default)]
-    bindings: BTreeMap<String, DeploymentBindingInput>,
+    bindings: BTreeMap<String, VersionBindingInput>,
     #[serde(default)]
-    services: BTreeMap<String, DeploymentServiceInput>,
+    services: BTreeMap<String, VersionServiceInput>,
     #[serde(flatten)]
-    runtime_features: DeploymentRuntimeFeatures,
+    runtime_features: VersionRuntimeFeatures,
     #[serde(default)]
     queue_consumers: Vec<QueueConsumerInput>,
     #[serde(default)]
@@ -479,7 +478,7 @@ struct DeploymentMetadata {
     promote: bool,
 }
 
-async fn create_deployment(
+async fn create_version(
     State(state): State<HttpState>,
     Path((account, worker)): Path<(String, String)>,
     request: Request,
@@ -496,7 +495,7 @@ async fn create_deployment(
         Ok(key) => key,
         Err(error) => return error_response(error, request_id),
     };
-    let metadata = match deployment_metadata(&request) {
+    let metadata = match version_metadata(&request) {
         Ok(metadata) => metadata,
         Err(error) => return error_response(error, request_id),
     };
@@ -512,7 +511,7 @@ async fn create_deployment(
         .is_some_and(|size| size > body_limit)
     {
         return error_response(
-            PlatformError::new(ErrorCode::BundleTooLarge, "deployment bundle exceeds limit"),
+            PlatformError::new(ErrorCode::BundleTooLarge, "version bundle exceeds limit"),
             request_id,
         );
     }
@@ -525,7 +524,7 @@ async fn create_deployment(
     };
     let staged = match stage_bundle(
         request.into_body(),
-        api.storage.data_dir().deployment_staging_dir(),
+        api.storage.data_dir().version_staging_dir(),
         api.bundle_limits,
         body_limit,
     )
@@ -545,7 +544,7 @@ async fn create_deployment(
         );
     }
     let validator: Arc<dyn RuntimeValidator> = Arc::new(api.transport.clone());
-    let mut controller = DeploymentController::new(
+    let mut controller = VersionController::new(
         &api.storage,
         api.artifacts.clone(),
         validator,
@@ -556,12 +555,12 @@ async fn create_deployment(
         controller = controller.with_product_promoter(promoter.clone());
     }
     let result = controller
-        .create_deployment(CreateDeploymentRequest {
+        .create_version(CreateVersionRequest {
             account_id,
             worker_id,
             idempotency_key: key,
-            content: DeploymentContent::Worker {
-                bundle: DeploymentBundle::Staged(staged.bundle.clone()),
+            content: VersionContent::Worker {
+                bundle: VersionBundle::Staged(staged.bundle.clone()),
                 assets: None,
             },
             vars: metadata.vars,
@@ -577,20 +576,20 @@ async fn create_deployment(
         })
         .await;
     match result {
-        Ok(CreateDeploymentOutcome::Applied(result)) => json_bytes(
+        Ok(CreateVersionOutcome::Applied(result)) => json_bytes(
             serde_json::to_vec(&serde_json::json!({
-                "deployment": result.deployment.to_api_json(),
+                "version": result.version.to_api_json(),
                 "promoted": result.promoted,
             }))
             .unwrap_or_else(|_| b"{}".to_vec()),
             StatusCode::CREATED,
         ),
-        Ok(CreateDeploymentOutcome::Replay(bytes)) => json_bytes(bytes, StatusCode::CREATED),
+        Ok(CreateVersionOutcome::Replay(bytes)) => json_bytes(bytes, StatusCode::CREATED),
         Err(error) => error_response(error, request_id),
     }
 }
 
-async fn list_deployments(
+async fn list_versions(
     State(state): State<HttpState>,
     Path((account, worker)): Path<(String, String)>,
     request: Request,
@@ -600,71 +599,65 @@ async fn list_deployments(
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
     let result = parse_ids(&account, &worker).and_then(|(account_id, worker_id)| {
-        WorkerRepository::new(api.storage.db()).list_deployments(account_id, worker_id)
+        WorkerRepository::new(api.storage.db()).list_versions(account_id, worker_id)
     });
     result_response(
-        result.map(|deployments| {
+        result.map(|versions| {
             serde_json::json!({
-                "deployments": deployments.iter().map(deployment_json).collect::<Vec<_>>()
+                "versions": versions.iter().map(version_json).collect::<Vec<_>>()
             })
         }),
         request_id,
     )
 }
 
-async fn get_deployment(
+async fn get_version(
     State(state): State<HttpState>,
-    Path((account, worker, deployment)): Path<(String, String, String)>,
+    Path((account, worker, version)): Path<(String, String, String)>,
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
     let Some(api) = authorized_api(&state, &request, request_id) else {
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
-    let result = parse_deployment_ids(&account, &worker, &deployment).and_then(
-        |(account_id, worker_id, deployment_id)| {
-            WorkerRepository::new(api.storage.db()).get_deployment(
-                account_id,
-                worker_id,
-                deployment_id,
-            )
+    let result = parse_version_ids(&account, &worker, &version).and_then(
+        |(account_id, worker_id, version_id)| {
+            WorkerRepository::new(api.storage.db()).get_version(account_id, worker_id, version_id)
         },
     );
     result_response(
-        result.map(|deployment| serde_json::json!({ "deployment": deployment_json(&deployment) })),
+        result.map(|version| serde_json::json!({ "version": version_json(&version) })),
         request_id,
     )
 }
 
-async fn delete_deployment(
+async fn delete_version(
     State(state): State<HttpState>,
-    Path((account, worker, deployment)): Path<(String, String, String)>,
+    Path((account, worker, version)): Path<(String, String, String)>,
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
     let Some(api) = authorized_api(&state, &request, request_id) else {
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
-    let (account_id, worker_id, deployment_id) =
-        match parse_deployment_ids(&account, &worker, &deployment) {
-            Ok(ids) => ids,
-            Err(error) => return error_response(error, request_id),
-        };
+    let (account_id, worker_id, version_id) = match parse_version_ids(&account, &worker, &version) {
+        Ok(ids) => ids,
+        Err(error) => return error_response(error, request_id),
+    };
     let key = match idempotency_key(&request) {
         Ok(key) => key,
         Err(error) => return error_response(error, request_id),
     };
-    let result =
-        run_deployment_delete(api, account_id, worker_id, deployment_id, &key, request_id).await;
+    let result = run_version_delete(api, account_id, worker_id, version_id, &key, request_id).await;
     idempotent_response(result, StatusCode::ACCEPTED, request_id)
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PromotionBody {
-    target_deployment_id: DeploymentId,
+    target_version_id: VersionId,
     #[serde(default)]
-    expected_active_deployment_id: Option<DeploymentId>,
+    expected_active_version_id: Option<VersionId>,
 }
 
 async fn promote(
@@ -707,12 +700,12 @@ async fn promotion_impl(
         Err(error) => return error_response(error, request_id),
     };
     let canonical = serde_json::to_vec(&serde_json::json!({
-        "targetDeploymentId": body.target_deployment_id,
-        "expectedActiveDeploymentId": body.expected_active_deployment_id,
+        "targetVersionId": body.target_version_id,
+        "expectedActiveVersionId": body.expected_active_version_id,
     }))
     .unwrap_or_default();
     let scope = format!(
-        "deployment.{}/{}",
+        "version.{}/{}",
         if rollback { "rollback" } else { "promote" },
         worker_id
     );
@@ -724,23 +717,22 @@ async fn promotion_impl(
         &key,
         &canonical,
         request_id,
-        Some(body.target_deployment_id),
+        Some(body.target_version_id),
         || async {
             let _admission = api.storage.reserve_mutation(64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
             let worker_before = repo.get_tenant_worker(account_id, worker_id)?;
-            if body.expected_active_deployment_id.is_some()
-                && body.expected_active_deployment_id != worker_before.active_deployment_id
+            if body.expected_active_version_id.is_some()
+                && body.expected_active_version_id != worker_before.active_version_id
             {
                 return Err(PlatformError::new(
                     ErrorCode::IdempotencyConflict,
                     "promotion compare-and-swap precondition failed",
                 ));
             }
-            let deployment =
-                repo.get_deployment(account_id, worker_id, body.target_deployment_id)?;
+            let version = repo.get_version(account_id, worker_id, body.target_version_id)?;
             let reloads_durable_objects = BindingRepository::new(api.storage.db())
-                .deployment_bindings(deployment.id)?
+                .version_bindings(version.id)?
                 .iter()
                 .any(|binding| binding.kind == BindingKind::DoNamespace);
             for route in repo.list_routes(account_id, worker_id)? {
@@ -750,8 +742,8 @@ async fn promotion_impl(
                             open_compute_workers::ValidationCandidate {
                                 account_id,
                                 worker_id,
-                                deployment_id: deployment.id,
-                                worker_code_sha256: deployment.worker_code_sha256,
+                                version_id: version.id,
+                                worker_code_sha256: version.worker_code_sha256,
                             },
                             entrypoint,
                         )
@@ -764,7 +756,7 @@ async fn promotion_impl(
                     .promote(ProductPromotionRequest {
                         account_id,
                         worker_id,
-                        deployment_id: body.target_deployment_id,
+                        version_id: body.target_version_id,
                         request_id,
                         now_ms: promoted_at_ms,
                     })
@@ -773,8 +765,8 @@ async fn promotion_impl(
                 repo.promote_checked(
                     account_id,
                     worker_id,
-                    body.target_deployment_id,
-                    body.expected_active_deployment_id,
+                    body.target_version_id,
+                    body.expected_active_version_id,
                     Some(worker_before.route_generation),
                     request_id,
                     promoted_at_ms,
@@ -848,25 +840,25 @@ async fn create_route(
             let repo = WorkerRepository::new(api.storage.db());
             let expected_active = if let Some(entrypoint) = body.entrypoint.as_ref() {
                 let worker = repo.get_tenant_worker(account_id, worker_id)?;
-                let deployment_id = worker.active_deployment_id.ok_or_else(|| {
+                let version_id = worker.active_version_id.ok_or_else(|| {
                     PlatformError::new(
-                        ErrorCode::DeploymentNotReady,
-                        "a named route requires an active deployment",
+                        ErrorCode::VersionNotReady,
+                        "a named route requires an active version",
                     )
                 })?;
-                let deployment = repo.get_deployment(account_id, worker_id, deployment_id)?;
+                let version = repo.get_version(account_id, worker_id, version_id)?;
                 api.transport
                     .probe_entrypoint(
                         open_compute_workers::ValidationCandidate {
                             account_id,
                             worker_id,
-                            deployment_id,
-                            worker_code_sha256: deployment.worker_code_sha256,
+                            version_id,
+                            worker_code_sha256: version.worker_code_sha256,
                         },
                         entrypoint.clone(),
                     )
                     .await?;
-                Some(deployment_id)
+                Some(version_id)
             } else {
                 None
             };
@@ -946,7 +938,7 @@ async fn delete_route(
     idempotent_response(response, StatusCode::ACCEPTED, request_id)
 }
 
-/// Fallback for the public listener: resolve DB route, freeze deployment, stream through workerd.
+/// Fallback for the public listener: resolve DB route, freeze version, stream through workerd.
 pub async fn public_ingress(State(state): State<HttpState>, request: Request) -> Response {
     let request_id = request_id(&request);
     let Some(api) = state.worker_api() else {
@@ -973,15 +965,15 @@ pub async fn public_ingress(State(state): State<HttpState>, request: Request) ->
         }
         Err(error) => return error_response(error, request_id),
     };
-    let pin = match api.pins.pin(snapshot.deployment.id) {
+    let pin = match api.pins.pin(snapshot.version.id) {
         Ok(pin) => pin,
         Err(error) => return error_response(error, request_id),
     };
     let target = DispatchTarget {
         account_id: snapshot.route.account_id,
         worker_id: snapshot.route.worker_id,
-        deployment_id: snapshot.deployment.id,
-        worker_code_sha256: hex::encode(snapshot.deployment.worker_code_sha256),
+        version_id: snapshot.version.id,
+        worker_code_sha256: hex::encode(snapshot.version.worker_code_sha256),
         entrypoint: snapshot.route.entrypoint,
         route_generation: i64::try_from(snapshot.worker.route_generation).unwrap_or(i64::MAX),
         request_id,
@@ -1060,7 +1052,7 @@ async fn stage_bundle(
         .map_err(|_| {
             PlatformError::new(
                 ErrorCode::DiskHardLimit,
-                "failed to create deployment staging file",
+                "failed to create version staging file",
             )
         })?;
     let cleanup = StagingCleanup { path: path.clone() };
@@ -1068,31 +1060,31 @@ async fn stage_bundle(
     let mut written = 0_usize;
     while let Some(frame) = body.frame().await {
         let frame = frame.map_err(|_| {
-            PlatformError::new(ErrorCode::BundleInvalid, "deployment upload stream failed")
+            PlatformError::new(ErrorCode::BundleInvalid, "version upload stream failed")
         })?;
         let Ok(data) = frame.into_data() else {
             continue;
         };
         written = written.checked_add(data.len()).ok_or_else(|| {
-            PlatformError::new(ErrorCode::BundleTooLarge, "deployment bundle exceeds limit")
+            PlatformError::new(ErrorCode::BundleTooLarge, "version bundle exceeds limit")
         })?;
         if written > body_limit {
             return Err(PlatformError::new(
                 ErrorCode::BundleTooLarge,
-                "deployment bundle exceeds limit",
+                "version bundle exceeds limit",
             ));
         }
         file.write_all(&data).await.map_err(|_| {
             PlatformError::new(
                 ErrorCode::DiskHardLimit,
-                "failed to write deployment staging file",
+                "failed to write version staging file",
             )
         })?;
     }
     file.sync_all().await.map_err(|_| {
         PlatformError::new(
             ErrorCode::DiskHardLimit,
-            "failed to persist deployment staging file",
+            "failed to persist version staging file",
         )
     })?;
     drop(file);
@@ -1118,25 +1110,25 @@ async fn read_json<T: for<'de> Deserialize<'de>>(
     })
 }
 
-fn deployment_metadata(request: &Request) -> Result<DeploymentMetadata, PlatformError> {
+fn version_metadata(request: &Request) -> Result<VersionMetadata, PlatformError> {
     let raw = request
         .headers()
-        .get(DEPLOYMENT_METADATA_HEADER)
+        .get(VERSION_METADATA_HEADER)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
             PlatformError::new(
                 ErrorCode::ConfigInvalid,
-                "deployment metadata header is required",
+                "version metadata header is required",
             )
         })?;
-    if raw.len() > MAX_DEPLOYMENT_METADATA_HEADER_BYTES {
+    if raw.len() > MAX_VERSION_METADATA_HEADER_BYTES {
         return Err(PlatformError::new(
             ErrorCode::LimitInvalid,
-            "deployment metadata header exceeds limit",
+            "version metadata header exceeds limit",
         ));
     }
     serde_json::from_str(raw)
-        .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "deployment metadata is invalid"))
+        .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "version metadata is invalid"))
 }
 
 fn parse_account(value: &str) -> Result<AccountId, PlatformError> {
@@ -1151,15 +1143,15 @@ fn parse_ids(value: &str, worker: &str) -> Result<(AccountId, WorkerId), Platfor
     Ok((account, worker))
 }
 
-fn parse_deployment_ids(
+fn parse_version_ids(
     account: &str,
     worker: &str,
-    deployment: &str,
-) -> Result<(AccountId, WorkerId, DeploymentId), PlatformError> {
+    version: &str,
+) -> Result<(AccountId, WorkerId, VersionId), PlatformError> {
     let (account, worker) = parse_ids(account, worker)?;
-    let deployment = DeploymentId::from_str(deployment)
-        .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "deployment ID is invalid"))?;
-    Ok((account, worker, deployment))
+    let version = VersionId::from_str(version)
+        .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "version ID is invalid"))?;
+    Ok((account, worker, version))
 }
 
 fn idempotency_key(request: &Request) -> Result<String, PlatformError> {
@@ -1190,7 +1182,7 @@ fn run_idempotent(
     key: &str,
     canonical_request: &[u8],
     _request_id: RequestId,
-    deployment_ref: Option<DeploymentId>,
+    version_ref: Option<VersionId>,
     operation: impl FnOnce() -> Result<serde_json::Value, PlatformError>,
 ) -> Result<Vec<u8>, PlatformError> {
     let mut input = Vec::with_capacity(scope.len() + canonical_request.len() + 1);
@@ -1223,14 +1215,14 @@ fn run_idempotent(
     match operation() {
         Ok(value) => {
             let response = serde_json::to_vec(&value).map_err(|_| internal())?;
-            if let Some(deployment_id) = deployment_ref {
-                repo.complete_idempotency_with_deployment_ref(
+            if let Some(version_id) = version_ref {
+                repo.complete_idempotency_with_version_ref(
                     account_id,
                     scope,
                     key,
                     &fingerprint,
                     &response,
-                    deployment_id,
+                    version_id,
                     &idempotency_ref_id(account_id, scope, key),
                     now_ms(),
                 )?;
@@ -1258,7 +1250,7 @@ async fn run_idempotent_async<F, Fut>(
     key: &str,
     canonical_request: &[u8],
     _request_id: RequestId,
-    deployment_ref: Option<DeploymentId>,
+    version_ref: Option<VersionId>,
     operation: F,
 ) -> Result<Vec<u8>, PlatformError>
 where
@@ -1295,14 +1287,14 @@ where
     match operation().await {
         Ok(value) => {
             let response = serde_json::to_vec(&value).map_err(|_| internal())?;
-            if let Some(deployment_id) = deployment_ref {
-                repo.complete_idempotency_with_deployment_ref(
+            if let Some(version_id) = version_ref {
+                repo.complete_idempotency_with_version_ref(
                     account_id,
                     scope,
                     key,
                     &fingerprint,
                     &response,
-                    deployment_id,
+                    version_id,
                     &idempotency_ref_id(account_id, scope, key),
                     now_ms(),
                 )?;
@@ -1322,18 +1314,18 @@ where
     }
 }
 
-async fn run_deployment_delete(
+async fn run_version_delete(
     api: &WorkerApiState,
     account_id: AccountId,
     worker_id: WorkerId,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
     key: &str,
     request_id: RequestId,
 ) -> Result<Vec<u8>, PlatformError> {
-    let scope = format!("deployment.delete/{worker_id}/{deployment_id}");
+    let scope = format!("version.delete/{worker_id}/{version_id}");
     let canonical = serde_json::to_vec(&serde_json::json!({
         "workerId": worker_id,
-        "deploymentId": deployment_id,
+        "versionId": version_id,
     }))
     .map_err(|_| internal())?;
     let mut input = Vec::with_capacity(scope.len() + canonical.len() + 1);
@@ -1367,19 +1359,13 @@ async fn run_deployment_delete(
     }
 
     let operation = async {
-        repo.begin_deployment_delete(account_id, worker_id, deployment_id)?;
+        repo.begin_version_delete(account_id, worker_id, version_id)?;
         api.pins
-            .fence_and_wait(deployment_id, api.delete_drain_timeout)
+            .fence_and_wait(version_id, api.delete_drain_timeout)
             .await?;
-        repo.finalize_deployment_delete(
-            account_id,
-            worker_id,
-            deployment_id,
-            request_id,
-            now_ms(),
-        )?;
+        repo.finalize_version_delete(account_id, worker_id, version_id, request_id, now_ms())?;
         serde_json::to_vec(&serde_json::json!({
-            "deploymentId": deployment_id,
+            "versionId": version_id,
             "state": "tombstoned"
         }))
         .map_err(|_| internal())
@@ -1387,7 +1373,7 @@ async fn run_deployment_delete(
     .await;
     match operation {
         Ok(response) => {
-            api.pins.retire_fence(deployment_id);
+            api.pins.retire_fence(version_id);
             repo.complete_idempotency(account_id, &scope, key, &fingerprint, &response)?;
             Ok(response)
         }
@@ -1415,7 +1401,7 @@ fn replayed_failure(response: &[u8]) -> PlatformError {
 
 fn idempotency_ref_id(account_id: AccountId, scope: &str, key: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"open-compute/deployment-referrer/v1\0");
+    hasher.update(b"open-compute/version-referrer/v1\0");
     hasher.update(account_id.to_string().as_bytes());
     hasher.update([0]);
     hasher.update(scope.as_bytes());
@@ -1476,8 +1462,8 @@ fn validate_route_parts(path: &str, entrypoint: Option<&str>) -> Result<(), Plat
     Ok(())
 }
 
-fn deployment_json(deployment: &DeploymentRecord) -> serde_json::Value {
-    deployment.to_api_json()
+fn version_json(version: &VersionRecord) -> serde_json::Value {
+    version.to_api_json()
 }
 
 fn request_id(request: &Request) -> RequestId {
@@ -1532,13 +1518,13 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         ErrorCode::AdminAuthRequired => StatusCode::UNAUTHORIZED,
         ErrorCode::AccountNotFound
         | ErrorCode::WorkerNotFound
-        | ErrorCode::DeploymentNotFound
+        | ErrorCode::VersionNotFound
         | ErrorCode::RouteNotFound
         | ErrorCode::EntrypointNotFound => StatusCode::NOT_FOUND,
         ErrorCode::WorkerNameConflict | ErrorCode::RouteConflict => StatusCode::CONFLICT,
-        ErrorCode::DeploymentNotReady
-        | ErrorCode::DeploymentActive
-        | ErrorCode::DeploymentReferenced
+        ErrorCode::VersionNotReady
+        | ErrorCode::VersionActive
+        | ErrorCode::VersionReferenced
         | ErrorCode::ServiceTargetReferenced
         | ErrorCode::IdempotencyConflict
         | ErrorCode::AssetUploadIncomplete
@@ -1559,7 +1545,7 @@ fn error_response(error: PlatformError, request_id: RequestId) -> Response {
         ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::Internal
         | ErrorCode::RuntimeResultUnknown
-        | ErrorCode::DeploymentInvariantViolation
+        | ErrorCode::VersionInvariantViolation
         | ErrorCode::ArtifactIntegrityError
         | ErrorCode::AssetIntegrityError => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::BAD_REQUEST,

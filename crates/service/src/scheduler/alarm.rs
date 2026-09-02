@@ -84,11 +84,11 @@ impl SchedulerService {
         let retargeted = {
             let store = self.store.clone();
             let current = job.clone();
-            let deployment = authority.deployment_id;
+            let version = authority.version_id;
             let generation = authority.route_generation;
             let now_ms = self.observed_wall_time_ms();
             tokio::task::spawn_blocking(move || {
-                store.retarget_claim(&current, deployment, generation, now_ms)
+                store.retarget_claim(&current, version, generation, now_ms)
             })
             .await
         };
@@ -335,7 +335,7 @@ impl SchedulerService {
                     object_generation: object.generation,
                     row_token,
                     due_at_ms,
-                    target_deployment_id: authority.deployment_id,
+                    target_version_id: authority.version_id,
                     execution_generation: authority.route_generation,
                     retry_count,
                 },

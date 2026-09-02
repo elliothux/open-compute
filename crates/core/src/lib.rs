@@ -48,9 +48,10 @@ pub use durable_objects::{
 pub use error::{ErrorCode, PlatformError, ReadinessReason};
 pub use health::{ComponentHealth, ComponentName, ComponentState, PlatformStatus};
 pub use ids::{
-    AccountId, BindingId, CronActivationId, CronRunId, DeploymentId, DeploymentUploadId,
-    PlatformId, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId, RequestId, ResourceId,
-    StartupId, WorkerId, WorkflowId, WorkflowInstanceId, WorkflowOperationId, WorkflowVersionId,
+    AccountId, BindingId, CronActivationId, CronRunId, DeploymentId, PlatformId, QueueBatchId,
+    QueueConsumerId, QueueId, QueueMessageId, RequestId, ResourceId, StartupId, VersionId,
+    VersionUploadId, WorkerId, WorkflowId, WorkflowInstanceId, WorkflowOperationId,
+    WorkflowVersionId,
 };
 pub use redact::Redactor;
 pub use release_identity::{

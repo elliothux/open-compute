@@ -55,7 +55,7 @@ use open_compute_runtime::{
 use open_compute_storage::{
     CacheManager, DurableObjectRepository, PlatformStorage, WorkerRepository,
 };
-use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins, RuntimeSource};
+use open_compute_workers::{BundleLimits, ResourcePins, RuntimeSource, VersionPins};
 use p1::{
     load_offline_metrics_receipts, refresh_metrics as refresh_p1_metrics,
     require_current_serving_schema, update_operations_health,
@@ -460,10 +460,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let admin_addr = loaded.config.server.admin_addr()?;
     let merged = !matches!(admin_addr, Some(admin) if admin != public_addr);
 
-    let deployment_pins = DeploymentPins::new();
+    let version_pins = VersionPins::new();
     let supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>> = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(generation_auth.clone(), supervisor_handle.clone())
-        .with_deployment_pins(deployment_pins.clone())
+        .with_version_pins(version_pins.clone())
         .with_max_request_body(
             usize::try_from(loaded.config.workers.max_request_body_bytes).map_err(|_| {
                 PlatformError::new(ErrorCode::LimitInvalid, "Worker body limit is invalid")
@@ -560,7 +560,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         storage.clone(),
         store.clone(),
         transport.clone(),
-        deployment_pins.clone(),
+        version_pins.clone(),
         bundle_limits,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
@@ -689,7 +689,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let maintenance_emergency_reserve_bytes = loaded.config.hardening.emergency_reserve_bytes;
     let maintenance_r2_objects = r2_objects;
     let maintenance_health = health.clone();
-    let maintenance_pins = deployment_pins.clone();
+    let maintenance_pins = version_pins.clone();
     let maintenance_resource_pins = resource_pins.clone();
     let maintenance_metrics = metrics.clone();
     let maintenance_snapshot_pins = snapshot_pins.clone();
@@ -777,11 +777,11 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         storage.clone(),
         store.clone(),
         cache.clone(),
-        deployment_pins.clone(),
+        version_pins.clone(),
     ));
     let service_invocations = Arc::new(ServiceInvocationRegistry::new(
         storage.clone(),
-        deployment_pins.clone(),
+        version_pins.clone(),
     ));
     let binding_service_invocations = service_invocations.clone();
     let binding_images = images.clone();
@@ -916,12 +916,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let metrics_watch = metrics.clone();
     let storage_watch = storage.clone();
     let service_invocations_watch = service_invocations;
-    let deployment_pins_watch = deployment_pins.clone();
+    let version_pins_watch = version_pins.clone();
     let images_watch = images;
     tokio::spawn(async move {
         let mut generation_resources = RuntimeGenerationResources::new(
             service_invocations_watch.as_ref().clone(),
-            deployment_pins_watch.clone(),
+            version_pins_watch.clone(),
         );
         loop {
             let snap = watch_rx.borrow().clone();
@@ -1136,7 +1136,7 @@ async fn run_worker_maintenance(
     store: &ArtifactStore,
     cache: &Arc<ArtifactCache>,
     response_cache: &Arc<CacheManager>,
-    pins: &DeploymentPins,
+    pins: &VersionPins,
     config: &open_compute_core::WorkersConfig,
     snapshot_pins: &SnapshotPins,
     metrics: &Arc<MetricsRegistry>,
@@ -1150,9 +1150,9 @@ async fn run_worker_maintenance(
         let _ = repo.prune_expired_idempotency(now, batch)?;
         let candidates = repo.retention_candidates(
             now,
-            policy.deployment_min_retention_ms,
-            policy.retain_ready_deployments,
-            policy.retain_rejected_deployments,
+            policy.version_min_retention_ms,
+            policy.retain_ready_versions,
+            policy.retain_rejected_versions,
             batch,
         )?;
         Ok::<_, PlatformError>(candidates)
@@ -1175,20 +1175,20 @@ async fn run_worker_maintenance(
     for candidate in candidates {
         let storage_for_begin = storage.clone();
         let begin = tokio::task::spawn_blocking(move || {
-            WorkerRepository::new(storage_for_begin.db()).begin_deployment_delete(
+            WorkerRepository::new(storage_for_begin.db()).begin_version_delete(
                 candidate.account_id,
                 candidate.worker_id,
-                candidate.deployment_id,
+                candidate.version_id,
             )
         })
         .await;
         if !matches!(begin, Ok(Ok(()))) {
-            pins.unfence(candidate.deployment_id);
+            pins.unfence(candidate.version_id);
             continue;
         }
         if pins
             .fence_and_wait(
-                candidate.deployment_id,
+                candidate.version_id,
                 Duration::from_millis(config.delete_drain_timeout_ms),
             )
             .await
@@ -1200,17 +1200,17 @@ async fn run_worker_maintenance(
         }
         let storage_for_finish = storage.clone();
         let finish = tokio::task::spawn_blocking(move || {
-            WorkerRepository::new(storage_for_finish.db()).finalize_deployment_delete(
+            WorkerRepository::new(storage_for_finish.db()).finalize_version_delete(
                 candidate.account_id,
                 candidate.worker_id,
-                candidate.deployment_id,
+                candidate.version_id,
                 RequestId::generate(),
                 now,
             )
         })
         .await;
         if matches!(finish, Ok(Ok(()))) {
-            pins.retire_fence(candidate.deployment_id);
+            pins.retire_fence(candidate.version_id);
         } else {
             tracing::warn!("Worker retention finalization failed");
         }
@@ -1251,7 +1251,7 @@ pub(crate) async fn gc_worker_artifacts(
     snapshot_pins: &SnapshotPins,
     response_cache: Option<Arc<CacheManager>>,
 ) -> Result<u64, PlatformError> {
-    let gc_fence = store.fence_deployment_gc().await;
+    let gc_fence = store.fence_version_gc().await;
     let storage_for_refs = storage.clone();
     let references = match tokio::task::spawn_blocking(move || {
         WorkerRepository::new(storage_for_refs.db()).referenced_artifacts()

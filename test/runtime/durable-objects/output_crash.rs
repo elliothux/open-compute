@@ -42,7 +42,7 @@ pub(super) struct Target<'a> {
     pub(super) queue: QueueId,
     pub(super) account: AccountId,
     pub(super) worker: WorkerId,
-    pub(super) deployment: &'a DeploymentRecord,
+    pub(super) version: &'a VersionRecord,
     pub(super) generation: u64,
 }
 
@@ -56,7 +56,7 @@ pub(super) async fn check(
         queue,
         account,
         worker,
-        deployment,
+        version,
         generation,
     } = target;
     let hold = QueueEnqueueHold::new();
@@ -64,13 +64,13 @@ pub(super) async fn check(
     hold.block_before();
     let mut pending = tokio::spawn({
         let transport = transport.clone();
-        let deployment = deployment.clone();
+        let version = version.clone();
         async move {
             dispatch(
                 &transport,
                 account,
                 worker,
-                &deployment,
+                &version,
                 generation,
                 "/commit-output?name=output-crash-before",
             )
@@ -104,7 +104,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/output-metrics?name=output-crash-before",
     )
@@ -120,13 +120,13 @@ pub(super) async fn check(
     hold.block_after();
     let mut pending = tokio::spawn({
         let transport = transport.clone();
-        let deployment = deployment.clone();
+        let version = version.clone();
         async move {
             dispatch(
                 &transport,
                 account,
                 worker,
-                &deployment,
+                &version,
                 generation,
                 "/commit-output?name=output-crash-after",
             )
@@ -163,7 +163,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/output-metrics?name=output-crash-after",
     )
@@ -180,7 +180,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/rollback-output?name=output-explicit-rollback",
     )
@@ -199,7 +199,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/failed-output?name=output-transaction-failed",
     )

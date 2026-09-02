@@ -1,6 +1,6 @@
 //! Queue catalog value types and fixed producer limits.
 
-use open_compute_core::{AccountId, BindingId, DeploymentId, ErrorCode, PlatformError, QueueId};
+use open_compute_core::{AccountId, BindingId, ErrorCode, PlatformError, QueueId, VersionId};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -191,8 +191,8 @@ pub struct QueueRecord {
 pub struct QueueProducerBindingRecord {
     /// Binding identity.
     pub id: BindingId,
-    /// Owning deployment.
-    pub deployment_id: DeploymentId,
+    /// Owning version.
+    pub version_id: VersionId,
     /// Tenant environment name.
     pub name: String,
     /// Frozen Queue identity.
@@ -207,7 +207,7 @@ pub struct QueueProducerBindingRecord {
     pub created_at_ms: i64,
 }
 
-/// Staging input inserted in the same transaction as an immutable deployment.
+/// Staging input inserted in the same transaction as an immutable version.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewQueueProducerBinding {
     /// Platform-generated binding identity.
@@ -224,14 +224,14 @@ pub struct NewQueueProducerBinding {
     pub descriptor_sha256: [u8; 32],
 }
 
-/// Trusted backend authorization assembled from deployment and Queue authority.
+/// Trusted backend authorization assembled from version and Queue authority.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthorizedQueueBinding {
     /// Immutable binding.
     pub binding: QueueProducerBindingRecord,
     /// Current exact Queue control row.
     pub queue: QueueRecord,
-    /// Account resolved through the deployment Worker.
+    /// Account resolved through the version Worker.
     pub account_id: AccountId,
 }
 

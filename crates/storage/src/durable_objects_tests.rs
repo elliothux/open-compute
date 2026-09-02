@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    NewDeployment, NewDeploymentBinding, ReserveResourceCreate, ResourceCreateReservation,
+    NewVersion, NewVersionBinding, ReserveResourceCreate, ResourceCreateReservation,
     WorkerRepository,
 };
 use open_compute_core::config::StorageConfig;
@@ -64,7 +64,7 @@ fn reserve_resource(
 struct Fixture {
     account: AccountId,
     worker: WorkerId,
-    deployment: DeploymentId,
+    version: VersionId,
     namespace: ResourceId,
     binding: BindingId,
     descriptor: [u8; 32],
@@ -107,29 +107,31 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
         .unwrap();
     resources.mark_ready(namespace, 12).unwrap();
 
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let binding = BindingId::generate();
     let descriptor_value = open_compute_workers_forbidden_descriptor(binding, namespace);
     let descriptor = descriptor_value.0;
     workers
-        .insert_staging_deployment(
-            &NewDeployment {
-                id: deployment,
+        .insert_staging_version(
+            &NewVersion {
+                id: version,
                 account_id: account,
                 worker_id: worker.id,
-                content_kind: crate::DeploymentContentKind::Worker,
+                content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
                 artifact_size: Some(1),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
                 worker_code_sha256: [9; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),
                 now_ms: 13,
             },
-            &crate::NewDeploymentProducts {
-                bindings: &[NewDeploymentBinding {
+            &crate::NewVersionProducts {
+                bindings: &[NewVersionBinding {
                     id: binding,
                     name: "COUNTERS".to_owned(),
                     kind: BindingKind::DoNamespace,
@@ -145,22 +147,15 @@ fn ready_fixture(storage: &PlatformStorage) -> Fixture {
             1_000_000,
         )
         .unwrap();
-    workers.begin_validation(deployment).unwrap();
-    workers.mark_ready(deployment, 14).unwrap();
+    workers.begin_validation(version).unwrap();
+    workers.mark_ready(version, 14).unwrap();
     let promoted = workers
-        .promote(
-            account,
-            worker.id,
-            deployment,
-            None,
-            RequestId::generate(),
-            15,
-        )
+        .promote(account, worker.id, version, None, RequestId::generate(), 15)
         .unwrap();
     Fixture {
         account,
         worker: worker.id,
-        deployment,
+        version,
         namespace,
         binding,
         descriptor,
@@ -207,7 +202,7 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     let first = repo
         .authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,
@@ -229,7 +224,7 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     let repeated = repo
         .authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,
@@ -241,7 +236,7 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     let existing_at_stop_watermark = repo
         .authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,
@@ -254,7 +249,7 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     assert_eq!(
         repo.authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             blocked_new,
@@ -275,7 +270,7 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     assert_eq!(
         repo.authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,
@@ -291,7 +286,7 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     let recreated = repo
         .authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,
@@ -312,7 +307,7 @@ fn authority_rejects_cross_namespace_stale_generation_and_live_namespace_delete(
     assert_eq!(
         repo.authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             wrong,
@@ -327,7 +322,7 @@ fn authority_rejects_cross_namespace_stale_generation_and_live_namespace_delete(
     assert_eq!(
         repo.authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation - 1,
             object,
@@ -336,11 +331,11 @@ fn authority_rejects_cross_namespace_stale_generation_and_live_namespace_delete(
         )
         .unwrap_err()
         .code(),
-        ErrorCode::DoDeploymentStale
+        ErrorCode::DoVersionStale
     );
     repo.authorize_dispatch(
         fixture.binding,
-        fixture.deployment,
+        fixture.version,
         &fixture.descriptor,
         fixture.route_generation,
         object,
@@ -366,7 +361,7 @@ fn fenced_delete_authority_survives_worker_tombstone() {
     let dispatch = repo
         .authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,
@@ -383,7 +378,7 @@ fn fenced_delete_authority_survives_worker_tombstone() {
         .delete_worker(
             fixture.account,
             fixture.worker,
-            &[fixture.deployment],
+            &[fixture.version],
             RequestId::generate(),
             23,
         )
@@ -403,7 +398,7 @@ fn fenced_delete_authority_survives_worker_tombstone() {
     assert_eq!(
         repo.authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,
@@ -475,7 +470,7 @@ fn namespace_and_object_failure_boundaries_are_idempotent() {
     let dispatch = repo
         .authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,
@@ -606,28 +601,30 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
     ResourceRepository::new(storage.db())
         .mark_ready(wrong_kind.id, 47)
         .unwrap();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let binding = BindingId::generate();
     let descriptor = [8; 32];
     workers
-        .insert_staging_deployment(
-            &NewDeployment {
-                id: deployment,
+        .insert_staging_version(
+            &NewVersion {
+                id: version,
                 account_id: account,
                 worker_id: worker.id,
-                content_kind: crate::DeploymentContentKind::Worker,
+                content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
                 artifact_size: Some(1),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
                 worker_code_sha256: [9; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),
                 now_ms: 48,
             },
-            &crate::NewDeploymentProducts {
-                bindings: &[NewDeploymentBinding {
+            &crate::NewVersionProducts {
+                bindings: &[NewVersionBinding {
                     id: binding,
                     name: "WRONG_KIND".to_owned(),
                     kind: BindingKind::KvNamespace,
@@ -643,22 +640,15 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
             1_000_000,
         )
         .unwrap();
-    workers.begin_validation(deployment).unwrap();
-    workers.mark_ready(deployment, 49).unwrap();
+    workers.begin_validation(version).unwrap();
+    workers.mark_ready(version, 49).unwrap();
     let promoted = workers
-        .promote(
-            account,
-            worker.id,
-            deployment,
-            None,
-            RequestId::generate(),
-            50,
-        )
+        .promote(account, worker.id, version, None, RequestId::generate(), 50)
         .unwrap();
     assert_eq!(
         repo.authorize_dispatch(
             binding,
-            deployment,
+            version,
             &descriptor,
             promoted.route_generation,
             public_id(wrong_kind.id, 9),
@@ -681,7 +671,7 @@ fn object_list_page_is_bounded_and_cursor_is_stable() {
         let object = public_id(fixture.namespace, fill);
         repo.authorize_dispatch(
             fixture.binding,
-            fixture.deployment,
+            fixture.version,
             &fixture.descriptor,
             fixture.route_generation,
             object,

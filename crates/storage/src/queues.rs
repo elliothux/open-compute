@@ -2,11 +2,11 @@
 
 use crate::catalog_page::{CatalogColumns, build_catalog_sql, record_catalog_cursor};
 use crate::{
-    CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, DeploymentState,
-    IdempotencyReservation,
+    CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb,
+    IdempotencyReservation, VersionState,
 };
 use open_compute_core::{
-    AccountId, BindingId, DeploymentId, ErrorCode, PlatformError, QueueId, RequestId,
+    AccountId, BindingId, ErrorCode, PlatformError, QueueId, RequestId, VersionId,
 };
 use rusqlite::{OptionalExtension as _, Transaction, params, params_from_iter};
 use std::str::FromStr;
@@ -647,25 +647,25 @@ impl<'a> QueueRepository<'a> {
     }
 
     /// Read immutable Queue producer bindings for descriptor reconstruction.
-    pub fn deployment_bindings(
+    pub fn version_bindings(
         &self,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
     ) -> Result<Vec<QueueProducerBindingRecord>, PlatformError> {
         self.db
-            .with_read(|conn| read_deployment_bindings_conn(conn, deployment_id))
+            .with_read(|conn| read_version_bindings_conn(conn, version_id))
     }
 
-    /// Authorize one private producer call from immutable deployment authority.
+    /// Authorize one private producer call from immutable version authority.
     pub fn authorize(
         &self,
         binding_id: BindingId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         descriptor_sha256: &[u8; 32],
     ) -> Result<AuthorizedQueueBinding, PlatformError> {
         self.db.with_read(|conn| {
             let row = conn
                 .query_row(
-                    "SELECT b.id, b.deployment_id, b.name, b.queue_id,
+                    "SELECT b.id, b.version_id, b.name, b.queue_id,
                             b.queue_lifecycle_generation, b.capability_version,
                             b.descriptor_sha256, b.created_at_ms,
                             q.id, q.account_id, q.name, q.state, q.availability,
@@ -679,29 +679,29 @@ impl<'a> QueueRepository<'a> {
                                 AND r.referrer_kind = 'producer_binding'
                                 AND r.referrer_id = b.id)
                      FROM queue_producer_bindings b
-                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     JOIN worker_versions d ON d.id = b.version_id
                      JOIN workers w ON w.id = d.worker_id
                      JOIN queues q ON q.id = b.queue_id
-                     WHERE b.id = ?1 AND b.deployment_id = ?2",
-                    params![binding_id.to_string(), deployment_id.to_string()],
+                     WHERE b.id = ?1 AND b.version_id = ?2",
+                    params![binding_id.to_string(), version_id.to_string()],
                     |row| {
                         let binding = map_binding_offset(row, 0)?;
                         let queue = map_queue_offset(row, 8)?;
                         let account: String = row.get(25)?;
-                        let deployment_state: String = row.get(26)?;
+                        let version_state: String = row.get(26)?;
                         let referrer: bool = row.get(27)?;
-                        Ok((binding, queue, account, deployment_state, referrer))
+                        Ok((binding, queue, account, version_state, referrer))
                     },
                 )
                 .optional()
                 .map_err(|_| invariant())?;
-            let Some((binding, queue, account, deployment_state, referrer)) = row else {
+            let Some((binding, queue, account, version_state, referrer)) = row else {
                 return Err(not_found());
             };
             let account_id = AccountId::from_str(&account).map_err(|_| invariant())?;
             if binding.descriptor_sha256 != *descriptor_sha256
                 || binding.capability_version != QUEUE_PRODUCER_CAPABILITY_VERSION
-                || deployment_state != DeploymentState::Ready.as_str()
+                || version_state != VersionState::Ready.as_str()
                 || account_id != queue.account_id
                 || binding.queue_id != queue.id
                 || binding.queue_lifecycle_generation != queue.lifecycle_generation
@@ -733,22 +733,22 @@ impl<'a> QueueRepository<'a> {
     }
 }
 
-/// Insert Queue producer bindings inside the deployment staging transaction.
+/// Insert Queue producer bindings inside the version staging transaction.
 pub(crate) fn insert_staging_bindings(
     tx: &Transaction<'_>,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
     bindings: &[NewQueueProducerBinding],
     now_ms: i64,
 ) -> Result<(), PlatformError> {
     for binding in bindings {
         tx.execute(
             "INSERT INTO queue_producer_bindings
-             (id, deployment_id, name, queue_id, queue_lifecycle_generation,
+             (id, version_id, name, queue_id, queue_lifecycle_generation,
               capability_version, descriptor_sha256, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 binding.id.to_string(),
-                deployment_id.to_string(),
+                version_id.to_string(),
                 binding.name,
                 binding.queue_id.to_string(),
                 i64::try_from(binding.queue_lifecycle_generation).map_err(|_| invariant())?,
@@ -814,13 +814,13 @@ fn insert_creating_tx(
     read_queue_tx(tx, account_id, queue_id)
 }
 
-pub(crate) fn read_deployment_bindings_conn(
+pub(crate) fn read_version_bindings_conn(
     conn: &rusqlite::Connection,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
 ) -> Result<Vec<QueueProducerBindingRecord>, PlatformError> {
     let mut statement = conn
         .prepare(
-            "SELECT b.id, b.deployment_id, b.name, b.queue_id,
+            "SELECT b.id, b.version_id, b.name, b.queue_id,
                     b.queue_lifecycle_generation, b.capability_version,
                     b.descriptor_sha256, b.created_at_ms,
                     q.state, q.availability, q.availability_code,
@@ -831,13 +831,13 @@ pub(crate) fn read_deployment_bindings_conn(
                         AND r.referrer_id = b.id)
              FROM queue_producer_bindings b
              JOIN queues q ON q.id = b.queue_id
-             JOIN worker_deployments d ON d.id = b.deployment_id
+             JOIN worker_versions d ON d.id = b.version_id
              JOIN workers w ON w.id = d.worker_id
-             WHERE b.deployment_id = ?1 ORDER BY b.name, b.id",
+             WHERE b.version_id = ?1 ORDER BY b.name, b.id",
         )
         .map_err(|_| db_error())?;
     let rows = statement
-        .query_map([deployment_id.to_string()], |row| {
+        .query_map([version_id.to_string()], |row| {
             let binding = map_binding_offset(row, 0)?;
             let state: String = row.get(8)?;
             let availability: String = row.get(9)?;
@@ -952,15 +952,14 @@ fn map_binding_offset(
     offset: usize,
 ) -> rusqlite::Result<QueueProducerBindingRecord> {
     let id: String = row.get(offset)?;
-    let deployment: String = row.get(offset + 1)?;
+    let version: String = row.get(offset + 1)?;
     let queue: String = row.get(offset + 3)?;
     let generation: i64 = row.get(offset + 4)?;
     let capability: i64 = row.get(offset + 5)?;
     let digest: Vec<u8> = row.get(offset + 6)?;
     Ok(QueueProducerBindingRecord {
         id: BindingId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        deployment_id: DeploymentId::from_str(&deployment)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(offset + 2)?,
         queue_id: QueueId::from_str(&queue).map_err(|_| rusqlite::Error::InvalidQuery)?,
         queue_lifecycle_generation: u64::try_from(generation)

@@ -15,7 +15,7 @@ const HEADER_BYTES: usize = 12;
 /// Canonical artifact schema version.
 pub const WORKER_BUNDLE_SCHEMA_VERSION: u32 = 1;
 
-/// Structural deployment bundle limits.
+/// Structural version bundle limits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BundleLimits {
     /// Maximum canonical manifest bytes.
@@ -134,13 +134,12 @@ impl std::fmt::Debug for StagedBundle {
 impl StagedBundle {
     /// Open and incrementally verify a canonical `WorkerBundleV1` file.
     pub fn open(path: PathBuf, limits: BundleLimits) -> Result<Self, PlatformError> {
-        let file =
-            File::open(&path).map_err(|_| invalid("deployment staging file is unavailable"))?;
+        let file = File::open(&path).map_err(|_| invalid("version staging file is unavailable"))?;
         let metadata = file
             .metadata()
-            .map_err(|_| invalid("deployment staging file is unavailable"))?;
+            .map_err(|_| invalid("version staging file is unavailable"))?;
         if !metadata.file_type().is_file() {
-            return Err(invalid("deployment staging path is not a regular file"));
+            return Err(invalid("version staging path is not a regular file"));
         }
         let size = metadata.len();
         if size > u64::try_from(limits.max_artifact_bytes).unwrap_or(u64::MAX) {

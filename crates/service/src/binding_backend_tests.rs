@@ -7,7 +7,7 @@ use open_compute_core::{
     AccountId, CanonicalBindingConfig, CanonicalPermissions, RequestId, ResourceAvailability,
     ResourceId, ResourceState, SecretString,
 };
-use open_compute_storage::{DeploymentBindingRecord, ResourceRecord};
+use open_compute_storage::{ResourceRecord, VersionBindingRecord};
 
 #[test]
 fn unavailable_executor_fails_closed() {
@@ -37,16 +37,16 @@ fn unavailable_executor_fails_closed() {
 
 #[test]
 fn protocol_parsers_and_error_mapping_cover_every_stable_class() {
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let request = RequestId::generate();
     let mut headers = HeaderMap::new();
-    headers.insert(DEPLOYMENT_HEADER, deployment.to_string().parse().unwrap());
+    headers.insert(VERSION_HEADER, version.to_string().parse().unwrap());
     headers.insert(REQUEST_HEADER, request.to_string().parse().unwrap());
     headers.insert(DESCRIPTOR_HEADER, "ab".repeat(32).parse().unwrap());
     headers.insert(header::CONTENT_TYPE, FRAME_CONTENT_TYPE.parse().unwrap());
     assert_eq!(
-        parse_header::<DeploymentId>(&headers, DEPLOYMENT_HEADER).unwrap(),
-        deployment
+        parse_header::<VersionId>(&headers, VERSION_HEADER).unwrap(),
+        version
     );
     assert_eq!(parse_digest(&headers).unwrap(), [0xab; 32]);
     assert!(valid_request_id(&headers));
@@ -204,20 +204,20 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
     .await;
     assert_eq!(invalid_path.status(), StatusCode::NOT_FOUND);
 
-    let missing_deployment = handle(
+    let missing_version = handle(
         State(state.clone()),
         base_request(Method::POST, &path, &token, "generation")
             .body(Body::empty())
             .unwrap(),
     )
     .await;
-    assert_eq!(missing_deployment.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(missing_version.status(), StatusCode::BAD_REQUEST);
 
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let invalid_request_id = handle(
         State(state.clone()),
         base_request(Method::POST, &path, &token, "generation")
-            .header(DEPLOYMENT_HEADER, deployment.to_string())
+            .header(VERSION_HEADER, version.to_string())
             .header(REQUEST_HEADER, "bad")
             .body(Body::empty())
             .unwrap(),
@@ -227,7 +227,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let invalid_digest = handle(
         State(state.clone()),
-        authorized_request(&path, &token, deployment)
+        authorized_request(&path, &token, version)
             .header(DESCRIPTOR_HEADER, "bad")
             .body(Body::empty())
             .unwrap(),
@@ -237,7 +237,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let wrong_content_type = handle(
         State(state.clone()),
-        authorized_request(&path, &token, deployment)
+        authorized_request(&path, &token, version)
             .header(DESCRIPTOR_HEADER, "ab".repeat(32))
             .header(header::CONTENT_TYPE, "text/plain")
             .body(Body::empty())
@@ -251,7 +251,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let missing_binding = handle(
         State(state),
-        authorized_request(&path, &token, deployment)
+        authorized_request(&path, &token, version)
             .header(DESCRIPTOR_HEADER, "ab".repeat(32))
             .header(header::CONTENT_TYPE, FRAME_CONTENT_TYPE)
             .body(Body::from(r#"{"key":"x"}"#))
@@ -298,13 +298,9 @@ fn base_request(
         .header(GENERATION_HEADER, generation)
 }
 
-fn authorized_request(
-    path: &str,
-    token: &str,
-    deployment: DeploymentId,
-) -> axum::http::request::Builder {
+fn authorized_request(path: &str, token: &str, version: VersionId) -> axum::http::request::Builder {
     base_request(Method::POST, path, token, "generation")
-        .header(DEPLOYMENT_HEADER, deployment.to_string())
+        .header(VERSION_HEADER, version.to_string())
         .header(REQUEST_HEADER, "550e8400-e29b-41d4-a716-446655440000")
 }
 
@@ -330,9 +326,9 @@ pub(super) fn authorized_binding() -> AuthorizedBinding {
     let account_id = AccountId::generate();
     let resource_id = ResourceId::generate();
     AuthorizedBinding {
-        binding: DeploymentBindingRecord {
+        binding: VersionBindingRecord {
             id: BindingId::generate(),
-            deployment_id: DeploymentId::generate(),
+            version_id: VersionId::generate(),
             name: "KV".to_owned(),
             kind: BindingKind::KvNamespace,
             resource_id,

@@ -5,7 +5,7 @@ use open_compute_core::workflow::{
     WorkflowStepDeclaration, WorkflowStepDescriptor, WorkflowStepKind,
 };
 use open_compute_core::{
-    AccountId, DeploymentId, WorkerId, WorkflowId, WorkflowOperationId, WorkflowVersionId,
+    AccountId, VersionId, WorkerId, WorkflowId, WorkflowOperationId, WorkflowVersionId,
 };
 use serde_json::{Value, json};
 
@@ -291,9 +291,9 @@ fn setup() -> (tempfile::TempDir, SchedulerStore, WorkflowInstanceIdentity) {
         account_id: AccountId::generate(),
         definition_id: WorkflowId::generate(),
         definition_name: "flow".into(),
-        version_id: WorkflowVersionId::generate(),
+        workflow_version_id: WorkflowVersionId::generate(),
         worker_id: WorkerId::generate(),
-        deployment_id: DeploymentId::generate(),
+        worker_version_id: VersionId::generate(),
         worker_code_sha256: [1; 32],
         class_name: "Workflow".into(),
         loader_schema_version: 1,

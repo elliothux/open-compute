@@ -5,7 +5,9 @@ use crate::{
     SecretEnvelope, encode_catalog_cursor, invalid_catalog_cursor, normalize_catalog_limit,
     search_as_worker_id,
 };
-use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, WorkerId};
+use open_compute_core::{
+    AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, VersionId, WorkerId,
+};
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Transaction, params, params_from_iter};
 use serde::{Deserialize, Serialize};
@@ -14,8 +16,8 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use uuid::Uuid;
 
-mod deployment_create;
-pub use deployment_create::NewDeploymentProducts;
+mod version_create;
+pub use version_create::NewVersionProducts;
 
 /// Current immutable loader descriptor schema.
 pub const LOADER_SCHEMA_VERSION: i64 = 1;
@@ -62,8 +64,10 @@ pub struct WorkerRecord {
     pub account_id: AccountId,
     /// Lowercase display slug.
     pub name: String,
-    /// Current active immutable deployment.
+    /// Current immutable traffic-assignment identity.
     pub active_deployment_id: Option<DeploymentId>,
+    /// Version selected by the current Deployment, derived at read time.
+    pub active_version_id: Option<VersionId>,
     /// Stable future Durable Object storage identity.
     pub do_storage_id: String,
     /// Route/promotion generation.
@@ -78,14 +82,69 @@ pub struct WorkerRecord {
     pub ownership: WorkerOwnership,
 }
 
-/// System-owned deployment slot tracked outside tenant Worker catalog.
+/// Immutable single-Version traffic assignment.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentRecord {
+    /// Opaque Deployment identity.
+    pub id: DeploymentId,
+    /// Parent Script/Worker.
+    pub worker_id: WorkerId,
+    /// Ready immutable Version receiving 100 percent of traffic.
+    pub version_id: VersionId,
+    /// Stable creation source.
+    pub source: DeploymentSource,
+    /// Creation time.
+    pub created_at_ms: i64,
+    /// Tombstone time for a non-current Deployment.
+    pub deleted_at_ms: Option<i64>,
+}
+
+/// Stable reason a Deployment was created.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentSource {
+    /// Script upload combined Version creation and activation.
+    ScriptUpload,
+    /// Explicit Versions/Deployments API activation.
+    VersionsApi,
+    /// Explicit rollback to a historical Version.
+    Rollback,
+    /// Platform-owned system Worker activation.
+    System,
+}
+
+impl DeploymentSource {
+    /// Stable database token.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ScriptUpload => "script_upload",
+            Self::VersionsApi => "versions_api",
+            Self::Rollback => "rollback",
+            Self::System => "system",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, PlatformError> {
+        match value {
+            "script_upload" => Ok(Self::ScriptUpload),
+            "versions_api" => Ok(Self::VersionsApi),
+            "rollback" => Ok(Self::Rollback),
+            "system" => Ok(Self::System),
+            _ => Err(invariant()),
+        }
+    }
+}
+
+/// System-owned version slot tracked outside tenant Worker catalog.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SystemOwnedDeploymentKind {
-    /// Release-owned operator dashboard assets deployment.
+pub enum SystemOwnedVersionKind {
+    /// Release-owned operator dashboard assets version.
     Dashboard,
 }
 
-impl SystemOwnedDeploymentKind {
+impl SystemOwnedVersionKind {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Dashboard => "dashboard",
@@ -100,32 +159,32 @@ impl SystemOwnedDeploymentKind {
     }
 }
 
-/// Persisted system-owned deployment pin.
+/// Persisted system-owned version pin.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SystemOwnedDeploymentRecord {
-    /// Deployment slot identity.
-    pub kind: SystemOwnedDeploymentKind,
+pub struct SystemOwnedVersionRecord {
+    /// Version slot identity.
+    pub kind: SystemOwnedVersionKind,
     /// Owning account.
     pub account_id: AccountId,
     /// Reserved system Worker identity.
     pub worker_id: WorkerId,
-    /// Current active immutable deployment, when installed.
-    pub active_deployment_id: Option<DeploymentId>,
+    /// Current active immutable version, when installed.
+    pub active_version_id: Option<VersionId>,
     /// Embedded dashboard asset tree digest pinned by this slot.
     pub assets_sha256: [u8; 32],
     /// Last pin update timestamp.
     pub updated_at_ms: i64,
 }
 
-/// Deployment lifecycle state.
+/// Version lifecycle state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DeploymentState {
+pub enum VersionState {
     /// Metadata and env are being inserted.
     Staging,
     /// Real workerd validation is in progress.
     Validating,
-    /// Immutable deployment may be dispatched or promoted.
+    /// Immutable version may be dispatched or promoted.
     Ready,
     /// Validation deterministically failed.
     Rejected,
@@ -135,17 +194,17 @@ pub enum DeploymentState {
     Tombstoned,
 }
 
-/// Executable or static-only content carried by an immutable deployment.
+/// Executable or static-only content carried by an immutable version.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DeploymentContentKind {
+pub enum VersionContentKind {
     /// Tenant Worker code, with optional static assets.
     Worker,
     /// Static assets without a fabricated tenant Worker.
     AssetsOnly,
 }
 
-impl DeploymentContentKind {
+impl VersionContentKind {
     /// Stable current-schema token.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -164,7 +223,7 @@ impl DeploymentContentKind {
     }
 }
 
-impl DeploymentState {
+impl VersionState {
     /// Stable database token.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -191,20 +250,20 @@ impl DeploymentState {
     }
 }
 
-/// Persisted immutable deployment metadata.
+/// Persisted immutable version metadata.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeploymentRecord {
-    /// Deployment identity.
-    pub id: DeploymentId,
+pub struct VersionRecord {
+    /// Version identity.
+    pub id: VersionId,
     /// Parent Worker.
     pub worker_id: WorkerId,
     /// Monotonic Worker-local version.
     pub version_number: u64,
-    /// Deployment content union discriminator.
-    pub content_kind: DeploymentContentKind,
+    /// Version content union discriminator.
+    pub content_kind: VersionContentKind,
     /// Lifecycle state.
-    pub state: DeploymentState,
+    pub state: VersionState,
     /// Canonical bundle digest.
     pub artifact_sha256: Option<[u8; 32]>,
     /// Canonical bundle size.
@@ -217,6 +276,10 @@ pub struct DeploymentRecord {
     pub worker_code_sha256: [u8; 32],
     /// Loader contract schema.
     pub loader_schema_version: u32,
+    /// Immutable Worker compatibility date.
+    pub compatibility_date: String,
+    /// Immutable sorted Worker compatibility flags.
+    pub compatibility_flags: Vec<String>,
     /// Creation time.
     pub created_at_ms: i64,
     /// Ready time.
@@ -229,7 +292,7 @@ pub struct DeploymentRecord {
     pub deleted_at_ms: Option<i64>,
 }
 
-impl DeploymentRecord {
+impl VersionRecord {
     /// Operator API JSON projection with hex digests.
     #[must_use]
     pub fn to_api_json(&self) -> serde_json::Value {
@@ -245,6 +308,8 @@ impl DeploymentRecord {
             "mainModule": self.main_module,
             "workerCodeSha256": hex::encode(self.worker_code_sha256),
             "loaderSchemaVersion": self.loader_schema_version,
+            "compatibilityDate": self.compatibility_date,
+            "compatibilityFlags": self.compatibility_flags,
             "createdAtMs": self.created_at_ms,
             "readyAtMs": self.ready_at_ms,
             "rejectedAtMs": self.rejected_at_ms,
@@ -254,9 +319,9 @@ impl DeploymentRecord {
     }
 }
 
-/// Secret ciphertext stored for one immutable deployment.
+/// Secret ciphertext stored for one immutable version.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StoredDeploymentSecret {
+pub struct StoredVersionSecret {
     /// Environment name.
     pub name: String,
     /// Immutable random revision.
@@ -267,31 +332,31 @@ pub struct StoredDeploymentSecret {
 
 /// Consistent immutable source snapshot used by `RuntimeSource`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct DeploymentSnapshot {
+pub struct VersionSnapshot {
     /// Account identity.
     pub account_id: AccountId,
     /// Worker row.
     pub worker: WorkerRecord,
-    /// Deployment row.
-    pub deployment: DeploymentRecord,
-    /// Static-asset authority when the deployment declares assets.
-    pub assets: Option<crate::DeploymentAssetsRecord>,
+    /// Version row.
+    pub version: VersionRecord,
+    /// Static-asset authority when the version declares assets.
+    pub assets: Option<crate::VersionAssetsRecord>,
     /// Canonical JSON vars keyed by env name.
     pub vars: BTreeMap<String, Vec<u8>>,
     /// Encrypted secrets keyed by env name.
-    pub secrets: BTreeMap<String, StoredDeploymentSecret>,
+    pub secrets: BTreeMap<String, StoredVersionSecret>,
     /// Immutable typed resource bindings ordered by env name.
-    pub bindings: Vec<crate::DeploymentBindingRecord>,
+    pub bindings: Vec<crate::VersionBindingRecord>,
     /// Immutable Queue producer bindings ordered by env name.
     pub queue_bindings: Vec<crate::QueueProducerBindingRecord>,
     /// Immutable Workflow caller bindings ordered by env name.
     pub workflow_bindings: Vec<crate::WorkflowBindingRecord>,
     /// Immutable cross-Worker Service declarations ordered by env name.
-    pub services: Vec<crate::DeploymentServiceRecord>,
+    pub services: Vec<crate::VersionServiceRecord>,
     /// Immutable default and named-entrypoint automatic-cache policies.
-    pub cache_policies: Vec<crate::DeploymentCachePolicyRecord>,
+    pub cache_policies: Vec<crate::VersionCachePolicyRecord>,
     /// Immutable platform-provided environment bindings.
-    pub builtin_bindings: Vec<crate::DeploymentBuiltinBindingRecord>,
+    pub builtin_bindings: Vec<crate::VersionBuiltinBindingRecord>,
 }
 
 /// Route kind supported by P0.2.
@@ -336,25 +401,27 @@ pub struct RouteRecord {
     pub generation: u64,
 }
 
-/// Frozen route and active deployment identity for one request.
+/// Frozen route and active version identity for one request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RouteSnapshot {
     /// Matched route.
     pub route: RouteRecord,
     /// Matched Worker.
     pub worker: WorkerRecord,
-    /// Active ready deployment.
+    /// Active immutable Deployment.
     pub deployment: DeploymentRecord,
-    /// Static-asset authority frozen with the same active deployment.
-    pub assets: Option<crate::DeploymentAssetsRecord>,
+    /// Active ready version.
+    pub version: VersionRecord,
+    /// Static-asset authority frozen with the same active version.
+    pub assets: Option<crate::VersionAssetsRecord>,
 }
 
-/// Registered reason a deployment must remain reachable.
+/// Registered reason a version must remain reachable.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeploymentReferrer {
-    /// Immutable deployment identity.
-    pub deployment_id: DeploymentId,
+pub struct VersionReferrer {
+    /// Immutable version identity.
+    pub version_id: VersionId,
     /// Owning subsystem token such as `control_idempotency`.
     pub kind: String,
     /// Stable subsystem-local reference identity.
@@ -363,28 +430,28 @@ pub struct DeploymentReferrer {
     pub created_at_ms: i64,
 }
 
-/// One non-active, unreferenced deployment eligible for automatic retention.
+/// One non-active, unreferenced version eligible for automatic retention.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RetentionCandidate {
     /// Account boundary.
     pub account_id: AccountId,
     /// Parent Worker.
     pub worker_id: WorkerId,
-    /// Candidate deployment.
-    pub deployment_id: DeploymentId,
+    /// Candidate version.
+    pub version_id: VersionId,
 }
 
-/// Input for an immutable staging deployment transaction.
+/// Input for an immutable staging version transaction.
 #[derive(Clone, Debug)]
-pub struct NewDeployment {
+pub struct NewVersion {
     /// Platform-generated identity.
-    pub id: DeploymentId,
+    pub id: VersionId,
     /// Owning account.
     pub account_id: AccountId,
     /// Parent Worker.
     pub worker_id: WorkerId,
-    /// Deployment content union discriminator.
-    pub content_kind: DeploymentContentKind,
+    /// Version content union discriminator.
+    pub content_kind: VersionContentKind,
     /// Artifact digest.
     pub artifact_sha256: Option<[u8; 32]>,
     /// Artifact size.
@@ -395,10 +462,14 @@ pub struct NewDeployment {
     pub main_module: Option<String>,
     /// Descriptor digest.
     pub worker_code_sha256: [u8; 32],
+    /// Immutable validated compatibility date.
+    pub compatibility_date: String,
+    /// Immutable validated and sorted compatibility flags.
+    pub compatibility_flags: Vec<String>,
     /// Canonical JSON vars.
     pub vars: BTreeMap<String, Vec<u8>>,
     /// Encrypted secret rows.
-    pub secrets: BTreeMap<String, StoredDeploymentSecret>,
+    pub secrets: BTreeMap<String, StoredVersionSecret>,
     /// Audit request identity.
     pub request_id: RequestId,
     /// Transaction timestamp.
@@ -444,7 +515,7 @@ impl<'a> WorkerRepository<'a> {
         if is_system_reserved_worker_name(name) {
             return Err(PlatformError::new(
                 ErrorCode::WorkerNameConflict,
-                "Worker name is reserved for platform-owned deployments",
+                "Worker name is reserved for platform-owned versions",
             ));
         }
         if max_live == 0 {
@@ -524,6 +595,7 @@ impl<'a> WorkerRepository<'a> {
                 account_id,
                 name: name.to_owned(),
                 active_deployment_id: None,
+                active_version_id: None,
                 do_storage_id: do_storage_id.clone(),
                 route_generation: 1,
                 created_at_ms: now_ms,
@@ -550,8 +622,10 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
+                    "SELECT id, account_id, name,
+                        (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
+                        do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
+                        ownership, active_deployment_id
                  FROM workers WHERE account_id = ?1 AND deleted_at_ms IS NULL
                    AND ownership = 'tenant'
                  ORDER BY created_at_ms, id",
@@ -592,8 +666,10 @@ impl<'a> WorkerRepository<'a> {
         };
         self.db.with_read(|conn| {
             let mut sql = String::from(
-                "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
+                "SELECT id, account_id, name,
+                        (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
+                        do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
+                        ownership, active_deployment_id
                  FROM workers
                  WHERE account_id = ? AND deleted_at_ms IS NULL AND ownership = 'tenant'",
             );
@@ -678,16 +754,14 @@ impl<'a> WorkerRepository<'a> {
         Ok(worker)
     }
 
-    /// Ensure the release-owned dashboard Worker exists as a system-owned deployment slot.
+    /// Ensure the release-owned dashboard Worker exists as a system-owned version slot.
     pub fn ensure_system_dashboard_worker(
         &self,
         account_id: AccountId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
-        if let Some(record) =
-            self.get_system_owned_deployment(SystemOwnedDeploymentKind::Dashboard)?
-        {
+        if let Some(record) = self.get_system_owned_version(SystemOwnedVersionKind::Dashboard)? {
             if record.account_id != account_id {
                 return Err(invariant());
             }
@@ -696,49 +770,46 @@ impl<'a> WorkerRepository<'a> {
         self.create_system_dashboard_worker(account_id, request_id, now_ms)
     }
 
-    /// Read one persisted system-owned deployment pin.
-    pub fn get_system_owned_deployment(
+    /// Read one persisted system-owned version pin.
+    pub fn get_system_owned_version(
         &self,
-        kind: SystemOwnedDeploymentKind,
-    ) -> Result<Option<SystemOwnedDeploymentRecord>, PlatformError> {
+        kind: SystemOwnedVersionKind,
+    ) -> Result<Option<SystemOwnedVersionRecord>, PlatformError> {
         self.db.with_read(|conn| {
             conn.query_row(
-                "SELECT kind, account_id, worker_id, active_deployment_id, assets_sha256,
+                "SELECT kind, account_id, worker_id, active_version_id, assets_sha256,
                         updated_at_ms
-                 FROM system_owned_deployments WHERE kind = ?1",
+                 FROM system_owned_versions WHERE kind = ?1",
                 [kind.as_str()],
-                map_system_owned_deployment,
+                map_system_owned_version,
             )
             .optional()
             .map_err(|_| db_error())
         })
     }
 
-    /// Persist the active dashboard deployment pin after bootstrap or promotion.
-    pub fn pin_system_owned_deployment(
+    /// Persist the active dashboard version pin after bootstrap or promotion.
+    pub fn pin_system_owned_version(
         &self,
-        record: &SystemOwnedDeploymentRecord,
+        record: &SystemOwnedVersionRecord,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let changed = tx
                 .execute(
-                    "INSERT INTO system_owned_deployments
-                     (kind, account_id, worker_id, active_deployment_id, assets_sha256, updated_at_ms)
+                    "INSERT INTO system_owned_versions
+                     (kind, account_id, worker_id, active_version_id, assets_sha256, updated_at_ms)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                      ON CONFLICT(kind) DO UPDATE SET
                        account_id = excluded.account_id,
                        worker_id = excluded.worker_id,
-                       active_deployment_id = excluded.active_deployment_id,
+                       active_version_id = excluded.active_version_id,
                        assets_sha256 = excluded.assets_sha256,
                        updated_at_ms = excluded.updated_at_ms",
                     params![
                         record.kind.as_str(),
                         record.account_id.to_string(),
                         record.worker_id.to_string(),
-                        record
-                            .active_deployment_id
-                            .as_ref()
-                            .map(ToString::to_string),
+                        record.active_version_id.as_ref().map(ToString::to_string),
                         record.assets_sha256.as_slice(),
                         record.updated_at_ms,
                     ],
@@ -780,8 +851,8 @@ impl<'a> WorkerRepository<'a> {
                 return Err(invariant());
             }
             tx.execute(
-                "INSERT INTO system_owned_deployments
-                 (kind, account_id, worker_id, active_deployment_id, assets_sha256, updated_at_ms)
+                "INSERT INTO system_owned_versions
+                 (kind, account_id, worker_id, active_version_id, assets_sha256, updated_at_ms)
                  VALUES ('dashboard', ?1, ?2, NULL, zeroblob(32), ?3)",
                 params![account_id.to_string(), worker_id.to_string(), now_ms],
             )
@@ -801,6 +872,7 @@ impl<'a> WorkerRepository<'a> {
                 account_id,
                 name: SYSTEM_DASHBOARD_WORKER_NAME.to_owned(),
                 active_deployment_id: None,
+                active_version_id: None,
                 do_storage_id,
                 route_generation: 1,
                 created_at_ms: now_ms,
@@ -819,8 +891,10 @@ impl<'a> WorkerRepository<'a> {
     ) -> Result<WorkerRecord, PlatformError> {
         self.db.with_read(|conn| {
             conn.query_row(
-                "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
+                "SELECT id, account_id, name,
+                        (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
+                        do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
+                        ownership, active_deployment_id
                  FROM workers WHERE id = ?1 AND account_id = ?2",
                 params![worker_id.to_string(), account_id.to_string()],
                 map_worker,
@@ -832,49 +906,42 @@ impl<'a> WorkerRepository<'a> {
     }
 
     /// Transition staging to validating.
-    pub fn begin_validation(&self, deployment_id: DeploymentId) -> Result<(), PlatformError> {
+    pub fn begin_validation(&self, version_id: VersionId) -> Result<(), PlatformError> {
         self.transition(
-            deployment_id,
-            DeploymentState::Staging,
-            DeploymentState::Validating,
+            version_id,
+            VersionState::Staging,
+            VersionState::Validating,
             0,
             None,
         )
     }
 
-    /// Mark a validating deployment ready.
-    pub fn mark_ready(
-        &self,
-        deployment_id: DeploymentId,
-        now_ms: i64,
-    ) -> Result<(), PlatformError> {
+    /// Mark a validating version ready.
+    pub fn mark_ready(&self, version_id: VersionId, now_ms: i64) -> Result<(), PlatformError> {
         self.transition(
-            deployment_id,
-            DeploymentState::Validating,
-            DeploymentState::Ready,
+            version_id,
+            VersionState::Validating,
+            VersionState::Ready,
             now_ms,
             None,
         )
     }
 
-    /// Reject a staging or validating deployment with a stable safe code.
+    /// Reject a staging or validating version with a stable safe code.
     pub fn mark_rejected(
         &self,
-        deployment_id: DeploymentId,
-        expected: DeploymentState,
+        version_id: VersionId,
+        expected: VersionState,
         code: ErrorCode,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        if !matches!(
-            expected,
-            DeploymentState::Staging | DeploymentState::Validating
-        ) {
+        if !matches!(expected, VersionState::Staging | VersionState::Validating) {
             return Err(invariant());
         }
         self.transition(
-            deployment_id,
+            version_id,
             expected,
-            DeploymentState::Rejected,
+            VersionState::Rejected,
             now_ms,
             Some(code.as_str()),
         )
@@ -882,16 +949,16 @@ impl<'a> WorkerRepository<'a> {
 
     fn transition(
         self,
-        deployment_id: DeploymentId,
-        expected: DeploymentState,
-        target: DeploymentState,
+        version_id: VersionId,
+        expected: VersionState,
+        target: VersionState,
         now_ms: i64,
         rejection_code: Option<&str>,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let changed = tx
                 .execute(
-                    "UPDATE worker_deployments
+                    "UPDATE worker_versions
                  SET state = ?1,
                      ready_at_ms = CASE WHEN ?1 = 'ready' THEN ?2 ELSE ready_at_ms END,
                      rejected_at_ms = CASE WHEN ?1 = 'rejected' THEN ?2 ELSE rejected_at_ms END,
@@ -901,28 +968,28 @@ impl<'a> WorkerRepository<'a> {
                         target.as_str(),
                         now_ms,
                         rejection_code,
-                        deployment_id.to_string(),
+                        version_id.to_string(),
                         expected.as_str()
                     ],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
                 return Err(PlatformError::new(
-                    ErrorCode::DeploymentNotReady,
-                    "deployment state transition precondition failed",
+                    ErrorCode::VersionNotReady,
+                    "version state transition precondition failed",
                 ));
             }
             Ok(())
         })
     }
 
-    /// Atomically promote a ready deployment, optionally using compare-and-swap.
+    /// Atomically promote a ready version, optionally using compare-and-swap.
     pub fn promote(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        target: DeploymentId,
-        expected_active: Option<DeploymentId>,
+        target: VersionId,
+        expected_active: Option<VersionId>,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
@@ -943,8 +1010,8 @@ impl<'a> WorkerRepository<'a> {
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        target: DeploymentId,
-        expected_active: Option<DeploymentId>,
+        target: VersionId,
+        expected_active: Option<VersionId>,
         expected_route_generation: Option<u64>,
         request_id: RequestId,
         now_ms: i64,
@@ -961,47 +1028,90 @@ impl<'a> WorkerRepository<'a> {
         )
     }
 
-    /// Promote a deployment for any live Worker in the account, including system-owned Workers.
+    /// Promote a version for any live Worker in the account, including system-owned Workers.
     #[allow(clippy::too_many_arguments)]
     pub fn promote_worker_checked(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        target: DeploymentId,
-        expected_active: Option<DeploymentId>,
+        target: VersionId,
+        expected_active: Option<VersionId>,
         expected_route_generation: Option<u64>,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
+        self.create_deployment_checked(
+            account_id,
+            worker_id,
+            target,
+            expected_active,
+            expected_route_generation,
+            if self.get_worker(account_id, worker_id)?.ownership == WorkerOwnership::System {
+                DeploymentSource::System
+            } else {
+                DeploymentSource::VersionsApi
+            },
+            request_id,
+            now_ms,
+        )
+        .map(|(worker, _)| worker)
+    }
+
+    /// Create one immutable 100-percent Deployment and atomically make it current.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_deployment_checked(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        target: VersionId,
+        expected_active: Option<VersionId>,
+        expected_route_generation: Option<u64>,
+        source: DeploymentSource,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<(WorkerRecord, DeploymentRecord), PlatformError> {
+        let deployment_id = DeploymentId::generate();
         self.db.with_immediate(|tx| {
             let current = require_live_worker(tx, account_id, worker_id)?;
             let state: Option<String> = tx
                 .query_row(
-                    "SELECT state FROM worker_deployments WHERE id = ?1 AND worker_id = ?2",
+                    "SELECT state FROM worker_versions WHERE id = ?1 AND worker_id = ?2",
                     params![target.to_string(), worker_id.to_string()],
                     |row| row.get(0),
                 )
                 .optional()
                 .map_err(|_| db_error())?;
             let Some(state) = state else {
-                return Err(deployment_not_found());
+                return Err(version_not_found());
             };
             if state != "ready" {
                 return Err(PlatformError::new(
-                    ErrorCode::DeploymentNotReady,
-                    "promotion target is not a ready deployment of this Worker",
+                    ErrorCode::VersionNotReady,
+                    "Deployment target is not a ready Version of this Worker",
                 ));
             }
-            if expected_active
-                .is_some_and(|expected| current.active_deployment_id != Some(expected))
+            if expected_active.is_some_and(|expected| current.active_version_id != Some(expected))
                 || expected_route_generation
                     .is_some_and(|expected| current.route_generation != expected)
             {
                 return Err(PlatformError::new(
                     ErrorCode::IdempotencyConflict,
-                    "promotion compare-and-swap precondition failed",
+                    "Deployment compare-and-swap precondition failed",
                 ));
             }
+            tx.execute(
+                "INSERT INTO worker_deployments
+                 (id, worker_id, version_id, source, created_at_ms, deleted_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+                params![
+                    deployment_id.to_string(),
+                    worker_id.to_string(),
+                    target.to_string(),
+                    source.as_str(),
+                    now_ms,
+                ],
+            )
+            .map_err(|_| db_error())?;
             let changed = tx
                 .execute(
                     "UPDATE workers SET active_deployment_id = ?1,
@@ -1009,7 +1119,7 @@ impl<'a> WorkerRepository<'a> {
                      WHERE id = ?3 AND account_id = ?4 AND deleted_at_ms IS NULL
                        AND route_generation = ?5",
                     params![
-                        target.to_string(),
+                        deployment_id.to_string(),
                         now_ms,
                         worker_id.to_string(),
                         account_id.to_string(),
@@ -1020,36 +1130,48 @@ impl<'a> WorkerRepository<'a> {
             if changed != 1 {
                 return Err(PlatformError::new(
                     ErrorCode::IdempotencyConflict,
-                    "promotion compare-and-swap precondition failed",
+                    "Deployment compare-and-swap precondition failed",
                 ));
             }
             audit(
                 tx,
                 account_id,
-                "deployment.promote",
+                "deployment.create",
                 "deployment",
-                &target.to_string(),
+                &deployment_id.to_string(),
                 request_id,
                 br#"{"state":"active"}"#,
                 now_ms,
             )?;
-            read_worker_tx(tx, account_id, worker_id)
+            Ok((
+                read_worker_tx(tx, account_id, worker_id)?,
+                DeploymentRecord {
+                    id: deployment_id,
+                    worker_id,
+                    version_id: target,
+                    source,
+                    created_at_ms: now_ms,
+                    deleted_at_ms: None,
+                },
+            ))
         })
     }
 
-    /// Read an immutable deployment with vars and secret ciphertext in one snapshot.
-    pub fn deployment_snapshot(
+    /// Read an immutable version with vars and secret ciphertext in one snapshot.
+    pub fn version_snapshot(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         allow_validating: bool,
-    ) -> Result<DeploymentSnapshot, PlatformError> {
+    ) -> Result<VersionSnapshot, PlatformError> {
         self.db.with_read(|conn| {
             let worker = conn
                 .query_row(
-                    "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
+                    "SELECT id, account_id, name,
+                        (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
+                        do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
+                        ownership, active_deployment_id
                  FROM workers WHERE id = ?1 AND account_id = ?2",
                     params![worker_id.to_string(), account_id.to_string()],
                     map_worker,
@@ -1063,63 +1185,61 @@ impl<'a> WorkerRepository<'a> {
                     "Worker is tombstoned",
                 ));
             }
-            let deployment = conn
+            let version = conn
                 .query_row(
                     "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
                         worker_code_sha256, loader_schema_version, created_at_ms,
-                        ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms
-                 FROM worker_deployments WHERE id = ?1 AND worker_id = ?2",
-                    params![deployment_id.to_string(), worker_id.to_string()],
-                    map_deployment,
+                        ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms,
+                        compatibility_date, compatibility_flags_json
+                 FROM worker_versions WHERE id = ?1 AND worker_id = ?2",
+                    params![version_id.to_string(), worker_id.to_string()],
+                    map_version,
                 )
                 .optional()
                 .map_err(|_| db_error())?
-                .ok_or_else(deployment_not_found)?;
-            if deployment.state != DeploymentState::Ready
-                && !(allow_validating && deployment.state == DeploymentState::Validating)
+                .ok_or_else(version_not_found)?;
+            if version.state != VersionState::Ready
+                && !(allow_validating && version.state == VersionState::Validating)
             {
                 return Err(PlatformError::new(
-                    ErrorCode::DeploymentNotReady,
-                    "deployment is not available to RuntimeSource",
+                    ErrorCode::VersionNotReady,
+                    "version is not available to RuntimeSource",
                 ));
             }
-            let vars = read_vars(conn, deployment_id)?;
-            let secrets = read_secrets(conn, deployment_id)?;
-            let bindings = crate::bindings::read_deployment_bindings_conn(conn, deployment_id)?;
-            let queue_bindings = crate::queues::read_deployment_bindings_conn(conn, deployment_id)?;
-            Ok(DeploymentSnapshot {
+            let vars = read_vars(conn, version_id)?;
+            let secrets = read_secrets(conn, version_id)?;
+            let bindings = crate::bindings::read_version_bindings_conn(conn, version_id)?;
+            let queue_bindings = crate::queues::read_version_bindings_conn(conn, version_id)?;
+            Ok(VersionSnapshot {
                 account_id,
                 worker,
-                assets: crate::assets::read_assets_conn(conn, deployment_id)?,
-                deployment,
+                assets: crate::assets::read_assets_conn(conn, version_id)?,
+                version,
                 vars,
                 secrets,
                 bindings,
                 queue_bindings,
                 workflow_bindings: crate::workflows::bindings::read_workflow_bindings(
-                    conn,
-                    deployment_id,
+                    conn, version_id,
                 )?,
-                services: crate::services::read_deployment_services_conn(conn, deployment_id)?,
+                services: crate::services::read_version_services_conn(conn, version_id)?,
                 cache_policies: crate::runtime_features::read_cache_policies_conn(
-                    conn,
-                    deployment_id,
+                    conn, version_id,
                 )?,
                 builtin_bindings: crate::runtime_features::read_builtin_bindings_conn(
-                    conn,
-                    deployment_id,
+                    conn, version_id,
                 )?,
             })
         })
     }
 
-    /// List all deployments, newest first.
-    pub fn list_deployments(
+    /// List all versions, newest first.
+    pub fn list_versions(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-    ) -> Result<Vec<DeploymentRecord>, PlatformError> {
+    ) -> Result<Vec<VersionRecord>, PlatformError> {
         self.get_tenant_worker(account_id, worker_id)?;
         self.db.with_read(|conn| {
             let mut stmt = conn
@@ -1127,19 +1247,78 @@ impl<'a> WorkerRepository<'a> {
                     "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
                         worker_code_sha256, loader_schema_version, created_at_ms,
-                        ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms
-                 FROM worker_deployments WHERE worker_id = ?1
+                        ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms,
+                        compatibility_date, compatibility_flags_json
+                 FROM worker_versions WHERE worker_id = ?1
                  ORDER BY version_number DESC",
                 )
                 .map_err(|_| db_error())?;
             let rows = stmt
+                .query_map([worker_id.to_string()], map_version)
+                .map_err(|_| db_error())?;
+            collect_rows(rows)
+        })
+    }
+
+    /// Read one version while enforcing the account and Worker boundary.
+    pub fn get_version(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        version_id: VersionId,
+    ) -> Result<VersionRecord, PlatformError> {
+        self.get_tenant_worker(account_id, worker_id)?;
+        self.get_worker_version(account_id, worker_id, version_id)
+    }
+
+    /// Read one version for any Worker in the account, including system-owned Workers.
+    pub fn get_worker_version(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        version_id: VersionId,
+    ) -> Result<VersionRecord, PlatformError> {
+        self.get_worker(account_id, worker_id)?;
+        self.db.with_read(|conn| {
+            conn.query_row(
+                "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
+                        artifact_size, artifact_schema_version, main_module,
+                        worker_code_sha256, loader_schema_version, created_at_ms,
+                        ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms,
+                        compatibility_date, compatibility_flags_json
+                 FROM worker_versions WHERE id = ?1 AND worker_id = ?2",
+                params![version_id.to_string(), worker_id.to_string()],
+                map_version,
+            )
+            .optional()
+            .map_err(|_| db_error())?
+            .ok_or_else(version_not_found)
+        })
+    }
+
+    /// List immutable Deployment history newest first.
+    pub fn list_deployments(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+    ) -> Result<Vec<DeploymentRecord>, PlatformError> {
+        self.get_tenant_worker(account_id, worker_id)?;
+        self.db.with_read(|conn| {
+            let mut statement = conn
+                .prepare(
+                    "SELECT id,worker_id,version_id,source,created_at_ms,deleted_at_ms
+                     FROM worker_deployments WHERE worker_id=?1 AND deleted_at_ms IS NULL
+                     ORDER BY created_at_ms DESC,id DESC",
+                )
+                .map_err(|_| db_error())?;
+            let rows = statement
                 .query_map([worker_id.to_string()], map_deployment)
                 .map_err(|_| db_error())?;
             collect_rows(rows)
         })
     }
 
-    /// Read one deployment while enforcing the account and Worker boundary.
+    /// Read one immutable Deployment.
     pub fn get_deployment(
         &self,
         account_id: AccountId,
@@ -1147,34 +1326,58 @@ impl<'a> WorkerRepository<'a> {
         deployment_id: DeploymentId,
     ) -> Result<DeploymentRecord, PlatformError> {
         self.get_tenant_worker(account_id, worker_id)?;
-        self.get_worker_deployment(account_id, worker_id, deployment_id)
-    }
-
-    /// Read one deployment for any Worker in the account, including system-owned Workers.
-    pub fn get_worker_deployment(
-        &self,
-        account_id: AccountId,
-        worker_id: WorkerId,
-        deployment_id: DeploymentId,
-    ) -> Result<DeploymentRecord, PlatformError> {
-        self.get_worker(account_id, worker_id)?;
         self.db.with_read(|conn| {
             conn.query_row(
-                "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
-                        artifact_size, artifact_schema_version, main_module,
-                        worker_code_sha256, loader_schema_version, created_at_ms,
-                        ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms
-                 FROM worker_deployments WHERE id = ?1 AND worker_id = ?2",
+                "SELECT id,worker_id,version_id,source,created_at_ms,deleted_at_ms
+                 FROM worker_deployments WHERE id=?1 AND worker_id=?2 AND deleted_at_ms IS NULL",
                 params![deployment_id.to_string(), worker_id.to_string()],
                 map_deployment,
             )
             .optional()
             .map_err(|_| db_error())?
-            .ok_or_else(deployment_not_found)
+            .ok_or_else(version_not_found)
         })
     }
 
-    /// Resolve the longest active exact-host or platform path route and freeze active deployment.
+    /// Tombstone a non-current Deployment without changing Version history.
+    pub fn delete_deployment(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        deployment_id: DeploymentId,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        self.get_tenant_worker(account_id, worker_id)?;
+        self.db.with_immediate(|tx| {
+            let changed = tx
+                .execute(
+                    "UPDATE worker_deployments SET deleted_at_ms=?1
+                     WHERE id=?2 AND worker_id=?3 AND deleted_at_ms IS NULL
+                       AND NOT EXISTS(SELECT 1 FROM workers WHERE active_deployment_id=?2)",
+                    params![now_ms, deployment_id.to_string(), worker_id.to_string()],
+                )
+                .map_err(|_| db_error())?;
+            if changed != 1 {
+                return Err(PlatformError::new(
+                    ErrorCode::VersionActive,
+                    "Deployment is current, missing, or already deleted",
+                ));
+            }
+            audit(
+                tx,
+                account_id,
+                "deployment.delete",
+                "deployment",
+                &deployment_id.to_string(),
+                request_id,
+                br#"{"state":"deleted"}"#,
+                now_ms,
+            )
+        })
+    }
+
+    /// Resolve the longest active exact-host or platform path route and freeze active version.
     pub fn resolve_route(
         &self,
         hostname_ascii: Option<&str>,
@@ -1203,8 +1406,10 @@ impl<'a> WorkerRepository<'a> {
                 .ok_or_else(route_not_found)?;
             let worker = conn
                 .query_row(
-                    "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
+                    "SELECT id, account_id, name,
+                        (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
+                        do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
+                        ownership, active_deployment_id
                  FROM workers WHERE id = ?1 AND account_id = ?2 AND deleted_at_ms IS NULL",
                     params![route.worker_id.to_string(), route.account_id.to_string()],
                     map_worker,
@@ -1212,16 +1417,28 @@ impl<'a> WorkerRepository<'a> {
                 .optional()
                 .map_err(|_| db_error())?
                 .ok_or_else(route_not_found)?;
-            let active = worker.active_deployment_id.ok_or_else(route_not_found)?;
+            let active_deployment = worker.active_deployment_id.ok_or_else(route_not_found)?;
             let deployment = conn
+                .query_row(
+                    "SELECT id,worker_id,version_id,source,created_at_ms,deleted_at_ms
+                     FROM worker_deployments WHERE id=?1 AND worker_id=?2 AND deleted_at_ms IS NULL",
+                    params![active_deployment.to_string(), worker.id.to_string()],
+                    map_deployment,
+                )
+                .optional()
+                .map_err(|_| db_error())?
+                .ok_or_else(route_not_found)?;
+            let active = deployment.version_id;
+            let version = conn
                 .query_row(
                     "SELECT id, worker_id, version_number, content_kind, state, artifact_sha256,
                         artifact_size, artifact_schema_version, main_module,
                         worker_code_sha256, loader_schema_version, created_at_ms,
-                        ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms
-                 FROM worker_deployments WHERE id = ?1 AND worker_id = ?2 AND state = 'ready'",
+                        ready_at_ms, rejected_at_ms, rejection_code, deleted_at_ms,
+                        compatibility_date, compatibility_flags_json
+                 FROM worker_versions WHERE id = ?1 AND worker_id = ?2 AND state = 'ready'",
                     params![active.to_string(), worker.id.to_string()],
-                    map_deployment,
+                    map_version,
                 )
                 .optional()
                 .map_err(|_| db_error())?
@@ -1229,8 +1446,9 @@ impl<'a> WorkerRepository<'a> {
             Ok(RouteSnapshot {
                 route,
                 worker,
-                assets: crate::assets::read_assets_conn(conn, active)?,
                 deployment,
+                assets: crate::assets::read_assets_conn(conn, active)?,
+                version,
             })
         })
     }
@@ -1244,7 +1462,7 @@ impl<'a> WorkerRepository<'a> {
         hostname_ascii: &str,
         path_prefix: &str,
         entrypoint: Option<&str>,
-        expected_active: Option<DeploymentId>,
+        expected_active: Option<VersionId>,
         request_id: RequestId,
         now_ms: i64,
         max_live: u32,
@@ -1274,8 +1492,7 @@ impl<'a> WorkerRepository<'a> {
                     "account route count quota was exceeded",
                 ));
             }
-            if expected_active.is_some_and(|expected| worker.active_deployment_id != Some(expected))
-            {
+            if expected_active.is_some_and(|expected| worker.active_version_id != Some(expected)) {
                 return Err(PlatformError::new(
                     ErrorCode::IdempotencyConflict,
                     "route entrypoint probe snapshot changed",
@@ -1436,22 +1653,22 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Atomically verify a pre-fenced deployment set, disable routes, and tombstone a Worker.
+    /// Atomically verify a pre-fenced version set, disable routes, and tombstone a Worker.
     pub fn delete_worker(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        expected_deployments: &[DeploymentId],
+        expected_versions: &[VersionId],
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
             require_tenant_worker(&worker)?;
-            let actual_deployments = {
+            let actual_versions = {
                 let mut statement = tx
                     .prepare(
-                        "SELECT id FROM worker_deployments
+                        "SELECT id FROM worker_versions
                          WHERE worker_id = ?1 AND deleted_at_ms IS NULL ORDER BY id",
                     )
                     .map_err(|_| db_error())?;
@@ -1461,26 +1678,26 @@ impl<'a> WorkerRepository<'a> {
                 let mut values = Vec::new();
                 for row in rows {
                     values.push(
-                        DeploymentId::from_str(&row.map_err(|_| db_error())?)
+                        VersionId::from_str(&row.map_err(|_| db_error())?)
                             .map_err(|_| invariant())?,
                     );
                 }
                 values
             };
-            let mut expected = expected_deployments.to_vec();
+            let mut expected = expected_versions.to_vec();
             expected.sort_unstable_by_key(ToString::to_string);
             expected.dedup();
-            if actual_deployments != expected {
+            if actual_versions != expected {
                 return Err(PlatformError::new(
-                    ErrorCode::DeploymentReferenced,
-                    "Worker deployment set changed during deletion admission",
+                    ErrorCode::VersionReferenced,
+                    "Worker version set changed during deletion admission",
                 ));
             }
             let inbound: bool = tx
                 .query_row(
                     "SELECT EXISTS(
-                        SELECT 1 FROM deployment_services s
-                        JOIN worker_deployments d ON d.id = s.deployment_id
+                        SELECT 1 FROM version_services s
+                        JOIN worker_versions d ON d.id = s.version_id
                         JOIN workers caller ON caller.id = d.worker_id
                         WHERE s.target_worker_id = ?1
                           AND caller.id != ?1
@@ -1495,7 +1712,7 @@ impl<'a> WorkerRepository<'a> {
             if inbound {
                 return Err(PlatformError::new(
                     ErrorCode::ServiceTargetReferenced,
-                    "Worker is retained by another deployment Service declaration",
+                    "Worker is retained by another version Service declaration",
                 ));
             }
             let generation = worker
@@ -1532,10 +1749,10 @@ impl<'a> WorkerRepository<'a> {
             }
             tx.execute(
                 "DELETE FROM resource_referrers
-                 WHERE referrer_kind = 'deployment_binding'
+                 WHERE referrer_kind = 'version_binding'
                    AND referrer_id IN (
-                     SELECT b.id FROM deployment_bindings b
-                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     SELECT b.id FROM version_bindings b
+                     JOIN worker_versions d ON d.id = b.version_id
                      WHERE d.worker_id = ?1
                    )",
                 [worker_id.to_string()],
@@ -1546,7 +1763,7 @@ impl<'a> WorkerRepository<'a> {
                  WHERE referrer_kind = 'producer_binding'
                    AND referrer_id IN (
                      SELECT b.id FROM queue_producer_bindings b
-                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     JOIN worker_versions d ON d.id = b.version_id
                      WHERE d.worker_id = ?1
                    )",
                 [worker_id.to_string()],
@@ -1557,7 +1774,7 @@ impl<'a> WorkerRepository<'a> {
                  WHERE referrer_kind = 'binding'
                    AND referrer_id IN (
                      SELECT b.id FROM workflow_bindings b
-                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     JOIN worker_versions d ON d.id = b.version_id
                      WHERE d.worker_id = ?1
                    )",
                 [worker_id.to_string()],
@@ -1708,16 +1925,16 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Complete an idempotent response and register its deployment readback ref atomically.
+    /// Complete an idempotent response and register its version readback ref atomically.
     #[allow(clippy::too_many_arguments)]
-    pub fn complete_idempotency_with_deployment_ref(
+    pub fn complete_idempotency_with_version_ref(
         &self,
         account_id: AccountId,
         scope: &str,
         key: &str,
         fingerprint: &[u8; 32],
         response: &[u8],
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         ref_id: &str,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
@@ -1729,7 +1946,7 @@ impl<'a> WorkerRepository<'a> {
             let changed = tx
                 .execute(
                     "UPDATE control_idempotency SET state = 'complete', response_json = ?1,
-                            deployment_id = ?6
+                            version_id = ?6
                      WHERE account_id = ?2 AND scope = ?3 AND idempotency_key = ?4
                        AND state = 'running' AND request_fingerprint = ?5",
                     params![
@@ -1738,7 +1955,7 @@ impl<'a> WorkerRepository<'a> {
                         scope,
                         key,
                         fingerprint.as_slice(),
-                        deployment_id.to_string()
+                        version_id.to_string()
                     ],
                 )
                 .map_err(|_| db_error())?;
@@ -1749,10 +1966,10 @@ impl<'a> WorkerRepository<'a> {
                 ));
             }
             tx.execute(
-                "INSERT OR IGNORE INTO deployment_referrers
-                 (deployment_id, kind, ref_id, created_at_ms)
+                "INSERT OR IGNORE INTO version_referrers
+                 (version_id, kind, ref_id, created_at_ms)
                  VALUES (?1, 'control_idempotency', ?2, ?3)",
-                params![deployment_id.to_string(), ref_id, now_ms],
+                params![version_id.to_string(), ref_id, now_ms],
             )
             .map_err(|_| db_error())?;
             Ok(())
@@ -1793,10 +2010,10 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Register a typed deployment referrer. Future products must use this table.
-    pub fn add_deployment_referrer(
+    /// Register a typed version referrer. Future products must use this table.
+    pub fn add_version_referrer(
         &self,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         kind: &str,
         ref_id: &str,
         now_ms: i64,
@@ -1805,65 +2022,65 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_immediate(|tx| {
             let state: Option<String> = tx
                 .query_row(
-                    "SELECT state FROM worker_deployments WHERE id = ?1",
-                    [deployment_id.to_string()],
+                    "SELECT state FROM worker_versions WHERE id = ?1",
+                    [version_id.to_string()],
                     |row| row.get(0),
                 )
                 .optional()
                 .map_err(|_| db_error())?;
             if !state.is_some_and(|state| matches!(state.as_str(), "ready" | "rejected")) {
                 return Err(PlatformError::new(
-                    ErrorCode::DeploymentNotReady,
-                    "deployment cannot accept a referrer in its current state",
+                    ErrorCode::VersionNotReady,
+                    "version cannot accept a referrer in its current state",
                 ));
             }
             tx.execute(
-                "INSERT OR IGNORE INTO deployment_referrers
-                 (deployment_id, kind, ref_id, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
-                params![deployment_id.to_string(), kind, ref_id, now_ms],
+                "INSERT OR IGNORE INTO version_referrers
+                 (version_id, kind, ref_id, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
+                params![version_id.to_string(), kind, ref_id, now_ms],
             )
             .map_err(|_| db_error())?;
             Ok(())
         })
     }
 
-    /// Remove a typed deployment referrer after its owner no longer needs replay/readback.
-    pub fn remove_deployment_referrer(
+    /// Remove a typed version referrer after its owner no longer needs replay/readback.
+    pub fn remove_version_referrer(
         &self,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         kind: &str,
         ref_id: &str,
     ) -> Result<(), PlatformError> {
         validate_referrer(kind, ref_id)?;
         self.db.with_immediate(|tx| {
             tx.execute(
-                "DELETE FROM deployment_referrers
-                 WHERE deployment_id = ?1 AND kind = ?2 AND ref_id = ?3",
-                params![deployment_id.to_string(), kind, ref_id],
+                "DELETE FROM version_referrers
+                 WHERE version_id = ?1 AND kind = ?2 AND ref_id = ?3",
+                params![version_id.to_string(), kind, ref_id],
             )
             .map_err(|_| db_error())?;
             Ok(())
         })
     }
 
-    /// Enumerate every registered non-memory referrer for one deployment.
-    pub fn deployment_referrers(
+    /// Enumerate every registered non-memory referrer for one version.
+    pub fn version_referrers(
         &self,
-        deployment_id: DeploymentId,
-    ) -> Result<Vec<DeploymentReferrer>, PlatformError> {
+        version_id: VersionId,
+    ) -> Result<Vec<VersionReferrer>, PlatformError> {
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT deployment_id, kind, ref_id, created_at_ms
-                     FROM deployment_referrers WHERE deployment_id = ?1
+                    "SELECT version_id, kind, ref_id, created_at_ms
+                     FROM version_referrers WHERE version_id = ?1
                      ORDER BY kind, ref_id",
                 )
                 .map_err(|_| db_error())?;
             let rows = stmt
-                .query_map([deployment_id.to_string()], |row| {
+                .query_map([version_id.to_string()], |row| {
                     let id: String = row.get(0)?;
-                    Ok(DeploymentReferrer {
-                        deployment_id: DeploymentId::from_str(&id)
+                    Ok(VersionReferrer {
+                        version_id: VersionId::from_str(&id)
                             .map_err(|_| rusqlite::Error::InvalidQuery)?,
                         kind: row.get(1)?,
                         ref_id: row.get(2)?,
@@ -1875,39 +2092,39 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Fence a non-active deployment in `SQLite` before waiting on in-memory pins.
-    pub fn begin_deployment_delete(
+    /// Fence a non-active version in `SQLite` before waiting on in-memory pins.
+    pub fn begin_version_delete(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
             require_tenant_worker(&worker)?;
-            if worker.active_deployment_id == Some(deployment_id) {
+            if worker.active_version_id == Some(version_id) {
                 return Err(PlatformError::new(
-                    ErrorCode::DeploymentActive,
-                    "active deployment cannot be deleted",
+                    ErrorCode::VersionActive,
+                    "active version cannot be deleted",
                 ));
             }
             let referenced: bool = tx
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM deployment_referrers WHERE deployment_id = ?1)",
-                    [deployment_id.to_string()],
+                    "SELECT EXISTS(SELECT 1 FROM version_referrers WHERE version_id = ?1)",
+                    [version_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
             if referenced {
                 return Err(PlatformError::new(
-                    ErrorCode::DeploymentReferenced,
-                    "deployment still has registered referrers",
+                    ErrorCode::VersionReferenced,
+                    "version still has registered referrers",
                 ));
             }
             let state: Option<String> = tx
                 .query_row(
-                    "SELECT state FROM worker_deployments WHERE id = ?1 AND worker_id = ?2",
-                    params![deployment_id.to_string(), worker_id.to_string()],
+                    "SELECT state FROM worker_versions WHERE id = ?1 AND worker_id = ?2",
+                    params![version_id.to_string(), worker_id.to_string()],
                     |row| row.get(0),
                 )
                 .optional()
@@ -1917,24 +2134,24 @@ impl<'a> WorkerRepository<'a> {
             }
             let changed = tx
                 .execute(
-                    "UPDATE worker_deployments SET state = 'deleting'
+                    "UPDATE worker_versions SET state = 'deleting'
                  WHERE id = ?1 AND worker_id = ?2 AND state IN ('ready', 'rejected')",
-                    params![deployment_id.to_string(), worker_id.to_string()],
+                    params![version_id.to_string(), worker_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
-                return Err(deployment_not_found());
+                return Err(version_not_found());
             }
             Ok(())
         })
     }
 
-    /// Finish a deleting deployment after its process-local pins drained.
-    pub fn finalize_deployment_delete(
+    /// Finish a deleting version after its process-local pins drained.
+    pub fn finalize_version_delete(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
@@ -1943,91 +2160,91 @@ impl<'a> WorkerRepository<'a> {
             let deleting: bool = tx
                 .query_row(
                     "SELECT EXISTS(
-                        SELECT 1 FROM worker_deployments
+                        SELECT 1 FROM worker_versions
                         WHERE id = ?1 AND worker_id = ?2 AND state = 'deleting'
                     )",
-                    params![deployment_id.to_string(), worker_id.to_string()],
+                    params![version_id.to_string(), worker_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
             if !deleting {
-                return Err(deployment_not_found());
+                return Err(version_not_found());
             }
             let referenced: bool = tx
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM deployment_referrers WHERE deployment_id = ?1)",
-                    [deployment_id.to_string()],
+                    "SELECT EXISTS(SELECT 1 FROM version_referrers WHERE version_id = ?1)",
+                    [version_id.to_string()],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
             if referenced {
                 return Err(PlatformError::new(
-                    ErrorCode::DeploymentReferenced,
-                    "deployment acquired a registered referrer while deleting",
+                    ErrorCode::VersionReferenced,
+                    "version acquired a registered referrer while deleting",
                 ));
             }
             tx.execute(
-                "DELETE FROM deployment_services WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM version_services WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "DELETE FROM deployment_cron_declarations WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM version_cron_declarations WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "DELETE FROM deployment_cron_configs WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM version_cron_configs WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "DELETE FROM deployment_queue_consumers WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM version_queue_consumers WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "DELETE FROM queue_producer_bindings WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM queue_producer_bindings WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "DELETE FROM workflow_bindings WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM workflow_bindings WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "DELETE FROM deployment_bindings WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM version_bindings WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "DELETE FROM deployment_vars WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM version_vars WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "DELETE FROM deployment_secrets WHERE deployment_id = ?1",
-                [deployment_id.to_string()],
+                "DELETE FROM version_secrets WHERE version_id = ?1",
+                [version_id.to_string()],
             )
             .map_err(|_| db_error())?;
-            crate::assets::delete_deployment_assets(tx, deployment_id)?;
+            crate::assets::delete_version_assets(tx, version_id)?;
             let changed = tx
                 .execute(
-                    "UPDATE worker_deployments SET state = 'tombstoned', deleted_at_ms = ?1
+                    "UPDATE worker_versions SET state = 'tombstoned', deleted_at_ms = ?1
                  WHERE id = ?2 AND worker_id = ?3 AND state = 'deleting'",
-                    params![now_ms, deployment_id.to_string(), worker_id.to_string()],
+                    params![now_ms, version_id.to_string(), worker_id.to_string()],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
-                return Err(deployment_not_found());
+                return Err(version_not_found());
             }
             audit(
                 tx,
                 account_id,
-                "deployment.delete",
-                "deployment",
-                &deployment_id.to_string(),
+                "version.delete",
+                "version",
+                &version_id.to_string(),
                 request_id,
                 br#"{"state":"tombstoned"}"#,
                 now_ms,
@@ -2037,28 +2254,28 @@ impl<'a> WorkerRepository<'a> {
     }
 
     /// Tombstone synchronously when the caller has already proven no pins exist.
-    pub fn tombstone_deployment(
+    pub fn tombstone_version(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        self.begin_deployment_delete(account_id, worker_id, deployment_id)?;
-        self.finalize_deployment_delete(account_id, worker_id, deployment_id, request_id, now_ms)
+        self.begin_version_delete(account_id, worker_id, version_id)?;
+        self.finalize_version_delete(account_id, worker_id, version_id, request_id, now_ms)
     }
 
     /// List crash-recovery candidates left in `deleting`.
-    pub fn deleting_deployments(&self) -> Result<Vec<DeploymentId>, PlatformError> {
+    pub fn deleting_versions(&self) -> Result<Vec<VersionId>, PlatformError> {
         self.db.with_read(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id FROM worker_deployments WHERE state = 'deleting' ORDER BY id")
+                .prepare("SELECT id FROM worker_versions WHERE state = 'deleting' ORDER BY id")
                 .map_err(|_| db_error())?;
             let rows = stmt
                 .query_map([], |row| {
                     let id: String = row.get(0)?;
-                    DeploymentId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)
+                    VersionId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)
                 })
                 .map_err(|_| db_error())?;
             collect_rows(rows)
@@ -2066,7 +2283,7 @@ impl<'a> WorkerRepository<'a> {
     }
 
     /// Re-enter a bounded batch of committed `deleting` rows after process restart.
-    pub fn recover_deleting_deployments(
+    pub fn recover_deleting_versions(
         &self,
         request_id: RequestId,
         now_ms: i64,
@@ -2083,10 +2300,10 @@ impl<'a> WorkerRepository<'a> {
                 let mut stmt = tx
                     .prepare(
                         "SELECT d.id, d.worker_id, w.account_id
-                         FROM worker_deployments d JOIN workers w ON w.id = d.worker_id
+                         FROM worker_versions d JOIN workers w ON w.id = d.worker_id
                          WHERE d.state = 'deleting'
                            AND NOT EXISTS (
-                             SELECT 1 FROM deployment_referrers r WHERE r.deployment_id = d.id
+                             SELECT 1 FROM version_referrers r WHERE r.version_id = d.id
                            )
                          ORDER BY d.id LIMIT ?1",
                     )
@@ -2107,60 +2324,57 @@ impl<'a> WorkerRepository<'a> {
                 out
             };
             let mut recovered = 0_u32;
-            for (deployment, _worker, account) in candidates {
+            for (version, _worker, account) in candidates {
                 tx.execute(
-                    "DELETE FROM deployment_services WHERE deployment_id = ?1",
-                    [&deployment],
+                    "DELETE FROM version_services WHERE version_id = ?1",
+                    [&version],
                 )
                 .map_err(|_| db_error())?;
                 tx.execute(
-                    "DELETE FROM deployment_cron_declarations WHERE deployment_id = ?1",
-                    [&deployment],
+                    "DELETE FROM version_cron_declarations WHERE version_id = ?1",
+                    [&version],
                 )
                 .map_err(|_| db_error())?;
                 tx.execute(
-                    "DELETE FROM deployment_cron_configs WHERE deployment_id = ?1",
-                    [&deployment],
+                    "DELETE FROM version_cron_configs WHERE version_id = ?1",
+                    [&version],
                 )
                 .map_err(|_| db_error())?;
                 tx.execute(
-                    "DELETE FROM deployment_queue_consumers WHERE deployment_id = ?1",
-                    [&deployment],
+                    "DELETE FROM version_queue_consumers WHERE version_id = ?1",
+                    [&version],
                 )
                 .map_err(|_| db_error())?;
                 tx.execute(
-                    "DELETE FROM queue_producer_bindings WHERE deployment_id = ?1",
-                    [&deployment],
+                    "DELETE FROM queue_producer_bindings WHERE version_id = ?1",
+                    [&version],
                 )
                 .map_err(|_| db_error())?;
                 tx.execute(
-                    "DELETE FROM workflow_bindings WHERE deployment_id = ?1",
-                    [&deployment],
+                    "DELETE FROM workflow_bindings WHERE version_id = ?1",
+                    [&version],
                 )
                 .map_err(|_| db_error())?;
                 tx.execute(
-                    "DELETE FROM deployment_bindings WHERE deployment_id = ?1",
-                    [&deployment],
+                    "DELETE FROM version_bindings WHERE version_id = ?1",
+                    [&version],
                 )
                 .map_err(|_| db_error())?;
+                tx.execute("DELETE FROM version_vars WHERE version_id = ?1", [&version])
+                    .map_err(|_| db_error())?;
                 tx.execute(
-                    "DELETE FROM deployment_vars WHERE deployment_id = ?1",
-                    [&deployment],
+                    "DELETE FROM version_secrets WHERE version_id = ?1",
+                    [&version],
                 )
                 .map_err(|_| db_error())?;
-                tx.execute(
-                    "DELETE FROM deployment_secrets WHERE deployment_id = ?1",
-                    [&deployment],
-                )
-                .map_err(|_| db_error())?;
-                let deployment_id = DeploymentId::from_str(&deployment).map_err(|_| invariant())?;
-                crate::assets::delete_deployment_assets(tx, deployment_id)?;
+                let version_id = VersionId::from_str(&version).map_err(|_| invariant())?;
+                crate::assets::delete_version_assets(tx, version_id)?;
                 let changed = tx
                     .execute(
-                        "UPDATE worker_deployments
+                        "UPDATE worker_versions
                          SET state = 'tombstoned', deleted_at_ms = ?1
                          WHERE id = ?2 AND state = 'deleting'",
-                        params![now_ms, deployment],
+                        params![now_ms, version],
                     )
                     .map_err(|_| db_error())?;
                 if changed == 1 {
@@ -2168,9 +2382,9 @@ impl<'a> WorkerRepository<'a> {
                     audit(
                         tx,
                         account_id,
-                        "deployment.delete.recover",
-                        "deployment",
-                        &deployment,
+                        "version.delete.recover",
+                        "version",
+                        &version,
                         request_id,
                         br#"{"state":"tombstoned"}"#,
                         now_ms,
@@ -2182,7 +2396,7 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Remove expired idempotency rows and their registered deployment refs atomically.
+    /// Remove expired idempotency rows and their registered version refs atomically.
     pub fn prune_expired_idempotency(&self, now_ms: i64, limit: u32) -> Result<u32, PlatformError> {
         if limit == 0 || limit > 10_000 {
             return Err(PlatformError::new(
@@ -2194,7 +2408,7 @@ impl<'a> WorkerRepository<'a> {
             let expired = {
                 let mut stmt = tx
                     .prepare(
-                        "SELECT account_id, scope, idempotency_key, deployment_id
+                        "SELECT account_id, scope, idempotency_key, version_id
                          FROM control_idempotency
                          WHERE expires_at_ms <= ?1 ORDER BY expires_at_ms LIMIT ?2",
                     )
@@ -2216,13 +2430,13 @@ impl<'a> WorkerRepository<'a> {
                 out
             };
             let mut pruned = 0_u32;
-            for (account, scope, key, deployment) in expired {
-                if let Some(deployment) = deployment {
+            for (account, scope, key, version) in expired {
+                if let Some(version) = version {
                     let account_id = AccountId::from_str(&account).map_err(|_| invariant())?;
                     tx.execute(
-                        "DELETE FROM deployment_referrers
-                         WHERE deployment_id = ?1 AND kind = 'control_idempotency' AND ref_id = ?2",
-                        params![deployment, idempotency_ref_id(account_id, &scope, &key)],
+                        "DELETE FROM version_referrers
+                         WHERE version_id = ?1 AND kind = 'control_idempotency' AND ref_id = ?2",
+                        params![version, idempotency_ref_id(account_id, &scope, &key)],
                     )
                     .map_err(|_| db_error())?;
                 }
@@ -2260,7 +2474,7 @@ impl<'a> WorkerRepository<'a> {
         {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
-                "deployment retention policy is invalid",
+                "version retention policy is invalid",
             ));
         }
         let cutoff = now_ms.saturating_sub(i64::try_from(min_age_ms).map_err(|_| invariant())?);
@@ -2268,22 +2482,25 @@ impl<'a> WorkerRepository<'a> {
             let mut stmt = conn
                 .prepare(
                     "SELECT d.id, d.worker_id, w.account_id
-                     FROM worker_deployments d JOIN workers w ON w.id = d.worker_id
+                     FROM worker_versions d JOIN workers w ON w.id = d.worker_id
                      WHERE d.state IN ('ready', 'rejected')
                        AND d.created_at_ms <= ?1
-                       AND (w.active_deployment_id IS NULL OR w.active_deployment_id != d.id)
                        AND NOT EXISTS (
-                         SELECT 1 FROM deployment_referrers r WHERE r.deployment_id = d.id
+                         SELECT 1 FROM worker_deployments active
+                         WHERE active.id=w.active_deployment_id AND active.version_id=d.id
+                       )
+                       AND NOT EXISTS (
+                         SELECT 1 FROM version_referrers r WHERE r.version_id = d.id
                        )
                        AND (
                          (d.state = 'ready' AND (
-                           SELECT count(*) FROM worker_deployments newer
+                           SELECT count(*) FROM worker_versions newer
                            WHERE newer.worker_id = d.worker_id AND newer.state = 'ready'
                              AND newer.version_number > d.version_number
                          ) >= ?2)
                          OR
                          (d.state = 'rejected' AND (
-                           SELECT count(*) FROM worker_deployments newer
+                           SELECT count(*) FROM worker_versions newer
                            WHERE newer.worker_id = d.worker_id AND newer.state = 'rejected'
                              AND newer.version_number > d.version_number
                          ) >= ?3)
@@ -2300,7 +2517,7 @@ impl<'a> WorkerRepository<'a> {
                         i64::from(limit)
                     ],
                     |row| {
-                        let deployment: String = row.get(0)?;
+                        let version: String = row.get(0)?;
                         let worker: String = row.get(1)?;
                         let account: String = row.get(2)?;
                         Ok(RetentionCandidate {
@@ -2308,7 +2525,7 @@ impl<'a> WorkerRepository<'a> {
                                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
                             worker_id: WorkerId::from_str(&worker)
                                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                            deployment_id: DeploymentId::from_str(&deployment)
+                            version_id: VersionId::from_str(&version)
                                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
                         })
                     },
@@ -2318,19 +2535,19 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Return all artifact references still retained by non-tombstoned deployments.
+    /// Return all artifact references still retained by non-tombstoned versions.
     pub fn referenced_artifacts(&self) -> Result<Vec<([u8; 32], u64)>, PlatformError> {
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
                     "SELECT DISTINCT r.sha256, r.size
-                     FROM deployment_object_refs r
-                     JOIN worker_deployments d ON d.id = r.deployment_id
+                     FROM version_object_refs r
+                     JOIN worker_versions d ON d.id = r.version_id
                      WHERE d.state != 'tombstoned'
                      UNION
                      SELECT DISTINCT o.sha256, o.size
-                     FROM deployment_upload_objects o
-                     JOIN deployment_uploads u ON u.id = o.session_id
+                     FROM version_upload_objects o
+                     JOIN version_uploads u ON u.id = o.session_id
                      WHERE o.verified = 1 AND u.status IN ('open', 'finalizing')",
                 )
                 .map_err(|_| db_error())?;
@@ -2383,7 +2600,7 @@ pub(crate) fn validate_referrer(kind: &str, ref_id: &str) -> Result<(), Platform
     if !valid(kind, 64) || !valid(ref_id, 256) {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
-            "deployment referrer token is invalid",
+            "version referrer token is invalid",
         ));
     }
     Ok(())
@@ -2391,7 +2608,7 @@ pub(crate) fn validate_referrer(kind: &str, ref_id: &str) -> Result<(), Platform
 
 pub(crate) fn idempotency_ref_id(account_id: AccountId, scope: &str, key: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"open-compute/deployment-referrer/v1\0");
+    hasher.update(b"open-compute/version-referrer/v1\0");
     hasher.update(account_id.to_string().as_bytes());
     hasher.update([0]);
     hasher.update(scope.as_bytes());
@@ -2473,8 +2690,10 @@ fn read_worker_tx(
     worker_id: WorkerId,
 ) -> Result<WorkerRecord, PlatformError> {
     tx.query_row(
-        "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
+        "SELECT id, account_id, name,
+                (SELECT version_id FROM worker_deployments WHERE id=workers.active_deployment_id),
+                do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
+                ownership, active_deployment_id
          FROM workers WHERE id = ?1 AND account_id = ?2",
         params![worker_id.to_string(), account_id.to_string()],
         map_worker,
@@ -2486,15 +2705,13 @@ fn read_worker_tx(
 
 fn read_vars(
     conn: &rusqlite::Connection,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
 ) -> Result<BTreeMap<String, Vec<u8>>, PlatformError> {
     let mut stmt = conn
-        .prepare(
-            "SELECT name, value_json FROM deployment_vars WHERE deployment_id = ?1 ORDER BY name",
-        )
+        .prepare("SELECT name, value_json FROM version_vars WHERE version_id = ?1 ORDER BY name")
         .map_err(|_| db_error())?;
     let rows = stmt
-        .query_map([deployment_id.to_string()], |row| {
+        .query_map([version_id.to_string()], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
         })
         .map_err(|_| db_error())?;
@@ -2508,20 +2725,20 @@ fn read_vars(
 
 fn read_secrets(
     conn: &rusqlite::Connection,
-    deployment_id: DeploymentId,
-) -> Result<BTreeMap<String, StoredDeploymentSecret>, PlatformError> {
+    version_id: VersionId,
+) -> Result<BTreeMap<String, StoredVersionSecret>, PlatformError> {
     let mut stmt = conn
         .prepare(
             "SELECT name, revision_id, key_id, algorithm, nonce, ciphertext
-         FROM deployment_secrets WHERE deployment_id = ?1 ORDER BY name",
+         FROM version_secrets WHERE version_id = ?1 ORDER BY name",
         )
         .map_err(|_| db_error())?;
     let rows = stmt
-        .query_map([deployment_id.to_string()], |row| {
+        .query_map([version_id.to_string()], |row| {
             let name: String = row.get(0)?;
             Ok((
                 name.clone(),
-                StoredDeploymentSecret {
+                StoredVersionSecret {
                     name,
                     revision_id: row.get(1)?,
                     envelope: SecretEnvelope {
@@ -2553,8 +2770,12 @@ fn map_worker(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRecord> {
         id: WorkerId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
         account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(2)?,
-        active_deployment_id: active
+        active_deployment_id: row
+            .get::<_, Option<String>>(10)?
             .map(|value| DeploymentId::from_str(&value).map_err(|_| rusqlite::Error::InvalidQuery))
+            .transpose()?,
+        active_version_id: active
+            .map(|value| VersionId::from_str(&value).map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
         do_storage_id: row.get(4)?,
         route_generation: u64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -2565,20 +2786,18 @@ fn map_worker(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRecord> {
     })
 }
 
-fn map_system_owned_deployment(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<SystemOwnedDeploymentRecord> {
+fn map_system_owned_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<SystemOwnedVersionRecord> {
     let kind: String = row.get(0)?;
     let account: String = row.get(1)?;
     let worker: String = row.get(2)?;
     let active: Option<String> = row.get(3)?;
     let assets: Vec<u8> = row.get(4)?;
-    Ok(SystemOwnedDeploymentRecord {
-        kind: SystemOwnedDeploymentKind::parse(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
+    Ok(SystemOwnedVersionRecord {
+        kind: SystemOwnedVersionKind::parse(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
         account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        active_deployment_id: active
-            .map(|value| DeploymentId::from_str(&value).map_err(|_| rusqlite::Error::InvalidQuery))
+        active_version_id: active
+            .map(|value| VersionId::from_str(&value).map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
         assets_sha256: array32(&assets)?,
         updated_at_ms: row.get(5)?,
@@ -2596,7 +2815,7 @@ fn require_tenant_worker(worker: &WorkerRecord) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord> {
+fn map_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionRecord> {
     let id: String = row.get(0)?;
     let worker: String = row.get(1)?;
     let version: i64 = row.get(2)?;
@@ -2607,13 +2826,13 @@ fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord>
     let artifact_schema: Option<i64> = row.get(7)?;
     let descriptor: Vec<u8> = row.get(9)?;
     let loader_schema: i64 = row.get(10)?;
-    Ok(DeploymentRecord {
-        id: DeploymentId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+    Ok(VersionRecord {
+        id: VersionId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
         version_number: u64::try_from(version).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        content_kind: DeploymentContentKind::parse(&content_kind)
+        content_kind: VersionContentKind::parse(&content_kind)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        state: DeploymentState::parse(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        state: VersionState::parse(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
         artifact_sha256: artifact.as_deref().map(array32).transpose()?,
         artifact_size: artifact_size
             .map(u64::try_from)
@@ -2626,6 +2845,9 @@ fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord>
         main_module: row.get(8)?,
         worker_code_sha256: array32(&descriptor)?,
         loader_schema_version: u32::try_from(loader_schema)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        compatibility_date: row.get(16)?,
+        compatibility_flags: serde_json::from_slice(&row.get::<_, Vec<u8>>(17)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         created_at_ms: row.get(11)?,
         ready_at_ms: row.get(12)?,
@@ -2649,6 +2871,21 @@ fn map_route(row: &rusqlite::Row<'_>) -> rusqlite::Result<RouteRecord> {
         path_prefix: row.get(5)?,
         entrypoint: row.get(6)?,
         generation: u64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?,
+    })
+}
+
+fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord> {
+    let id: String = row.get(0)?;
+    let worker: String = row.get(1)?;
+    let version: String = row.get(2)?;
+    let source: String = row.get(3)?;
+    Ok(DeploymentRecord {
+        id: DeploymentId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        source: DeploymentSource::parse(&source).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        created_at_ms: row.get(4)?,
+        deleted_at_ms: row.get(5)?,
     })
 }
 
@@ -2699,8 +2936,8 @@ pub(crate) fn worker_not_found() -> PlatformError {
     PlatformError::new(ErrorCode::WorkerNotFound, "Worker was not found")
 }
 
-pub(crate) fn deployment_not_found() -> PlatformError {
-    PlatformError::new(ErrorCode::DeploymentNotFound, "deployment was not found")
+pub(crate) fn version_not_found() -> PlatformError {
+    PlatformError::new(ErrorCode::VersionNotFound, "version was not found")
 }
 
 pub(crate) fn route_not_found() -> PlatformError {
@@ -2712,8 +2949,8 @@ pub(crate) fn route_not_found() -> PlatformError {
 
 pub(crate) fn invariant() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentInvariantViolation,
-        "persisted deployment invariant failed",
+        ErrorCode::VersionInvariantViolation,
+        "persisted version invariant failed",
     )
 }
 

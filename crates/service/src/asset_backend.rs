@@ -1,4 +1,4 @@
-//! Private deployment-scoped static-assets binding backend.
+//! Private version-scoped static-assets binding backend.
 
 use axum::body::Body;
 use axum::extract::Request;
@@ -7,13 +7,13 @@ use axum::response::Response;
 use bytes::Bytes;
 use hyper::body::{Body as HttpBody, Frame, SizeHint};
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
-use open_compute_core::{DeploymentId, ErrorCode, PlatformError};
+use open_compute_core::{ErrorCode, PlatformError, VersionId};
 use open_compute_storage::{
-    DeploymentAssetsRepository, DeploymentRecord, PlatformStorage, WorkerRepository,
+    PlatformStorage, VersionAssetsRepository, VersionRecord, WorkerRepository,
 };
 use open_compute_workers::{
-    AssetManifestV1, AssetRequest, AssetResponsePlan, AssetRoutingConfigV1, DeploymentPin,
-    DeploymentPins, plan_asset_response,
+    AssetManifestV1, AssetRequest, AssetResponsePlan, AssetRoutingConfigV1, VersionPin,
+    VersionPins, plan_asset_response,
 };
 use std::pin::Pin;
 use std::str::FromStr;
@@ -25,7 +25,7 @@ use url::Url;
 const ASSET_METHOD_HEADER: &str = "x-open-compute-asset-method";
 const ASSET_URL_HEADER: &str = "x-open-compute-asset-url";
 const ASSET_REPRESENTATION_LENGTH_HEADER: &str = "x-open-compute-asset-representation-length";
-const DEPLOYMENT_HEADER: &str = "x-open-compute-deployment-id";
+const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 
@@ -35,7 +35,7 @@ pub struct AssetBindingService {
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     cache: Arc<ArtifactCache>,
-    pins: DeploymentPins,
+    pins: VersionPins,
 }
 
 impl AssetBindingService {
@@ -45,7 +45,7 @@ impl AssetBindingService {
         storage: Arc<PlatformStorage>,
         artifacts: ArtifactStore,
         cache: Arc<ArtifactCache>,
-        pins: DeploymentPins,
+        pins: VersionPins,
     ) -> Self {
         Self {
             storage,
@@ -64,12 +64,12 @@ impl AssetBindingService {
     }
 
     async fn handle_authorized(&self, request: Request) -> Result<Response, PlatformError> {
-        let deployment_id = request
+        let version_id = request
             .headers()
-            .get(DEPLOYMENT_HEADER)
+            .get(VERSION_HEADER)
             .and_then(|value| value.to_str().ok())
             .ok_or_else(protocol_error)
-            .and_then(|value| DeploymentId::from_str(value).map_err(|_| protocol_error()))?;
+            .and_then(|value| VersionId::from_str(value).map_err(|_| protocol_error()))?;
         let descriptor = request
             .headers()
             .get(DESCRIPTOR_HEADER)
@@ -105,9 +105,9 @@ impl AssetBindingService {
             .and_then(|value| value.to_str().ok());
         let has_authorization = request.headers().contains_key(header::AUTHORIZATION);
         let has_range = request.headers().contains_key(header::RANGE);
-        let pin = self.pins.pin(deployment_id)?;
-        let (account_id, worker_id, assets) = DeploymentAssetsRepository::new(self.storage.db())
-            .authorize_ready(deployment_id, &descriptor)
+        let pin = self.pins.pin(version_id)?;
+        let (account_id, worker_id, assets) = VersionAssetsRepository::new(self.storage.db())
+            .authorize_ready(version_id, &descriptor)
             .map_err(|_| invariant())?;
         let manifest = serde_json::from_slice::<AssetManifestV1>(&assets.manifest_json)
             .map_err(|_| invariant())?;
@@ -119,11 +119,8 @@ impl AssetBindingService {
         {
             return Err(invariant());
         }
-        let deployment = WorkerRepository::new(self.storage.db()).get_worker_deployment(
-            account_id,
-            worker_id,
-            deployment_id,
-        )?;
+        let version = WorkerRepository::new(self.storage.db())
+            .get_worker_version(account_id, worker_id, version_id)?;
         let plan = plan_asset_response(
             &manifest,
             &routing,
@@ -142,7 +139,7 @@ impl AssetBindingService {
             &self.storage,
             &self.artifacts,
             Some(&self.cache),
-            &deployment,
+            &version,
             plan,
         )
         .await?;
@@ -161,7 +158,7 @@ pub(crate) async fn serve_asset_plan(
     storage: &PlatformStorage,
     artifacts: &ArtifactStore,
     cache: Option<&Arc<ArtifactCache>>,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     plan: AssetResponsePlan,
 ) -> Result<Response, PlatformError> {
     let status = StatusCode::from_u16(plan.status).map_err(|_| internal())?;
@@ -175,9 +172,9 @@ pub(crate) async fn serve_asset_plan(
         None => Body::empty(),
         Some(entry) => {
             let digest = parse_stored_digest(&entry.sha256)?;
-            DeploymentAssetsRepository::new(storage.db()).authorize_blob(
-                deployment.id,
-                &deployment.worker_code_sha256,
+            VersionAssetsRepository::new(storage.db()).authorize_blob(
+                version.id,
+                &version.worker_code_sha256,
                 &digest,
                 entry.size,
             )?;
@@ -236,7 +233,7 @@ pub(crate) async fn serve_asset_plan(
 
 struct PinnedBody {
     inner: Body,
-    pin: Option<DeploymentPin>,
+    pin: Option<VersionPin>,
 }
 
 impl HttpBody for PinnedBody {
@@ -268,7 +265,7 @@ impl HttpBody for PinnedBody {
     }
 }
 
-pub(crate) fn pin_response(response: Response, pin: DeploymentPin) -> Response {
+pub(crate) fn pin_response(response: Response, pin: VersionPin) -> Response {
     let (parts, body) = response.into_parts();
     Response::from_parts(
         parts,
@@ -316,7 +313,7 @@ fn asset_error(error: &PlatformError) -> Response {
         ErrorCode::BindingProtocolError => {
             (ErrorCode::BindingProtocolError, StatusCode::BAD_REQUEST)
         }
-        ErrorCode::AssetIntegrityError | ErrorCode::DeploymentInvariantViolation => (
+        ErrorCode::AssetIntegrityError | ErrorCode::VersionInvariantViolation => (
             ErrorCode::AssetIntegrityError,
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
@@ -346,8 +343,8 @@ fn protocol_error() -> PlatformError {
 
 fn invariant() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentInvariantViolation,
-        "asset binding deployment authority is inconsistent",
+        ErrorCode::VersionInvariantViolation,
+        "asset binding version authority is inconsistent",
     )
 }
 

@@ -20,9 +20,8 @@ use bytes::Bytes;
 use http_body_util::BodyExt as _;
 use open_compute_artifacts::{AiSearchObjectRef, AiSearchObjectStore};
 use open_compute_core::{
-    AiConfig, AiGenerationCapability, BindingId, BindingKind, DeploymentId, ErrorCode,
-    PlatformError, RequestId, ResolvedEmbeddingModelContract, ResourceAvailability, ResourceId,
-    ResourceState,
+    AiConfig, AiGenerationCapability, BindingId, BindingKind, ErrorCode, PlatformError, RequestId,
+    ResolvedEmbeddingModelContract, ResourceAvailability, ResourceId, ResourceState, VersionId,
 };
 use open_compute_search::ai_search::{
     ChunkConfig, FusionMethod, KeywordMatchMode as FtsKeywordMatchMode, RankedCandidate,
@@ -323,7 +322,7 @@ impl AiSearchBindingService {
                 let staging = self
                     .storage
                     .data_dir()
-                    .deployment_staging_dir()
+                    .version_staging_dir()
                     .join(format!("ai-search-upload-{}", Uuid::now_v7()));
                 let upload = stage_upload(request.into_body(), staging).await?;
                 self.upload(authority, upload).await
@@ -345,7 +344,7 @@ impl AiSearchBindingService {
 
     fn authorize(&self, headers: &HeaderMap) -> Result<Authority, PlatformError> {
         let binding_id = parse_header::<BindingId>(headers, "x-open-compute-binding-id")?;
-        let deployment_id = parse_header::<DeploymentId>(headers, "x-open-compute-deployment-id")?;
+        let version_id = parse_header::<VersionId>(headers, "x-open-compute-version-id")?;
         let resource_id = parse_header::<ResourceId>(headers, "x-open-compute-resource-id")?;
         let generation = header_text(headers, "x-open-compute-resource-generation")?
             .parse::<u64>()
@@ -354,7 +353,7 @@ impl AiSearchBindingService {
         let request_id = parse_header::<RequestId>(headers, "x-open-compute-request-id")?;
         let binding = BindingRepository::new(self.storage.db()).authorize(
             binding_id,
-            deployment_id,
+            version_id,
             &descriptor,
         )?;
         if !matches!(

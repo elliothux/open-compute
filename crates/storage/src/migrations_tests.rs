@@ -49,12 +49,12 @@ fn migration_invariants_reject_missing_non_strict_and_invalid_indexes() {
     );
     for table in [
         "workers",
-        "worker_deployments",
-        "deployment_vars",
-        "deployment_secrets",
+        "worker_versions",
+        "version_vars",
+        "version_secrets",
         "worker_routes",
         "control_idempotency",
-        "deployment_referrers",
+        "version_referrers",
         "control_audit_events",
     ] {
         version_two.push_str(&format!("CREATE TABLE {table}(id INTEGER) STRICT;"));

@@ -11,7 +11,7 @@ use open_compute_core::{
 };
 use open_compute_core::{BindingId, BindingKind};
 use open_compute_storage::{
-    NewDeployment, NewDeploymentBinding, R2BucketRepository, R2MultipartPartRecord,
+    NewVersion, NewVersionBinding, R2BucketRepository, R2MultipartPartRecord,
     R2MultipartRepository, R2MultipartState, R2MultipartUploadRecord, R2ObjectRecord,
     ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, WorkerRepository,
 };
@@ -28,7 +28,7 @@ struct Fixture {
     storage: Arc<PlatformStorage>,
     pins: ResourcePins,
     binding: BindingId,
-    deployment: DeploymentId,
+    version: VersionId,
     descriptor: [u8; 32],
     resource: ResourceId,
 }
@@ -104,14 +104,14 @@ async fn fixture() -> Fixture {
     let (worker, _) = workers
         .create_worker(account, "r2-worker", RequestId::generate(), 12, 1_000_000)
         .unwrap();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let binding = BindingId::generate();
     let descriptor = [9_u8; 32];
     workers
-        .insert_staging_deployment(
-            &deployment_input(account, worker.id, deployment),
-            &open_compute_storage::NewDeploymentProducts {
-                bindings: &[NewDeploymentBinding {
+        .insert_staging_version(
+            &version_input(account, worker.id, version),
+            &open_compute_storage::NewVersionProducts {
+                bindings: &[NewVersionBinding {
                     id: binding,
                     name: "BUCKET".to_owned(),
                     kind: BindingKind::R2Bucket,
@@ -127,8 +127,8 @@ async fn fixture() -> Fixture {
             1_000_000,
         )
         .unwrap();
-    workers.begin_validation(deployment).unwrap();
-    workers.mark_ready(deployment, 13).unwrap();
+    workers.begin_validation(version).unwrap();
+    workers.mark_ready(version, 13).unwrap();
     let pins = ResourcePins::new();
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
@@ -143,27 +143,25 @@ async fn fixture() -> Fixture {
         storage,
         pins,
         binding,
-        deployment,
+        version,
         descriptor,
         resource,
     }
 }
 
-fn deployment_input(
-    account_id: AccountId,
-    worker_id: WorkerId,
-    deployment_id: DeploymentId,
-) -> NewDeployment {
-    NewDeployment {
-        id: deployment_id,
+fn version_input(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) -> NewVersion {
+    NewVersion {
+        id: version_id,
         account_id,
         worker_id,
-        content_kind: open_compute_storage::DeploymentContentKind::Worker,
+        content_kind: open_compute_storage::VersionContentKind::Worker,
         artifact_sha256: Some([1; 32]),
         artifact_size: Some(1),
         artifact_schema_version: Some(1),
         main_module: Some("index.js".to_owned()),
         worker_code_sha256: [2; 32],
+        compatibility_date: "2026-08-30".into(),
+        compatibility_flags: Vec::new(),
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
         request_id: RequestId::generate(),
@@ -184,10 +182,7 @@ fn request(
             fixture.binding
         ))
         .header("content-type", content_type)
-        .header(
-            "x-open-compute-deployment-id",
-            fixture.deployment.to_string(),
-        )
+        .header("x-open-compute-version-id", fixture.version.to_string())
         .header(
             "x-open-compute-descriptor-sha256",
             hex::encode(fixture.descriptor),
@@ -497,10 +492,7 @@ async fn private_protocol_fails_closed_before_mutation_and_releases_cancelled_st
         .method("POST")
         .uri(format!("/internal/bindings/v1/r2/{}/head", fixture.binding))
         .header("content-type", JSON_CONTENT_TYPE)
-        .header(
-            "x-open-compute-deployment-id",
-            fixture.deployment.to_string(),
-        )
+        .header("x-open-compute-version-id", fixture.version.to_string())
         .header("x-open-compute-descriptor-sha256", "00".repeat(32))
         .header(
             "x-open-compute-request-id",
@@ -630,7 +622,7 @@ async fn object_authority_reconciles_every_current_put_and_delete_observation() 
         .locator(bucket.resource.id, &bucket.physical_prefix)
         .unwrap();
     let binding = BindingRepository::new(fixture.storage.db())
-        .authorize(fixture.binding, fixture.deployment, &fixture.descriptor)
+        .authorize(fixture.binding, fixture.version, &fixture.descriptor)
         .unwrap();
     let repo = R2ObjectRepository::new(fixture.storage.db());
     let timeout = Duration::from_secs(1);

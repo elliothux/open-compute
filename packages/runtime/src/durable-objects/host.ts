@@ -25,7 +25,7 @@ const INTERNAL = [
   "x-open-compute-account-id",
   "x-open-compute-worker-id",
   "x-open-compute-binding-id",
-  "x-open-compute-deployment-id",
+  "x-open-compute-version-id",
   "x-open-compute-descriptor-sha256",
   "x-open-compute-worker-code-sha256",
   "x-open-compute-route-generation",
@@ -205,7 +205,7 @@ function required(headers: Headers, name: string, pattern: RegExp): string {
 function authorityFromHeaders(headers: Headers) {
   const accountId = required(headers, "x-open-compute-account-id", /^[0-9a-f-]{36}$/);
   const workerId = required(headers, "x-open-compute-worker-id", /^[0-9a-f-]{36}$/);
-  const deploymentId = required(headers, "x-open-compute-deployment-id", /^[0-9a-f-]{36}$/);
+  const versionId = required(headers, "x-open-compute-version-id", /^[0-9a-f-]{36}$/);
   const workerCodeSha256 = required(
     headers,
     "x-open-compute-worker-code-sha256",
@@ -231,14 +231,14 @@ function authorityFromHeaders(headers: Headers) {
   return {
     accountId,
     workerId,
-    deploymentId,
+    versionId,
     workerCodeSha256,
     objectId,
     namespaceResourceId,
     className,
     routeGeneration,
     objectGeneration,
-    loaderKey: `${accountId}/${workerId}/${deploymentId}`,
+    loaderKey: `${accountId}/${workerId}/${versionId}`,
   };
 }
 
@@ -262,7 +262,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
       CREATE TABLE IF NOT EXISTS open_compute_host_meta (
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
         route_generation INTEGER NOT NULL,
-        deployment_id TEXT NOT NULL,
+        version_id TEXT NOT NULL,
         object_generation INTEGER NOT NULL,
         data_format_version INTEGER NOT NULL
       )
@@ -277,7 +277,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
 
   #meta() {
     const rows = this.ctx.storage.sql.exec(
-      "SELECT route_generation, deployment_id, object_generation, data_format_version "
+      "SELECT route_generation, version_id, object_generation, data_format_version "
       + "FROM open_compute_host_meta WHERE singleton = 1",
     ).toArray();
     return rows.length ? rows[0] : null;
@@ -355,9 +355,9 @@ export class DoHost extends DurableObject<DoHostEnv> {
     const physicalName = logicalPath.length === 0 ? "root" : await physicalFacetName(logicalPath);
     const version = this.#facetVersions.get(physicalName) ?? 0;
     const envelope = {
-      loaderKey: `${authority.accountId}/${authority.workerId}/${authority.deploymentId}`,
+      loaderKey: `${authority.accountId}/${authority.workerId}/${authority.versionId}`,
       expected: authority.workerCodeSha256,
-      runtimeKey: `runtime/${authority.accountId}/${authority.workerId}/${authority.deploymentId}`
+      runtimeKey: `runtime/${authority.accountId}/${authority.workerId}/${authority.versionId}`
         + `/${authority.workerCodeSha256}/g/${authority.routeGeneration}/do/${this.#activationId}`
         + `/${physicalName}/v/${version}/${entrypoint}`,
     };
@@ -369,14 +369,14 @@ export class DoHost extends DurableObject<DoHostEnv> {
       this.env.INTERNAL_TOKEN,
     );
     if (snapshot.routeGeneration !== authority.routeGeneration) {
-      throw bindingError("DO_DEPLOYMENT_STALE");
+      throw bindingError("DO_VERSION_STALE");
     }
     const built = modulesFor(snapshot, false, entrypoint, true);
     const code = {
       ...lockWorkerCode(this.env),
       mainModule: built.mainModule,
       modules: built.modules,
-      env: tenantEnv(snapshot, this.ctx, authority.deploymentId, doPolicy(this.env), true, false),
+      env: tenantEnv(snapshot, this.ctx, authority.versionId, doPolicy(this.env), true, false),
       globalOutbound: tenantGlobalOutbound(this.env, false),
     };
     Object.defineProperties(code.env, {
@@ -449,18 +449,18 @@ export class DoHost extends DurableObject<DoHostEnv> {
   async #tenant(authority: TenantDoAuthority) {
     const prior = this.#meta();
     if (prior && authority.routeGeneration < Number(prior.route_generation)) {
-      throw bindingError("DO_DEPLOYMENT_STALE");
+      throw bindingError("DO_VERSION_STALE");
     }
     if (prior && authority.objectGeneration !== Number(prior.object_generation)) {
       throw bindingError("DO_OBJECT_DELETING");
     }
     if (prior && authority.routeGeneration === Number(prior.route_generation)
-        && authority.deploymentId !== prior.deployment_id) {
+        && authority.versionId !== prior.version_id) {
       throw bindingError("DO_INTERNAL_PROTOCOL_ERROR");
     }
     if (prior && authority.routeGeneration > Number(prior.route_generation)) {
-      await this.ctx.facets.abort("tenant", "deployment-generation-advanced");
-      await this.#abortRegisteredFacets(undefined, "deployment-generation-advanced");
+      await this.ctx.facets.abort("tenant", "version-generation-advanced");
+      await this.#abortRegisteredFacets(undefined, "version-generation-advanced");
     }
     const cls = await this.#loadedClass(authority, authority.className, [], {});
     const facet = this.ctx.facets.get("tenant", () => ({
@@ -470,10 +470,10 @@ export class DoHost extends DurableObject<DoHostEnv> {
     if (!prior || authority.routeGeneration > Number(prior.route_generation)) {
       this.ctx.storage.sql.exec(
         "INSERT OR REPLACE INTO open_compute_host_meta "
-        + "(singleton, route_generation, deployment_id, object_generation, data_format_version) "
+        + "(singleton, route_generation, version_id, object_generation, data_format_version) "
         + "VALUES (1, ?, ?, ?, 1)",
         authority.routeGeneration,
-        authority.deploymentId,
+        authority.versionId,
         authority.objectGeneration,
       );
     }

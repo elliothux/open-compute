@@ -2,11 +2,11 @@ use super::*;
 use crate::binding_backend::KvBindingExecutor;
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{
-    BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
-    DeterministicClock, RequestId, ResourceState, SystemClock,
+    BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeterministicClock,
+    RequestId, ResourceState, SystemClock, VersionId,
 };
 use open_compute_storage::{
-    AuthorizedBinding, DeploymentBindingRecord, KvNamespaceRepository, PlatformStorage,
+    AuthorizedBinding, KvNamespaceRepository, PlatformStorage, VersionBindingRecord,
 };
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, KvResourceDriver, ResourceController,
@@ -57,9 +57,9 @@ fn fixture() -> (
         .resource;
     assert_eq!(resource.state, ResourceState::Ready);
     let binding = AuthorizedBinding {
-        binding: DeploymentBindingRecord {
+        binding: VersionBindingRecord {
             id: BindingId::generate(),
-            deployment_id: DeploymentId::generate(),
+            version_id: VersionId::generate(),
             name: "CACHE".to_owned(),
             kind: BindingKind::KvNamespace,
             resource_id,

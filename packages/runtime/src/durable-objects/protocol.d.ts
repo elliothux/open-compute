@@ -132,7 +132,7 @@ export interface FacetManagerCapability extends Fetcher {
 export interface TenantDoAuthority extends AlarmIdentity {
   accountId: string;
   workerId: string;
-  deploymentId: string;
+  versionId: string;
   workerCodeSha256: string;
   routeGeneration: number;
   className: string;

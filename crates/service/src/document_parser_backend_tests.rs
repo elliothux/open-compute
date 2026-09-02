@@ -6,15 +6,15 @@ use open_compute_document_parser::{
     DocumentErrorCode, DocumentFormat, DocumentMetadata, ParseOutput, ParseSuccess,
     encode_output_frame,
 };
-use open_compute_workers::{DeploymentAiInput, DeploymentRuntimeFeatures};
+use open_compute_workers::{VersionAiInput, VersionRuntimeFeatures};
 use std::os::unix::fs::PermissionsExt as _;
 
 async fn fixture() -> (RuntimeFeatureFixture, DocumentParserBindingService) {
-    let fixture = RuntimeFeatureFixture::create(DeploymentRuntimeFeatures {
-        ai: Some(DeploymentAiInput {
+    let fixture = RuntimeFeatureFixture::create(VersionRuntimeFeatures {
+        ai: Some(VersionAiInput {
             binding: "AI".to_owned(),
         }),
-        ..DeploymentRuntimeFeatures::default()
+        ..VersionRuntimeFeatures::default()
     })
     .await;
     let service = DocumentParserBindingService::with_executable(
@@ -31,7 +31,7 @@ fn request(fixture: &RuntimeFeatureFixture, method: Method, path: &str, body: Bo
         .uri(path)
         .header(ACCOUNT_HEADER, fixture.account.to_string())
         .header(WORKER_HEADER, fixture.worker.to_string())
-        .header(DEPLOYMENT_HEADER, fixture.deployment.to_string())
+        .header(VERSION_HEADER, fixture.version.to_string())
         .header(
             DESCRIPTOR_HEADER,
             fixture.ai_descriptor_sha256.as_deref().unwrap(),
@@ -585,7 +585,7 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
     let (fixture, _) = fixture().await;
     let authority = ParserAuthority {
         account: fixture.account,
-        deployment: fixture.deployment,
+        version: fixture.version,
     };
     let temporary = tempfile::tempdir().unwrap();
 

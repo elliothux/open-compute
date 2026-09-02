@@ -1,6 +1,6 @@
 //! Real pinned-workerd P0.3 resource-binding framework Gate.
 //! Kept as one cohesive matrix so all RB assertions share one generation,
-//! immutable deployment chain, restart, and final leak audit.
+//! immutable version chain, restart, and final leak audit.
 
 #![cfg(feature = "test-support")]
 
@@ -31,14 +31,14 @@ use open_compute_service::{
     serve_binding_backend,
 };
 use open_compute_storage::{
-    AuthorizedBinding, BindingRepository, DeploymentRecord, PlatformStorage, ResourceRecord,
-    ResourceRepository, WorkerRepository,
+    AuthorizedBinding, BindingRepository, PlatformStorage, ResourceRecord, ResourceRepository,
+    VersionRecord, WorkerRepository,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    CreateResourceOutcome, CreateResourceRequest, DeploymentBindingInput, DeploymentController,
-    ModuleInput, ModuleType, ReconcileOutcome, ResourceController, ResourceDriver, ResourceHealth,
-    ResourcePins, RuntimeSource, RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
+    CreateVersionOutcome, CreateVersionRequest, ModuleInput, ModuleType, ReconcileOutcome,
+    ResourceController, ResourceDriver, ResourceHealth, ResourcePins, RuntimeSource,
+    RuntimeValidator, VersionBindingInput, VersionController,
 };
 use rusqlite::params;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -327,15 +327,15 @@ async fn p0_3_real_binding_matrix() {
         )
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let deployments = DeploymentController::new(
+    let versions = VersionController::new(
         &storage,
         artifacts.clone(),
         validator,
         BundleLimits::default(),
     );
 
-    let collision = deployments
-        .create_deployment(deployment_request(
+    let collision = versions
+        .create_version(version_request(
             account,
             worker.id,
             "env-collision",
@@ -353,8 +353,8 @@ async fn p0_3_real_binding_matrix() {
     let (foreign_worker, _) = repository
         .create_worker(foreign, "foreign", RequestId::generate(), 21, 1_000_000)
         .unwrap();
-    let cross_account = deployments
-        .create_deployment(deployment_request(
+    let cross_account = versions
+        .create_version(version_request(
             foreign,
             foreign_worker.id,
             "cross-account",
@@ -368,8 +368,8 @@ async fn p0_3_real_binding_matrix() {
     assert_eq!(cross_account.code(), ErrorCode::ResourceNotFound);
 
     let bound = deploy(
-        &deployments,
-        deployment_request(
+        &versions,
+        version_request(
             account,
             worker.id,
             "bound",
@@ -418,7 +418,7 @@ async fn p0_3_real_binding_matrix() {
     assert_eq!(pins.count(resource), 0);
 
     let binding = BindingRepository::new(storage.db())
-        .deployment_bindings(bound.id)
+        .version_bindings(bound.id)
         .unwrap()
         .pop()
         .unwrap();
@@ -480,12 +480,12 @@ async fn p0_3_real_binding_matrix() {
     tamper_descriptor(storage.data_dir().control_db_path(), binding.id, [0; 32]);
     let warm_tamper = dispatch(&transport, account, worker.id, &bound, "/get", "").await;
     assert_eq!(warm_tamper.status, 500);
-    assert!(warm_tamper.body.contains("DEPLOYMENT_INVARIANT_VIOLATION"));
+    assert!(warm_tamper.body.contains("VERSION_INVARIANT_VIOLATION"));
     assert_eq!(
         repository
             .get_worker(account, worker.id)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         Some(bound.id)
     );
     tamper_descriptor(
@@ -495,8 +495,8 @@ async fn p0_3_real_binding_matrix() {
     );
 
     let read_only = deploy(
-        &deployments,
-        deployment_request(
+        &versions,
+        version_request(
             account,
             worker.id,
             "read-only",
@@ -597,8 +597,8 @@ async fn p0_3_real_binding_matrix() {
     pins.unfence(resource);
 
     let plain = deploy(
-        &deployments,
-        deployment_request(account, worker.id, "plain", None, true, false, 50),
+        &versions,
+        version_request(account, worker.id, "plain", None, true, false, 50),
     )
     .await;
     let plain_result = dispatch(&transport, account, worker.id, &plain, "/plain", "").await;
@@ -609,8 +609,8 @@ async fn p0_3_real_binding_matrix() {
     repository
         .prune_expired_idempotency(24 * 60 * 60 * 1000 + 100, 100)
         .unwrap();
-    delete_deployment(repository, account, worker.id, bound.id, 51);
-    delete_deployment(repository, account, worker.id, read_only.id, 52);
+    delete_version(repository, account, worker.id, bound.id, 51);
+    delete_version(repository, account, worker.id, read_only.id, 52);
     controller
         .delete(
             account,
@@ -673,16 +673,16 @@ fn resource_request(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
-) -> DeploymentRecord {
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
+) -> VersionRecord {
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
-fn deployment_request(
+fn version_request(
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
@@ -690,7 +690,7 @@ fn deployment_request(
     promote: bool,
     collision: bool,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let source = r#"export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
@@ -719,7 +719,7 @@ fn deployment_request(
     if let Some((resource_id, permissions)) = binding {
         bindings.insert(
             "KV".to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::KvNamespace,
                 id: resource_id,
                 permissions,
@@ -727,11 +727,11 @@ fn deployment_request(
             },
         );
     }
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -758,7 +758,7 @@ async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     path: &str,
     body: &str,
 ) -> DispatchResponse {
@@ -773,8 +773,8 @@ async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: 1,
                 request_id: RequestId::generate(),
@@ -801,7 +801,7 @@ async fn backend_call(
     token: &str,
     generation: &str,
     binding_id: open_compute_core::BindingId,
-    deployment_id: open_compute_core::DeploymentId,
+    version_id: open_compute_core::VersionId,
     descriptor_sha256: &str,
     operation: &str,
     body: &[u8],
@@ -815,7 +815,7 @@ async fn backend_call(
         .header("content-type", "application/vnd.open-compute.kv.v1+frame")
         .header("x-open-compute-binding-token", token)
         .header("x-open-compute-startup-generation", generation)
-        .header("x-open-compute-deployment-id", deployment_id.to_string())
+        .header("x-open-compute-version-id", version_id.to_string())
         .header("x-open-compute-descriptor-sha256", descriptor_sha256)
         .header(
             "x-open-compute-request-id",
@@ -845,31 +845,31 @@ fn insert_account(path: PathBuf, account_id: AccountId) {
 fn tamper_descriptor(path: PathBuf, binding_id: open_compute_core::BindingId, digest: [u8; 32]) {
     let connection = rusqlite::Connection::open(path).unwrap();
     connection
-        .execute_batch("DROP TRIGGER IF EXISTS deployment_bindings_update_guard")
+        .execute_batch("DROP TRIGGER IF EXISTS version_bindings_update_guard")
         .unwrap();
     connection
         .execute(
-            "UPDATE deployment_bindings SET descriptor_sha256 = ?1 WHERE id = ?2",
+            "UPDATE version_bindings SET descriptor_sha256 = ?1 WHERE id = ?2",
             params![digest.as_slice(), binding_id.to_string()],
         )
         .unwrap();
 }
 
-fn delete_deployment(
+fn delete_version(
     repository: WorkerRepository<'_>,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment_id: open_compute_core::DeploymentId,
+    version_id: open_compute_core::VersionId,
     now_ms: i64,
 ) {
     repository
-        .begin_deployment_delete(account_id, worker_id, deployment_id)
+        .begin_version_delete(account_id, worker_id, version_id)
         .unwrap();
     repository
-        .finalize_deployment_delete(
+        .finalize_version_delete(
             account_id,
             worker_id,
-            deployment_id,
+            version_id,
             RequestId::generate(),
             now_ms,
         )

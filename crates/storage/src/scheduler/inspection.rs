@@ -92,8 +92,8 @@ pub struct P23CrossDatabaseInspection {
     pub queue_consumer_projection_mismatches: u64,
     /// Live Cron activation authorities missing or conflicting on either side.
     pub cron_projection_mismatches: u64,
-    /// Live Queue/Cron targets missing their exact deployment referrer.
-    pub deployment_referrer_mismatches: u64,
+    /// Live Queue/Cron targets missing their exact version referrer.
+    pub version_referrer_mismatches: u64,
 }
 
 /// Compare P2.3 control and scheduler authority without mutating either database.
@@ -114,41 +114,41 @@ pub fn inspect_p23_cross_database(
     }
     let control_consumers = inspect_authority_set(
         &control,
-        "SELECT id, consumer_generation, deployment_id FROM queue_consumers
+        "SELECT id, consumer_generation, version_id FROM queue_consumers
          WHERE state != 'tombstoned'",
     )?;
     let scheduler_consumers = inspect_authority_set(
         &scheduler,
-        "SELECT consumer_id, consumer_generation, deployment_id FROM queue_consumer_state",
+        "SELECT consumer_id, consumer_generation, version_id FROM queue_consumer_state",
     )?;
     let control_crons = inspect_authority_set(
         &control,
-        "SELECT id, activation_generation, deployment_id FROM cron_activations
+        "SELECT id, activation_generation, version_id FROM cron_activations
          WHERE state != 'tombstoned'",
     )?;
     let scheduler_crons = inspect_authority_set(
         &scheduler,
-        "SELECT activation_id, activation_generation, deployment_id FROM cron_schedules",
+        "SELECT activation_id, activation_generation, version_id FROM cron_schedules",
     )?;
-    let deployment_referrer_mismatches: i64 = control
+    let version_referrer_mismatches: i64 = control
         .query_row(
             "SELECT
                (SELECT COUNT(*) FROM queue_consumers c
                 WHERE c.state != 'tombstoned' AND NOT EXISTS (
-                  SELECT 1 FROM deployment_referrers r
-                  WHERE r.deployment_id = c.deployment_id
+                  SELECT 1 FROM version_referrers r
+                  WHERE r.version_id = c.version_id
                     AND r.kind = 'queue_consumer' AND r.ref_id = c.id
                 )) +
                (SELECT COUNT(*) FROM cron_activations c
                 WHERE c.state != 'tombstoned' AND NOT EXISTS (
-                  SELECT 1 FROM deployment_referrers r
-                  WHERE r.deployment_id = c.deployment_id
+                  SELECT 1 FROM version_referrers r
+                  WHERE r.version_id = c.version_id
                     AND r.kind = 'cron_activation' AND r.ref_id = c.id
                 )) +
                (SELECT COUNT(*) FROM queue_consumers c
-                WHERE c.pending_deployment_id IS NOT NULL AND NOT EXISTS (
-                  SELECT 1 FROM deployment_referrers r
-                  WHERE r.deployment_id = c.pending_deployment_id
+                WHERE c.pending_version_id IS NOT NULL AND NOT EXISTS (
+                  SELECT 1 FROM version_referrers r
+                  WHERE r.version_id = c.pending_version_id
                     AND r.kind = 'queue_consumer_pending' AND r.ref_id = c.id
                 ))",
             [],
@@ -161,7 +161,7 @@ pub fn inspect_p23_cross_database(
             &scheduler_consumers,
         )?,
         cron_projection_mismatches: symmetric_difference_len(&control_crons, &scheduler_crons)?,
-        deployment_referrer_mismatches: u64::try_from(deployment_referrer_mismatches)
+        version_referrer_mismatches: u64::try_from(version_referrer_mismatches)
             .map_err(|_| corrupt())?,
     })
 }

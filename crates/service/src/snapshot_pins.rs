@@ -31,7 +31,7 @@ impl SnapshotPins {
         }
     }
 
-    /// Add authenticated deployment artifact pins to the current live-reference set.
+    /// Add authenticated version artifact pins to the current live-reference set.
     pub(crate) fn extend_artifacts(
         &self,
         retained: &mut HashSet<ArtifactRef>,
@@ -81,7 +81,7 @@ pub(crate) async fn load_snapshot_pins(
         let manifest = load_manifest(loaded, &objects, &snapshot.snapshot_id, &key).await?;
         for reference in manifest.immutable_references {
             object_keys.insert(reference.object_key);
-            if reference.role == "deployment_artifact" {
+            if reference.role == "version_artifact" {
                 artifact_refs.insert(ArtifactRef::new(
                     ARTIFACT_KEY_VERSION,
                     &reference.sha256,

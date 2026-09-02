@@ -12,8 +12,8 @@ use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
 use open_compute_core::{BindingKind, ErrorCode, PlatformError, SecretString};
 use open_compute_storage::{
-    BuiltinBindingKind, DeploymentContentKind, DeploymentState, DurableObjectRepository,
-    PlatformStorage, WorkerRepository,
+    BuiltinBindingKind, DurableObjectRepository, PlatformStorage, VersionContentKind, VersionState,
+    WorkerRepository,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -23,11 +23,11 @@ use zeroize::Zeroize;
 /// `RuntimeSource` authorization scope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeScope {
-    /// Only immutable ready deployments.
+    /// Only immutable ready versions.
     Runtime,
-    /// Only a currently validating deployment; secrets are omitted.
+    /// Only a currently validating version; secrets are omitted.
     Validation,
-    /// A validating or ready deployment used to prove a named export; secrets are omitted.
+    /// A validating or ready version used to prove a named export; secrets are omitted.
     Probe,
 }
 
@@ -114,7 +114,7 @@ pub struct RuntimeWorkflowBinding {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeScheduledTarget {
-    /// Exact deployment-declared cron expression.
+    /// Exact version-declared cron expression.
     pub cron: String,
     /// Whether the tenant default scheduled handler is invoked.
     pub scheduled_handler: bool,
@@ -167,18 +167,18 @@ pub struct RuntimeAiBinding {
     pub descriptor_sha256: String,
 }
 
-/// Verified immutable deployment Version Metadata binding.
+/// Verified immutable version Version Metadata binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeVersionMetadataBinding {
     /// Tenant environment name.
     pub name: String,
-    /// Immutable deployment ID.
+    /// Immutable version ID.
     pub id: String,
     /// Optional application release tag.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
-    /// Immutable deployment creation timestamp in Unix milliseconds.
+    /// Immutable version creation timestamp in Unix milliseconds.
     pub timestamp_ms: i64,
     /// Independently verified canonical descriptor digest.
     pub descriptor_sha256: String,
@@ -202,7 +202,7 @@ pub struct RuntimeAssets {
     pub routing: AssetRoutingConfigV1,
 }
 
-/// Fully verified immutable deployment assembly.
+/// Fully verified immutable version assembly.
 #[derive(Clone)]
 pub struct RuntimeSnapshot {
     /// Canonical loader key.
@@ -211,8 +211,12 @@ pub struct RuntimeSnapshot {
     pub worker_code_sha256: String,
     /// Current Worker route generation used to fence Durable Object dispatch.
     pub route_generation: u64,
+    /// Immutable compatibility date for this Version.
+    pub compatibility_date: String,
+    /// Immutable compatibility flags for this Version.
+    pub compatibility_flags: Vec<String>,
     /// Executable or assets-only content discriminator.
-    pub content_kind: DeploymentContentKind,
+    pub content_kind: VersionContentKind,
     /// Main module for executable Workers.
     pub main_module: Option<String>,
     /// Verified modules.
@@ -227,7 +231,7 @@ pub struct RuntimeSnapshot {
     pub queue_bindings: Vec<RuntimeQueueBinding>,
     /// Verified Workflow caller bindings, carrying no execution or creation tokens.
     pub workflow_bindings: Vec<RuntimeWorkflowBinding>,
-    /// Verified deployment Cron targets used by the generated system adapter.
+    /// Verified version Cron targets used by the generated system adapter.
     pub scheduled_targets: Vec<RuntimeScheduledTarget>,
     /// Verified lazy Service declarations.
     pub services: Vec<RuntimeServiceBinding>,
@@ -239,7 +243,7 @@ pub struct RuntimeSnapshot {
     pub images_binding: Option<RuntimeImagesBinding>,
     /// Optional immutable Version Metadata environment object.
     pub version_metadata_binding: Option<RuntimeVersionMetadataBinding>,
-    /// Optional deployment-scoped static-assets fetch capability.
+    /// Optional version-scoped static-assets fetch capability.
     pub asset_binding: Option<RuntimeAssetBinding>,
     /// Optional verified static assets used by the trusted default HTTP router.
     pub assets: Option<RuntimeAssets>,
@@ -349,14 +353,14 @@ impl RuntimeSource {
         self
     }
 
-    /// Resolve, verify, decrypt if allowed, and assemble one immutable deployment.
+    /// Resolve, verify, decrypt if allowed, and assemble one immutable version.
     pub async fn resolve(
         &self,
         key: &str,
         expected_worker_code_sha256: &str,
         scope: RuntimeScope,
     ) -> Result<RuntimeSnapshot, PlatformError> {
-        let (account_id, worker_id, deployment_id) = parse_loader_key(key)?;
+        let (account_id, worker_id, version_id) = parse_loader_key(key)?;
         if expected_worker_code_sha256.len() != 64
             || expected_worker_code_sha256
                 .bytes()
@@ -365,25 +369,23 @@ impl RuntimeSource {
             return Err(invariant());
         }
         let repo = WorkerRepository::new(self.storage.db());
-        let snapshot = repo.deployment_snapshot(
+        let snapshot = repo.version_snapshot(
             account_id,
             worker_id,
-            deployment_id,
+            version_id,
             matches!(scope, RuntimeScope::Validation | RuntimeScope::Probe),
         )?;
         match scope {
-            RuntimeScope::Runtime if snapshot.deployment.state != DeploymentState::Ready => {
+            RuntimeScope::Runtime if snapshot.version.state != VersionState::Ready => {
                 return Err(not_ready());
             }
-            RuntimeScope::Validation
-                if snapshot.deployment.state != DeploymentState::Validating =>
-            {
+            RuntimeScope::Validation if snapshot.version.state != VersionState::Validating => {
                 return Err(not_ready());
             }
             RuntimeScope::Probe
                 if !matches!(
-                    snapshot.deployment.state,
-                    DeploymentState::Validating | DeploymentState::Ready
+                    snapshot.version.state,
+                    VersionState::Validating | VersionState::Ready
                 ) =>
             {
                 return Err(not_ready());
@@ -409,12 +411,12 @@ impl RuntimeSource {
                 Ok((manifest, routing))
             })
             .transpose()?;
-        let bundle = match snapshot.deployment.content_kind {
-            DeploymentContentKind::Worker => {
-                let artifact_sha256 = snapshot.deployment.artifact_sha256.ok_or_else(invariant)?;
-                let artifact_size = snapshot.deployment.artifact_size.ok_or_else(invariant)?;
+        let bundle = match snapshot.version.content_kind {
+            VersionContentKind::Worker => {
+                let artifact_sha256 = snapshot.version.artifact_sha256.ok_or_else(invariant)?;
+                let artifact_size = snapshot.version.artifact_size.ok_or_else(invariant)?;
                 let main_module = snapshot
-                    .deployment
+                    .version
                     .main_module
                     .as_deref()
                     .ok_or_else(invariant)?;
@@ -446,13 +448,13 @@ impl RuntimeSource {
                 }
                 Some(bundle)
             }
-            DeploymentContentKind::AssetsOnly if scope == RuntimeScope::Runtime => {
+            VersionContentKind::AssetsOnly if scope == RuntimeScope::Runtime => {
                 if assets.is_none() {
                     return Err(invariant());
                 }
                 None
             }
-            DeploymentContentKind::AssetsOnly => return Err(not_ready()),
+            VersionContentKind::AssetsOnly => return Err(not_ready()),
         };
 
         let mut vars = BTreeMap::new();
@@ -541,10 +543,9 @@ impl RuntimeSource {
                 descriptor_sha256: hex::encode(digest),
             });
         }
-        let scheduled_targets = if snapshot.deployment.content_kind == DeploymentContentKind::Worker
-        {
+        let scheduled_targets = if snapshot.version.content_kind == VersionContentKind::Worker {
             let cron = open_compute_storage::CronRepository::new(self.storage.db())
-                .deployment_config(deployment_id)?;
+                .version_config(version_id)?;
             for declaration in &cron.declarations {
                 for name in &declaration.workflow_bindings {
                     let Some(binding) = runtime_workflow_bindings
@@ -658,9 +659,9 @@ impl RuntimeSource {
                 BuiltinBindingKind::VersionMetadata => {
                     version_metadata_binding = Some(RuntimeVersionMetadataBinding {
                         name: binding.name.clone(),
-                        id: deployment_id.to_string(),
+                        id: version_id.to_string(),
                         tag: binding.tag.clone(),
-                        timestamp_ms: snapshot.deployment.created_at_ms,
+                        timestamp_ms: snapshot.version.created_at_ms,
                         descriptor_sha256: hex::encode(digest),
                     });
                 }
@@ -670,8 +671,10 @@ impl RuntimeSource {
         let descriptor = WorkerCodeDescriptorV1::new(
             account_id,
             worker_id,
-            deployment_id,
-            snapshot.deployment.created_at_ms,
+            version_id,
+            snapshot.version.created_at_ms,
+            snapshot.version.compatibility_date.clone(),
+            snapshot.version.compatibility_flags.clone(),
             bundle
                 .as_ref()
                 .map(|bundle| (bundle.sha256(), bundle.manifest())),
@@ -686,10 +689,10 @@ impl RuntimeSource {
             service_descriptors,
             cache_policy.clone(),
             builtin_descriptors,
-            snapshot.deployment.loader_schema_version,
+            snapshot.version.loader_schema_version,
         )?;
         let actual_descriptor = descriptor.sha256()?;
-        if actual_descriptor != snapshot.deployment.worker_code_sha256
+        if actual_descriptor != snapshot.version.worker_code_sha256
             || hex::encode(actual_descriptor) != expected_worker_code_sha256
         {
             return Err(invariant());
@@ -713,7 +716,7 @@ impl RuntimeSource {
                     &secret.envelope,
                     account_id,
                     worker_id,
-                    deployment_id,
+                    version_id,
                     &secret.name,
                     &secret.revision_id,
                 )?;
@@ -731,7 +734,9 @@ impl RuntimeSource {
             loader_key: key.to_owned(),
             worker_code_sha256: hex::encode(actual_descriptor),
             route_generation: snapshot.worker.route_generation,
-            content_kind: snapshot.deployment.content_kind,
+            compatibility_date: snapshot.version.compatibility_date,
+            compatibility_flags: snapshot.version.compatibility_flags,
+            content_kind: snapshot.version.content_kind,
             main_module: bundle
                 .as_ref()
                 .map(|bundle| bundle.manifest().main_module.clone()),
@@ -774,7 +779,9 @@ impl RuntimeSource {
             loader_key: &'a str,
             worker_code_sha256: &'a str,
             route_generation: u64,
-            content_kind: DeploymentContentKind,
+            compatibility_date: &'a str,
+            compatibility_flags: &'a [String],
+            content_kind: VersionContentKind,
             #[serde(skip_serializing_if = "Option::is_none")]
             main_module: Option<&'a str>,
             modules: Vec<Module<'a>>,
@@ -874,6 +881,8 @@ impl RuntimeSource {
             loader_key: &snapshot.loader_key,
             worker_code_sha256: &snapshot.worker_code_sha256,
             route_generation: snapshot.route_generation,
+            compatibility_date: &snapshot.compatibility_date,
+            compatibility_flags: &snapshot.compatibility_flags,
             content_kind: snapshot.content_kind,
             main_module: snapshot.main_module.as_deref(),
             modules,
@@ -909,14 +918,14 @@ pub(crate) fn map_artifact_error(error: PlatformError) -> PlatformError {
 
 pub(crate) fn not_ready() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentNotReady,
-        "deployment is not available in this RuntimeSource scope",
+        ErrorCode::VersionNotReady,
+        "version is not available in this RuntimeSource scope",
     )
 }
 
 pub(crate) fn invariant() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentInvariantViolation,
+        ErrorCode::VersionInvariantViolation,
         "RuntimeSource descriptor invariant failed",
     )
 }

@@ -10,8 +10,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub enum WebSocketCloseReason {
     /// Peer completed an ordinary close.
     Normal,
-    /// Deployment generation was replaced.
-    DeploymentRestart,
+    /// Version generation was replaced.
+    VersionRestart,
     /// Platform or runtime shutdown terminated the tunnel.
     Shutdown,
     /// Transport or protocol error terminated the tunnel.
@@ -24,7 +24,7 @@ impl WebSocketCloseReason {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Normal => "normal",
-            Self::DeploymentRestart => "deployment_restart",
+            Self::VersionRestart => "version_restart",
             Self::Shutdown => "shutdown",
             Self::Error => "error",
             Self::Disconnected => "disconnected",
@@ -349,7 +349,7 @@ pub(super) fn write_p1_metrics(out: &mut String, metrics: &P1Metrics) {
     for (index, resource) in [
         "accounts",
         "workers",
-        "deployments",
+        "versions",
         "routes",
         "kv_namespaces",
         "r2_buckets",
@@ -463,7 +463,7 @@ const fn admission_operation_name(operation: OperationClass) -> &'static str {
 const fn websocket_close_reasons() -> [WebSocketCloseReason; 5] {
     [
         WebSocketCloseReason::Normal,
-        WebSocketCloseReason::DeploymentRestart,
+        WebSocketCloseReason::VersionRestart,
         WebSocketCloseReason::Shutdown,
         WebSocketCloseReason::Error,
         WebSocketCloseReason::Disconnected,

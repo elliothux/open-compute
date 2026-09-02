@@ -274,7 +274,7 @@ pub struct WorkflowStepDeclaration {
     pub name_count: u32,
     /// Raw supported options, normalized at admission.
     pub config: Value,
-    /// Rollback callback policy when the deployment registered a handler.
+    /// Rollback callback policy when the version registered a handler.
     #[serde(default)]
     pub rollback_config: Option<Value>,
     /// Whether this descriptor executes a previously registered rollback handler.

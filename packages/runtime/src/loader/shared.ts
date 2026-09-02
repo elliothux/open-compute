@@ -2,7 +2,7 @@ import type { DoPolicy, DoPolicyEnv } from "../durable-objects/protocol.js";
 import { assertSnapshot } from "./snapshot.js";
 import type { LoaderEnv, RuntimeEnvelope, RuntimeSnapshot } from "./protocol.js";
 
-const SOURCE_PATH = "/internal/runtime/v1/deployments/resolve";
+const SOURCE_PATH = "/internal/runtime/v1/versions/resolve";
 /** Generation-authenticated private runtime-source header. */
 export const TOKEN_HEADER = "x-open-compute-internal-token";
 let startupGeneration: string | undefined;
@@ -30,7 +30,7 @@ export const INTERNAL_HEADERS = Object.freeze([
   TOKEN_HEADER,
   "x-open-compute-account-id",
   "x-open-compute-worker-id",
-  "x-open-compute-deployment-id",
+  "x-open-compute-version-id",
   "x-open-compute-loader-key",
   "x-open-compute-execution-started",
   "x-open-compute-asset-representation-length",
@@ -63,7 +63,7 @@ export const INTERNAL_HEADERS = Object.freeze([
 /** Select the one public-only outbound capability for tenant code, or disable it for validation. */
 export function tenantGlobalOutbound(env: LoaderEnv, validation: boolean): Fetcher | null {
   if (validation) return null;
-  if (env.PUBLIC_NETWORK == null) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+  if (env.PUBLIC_NETWORK == null) throw bindingError("VERSION_INVARIANT_VIOLATION");
   return env.PUBLIC_NETWORK;
 }
 
@@ -75,11 +75,27 @@ export function lockWorkerCode(env: LoaderEnv): {
   if (typeof env.COMPATIBILITY_DATE !== "string" || env.COMPATIBILITY_DATE.length === 0
       || !Array.isArray(env.REQUIRED_COMPATIBILITY_FLAGS)
       || !env.REQUIRED_COMPATIBILITY_FLAGS.every((flag): flag is string => typeof flag === "string")) {
-    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   return {
     compatibilityDate: env.COMPATIBILITY_DATE,
     compatibilityFlags: [...env.REQUIRED_COMPATIBILITY_FLAGS],
+  };
+}
+
+/** Select compatibility metadata only from the authenticated immutable Version snapshot. */
+export function snapshotWorkerCode(snapshot: RuntimeSnapshot): {
+  compatibilityDate: string;
+  compatibilityFlags: string[];
+} {
+  if (snapshot.compatibilityDate !== "2026-08-30"
+      || !Array.isArray(snapshot.compatibilityFlags)
+      || snapshot.compatibilityFlags.length !== 0) {
+    throw bindingError("VERSION_INVARIANT_VIOLATION");
+  }
+  return {
+    compatibilityDate: snapshot.compatibilityDate,
+    compatibilityFlags: [...snapshot.compatibilityFlags],
   };
 }
 
@@ -108,7 +124,7 @@ export function currentStartupGeneration(seed?: string | null): string {
   return startupGeneration;
 }
 
-/** Resolve and strictly validate an immutable deployment snapshot. */
+/** Resolve and strictly validate an immutable version snapshot. */
 export async function resolveSnapshot(
   env: LoaderEnv,
   envelope: RuntimeEnvelope,
@@ -137,7 +153,7 @@ export async function resolveSnapshot(
   const snapshot: unknown = await response.json();
   assertSnapshot(snapshot);
   if (snapshot.loaderKey !== envelope.loaderKey || snapshot.workerCodeSha256 !== envelope.expected) {
-    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   return snapshot;
 }

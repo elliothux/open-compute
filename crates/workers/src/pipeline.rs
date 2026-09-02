@@ -1,4 +1,4 @@
-//! Immutable deployment creation pipeline.
+//! Immutable version creation pipeline.
 
 #[path = "pipeline/bindings.rs"]
 mod binding_preparation;
@@ -15,7 +15,7 @@ pub(crate) use validation::{
 
 use products::{prepare_cron_config, validate_product_counts};
 
-use crate::assets::{DeploymentAssets, RunWorkerFirst};
+use crate::assets::{RunWorkerFirst, VersionAssets};
 use crate::bundle::{
     BundleLimits, CanonicalBundle, StagedBundle, WORKER_BUNDLE_SCHEMA_VERSION, WorkerBundleManifest,
 };
@@ -30,18 +30,17 @@ use futures::stream;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
     AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions,
-    CronActivationId, CronSchedule, DeploymentId, ErrorCode, PlatformError, QueueConsumerId,
-    QueueId, RequestId, ResourceId, ResourceState, SecretBytes, SecretString, WorkerId,
+    CronActivationId, CronSchedule, ErrorCode, PlatformError, QueueConsumerId, QueueId, RequestId,
+    ResourceId, ResourceState, SecretBytes, SecretString, VersionId, WorkerId,
 };
 use open_compute_storage::{
-    BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, DeploymentBuiltinBindingRecord,
-    DeploymentCachePolicyRecord, DeploymentContentKind, DeploymentObjectKind, DeploymentRecord,
-    DeploymentState, DurableObjectRepository, IdempotencyReservation, LOADER_SCHEMA_VERSION,
-    NewCronConfig, NewCronDeclaration, NewDeployment, NewDeploymentAssets, NewDeploymentBinding,
-    NewDeploymentObjectRef, NewDeploymentService, NewQueueConsumerDeclaration,
-    NewQueueProducerBinding, PlatformStorage, QueueAvailability, QueueConsumerConfig,
-    QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository,
-    StoredDeploymentSecret, WorkerRepository,
+    BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, DurableObjectRepository,
+    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration,
+    NewQueueConsumerDeclaration, NewQueueProducerBinding, NewVersion, NewVersionAssets,
+    NewVersionBinding, NewVersionObjectRef, NewVersionService, PlatformStorage, QueueAvailability,
+    QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository,
+    StoredVersionSecret, VersionBuiltinBindingRecord, VersionCachePolicyRecord, VersionContentKind,
+    VersionObjectKind, VersionRecord, VersionState, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -59,13 +58,13 @@ const MAX_SECRET_BYTES: usize = 16 * 1024;
 const MAX_SECRET_TOTAL_BYTES: usize = 64 * 1024;
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_QUEUE_CONSUMER_CONCURRENCY: u32 = 32;
-const MAX_QUEUE_CONSUMERS_PER_DEPLOYMENT: usize = 64;
-const MAX_CRONS_PER_DEPLOYMENT: usize = 100;
+const MAX_QUEUE_CONSUMERS_PER_VERSION: usize = 64;
+const MAX_CRONS_PER_VERSION: usize = 100;
 
-/// Control-plane request for one immutable deployment resource binding.
+/// Control-plane request for one immutable version resource binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DeploymentBindingInput {
+pub struct VersionBindingInput {
     /// Static product kind expected by the adapter.
     #[serde(rename = "type")]
     pub kind: BindingKind,
@@ -82,7 +81,7 @@ pub struct DeploymentBindingInput {
 /// Control-plane declaration for one dynamic same-account Service binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DeploymentServiceInput {
+pub struct VersionServiceInput {
     /// Existing logical target Worker identity; names are resolved by tooling before deploy.
     pub target_worker_id: WorkerId,
     /// Optional named `WorkerEntrypoint` export.
@@ -93,31 +92,31 @@ pub struct DeploymentServiceInput {
 /// Automatic response-cache policy on the default or a named Worker entrypoint.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DeploymentCachePolicyInput {
+pub struct VersionCachePolicyInput {
     /// Whether automatic response caching is enabled.
     #[serde(default)]
     pub enabled: bool,
-    /// Whether automatic entries are shared across deployment versions.
+    /// Whether automatic entries are shared across version versions.
     #[serde(default)]
     pub cross_version_cache: bool,
 }
 
-/// Deployment-wide automatic-cache configuration and named-entrypoint overrides.
+/// Version-wide automatic-cache configuration and named-entrypoint overrides.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DeploymentCacheInput {
+pub struct VersionCacheInput {
     /// Default export policy.
     #[serde(flatten)]
-    pub default: DeploymentCachePolicyInput,
+    pub default: VersionCachePolicyInput,
     /// Named Worker entrypoint policy overrides.
     #[serde(default)]
-    pub entrypoints: BTreeMap<String, DeploymentCachePolicyInput>,
+    pub entrypoints: BTreeMap<String, VersionCachePolicyInput>,
 }
 
 /// One platform-provided Images binding declaration.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DeploymentImagesInput {
+pub struct VersionImagesInput {
     /// Tenant environment binding name.
     pub binding: String,
 }
@@ -125,15 +124,15 @@ pub struct DeploymentImagesInput {
 /// One standard Workers AI binding declaration.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DeploymentAiInput {
+pub struct VersionAiInput {
     /// Tenant environment binding name.
     pub binding: String,
 }
 
-/// One immutable deployment Version Metadata binding declaration.
+/// One immutable version Version Metadata binding declaration.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DeploymentVersionMetadataInput {
+pub struct VersionVersionMetadataInput {
     /// Tenant environment binding name.
     pub binding: String,
     /// Optional application-supplied immutable release tag.
@@ -141,25 +140,48 @@ pub struct DeploymentVersionMetadataInput {
     pub tag: Option<String>,
 }
 
-/// Platform-provided runtime capabilities frozen with one deployment.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+/// Platform-provided runtime capabilities frozen with one version.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DeploymentRuntimeFeatures {
+pub struct VersionRuntimeFeatures {
+    /// Immutable compatibility date passed to the tenant isolate.
+    #[serde(default = "default_compatibility_date")]
+    pub compatibility_date: String,
+    /// Immutable compatibility flags passed to the tenant isolate.
+    #[serde(default)]
+    pub compatibility_flags: Vec<String>,
     /// Automatic response-cache policy.
     #[serde(default)]
-    pub cache: DeploymentCacheInput,
+    pub cache: VersionCacheInput,
     /// Optional Workers AI binding exposing the Markdown Conversion subset.
     #[serde(default)]
-    pub ai: Option<DeploymentAiInput>,
+    pub ai: Option<VersionAiInput>,
     /// Optional local Images binding.
     #[serde(default)]
-    pub images: Option<DeploymentImagesInput>,
+    pub images: Option<VersionImagesInput>,
     /// Optional frozen Version Metadata binding.
     #[serde(default)]
-    pub version_metadata: Option<DeploymentVersionMetadataInput>,
+    pub version_metadata: Option<VersionVersionMetadataInput>,
 }
 
-/// Immutable Queue push-consumer declaration supplied with a deployment.
+impl Default for VersionRuntimeFeatures {
+    fn default() -> Self {
+        Self {
+            compatibility_date: default_compatibility_date(),
+            compatibility_flags: Vec::new(),
+            cache: VersionCacheInput::default(),
+            ai: None,
+            images: None,
+            version_metadata: None,
+        }
+    }
+}
+
+fn default_compatibility_date() -> String {
+    "2026-08-30".to_owned()
+}
+
+/// Immutable Queue push-consumer declaration supplied with a version.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QueueConsumerInput {
@@ -188,8 +210,8 @@ pub struct ValidationCandidate {
     pub account_id: AccountId,
     /// Worker identity.
     pub worker_id: WorkerId,
-    /// Immutable deployment identity.
-    pub deployment_id: DeploymentId,
+    /// Immutable version identity.
+    pub version_id: VersionId,
     /// Stored descriptor digest expected before loader get.
     pub worker_code_sha256: [u8; 32],
 }
@@ -245,10 +267,10 @@ pub trait ProductPromotionCoordinator: Send + Sync + 'static {
 pub struct ProductPromotionRequest {
     /// Owning account.
     pub account_id: AccountId,
-    /// Worker whose active deployment changes.
+    /// Worker whose active version changes.
     pub worker_id: WorkerId,
-    /// Validated ready target deployment.
-    pub deployment_id: DeploymentId,
+    /// Validated ready target version.
+    pub version_id: VersionId,
     /// Audit request identity.
     pub request_id: RequestId,
     /// Control-plane wall time.
@@ -268,27 +290,27 @@ where
     }
 }
 
-/// Secret-safe deployment request. Debug redacts secret values.
+/// Secret-safe version request. Debug redacts secret values.
 #[derive(Clone, Debug)]
-pub struct CreateDeploymentRequest {
+pub struct CreateVersionRequest {
     /// Account boundary.
     pub account_id: AccountId,
     /// Parent Worker.
     pub worker_id: WorkerId,
     /// Required control idempotency key.
     pub idempotency_key: String,
-    /// Explicit Worker/Assets deployment content union.
-    pub content: DeploymentContent,
+    /// Explicit Worker/Assets version content union.
+    pub content: VersionContent,
     /// JSON-compatible vars.
     pub vars: BTreeMap<String, serde_json::Value>,
     /// Write-only UTF-8 secrets.
     pub secrets: BTreeMap<String, SecretString>,
     /// Immutable resource bindings keyed by tenant environment name.
-    pub bindings: BTreeMap<String, DeploymentBindingInput>,
+    pub bindings: BTreeMap<String, VersionBindingInput>,
     /// Immutable Service declarations keyed by tenant environment name.
-    pub services: BTreeMap<String, DeploymentServiceInput>,
+    pub services: BTreeMap<String, VersionServiceInput>,
     /// Platform-provided runtime capabilities.
-    pub runtime_features: DeploymentRuntimeFeatures,
+    pub runtime_features: VersionRuntimeFeatures,
     /// Immutable Queue push-consumer declarations.
     pub queue_consumers: Vec<QueueConsumerInput>,
     /// Exact Cron set for the Worker's scheduled handler.
@@ -301,33 +323,33 @@ pub struct CreateDeploymentRequest {
     pub now_ms: i64,
 }
 
-/// Canonical deployment artifact supplied in memory or as a verified staging file.
+/// Canonical version artifact supplied in memory or as a verified staging file.
 #[derive(Clone, Debug)]
-pub enum DeploymentBundle {
+pub enum VersionBundle {
     /// Bounded convenience input used by library callers and small tests.
     Bytes(Vec<u8>),
     /// Incrementally verified private staging file used by the HTTP upload path.
     Staged(StagedBundle),
 }
 
-/// Authoritative deployment content; assets-only never fabricates a Worker bundle.
+/// Authoritative version content; assets-only never fabricates a Worker bundle.
 #[derive(Clone, Debug)]
-pub enum DeploymentContent {
+pub enum VersionContent {
     /// Executable Worker with optional static assets.
     Worker {
         /// Canonical Worker bundle.
-        bundle: DeploymentBundle,
+        bundle: VersionBundle,
         /// Optional static assets frozen with the code.
-        assets: Option<DeploymentAssets>,
+        assets: Option<VersionAssets>,
     },
     /// Static assets without executable tenant code.
     AssetsOnly {
         /// Required immutable static assets.
-        assets: DeploymentAssets,
+        assets: VersionAssets,
     },
 }
 
-impl From<Vec<u8>> for DeploymentBundle {
+impl From<Vec<u8>> for VersionBundle {
     fn from(value: Vec<u8>) -> Self {
         Self::Bytes(value)
     }
@@ -343,30 +365,30 @@ enum PreparedBundle {
 enum PreparedContent {
     Worker {
         bundle: PreparedBundle,
-        assets: Option<DeploymentAssets>,
+        assets: Option<VersionAssets>,
     },
     AssetsOnly {
-        assets: DeploymentAssets,
+        assets: VersionAssets,
     },
 }
 
 impl PreparedContent {
-    fn prepare(input: &DeploymentContent, limits: BundleLimits) -> Result<Self, PlatformError> {
+    fn prepare(input: &VersionContent, limits: BundleLimits) -> Result<Self, PlatformError> {
         match input {
-            DeploymentContent::Worker { bundle, assets } => Ok(Self::Worker {
+            VersionContent::Worker { bundle, assets } => Ok(Self::Worker {
                 bundle: PreparedBundle::prepare(bundle, limits)?,
                 assets: assets.clone(),
             }),
-            DeploymentContent::AssetsOnly { assets } => Ok(Self::AssetsOnly {
+            VersionContent::AssetsOnly { assets } => Ok(Self::AssetsOnly {
                 assets: assets.clone(),
             }),
         }
     }
 
-    const fn kind(&self) -> DeploymentContentKind {
+    const fn kind(&self) -> VersionContentKind {
         match self {
-            Self::Worker { .. } => DeploymentContentKind::Worker,
-            Self::AssetsOnly { .. } => DeploymentContentKind::AssetsOnly,
+            Self::Worker { .. } => VersionContentKind::Worker,
+            Self::AssetsOnly { .. } => VersionContentKind::AssetsOnly,
         }
     }
 
@@ -377,7 +399,7 @@ impl PreparedContent {
         }
     }
 
-    const fn assets(&self) -> Option<&DeploymentAssets> {
+    const fn assets(&self) -> Option<&VersionAssets> {
         match self {
             Self::Worker { assets, .. } => assets.as_ref(),
             Self::AssetsOnly { assets } => Some(assets),
@@ -400,12 +422,12 @@ impl PreparedContent {
 }
 
 impl PreparedBundle {
-    fn prepare(input: &DeploymentBundle, limits: BundleLimits) -> Result<Self, PlatformError> {
+    fn prepare(input: &VersionBundle, limits: BundleLimits) -> Result<Self, PlatformError> {
         match input {
-            DeploymentBundle::Bytes(bytes) => {
+            VersionBundle::Bytes(bytes) => {
                 CanonicalBundle::parse(bytes.clone(), limits).map(Self::Memory)
             }
-            DeploymentBundle::Staged(bundle) => Ok(Self::Staged(bundle.clone())),
+            VersionBundle::Staged(bundle) => Ok(Self::Staged(bundle.clone())),
         }
     }
 
@@ -468,9 +490,9 @@ impl PreparedBundle {
 /// Successful creation response persisted for idempotent replay.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateDeploymentResult {
-    /// Created deployment.
-    pub deployment: DeploymentRecord,
+pub struct CreateVersionResult {
+    /// Created version.
+    pub version: VersionRecord,
     /// Whether the same operation promoted it.
     pub promoted: bool,
 }
@@ -478,15 +500,15 @@ pub struct CreateDeploymentResult {
 /// New result or exact persisted response bytes for replay.
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
-pub enum CreateDeploymentOutcome {
-    /// Pipeline ran and produced a new immutable deployment.
-    Applied(CreateDeploymentResult),
+pub enum CreateVersionOutcome {
+    /// Pipeline ran and produced a new immutable version.
+    Applied(CreateVersionResult),
     /// Same idempotency fingerprint already completed.
     Replay(Vec<u8>),
 }
 
-/// P0.2 deployment orchestrator over typed P0.1 capabilities.
-pub struct DeploymentController<'a> {
+/// P0.2 version orchestrator over typed P0.1 capabilities.
+pub struct VersionController<'a> {
     storage: &'a PlatformStorage,
     artifacts: ArtifactStore,
     validator: Arc<dyn RuntimeValidator>,
@@ -495,16 +517,16 @@ pub struct DeploymentController<'a> {
     product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
 }
 
-impl std::fmt::Debug for DeploymentController<'_> {
+impl std::fmt::Debug for VersionController<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeploymentController")
+        f.debug_struct("VersionController")
             .field("artifacts", &self.artifacts)
             .field("bundle_limits", &self.bundle_limits)
             .finish_non_exhaustive()
     }
 }
 
-impl<'a> DeploymentController<'a> {
+impl<'a> VersionController<'a> {
     /// Bind storage, immutable artifacts, and a real runtime validator.
     #[must_use]
     pub fn new(
@@ -538,28 +560,27 @@ impl<'a> DeploymentController<'a> {
     }
 
     /// Execute upload, immutable DB transaction, runtime validation, and optional promotion.
-    pub async fn create_deployment(
+    pub async fn create_version(
         &self,
-        request: CreateDeploymentRequest,
-    ) -> Result<CreateDeploymentOutcome, PlatformError> {
-        self.create_deployment_with_id(request, None).await
+        request: CreateVersionRequest,
+    ) -> Result<CreateVersionOutcome, PlatformError> {
+        self.create_version_with_id(request, None).await
     }
 
-    /// Finalize a resumable upload using the deployment identity persisted before validation.
+    /// Finalize a resumable upload using the version identity persisted before validation.
     pub async fn finalize_upload(
         &self,
-        request: CreateDeploymentRequest,
-        deployment_id: DeploymentId,
-    ) -> Result<CreateDeploymentOutcome, PlatformError> {
-        self.create_deployment_with_id(request, Some(deployment_id))
-            .await
+        request: CreateVersionRequest,
+        version_id: VersionId,
+    ) -> Result<CreateVersionOutcome, PlatformError> {
+        self.create_version_with_id(request, Some(version_id)).await
     }
 
-    async fn create_deployment_with_id(
+    async fn create_version_with_id(
         &self,
-        request: CreateDeploymentRequest,
-        deployment_id: Option<DeploymentId>,
-    ) -> Result<CreateDeploymentOutcome, PlatformError> {
+        request: CreateVersionRequest,
+        version_id: Option<VersionId>,
+    ) -> Result<CreateVersionOutcome, PlatformError> {
         validate_idempotency_key(&request.idempotency_key)?;
         let content = PreparedContent::prepare(&request.content, self.bundle_limits)?;
         let (canonical_vars, stored_vars) =
@@ -582,14 +603,14 @@ impl<'a> DeploymentController<'a> {
         // nonexistent target cannot strand a running idempotency row.
         repo.get_worker(request.account_id, request.worker_id)?;
         let fingerprint_input =
-            request_fingerprint(&request, &content, &canonical_vars, deployment_id)?;
+            request_fingerprint(&request, &content, &canonical_vars, version_id)?;
         let fingerprint = self
             .storage
             .crypto()
             .fingerprint_request(&fingerprint_input);
         let reservation = repo.reserve_idempotency(
             request.account_id,
-            "deployment.create",
+            "version.create",
             &request.idempotency_key,
             self.storage.crypto().fingerprint_key_id(),
             &fingerprint,
@@ -599,9 +620,9 @@ impl<'a> DeploymentController<'a> {
         let recover_running = matches!(reservation, IdempotencyReservation::Running);
         match reservation {
             IdempotencyReservation::Complete(response) => {
-                return Ok(CreateDeploymentOutcome::Replay(response));
+                return Ok(CreateVersionOutcome::Replay(response));
             }
-            IdempotencyReservation::Running if deployment_id.is_none() => {
+            IdempotencyReservation::Running if version_id.is_none() => {
                 return Err(PlatformError::new(
                     ErrorCode::IdempotencyConflict,
                     "the same idempotent operation is still running",
@@ -612,20 +633,20 @@ impl<'a> DeploymentController<'a> {
                     serde_json::from_slice(&response).map_err(|_| invariant())?;
                 return Err(PlatformError::new(
                     ErrorCode::from_stable_str(&failed.code).unwrap_or(ErrorCode::Internal),
-                    "idempotent deployment operation previously failed",
+                    "idempotent version operation previously failed",
                 ));
             }
             IdempotencyReservation::Running | IdempotencyReservation::Reserved => {}
         }
 
-        let fixed_deployment_id = deployment_id.unwrap_or_else(DeploymentId::generate);
+        let fixed_version_id = version_id.unwrap_or_else(VersionId::generate);
         let operation = if recover_running {
             self.resume_reserved(
                 &request,
                 content,
                 canonical_vars,
                 stored_vars,
-                fixed_deployment_id,
+                fixed_version_id,
             )
             .await
         } else {
@@ -634,32 +655,32 @@ impl<'a> DeploymentController<'a> {
                 content,
                 canonical_vars,
                 stored_vars,
-                fixed_deployment_id,
+                fixed_version_id,
             )
             .await
         };
         match operation {
             Ok(result) => {
                 let response = serde_json::to_vec(&serde_json::json!({
-                    "deployment": result.deployment.to_api_json(),
+                    "version": result.version.to_api_json(),
                     "promoted": result.promoted,
                 }))
                 .map_err(|_| invariant())?;
-                repo.complete_idempotency_with_deployment_ref(
+                repo.complete_idempotency_with_version_ref(
                     request.account_id,
-                    "deployment.create",
+                    "version.create",
                     &request.idempotency_key,
                     &fingerprint,
                     &response,
-                    result.deployment.id,
+                    result.version.id,
                     &idempotency_ref_id(
                         request.account_id,
-                        "deployment.create",
+                        "version.create",
                         &request.idempotency_key,
                     ),
                     request.now_ms,
                 )?;
-                Ok(CreateDeploymentOutcome::Applied(result))
+                Ok(CreateVersionOutcome::Applied(result))
             }
             Err(error) => {
                 let response = serde_json::to_vec(&FailedResponse {
@@ -668,7 +689,7 @@ impl<'a> DeploymentController<'a> {
                 .map_err(|_| invariant())?;
                 repo.fail_idempotency(
                     request.account_id,
-                    "deployment.create",
+                    "version.create",
                     &request.idempotency_key,
                     &fingerprint,
                     &response,
@@ -680,18 +701,19 @@ impl<'a> DeploymentController<'a> {
 
     async fn create_reserved(
         &self,
-        request: &CreateDeploymentRequest,
+        request: &CreateVersionRequest,
         content: PreparedContent,
         canonical_vars: BTreeMap<String, serde_json::Value>,
         stored_vars: BTreeMap<String, Vec<u8>>,
-        deployment_id: DeploymentId,
-    ) -> Result<CreateDeploymentResult, PlatformError> {
+        version_id: VersionId,
+    ) -> Result<CreateVersionResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
+        let compatibility_flags = validate_compatibility(&request.runtime_features)?;
         let _admission = self.storage.reserve_mutation(content.admission_bytes()?)?;
         let (stored_secrets, secret_descriptors) = self.encrypt_secrets(
             request.account_id,
             request.worker_id,
-            deployment_id,
+            version_id,
             &request.secrets,
         )?;
         let PreparedBindings {
@@ -704,7 +726,7 @@ impl<'a> DeploymentController<'a> {
             durable_object_classes,
             service_descriptors,
             service_rows,
-        } = self.prepare_bindings(request, deployment_id)?;
+        } = self.prepare_bindings(request, version_id)?;
         let queue_consumers = self.prepare_queue_consumers(request)?;
         let cron = prepare_cron_config(request, &workflow_binding_descriptors)?;
         let (cache_policy, mut cache_rows, builtin_descriptors, builtin_rows) =
@@ -712,8 +734,10 @@ impl<'a> DeploymentController<'a> {
         let descriptor = WorkerCodeDescriptorV1::new(
             request.account_id,
             request.worker_id,
-            deployment_id,
+            version_id,
             request.now_ms,
+            request.runtime_features.compatibility_date.clone(),
+            compatibility_flags.clone(),
             content
                 .bundle()
                 .map(|bundle| (bundle.sha256(), bundle.manifest())),
@@ -730,11 +754,11 @@ impl<'a> DeploymentController<'a> {
             builtin_descriptors,
             u32::try_from(LOADER_SCHEMA_VERSION).map_err(|_| invariant())?,
         )?;
-        if content.kind() == DeploymentContentKind::AssetsOnly {
+        if content.kind() == VersionContentKind::AssetsOnly {
             cache_rows.clear();
         }
         let descriptor_hash = descriptor.sha256()?;
-        let artifact_reservation = self.artifacts.reserve_deployment_artifact().await;
+        let artifact_reservation = self.artifacts.reserve_version_artifact().await;
         let bundle_identity = if let Some(bundle) = content.bundle() {
             let size = bundle.size()?;
             let artifact = bundle.store(&self.artifacts).await?;
@@ -749,9 +773,9 @@ impl<'a> DeploymentController<'a> {
             None
         };
         let prepared_assets = self.prepare_assets(content.assets()).await?;
-        let deployment = repo.insert_staging_deployment(
-            &NewDeployment {
-                id: deployment_id,
+        let version = repo.insert_staging_version(
+            &NewVersion {
+                id: version_id,
                 account_id: request.account_id,
                 worker_id: request.worker_id,
                 content_kind: content.kind(),
@@ -762,12 +786,14 @@ impl<'a> DeploymentController<'a> {
                     .map(|_| WORKER_BUNDLE_SCHEMA_VERSION),
                 main_module: bundle_identity.as_ref().map(|value| value.2.clone()),
                 worker_code_sha256: descriptor_hash,
+                compatibility_date: request.runtime_features.compatibility_date.clone(),
+                compatibility_flags,
                 vars: stored_vars,
                 secrets: stored_secrets,
                 request_id: request.request_id,
                 now_ms: request.now_ms,
             },
-            &open_compute_storage::NewDeploymentProducts {
+            &open_compute_storage::NewVersionProducts {
                 assets: prepared_assets.as_ref().map(|value| &value.0),
                 asset_object_refs: prepared_assets
                     .as_ref()
@@ -779,9 +805,9 @@ impl<'a> DeploymentController<'a> {
                 cache_policies: &cache_rows,
                 builtin_bindings: &builtin_rows,
                 queue_consumers: &queue_consumers,
-                cron: (content.kind() == DeploymentContentKind::Worker).then_some(&cron),
+                cron: (content.kind() == VersionContentKind::Worker).then_some(&cron),
             },
-            self.storage.hardening().max_deployments_per_worker,
+            self.storage.hardening().max_versions_per_worker,
         )?;
         drop(artifact_reservation);
         let requires_product_promoter =
@@ -803,7 +829,7 @@ impl<'a> DeploymentController<'a> {
             .collect();
         self.finish_reserved(
             request,
-            deployment,
+            version,
             durable_object_classes,
             queue_entrypoints,
             requires_product_promoter,
@@ -813,33 +839,28 @@ impl<'a> DeploymentController<'a> {
 
     async fn resume_reserved(
         &self,
-        request: &CreateDeploymentRequest,
+        request: &CreateVersionRequest,
         content: PreparedContent,
         canonical_vars: BTreeMap<String, serde_json::Value>,
         stored_vars: BTreeMap<String, Vec<u8>>,
-        deployment_id: DeploymentId,
-    ) -> Result<CreateDeploymentResult, PlatformError> {
+        version_id: VersionId,
+    ) -> Result<CreateVersionResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
-        let deployment = match repo.get_worker_deployment(
-            request.account_id,
-            request.worker_id,
-            deployment_id,
-        ) {
-            Ok(deployment) => deployment,
-            Err(error) if error.code() == ErrorCode::DeploymentNotFound => {
-                return self
-                    .create_reserved(request, content, canonical_vars, stored_vars, deployment_id)
-                    .await;
-            }
-            Err(error) => return Err(error),
-        };
-        if deployment.content_kind != content.kind() || deployment.deleted_at_ms.is_some() {
+        let version =
+            match repo.get_worker_version(request.account_id, request.worker_id, version_id) {
+                Ok(version) => version,
+                Err(error) if error.code() == ErrorCode::VersionNotFound => {
+                    return self
+                        .create_reserved(request, content, canonical_vars, stored_vars, version_id)
+                        .await;
+                }
+                Err(error) => return Err(error),
+            };
+        if version.content_kind != content.kind() || version.deleted_at_ms.is_some() {
             return Err(invariant());
         }
         let mut durable_object_classes = Vec::new();
-        for binding in
-            BindingRepository::new(self.storage.db()).deployment_bindings(deployment_id)?
-        {
+        for binding in BindingRepository::new(self.storage.db()).version_bindings(version_id)? {
             if binding.kind == BindingKind::DoNamespace {
                 let namespace = DurableObjectRepository::new(self.storage)
                     .get_namespace(request.account_id, binding.resource_id)?;
@@ -848,10 +869,10 @@ impl<'a> DeploymentController<'a> {
         }
         durable_object_classes.sort();
         durable_object_classes.dedup();
-        let queue_declarations = QueueConsumerRepository::new(self.storage.db())
-            .deployment_declarations(deployment_id)?;
+        let queue_declarations =
+            QueueConsumerRepository::new(self.storage.db()).version_declarations(version_id)?;
         let cron_declarations = open_compute_storage::CronRepository::new(self.storage.db())
-            .deployment_config(deployment_id)?
+            .version_config(version_id)?
             .declarations;
         let requires_product_promoter =
             !queue_declarations.is_empty() || !cron_declarations.is_empty();
@@ -860,7 +881,7 @@ impl<'a> DeploymentController<'a> {
             .map(|consumer| consumer.entrypoint)
             .collect::<Vec<_>>();
         let (cache_policies, _) =
-            open_compute_storage::deployment_runtime_features(self.storage.db(), deployment_id)?;
+            open_compute_storage::version_runtime_features(self.storage.db(), version_id)?;
         queue_entrypoints.extend(
             cache_policies
                 .into_iter()
@@ -869,7 +890,7 @@ impl<'a> DeploymentController<'a> {
         );
         self.finish_reserved(
             request,
-            deployment,
+            version,
             durable_object_classes,
             queue_entrypoints,
             requires_product_promoter,
@@ -879,36 +900,36 @@ impl<'a> DeploymentController<'a> {
 
     async fn finish_reserved(
         &self,
-        request: &CreateDeploymentRequest,
-        mut deployment: DeploymentRecord,
+        request: &CreateVersionRequest,
+        mut version: VersionRecord,
         durable_object_classes: Vec<String>,
         queue_entrypoints: Vec<Option<String>>,
         requires_product_promoter: bool,
-    ) -> Result<CreateDeploymentResult, PlatformError> {
+    ) -> Result<CreateVersionResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
-        if deployment.state == DeploymentState::Rejected {
-            let code = deployment
+        if version.state == VersionState::Rejected {
+            let code = version
                 .rejection_code
                 .as_deref()
                 .and_then(ErrorCode::from_stable_str)
                 .unwrap_or(ErrorCode::BundleRuntimeInvalid);
             return Err(PlatformError::new(
                 code,
-                "deployment validation previously failed",
+                "version validation previously failed",
             ));
         }
-        if deployment.state == DeploymentState::Staging {
-            repo.begin_validation(deployment.id)?;
-            deployment.state = DeploymentState::Validating;
+        if version.state == VersionState::Staging {
+            repo.begin_validation(version.id)?;
+            version.state = VersionState::Validating;
         }
         let candidate = ValidationCandidate {
             account_id: request.account_id,
             worker_id: request.worker_id,
-            deployment_id: deployment.id,
-            worker_code_sha256: deployment.worker_code_sha256,
+            version_id: version.id,
+            worker_code_sha256: version.worker_code_sha256,
         };
-        let validation = if deployment.state == DeploymentState::Validating
-            && deployment.content_kind == DeploymentContentKind::Worker
+        let validation = if version.state == VersionState::Validating
+            && version.content_kind == VersionContentKind::Worker
         {
             self.validator.validate(candidate.clone()).await
         } else {
@@ -916,19 +937,14 @@ impl<'a> DeploymentController<'a> {
         };
         if let Err(err) = validation {
             let code = stable_validation_code(&err);
-            repo.mark_rejected(
-                deployment.id,
-                DeploymentState::Validating,
-                code,
-                request.now_ms,
-            )?;
+            repo.mark_rejected(version.id, VersionState::Validating, code, request.now_ms)?;
             return Err(PlatformError::new(
                 code,
-                "real workerd validation rejected the deployment",
+                "real workerd validation rejected the version",
             ));
         }
         for class_name in durable_object_classes {
-            if deployment.state != DeploymentState::Validating {
+            if version.state != VersionState::Validating {
                 break;
             }
             if let Err(error) = self
@@ -941,12 +957,7 @@ impl<'a> DeploymentController<'a> {
                 } else {
                     stable_validation_code(&error)
                 };
-                repo.mark_rejected(
-                    deployment.id,
-                    DeploymentState::Validating,
-                    code,
-                    request.now_ms,
-                )?;
+                repo.mark_rejected(version.id, VersionState::Validating, code, request.now_ms)?;
                 return Err(PlatformError::new(
                     code,
                     "real workerd validation rejected a Durable Object class",
@@ -954,7 +965,7 @@ impl<'a> DeploymentController<'a> {
             }
         }
         for entrypoint in &queue_entrypoints {
-            if deployment.state == DeploymentState::Validating
+            if version.state == VersionState::Validating
                 && let Some(entrypoint) = entrypoint
                 && let Err(error) = self
                     .validator
@@ -962,28 +973,23 @@ impl<'a> DeploymentController<'a> {
                     .await
             {
                 let code = stable_validation_code(&error);
-                repo.mark_rejected(
-                    deployment.id,
-                    DeploymentState::Validating,
-                    code,
-                    request.now_ms,
-                )?;
+                repo.mark_rejected(version.id, VersionState::Validating, code, request.now_ms)?;
                 return Err(PlatformError::new(
                     code,
                     "real workerd validation rejected a named entrypoint",
                 ));
             }
         }
-        if deployment.state == DeploymentState::Validating {
-            repo.mark_ready(deployment.id, request.now_ms)?;
-            deployment.state = DeploymentState::Ready;
-            deployment.ready_at_ms = Some(request.now_ms);
+        if version.state == VersionState::Validating {
+            repo.mark_ready(version.id, request.now_ms)?;
+            version.state = VersionState::Ready;
+            version.ready_at_ms = Some(request.now_ms);
         }
         if request.promote {
             let worker = repo.get_worker(request.account_id, request.worker_id)?;
-            if worker.active_deployment_id == Some(deployment.id) {
-                return Ok(CreateDeploymentResult {
-                    deployment,
+            if worker.active_version_id == Some(version.id) {
+                return Ok(CreateVersionResult {
+                    version,
                     promoted: true,
                 });
             }
@@ -999,7 +1005,7 @@ impl<'a> DeploymentController<'a> {
                     .promote(ProductPromotionRequest {
                         account_id: request.account_id,
                         worker_id: request.worker_id,
-                        deployment_id: deployment.id,
+                        version_id: version.id,
                         request_id: request.request_id,
                         now_ms: request.now_ms,
                     })
@@ -1013,7 +1019,7 @@ impl<'a> DeploymentController<'a> {
                 repo.promote_worker_checked(
                     request.account_id,
                     request.worker_id,
-                    deployment.id,
+                    version.id,
                     None,
                     Some(worker.route_generation),
                     request.request_id,
@@ -1021,8 +1027,8 @@ impl<'a> DeploymentController<'a> {
                 )?;
             }
         }
-        let result = CreateDeploymentResult {
-            deployment,
+        let result = CreateVersionResult {
+            version,
             promoted: request.promote,
         };
         Ok(result)
@@ -1030,8 +1036,8 @@ impl<'a> DeploymentController<'a> {
 
     async fn prepare_assets(
         &self,
-        assets: Option<&DeploymentAssets>,
-    ) -> Result<Option<(NewDeploymentAssets, Vec<NewDeploymentObjectRef>)>, PlatformError> {
+        assets: Option<&VersionAssets>,
+    ) -> Result<Option<(NewVersionAssets, Vec<NewVersionObjectRef>)>, PlatformError> {
         let Some(assets) = assets else {
             return Ok(None);
         };
@@ -1056,8 +1062,8 @@ impl<'a> DeploymentController<'a> {
                 "asset manifest identity changed during upload",
             ));
         }
-        let mut refs = vec![NewDeploymentObjectRef {
-            kind: DeploymentObjectKind::AssetManifest,
+        let mut refs = vec![NewVersionObjectRef {
+            kind: VersionObjectKind::AssetManifest,
             sha256: manifest_digest,
             size: manifest_bytes.len() as u64,
         }];
@@ -1077,14 +1083,14 @@ impl<'a> DeploymentController<'a> {
                 .download_verified(&object, &mut std::io::sink())
                 .await
                 .map_err(|error| map_asset_store_error(&error))?;
-            refs.push(NewDeploymentObjectRef {
-                kind: DeploymentObjectKind::AssetBlob,
+            refs.push(NewVersionObjectRef {
+                kind: VersionObjectKind::AssetBlob,
                 sha256: *object.sha256_bytes(),
                 size: object.size(),
             });
         }
         Ok(Some((
-            NewDeploymentAssets {
+            NewVersionAssets {
                 manifest_sha256: manifest_digest,
                 manifest_json: manifest_bytes,
                 routing_config_json: assets.routing.canonical_bytes()?,
@@ -1101,15 +1107,9 @@ impl<'a> DeploymentController<'a> {
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         secrets: &BTreeMap<String, SecretString>,
-    ) -> Result<
-        (
-            BTreeMap<String, StoredDeploymentSecret>,
-            Vec<SecretDescriptor>,
-        ),
-        PlatformError,
-    > {
+    ) -> Result<(BTreeMap<String, StoredVersionSecret>, Vec<SecretDescriptor>), PlatformError> {
         let mut stored = BTreeMap::new();
         let mut descriptors = Vec::with_capacity(secrets.len());
         for (name, value) in secrets {
@@ -1119,7 +1119,7 @@ impl<'a> DeploymentController<'a> {
                 &plaintext,
                 account_id,
                 worker_id,
-                deployment_id,
+                version_id,
                 name,
                 &revision_id,
             )?;
@@ -1130,7 +1130,7 @@ impl<'a> DeploymentController<'a> {
             });
             stored.insert(
                 name.clone(),
-                StoredDeploymentSecret {
+                StoredVersionSecret {
                     name: name.clone(),
                     revision_id,
                     envelope,
@@ -1143,13 +1143,13 @@ impl<'a> DeploymentController<'a> {
 
 #[allow(clippy::type_complexity)]
 fn prepare_runtime_features(
-    input: &DeploymentRuntimeFeatures,
+    input: &VersionRuntimeFeatures,
 ) -> Result<
     (
         CachePolicyDescriptorV1,
-        Vec<DeploymentCachePolicyRecord>,
+        Vec<VersionCachePolicyRecord>,
         Vec<BuiltinBindingDescriptorV1>,
-        Vec<DeploymentBuiltinBindingRecord>,
+        Vec<VersionBuiltinBindingRecord>,
     ),
     PlatformError,
 > {
@@ -1172,13 +1172,13 @@ fn prepare_runtime_features(
             .collect(),
     };
     cache_policy.validate()?;
-    let mut cache_rows = vec![DeploymentCachePolicyRecord {
+    let mut cache_rows = vec![VersionCachePolicyRecord {
         entrypoint: None,
         enabled: cache_policy.enabled,
         cross_version_cache: cache_policy.cross_version_cache,
     }];
     cache_rows.extend(cache_policy.entrypoints.iter().map(|(name, policy)| {
-        DeploymentCachePolicyRecord {
+        VersionCachePolicyRecord {
             entrypoint: Some(name.clone()),
             enabled: policy.enabled,
             cross_version_cache: policy.cross_version_cache,
@@ -1210,7 +1210,7 @@ fn prepare_runtime_features(
     let rows = descriptors
         .iter()
         .map(|descriptor| {
-            Ok(DeploymentBuiltinBindingRecord {
+            Ok(VersionBuiltinBindingRecord {
                 name: descriptor.name.clone(),
                 kind: match descriptor.kind {
                     BuiltinBindingDescriptorKindV1::Ai => BuiltinBindingKind::Ai,
@@ -1227,8 +1227,26 @@ fn prepare_runtime_features(
     Ok((cache_policy, cache_rows, descriptors, rows))
 }
 
+fn validate_compatibility(input: &VersionRuntimeFeatures) -> Result<Vec<String>, PlatformError> {
+    // P6 intentionally certifies only the formal pin's latest date. Supporting an older date
+    // requires separate stock-workerd evidence and an explicit capability-range update.
+    if input.compatibility_date != "2026-08-30" {
+        return Err(PlatformError::new(
+            ErrorCode::CompatibilityUnsupported,
+            "compatibility date is outside the certified pinned-workerd range",
+        ));
+    }
+    if !input.compatibility_flags.is_empty() {
+        return Err(PlatformError::new(
+            ErrorCode::CompatibilityUnsupported,
+            "tenant compatibility flags are not in the certified pinned-workerd contract",
+        ));
+    }
+    Ok(Vec::new())
+}
+
 fn validate_asset_content(
-    request: &CreateDeploymentRequest,
+    request: &CreateVersionRequest,
     content: &PreparedContent,
     vars: &BTreeMap<String, serde_json::Value>,
 ) -> Result<(), PlatformError> {
@@ -1244,10 +1262,10 @@ fn validate_asset_content(
     {
         return Err(PlatformError::new(
             ErrorCode::BindingTypeMismatch,
-            "asset binding conflicts with another deployment env name",
+            "asset binding conflicts with another version env name",
         ));
     }
-    if content.kind() == DeploymentContentKind::AssetsOnly
+    if content.kind() == VersionContentKind::AssetsOnly
         && (!vars.is_empty()
             || !request.secrets.is_empty()
             || !request.bindings.is_empty()
@@ -1260,7 +1278,7 @@ fn validate_asset_content(
     {
         return Err(PlatformError::new(
             ErrorCode::AssetConfigUnsupported,
-            "assets-only deployments cannot declare an execution environment",
+            "assets-only versions cannot declare an execution environment",
         ));
     }
     Ok(())
@@ -1285,7 +1303,7 @@ fn map_asset_store_error(error: &PlatformError) -> PlatformError {
 
 pub(crate) fn idempotency_ref_id(account_id: AccountId, scope: &str, key: &str) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"open-compute/deployment-referrer/v1\0");
+    hasher.update(b"open-compute/version-referrer/v1\0");
     hasher.update(account_id.to_string().as_bytes());
     hasher.update([0]);
     hasher.update(scope.as_bytes());

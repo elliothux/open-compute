@@ -1,4 +1,4 @@
-//! Real SIGKILL cleanup for in-flight Service handles and deployment pins.
+//! Real SIGKILL cleanup for in-flight Service handles and version pins.
 
 #![cfg(feature = "test-support")]
 
@@ -12,9 +12,8 @@ use open_compute_runtime::SupervisorState;
 use open_compute_service::runtime_bridge::DispatchTarget;
 use open_compute_storage::WorkerRepository;
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentContent, DeploymentController, DeploymentServiceInput, ModuleInput, ModuleType,
-    RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, RuntimeValidator, VersionContent, VersionController, VersionServiceInput,
 };
 use p3_services_support::Harness;
 use std::collections::BTreeMap;
@@ -79,15 +78,15 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
         )
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(harness.transport.clone());
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &harness.storage,
         harness.artifacts.clone(),
         validator,
         BundleLimits::default(),
     );
-    let target_deployment = deploy(
+    let target_version = deploy(
         &controller,
-        deployment_request(
+        version_request(
             account,
             target.id,
             "service-crash-target-v1",
@@ -97,16 +96,16 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
         ),
     )
     .await;
-    let caller_deployment = deploy(
+    let caller_version = deploy(
         &controller,
-        deployment_request(
+        version_request(
             account,
             caller.id,
             "service-crash-caller-v1",
             CALLER,
             BTreeMap::from([(
                 "TARGET".to_owned(),
-                DeploymentServiceInput {
+                VersionServiceInput {
                     target_worker_id: target.id,
                     entrypoint: None,
                 },
@@ -116,7 +115,7 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
     )
     .await;
 
-    let response = dispatch(&harness, caller.id, &caller_deployment, "/hold").await;
+    let response = dispatch(&harness, caller.id, &caller_version, "/hold").await;
     assert_eq!(response.status(), 200);
     let mut stream = response.into_body().into_data_stream();
     let ready = stream.next().await.unwrap().unwrap();
@@ -126,9 +125,7 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
         "in-flight Service retention",
         || {
             let counts = harness.service_invocations.counts();
-            counts.0 == 1
-                && counts.2 == 1
-                && harness.deployment_pins.count(target_deployment.id) == 1
+            counts.0 == 1 && counts.2 == 1 && harness.version_pins.count(target_version.id) == 1
         },
     )
     .await;
@@ -140,7 +137,7 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
         "generation resource cleanup",
         || {
             harness.service_invocations.counts() == (0, 0, 0)
-                && harness.deployment_pins.count(target_deployment.id) == 0
+                && harness.version_pins.count(target_version.id) == 0
         },
     )
     .await;
@@ -154,7 +151,7 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
     })
     .await;
 
-    let response = dispatch(&harness, caller.id, &caller_deployment, "/ping").await;
+    let response = dispatch(&harness, caller.id, &caller_version, "/ping").await;
     assert_eq!(response.status(), 200);
     assert_eq!(
         to_bytes(response.into_body(), 1024).await.unwrap().as_ref(),
@@ -165,21 +162,21 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
         "fresh-generation Service drain",
         || {
             harness.service_invocations.counts() == (0, 0, 0)
-                && harness.deployment_pins.count(target_deployment.id) == 0
+                && harness.version_pins.count(target_version.id) == 0
         },
     )
     .await;
     harness.stop().await;
 }
 
-fn deployment_request(
+fn version_request(
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     source: &str,
-    services: BTreeMap<String, DeploymentServiceInput>,
+    services: BTreeMap<String, VersionServiceInput>,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -190,11 +187,11 @@ fn deployment_request(
         BundleLimits::default(),
     )
     .unwrap();
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: DeploymentContent::Worker {
+        content: VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -212,19 +209,19 @@ fn deployment_request(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
-) -> open_compute_storage::DeploymentRecord {
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
+) -> open_compute_storage::VersionRecord {
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
 async fn dispatch(
     harness: &Harness,
     worker_id: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     path: &str,
 ) -> axum::response::Response {
     harness
@@ -233,8 +230,8 @@ async fn dispatch(
             DispatchTarget {
                 account_id: harness.storage.identity().default_account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: 1,
                 request_id: RequestId::generate(),

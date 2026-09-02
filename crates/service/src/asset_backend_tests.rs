@@ -48,7 +48,7 @@ fn private_asset_protocol_parsing_and_errors_are_stable() {
             ErrorCode::AssetIntegrityError,
         ),
         (
-            ErrorCode::DeploymentInvariantViolation,
+            ErrorCode::VersionInvariantViolation,
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorCode::AssetIntegrityError,
         ),
@@ -68,6 +68,6 @@ fn private_asset_protocol_parsing_and_errors_are_stable() {
         assert_eq!(response.headers()[ERROR_HEADER], exposed.as_str());
     }
     assert_eq!(protocol_error().code(), ErrorCode::BindingProtocolError);
-    assert_eq!(invariant().code(), ErrorCode::DeploymentInvariantViolation);
+    assert_eq!(invariant().code(), ErrorCode::VersionInvariantViolation);
     assert_eq!(internal().code(), ErrorCode::Internal);
 }

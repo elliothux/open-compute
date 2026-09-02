@@ -26,7 +26,7 @@ async fn body_dispatch_does_not_reuse_connections_or_buffer_input() {
     let target = DispatchTarget {
         account_id: AccountId::generate(),
         worker_id: WorkerId::generate(),
-        deployment_id: DeploymentId::generate(),
+        version_id: VersionId::generate(),
         worker_code_sha256: "11".repeat(32),
         entrypoint: None,
         route_generation: 1,
@@ -307,7 +307,7 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     let candidate = ValidationCandidate {
         account_id: AccountId::generate(),
         worker_id: WorkerId::generate(),
-        deployment_id: DeploymentId::generate(),
+        version_id: VersionId::generate(),
         worker_code_sha256: [7; 32],
     };
     assert_eq!(
@@ -329,7 +329,7 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     let target = DispatchTarget {
         account_id: candidate.account_id,
         worker_id: candidate.worker_id,
-        deployment_id: candidate.deployment_id,
+        version_id: candidate.version_id,
         worker_code_sha256: hex::encode(candidate.worker_code_sha256),
         entrypoint: None,
         route_generation: 1,
@@ -385,7 +385,7 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     assert!(response_headers.get("x-open-compute-request-id").is_some());
 
     for (code, expected) in [
-        (ErrorCode::DeploymentNotReady, StatusCode::CONFLICT),
+        (ErrorCode::VersionNotReady, StatusCode::CONFLICT),
         (
             ErrorCode::ArtifactUnavailable,
             StatusCode::SERVICE_UNAVAILABLE,

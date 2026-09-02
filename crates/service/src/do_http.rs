@@ -600,7 +600,7 @@ async fn delete_namespace(
         return error_response(
             PlatformError::new(
                 ErrorCode::ResourceReferenced,
-                "namespace still has retained deployment bindings",
+                "namespace still has retained version bindings",
             ),
             request_id,
         );

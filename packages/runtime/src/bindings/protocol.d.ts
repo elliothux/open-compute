@@ -4,20 +4,20 @@ export interface BindingEnv {
   BINDING_BACKEND_TOKEN: string;
 }
 
-/** Resource authority selected from the persisted deployment descriptor. */
+/** Resource authority selected from the persisted version descriptor. */
 export interface BindingProps {
   bindingId: string;
-  deploymentId: string;
+  versionId: string;
   descriptorSha256: string;
 }
 export interface AssetBindingProps {
-  deploymentId: string;
+  versionId: string;
   descriptorSha256: string;
 }
 export interface CacheTransportProps {
   accountId: string;
   workerId: string;
-  deploymentId: string;
+  versionId: string;
   entrypoint: string;
   descriptorSha256: string;
   automaticEnabled: boolean;
@@ -26,17 +26,17 @@ export interface CacheTransportProps {
 export interface ImageTransportProps {
   accountId: string;
   workerId: string;
-  deploymentId: string;
+  versionId: string;
   descriptorSha256: string;
 }
 export interface AiTransportProps {
   accountId: string;
   workerId: string;
-  deploymentId: string;
+  versionId: string;
   descriptorSha256: string;
 }
 export interface ServiceBindingProps {
-  deploymentId: string;
+  versionId: string;
   bindingName: string;
   descriptorSha256: string;
   entrypoint?: string;

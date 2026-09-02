@@ -1,11 +1,11 @@
 //! Synthetic binding authority for authenticated operator data APIs.
 
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
-    ErrorCode, PlatformError, ResourceId,
+    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode,
+    PlatformError, ResourceId, VersionId,
 };
 use open_compute_storage::{
-    AuthorizedBinding, DeploymentBindingRecord, PlatformStorage, ResourceRepository,
+    AuthorizedBinding, PlatformStorage, ResourceRepository, VersionBindingRecord,
 };
 
 /// Build a full-permission operator binding for one persisted resource.
@@ -23,9 +23,9 @@ pub(crate) fn operator_binding(
         ));
     }
     Ok(AuthorizedBinding {
-        binding: DeploymentBindingRecord {
+        binding: VersionBindingRecord {
             id: BindingId::generate(),
-            deployment_id: DeploymentId::generate(),
+            version_id: VersionId::generate(),
             name: "__operator__".to_owned(),
             kind,
             resource_id,

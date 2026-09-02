@@ -81,7 +81,7 @@ pub enum WorkflowStepResult {
         /// Frozen error category.
         code: String,
     },
-    /// The tenant deployment must evaluate its dynamic delay function and
+    /// The tenant version must evaluate its dynamic delay function and
     /// report the bounded result under the current run fence.
     ResolveDelay {
         /// One-based failed attempt.

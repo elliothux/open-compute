@@ -1,7 +1,7 @@
 //! Real pinned-workerd P0.7 Durable Objects identity, facet, lifecycle, and restart Gate.
 //!
 //! This intentionally stays one cohesive process matrix so one fixture proves identity,
-//! deployment fencing, native persistence, `WebSockets`, and destructive lifecycle together.
+//! version fencing, native persistence, `WebSockets`, and destructive lifecycle together.
 
 #![cfg(feature = "test-support")]
 
@@ -35,14 +35,14 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_service::{SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend};
 use open_compute_storage::{
-    DO_NAMESPACE_SCHEMA_VERSION, DeploymentRecord, DurableObjectRepository, PlatformStorage,
-    SchedulerStore, WorkerRepository,
+    DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRepository, PlatformStorage, SchedulerStore,
+    VersionRecord, WorkerRepository,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    CreateResourceOutcome, CreateResourceRequest, DeploymentBindingInput, DeploymentContent,
-    DeploymentController, DurableObjectResourceDriver, ModuleInput, ModuleType, ResourceController,
-    ResourcePins, RuntimeSource, RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
+    CreateVersionOutcome, CreateVersionRequest, DurableObjectResourceDriver, ModuleInput,
+    ModuleType, ResourceController, ResourcePins, RuntimeSource, RuntimeValidator,
+    VersionBindingInput, VersionContent, VersionController,
 };
 use sha2::Sha256;
 use std::collections::BTreeMap;
@@ -197,11 +197,10 @@ async fn p0_7_real_durable_objects_matrix() {
         12,
     );
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let deployments =
-        DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
-    let deployment_a = deploy(
-        &deployments,
-        deployment_request(
+    let versions = VersionController::new(&storage, artifacts, validator, BundleLimits::default());
+    let version_a = deploy(
+        &versions,
+        version_request(
             account,
             worker.id,
             counter,
@@ -224,7 +223,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/ids",
     )
@@ -273,7 +272,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/increment?name=alpha",
     )
@@ -302,7 +301,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc?name=alpha",
     )
@@ -322,7 +321,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-binary?name=alpha",
     )
@@ -335,7 +334,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/connect?name=alpha",
     )
@@ -350,7 +349,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/connect-ipv6?name=alpha",
     )
@@ -365,7 +364,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-structured?name=alpha",
     )
@@ -383,7 +382,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-stream?name=alpha",
     )
@@ -396,7 +395,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-writable?name=alpha",
     )
@@ -409,7 +408,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-capability?name=alpha",
     )
@@ -419,7 +418,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-property?name=alpha",
     )
@@ -433,7 +432,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-property-error?name=alpha",
     )
@@ -446,7 +445,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-callback?name=alpha",
     )
@@ -459,7 +458,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-clone-error?name=alpha",
     )
@@ -472,7 +471,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-capability-error?name=alpha",
     )
@@ -486,7 +485,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rpc-error?name=alpha",
     )
@@ -496,7 +495,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/rollback?name=alpha",
     )
@@ -506,7 +505,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/websocket?name=alpha",
     )
@@ -527,7 +526,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/order?name=ordered",
     )
@@ -545,7 +544,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/cross-order?name=cross-ordered",
     )
@@ -575,7 +574,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/order-error?name=order-error",
     )
@@ -590,14 +589,14 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/storage?name=storage-matrix",
     )
     .await;
     assert_eq!(storage_matrix.status, 200, "{}", storage_matrix.body);
     hibernation::storage_members(&serde_json::from_str(&storage_matrix.body).unwrap());
-    hibernation::facets(&transport, account, worker.id, &deployment_a, generation_a).await;
+    hibernation::facets(&transport, account, worker.id, &version_a, generation_a).await;
 
     let parallel_start = Instant::now();
     let (left, right) = tokio::join!(
@@ -605,7 +604,7 @@ async fn p0_7_real_durable_objects_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/hold?name=left&ms=250&window=1",
         ),
@@ -613,7 +612,7 @@ async fn p0_7_real_durable_objects_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/hold?name=right&ms=250&window=1",
         ),
@@ -637,7 +636,7 @@ async fn p0_7_real_durable_objects_matrix() {
         parallel_start.elapsed(),
     );
 
-    let mut missing_class = deployment_request(
+    let mut missing_class = version_request(
         account,
         worker.id,
         counter,
@@ -648,7 +647,7 @@ async fn p0_7_real_durable_objects_matrix() {
         29,
         false,
     );
-    missing_class.content = DeploymentContent::Worker {
+    missing_class.content = VersionContent::Worker {
         bundle: CanonicalBundle::build(
             "index.js",
             vec![ModuleInput {
@@ -664,8 +663,8 @@ async fn p0_7_real_durable_objects_matrix() {
         assets: None,
     };
     assert_eq!(
-        deployments
-            .create_deployment(missing_class)
+        versions
+            .create_version(missing_class)
             .await
             .unwrap_err()
             .code(),
@@ -674,13 +673,13 @@ async fn p0_7_real_durable_objects_matrix() {
 
     let in_flight = tokio::spawn({
         let transport = transport.clone();
-        let deployment = deployment_a.clone();
+        let version = version_a.clone();
         async move {
             dispatch(
                 &transport,
                 account,
                 worker.id,
-                &deployment,
+                &version,
                 generation_a,
                 "/hold?name=alpha&ms=3000",
             )
@@ -689,13 +688,13 @@ async fn p0_7_real_durable_objects_matrix() {
     });
     let capability_in_flight = tokio::spawn({
         let transport = transport.clone();
-        let deployment = deployment_a.clone();
+        let version = version_a.clone();
         async move {
             dispatch(
                 &transport,
                 account,
                 worker.id,
-                &deployment,
+                &version,
                 generation_a,
                 "/rpc-pipeline-hold?name=alpha&ms=3000",
             )
@@ -708,7 +707,7 @@ async fn p0_7_real_durable_objects_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/hold-started?name=alpha",
         )
@@ -725,9 +724,9 @@ async fn p0_7_real_durable_objects_matrix() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    let deployment_b = deploy(
-        &deployments,
-        deployment_request(
+    let version_b = deploy(
+        &versions,
+        version_request(
             account,
             worker.id,
             counter,
@@ -767,7 +766,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_b,
+        &version_b,
         generation_b,
         "/increment?name=alpha",
     )
@@ -777,7 +776,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_b,
+        &version_b,
         generation_b,
         "/rpc-capability?name=alpha",
     )
@@ -787,7 +786,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/increment?name=alpha",
     )
@@ -798,8 +797,8 @@ async fn p0_7_real_durable_objects_matrix() {
         .promote_checked(
             account,
             worker.id,
-            deployment_a.id,
-            Some(deployment_b.id),
+            version_a.id,
+            Some(version_b.id),
             Some(generation_b),
             RequestId::generate(),
             40,
@@ -813,7 +812,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
         "/rpc?name=alpha",
     )
@@ -827,7 +826,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
         "/rpc?name=alpha",
     )
@@ -837,7 +836,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
         "/rpc-capability?name=alpha",
     )
@@ -846,13 +845,13 @@ async fn p0_7_real_durable_objects_matrix() {
 
     let pending_capability = tokio::spawn({
         let transport = transport.clone();
-        let deployment = deployment_a.clone();
+        let version = version_a.clone();
         async move {
             dispatch(
                 &transport,
                 account,
                 worker.id,
-                &deployment,
+                &version,
                 generation_rollback,
                 "/rpc-pipeline-hold?name=alpha&ms=60000",
             )
@@ -880,7 +879,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
         "/rpc-capability?name=alpha",
     )
@@ -892,7 +891,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &supervisor,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
     )
     .await;
@@ -901,7 +900,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &supervisor,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
     )
     .await;
@@ -913,7 +912,7 @@ async fn p0_7_real_durable_objects_matrix() {
             queue: output_queue,
             account,
             worker: worker.id,
-            deployment: &deployment_a,
+            version: &version_a,
             generation: generation_rollback,
         },
     )
@@ -935,7 +934,7 @@ async fn p0_7_real_durable_objects_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
         "/increment?name=alpha",
     )
@@ -951,11 +950,11 @@ async fn p0_7_real_durable_objects_matrix() {
     assert_eq!(alpha_generations, vec![1, 2]);
 
     let expected = workers
-        .list_deployments(account, worker.id)
+        .list_versions(account, worker.id)
         .unwrap()
         .into_iter()
-        .filter(|deployment| deployment.deleted_at_ms.is_none())
-        .map(|deployment| deployment.id)
+        .filter(|version| version.deleted_at_ms.is_none())
+        .map(|version| version.id)
         .collect::<Vec<_>>();
     workers
         .delete_worker(account, worker.id, &expected, RequestId::generate(), 60)
@@ -1028,27 +1027,27 @@ fn create_namespace(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
     supervisor: &WorkerdSupervisor,
-) -> DeploymentRecord {
+) -> VersionRecord {
     match controller
-        .create_deployment(request)
+        .create_version(request)
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "deployment failed: {error:?}; runtime={:?}; diagnostics={:?}",
+                "version failed: {error:?}; runtime={:?}; diagnostics={:?}",
                 supervisor.snapshot(),
                 supervisor.last_diagnostics()
             )
         }) {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn deployment_request(
+fn version_request(
     account_id: AccountId,
     worker_id: WorkerId,
     counter: ResourceId,
@@ -1058,7 +1057,7 @@ fn deployment_request(
     release: &str,
     now_ms: i64,
     promote: bool,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -1075,7 +1074,7 @@ fn deployment_request(
     for (name, id) in [("COUNTER", counter), ("OTHER", other)] {
         bindings.insert(
             name.to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::DoNamespace,
                 id,
                 permissions: CanonicalPermissions::default(),
@@ -1085,7 +1084,7 @@ fn deployment_request(
     }
     bindings.insert(
         "EVENTS".to_owned(),
-        DeploymentBindingInput {
+        VersionBindingInput {
             kind: BindingKind::QueueProducer,
             id: output_queue,
             permissions: CanonicalPermissions::default(),
@@ -1094,11 +1093,11 @@ fn deployment_request(
     );
     let mut vars = BTreeMap::new();
     vars.insert("RELEASE".to_owned(), serde_json::json!(release));
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: DeploymentContent::Worker {
+        content: VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -1256,7 +1255,7 @@ async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     route_generation: u64,
     path: &str,
 ) -> DispatchResponse {
@@ -1271,8 +1270,8 @@ async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: i64::try_from(route_generation).unwrap(),
                 request_id: RequestId::generate(),

@@ -33,12 +33,11 @@ use open_compute_service::{
     serve_binding_backend,
 };
 use open_compute_storage::{
-    DeploymentState, PlatformStorage, QueueContentType, SchedulerStore, WorkerRepository,
+    PlatformStorage, QueueContentType, SchedulerStore, VersionState, WorkerRepository,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentController, DeploymentPins, ModuleInput, ModuleType, ResourcePins, RuntimeSource,
-    RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, ResourcePins, RuntimeSource, RuntimeValidator, VersionController, VersionPins,
 };
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -175,7 +174,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         .create_worker(account, "runtime-gate", RequestId::generate(), 1, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts.clone(),
         validator,
@@ -199,16 +198,16 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     assert_eq!(
         supervisor.snapshot().state,
         SupervisorState::Running,
-        "runtime left Running after deployment validation: {:?}",
+        "runtime left Running after version validation: {:?}",
         supervisor.last_diagnostics()
     );
     assert!(
         !source_task.is_finished(),
-        "runtime-source server stopped during deployment validation"
+        "runtime-source server stopped during version validation"
     );
     assert!(
         !binding_task.is_finished(),
-        "binding-backend server stopped during deployment validation"
+        "binding-backend server stopped during version validation"
     );
     let response = dispatch(&transport, account, worker.id, &a, None, "hello-a").await;
     assert_eq!(
@@ -473,7 +472,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     assert_eq!(
         repo.get_worker(account, worker.id)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         Some(b.id)
     );
 
@@ -587,19 +586,19 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     let active_before = repo
         .get_worker(account, worker.id)
         .unwrap()
-        .active_deployment_id;
+        .active_version_id;
     let invalid = create_request(account, worker.id, "deploy-invalid", "C", false, true);
-    let error = controller.create_deployment(invalid).await.unwrap_err();
+    let error = controller.create_version(invalid).await.unwrap_err();
     assert_eq!(error.code(), ErrorCode::BundleRuntimeInvalid);
     assert_eq!(
         repo.get_worker(account, worker.id)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         active_before
     );
     assert_eq!(
-        repo.list_deployments(account, worker.id).unwrap()[0].state,
-        DeploymentState::Rejected
+        repo.list_versions(account, worker.id).unwrap()[0].state,
+        VersionState::Rejected
     );
 
     // Restart rotates credentials and forces a new workerd process/cold cache.
@@ -612,13 +611,13 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     );
     let concurrent = futures::future::join_all((0..100).map(|index| {
         let transport = transport.clone();
-        let deployment = a.clone();
+        let version = a.clone();
         async move {
             dispatch(
                 &transport,
                 account,
                 worker.id,
-                &deployment,
+                &version,
                 None,
                 &format!("restart-{index}"),
             )
@@ -758,11 +757,11 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
 }
 
 async fn deploy_egress(
-    controller: &DeploymentController<'_>,
+    controller: &VersionController<'_>,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
     fixture: Option<&EgressFixture>,
-) -> open_compute_storage::DeploymentRecord {
+) -> open_compute_storage::VersionRecord {
     let public_targets = fixture.map_or_else(Vec::new, |fixture| {
         vec![
             fixture.public_ipv4_url.clone(),
@@ -820,11 +819,11 @@ async fn deploy_egress(
         BundleLimits::default(),
     )
     .unwrap();
-    let request = CreateDeploymentRequest {
+    let request = CreateVersionRequest {
         account_id: account,
         worker_id: worker,
         idempotency_key: "deploy-egress".to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -839,9 +838,9 @@ async fn deploy_egress(
         request_id: RequestId::generate(),
         now_ms: 20,
     };
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected replay"),
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
     }
 }
 
@@ -1056,10 +1055,10 @@ fn assert_raw_tcp_fixture(raw: &serde_json::Value, fixture: &EgressFixture) {
 }
 
 async fn deploy_node(
-    controller: &DeploymentController<'_>,
+    controller: &VersionController<'_>,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-) -> open_compute_storage::DeploymentRecord {
+) -> open_compute_storage::VersionRecord {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -1072,11 +1071,11 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
         BundleLimits::default(),
     )
     .unwrap();
-    let request = CreateDeploymentRequest {
+    let request = CreateVersionRequest {
         account_id: account,
         worker_id: worker,
         idempotency_key: "deploy-node-compat".to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -1091,30 +1090,30 @@ export default { fetch() { return new Response(Buffer.from("node-compat").toStri
         request_id: RequestId::generate(),
         now_ms: 21,
     };
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected replay"),
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
     }
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
+    controller: &VersionController<'_>,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
     key: &str,
     label: &str,
     promote: bool,
     invalid: bool,
-) -> open_compute_storage::DeploymentRecord {
+) -> open_compute_storage::VersionRecord {
     match controller
-        .create_deployment(create_request(
+        .create_version(create_request(
             account, worker, key, label, promote, invalid,
         ))
         .await
         .unwrap()
     {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected replay"),
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
     }
 }
 
@@ -1125,7 +1124,7 @@ fn create_request(
     label: &str,
     promote: bool,
     invalid: bool,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let source = if invalid {
         "export default { fetch( {".to_owned()
     } else {
@@ -1209,11 +1208,11 @@ export default {{
     vars.insert("MODE".to_owned(), serde_json::json!("production"));
     let mut secrets = BTreeMap::new();
     secrets.insert("API_TOKEN".to_owned(), SecretString::new("gate-secret"));
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id: account,
         worker_id: worker,
         idempotency_key: key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -1266,14 +1265,14 @@ impl Drop for PendingUpload {
 fn dispatch_target(
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     entrypoint: Option<&str>,
 ) -> DispatchTarget {
     DispatchTarget {
         account_id: account,
         worker_id: worker,
-        deployment_id: deployment.id,
-        worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+        version_id: version.id,
+        worker_code_sha256: hex::encode(version.worker_code_sha256),
         entrypoint: entrypoint.map(str::to_owned),
         route_generation: 1,
         request_id: RequestId::generate(),
@@ -1284,7 +1283,7 @@ async fn dispatch(
     transport: &WorkerdTransport,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     entrypoint: Option<&str>,
     body: &str,
 ) -> DispatchResponse {
@@ -1297,7 +1296,7 @@ async fn dispatch(
         .unwrap();
     let response = transport
         .dispatch(
-            dispatch_target(account, worker, deployment, entrypoint),
+            dispatch_target(account, worker, version, entrypoint),
             request,
         )
         .await

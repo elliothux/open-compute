@@ -2,12 +2,12 @@
 
 use open_compute_core::config::{MetricsConfig, StorageConfig};
 use open_compute_core::{
-    AccountId, BindingKind, DeploymentId, ErrorCode, PlatformStatus, RequestId, ResourceId,
-    SystemClock, valid_restore_path,
+    AccountId, BindingKind, ErrorCode, PlatformStatus, RequestId, ResourceId, SystemClock,
+    VersionId, valid_restore_path,
 };
 use open_compute_service::metrics::MetricsRegistry;
 use open_compute_storage::{
-    NewDeployment, PlatformStorage, ReserveResourceCreate, ResourceCreateReservation,
+    NewVersion, PlatformStorage, ReserveResourceCreate, ResourceCreateReservation,
     ResourceRepository, WorkerRepository,
 };
 use rusqlite::params;
@@ -114,42 +114,44 @@ fn insert_account(storage: &PlatformStorage, account: AccountId) {
         .expect("insert second account");
 }
 
-fn ready_deployment(
+fn ready_version(
     repository: WorkerRepository<'_>,
     account: AccountId,
     worker: open_compute_core::WorkerId,
     byte: u8,
     now_ms: i64,
-) -> DeploymentId {
-    let id = DeploymentId::generate();
+) -> VersionId {
+    let id = VersionId::generate();
     repository
-        .insert_staging_deployment(
-            &NewDeployment {
+        .insert_staging_version(
+            &NewVersion {
                 id,
                 account_id: account,
                 worker_id: worker,
-                content_kind: open_compute_storage::DeploymentContentKind::Worker,
+                content_kind: open_compute_storage::VersionContentKind::Worker,
                 artifact_sha256: Some([byte; 32]),
                 artifact_size: Some(1),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
                 worker_code_sha256: [byte; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: RequestId::generate(),
                 now_ms,
             },
-            &open_compute_storage::NewDeploymentProducts::default(),
+            &open_compute_storage::NewVersionProducts::default(),
             1_000_000,
         )
-        .expect("insert deployment");
+        .expect("insert version");
     repository.begin_validation(id).expect("begin validation");
     repository.mark_ready(id, now_ms + 1).expect("ready");
     id
 }
 
 #[test]
-fn p1_two_account_resource_and_deployment_matrix_has_no_existence_or_metric_oracle() {
+fn p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle() {
     let temp = TempDir::new().expect("temp");
     let root = fs::canonicalize(temp.path())
         .expect("canonical temp")
@@ -246,20 +248,20 @@ fn p1_two_account_resource_and_deployment_matrix_has_no_existence_or_metric_orac
     let (worker_b, _) = workers
         .create_worker(account_b, "account-b", RequestId::generate(), 21, 1_000_000)
         .expect("worker B");
-    let a1 = ready_deployment(workers, account_a, worker_a.id, 1, 30);
-    let a2 = ready_deployment(workers, account_a, worker_a.id, 2, 40);
-    let b1 = ready_deployment(workers, account_b, worker_b.id, 3, 50);
-    let b2 = ready_deployment(workers, account_b, worker_b.id, 4, 60);
+    let a1 = ready_version(workers, account_a, worker_a.id, 1, 30);
+    let a2 = ready_version(workers, account_a, worker_a.id, 2, 40);
+    let b1 = ready_version(workers, account_b, worker_b.id, 3, 50);
+    let b2 = ready_version(workers, account_b, worker_b.id, 4, 60);
     assert_eq!(
         workers
-            .list_deployments(account_a, worker_a.id)
+            .list_versions(account_a, worker_a.id)
             .expect("A list")
             .len(),
         2
     );
     assert_eq!(
         workers
-            .list_deployments(account_b, worker_b.id)
+            .list_versions(account_b, worker_b.id)
             .expect("B list")
             .len(),
         2
@@ -290,34 +292,34 @@ fn p1_two_account_resource_and_deployment_matrix_has_no_existence_or_metric_orac
             72,
         )
         .expect("rollback A1");
-    assert_eq!(rolled_back.active_deployment_id, Some(a1));
+    assert_eq!(rolled_back.active_version_id, Some(a1));
     assert_eq!(
         workers
             .promote(account_a, worker_a.id, b1, None, RequestId::generate(), 73)
-            .expect_err("cross deployment")
+            .expect_err("cross version")
             .code(),
-        ErrorCode::DeploymentNotFound
+        ErrorCode::VersionNotFound
     );
     assert_eq!(
         workers
             .promote(
                 account_a,
                 worker_a.id,
-                DeploymentId::generate(),
+                VersionId::generate(),
                 None,
                 RequestId::generate(),
                 73,
             )
-            .expect_err("unknown deployment")
+            .expect_err("unknown version")
             .code(),
-        ErrorCode::DeploymentNotFound
+        ErrorCode::VersionNotFound
     );
     assert_eq!(
         workers
-            .get_deployment(account_a, worker_a.id, b2)
-            .expect_err("foreign deployment")
+            .get_version(account_a, worker_a.id, b2)
+            .expect_err("foreign version")
             .code(),
-        ErrorCode::DeploymentNotFound
+        ErrorCode::VersionNotFound
     );
     assert_eq!(
         workers
@@ -338,14 +340,14 @@ fn p1_two_account_resource_and_deployment_matrix_has_no_existence_or_metric_orac
         workers
             .get_worker(account_a, worker_a.id)
             .expect("A active")
-            .active_deployment_id,
+            .active_version_id,
         Some(a1)
     );
     assert_eq!(
         workers
             .get_worker(account_b, worker_b.id)
             .expect("B active")
-            .active_deployment_id,
+            .active_version_id,
         None
     );
 

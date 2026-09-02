@@ -24,7 +24,7 @@ fn projection(
         object_generation: 1,
         row_token: token.to_owned(),
         due_at_ms,
-        target_deployment_id: DeploymentId::generate(),
+        target_version_id: VersionId::generate(),
         execution_generation: 3,
         retry_count: 0,
     }
@@ -238,7 +238,7 @@ fn overwrite_claim_and_conditional_completion_are_token_fenced() {
     assert_eq!(claimed.claim_token.len(), 64);
 
     let mut current = projection(namespace, object_id, "new-token-0000002", 40);
-    current.target_deployment_id = old.target_deployment_id;
+    current.target_version_id = old.target_version_id;
     store.upsert_alarm(&current, 21).unwrap();
     assert!(
         !store
@@ -950,13 +950,13 @@ fn queue_consumer_claim_completion_recovery_and_dlq_are_token_fenced() {
             .unwrap();
     }
     let consumer_id = QueueConsumerId::generate();
-    let deployment_id = DeploymentId::generate();
+    let version_id = VersionId::generate();
     let worker_id = WorkerId::generate();
     let consumer = QueueConsumerProjection {
         consumer_id,
         queue_id: source_id,
         consumer_generation: 1,
-        deployment_id,
+        version_id,
         worker_id,
         execution_generation: 1,
         entrypoint: None,
@@ -1169,7 +1169,7 @@ fn cron_slots_retries_and_unknown_recovery_preserve_logical_identity() {
         activation_id,
         account_id: AccountId::generate(),
         worker_id: WorkerId::generate(),
-        deployment_id: DeploymentId::generate(),
+        version_id: VersionId::generate(),
         execution_generation: 1,
         activation_generation: 1,
         expression: "* * * * *".to_owned(),

@@ -3,8 +3,8 @@ use crate::assets::{
     AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, HtmlHandling, NotFoundHandling,
 };
 
-fn deployment_assets(binding: Option<&str>, worker_first: RunWorkerFirst) -> DeploymentAssets {
-    DeploymentAssets {
+fn version_assets(binding: Option<&str>, worker_first: RunWorkerFirst) -> VersionAssets {
+    VersionAssets {
         manifest: AssetManifestV1 {
             schema_version: 1,
             entries: vec![AssetEntryV1 {
@@ -26,12 +26,12 @@ fn deployment_assets(binding: Option<&str>, worker_first: RunWorkerFirst) -> Dep
     }
 }
 
-fn assets_only_request(assets: &DeploymentAssets) -> CreateDeploymentRequest {
-    CreateDeploymentRequest {
+fn assets_only_request(assets: &VersionAssets) -> CreateVersionRequest {
+    CreateVersionRequest {
         account_id: AccountId::generate(),
         worker_id: WorkerId::generate(),
         idempotency_key: "asset-test".to_owned(),
-        content: DeploymentContent::AssetsOnly {
+        content: VersionContent::AssetsOnly {
             assets: assets.clone(),
         },
         vars: BTreeMap::new(),
@@ -53,7 +53,7 @@ async fn default_entrypoint_validation_and_internal_error_are_stable() {
     let candidate = ValidationCandidate {
         account_id: AccountId::generate(),
         worker_id: WorkerId::generate(),
-        deployment_id: DeploymentId::generate(),
+        version_id: VersionId::generate(),
         worker_code_sha256: [3; 32],
     };
     assert_eq!(
@@ -64,7 +64,7 @@ async fn default_entrypoint_validation_and_internal_error_are_stable() {
             .code(),
         ErrorCode::EntrypointNotFound
     );
-    assert_eq!(invariant().code(), ErrorCode::DeploymentInvariantViolation);
+    assert_eq!(invariant().code(), ErrorCode::VersionInvariantViolation);
     assert_eq!(
         validator
             .validate_durable_object_class(candidate, "Counter".to_owned())
@@ -77,13 +77,13 @@ async fn default_entrypoint_validation_and_internal_error_are_stable() {
 
 #[test]
 fn assets_only_content_rejects_execution_and_binding_collisions() {
-    let assets = deployment_assets(Some("ASSETS"), RunWorkerFirst::All(false));
+    let assets = version_assets(Some("ASSETS"), RunWorkerFirst::All(false));
     let content = PreparedContent::AssetsOnly {
         assets: assets.clone(),
     };
     let request = assets_only_request(&assets);
     assert!(validate_asset_content(&request, &content, &BTreeMap::new()).is_ok());
-    assert_eq!(content.kind(), DeploymentContentKind::AssetsOnly);
+    assert_eq!(content.kind(), VersionContentKind::AssetsOnly);
     assert!(content.bundle().is_none());
     assert_eq!(content.assets(), Some(&assets));
     assert!(content.admission_bytes().unwrap() > 64 * 1024);
@@ -97,9 +97,9 @@ fn assets_only_content_rejects_execution_and_binding_collisions() {
         ErrorCode::BindingTypeMismatch
     );
 
-    let mut request = assets_only_request(&deployment_assets(None, RunWorkerFirst::All(false)));
+    let mut request = assets_only_request(&version_assets(None, RunWorkerFirst::All(false)));
     let content = PreparedContent::AssetsOnly {
-        assets: deployment_assets(None, RunWorkerFirst::All(false)),
+        assets: version_assets(None, RunWorkerFirst::All(false)),
     };
     request
         .secrets
@@ -111,9 +111,9 @@ fn assets_only_content_rejects_execution_and_binding_collisions() {
         ErrorCode::AssetConfigUnsupported
     );
 
-    let request = assets_only_request(&deployment_assets(None, RunWorkerFirst::All(true)));
+    let request = assets_only_request(&version_assets(None, RunWorkerFirst::All(true)));
     let content = PreparedContent::AssetsOnly {
-        assets: deployment_assets(None, RunWorkerFirst::All(true)),
+        assets: version_assets(None, RunWorkerFirst::All(true)),
     };
     assert_eq!(
         validate_asset_content(&request, &content, &BTreeMap::new())

@@ -9,11 +9,11 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, ResourceState,
-    SchedulerClock as _, SystemSchedulerClock, WorkflowId, WorkflowInstanceId,
+    AccountId, ErrorCode, PlatformError, RequestId, ResourceState, SchedulerClock as _,
+    SystemSchedulerClock, VersionId, WorkflowId, WorkflowInstanceId,
 };
 use open_compute_storage::{
-    CatalogCursor, CatalogDirection, CatalogSort, DeploymentState, PlatformStorage, SchedulerStore,
+    CatalogCursor, CatalogDirection, CatalogSort, PlatformStorage, SchedulerStore, VersionState,
     WorkflowRepository, WorkflowVersion, decode_catalog_cursor,
 };
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ impl WorkflowApiState {
         &self,
         account: AccountId,
         definition: WorkflowId,
-        deployment: DeploymentId,
+        version: VersionId,
         class_name: String,
     ) -> Result<WorkflowVersion, PlatformError> {
         let storage = self.storage.clone();
@@ -62,7 +62,7 @@ impl WorkflowApiState {
             WorkflowRepository::new(storage.db()).stage_version(
                 account,
                 definition,
-                deployment,
+                version,
                 &class_name,
                 now_ms(),
             )
@@ -97,7 +97,7 @@ pub(crate) async fn validate_version(
     tokio::task::spawn_blocking(move || {
         WorkflowRepository::new(storage.db()).finish_version(
             version.target.account_id,
-            version.target.version_id,
+            version.target.workflow_version_id,
             accepted,
             now_ms(),
         )
@@ -145,7 +145,7 @@ struct NameBody {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VersionBody {
-    deployment_id: DeploymentId,
+    version_id: VersionId,
     class_name: String,
 }
 
@@ -318,11 +318,11 @@ async fn create_version(
         Err(error) => return failure(&error, id),
     };
     match api
-        .create_version(account, definition, body.deployment_id, body.class_name)
+        .create_version(account, definition, body.version_id, body.class_name)
         .await
     {
         Ok(version) => {
-            let status = if version.state == DeploymentState::Validating {
+            let status = if version.state == VersionState::Validating {
                 StatusCode::ACCEPTED
             } else {
                 StatusCode::CREATED

@@ -28,10 +28,9 @@ pub use ai_search::{
 };
 pub use assets::{
     AssetEntryV1, AssetHeaderOperation, AssetHeaderRule, AssetManifestV1, AssetRedirectRule,
-    AssetRequest, AssetResponsePlan, AssetRoutingConfigV1, DeploymentAssets, HtmlHandling,
-    MAX_ASSET_FILE_BYTES, MAX_ASSET_FILES, MAX_ASSET_MANIFEST_BYTES, MAX_ASSET_ROUTING_RULES,
-    MAX_ASSET_TOTAL_BYTES, NotFoundHandling, RunWorkerFirst, plan_asset_response,
-    validate_asset_path,
+    AssetRequest, AssetResponsePlan, AssetRoutingConfigV1, HtmlHandling, MAX_ASSET_FILE_BYTES,
+    MAX_ASSET_FILES, MAX_ASSET_MANIFEST_BYTES, MAX_ASSET_ROUTING_RULES, MAX_ASSET_TOTAL_BYTES,
+    NotFoundHandling, RunWorkerFirst, VersionAssets, plan_asset_response, validate_asset_path,
 };
 
 pub use bundle::{
@@ -48,13 +47,13 @@ pub use descriptor::{
 };
 pub use durable_objects::DurableObjectResourceDriver;
 pub use kv::KvResourceDriver;
-pub use pins::{DeploymentPin, DeploymentPins};
+pub use pins::{VersionPin, VersionPins};
 pub use pipeline::{
-    CreateDeploymentOutcome, CreateDeploymentRequest, CreateDeploymentResult, DeploymentAiInput,
-    DeploymentBindingInput, DeploymentBundle, DeploymentCacheInput, DeploymentCachePolicyInput,
-    DeploymentContent, DeploymentController, DeploymentImagesInput, DeploymentRuntimeFeatures,
-    DeploymentServiceInput, DeploymentVersionMetadataInput, ProductPromotionCoordinator,
+    CreateVersionOutcome, CreateVersionRequest, CreateVersionResult, ProductPromotionCoordinator,
     ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, ValidationCandidate,
+    VersionAiInput, VersionBindingInput, VersionBundle, VersionCacheInput, VersionCachePolicyInput,
+    VersionContent, VersionController, VersionImagesInput, VersionRuntimeFeatures,
+    VersionServiceInput, VersionVersionMetadataInput,
 };
 pub use queue_lifecycle::{
     CreateQueueOutcome, CreateQueueRequest, CreateQueueResult, DeleteQueueResult, QueueController,

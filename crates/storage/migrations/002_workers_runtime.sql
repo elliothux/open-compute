@@ -15,7 +15,7 @@ CREATE UNIQUE INDEX workers_live_name
 ON workers(account_id, name)
 WHERE deleted_at_ms IS NULL;
 
-CREATE TABLE worker_deployments (
+CREATE TABLE worker_versions (
   id TEXT PRIMARY KEY,
   worker_id TEXT NOT NULL REFERENCES workers(id),
   version_number INTEGER NOT NULL CHECK(version_number > 0),
@@ -29,6 +29,8 @@ CREATE TABLE worker_deployments (
   main_module TEXT,
   worker_code_sha256 BLOB NOT NULL CHECK(length(worker_code_sha256) = 32),
   loader_schema_version INTEGER NOT NULL,
+  compatibility_date TEXT NOT NULL CHECK(length(compatibility_date) = 10),
+  compatibility_flags_json BLOB NOT NULL CHECK(length(compatibility_flags_json) >= 2),
   created_at_ms INTEGER NOT NULL,
   ready_at_ms INTEGER,
   rejected_at_ms INTEGER,
@@ -45,25 +47,37 @@ CREATE TABLE worker_deployments (
   UNIQUE(worker_id, version_number)
 ) STRICT;
 
-CREATE INDEX deployments_worker_state
-ON worker_deployments(worker_id, state, version_number DESC);
+CREATE INDEX versions_worker_state
+ON worker_versions(worker_id, state, version_number DESC);
 
-CREATE TABLE deployment_vars (
-  deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
+CREATE TABLE worker_deployments (
+  id TEXT PRIMARY KEY,
+  worker_id TEXT NOT NULL REFERENCES workers(id),
+  version_id TEXT NOT NULL REFERENCES worker_versions(id),
+  source TEXT NOT NULL CHECK(source IN ('script_upload', 'versions_api', 'rollback', 'system')),
+  created_at_ms INTEGER NOT NULL,
+  deleted_at_ms INTEGER
+) STRICT;
+
+CREATE INDEX deployments_worker_created
+ON worker_deployments(worker_id, created_at_ms DESC, id DESC);
+
+CREATE TABLE version_vars (
+  version_id TEXT NOT NULL REFERENCES worker_versions(id),
   name TEXT NOT NULL,
   value_json BLOB NOT NULL,
-  PRIMARY KEY(deployment_id, name)
+  PRIMARY KEY(version_id, name)
 ) WITHOUT ROWID, STRICT;
 
-CREATE TABLE deployment_secrets (
-  deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
+CREATE TABLE version_secrets (
+  version_id TEXT NOT NULL REFERENCES worker_versions(id),
   name TEXT NOT NULL,
   revision_id TEXT NOT NULL,
   key_id TEXT NOT NULL,
   algorithm TEXT NOT NULL,
   nonce BLOB NOT NULL,
   ciphertext BLOB NOT NULL,
-  PRIMARY KEY(deployment_id, name)
+  PRIMARY KEY(version_id, name)
 ) WITHOUT ROWID, STRICT;
 
 CREATE TABLE worker_routes (
@@ -98,7 +112,7 @@ CREATE TABLE control_idempotency (
   fingerprint_key_id TEXT NOT NULL,
   request_fingerprint BLOB NOT NULL CHECK(length(request_fingerprint) = 32),
   response_json BLOB,
-  deployment_id TEXT REFERENCES worker_deployments(id),
+  version_id TEXT REFERENCES worker_versions(id),
   resource_id TEXT REFERENCES resources(id) DEFERRABLE INITIALLY DEFERRED,
   queue_id TEXT REFERENCES queues(id) DEFERRABLE INITIALLY DEFERRED,
   state TEXT NOT NULL CHECK(state IN ('running', 'complete', 'failed')),
@@ -107,15 +121,15 @@ CREATE TABLE control_idempotency (
   PRIMARY KEY(account_id, scope, idempotency_key)
 ) WITHOUT ROWID, STRICT;
 
--- Every subsystem that keeps a deployment reachable registers a typed row
+-- Every subsystem that keeps a version reachable registers a typed row
 -- here. Deletion consults this registry instead of an incomplete COUNT spread
 -- across product-specific tables.
-CREATE TABLE deployment_referrers (
-  deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
+CREATE TABLE version_referrers (
+  version_id TEXT NOT NULL REFERENCES worker_versions(id),
   kind TEXT NOT NULL,
   ref_id TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL,
-  PRIMARY KEY(deployment_id, kind, ref_id)
+  PRIMARY KEY(version_id, kind, ref_id)
 ) WITHOUT ROWID, STRICT;
 
 CREATE TABLE control_audit_events (
@@ -134,8 +148,9 @@ BEFORE INSERT ON workers
 WHEN NEW.active_deployment_id IS NOT NULL
 BEGIN
   SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM worker_deployments
-    WHERE id = NEW.active_deployment_id AND worker_id = NEW.id AND state = 'ready'
+    SELECT 1 FROM worker_deployments d JOIN worker_versions v ON v.id = d.version_id
+    WHERE d.id = NEW.active_deployment_id AND d.worker_id = NEW.id
+      AND d.deleted_at_ms IS NULL AND v.worker_id = NEW.id AND v.state = 'ready'
   ) THEN RAISE(ABORT, 'active deployment invariant') END;
 END;
 
@@ -144,13 +159,33 @@ BEFORE UPDATE OF active_deployment_id ON workers
 WHEN NEW.active_deployment_id IS NOT NULL
 BEGIN
   SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM worker_deployments
-    WHERE id = NEW.active_deployment_id AND worker_id = NEW.id AND state = 'ready'
+    SELECT 1 FROM worker_deployments d JOIN worker_versions v ON v.id = d.version_id
+    WHERE d.id = NEW.active_deployment_id AND d.worker_id = NEW.id
+      AND d.deleted_at_ms IS NULL AND v.worker_id = NEW.id AND v.state = 'ready'
   ) THEN RAISE(ABORT, 'active deployment invariant') END;
 END;
 
-CREATE TRIGGER deployment_transition_guard
-BEFORE UPDATE OF state ON worker_deployments
+CREATE TRIGGER deployment_insert_guard
+BEFORE INSERT ON worker_deployments
+WHEN NOT EXISTS (
+  SELECT 1 FROM worker_versions v
+  WHERE v.id = NEW.version_id AND v.worker_id = NEW.worker_id AND v.state = 'ready'
+)
+BEGIN SELECT RAISE(ABORT, 'deployment target must be a ready version'); END;
+
+CREATE TRIGGER deployment_immutable_guard
+BEFORE UPDATE OF id,worker_id,version_id,source,created_at_ms ON worker_deployments
+BEGIN SELECT RAISE(ABORT, 'deployment is immutable'); END;
+
+CREATE TRIGGER deployment_delete_guard
+BEFORE UPDATE OF deleted_at_ms ON worker_deployments
+WHEN NEW.deleted_at_ms IS NOT NULL AND EXISTS (
+  SELECT 1 FROM workers WHERE active_deployment_id = OLD.id
+)
+BEGIN SELECT RAISE(ABORT, 'active deployment cannot be deleted'); END;
+
+CREATE TRIGGER version_transition_guard
+BEFORE UPDATE OF state ON worker_versions
 WHEN OLD.state != NEW.state AND NOT (
   (OLD.state = 'staging' AND NEW.state IN ('validating', 'rejected')) OR
   (OLD.state = 'validating' AND NEW.state IN ('ready', 'rejected')) OR
@@ -158,54 +193,55 @@ WHEN OLD.state != NEW.state AND NOT (
   (OLD.state = 'deleting' AND NEW.state = 'tombstoned')
 )
 BEGIN
-  SELECT RAISE(ABORT, 'invalid deployment transition');
+  SELECT RAISE(ABORT, 'invalid version transition');
 END;
 
-CREATE TRIGGER deployment_immutable_guard
+CREATE TRIGGER version_immutable_guard
 BEFORE UPDATE OF content_kind, artifact_sha256, artifact_size, artifact_schema_version,
-  main_module, worker_code_sha256, loader_schema_version
-ON worker_deployments
+  main_module, worker_code_sha256, loader_schema_version, compatibility_date,
+  compatibility_flags_json
+ON worker_versions
 WHEN OLD.state != 'staging'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment');
+  SELECT RAISE(ABORT, 'immutable version');
 END;
 
-CREATE TRIGGER deployment_vars_insert_guard
-BEFORE INSERT ON deployment_vars
-WHEN (SELECT state FROM worker_deployments WHERE id = NEW.deployment_id) != 'staging'
+CREATE TRIGGER version_vars_insert_guard
+BEFORE INSERT ON version_vars
+WHEN (SELECT state FROM worker_versions WHERE id = NEW.version_id) != 'staging'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment vars');
+  SELECT RAISE(ABORT, 'immutable version vars');
 END;
 
-CREATE TRIGGER deployment_vars_update_guard
-BEFORE UPDATE ON deployment_vars
+CREATE TRIGGER version_vars_update_guard
+BEFORE UPDATE ON version_vars
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment vars');
+  SELECT RAISE(ABORT, 'immutable version vars');
 END;
 
-CREATE TRIGGER deployment_vars_delete_guard
-BEFORE DELETE ON deployment_vars
-WHEN (SELECT state FROM worker_deployments WHERE id = OLD.deployment_id) != 'deleting'
+CREATE TRIGGER version_vars_delete_guard
+BEFORE DELETE ON version_vars
+WHEN (SELECT state FROM worker_versions WHERE id = OLD.version_id) != 'deleting'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment vars');
+  SELECT RAISE(ABORT, 'immutable version vars');
 END;
 
-CREATE TRIGGER deployment_secrets_insert_guard
-BEFORE INSERT ON deployment_secrets
-WHEN (SELECT state FROM worker_deployments WHERE id = NEW.deployment_id) != 'staging'
+CREATE TRIGGER version_secrets_insert_guard
+BEFORE INSERT ON version_secrets
+WHEN (SELECT state FROM worker_versions WHERE id = NEW.version_id) != 'staging'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment secrets');
+  SELECT RAISE(ABORT, 'immutable version secrets');
 END;
 
-CREATE TRIGGER deployment_secrets_update_guard
-BEFORE UPDATE ON deployment_secrets
+CREATE TRIGGER version_secrets_update_guard
+BEFORE UPDATE ON version_secrets
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment secrets');
+  SELECT RAISE(ABORT, 'immutable version secrets');
 END;
 
-CREATE TRIGGER deployment_secrets_delete_guard
-BEFORE DELETE ON deployment_secrets
-WHEN (SELECT state FROM worker_deployments WHERE id = OLD.deployment_id) != 'deleting'
+CREATE TRIGGER version_secrets_delete_guard
+BEFORE DELETE ON version_secrets
+WHEN (SELECT state FROM worker_versions WHERE id = OLD.version_id) != 'deleting'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment secrets');
+  SELECT RAISE(ABORT, 'immutable version secrets');
 END;

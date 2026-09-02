@@ -12,7 +12,7 @@ const RUNTIME: &str = "runtime";
 const CACHE: &str = "cache";
 const ARTIFACTS: &str = "artifacts";
 const SHA256: &str = "sha256";
-const DEPLOYMENT_STAGING: &str = "deployment-staging";
+const VERSION_STAGING: &str = "version-staging";
 const BACKUP_STAGING: &str = "backup-staging";
 const DIAGNOSTICS: &str = "diagnostics";
 const OPERATIONS: &str = "operations";
@@ -103,7 +103,7 @@ impl DataDir {
             lock,
         };
         data_dir.validate_children()?;
-        data_dir.clear_deployment_staging()?;
+        data_dir.clear_version_staging()?;
         Ok(data_dir)
     }
 
@@ -168,10 +168,10 @@ impl DataDir {
         self.root.join(CACHE).join(ARTIFACTS)
     }
 
-    /// Private crash-recoverable staging directory for streamed deployment uploads.
+    /// Private crash-recoverable staging directory for streamed version uploads.
     #[must_use]
-    pub fn deployment_staging_dir(&self) -> PathBuf {
-        self.root.join(DEPLOYMENT_STAGING)
+    pub fn version_staging_dir(&self) -> PathBuf {
+        self.root.join(VERSION_STAGING)
     }
 
     /// Private staging directory for online backups and verified restores.
@@ -465,7 +465,7 @@ impl DataDir {
             KEYS,
             RUNTIME,
             CACHE,
-            DEPLOYMENT_STAGING,
+            VERSION_STAGING,
             BACKUP_STAGING,
             DIAGNOSTICS,
         ] {
@@ -487,7 +487,7 @@ impl DataDir {
             self.root.join(CACHE),
             self.root.join(CACHE).join(ARTIFACTS),
             self.root.join(CACHE).join(ARTIFACTS).join(SHA256),
-            self.deployment_staging_dir(),
+            self.version_staging_dir(),
             self.root.join(BACKUP_STAGING),
             self.root.join(DIAGNOSTICS),
             self.root.join(DIAGNOSTICS).join(FAILED_STARTS),
@@ -498,36 +498,36 @@ impl DataDir {
         Ok(())
     }
 
-    fn clear_deployment_staging(&self) -> Result<(), PlatformError> {
-        let staging = self.deployment_staging_dir();
+    fn clear_version_staging(&self) -> Result<(), PlatformError> {
+        let staging = self.version_staging_dir();
         for entry in std::fs::read_dir(&staging).map_err(|_| {
             PlatformError::new(
                 open_compute_core::ErrorCode::PathInvalid,
-                "failed to inspect deployment staging directory",
+                "failed to inspect version staging directory",
             )
         })? {
             let entry = entry.map_err(|_| {
                 PlatformError::new(
                     open_compute_core::ErrorCode::PathInvalid,
-                    "failed to inspect deployment staging entry",
+                    "failed to inspect version staging entry",
                 )
             })?;
             let kind = entry.file_type().map_err(|_| {
                 PlatformError::new(
                     open_compute_core::ErrorCode::PathInvalid,
-                    "failed to inspect deployment staging entry type",
+                    "failed to inspect version staging entry type",
                 )
             })?;
             if !kind.is_file() || kind.is_symlink() {
                 return Err(PlatformError::new(
                     open_compute_core::ErrorCode::PathInvalid,
-                    "deployment staging contains a non-regular entry",
+                    "version staging contains a non-regular entry",
                 ));
             }
             std::fs::remove_file(entry.path()).map_err(|_| {
                 PlatformError::new(
                     open_compute_core::ErrorCode::PathInvalid,
-                    "failed to clear stale deployment staging file",
+                    "failed to clear stale version staging file",
                 )
             })?;
         }
@@ -629,7 +629,7 @@ fn create_layout(root: &Path) -> Result<(), PlatformError> {
     fs::create_dir_secure(&root.join(CACHE))?;
     fs::create_dir_secure(&root.join(CACHE).join(ARTIFACTS))?;
     fs::create_dir_secure(&root.join(CACHE).join(ARTIFACTS).join(SHA256))?;
-    fs::create_dir_secure(&root.join(DEPLOYMENT_STAGING))?;
+    fs::create_dir_secure(&root.join(VERSION_STAGING))?;
     fs::create_dir_secure(&root.join(BACKUP_STAGING))?;
     fs::create_dir_secure(&root.join(DIAGNOSTICS))?;
     fs::create_dir_secure(&root.join(DIAGNOSTICS).join(FAILED_STARTS))?;
@@ -663,7 +663,7 @@ pub fn expected_directories(root: &Path) -> Vec<PathBuf> {
         root.join(CACHE),
         root.join(CACHE).join(ARTIFACTS),
         root.join(CACHE).join(ARTIFACTS).join(SHA256),
-        root.join(DEPLOYMENT_STAGING),
+        root.join(VERSION_STAGING),
         root.join(BACKUP_STAGING),
         root.join(DIAGNOSTICS),
         root.join(DIAGNOSTICS).join(FAILED_STARTS),

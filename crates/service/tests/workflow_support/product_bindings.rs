@@ -5,8 +5,8 @@ use open_compute_core::WorkflowCronSchedule;
 use open_compute_service::runtime_bridge::ScheduledDispatchRequest;
 use open_compute_storage::{PlatformStorage, WorkerRepository};
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentRequest, CreateQueueOutcome, CreateQueueRequest,
-    DeploymentController, ModuleInput, ModuleType, QueueController,
+    BundleLimits, CanonicalBundle, CreateQueueOutcome, CreateQueueRequest, CreateVersionRequest,
+    ModuleInput, ModuleType, QueueController, VersionController,
 };
 use p0_exit_support::{
     GateStack, admin_json, admin_router, deploy, open_scheduler, repo_root, storage_config, stores,
@@ -110,7 +110,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         };
         bindings.insert(
             binding.into(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind,
                 id: id.as_str().unwrap().parse().unwrap(),
                 permissions: Default::default(),
@@ -133,7 +133,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     };
     bindings.insert(
         "QUEUE".into(),
-        DeploymentBindingInput {
+        VersionBindingInput {
             kind: BindingKind::QueueProducer,
             id: ResourceId::from_uuid(queue.queue.id.as_uuid()).unwrap(),
             permissions: Default::default(),
@@ -150,7 +150,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         BundleLimits::default(),
     )
     .unwrap();
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts,
         Arc::new(stack.transport.clone()),
@@ -160,13 +160,13 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         storage.clone(),
         scheduler.clone(),
     ));
-    let workflow_deployment = deploy(
+    let workflow_version = deploy(
         &controller,
-        CreateDeploymentRequest {
+        CreateVersionRequest {
             account_id: account,
             worker_id: worker.id,
             idempotency_key: "workflow-products".into(),
-            content: open_compute_workers::DeploymentContent::Worker {
+            content: open_compute_workers::VersionContent::Worker {
                 bundle: bundle.clone().into_bytes().into(),
                 assets: None,
             },
@@ -199,17 +199,12 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         Default::default(),
     );
     workflow_api
-        .create_version(
-            account,
-            definition.id,
-            workflow_deployment.id,
-            "Flow".into(),
-        )
+        .create_version(account, definition.id, workflow_version.id, "Flow".into())
         .await
         .unwrap();
     bindings.insert(
         "FLOW".into(),
-        DeploymentBindingInput {
+        VersionBindingInput {
             kind: BindingKind::Workflow,
             id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
             permissions: Default::default(),
@@ -218,13 +213,13 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             },
         },
     );
-    let deployment = deploy(
+    let scheduled_version = deploy(
         &controller,
-        CreateDeploymentRequest {
+        CreateVersionRequest {
             account_id: account,
             worker_id: worker.id,
             idempotency_key: "workflow-products-scheduled".into(),
-            content: open_compute_workers::DeploymentContent::Worker {
+            content: open_compute_workers::VersionContent::Worker {
                 bundle: bundle.into_bytes().into(),
                 assets: None,
             },
@@ -247,8 +242,8 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         &stack.supervisor,
     )
     .await;
-    let version = workflow_api
-        .create_version(account, definition.id, deployment.id, "Flow".into())
+    let workflow_catalog_version = workflow_api
+        .create_version(account, definition.id, scheduled_version.id, "Flow".into())
         .await
         .unwrap();
     let config = WorkflowsConfig::default();
@@ -264,8 +259,8 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             &DispatchTarget {
                 account_id: account,
                 worker_id: worker.id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: scheduled_version.id,
+                worker_code_sha256: hex::encode(scheduled_version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: i64::try_from(generation).unwrap(),
                 request_id: RequestId::generate(),
@@ -297,7 +292,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .claim(now(), &mut Default::default())
         .unwrap()
         .unwrap();
-    let target = version.target;
+    let target = workflow_catalog_version.target;
     let scheduled_result = stack
         .transport
         .dispatch_workflow(
@@ -489,7 +484,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             &stack.transport,
             account,
             worker.id,
-            &deployment,
+            &scheduled_version,
             generation,
             "/effect",
         )
@@ -598,7 +593,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             &stack.transport,
             account,
             worker.id,
-            &deployment,
+            &scheduled_version,
             generation,
             "/fairness",
         )

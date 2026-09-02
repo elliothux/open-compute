@@ -73,16 +73,16 @@ function moduleValue(module: RuntimeModule): WorkerLoaderModule {
 
 export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entrypointName: string | undefined, durableObject = false, workflow = false) {
   if (snapshot.contentKind !== "worker" || typeof snapshot.mainModule !== "string") {
-    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   const modules: Record<string, WorkerLoaderModule> = {};
   for (const module of snapshot.modules) {
-    if (module.name.startsWith(INTERNAL_MODULE_PREFIX)) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    if (module.name.startsWith(INTERNAL_MODULE_PREFIX)) throw bindingError("VERSION_INVARIANT_VIOLATION");
     Object.defineProperty(modules, module.name, { value: moduleValue(module), enumerable: true });
   }
   const has = (kind: string, version = 1) => snapshot.bindings.some(binding => binding.kind === kind && binding.capabilityVersion === version);
   if (snapshot.bindings.some(binding => binding.capabilityVersion !== 1)) {
-    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   modules[WRAPPER_RUNTIME_MODULE] = { js: wrapperRuntimeSource };
   modules[SERVICE_SCOPE_MODULE] = { js: serviceScopeSource };

@@ -100,7 +100,7 @@ async fn upload_inventory_parsing_and_error_mapping_are_strict() {
             .find(|object| object.sha256 == [2; 32])
             .unwrap()
             .kind,
-        DeploymentObjectKind::AssetBlob
+        VersionObjectKind::AssetBlob
     );
 
     let conflicting = manifest(vec![
@@ -142,7 +142,7 @@ async fn upload_inventory_parsing_and_error_mapping_are_strict() {
 
     let account = AccountId::generate();
     let worker = WorkerId::generate();
-    let upload = DeploymentUploadId::generate();
+    let upload = VersionUploadId::generate();
     assert_eq!(
         parse_upload_ids(
             &account.to_string(),

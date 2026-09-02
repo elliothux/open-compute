@@ -80,10 +80,10 @@ impl SchedulerService {
             tokio::task::spawn_blocking(move || {
                 let workers = WorkerRepository::new(storage.db());
                 let worker = workers.get_worker(current.account_id, current.worker_id)?;
-                let deployment = workers.get_deployment(
+                let version = workers.get_version(
                     worker.account_id,
                     current.worker_id,
-                    current.deployment_id,
+                    current.version_id,
                 )?;
                 let queue =
                     QueueRepository::new(storage.db()).get(worker.account_id, current.queue_id)?;
@@ -92,11 +92,11 @@ impl SchedulerService {
                     queue.lifecycle_generation,
                     queue.config_generation,
                 )?;
-                Ok::<_, PlatformError>((worker, deployment, queue.name, metrics))
+                Ok::<_, PlatformError>((worker, version, queue.name, metrics))
             })
             .await
         };
-        let Ok(Ok((worker, deployment, queue_name, metrics))) = authority else {
+        let Ok(Ok((worker, version, queue_name, metrics))) = authority else {
             if let Some(metrics) = &self.metrics {
                 metrics.observe_queue_consumer_batch(
                     QueueConsumerBatchOutcome::Unknown,
@@ -136,8 +136,8 @@ impl SchedulerService {
         let target = DispatchTarget {
             account_id: worker.account_id,
             worker_id: batch.worker_id,
-            deployment_id: batch.deployment_id,
-            worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+            version_id: batch.version_id,
+            worker_code_sha256: hex::encode(version.worker_code_sha256),
             entrypoint: batch.entrypoint.clone(),
             route_generation,
             request_id: RequestId::generate(),

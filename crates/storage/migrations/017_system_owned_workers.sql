@@ -7,11 +7,11 @@ CREATE UNIQUE INDEX workers_live_name
 ON workers(account_id, name)
 WHERE deleted_at_ms IS NULL AND ownership = 'tenant';
 
-CREATE TABLE system_owned_deployments (
+CREATE TABLE system_owned_versions (
   kind TEXT PRIMARY KEY CHECK(kind = 'dashboard'),
   account_id TEXT NOT NULL REFERENCES accounts(id),
   worker_id TEXT NOT NULL REFERENCES workers(id),
-  active_deployment_id TEXT REFERENCES worker_deployments(id),
+  active_version_id TEXT REFERENCES worker_versions(id),
   assets_sha256 BLOB NOT NULL CHECK(length(assets_sha256) = 32),
   updated_at_ms INTEGER NOT NULL
 ) STRICT;
@@ -29,14 +29,14 @@ WHERE worker_id IN (
 )
 AND state = 'active';
 
-INSERT OR REPLACE INTO system_owned_deployments (
-  kind, account_id, worker_id, active_deployment_id, assets_sha256, updated_at_ms
+INSERT OR REPLACE INTO system_owned_versions (
+  kind, account_id, worker_id, active_version_id, assets_sha256, updated_at_ms
 )
 SELECT
   'dashboard',
   account_id,
   id,
-  active_deployment_id,
+  (SELECT version_id FROM worker_deployments WHERE id = workers.active_deployment_id),
   zeroblob(32),
   updated_at_ms
 FROM workers

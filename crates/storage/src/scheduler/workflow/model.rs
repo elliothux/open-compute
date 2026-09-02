@@ -136,7 +136,7 @@ impl std::fmt::Debug for WorkflowInstanceRecord {
 pub struct ClaimedWorkflowRun {
     /// Exact run mutation fence.
     pub fence: WorkflowFence,
-    /// Frozen deployment and class.
+    /// Frozen version and class.
     pub target: WorkflowTarget,
     /// Public definition-scoped instance identity.
     pub external_instance_id: String,
@@ -255,9 +255,9 @@ pub struct WorkflowInstanceInspection {
     /// Public definition-scoped identity.
     pub external_instance_id: String,
     /// Frozen version identity.
-    pub version_id: open_compute_core::WorkflowVersionId,
-    /// Frozen deployment identity.
-    pub deployment_id: open_compute_core::DeploymentId,
+    pub workflow_version_id: open_compute_core::WorkflowVersionId,
+    /// Frozen version identity.
+    pub worker_version_id: open_compute_core::VersionId,
     /// Frozen named export.
     pub class_name: String,
     /// Instance mutation generation.

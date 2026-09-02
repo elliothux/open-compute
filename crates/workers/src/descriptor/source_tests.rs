@@ -1,10 +1,10 @@
 use super::*;
-use crate::pipeline::{DeploymentBindingInput, validate_binding_set};
+use crate::pipeline::{VersionBindingInput, validate_binding_set};
 use serde_json::json;
 use sha2::Digest;
 
 #[test]
-fn every_deployment_binds_the_complete_system_source_identity() {
+fn every_version_binds_the_complete_system_source_identity() {
     let bundle = crate::CanonicalBundle::build(
         "index.js",
         vec![crate::ModuleInput {
@@ -18,8 +18,10 @@ fn every_deployment_binds_the_complete_system_source_identity() {
     let descriptor = WorkerCodeDescriptorV1::new(
         AccountId::generate(),
         WorkerId::generate(),
-        DeploymentId::generate(),
+        VersionId::generate(),
         0,
+        "2026-08-30".into(),
+        Vec::new(),
         Some((bundle.sha256(), bundle.manifest())),
         None,
         BTreeMap::new(),
@@ -136,8 +138,8 @@ fn all_system_module_paths_are_reserved_without_binding_exceptions() {
 #[test]
 fn caller_declaration_uses_one_current_capability_and_rejects_selectors() {
     let body = json!({"type":"workflow","id":ResourceId::generate(),"permissions":{"read":true,"write":true},"config":{}});
-    let declaration: DeploymentBindingInput = serde_json::from_value(body.clone()).unwrap();
-    let valid = |value: &DeploymentBindingInput| {
+    let declaration: VersionBindingInput = serde_json::from_value(body.clone()).unwrap();
+    let valid = |value: &VersionBindingInput| {
         validate_binding_set(
             &BTreeMap::from([("FLOW".into(), value.clone())]),
             &BTreeMap::new(),
@@ -156,6 +158,6 @@ fn caller_declaration_uses_one_current_capability_and_rejects_selectors() {
     ] {
         let mut invalid = body.clone();
         invalid["capabilityVersion"] = capability;
-        assert!(serde_json::from_value::<DeploymentBindingInput>(invalid).is_err());
+        assert!(serde_json::from_value::<VersionBindingInput>(invalid).is_err());
     }
 }

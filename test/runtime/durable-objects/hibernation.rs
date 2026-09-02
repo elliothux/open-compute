@@ -33,14 +33,14 @@ pub(super) async fn facets(
     transport: &WorkerdTransport,
     account: AccountId,
     worker: WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     generation: u64,
 ) {
     let response = dispatch(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/facets?name=facet-owner",
     )
@@ -62,7 +62,7 @@ pub(super) async fn check(
     supervisor: &WorkerdSupervisor,
     account: AccountId,
     worker: WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     generation: u64,
 ) {
     run_native_eviction_probe().await;
@@ -71,7 +71,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/hibernate?name=hibernate",
     )
@@ -95,7 +95,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/hibernate-inspect?name=hibernate",
     )
@@ -108,7 +108,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/hibernate-open?name=hibernate-hold",
     )
@@ -121,7 +121,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/abort?name=abort-probe",
     )
@@ -138,7 +138,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/hibernate-inspect?name=hibernate-hold",
     )

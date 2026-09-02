@@ -396,20 +396,20 @@ async function loadedServiceTarget(
   );
   if (snapshot.routeGeneration !== admission.target.routeGeneration
       || snapshot.contentKind !== admission.target.contentKind) {
-    throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+    throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   if (snapshot.contentKind !== "worker") throw bindingError("SERVICE_ENTRYPOINT_NOT_FOUND");
   const entrypoint = admission.target.entrypoint;
   const runtimeKey = `service/${admission.target.loaderKey}/${admission.target.workerCodeSha256}/g/${admission.target.routeGeneration}/${entrypoint || "default"}`;
   const code = await assembleOnce(runtimeKey, async () => {
     const built = modulesFor(snapshot, false, entrypoint);
-    const deploymentId = admission.target.loaderKey.split("/")[2]!;
+    const versionId = admission.target.loaderKey.split("/")[2]!;
     return {
       ...lockWorkerCode(env),
       mainModule: built.mainModule,
       modules: built.modules,
       env: tenantEnv(
-        snapshot, ctx, deploymentId, doPolicy(env), false, true, entrypoint ?? "default",
+        snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
       ),
       globalOutbound: tenantGlobalOutbound(env, false),
     };
@@ -426,7 +426,7 @@ async function loadedServiceTarget(
 export class ServiceTransport extends WorkerEntrypoint<LoaderEnv, ServiceBindingProps> {
   #props(): ServiceBindingProps {
     const props = this.ctx.props;
-    if (!props || typeof props.deploymentId !== "string" || typeof props.bindingName !== "string"
+    if (!props || typeof props.versionId !== "string" || typeof props.bindingName !== "string"
         || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) {
       throw bindingError("SERVICE_BINDING_DENIED");
     }
@@ -455,7 +455,7 @@ export class ServiceTransport extends WorkerEntrypoint<LoaderEnv, ServiceBinding
       this.env,
       "/internal/services/v1/resolve",
       {
-        callerDeploymentId: props.deploymentId,
+        callerVersionId: props.versionId,
         bindingName: props.bindingName,
         descriptorSha256: props.descriptorSha256,
         parentFrame,
@@ -578,15 +578,15 @@ export class ServiceTransport extends WorkerEntrypoint<LoaderEnv, ServiceBinding
       if (!admitted.target.entrypoint && routeDefaultHttp(snapshot, request) === "asset") {
         dispatched = true;
         drain.backgroundDone().catch(() => undefined);
-        const deploymentId = admitted.target.loaderKey.split("/")[2]!;
+        const versionId = admitted.target.loaderKey.split("/")[2]!;
         const response = await serviceDeadline(
           this.ctx.exports.AssetTransport({ props: Object.freeze({
-            deploymentId,
+            versionId,
             descriptorSha256: admitted.target.workerCodeSha256,
           }) }).fetch(request),
           deadlineAt,
         );
-        // The Rust-owned asset body has its own precise deployment pin.
+        // The Rust-owned asset body has its own precise version pin.
         await drain.forceDone();
         return response;
       }

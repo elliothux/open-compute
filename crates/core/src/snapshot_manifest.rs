@@ -249,7 +249,7 @@ impl PlatformSnapshotManifestV1 {
             if reference.role.is_empty()
                 || !matches!(
                     reference.role.as_str(),
-                    "deployment_artifact"
+                    "version_artifact"
                         | "kv_backup"
                         | "d1_backup"
                         | "r2_bucket_marker"

@@ -17,28 +17,28 @@ pub fn control_router() -> Router<HttpState> {
             get(get_worker).delete(delete_worker),
         )
         .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/deployments",
-            post(create_deployment).get(list_deployments),
+            "/v1/accounts/{account_id}/workers/{worker_id}/versions",
+            post(create_version).get(list_versions),
         )
         .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/deployment-uploads",
-            post(create_deployment_upload),
+            "/v1/accounts/{account_id}/workers/{worker_id}/version-uploads",
+            post(create_version_upload),
         )
         .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/deployment-uploads/{upload_id}",
-            get(get_deployment_upload).delete(abort_deployment_upload),
+            "/v1/accounts/{account_id}/workers/{worker_id}/version-uploads/{upload_id}",
+            get(get_version_upload).delete(abort_version_upload),
         )
         .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/deployment-uploads/{upload_id}/objects/{sha256}",
-            put(put_deployment_upload_object),
+            "/v1/accounts/{account_id}/workers/{worker_id}/version-uploads/{upload_id}/objects/{sha256}",
+            put(put_version_upload_object),
         )
         .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/deployment-uploads/{upload_id}/finalize",
-            post(finalize_deployment_upload),
+            "/v1/accounts/{account_id}/workers/{worker_id}/version-uploads/{upload_id}/finalize",
+            post(finalize_version_upload),
         )
         .route(
-            "/v1/accounts/{account_id}/workers/{worker_id}/deployments/{deployment_id}",
-            get(get_deployment).delete(delete_deployment),
+            "/v1/accounts/{account_id}/workers/{worker_id}/versions/{version_id}",
+            get(get_version).delete(delete_version),
         )
         .route(
             "/v1/accounts/{account_id}/workers/{worker_id}/promotions",

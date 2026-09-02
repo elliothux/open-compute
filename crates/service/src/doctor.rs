@@ -450,23 +450,23 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
                         Ok(cross)
                             if cross.queue_consumer_projection_mismatches == 0
                                 && cross.cron_projection_mismatches == 0
-                                && cross.deployment_referrer_mismatches == 0 =>
+                                && cross.version_referrer_mismatches == 0 =>
                         {
                             checks.push(ok(
                                 "p2_3_cross_database",
-                                "Queue/Cron projections and deployment referrers match control authority",
+                                "Queue/Cron projections and version referrers match control authority",
                                 Some("0".to_owned()),
                             ));
                         }
                         Ok(cross) => checks.push(failed(
                             "p2_3_cross_database",
                             ErrorCode::SchedulerCorrupt,
-                            "Queue/Cron projection or deployment-referrer authority diverged",
+                            "Queue/Cron projection or version-referrer authority diverged",
                             Some(format!(
                                 "queue={} cron={} referrers={}",
                                 cross.queue_consumer_projection_mismatches,
                                 cross.cron_projection_mismatches,
-                                cross.deployment_referrer_mismatches,
+                                cross.version_referrer_mismatches,
                             )),
                         )),
                         Err(error) => checks.push(failed(

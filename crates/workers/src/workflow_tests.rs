@@ -1,9 +1,9 @@
 use super::*;
-use open_compute_core::{DeploymentId, RequestId, StorageConfig, SystemClock};
+use open_compute_core::{RequestId, StorageConfig, SystemClock, VersionId};
 use open_compute_storage::scheduler::{
     WorkflowClaimCursor, WorkflowFailure, WorkflowInstanceAction,
 };
-use open_compute_storage::{NewDeployment, WorkerRepository};
+use open_compute_storage::{NewVersion, WorkerRepository};
 
 #[path = "workflow_crash_tests.rs"]
 mod crash_matrix;
@@ -40,37 +40,39 @@ fn fixture() -> (
             1_000_000,
         )
         .unwrap();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     workers
-        .insert_staging_deployment(
-            &NewDeployment {
-                id: deployment,
+        .insert_staging_version(
+            &NewVersion {
+                id: version,
                 account_id: account,
                 worker_id: worker.id,
-                content_kind: open_compute_storage::DeploymentContentKind::Worker,
+                content_kind: open_compute_storage::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".into()),
                 worker_code_sha256: [2; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars: Default::default(),
                 secrets: Default::default(),
                 request_id: RequestId::generate(),
                 now_ms: 0,
             },
-            &open_compute_storage::NewDeploymentProducts::default(),
+            &open_compute_storage::NewVersionProducts::default(),
             1_000_000,
         )
         .unwrap();
-    workers.begin_validation(deployment).unwrap();
-    workers.mark_ready(deployment, 1).unwrap();
+    workers.begin_validation(version).unwrap();
+    workers.mark_ready(version, 1).unwrap();
     let workflows = WorkflowRepository::new(storage.db());
     let definition = workflows.create_definition(account, "flow", 2).unwrap();
     let version = workflows
-        .stage_version(account, definition.id, deployment, "Flow", 3)
+        .stage_version(account, definition.id, version, "Flow", 3)
         .unwrap();
     workflows
-        .finish_version(account, version.target.version_id, true, 4)
+        .finish_version(account, version.target.workflow_version_id, true, 4)
         .unwrap();
     (temp, storage, scheduler, definition.id)
 }

@@ -30,14 +30,14 @@ use open_compute_service::{
     serve_binding_backend,
 };
 use open_compute_storage::{
-    AlarmProjection, ClaimResult, DO_NAMESPACE_SCHEMA_VERSION, DeploymentRecord,
-    DurableObjectRepository, PlatformStorage, SchedulerStore, SchedulerSummary, WorkerRepository,
+    AlarmProjection, ClaimResult, DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRepository,
+    PlatformStorage, SchedulerStore, SchedulerSummary, VersionRecord, WorkerRepository,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    CreateResourceOutcome, CreateResourceRequest, DeploymentBindingInput, DeploymentController,
-    DurableObjectResourceDriver, ModuleInput, ModuleType, ResourceController, ResourcePins,
-    RuntimeSource, RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
+    CreateVersionOutcome, CreateVersionRequest, DurableObjectResourceDriver, ModuleInput,
+    ModuleType, ResourceController, ResourcePins, RuntimeSource, RuntimeValidator,
+    VersionBindingInput, VersionController,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -183,11 +183,10 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         11,
     );
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let deployments =
-        DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
-    let deployment_a = deploy(
-        &deployments,
-        deployment_request(account, worker.id, namespace, "deploy-a", "A", 20, true),
+    let versions = VersionController::new(&storage, artifacts, validator, BundleLimits::default());
+    let version_a = deploy(
+        &versions,
+        version_request(account, worker.id, namespace, "deploy-a", "A", 20, true),
         &supervisor,
     )
     .await;
@@ -225,7 +224,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/proxy-rpc",
     )
@@ -236,7 +235,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/proxy-fetch",
     )
@@ -248,7 +247,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/raw-tcp",
         )
@@ -264,7 +263,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/invalid",
     )
@@ -282,7 +281,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             &format!("/set?time={past}"),
         )
@@ -290,7 +289,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     );
     assert_eq!(scheduler_store.summary(now_ms()).unwrap().scheduled, 1);
     assert_eq!(scheduler.poll_once().await.unwrap(), 1);
-    let initial_status = status(&transport, account, worker.id, &deployment_a, generation_a).await;
+    let initial_status = status(&transport, account, worker.id, &version_a, generation_a).await;
     assert_eq!(initial_status["deliveries"], 1);
     assert_eq!(initial_status["alarm"], serde_json::Value::Null);
     assert_eq!(initial_status["lastRelease"], "A");
@@ -305,7 +304,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/forge-private-alarm",
     )
@@ -315,7 +314,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         "private scheduler dispatch was tenant-callable"
     );
     assert_eq!(
-        status(&transport, account, worker.id, &deployment_a, generation_a).await["deliveries"],
+        status(&transport, account, worker.id, &version_a, generation_a).await["deliveries"],
         1
     );
 
@@ -325,7 +324,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             &format!("/set?time={}", now_ms().saturating_sub(1).max(1)),
         )
@@ -341,7 +340,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             &format!("/set?time={}", now_ms().saturating_sub(1).max(1)),
         )
@@ -359,7 +358,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     );
     assert_eq!(scheduler.poll_once().await.unwrap(), 1);
     assert_eq!(
-        status(&transport, account, worker.id, &deployment_a, generation_a).await["deliveries"],
+        status(&transport, account, worker.id, &version_a, generation_a).await["deliveries"],
         2
     );
 
@@ -369,7 +368,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             &format!("/set?time={}", now_ms().saturating_add(60_000)),
         )
@@ -380,7 +379,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/delete",
         )
@@ -391,7 +390,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/delete",
         )
@@ -404,7 +403,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         &format!("/set-date?time={date_due}"),
     )
@@ -416,7 +415,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/delete",
         )
@@ -429,7 +428,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             &format!("/txn-commit?time={}", now_ms().saturating_add(60_000)),
         )
@@ -441,7 +440,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/delete",
         )
@@ -451,7 +450,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         &format!("/txn-rollback?time={}", now_ms().saturating_add(60_000)),
     )
@@ -463,7 +462,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/txn-sync",
     )
@@ -478,7 +477,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             &format!("/set?time={future}"),
         )
@@ -496,7 +495,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_a,
         "/get",
     )
@@ -510,7 +509,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     let old_pid = supervisor.snapshot().pid.unwrap();
     supervisor.report_unhealthy();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
-    let _ = status(&transport, account, worker.id, &deployment_a, generation_a).await;
+    let _ = status(&transport, account, worker.id, &version_a, generation_a).await;
     assert_eq!(scheduler_store.summary(now_ms()).unwrap().scheduled, 1);
 
     // A bounded private scan independently reconstructs a missing projection and advances/reset
@@ -526,7 +525,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             "/delete",
         )
@@ -542,15 +541,15 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_a,
             &format!("/set?time={}", now_ms().saturating_sub(1).max(1)),
         )
         .await,
     );
-    let deployment_b = deploy(
-        &deployments,
-        deployment_request(account, worker.id, namespace, "deploy-b", "B", 30, true),
+    let version_b = deploy(
+        &versions,
+        version_request(account, worker.id, namespace, "deploy-b", "B", 30, true),
         &supervisor,
     )
     .await;
@@ -561,7 +560,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
     assert!(generation_b > generation_a);
     assert_eq!(scheduler.poll_once().await.unwrap(), 1);
     assert_eq!(
-        status(&transport, account, worker.id, &deployment_b, generation_b).await["lastRelease"],
+        status(&transport, account, worker.id, &version_b, generation_b).await["lastRelease"],
         "B"
     );
 
@@ -570,7 +569,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_b,
+            &version_b,
             generation_b,
             &format!("/set?time={}", now_ms().saturating_sub(1).max(1)),
         )
@@ -580,8 +579,8 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         .promote_checked(
             account,
             worker.id,
-            deployment_a.id,
-            Some(deployment_b.id),
+            version_a.id,
+            Some(version_b.id),
             Some(generation_b),
             RequestId::generate(),
             40,
@@ -597,7 +596,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback
         )
         .await["lastRelease"],
@@ -610,7 +609,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             &format!("/fail?count=1&time={}", now_ms().saturating_sub(1).max(1)),
         )
@@ -624,7 +623,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
     )
     .await;
@@ -636,7 +635,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment_a,
+        &version_a,
         generation_rollback,
         &format!("/delete-all?time={}", now_ms().saturating_add(60_000)),
     )
@@ -664,7 +663,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
                     object_generation: object.generation,
                     row_token: row_token.to_owned(),
                     due_at_ms: now_ms().saturating_sub(31_000).max(1),
-                    target_deployment_id: deployment_a.id,
+                    target_version_id: version_a.id,
                     execution_generation: generation_rollback,
                     retry_count: 0,
                 },
@@ -683,7 +682,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             &format!("/set?time={}", now_ms().saturating_sub(1).max(1)),
         )
@@ -697,7 +696,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
                 object_generation: object.generation,
                 row_token: "00000000-0000-4000-8000-000000000009".to_owned(),
                 due_at_ms: now_ms().saturating_sub(1).max(1),
-                target_deployment_id: deployment_a.id,
+                target_version_id: version_a.id,
                 execution_generation: generation_rollback,
                 retry_count: 0,
             },
@@ -710,7 +709,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             "/delete",
         )
@@ -734,7 +733,7 @@ async fn p0_8_real_scheduler_alarm_matrix() {
             &transport,
             account,
             worker.id,
-            &deployment_a,
+            &version_a,
             generation_rollback,
             &format!("/set?time={}", now_ms().saturating_sub(1).max(1)),
         )
@@ -785,26 +784,26 @@ fn create_namespace(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
     supervisor: &WorkerdSupervisor,
-) -> DeploymentRecord {
+) -> VersionRecord {
     match controller
-        .create_deployment(request)
+        .create_version(request)
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "deployment failed: {error:?}; runtime={:?}; diagnostics={:?}",
+                "version failed: {error:?}; runtime={:?}; diagnostics={:?}",
                 supervisor.snapshot(),
                 supervisor.last_diagnostics()
             )
         }) {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
-fn deployment_request(
+fn version_request(
     account_id: AccountId,
     worker_id: WorkerId,
     namespace: ResourceId,
@@ -812,7 +811,7 @@ fn deployment_request(
     release: &str,
     now_ms: i64,
     promote: bool,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -826,7 +825,7 @@ fn deployment_request(
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "ALARM".to_owned(),
-        DeploymentBindingInput {
+        VersionBindingInput {
             kind: BindingKind::DoNamespace,
             id: namespace,
             permissions: CanonicalPermissions::default(),
@@ -841,11 +840,11 @@ fn deployment_request(
             serde_json::Value::String(config),
         );
     }
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -1086,7 +1085,7 @@ async fn dispatch_path(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     route_generation: u64,
     path: &str,
 ) -> DispatchResponse {
@@ -1094,7 +1093,7 @@ async fn dispatch_path(
         transport,
         account_id,
         worker_id,
-        deployment,
+        version,
         route_generation,
         path,
     )
@@ -1105,7 +1104,7 @@ async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     route_generation: u64,
     path: &str,
 ) -> DispatchResponse {
@@ -1120,8 +1119,8 @@ async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: i64::try_from(route_generation).unwrap(),
                 request_id: RequestId::generate(),
@@ -1144,14 +1143,14 @@ async fn status(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     route_generation: u64,
 ) -> serde_json::Value {
     let response = dispatch(
         transport,
         account_id,
         worker_id,
-        deployment,
+        version,
         route_generation,
         "/status",
     )

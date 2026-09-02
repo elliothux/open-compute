@@ -7,14 +7,14 @@ use crate::p0_exit_support::{
 use crate::platform_process::Evidence;
 use open_compute_artifacts::MockS3;
 use open_compute_core::{
-    AccountId, BindingKind, DeploymentId, QueueId, RequestId, ResourceId, SystemClock, WorkflowId,
+    AccountId, BindingKind, QueueId, RequestId, ResourceId, SystemClock, VersionId, WorkflowId,
 };
 use open_compute_service::workflow_http::WorkflowApiState;
 use open_compute_storage::{PlatformStorage, WorkerRepository, WorkflowRepository};
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentRequest, CreateQueueOutcome, CreateQueueRequest,
-    DeploymentBindingInput, DeploymentController, ModuleInput, ModuleType, QueueConsumerInput,
-    QueueController, ResourcePins,
+    BundleLimits, CanonicalBundle, CreateQueueOutcome, CreateQueueRequest, CreateVersionRequest,
+    ModuleInput, ModuleType, QueueConsumerInput, QueueController, ResourcePins,
+    VersionBindingInput, VersionController,
 };
 use serde_json::json;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
@@ -26,8 +26,8 @@ pub(super) struct Fixture {
     pub account: AccountId,
     pub queue: QueueId,
     pub definition: WorkflowId,
-    pub frozen: DeploymentId,
-    pub future: DeploymentId,
+    pub frozen: VersionId,
+    pub future: VersionId,
 }
 
 pub(super) async fn prepare() -> Fixture {
@@ -147,7 +147,7 @@ pub(super) async fn prepare() -> Fixture {
         .create_definition(account, "chain-flow", now_ms())
         .unwrap()
         .id;
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts,
         Arc::new(stack.transport.clone()),
@@ -158,7 +158,7 @@ pub(super) async fn prepare() -> Fixture {
         scheduler.clone(),
     ));
     let source = include_str!("../fixtures/p2-exit-worker.js");
-    let mut deployments = Vec::new();
+    let mut versions = Vec::new();
     for index in 0..3 {
         let mut bound = bindings.clone();
         if index == 1 {
@@ -192,11 +192,11 @@ pub(super) async fn prepare() -> Fixture {
             BundleLimits::default(),
         )
         .unwrap();
-        let request = CreateDeploymentRequest {
+        let request = CreateVersionRequest {
             account_id: account,
             worker_id: worker.id,
             idempotency_key: format!("chain-{index}"),
-            content: open_compute_workers::DeploymentContent::Worker {
+            content: open_compute_workers::VersionContent::Worker {
                 bundle: bundle.into_bytes().into(),
                 assets: None,
             },
@@ -220,11 +220,11 @@ pub(super) async fn prepare() -> Fixture {
             request_id: RequestId::generate(),
             now_ms: now_ms(),
         };
-        let deployment = deploy(&controller, request, &stack.supervisor).await;
+        let version = deploy(&controller, request, &stack.supervisor).await;
         // The first version makes the self-binding deployable; publish the
-        // gateway's version too so its DO calls use the active Worker deployment.
+        // gateway's version too so its DO calls use the active Worker version.
         // Later the test advances only the Workflow version, preserving the
-        // existing DO contract that rejects retired Worker deployments.
+        // existing DO contract that rejects retired Worker versions.
         if index < 2 {
             let version = WorkflowApiState::new(
                 storage.clone(),
@@ -232,10 +232,10 @@ pub(super) async fn prepare() -> Fixture {
                 stack.transport.clone(),
                 Default::default(),
             )
-            .create_version(account, definition, deployment.id, "Flow".into())
+            .create_version(account, definition, version.id, "Flow".into())
             .await
             .unwrap();
-            if version.state != open_compute_storage::DeploymentState::Ready {
+            if version.state != open_compute_storage::VersionState::Ready {
                 let failed_pid = stack.supervisor.snapshot().pid.unwrap();
                 stack.supervisor.report_unhealthy();
                 wait_pid_change(&stack.supervisor, failed_pid, Duration::from_secs(30)).await;
@@ -246,7 +246,7 @@ pub(super) async fn prepare() -> Fixture {
                 );
             }
         }
-        deployments.push(deployment.id);
+        versions.push(version.id);
     }
     workers
         .create_exact_route(
@@ -269,13 +269,13 @@ pub(super) async fn prepare() -> Fixture {
         account,
         queue,
         definition,
-        frozen: deployments[1],
-        future: deployments[2],
+        frozen: versions[1],
+        future: versions[2],
     }
 }
 
-fn binding(kind: BindingKind, id: ResourceId) -> DeploymentBindingInput {
-    DeploymentBindingInput {
+fn binding(kind: BindingKind, id: ResourceId) -> VersionBindingInput {
+    VersionBindingInput {
         kind,
         id,
         permissions: Default::default(),

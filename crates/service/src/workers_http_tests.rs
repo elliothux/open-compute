@@ -8,8 +8,7 @@ use open_compute_artifacts::{
 use open_compute_core::{MetricsConfig, PlatformConfig, StorageConfig, SystemClock};
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
-    DeploymentAssetsRepository, DeploymentContentKind, NewDeployment, PlatformStorage,
-    WorkerRepository,
+    NewVersion, PlatformStorage, VersionAssetsRepository, VersionContentKind, WorkerRepository,
 };
 use open_compute_workers::{CanonicalBundle, ModuleInput, ModuleType};
 use std::collections::BTreeMap;
@@ -68,7 +67,7 @@ request_timeout_ms = 1500
         storage,
         ArtifactStore::new(client),
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
-        DeploymentPins::new(),
+        VersionPins::new(),
         BundleLimits::default(),
         Duration::from_millis(10),
     );
@@ -141,7 +140,7 @@ async fn assets_only_upload_resume_finalize_and_handler_share_one_authority() {
     let state = authorized_http_state(api.clone());
     let router = control_router().with_state(state.clone());
     let collection = format!(
-        "/v1/accounts/{account}/workers/{}/deployment-uploads",
+        "/v1/accounts/{account}/workers/{}/version-uploads",
         worker.id
     );
     let create = serde_json::json!({
@@ -238,13 +237,10 @@ async fn assets_only_upload_resume_finalize_and_handler_share_one_authority() {
     assert_eq!(response.status(), StatusCode::CREATED);
     let first = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
     let value: serde_json::Value = serde_json::from_slice(&first).unwrap();
-    assert_eq!(value["deployment"]["contentKind"], "assets_only");
-    assert_eq!(
-        value["deployment"]["artifactSha256"],
-        serde_json::Value::Null
-    );
+    assert_eq!(value["version"]["contentKind"], "assets_only");
+    assert_eq!(value["version"]["artifactSha256"], serde_json::Value::Null);
     assert_eq!(value["promoted"], true);
-    let deployment_id: DeploymentId = value["deployment"]["id"].as_str().unwrap().parse().unwrap();
+    let version_id: VersionId = value["version"]["id"].as_str().unwrap().parse().unwrap();
     let replay = router.clone().oneshot(finalize_request()).await.unwrap();
     assert_eq!(replay.status(), StatusCode::CREATED);
     assert_eq!(
@@ -252,11 +248,11 @@ async fn assets_only_upload_resume_finalize_and_handler_share_one_authority() {
         first
     );
 
-    let deployment = WorkerRepository::new(api.storage.db())
-        .get_deployment(account, worker.id, deployment_id)
+    let version = WorkerRepository::new(api.storage.db())
+        .get_version(account, worker.id, version_id)
         .unwrap();
-    let stored = DeploymentAssetsRepository::new(api.storage.db())
-        .get(deployment_id)
+    let stored = VersionAssetsRepository::new(api.storage.db())
+        .get(version_id)
         .unwrap()
         .unwrap();
     let manifest: open_compute_workers::AssetManifestV1 =
@@ -278,7 +274,7 @@ async fn assets_only_upload_resume_finalize_and_handler_share_one_authority() {
         },
     )
     .unwrap();
-    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &deployment, plan)
+    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &version, plan)
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -307,7 +303,7 @@ async fn assets_only_upload_resume_finalize_and_handler_share_one_authority() {
         },
     )
     .unwrap();
-    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &deployment, conditional)
+    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &version, conditional)
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
@@ -333,7 +329,7 @@ async fn assets_only_upload_resume_finalize_and_handler_share_one_authority() {
         },
     )
     .unwrap();
-    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &deployment, redirect)
+    let response = serve_asset_plan(&api.storage, &api.artifacts, None, &version, redirect)
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
@@ -365,48 +361,48 @@ fn host_and_route_validation_are_canonical_and_bounded() {
 async fn request_metadata_json_ids_and_idempotency_are_strict() {
     let account = AccountId::generate();
     let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     assert_eq!(parse_account(&account.to_string()).unwrap(), account);
     assert_eq!(
         parse_ids(&account.to_string(), &worker.to_string()).unwrap(),
         (account, worker)
     );
     assert_eq!(
-        parse_deployment_ids(
+        parse_version_ids(
             &account.to_string(),
             &worker.to_string(),
-            &deployment.to_string()
+            &version.to_string()
         )
         .unwrap(),
-        (account, worker, deployment)
+        (account, worker, version)
     );
     assert!(parse_account("bad").is_err());
     assert!(parse_ids(&account.to_string(), "bad").is_err());
-    assert!(parse_deployment_ids(&account.to_string(), &worker.to_string(), "bad").is_err());
+    assert!(parse_version_ids(&account.to_string(), &worker.to_string(), "bad").is_err());
 
     let valid = Request::builder()
         .header(IDEMPOTENCY_HEADER, "key-1")
-        .header(DEPLOYMENT_METADATA_HEADER, r#"{"mainModule":"index.js"}"#)
+        .header(VERSION_METADATA_HEADER, r#"{"mainModule":"index.js"}"#)
         .body(Body::from(r#"{"name":"worker"}"#))
         .unwrap();
     assert_eq!(idempotency_key(&valid).unwrap(), "key-1");
-    let metadata = deployment_metadata(&valid).unwrap();
+    let metadata = version_metadata(&valid).unwrap();
     assert_eq!(metadata.main_module, "index.js");
     let body: CreateWorkerBody = read_json(valid, MAX_JSON_BODY).await.unwrap();
     assert_eq!(body.name, "worker");
 
     let missing = Request::new(Body::empty());
     assert!(idempotency_key(&missing).is_err());
-    assert!(deployment_metadata(&missing).is_err());
+    assert!(version_metadata(&missing).is_err());
     let oversized_metadata = Request::builder()
         .header(
-            DEPLOYMENT_METADATA_HEADER,
-            "x".repeat(MAX_DEPLOYMENT_METADATA_HEADER_BYTES + 1),
+            VERSION_METADATA_HEADER,
+            "x".repeat(MAX_VERSION_METADATA_HEADER_BYTES + 1),
         )
         .body(Body::empty())
         .unwrap();
-    let Err(error) = deployment_metadata(&oversized_metadata) else {
-        panic!("oversized deployment metadata unexpectedly accepted");
+    let Err(error) = version_metadata(&oversized_metadata) else {
+        panic!("oversized version metadata unexpectedly accepted");
     };
     assert_eq!(error.code(), ErrorCode::LimitInvalid);
     let whitespace = Request::builder()
@@ -515,8 +511,8 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
         (ErrorCode::EntrypointNotFound, StatusCode::NOT_FOUND),
         (ErrorCode::WorkerNameConflict, StatusCode::CONFLICT),
         (ErrorCode::RouteConflict, StatusCode::CONFLICT),
-        (ErrorCode::DeploymentNotReady, StatusCode::CONFLICT),
-        (ErrorCode::DeploymentReferenced, StatusCode::CONFLICT),
+        (ErrorCode::VersionNotReady, StatusCode::CONFLICT),
+        (ErrorCode::VersionReferenced, StatusCode::CONFLICT),
         (ErrorCode::BundleTooLarge, StatusCode::PAYLOAD_TOO_LARGE),
         (ErrorCode::AssetLimitExceeded, StatusCode::PAYLOAD_TOO_LARGE),
         (ErrorCode::AssetUploadConflict, StatusCode::CONFLICT),
@@ -555,7 +551,7 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
         (
-            ErrorCode::DeploymentInvariantViolation,
+            ErrorCode::VersionInvariantViolation,
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
         (
@@ -616,11 +612,11 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
         64
     );
 
-    let deployment = DeploymentId::generate();
-    let pins = DeploymentPins::new();
-    let pin = pins.pin(deployment).unwrap();
+    let version = VersionId::generate();
+    let pins = VersionPins::new();
+    let pin = pins.pin(version).unwrap();
     let response = pin_response((StatusCode::OK, "body").into_response(), pin);
-    assert_eq!(pins.count(deployment), 1);
+    assert_eq!(pins.count(version), 1);
     assert!(!response.body().is_end_stream());
     assert_eq!(response.body().size_hint().exact(), Some(4));
     let mut body = response.into_body();
@@ -628,7 +624,7 @@ async fn response_helpers_map_codes_and_hold_pin_until_body_drop() {
         body.frame().await.unwrap().unwrap().into_data().unwrap(),
         Bytes::from_static(b"body")
     );
-    assert_eq!(pins.count(deployment), 0);
+    assert_eq!(pins.count(version), 0);
     assert!(body.frame().await.is_none());
 }
 
@@ -642,7 +638,7 @@ fn request_id_extension_is_preserved_or_generated() {
 }
 
 #[tokio::test]
-async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
+async fn idempotent_helpers_replay_running_failed_async_and_version_refs() {
     let (_temp, _mock, api, account) = worker_api_fixture().await;
     let scope = "coverage/sync";
     let canonical = br#"{"value":1}"#;
@@ -735,24 +731,26 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
             1_000_000,
         )
         .unwrap();
-    let deployment = DeploymentId::generate();
-    repo.insert_staging_deployment(
-        &NewDeployment {
-            id: deployment,
+    let version = VersionId::generate();
+    repo.insert_staging_version(
+        &NewVersion {
+            id: version,
             account_id: account,
             worker_id: worker.id,
-            content_kind: DeploymentContentKind::Worker,
+            content_kind: VersionContentKind::Worker,
             artifact_sha256: Some([7; 32]),
             artifact_size: Some(7),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: [8; 32],
+            compatibility_date: "2026-08-30".into(),
+            compatibility_flags: Vec::new(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: RequestId::generate(),
             now_ms: now_ms(),
         },
-        &open_compute_storage::NewDeploymentProducts::default(),
+        &open_compute_storage::NewVersionProducts::default(),
         1_000_000,
     )
     .unwrap();
@@ -763,14 +761,14 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
         "sync-ref",
         b"sync-ref",
         RequestId::generate(),
-        Some(deployment),
-        || Ok(serde_json::json!({"deploymentId": deployment})),
+        Some(version),
+        || Ok(serde_json::json!({"versionId": version})),
     )
     .unwrap();
     assert!(
         String::from_utf8(sync_ref)
             .unwrap()
-            .contains(&deployment.to_string())
+            .contains(&version.to_string())
     );
     let body = run_idempotent_async(
         &api,
@@ -779,15 +777,15 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
         "ref",
         b"ref",
         RequestId::generate(),
-        Some(deployment),
-        || async { Ok(serde_json::json!({"deploymentId": deployment})) },
+        Some(version),
+        || async { Ok(serde_json::json!({"versionId": version})) },
     )
     .await
     .unwrap();
     assert!(
         String::from_utf8(body)
             .unwrap()
-            .contains(&deployment.to_string())
+            .contains(&version.to_string())
     );
 
     let async_running_scope = "coverage/async-running";
@@ -834,63 +832,60 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
                 b"failed",
                 RequestId::generate(),
                 None,
-                || async {
-                    Err(PlatformError::new(
-                        ErrorCode::DeploymentNotReady,
-                        "not ready",
-                    ))
-                },
+                || async { Err(PlatformError::new(ErrorCode::VersionNotReady, "not ready",)) },
             )
             .await
             .unwrap_err()
             .code(),
-            ErrorCode::DeploymentNotReady
+            ErrorCode::VersionNotReady
         );
     }
 
-    let delete_deployment = DeploymentId::generate();
-    repo.insert_staging_deployment(
-        &NewDeployment {
-            id: delete_deployment,
+    let delete_version = VersionId::generate();
+    repo.insert_staging_version(
+        &NewVersion {
+            id: delete_version,
             account_id: account,
             worker_id: worker.id,
-            content_kind: DeploymentContentKind::Worker,
+            content_kind: VersionContentKind::Worker,
             artifact_sha256: Some([9; 32]),
             artifact_size: Some(9),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: [10; 32],
+            compatibility_date: "2026-08-30".into(),
+            compatibility_flags: Vec::new(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: RequestId::generate(),
             now_ms: now_ms(),
         },
-        &open_compute_storage::NewDeploymentProducts::default(),
+        &open_compute_storage::NewVersionProducts::default(),
         1_000_000,
     )
     .unwrap();
     repo.mark_rejected(
-        delete_deployment,
-        open_compute_storage::DeploymentState::Staging,
+        delete_version,
+        open_compute_storage::VersionState::Staging,
         ErrorCode::BundleInvalid,
         now_ms(),
     )
     .unwrap();
-    let deleted = run_deployment_delete(
+    let deleted = run_version_delete(
         &api,
         account,
         worker.id,
-        delete_deployment,
+        delete_version,
         "delete-complete",
         RequestId::generate(),
     )
     .await
     .unwrap();
-    let replayed = run_deployment_delete(
+    let replayed = run_version_delete(
         &api,
         account,
         worker.id,
-        delete_deployment,
+        delete_version,
         "delete-complete",
         RequestId::generate(),
     )
@@ -898,29 +893,29 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
     .unwrap();
     assert_eq!(deleted, replayed);
 
-    let missing_deployment = DeploymentId::generate();
+    let missing_version = VersionId::generate();
     for _ in 0..2 {
         assert_eq!(
-            run_deployment_delete(
+            run_version_delete(
                 &api,
                 account,
                 worker.id,
-                missing_deployment,
+                missing_version,
                 "delete-failed",
                 RequestId::generate(),
             )
             .await
             .unwrap_err()
             .code(),
-            ErrorCode::DeploymentNotFound
+            ErrorCode::VersionNotFound
         );
     }
 
-    let running_deployment = DeploymentId::generate();
-    let running_scope = format!("deployment.delete/{}/{}", worker.id, running_deployment);
+    let running_version = VersionId::generate();
+    let running_scope = format!("version.delete/{}/{}", worker.id, running_version);
     let running_canonical = serde_json::to_vec(&serde_json::json!({
         "workerId": worker.id,
-        "deploymentId": running_deployment,
+        "versionId": running_version,
     }))
     .unwrap();
     let mut running_input = Vec::new();
@@ -939,11 +934,11 @@ async fn idempotent_helpers_replay_running_failed_async_and_deployment_refs() {
     )
     .unwrap();
     assert_eq!(
-        run_deployment_delete(
+        run_version_delete(
             &api,
             account,
             worker.id,
-            running_deployment,
+            running_version,
             "delete-running",
             RequestId::generate(),
         )
@@ -998,7 +993,7 @@ async fn worker_and_route_failures_replay_after_storage_restart_without_mutation
         storage,
         artifacts,
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
-        DeploymentPins::new(),
+        VersionPins::new(),
         BundleLimits::default(),
         Duration::from_millis(10),
     );

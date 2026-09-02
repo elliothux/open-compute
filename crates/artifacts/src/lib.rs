@@ -44,7 +44,7 @@ pub use r2_model::{
 };
 pub use r2_preflight::{R2PreflightOutcome, preflight_r2};
 pub use snapshot::{CommittedSnapshot, IncompleteSnapshotCleanup, SnapshotObjectStore};
-pub use store::{ArtifactCandidate, ArtifactDeploymentReservation, ArtifactGcFence, ArtifactStore};
+pub use store::{ArtifactCandidate, ArtifactGcFence, ArtifactStore, ArtifactVersionReservation};
 
 #[cfg(any(test, feature = "test-support"))]
 pub use credentials::MapEnv;

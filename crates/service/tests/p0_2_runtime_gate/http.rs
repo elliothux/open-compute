@@ -46,7 +46,7 @@ pub(super) async fn api_matrix(
             storage.clone(),
             artifacts,
             transport,
-            DeploymentPins::new(),
+            VersionPins::new(),
             BundleLimits::default(),
             Duration::from_secs(5),
         ));
@@ -155,46 +155,46 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
         .chunks(7)
         .map(|chunk| Ok::<Bytes, Infallible>(Bytes::copy_from_slice(chunk)))
         .collect::<Vec<_>>();
-    let deployment = app
+    let version = app
         .clone()
         .oneshot(
             with_admin_auth(
                 Request::builder()
                     .method("POST")
                     .uri(format!(
-                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments"
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/versions"
                     ))
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .header("idempotency-key", "api-deploy-create")
-                    .header("x-open-compute-deployment-metadata", metadata),
+                    .header("x-open-compute-version-metadata", metadata),
             )
             .body(Body::from_stream(futures::stream::iter(bundle_chunks)))
             .unwrap(),
         )
         .await
         .unwrap();
-    let deployment_status = deployment.status();
-    let deployment_body = to_bytes(deployment.into_body(), 128 * 1024).await.unwrap();
+    let version_status = version.status();
+    let version_body = to_bytes(version.into_body(), 128 * 1024).await.unwrap();
     assert_eq!(
-        deployment_status,
+        version_status,
         201,
-        "deployment response={}",
-        String::from_utf8_lossy(&deployment_body)
+        "version response={}",
+        String::from_utf8_lossy(&version_body)
     );
-    let deployment_json: serde_json::Value = serde_json::from_slice(&deployment_body).unwrap();
-    let deployment_id = deployment_json["deployment"]["id"].as_str().unwrap();
-    let get_deployment = app
+    let version_json: serde_json::Value = serde_json::from_slice(&version_body).unwrap();
+    let version_id = version_json["version"]["id"].as_str().unwrap();
+    let get_version = app
         .clone()
         .oneshot(
             with_admin_auth(Request::builder().uri(format!(
-                "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments/{deployment_id}"
+                "/operator/api/v1/accounts/{account}/workers/{worker_id}/versions/{version_id}"
             )))
             .body(Body::empty())
             .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(get_deployment.status(), 200);
+    assert_eq!(get_version.status(), 200);
 
     let named_route = app
         .clone()
@@ -301,7 +301,7 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
                 .method("GET")
                 .uri(format!("/__workers/{account}/api-gate/hello"))
                 .header(header::HOST, "public.example.test")
-                .header("x-open-compute-deployment-id", "forged")
+                .header("x-open-compute-version-id", "forged")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -337,11 +337,11 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
                 Request::builder()
                     .method("POST")
                     .uri(format!(
-                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments"
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/versions"
                     ))
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .header("idempotency-key", "api-deploy-disposable")
-                    .header("x-open-compute-deployment-metadata", disposable_metadata),
+                    .header("x-open-compute-version-metadata", disposable_metadata),
             )
             .body(Body::from(disposable_bundle.into_bytes()))
             .unwrap(),
@@ -352,7 +352,7 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let disposable_json: serde_json::Value =
         serde_json::from_slice(&to_bytes(disposable.into_body(), 128 * 1024).await.unwrap())
             .unwrap();
-    let disposable_id = disposable_json["deployment"]["id"].as_str().unwrap();
+    let disposable_id = disposable_json["version"]["id"].as_str().unwrap();
     let promoted = app
         .clone()
         .oneshot(
@@ -367,8 +367,8 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
             )
             .body(Body::from(
                 serde_json::json!({
-                    "targetDeploymentId": disposable_id,
-                    "expectedActiveDeploymentId": deployment_id,
+                    "targetVersionId": disposable_id,
+                    "expectedActiveVersionId": version_id,
                 })
                 .to_string(),
             ))
@@ -391,8 +391,8 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
             )
             .body(Body::from(
                 serde_json::json!({
-                    "targetDeploymentId": deployment_id,
-                    "expectedActiveDeploymentId": disposable_id,
+                    "targetVersionId": version_id,
+                    "expectedActiveVersionId": disposable_id,
                 })
                 .to_string(),
             ))
@@ -408,7 +408,7 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
                 Request::builder()
                     .method("DELETE")
                     .uri(format!(
-                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments/{disposable_id}"
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/versions/{disposable_id}"
                     ))
                     .header("idempotency-key", "api-delete-referenced"),
             )
@@ -426,7 +426,7 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
             Request::builder()
                 .method("DELETE")
                 .uri(format!(
-                    "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments/{disposable_id}"
+                    "/operator/api/v1/accounts/{account}/workers/{worker_id}/versions/{disposable_id}"
                 ))
                 .header("idempotency-key", "api-delete-complete"),
         )
@@ -447,7 +447,7 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
         .clone()
         .oneshot(
             with_admin_auth(Request::builder().method("GET").uri(format!(
-                "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments"
+                "/operator/api/v1/accounts/{account}/workers/{worker_id}/versions"
             )))
             .body(Body::empty())
             .unwrap(),

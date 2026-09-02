@@ -31,15 +31,16 @@ use open_compute_service::{
     serve_binding_backend_with_assets,
 };
 use open_compute_storage::{
-    ClaimedQueueBatch, DO_NAMESPACE_SCHEMA_VERSION, DeploymentRecord, PlatformStorage, QueueConfig,
-    QueueConsumerConfig, QueueRepository, SchedulerStore, WorkerRepository, WorkflowTarget,
+    ClaimedQueueBatch, DO_NAMESPACE_SCHEMA_VERSION, PlatformStorage, QueueConfig,
+    QueueConsumerConfig, QueueRepository, SchedulerStore, VersionRecord, WorkerRepository,
+    WorkflowTarget,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentRequest, CreateQueueOutcome, CreateQueueRequest,
-    CreateResourceOutcome, CreateResourceRequest, DeploymentBindingInput, DeploymentController,
-    DeploymentPins, DeploymentServiceInput, DurableObjectResourceDriver, ModuleInput, ModuleType,
-    QueueConsumerInput, QueueController, ResourceController, ResourcePins, RuntimeSource,
-    RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateQueueOutcome, CreateQueueRequest, CreateResourceOutcome,
+    CreateResourceRequest, CreateVersionRequest, DurableObjectResourceDriver, ModuleInput,
+    ModuleType, QueueConsumerInput, QueueController, ResourceController, ResourcePins,
+    RuntimeSource, RuntimeValidator, VersionBindingInput, VersionController, VersionPins,
+    VersionServiceInput,
 };
 use rusqlite::{Connection, OptionalExtension as _};
 use std::collections::BTreeMap;
@@ -86,10 +87,10 @@ async fn p2_2_real_queue_scheduler_matrix() {
     let binding_listener = bind_binding_backend().await.unwrap();
     let binding_addr = binding_listener.local_addr().unwrap();
     let resource_pins = ResourcePins::new();
-    let deployment_pins = DeploymentPins::new();
+    let version_pins = VersionPins::new();
     let service_invocations = Arc::new(ServiceInvocationRegistry::new(
         storage.clone(),
-        deployment_pins.clone(),
+        version_pins.clone(),
     ));
     let (shutdown_tx, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown_tx.subscribe();
@@ -112,14 +113,14 @@ async fn p2_2_real_queue_scheduler_matrix() {
         let scheduler = scheduler_store.clone();
         let artifacts = artifacts.clone();
         let cache = cache.clone();
-        let deployment_pins = deployment_pins.clone();
+        let version_pins = version_pins.clone();
         let services = service_invocations.clone();
         async move {
             let assets = Arc::new(AssetBindingService::new(
                 backend_storage.clone(),
                 artifacts,
                 cache,
-                deployment_pins,
+                version_pins,
             ));
             serve_binding_backend_with_assets(
                 binding_listener,
@@ -236,7 +237,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         .unwrap();
     let namespace = create_namespace(&storage, resource_pins.clone(), account, worker.id);
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let deployments = DeploymentController::new(
+    let versions = VersionController::new(
         &storage,
         artifacts.clone(),
         validator,
@@ -246,8 +247,8 @@ async fn p2_2_real_queue_scheduler_matrix() {
         storage.clone(),
         scheduler_store.clone(),
     ));
-    let deployment = deploy(
-        &deployments,
+    let version = deploy(
+        &versions,
         consumer_request(
             account,
             worker.id,
@@ -259,8 +260,8 @@ async fn p2_2_real_queue_scheduler_matrix() {
         ),
     )
     .await;
-    let caller_deployment = deploy(
-        &deployments,
+    let caller_version = deploy(
+        &versions,
         caller_request(account, caller.id, worker.id, "scheduler-caller", 21),
     )
     .await;
@@ -293,7 +294,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         None,
         "/operator/metrics",
@@ -305,24 +306,12 @@ async fn p2_2_real_queue_scheduler_matrix() {
     assert!(empty_metrics.get("oldestMessageTimestamp").is_none());
 
     let worker_send = dispatch(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        generation,
-        None,
-        "/worker",
+        &transport, account, worker.id, &version, generation, None, "/worker",
     )
     .await;
     assert_eq!(worker_send.status, 200, "{}", worker_send.body);
     let do_send = dispatch(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        generation,
-        None,
-        "/do",
+        &transport, account, worker.id, &version, generation, None, "/do",
     )
     .await;
     assert_eq!(
@@ -340,10 +329,10 @@ async fn p2_2_real_queue_scheduler_matrix() {
                 account_id: account,
                 definition_id: WorkflowId::generate(),
                 definition_name: "queue-flow".to_owned(),
-                version_id: WorkflowVersionId::generate(),
+                workflow_version_id: WorkflowVersionId::generate(),
                 worker_id: worker.id,
-                deployment_id: deployment.id,
-                worker_code_sha256: deployment.worker_code_sha256,
+                worker_version_id: version.id,
+                worker_code_sha256: version.worker_code_sha256,
                 class_name: "Flow".to_owned(),
                 loader_schema_version: 1,
                 capability_version: 1,
@@ -374,7 +363,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         caller_generation,
         None,
         "/",
@@ -397,7 +386,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         None,
         "/operator/metrics",
@@ -423,7 +412,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         "ack-then-retry",
     )
@@ -432,7 +421,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         "retry-then-ack",
     )
@@ -465,7 +454,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         "ack-all-then-retry-all",
     )
@@ -474,7 +463,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         "ack-all-then-retry-all",
     )
@@ -488,7 +477,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         "retry-all-then-ack-all",
     )
@@ -497,7 +486,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         "retry-all-then-ack-all",
     )
@@ -534,12 +523,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
     assert_eq!(text_count(&db, "retry-all-then-ack-all"), 0);
 
     send_text(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        generation,
-        "throw",
+        &transport, account, worker.id, &version, generation, "throw",
     )
     .await;
     let thrown = claim_one(&scheduler).await;
@@ -569,7 +553,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         "wait-until",
     )
@@ -595,12 +579,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
     assert!(text_missing(&db, "wait-until"));
 
     send_text(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        generation,
-        "reclaim",
+        &transport, account, worker.id, &version, generation, "reclaim",
     )
     .await;
     let leased = claim_one(&scheduler).await;
@@ -628,12 +607,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
     assert!(text_missing(&db, "reclaim"));
 
     send_text(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        generation,
-        "dlq-me",
+        &transport, account, worker.id, &version, generation, "dlq-me",
     )
     .await;
     let first_dlq = claim_one(&scheduler).await;
@@ -677,13 +651,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
     );
 
     let v8 = dispatch(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        generation,
-        None,
-        "/v8",
+        &transport, account, worker.id, &version, generation, None, "/v8",
     )
     .await;
     assert_eq!(v8.status, 200, "{}", v8.body);
@@ -718,7 +686,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         generation,
         None,
         "/operator/metrics",
@@ -927,7 +895,7 @@ fn consumer_request(
     namespace: ResourceId,
     key: &str,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -941,7 +909,7 @@ fn consumer_request(
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "EVENTS".to_owned(),
-        DeploymentBindingInput {
+        VersionBindingInput {
             kind: BindingKind::QueueProducer,
             id: ResourceId::from_uuid(queue_id.as_uuid()).unwrap(),
             permissions: CanonicalPermissions::default(),
@@ -950,18 +918,18 @@ fn consumer_request(
     );
     bindings.insert(
         "OBJECTS".to_owned(),
-        DeploymentBindingInput {
+        VersionBindingInput {
             kind: BindingKind::DoNamespace,
             id: namespace,
             permissions: CanonicalPermissions::default(),
             config: CanonicalBindingConfig::default(),
         },
     );
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -995,7 +963,7 @@ fn caller_request(
     target_worker_id: open_compute_core::WorkerId,
     key: &str,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -1006,11 +974,11 @@ fn caller_request(
         BundleLimits::default(),
     )
     .unwrap();
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -1019,7 +987,7 @@ fn caller_request(
         bindings: BTreeMap::new(),
         services: BTreeMap::from([(
             "PRODUCER".to_owned(),
-            DeploymentServiceInput {
+            VersionServiceInput {
                 target_worker_id,
                 entrypoint: Some("Producer".to_owned()),
             },
@@ -1037,7 +1005,7 @@ async fn send_text(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     route_generation: i64,
     body: &str,
 ) {
@@ -1045,7 +1013,7 @@ async fn send_text(
         transport,
         account_id,
         worker_id,
-        deployment,
+        version,
         route_generation,
         "/send",
         Body::from(body.to_owned()),
@@ -1059,7 +1027,7 @@ async fn post(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     route_generation: i64,
     path: &str,
     body: Body,
@@ -1075,8 +1043,8 @@ async fn post(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation,
                 request_id: RequestId::generate(),

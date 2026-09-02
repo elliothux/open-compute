@@ -25,13 +25,13 @@ use open_compute_service::{
     R2BindingService, SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend,
 };
 use open_compute_storage::{
-    DeploymentRecord, PlatformStorage, R2_SCHEMA_VERSION, ReserveResourceCreate,
-    ResourceCreateReservation, ResourceRepository, WorkerRepository,
+    PlatformStorage, R2_SCHEMA_VERSION, ReserveResourceCreate, ResourceCreateReservation,
+    ResourceRepository, VersionRecord, WorkerRepository,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentBindingInput, DeploymentController, ModuleInput, ModuleType, R2ResourceDriver,
-    ResourcePins, RuntimeSource, RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, R2ResourceDriver, ResourcePins, RuntimeSource, RuntimeValidator,
+    VersionBindingInput, VersionController,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -170,14 +170,13 @@ async fn p0_5_real_r2_facade_matrix() {
     let resource = create_bucket(&storage, &objects, &r2_config, account).await;
     let repository = WorkerRepository::new(storage.db());
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let deployments =
-        DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
+    let versions = VersionController::new(&storage, artifacts, validator, BundleLimits::default());
 
     let (object_worker, _) = repository
         .create_worker(account, "r2-object", RequestId::generate(), 20, 1_000_000)
         .unwrap();
     let object = deploy(
-        &deployments,
+        &versions,
         request(
             account,
             object_worker.id,
@@ -282,27 +281,18 @@ async fn p0_5_real_r2_facade_matrix() {
         let (worker, _) = repository
             .create_worker(account, name, RequestId::generate(), now, 1_000_000)
             .unwrap();
-        let deployment = deploy(
-            &deployments,
+        let version = deploy(
+            &versions,
             request(account, worker.id, resource, name, source, now + 1),
             &supervisor,
         )
         .await;
-        let response = dispatch(
-            &transport,
-            account,
-            worker.id,
-            &deployment,
-            None,
-            "/shape",
-            "",
-        )
-        .await;
+        let response = dispatch(&transport, account, worker.id, &version, None, "/shape", "").await;
         assert_eq!((response.status, response.body.as_str()), (200, expected));
     }
 
     let object_v2 = deploy(
-        &deployments,
+        &versions,
         request(
             account,
             object_worker.id,
@@ -418,22 +408,22 @@ async fn create_bucket(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
     supervisor: &WorkerdSupervisor,
-) -> DeploymentRecord {
+) -> VersionRecord {
     match controller
-        .create_deployment(request)
+        .create_version(request)
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "deployment failed: {error:?}; runtime={:?}; diagnostics={:?}",
+                "version failed: {error:?}; runtime={:?}; diagnostics={:?}",
                 supervisor.snapshot(),
                 supervisor.last_diagnostics()
             )
         }) {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
@@ -444,7 +434,7 @@ fn request(
     key: &str,
     source: &str,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -458,7 +448,7 @@ fn request(
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "BUCKET".to_owned(),
-        DeploymentBindingInput {
+        VersionBindingInput {
             kind: BindingKind::R2Bucket,
             id: resource,
             permissions: CanonicalPermissions::default(),
@@ -467,18 +457,18 @@ fn request(
     );
     bindings.insert(
         "BUCKET_ALIAS".to_owned(),
-        DeploymentBindingInput {
+        VersionBindingInput {
             kind: BindingKind::R2Bucket,
             id: resource,
             permissions: CanonicalPermissions::default(),
             config: CanonicalBindingConfig::default(),
         },
     );
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -676,7 +666,7 @@ async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     entrypoint: Option<&str>,
     path: &str,
     body: &str,
@@ -692,8 +682,8 @@ async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: entrypoint.map(str::to_owned),
                 route_generation: 1,
                 request_id: RequestId::generate(),

@@ -10,8 +10,8 @@ use helpers::*;
 use super::{SchedulerStore, map_sql_error};
 use crate::QueueConsumerConfig;
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, QueueBatchId, QueueConsumerId, QueueId,
-    QueueMessageId, WorkerId, WorkloadSummary,
+    AccountId, ErrorCode, PlatformError, QueueBatchId, QueueConsumerId, QueueId, QueueMessageId,
+    VersionId, WorkerId, WorkloadSummary,
 };
 use rand::TryRngCore as _;
 use rusqlite::{OptionalExtension as _, Transaction, TransactionBehavior, params};
@@ -29,8 +29,8 @@ pub struct QueueConsumerProjection {
     pub queue_id: QueueId,
     /// Monotonic attachment generation.
     pub consumer_generation: u64,
-    /// Frozen deployment target.
-    pub deployment_id: DeploymentId,
+    /// Frozen version target.
+    pub version_id: VersionId,
     /// Owning Worker.
     pub worker_id: WorkerId,
     /// Frozen Worker execution generation.
@@ -75,8 +75,8 @@ pub struct ClaimedQueueBatch {
     pub consumer_id: QueueConsumerId,
     /// Attachment generation fence.
     pub consumer_generation: u64,
-    /// Frozen deployment target.
-    pub deployment_id: DeploymentId,
+    /// Frozen version target.
+    pub version_id: VersionId,
     /// Frozen Worker target.
     pub worker_id: WorkerId,
     /// Frozen execution generation.
@@ -167,7 +167,7 @@ struct ConsumerRow {
     queue_id: QueueId,
     account_id: AccountId,
     consumer_generation: u64,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
     worker_id: WorkerId,
     execution_generation: u64,
     entrypoint: Option<String>,
@@ -207,7 +207,7 @@ impl SchedulerStore {
         connection
             .execute(
                 "INSERT OR IGNORE INTO queue_consumer_state
-                 (consumer_id, queue_id, consumer_generation, deployment_id, worker_id,
+                 (consumer_id, queue_id, consumer_generation, version_id, worker_id,
                   execution_generation, entrypoint, state, max_batch_size,
                   max_batch_timeout_ms, max_retries, retry_delay_seconds, max_concurrency,
                   dlq_queue_id, dlq_queue_generation, descriptor_sha256, updated_at_ms)
@@ -217,7 +217,7 @@ impl SchedulerStore {
                     projection.consumer_id.to_string(),
                     projection.queue_id.to_string(),
                     as_i64(projection.consumer_generation)?,
-                    projection.deployment_id.to_string(),
+                    projection.version_id.to_string(),
                     projection.worker_id.to_string(),
                     as_i64(projection.execution_generation)?,
                     projection.entrypoint,
@@ -237,7 +237,7 @@ impl SchedulerStore {
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM queue_consumer_state
                   WHERE consumer_id = ?1 AND queue_id = ?2 AND consumer_generation = ?3
-                    AND deployment_id = ?4 AND worker_id = ?5 AND execution_generation = ?6
+                    AND version_id = ?4 AND worker_id = ?5 AND execution_generation = ?6
                     AND entrypoint IS ?7 AND max_batch_size = ?8
                     AND max_batch_timeout_ms = ?9 AND max_retries = ?10
                     AND retry_delay_seconds = ?11 AND max_concurrency = ?12
@@ -247,7 +247,7 @@ impl SchedulerStore {
                     projection.consumer_id.to_string(),
                     projection.queue_id.to_string(),
                     as_i64(projection.consumer_generation)?,
-                    projection.deployment_id.to_string(),
+                    projection.version_id.to_string(),
                     projection.worker_id.to_string(),
                     as_i64(projection.execution_generation)?,
                     projection.entrypoint,
@@ -396,7 +396,7 @@ impl SchedulerStore {
             let claim_token = random_claim_token()?;
             tx.execute(
                 "INSERT INTO queue_delivery_batches
-                 (id, queue_id, consumer_id, consumer_generation, deployment_id,
+                 (id, queue_id, consumer_id, consumer_generation, version_id,
                   execution_generation, entrypoint, claim_token, state, claimed_at_ms,
                   claim_until_ms, message_count, created_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'claimed', ?9, ?10, ?11, ?9)",
@@ -405,7 +405,7 @@ impl SchedulerStore {
                     consumer.queue_id.to_string(),
                     consumer.consumer_id.to_string(),
                     as_i64(consumer.consumer_generation)?,
-                    consumer.deployment_id.to_string(),
+                    consumer.version_id.to_string(),
                     as_i64(consumer.execution_generation)?,
                     consumer.entrypoint,
                     claim_token.as_slice(),
@@ -447,7 +447,7 @@ impl SchedulerStore {
                 queue_id: consumer.queue_id,
                 consumer_id: consumer.consumer_id,
                 consumer_generation: consumer.consumer_generation,
-                deployment_id: consumer.deployment_id,
+                version_id: consumer.version_id,
                 worker_id: consumer.worker_id,
                 execution_generation: consumer.execution_generation,
                 entrypoint: consumer.entrypoint,

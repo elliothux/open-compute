@@ -3,21 +3,21 @@ use super::*;
 
 pub(super) struct PreparedBindings {
     pub(super) descriptors: Vec<BindingDescriptorV1>,
-    pub(super) rows: Vec<NewDeploymentBinding>,
+    pub(super) rows: Vec<NewVersionBinding>,
     pub(super) queue_descriptors: Vec<QueueProducerBindingDescriptorV1>,
     pub(super) queue_rows: Vec<NewQueueProducerBinding>,
     pub(super) workflow_descriptors: Vec<open_compute_storage::WorkflowBindingDescriptor>,
     pub(super) workflow_rows: Vec<open_compute_storage::WorkflowBindingRecord>,
     pub(super) durable_object_classes: Vec<String>,
     pub(super) service_descriptors: Vec<ServiceDescriptorV1>,
-    pub(super) service_rows: Vec<NewDeploymentService>,
+    pub(super) service_rows: Vec<NewVersionService>,
 }
 
-impl DeploymentController<'_> {
+impl VersionController<'_> {
     pub(super) fn prepare_bindings(
         &self,
-        request: &CreateDeploymentRequest,
-        deployment: DeploymentId,
+        request: &CreateVersionRequest,
+        version: VersionId,
     ) -> Result<PreparedBindings, PlatformError> {
         let repository = ResourceRepository::new(self.storage.db());
         let queues = QueueRepository::new(self.storage.db());
@@ -43,7 +43,7 @@ impl DeploymentController<'_> {
                 let binding = open_compute_storage::WorkflowRepository::new(self.storage.db())
                     .prepare_binding(
                         request.account_id,
-                        deployment,
+                        version,
                         name,
                         definition,
                         input.config.workflow_schedules.clone(),
@@ -69,7 +69,7 @@ impl DeploymentController<'_> {
                 {
                     return Err(PlatformError::new(
                         ErrorCode::QueueNotReady,
-                        "deployment Queue binding is not ready",
+                        "version Queue binding is not ready",
                     ));
                 }
                 let descriptor = QueueProducerBindingDescriptorV1::new(
@@ -94,7 +94,7 @@ impl DeploymentController<'_> {
             if resource.state != ResourceState::Ready {
                 return Err(PlatformError::new(
                     ErrorCode::ResourceNotReady,
-                    "deployment binding resource is not ready",
+                    "version binding resource is not ready",
                 ));
             }
             if resource.kind != input.kind {
@@ -127,7 +127,7 @@ impl DeploymentController<'_> {
             let permissions_json =
                 serde_json::to_vec(&descriptor.permissions).map_err(|_| invariant())?;
             let config_json = serde_json::to_vec(&descriptor.config).map_err(|_| invariant())?;
-            rows.push(NewDeploymentBinding {
+            rows.push(NewVersionBinding {
                 id: descriptor.binding_id,
                 name: descriptor.name.clone(),
                 kind: descriptor.kind,
@@ -156,7 +156,7 @@ impl DeploymentController<'_> {
                 input.target_worker_id,
                 input.entrypoint.clone(),
             )?;
-            service_rows.push(NewDeploymentService {
+            service_rows.push(NewVersionService {
                 binding_name: descriptor.name.clone(),
                 target_worker_id: descriptor.target_worker_id,
                 entrypoint: descriptor.entrypoint.clone(),

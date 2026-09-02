@@ -12,7 +12,7 @@ await writeFile(join(compiled, "transport.mjs"), await compileRuntime("r2/transp
 await writeFile(join(compiled, "facade.mjs"), await compileRuntime("r2/facade.ts"));
 const { makeR2TransportBase } = await import(pathToFileURL(join(compiled, "transport.mjs")).href);
 const { R2Bucket } = await import(pathToFileURL(join(compiled, "facade.mjs")).href);
-const props = { bindingId: "binding", deploymentId: "deployment", descriptorSha256: "a".repeat(64), resourceSpecGeneration: 1, permissions: { read: true, write: true } };
+const props = { bindingId: "binding", versionId: "version", descriptorSha256: "a".repeat(64), resourceSpecGeneration: 1, permissions: { read: true, write: true } };
 const meta = { key: "asset", version: "00000000-0000-7000-8000-000000000001", size: 3, etag: "etag", httpEtag: '"etag"', uploaded: 1,
   httpMetadata: { contentType: "text/plain", cacheExpiry: null }, customMetadata: {}, checksums: { md5: "5d41402abc4b2a76b9719d911017c592" }, storageClass: "Standard" };
 const Transport = makeR2TransportBase(code => new Error(code), () => "generation", "private-token");

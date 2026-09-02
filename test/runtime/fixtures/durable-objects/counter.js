@@ -47,7 +47,7 @@ export class Counter extends DurableObject {
       "x-open-compute-account-id",
       "x-open-compute-worker-id",
       "x-open-compute-binding-id",
-      "x-open-compute-deployment-id",
+      "x-open-compute-version-id",
       "x-open-compute-descriptor-sha256",
       "x-open-compute-worker-code-sha256",
       "x-open-compute-route-generation",

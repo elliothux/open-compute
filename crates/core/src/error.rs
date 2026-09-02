@@ -81,30 +81,30 @@ pub enum ErrorCode {
     WorkerNameConflict,
     /// The Worker has been tombstoned.
     WorkerDeleted,
-    /// Requested deployment does not exist for the Worker.
-    DeploymentNotFound,
-    /// Deployment is not ready for the requested operation.
-    DeploymentNotReady,
-    /// Deployment is currently active and cannot be deleted.
-    DeploymentActive,
-    /// Deployment still has a live referrer or in-flight pin.
-    DeploymentReferenced,
+    /// Requested version does not exist for the Worker.
+    VersionNotFound,
+    /// Version is not ready for the requested operation.
+    VersionNotReady,
+    /// Version is currently active and cannot be deleted.
+    VersionActive,
+    /// Version still has a live referrer or in-flight pin.
+    VersionReferenced,
     /// A Service binding declaration is missing, forged, or outside its account boundary.
     ServiceBindingDenied,
-    /// The dynamically resolved target Worker has no callable active deployment.
+    /// The dynamically resolved target Worker has no callable active version.
     ServiceTargetNotReady,
     /// The resolved Service target cannot currently be reached.
     ServiceUnavailable,
-    /// The selected named Service entrypoint is absent from the active deployment.
+    /// The selected named Service entrypoint is absent from the active version.
     ServiceEntrypointNotFound,
     /// One root Service invocation exhausted its depth, count, or concurrency budget.
     ServiceLimitExceeded,
     /// A Service invocation exceeded its bounded foreground deadline.
     ServiceTimeout,
-    /// Another retained deployment still declares the Worker as a Service target.
+    /// Another retained version still declares the Worker as a Service target.
     ServiceTargetReferenced,
-    /// Immutable deployment metadata no longer matches its descriptor.
-    DeploymentInvariantViolation,
+    /// Immutable version metadata no longer matches its descriptor.
+    VersionInvariantViolation,
     /// Worker bundle framing, module metadata, or source is invalid.
     BundleInvalid,
     /// Worker bundle exceeds a configured structural limit.
@@ -115,13 +115,13 @@ pub enum ErrorCode {
     CompatibilityUnsupported,
     /// A referenced artifact could not be opened.
     ArtifactUnavailable,
-    /// Public route did not resolve to a live active deployment.
+    /// Public route did not resolve to a live active version.
     RouteNotFound,
     /// A live route already owns the canonical host and path prefix.
     RouteConflict,
     /// Requested named entrypoint does not exist.
     EntrypointNotFound,
-    /// A deployment secret name or value is invalid.
+    /// A version secret name or value is invalid.
     SecretInvalid,
     /// An idempotency key was reused with a different canonical request.
     IdempotencyConflict,
@@ -137,7 +137,7 @@ pub enum ErrorCode {
     AssetPathInvalid,
     /// A static-asset manifest, file, rule, or upload exceeded a fixed limit.
     AssetLimitExceeded,
-    /// A deployment upload is missing one or more verified objects.
+    /// A version upload is missing one or more verified objects.
     AssetUploadIncomplete,
     /// An upload session or object conflicts with its immutable input identity.
     AssetUploadConflict,
@@ -272,8 +272,8 @@ pub enum ErrorCode {
     /// Durable Object deletion has fenced new dispatches.
     DoObjectDeleting,
     /// A late call carries an execution generation older than the host actor has observed.
-    DoDeploymentStale,
-    /// The active deployment no longer exports the namespace class.
+    DoVersionStale,
+    /// The active version no longer exports the namespace class.
     DoClassNotFound,
     /// Native Durable Object storage or its local disk is unavailable.
     DoStorageUnavailable,
@@ -527,10 +527,10 @@ impl ErrorCode {
             Self::WorkerNotFound => "WORKER_NOT_FOUND",
             Self::WorkerNameConflict => "WORKER_NAME_CONFLICT",
             Self::WorkerDeleted => "WORKER_DELETED",
-            Self::DeploymentNotFound => "DEPLOYMENT_NOT_FOUND",
-            Self::DeploymentNotReady => "DEPLOYMENT_NOT_READY",
-            Self::DeploymentActive => "DEPLOYMENT_ACTIVE",
-            Self::DeploymentReferenced => "DEPLOYMENT_REFERENCED",
+            Self::VersionNotFound => "VERSION_NOT_FOUND",
+            Self::VersionNotReady => "VERSION_NOT_READY",
+            Self::VersionActive => "VERSION_ACTIVE",
+            Self::VersionReferenced => "VERSION_REFERENCED",
             Self::ServiceBindingDenied => "SERVICE_BINDING_DENIED",
             Self::ServiceTargetNotReady => "SERVICE_TARGET_NOT_READY",
             Self::ServiceUnavailable => "SERVICE_UNAVAILABLE",
@@ -538,7 +538,7 @@ impl ErrorCode {
             Self::ServiceLimitExceeded => "SERVICE_LIMIT_EXCEEDED",
             Self::ServiceTimeout => "SERVICE_TIMEOUT",
             Self::ServiceTargetReferenced => "SERVICE_TARGET_REFERENCED",
-            Self::DeploymentInvariantViolation => "DEPLOYMENT_INVARIANT_VIOLATION",
+            Self::VersionInvariantViolation => "VERSION_INVARIANT_VIOLATION",
             Self::BundleInvalid => "BUNDLE_INVALID",
             Self::BundleTooLarge => "BUNDLE_TOO_LARGE",
             Self::BundleRuntimeInvalid => "BUNDLE_RUNTIME_INVALID",
@@ -622,7 +622,7 @@ impl ErrorCode {
             Self::DoNamespaceNotFound => "DO_NAMESPACE_NOT_FOUND",
             Self::DoIdInvalid => "DO_ID_INVALID",
             Self::DoObjectDeleting => "DO_OBJECT_DELETING",
-            Self::DoDeploymentStale => "DO_DEPLOYMENT_STALE",
+            Self::DoVersionStale => "DO_VERSION_STALE",
             Self::DoClassNotFound => "DO_CLASS_NOT_FOUND",
             Self::DoStorageUnavailable => "DO_STORAGE_UNAVAILABLE",
             Self::DoStorageLimit => "DO_STORAGE_LIMIT",

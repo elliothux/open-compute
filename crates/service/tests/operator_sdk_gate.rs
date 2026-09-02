@@ -24,7 +24,7 @@ use open_compute_service::runtime_bridge::WorkerdTransport;
 use open_compute_service::workers_http::WorkerApiState;
 use open_compute_service::workflow_http::WorkflowApiState;
 use open_compute_storage::{PlatformStorage, SchedulerStore};
-use open_compute_workers::{BundleLimits, DeploymentPins, ResourcePins};
+use open_compute_workers::{BundleLimits, ResourcePins, VersionPins};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -67,7 +67,7 @@ async fn operator_sdk_matches_live_admin_router_contract() {
         storage.clone(),
         artifacts.clone(),
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
-        DeploymentPins::new(),
+        VersionPins::new(),
         BundleLimits::default(),
         Duration::from_secs(1),
     );

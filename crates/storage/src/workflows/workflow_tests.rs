@@ -1,5 +1,5 @@
 use super::*;
-use crate::{NewDeployment, PlatformStorage, WorkerRepository};
+use crate::{NewVersion, PlatformStorage, WorkerRepository};
 use open_compute_core::{RequestId, StorageConfig, WorkflowsConfig, clock::SystemClock};
 
 #[path = "migration_tests.rs"]
@@ -10,7 +10,7 @@ mod atomicity_tests;
 #[path = "operation_tests.rs"]
 mod operation_tests;
 
-fn setup() -> (tempfile::TempDir, PlatformStorage, DeploymentId) {
+fn setup() -> (tempfile::TempDir, PlatformStorage, VersionId) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("data");
     let config = StorageConfig {
@@ -32,54 +32,56 @@ fn setup() -> (tempfile::TempDir, PlatformStorage, DeploymentId) {
             1_000_000,
         )
         .unwrap();
-    let deployment = staging(&storage, worker.0.id);
+    let version = staging(&storage, worker.0.id);
     let workers = WorkerRepository::new(storage.db());
-    workers.begin_validation(deployment).unwrap();
-    workers.mark_ready(deployment, 1).unwrap();
-    (tmp, storage, deployment)
+    workers.begin_validation(version).unwrap();
+    workers.mark_ready(version, 1).unwrap();
+    (tmp, storage, version)
 }
 
-fn staging(storage: &PlatformStorage, worker: open_compute_core::WorkerId) -> DeploymentId {
-    let id = DeploymentId::generate();
+fn staging(storage: &PlatformStorage, worker: open_compute_core::WorkerId) -> VersionId {
+    let id = VersionId::generate();
     WorkerRepository::new(storage.db())
-        .insert_staging_deployment(
-            &NewDeployment {
+        .insert_staging_version(
+            &NewVersion {
                 id,
                 account_id: storage.identity().default_account_id,
                 worker_id: worker,
-                content_kind: crate::DeploymentContentKind::Worker,
+                content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".into()),
                 worker_code_sha256: [2; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars: Default::default(),
                 secrets: Default::default(),
                 request_id: RequestId::generate(),
                 now_ms: 0,
             },
-            &crate::NewDeploymentProducts::default(),
+            &crate::NewVersionProducts::default(),
             1_000_000,
         )
         .unwrap();
     id
 }
 
-fn ready(storage: &PlatformStorage, deployment: DeploymentId) -> WorkflowDefinition {
+fn ready(storage: &PlatformStorage, version: VersionId) -> WorkflowDefinition {
     let account = storage.identity().default_account_id;
     let repo = WorkflowRepository::new(storage.db());
     let definition = repo.create_definition(account, "orders", 0).unwrap();
     let version = repo
-        .stage_version(account, definition.id, deployment, "Orders", 1)
+        .stage_version(account, definition.id, version, "Orders", 1)
         .unwrap();
-    repo.finish_version(account, version.target.version_id, true, 2)
+    repo.finish_version(account, version.target.workflow_version_id, true, 2)
         .unwrap();
     repo.definition(account, definition.id).unwrap()
 }
 
 #[test]
 fn workflow_definition_validation_scope_version_freeze_and_retirement() {
-    let (_tmp, storage, deployment) = setup();
+    let (_tmp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
     assert_eq!(
@@ -88,7 +90,7 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
             .code(),
         ErrorCode::WorkflowNotFound
     );
-    let definition = ready(&storage, deployment);
+    let definition = ready(&storage, version);
     assert_eq!(
         repo.create_definition(account, "orders", 0)
             .unwrap_err()
@@ -102,7 +104,7 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
         ErrorCode::WorkflowNotFound
     );
     assert_eq!(
-        repo.stage_version(account, definition.id, deployment, "__reserved", 1)
+        repo.stage_version(account, definition.id, version, "__reserved", 1)
             .unwrap_err()
             .code(),
         ErrorCode::WorkflowVersionNotReady
@@ -119,14 +121,14 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
         .unwrap();
     repo.rename(account, definition.id, "renamed", 4).unwrap();
     let version2 = repo
-        .stage_version(account, definition.id, deployment, "Second", 5)
+        .stage_version(account, definition.id, version, "Second", 5)
         .unwrap();
     let version3 = repo
-        .stage_version(account, definition.id, deployment, "Third", 6)
+        .stage_version(account, definition.id, version, "Third", 6)
         .unwrap();
-    repo.finish_version(account, version3.target.version_id, true, 7)
+    repo.finish_version(account, version3.target.workflow_version_id, true, 7)
         .unwrap();
-    repo.finish_version(account, version2.target.version_id, true, 8)
+    repo.finish_version(account, version2.target.workflow_version_id, true, 8)
         .unwrap();
     let after = repo
         .reserve_instance(
@@ -138,9 +140,12 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
             9,
         )
         .unwrap();
-    assert_eq!(after.identity.target.version_id, version3.target.version_id);
     assert_eq!(
-        before.identity.target.version_id,
+        after.identity.target.workflow_version_id,
+        version3.target.workflow_version_id
+    );
+    assert_eq!(
+        before.identity.target.workflow_version_id,
         definition.current_version_id.unwrap()
     );
     assert_eq!(
@@ -174,10 +179,10 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
     assert!(!repo.instance_referrers_intact(&before.identity).unwrap());
     assert_eq!(repo.retire_unused_versions(100, 14).unwrap(), 1);
     assert_eq!(
-        repo.version(account, before.identity.target.version_id)
+        repo.version(account, before.identity.target.workflow_version_id)
             .unwrap()
             .state,
-        DeploymentState::Tombstoned
+        VersionState::Tombstoned
     );
     repo.abandon_creation(&after.identity).unwrap();
     repo.delete(account, definition.id, 15).unwrap();
@@ -216,10 +221,10 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
 
 #[test]
 fn workflow_creation_identity_quota_grace_and_referrer_guards() {
-    let (_tmp, storage, deployment) = setup();
+    let (_tmp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
-    let definition = ready(&storage, deployment);
+    let definition = ready(&storage, version);
     let limits = WorkflowsConfig {
         max_instances_per_account: 1,
         max_instances_per_definition: 1,
@@ -279,7 +284,7 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
         .with_immediate(|tx| {
             assert!(
                 tx.execute(
-                    "DELETE FROM deployment_referrers WHERE kind='workflow_instance' AND ref_id=?1",
+                    "DELETE FROM version_referrers WHERE kind='workflow_instance' AND ref_id=?1",
                     [id.instance_id.to_string()]
                 )
                 .is_err()
@@ -350,10 +355,10 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
 
 #[test]
 fn workflow_binding_namespace_hash_and_catalog_reachability() {
-    let (_tmp, storage, deployment) = setup();
+    let (_tmp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
-    let definition = ready(&storage, deployment);
+    let definition = ready(&storage, version);
     let target_worker = repo
         .version(account, definition.current_version_id.unwrap())
         .unwrap()
@@ -410,7 +415,7 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
         .with_immediate(|tx| {
             assert!(
                 tx.execute(
-                    "INSERT INTO deployment_vars VALUES(?1,'ORDERS',X'6E756C6C')",
+                    "INSERT INTO version_vars VALUES(?1,'ORDERS',X'6E756C6C')",
                     [caller.to_string()]
                 )
                 .is_err()
@@ -442,7 +447,7 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
     assert_eq!(
         repo.authorize_binding(
             binding.descriptor.binding_id,
-            deployment,
+            version,
             &binding.descriptor_sha256
         )
         .unwrap_err()
@@ -471,18 +476,18 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
 
 #[test]
 fn workflow_rejection_does_not_replace_current_version_or_enable_unvalidated_definition() {
-    let (_tmp, storage, deployment) = setup();
+    let (_tmp, storage, version) = setup();
     let repo = WorkflowRepository::new(storage.db());
     let account = storage.identity().default_account_id;
     let definition = repo.create_definition(account, "bad", 0).unwrap();
     let version = repo
-        .stage_version(account, definition.id, deployment, "Missing", 1)
+        .stage_version(account, definition.id, version, "Missing", 1)
         .unwrap();
     assert_eq!(
         repo.delete(account, definition.id, 1).unwrap_err().code(),
         ErrorCode::WorkflowReferenced
     );
-    repo.finish_version(account, version.target.version_id, false, 2)
+    repo.finish_version(account, version.target.workflow_version_id, false, 2)
         .unwrap();
     assert_eq!(
         repo.reserve_instance(
@@ -498,7 +503,7 @@ fn workflow_rejection_does_not_replace_current_version_or_enable_unvalidated_def
         ErrorCode::WorkflowNotReady
     );
     assert!(
-        repo.finish_version(account, version.target.version_id, true, 3)
+        repo.finish_version(account, version.target.workflow_version_id, true, 3)
             .is_err()
     );
     assert_eq!(repo.retire_unused_versions(1, 4).unwrap(), 1);

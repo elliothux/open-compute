@@ -48,15 +48,12 @@ pub use ai_search::{
     inspect_ai_search_instance, inspect_ai_search_object_references,
 };
 pub use assets::{
-    BeginDeploymentUploadFinalize, DeploymentAssetsRecord, DeploymentAssetsRepository,
-    DeploymentObjectKind, DeploymentUploadFinalize, DeploymentUploadFinalizeDisposition,
-    DeploymentUploadObjectRecord, DeploymentUploadRecord, DeploymentUploadRepository,
-    DeploymentUploadStatus, NewDeploymentAssets, NewDeploymentObjectRef, NewDeploymentUpload,
-    NewDeploymentUploadObject,
+    BeginVersionUploadFinalize, NewVersionAssets, NewVersionObjectRef, NewVersionUpload,
+    NewVersionUploadObject, VersionAssetsRecord, VersionAssetsRepository, VersionObjectKind,
+    VersionUploadFinalize, VersionUploadFinalizeDisposition, VersionUploadObjectRecord,
+    VersionUploadRecord, VersionUploadRepository, VersionUploadStatus,
 };
-pub use bindings::{
-    AuthorizedBinding, BindingRepository, DeploymentBindingRecord, NewDeploymentBinding,
-};
+pub use bindings::{AuthorizedBinding, BindingRepository, NewVersionBinding, VersionBindingRecord};
 pub use cache::{
     CACHE_DATABASE_SCHEMA_VERSION, CacheBodyRef, CacheEngine, CacheHeader, CacheIdentity,
     CacheLookup, CacheLookupStatus, CacheManager, CacheMethod, CachePaths, CachePurge, CachePut,
@@ -73,7 +70,7 @@ pub use catalog_page::{
 pub use control_db::ControlDb;
 pub use cron::{
     CRON_PARSER_VERSION, CronActivationRecord, CronActivationState, CronDeclaration,
-    CronDeploymentConfig, CronRepository, NewCronConfig, NewCronDeclaration,
+    CronRepository, CronVersionConfig, NewCronConfig, NewCronDeclaration,
 };
 pub use crypto::{SecretCrypto, SecretEnvelope};
 pub use d1::{
@@ -152,8 +149,8 @@ pub use resources::{
 };
 pub use restore_cleanup::{RestoreStagingCleanup, cleanup_restore_staging};
 pub use runtime_features::{
-    BuiltinBindingKind, DeploymentBuiltinBindingRecord, DeploymentCachePolicyRecord,
-    deployment_runtime_features,
+    BuiltinBindingKind, VersionBuiltinBindingRecord, VersionCachePolicyRecord,
+    version_runtime_features,
 };
 pub use scheduler::{
     AlarmProjection, ClaimResult, ClaimedCronRun, ClaimedJob, ClaimedQueueBatch,
@@ -169,8 +166,8 @@ pub use scheduler::{
 };
 pub use schema_inspection::{CurrentSchemaState, inspect_current_schema};
 pub use services::{
-    DeploymentServiceRecord, NewDeploymentService, ResolvedServiceTarget, ServiceReferrer,
-    ServiceRepository,
+    NewVersionService, ResolvedServiceTarget, ServiceReferrer, ServiceRepository,
+    VersionServiceRecord,
 };
 pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
 pub use vectorize::{
@@ -179,11 +176,11 @@ pub use vectorize::{
     VectorizeIndexRepository, VectorizePaths, VectorizeReadSnapshot,
 };
 pub use workers::{
-    DeploymentContentKind, DeploymentRecord, DeploymentReferrer, DeploymentSnapshot,
-    DeploymentState, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment,
-    NewDeploymentProducts, RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot,
-    SYSTEM_DASHBOARD_WORKER_NAME, StoredDeploymentSecret, SystemOwnedDeploymentKind,
-    SystemOwnedDeploymentRecord, WorkerOwnership, WorkerRecord, WorkerRepository,
+    IdempotencyReservation, LOADER_SCHEMA_VERSION, NewVersion, NewVersionProducts,
+    RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot, SYSTEM_DASHBOARD_WORKER_NAME,
+    StoredVersionSecret, SystemOwnedVersionKind, SystemOwnedVersionRecord, VersionContentKind,
+    VersionRecord, VersionReferrer, VersionSnapshot, VersionState, WorkerOwnership, WorkerRecord,
+    WorkerRepository,
 };
 pub use workflows::{
     WorkflowAppliedOperation, WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition,

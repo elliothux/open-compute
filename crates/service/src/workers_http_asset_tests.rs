@@ -2,7 +2,7 @@ use super::*;
 use crate::asset_backend::{AssetBindingService, serve_asset_plan};
 use axum::body::to_bytes;
 use open_compute_artifacts::ArtifactCache;
-use open_compute_core::{CacheConfig, DeploymentUploadId, StartupId};
+use open_compute_core::{CacheConfig, StartupId, VersionUploadId};
 use open_compute_workers::{
     AssetEntryV1, AssetResponsePlan, CanonicalBundle, ModuleInput, ModuleType,
 };
@@ -51,7 +51,7 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
     let state = tests::authorized_http_state(api.clone());
     let router = control_router().with_state(state);
     let collection = format!(
-        "/v1/accounts/{account}/workers/{}/deployment-uploads",
+        "/v1/accounts/{account}/workers/{}/version-uploads",
         worker.id
     );
     let bytes = b"<main>private asset binding</main>";
@@ -103,7 +103,7 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/v1/accounts/bad/workers/{}/deployment-uploads",
+                    "/v1/accounts/bad/workers/{}/version-uploads",
                     worker.id
                 ))
                 .header(IDEMPOTENCY_HEADER, "bad-account"),
@@ -139,7 +139,7 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
         authorized(
             Request::builder().method("PUT").uri(format!(
                 "{collection}/{}/objects/bad",
-                DeploymentUploadId::generate()
+                VersionUploadId::generate()
             )),
             Body::empty(),
         ),
@@ -152,7 +152,7 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
         authorized(
             Request::builder().method("POST").uri(format!(
                 "{collection}/{}/finalize",
-                DeploymentUploadId::generate()
+                VersionUploadId::generate()
             )),
             Body::from("{"),
         ),
@@ -188,7 +188,7 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
     assert_eq!(response.status(), StatusCode::CONFLICT);
 
     let unknown_worker_collection = format!(
-        "/v1/accounts/{account}/workers/{}/deployment-uploads",
+        "/v1/accounts/{account}/workers/{}/version-uploads",
         WorkerId::generate()
     );
     let response = router
@@ -271,20 +271,20 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
     let finalized = response_json(response).await;
-    let deployment_id: DeploymentId = finalized["deployment"]["id"]
+    let version_id: VersionId = finalized["version"]["id"]
         .as_str()
         .unwrap()
         .parse()
         .unwrap();
-    let deployment = WorkerRepository::new(api.storage.db())
-        .get_deployment(account, worker.id, deployment_id)
+    let version = WorkerRepository::new(api.storage.db())
+        .get_version(account, worker.id, version_id)
         .unwrap();
 
     let Err(error) = serve_asset_plan(
         &api.storage,
         &api.artifacts,
         None,
-        &deployment,
+        &version,
         AssetResponsePlan {
             status: 200,
             entry: Some(AssetEntryV1 {
@@ -301,7 +301,7 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
     else {
         panic!("mismatched asset authority unexpectedly served bytes");
     };
-    assert_eq!(error.code(), ErrorCode::DeploymentNotFound);
+    assert_eq!(error.code(), ErrorCode::VersionNotFound);
 
     let cache = Arc::new(
         ArtifactCache::open(
@@ -317,10 +317,10 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
         cache,
         api.pins.clone(),
     );
-    let descriptor = hex::encode(deployment.worker_code_sha256);
+    let descriptor = hex::encode(version.worker_code_sha256);
     let binding_request = |method: &str, url: &str, descriptor: &str| {
         Request::builder()
-            .header("x-open-compute-deployment-id", deployment_id.to_string())
+            .header("x-open-compute-version-id", version_id.to_string())
             .header("x-open-compute-descriptor-sha256", descriptor)
             .header("x-open-compute-asset-method", method)
             .header("x-open-compute-asset-url", url)
@@ -360,12 +360,12 @@ async fn asset_upload_endpoints_and_private_binding_fail_closed() {
         .insert(header::AUTHORIZATION, HeaderValue::from_static("tenant"));
     let response = binding.handle(request).await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(api.pins.count(deployment_id), 1);
+    assert_eq!(api.pins.count(version_id), 1);
     assert_eq!(
         to_bytes(response.into_body(), 64 * 1024).await.unwrap(),
         bytes.as_slice()
     );
-    assert_eq!(api.pins.count(deployment_id), 0);
+    assert_eq!(api.pins.count(version_id), 0);
 
     let response = binding
         .handle(binding_request(
@@ -410,7 +410,7 @@ async fn worker_asset_upload_stages_bundle_and_replays_runtime_failure() {
         .unwrap();
     let router = control_router().with_state(tests::authorized_http_state(api));
     let collection = format!(
-        "/v1/accounts/{account}/workers/{}/deployment-uploads",
+        "/v1/accounts/{account}/workers/{}/version-uploads",
         worker.id
     );
     let bundle = CanonicalBundle::build(

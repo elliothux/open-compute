@@ -5,7 +5,7 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hmac::{Hmac, Mac};
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, ResourceId, SecretBytes, WorkerId,
+    AccountId, ErrorCode, PlatformError, ResourceId, SecretBytes, VersionId, WorkerId,
 };
 use rand::TryRngCore;
 use serde::{Deserialize, Serialize};
@@ -281,13 +281,13 @@ impl SecretCrypto {
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
     }
 
-    /// Encrypt a deployment secret bound to its immutable revision and identity.
+    /// Encrypt a version secret bound to its immutable revision and identity.
     pub fn encrypt(
         &self,
         plaintext: &SecretBytes,
         account: AccountId,
         worker: WorkerId,
-        deployment: DeploymentId,
+        version: VersionId,
         secret_name: &str,
         revision_id: &str,
     ) -> Result<SecretEnvelope, PlatformError> {
@@ -298,7 +298,7 @@ impl SecretCrypto {
                 PlatformError::new(ErrorCode::ConfigInvalid, "failed to generate AEAD nonce")
             })?;
         let nonce = XNonce::from(nonce_bytes);
-        let aad = associated_data(account, worker, deployment, secret_name, revision_id)?;
+        let aad = associated_data(account, worker, version, secret_name, revision_id)?;
         let ciphertext = self
             .cipher
             .encrypt(
@@ -320,13 +320,13 @@ impl SecretCrypto {
         })
     }
 
-    /// Decrypt a deployment secret, rejecting envelope, revision, or identity mismatch.
+    /// Decrypt a version secret, rejecting envelope, revision, or identity mismatch.
     pub fn decrypt(
         &self,
         envelope: &SecretEnvelope,
         account: AccountId,
         worker: WorkerId,
-        deployment: DeploymentId,
+        version: VersionId,
         secret_name: &str,
         revision_id: &str,
     ) -> Result<SecretBytes, PlatformError> {
@@ -355,7 +355,7 @@ impl SecretCrypto {
             ));
         }
         let nonce = XNonce::from_slice(&envelope.nonce);
-        let aad = associated_data(account, worker, deployment, secret_name, revision_id)?;
+        let aad = associated_data(account, worker, version, secret_name, revision_id)?;
         let plaintext = self
             .cipher
             .decrypt(
@@ -546,7 +546,7 @@ fn derive_key(master: &[u8], domain: &[u8]) -> Result<[u8; 32], PlatformError> {
 fn associated_data(
     account: AccountId,
     worker: WorkerId,
-    deployment: DeploymentId,
+    version: VersionId,
     secret_name: &str,
     revision_id: &str,
 ) -> Result<Vec<u8>, PlatformError> {
@@ -566,7 +566,7 @@ fn associated_data(
     out.extend_from_slice(&SECRET_AAD_SCHEMA.to_be_bytes());
     write_framed(&mut out, account.as_canonical_str().as_bytes())?;
     write_framed(&mut out, worker.as_canonical_str().as_bytes())?;
-    write_framed(&mut out, deployment.as_canonical_str().as_bytes())?;
+    write_framed(&mut out, version.as_canonical_str().as_bytes())?;
     write_framed(&mut out, secret_name.as_bytes())?;
     if revision_id.is_empty() || revision_id.len() > MAX_SECRET_NAME_LEN {
         return Err(PlatformError::new(

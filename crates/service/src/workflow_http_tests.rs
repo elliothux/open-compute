@@ -3,17 +3,17 @@ use crate::health::HealthCoordinator;
 use crate::metrics::MetricsRegistry;
 use open_compute_core::{MetricsConfig, SecretString, StorageConfig, SystemClock};
 use open_compute_runtime::GenerationAuthRegistry;
-use open_compute_storage::{NewDeployment, WorkerRepository};
+use open_compute_storage::{NewVersion, WorkerRepository};
 use std::sync::Mutex;
 use tower::ServiceExt as _;
 
 #[test]
 fn version_rejects_the_removed_capability_selector() {
-    let body = serde_json::json!({"deploymentId":DeploymentId::generate(),"className":"Flow"});
+    let body = serde_json::json!({"versionId":VersionId::generate(),"className":"Flow"});
     assert!(serde_json::from_value::<VersionBody>(body.clone()).is_ok());
     assert!(
         serde_json::from_value::<VersionBody>(serde_json::json!({
-            "deploymentId": body["deploymentId"],
+            "versionId": body["versionId"],
             "className": "Flow",
             "capabilityVersion": 1,
         }))
@@ -26,7 +26,7 @@ pub(crate) struct Fixture {
     pub(crate) storage: Arc<PlatformStorage>,
     pub(crate) scheduler: Arc<SchedulerStore>,
     pub(crate) account: AccountId,
-    pub(crate) deployment: DeploymentId,
+    pub(crate) version: VersionId,
     pub(crate) metrics: Arc<MetricsRegistry>,
     router: Router,
 }
@@ -56,30 +56,32 @@ pub(crate) fn fixture() -> Fixture {
     let (worker, _) = workers
         .create_worker(account, "workflow-api", RequestId::generate(), 0, 1_000_000)
         .unwrap();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     workers
-        .insert_staging_deployment(
-            &NewDeployment {
-                id: deployment,
+        .insert_staging_version(
+            &NewVersion {
+                id: version,
                 account_id: account,
                 worker_id: worker.id,
-                content_kind: open_compute_storage::DeploymentContentKind::Worker,
+                content_kind: open_compute_storage::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".into()),
                 worker_code_sha256: [2; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars: Default::default(),
                 secrets: Default::default(),
                 request_id: RequestId::generate(),
                 now_ms: 0,
             },
-            &open_compute_storage::NewDeploymentProducts::default(),
+            &open_compute_storage::NewVersionProducts::default(),
             1_000_000,
         )
         .unwrap();
-    workers.begin_validation(deployment).unwrap();
-    workers.mark_ready(deployment, 1).unwrap();
+    workers.begin_validation(version).unwrap();
+    workers.mark_ready(version, 1).unwrap();
     let transport =
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
     let api = WorkflowApiState::new(
@@ -114,7 +116,7 @@ pub(crate) fn fixture() -> Fixture {
         storage,
         scheduler,
         account,
-        deployment,
+        version,
         metrics,
         router: crate::http::admin_router(state),
     }
@@ -196,7 +198,7 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
         .request(
             "POST",
             &versions,
-            serde_json::json!({"deploymentId":f.deployment,"className":"Flow"}),
+            serde_json::json!({"versionId":f.version,"className":"Flow"}),
         )
         .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{version}");
@@ -394,7 +396,7 @@ async fn workflow_operator_rejects_untrusted_scope_pagination_and_bodies() {
         f.request(
             "POST",
             &format!("{detail}/versions"),
-            serde_json::json!({"deploymentId":f.deployment,"className":"__private"})
+            serde_json::json!({"versionId":f.version,"className":"__private"})
         )
         .await
         .0,
@@ -466,9 +468,9 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
         .create_definition(f.account, "admin-durable", 0)
         .unwrap();
     let version = repo
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
+        .stage_version(f.account, definition.id, f.version, "Flow", 1)
         .unwrap();
-    repo.finish_version(f.account, version.target.version_id, true, 2)
+    repo.finish_version(f.account, version.target.workflow_version_id, true, 2)
         .unwrap();
     let limits = WorkflowsConfig::default();
     let controller = WorkflowController::new(&f.storage, &f.scheduler, &limits);
@@ -640,7 +642,10 @@ async fn workflow_admin_modifiers_share_generation_retention_and_event_authority
     );
     let metadata = f.request("GET", &instance, Value::Null).await.1;
     assert_eq!(metadata["generation"], 2);
-    assert_eq!(metadata["versionId"], version.target.version_id.to_string());
+    assert_eq!(
+        metadata["versionId"],
+        version.target.workflow_version_id.to_string()
+    );
     assert_eq!(metadata["durable"]["eventCount"], 0);
     assert_eq!(metadata["status"], "queued");
     f.storage.begin_draining();

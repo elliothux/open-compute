@@ -160,10 +160,10 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
             harness.transport.clone(),
             Default::default(),
         )
-        .create_version(account, definition.id, target.deployment_id, "Flow".into())
+        .create_version(account, definition.id, target.version_id, "Flow".into())
         .await
         .unwrap();
-        assert_eq!(version.state, DeploymentState::Ready);
+        assert_eq!(version.state, VersionState::Ready);
 
         for after_commit in [false, true] {
             for observation in [Observation::Known, Observation::Unknown] {
@@ -370,7 +370,7 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 "",
                 BTreeMap::from([(
                     "FLOW".into(),
-                    DeploymentBindingInput {
+                    VersionBindingInput {
                         kind: BindingKind::Workflow,
                         id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                         permissions: CanonicalPermissions::default(),

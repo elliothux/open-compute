@@ -444,7 +444,7 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
     const props = this.ctx.props;
     if (!props
       || typeof props.bindingId !== "string"
-      || typeof props.deploymentId !== "string"
+      || typeof props.versionId !== "string"
       || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
       || !Number.isSafeInteger(props.resourceSpecGeneration)
       || props.resourceSpecGeneration < 1) {
@@ -466,7 +466,7 @@ export class KVNamespace extends WorkerEntrypoint<BindingEnv, ResourceBindingPro
           "content-type": BINDING_FRAME_CONTENT_TYPE,
           [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
           "x-open-compute-startup-generation": currentStartupGeneration(),
-          "x-open-compute-deployment-id": props.deploymentId,
+          "x-open-compute-version-id": props.versionId,
           "x-open-compute-descriptor-sha256": props.descriptorSha256,
           "x-open-compute-request-id": crypto.randomUUID(),
         },

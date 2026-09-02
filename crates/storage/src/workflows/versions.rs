@@ -59,12 +59,12 @@ impl WorkflowRepository<'_> {
         })
     }
 
-    /// Freeze a ready same-account deployment and protect it before asynchronous class validation.
+    /// Freeze a ready same-account version and protect it before asynchronous class validation.
     pub fn stage_version(
         &self,
         account: AccountId,
         definition: WorkflowId,
-        deployment: DeploymentId,
+        version: VersionId,
         class_name: &str,
         now_ms: i64,
     ) -> Result<WorkflowVersion, PlatformError> {
@@ -86,28 +86,28 @@ impl WorkflowRepository<'_> {
             if !matches!(definition_row.state, ResourceState::Creating|ResourceState::Ready) {
                 return Err(error(ErrorCode::WorkflowNotReady));
             }
-            let deployment = tx.query_row("SELECT w.id,d.id,d.worker_code_sha256,d.loader_schema_version
-                FROM worker_deployments d JOIN workers w ON w.id=d.worker_id
+            let version = tx.query_row("SELECT w.id,d.id,d.worker_code_sha256,d.loader_schema_version
+                FROM worker_versions d JOIN workers w ON w.id=d.worker_id
                 WHERE d.id=?1 AND w.account_id=?2 AND d.state='ready' AND w.deleted_at_ms IS NULL",
-                params![deployment.to_string(),account.to_string()], |row| {
+                params![version.to_string(),account.to_string()], |row| {
                     Ok((parse(row,0)?,parse(row,1)?,digest(row,2)?,row.get::<_,i64>(3)?))
                 }).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::WorkflowVersionNotReady))?;
             let version_number: i64 = tx.query_row("SELECT coalesce(MAX(version_number),0)+1 FROM workflow_versions WHERE definition_id=?1",
                 [definition.to_string()],|row|row.get(0)).map_err(sql_error)?;
             if version_number > 10000 { return Err(error(ErrorCode::QuotaExceeded)); }
             let mut target = WorkflowTarget { account_id: account, definition_id: definition,
-                definition_name: definition_row.name, version_id: WorkflowVersionId::generate(),
-                worker_id: deployment.0, deployment_id: deployment.1, worker_code_sha256: deployment.2,
-                class_name: class_name.into(), loader_schema_version: deployment.3, capability_version: 1,
+                definition_name: definition_row.name, workflow_version_id: WorkflowVersionId::generate(),
+                worker_id: version.0, worker_version_id: version.1, worker_code_sha256: version.2,
+                class_name: class_name.into(), loader_schema_version: version.3, capability_version: 1,
                 descriptor_sha256: [0;32] };
             target.descriptor_sha256 = version_digest(&target)?;
-            tx.execute("INSERT INTO workflow_versions(id,definition_id,version_number,state,worker_id,deployment_id,
+            tx.execute("INSERT INTO workflow_versions(id,definition_id,version_number,state,worker_id,worker_version_id,
                 class_name,worker_code_sha256,loader_schema_version,capability_version,descriptor_sha256,created_at_ms)
-                VALUES(?1,?2,?3,'staging',?4,?5,?6,?7,?8,?9,?10,?11)", params![target.version_id.to_string(),
-                definition.to_string(),version_number,target.worker_id.to_string(),target.deployment_id.to_string(),
+                VALUES(?1,?2,?3,'staging',?4,?5,?6,?7,?8,?9,?10,?11)", params![target.workflow_version_id.to_string(),
+                definition.to_string(),version_number,target.worker_id.to_string(),target.worker_version_id.to_string(),
                 class_name,target.worker_code_sha256.as_slice(),target.loader_schema_version,1,target.descriptor_sha256.as_slice(),now_ms]).map_err(sql_error)?;
-            tx.execute("UPDATE workflow_versions SET state='validating' WHERE id=?1",[target.version_id.to_string()]).map_err(sql_error)?;
-            Ok(WorkflowVersion { target, version_number, state: DeploymentState::Validating,
+            tx.execute("UPDATE workflow_versions SET state='validating' WHERE id=?1",[target.workflow_version_id.to_string()]).map_err(sql_error)?;
+            Ok(WorkflowVersion { target, version_number, state: VersionState::Validating,
                 created_at_ms: now_ms, rejection_code: None })
         })
     }
@@ -146,8 +146,8 @@ impl WorkflowRepository<'_> {
             let version = tx.query_row(&format!("{VERSION_SELECT} WHERE f.account_id=?1 AND v.id=?2"),
                 params![account.to_string(),id.to_string()],version_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowVersionNotReady))?;
-            if version.state == if accepted { DeploymentState::Ready } else { DeploymentState::Rejected } { return Ok(version); }
-            if version.state != DeploymentState::Validating { return Err(error(ErrorCode::WorkflowVersionNotReady)); }
+            if version.state == if accepted { VersionState::Ready } else { VersionState::Rejected } { return Ok(version); }
+            if version.state != VersionState::Validating { return Err(error(ErrorCode::WorkflowVersionNotReady)); }
             if accepted {
                 tx.execute("UPDATE workflow_versions SET state='ready',ready_at_ms=?2 WHERE id=?1 AND state='validating'",
                     params![id.to_string(),now_ms]).map_err(sql_error)?;
@@ -171,7 +171,7 @@ impl WorkflowRepository<'_> {
         self.db.with_immediate(|tx| {
             let mut statement = tx.prepare("SELECT v.id FROM workflow_versions v
                 WHERE v.state IN ('ready','rejected') AND NOT EXISTS(SELECT 1 FROM workflow_definitions f WHERE f.current_version_id=v.id)
-                AND NOT EXISTS(SELECT 1 FROM workflow_instance_referrers r WHERE r.version_id=v.id AND r.state!='released')
+                AND NOT EXISTS(SELECT 1 FROM workflow_instance_referrers r WHERE r.workflow_version_id=v.id AND r.state!='released')
                 ORDER BY v.created_at_ms,v.id LIMIT ?1").map_err(sql_error)?;
             let ids = statement.query_map([limit],|row|row.get::<_,String>(0)).map_err(sql_error)?
                 .collect::<Result<Vec<_>,_>>().map_err(sql_error)?;

@@ -5,20 +5,21 @@ use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use open_compute_core::MetricsConfig;
 use open_compute_images::RasterFormat;
 use open_compute_workers::{
-    DeploymentImagesInput, DeploymentRuntimeFeatures, DeploymentVersionMetadataInput,
+    VersionImagesInput, VersionRuntimeFeatures, VersionVersionMetadataInput,
 };
 
 async fn fixture(config: ImagesConfig) -> (RuntimeFeatureFixture, ImageBindingService, Vec<u8>) {
-    let fixture = RuntimeFeatureFixture::create(DeploymentRuntimeFeatures {
+    let fixture = RuntimeFeatureFixture::create(VersionRuntimeFeatures {
         cache: Default::default(),
-        images: Some(DeploymentImagesInput {
+        images: Some(VersionImagesInput {
             binding: "IMAGES".to_owned(),
         }),
         ai: None,
-        version_metadata: Some(DeploymentVersionMetadataInput {
+        version_metadata: Some(VersionVersionMetadataInput {
             binding: "VERSION".to_owned(),
             tag: Some("release-1".to_owned()),
         }),
+        ..VersionRuntimeFeatures::default()
     })
     .await;
     let service = ImageBindingService::new(fixture.storage.clone(), config);
@@ -35,7 +36,7 @@ fn request(fixture: &RuntimeFeatureFixture, path: &str, body: Body) -> Request<B
         .uri(path)
         .header(ACCOUNT_HEADER, fixture.account.to_string())
         .header(WORKER_HEADER, fixture.worker.to_string())
-        .header(DEPLOYMENT_HEADER, fixture.deployment.to_string())
+        .header(VERSION_HEADER, fixture.version.to_string())
         .header(
             DESCRIPTOR_HEADER,
             fixture.images_descriptor_sha256.as_deref().unwrap(),

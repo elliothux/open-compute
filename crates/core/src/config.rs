@@ -125,8 +125,8 @@ pub struct HardeningConfig {
     pub max_workers_per_account: u32,
     /// Maximum live routes owned by one account.
     pub max_routes_per_account: u32,
-    /// Maximum retained deployments owned by one Worker.
-    pub max_deployments_per_worker: u32,
+    /// Maximum retained versions owned by one Worker.
+    pub max_versions_per_worker: u32,
     /// Maximum live resources of one product kind owned by one account.
     pub max_resources_per_kind_per_account: u32,
     /// Bytes retained exclusively for delete, cleanup, and bounded diagnostics.
@@ -154,7 +154,7 @@ impl Default for HardeningConfig {
         Self {
             max_workers_per_account: 1_000,
             max_routes_per_account: 10_000,
-            max_deployments_per_worker: 1_000,
+            max_versions_per_worker: 1_000,
             max_resources_per_kind_per_account: 1_000,
             emergency_reserve_bytes: 64 * 1024 * 1024,
             max_snapshot_files: 1_000_000,
@@ -175,8 +175,8 @@ impl HardeningConfig {
             || self.max_workers_per_account > 1_000_000
             || self.max_routes_per_account == 0
             || self.max_routes_per_account > 10_000_000
-            || self.max_deployments_per_worker == 0
-            || self.max_deployments_per_worker > 1_000_000
+            || self.max_versions_per_worker == 0
+            || self.max_versions_per_worker > 1_000_000
             || self.max_resources_per_kind_per_account == 0
             || self.max_resources_per_kind_per_account > 1_000_000
             || self.emergency_reserve_bytes == 0
@@ -830,8 +830,8 @@ pub struct DocumentParserConfig {
     pub max_concurrency: u16,
     /// Maximum concurrent parser children for one account.
     pub max_concurrency_per_account: u16,
-    /// Maximum concurrent parser children for one immutable deployment.
-    pub max_concurrency_per_deployment: u16,
+    /// Maximum concurrent parser children for one immutable version.
+    pub max_concurrency_per_version: u16,
     /// End-to-end parser child deadline in milliseconds.
     pub request_timeout_ms: u64,
     /// Maximum virtual address-space bytes available to one parser child.
@@ -851,7 +851,7 @@ impl Default for DocumentParserConfig {
             max_output_bytes: 16 * 1024 * 1024,
             max_concurrency: 4,
             max_concurrency_per_account: 2,
-            max_concurrency_per_deployment: 1,
+            max_concurrency_per_version: 1,
             request_timeout_ms: 30_000,
             max_address_space_bytes: 2 * 1024 * 1024 * 1024,
             max_cpu_seconds: 30,
@@ -879,8 +879,8 @@ impl DocumentParserConfig {
                 "document_parser.max_concurrency_per_account",
             ),
             (
-                u64::from(self.max_concurrency_per_deployment),
-                "document_parser.max_concurrency_per_deployment",
+                u64::from(self.max_concurrency_per_version),
+                "document_parser.max_concurrency_per_version",
             ),
             (
                 self.request_timeout_ms,
@@ -902,7 +902,7 @@ impl DocumentParserConfig {
             || self.max_output_bytes > 16 * 1024 * 1024
             || self.max_concurrency > 256
             || self.max_concurrency_per_account > self.max_concurrency
-            || self.max_concurrency_per_deployment > self.max_concurrency_per_account
+            || self.max_concurrency_per_version > self.max_concurrency_per_account
             || self.request_timeout_ms > 30_000
             || !(64 * 1024 * 1024..=2 * 1024 * 1024 * 1024).contains(&self.max_address_space_bytes)
             || self.max_cpu_seconds > 30
@@ -955,20 +955,20 @@ pub struct WorkersConfig {
     pub max_bundle_bytes: u64,
     /// Maximum request body bytes forwarded to a tenant Worker.
     pub max_request_body_bytes: u64,
-    /// Deadline for waiting on in-flight deployment pins during delete.
+    /// Deadline for waiting on in-flight version pins during delete.
     pub delete_drain_timeout_ms: u64,
     /// Minimum remote artifact orphan age before deletion.
     pub artifact_gc_grace_ms: u64,
     /// Background artifact GC interval.
     pub artifact_gc_interval_ms: u64,
-    /// Maximum deployments finalized in one crash-recovery batch.
+    /// Maximum versions finalized in one crash-recovery batch.
     pub delete_recovery_batch: u32,
-    /// Number of newest ready deployments retained per Worker.
-    pub retain_ready_deployments: u32,
-    /// Number of newest rejected deployments retained per Worker.
-    pub retain_rejected_deployments: u32,
-    /// Minimum deployment age before automatic retention deletion.
-    pub deployment_min_retention_ms: u64,
+    /// Number of newest ready versions retained per Worker.
+    pub retain_ready_versions: u32,
+    /// Number of newest rejected versions retained per Worker.
+    pub retain_rejected_versions: u32,
+    /// Minimum version age before automatic retention deletion.
+    pub version_min_retention_ms: u64,
 }
 
 impl Default for WorkersConfig {
@@ -980,9 +980,9 @@ impl Default for WorkersConfig {
             artifact_gc_grace_ms: 24 * 60 * 60 * 1_000,
             artifact_gc_interval_ms: 60_000,
             delete_recovery_batch: 64,
-            retain_ready_deployments: 10,
-            retain_rejected_deployments: 10,
-            deployment_min_retention_ms: 24 * 60 * 60 * 1_000,
+            retain_ready_versions: 10,
+            retain_rejected_versions: 10,
+            version_min_retention_ms: 24 * 60 * 60 * 1_000,
         }
     }
 }
@@ -1008,22 +1008,22 @@ impl WorkersConfig {
             "workers.delete_recovery_batch",
         )?;
         require_nonzero(
-            u64::from(self.retain_ready_deployments),
-            "workers.retain_ready_deployments",
+            u64::from(self.retain_ready_versions),
+            "workers.retain_ready_versions",
         )?;
         require_nonzero(
-            u64::from(self.retain_rejected_deployments),
-            "workers.retain_rejected_deployments",
+            u64::from(self.retain_rejected_versions),
+            "workers.retain_rejected_versions",
         )?;
         require_nonzero(
-            self.deployment_min_retention_ms,
-            "workers.deployment_min_retention_ms",
+            self.version_min_retention_ms,
+            "workers.version_min_retention_ms",
         )?;
         if self.max_bundle_bytes > 64 * 1024 * 1024
             || self.max_request_body_bytes > 64 * 1024 * 1024
             || self.delete_recovery_batch > 10_000
-            || self.retain_ready_deployments > 10_000
-            || self.retain_rejected_deployments > 10_000
+            || self.retain_ready_versions > 10_000
+            || self.retain_rejected_versions > 10_000
         {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,

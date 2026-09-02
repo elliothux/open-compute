@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
-description = "Worker bundles, immutable deployments, routing, and runtime source"
+description = "Worker bundles, immutable versions, routing, and runtime source"
 publish.workspace = true
 
 [features]

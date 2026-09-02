@@ -41,9 +41,9 @@ use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
 use open_compute_storage::{DataDir, SchedulerStore, SchedulerSummary, inspect_scheduler_db};
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentController, DeploymentPins, ModuleInput, ModuleType, ProductPromotionCoordinator,
-    ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, ValidationCandidate,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, ProductPromotionCoordinator, ProductPromotionRequest, QueueConsumerInput,
+    RuntimeValidator, ValidationCandidate, VersionController, VersionPins,
 };
 use sha2::Digest;
 use std::fs::{self, File};
@@ -867,16 +867,16 @@ async fn liveness_ready_status_and_bounds() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let deployment_path = "/operator/api/v1/accounts/acct_test/workers/wrk_test/deployments";
+    let version_path = "/operator/api/v1/accounts/acct_test/workers/wrk_test/versions";
     let res = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(deployment_path)
+                .uri(version_path)
                 .header("content-length", 18 * 1024 * 1024)
                 .header(
-                    "x-open-compute-deployment-metadata",
+                    "x-open-compute-version-metadata",
                     format!("{{\"padding\":\"{}\"}}", "x".repeat(9000)),
                 )
                 .body(Body::empty())
@@ -891,7 +891,7 @@ async fn liveness_ready_status_and_bounds() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(deployment_path)
+                .uri(version_path)
                 .header("content-length", 64 * 1024 * 1024 + 1)
                 .body(Body::empty())
                 .unwrap(),
@@ -900,7 +900,7 @@ async fn liveness_ready_status_and_bounds() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let staged_upload_path = "/operator/api/v1/accounts/acct_test/workers/wrk_test/deployment-uploads/upload_test/objects/digest";
+    let staged_upload_path = "/operator/api/v1/accounts/acct_test/workers/wrk_test/version-uploads/upload_test/objects/digest";
     let res = app
         .clone()
         .oneshot(
@@ -934,7 +934,7 @@ async fn liveness_ready_status_and_bounds() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/operator/api/v1/accounts/acct_test/workers/wrk_test/deployment-uploads")
+                .uri("/operator/api/v1/accounts/acct_test/workers/wrk_test/version-uploads")
                 .header("content-length", 16 * 1024)
                 .body(Body::empty())
                 .unwrap(),
@@ -948,9 +948,7 @@ async fn liveness_ready_status_and_bounds() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(
-                    "/operator/api/v1/accounts/acct_test/workers/wrk_test/deployment-uploads-extra",
-                )
+                .uri("/operator/api/v1/accounts/acct_test/workers/wrk_test/version-uploads-extra")
                 .header("content-length", 16 * 1024)
                 .body(Body::empty())
                 .unwrap(),
@@ -2439,7 +2437,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     metrics.inc_sqlite_busy();
     metrics.inc_sqlite_check_failure();
-    metrics.inc_websocket_close(WebSocketCloseReason::DeploymentRestart);
+    metrics.inc_websocket_close(WebSocketCloseReason::VersionRestart);
     for reason in [
         WebSocketCloseReason::Normal,
         WebSocketCloseReason::Shutdown,
@@ -2499,7 +2497,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     assert!(rendered.contains("platform_quota_reject_total{product=\"durable_objects\"} 1"));
     assert!(rendered.contains("sqlite_busy_total 3"));
     assert!(rendered.contains("sqlite_check_failure_total 1"));
-    assert!(rendered.contains("oc_do_websocket_close_total{reason=\"deployment_restart\"} 1"));
+    assert!(rendered.contains("oc_do_websocket_close_total{reason=\"version_restart\"} 1"));
     assert!(rendered.contains("platform_restore_last_smoke_verified 1"));
     assert!(rendered.contains("conformance_result=\"p1.0-capabilities-v1\""));
     assert!(rendered.contains(
@@ -2537,14 +2535,13 @@ async fn initialized_worker_http_fixture() -> (
         storage,
         open_compute_artifacts::ArtifactStore::new(client),
         transport,
-        DeploymentPins::new(),
+        VersionPins::new(),
         BundleLimits::default(),
         Duration::from_millis(10),
     );
     assert!(format!("{api:?}").contains("WorkerApiState"));
     assert_eq!(
-        api.pins()
-            .count(open_compute_core::DeploymentId::generate()),
+        api.pins().count(open_compute_core::VersionId::generate()),
         0
     );
     (
@@ -2611,7 +2608,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         scheduler_store.clone(),
         Duration::from_millis(100),
     ));
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         open_compute_artifacts::ArtifactStore::new(client),
         validator,
@@ -2633,11 +2630,11 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             BundleLimits::default(),
         )
         .unwrap();
-        CreateDeploymentRequest {
+        CreateVersionRequest {
             account_id: account,
             worker_id: worker.id,
             idempotency_key: key.to_owned(),
-            content: open_compute_workers::DeploymentContent::Worker {
+            content: open_compute_workers::VersionContent::Worker {
                 bundle: bundle.into_bytes().into(),
                 assets: None,
             },
@@ -2663,12 +2660,12 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
     };
 
     let first = controller
-        .create_deployment(request("p23-first", "first", true, "*/5 * * * *", 10))
+        .create_version(request("p23-first", "first", true, "*/5 * * * *", 10))
         .await
         .unwrap();
     let first_id = match first {
-        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
-        CreateDeploymentOutcome::Replay(_) => panic!("first P2.3 deployment replayed"),
+        CreateVersionOutcome::Applied(result) => result.version.id,
+        CreateVersionOutcome::Replay(_) => panic!("first P2.3 version replayed"),
     };
     let consumer_repo = open_compute_storage::QueueConsumerRepository::new(storage.db());
     let first_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
@@ -2676,7 +2673,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         first_consumer.state,
         open_compute_storage::QueueConsumerState::Active
     );
-    assert_eq!(first_consumer.deployment_id, first_id);
+    assert_eq!(first_consumer.version_id, first_id);
     assert!(
         scheduler_store
             .inspect_queue_consumer_runtime(queue_id, first_consumer.id, 1)
@@ -2696,7 +2693,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         .promote(ProductPromotionRequest {
             account_id: account,
             worker_id: worker.id,
-            deployment_id: first_id,
+            version_id: first_id,
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_001,
         })
@@ -2900,11 +2897,11 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         .clone()
         .dispatch_queue_batch(missing_queue_authority)
         .await;
-    let mut missing_queue_deployment = retry_batch.clone();
-    missing_queue_deployment.deployment_id = open_compute_core::DeploymentId::generate();
+    let mut missing_queue_version = retry_batch.clone();
+    missing_queue_version.version_id = open_compute_core::VersionId::generate();
     scheduler
         .clone()
-        .dispatch_queue_batch(missing_queue_deployment)
+        .dispatch_queue_batch(missing_queue_version)
         .await;
     let mut invalid_queue_generation = retry_batch.clone();
     invalid_queue_generation.execution_generation = u64::MAX;
@@ -3086,31 +3083,31 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
     assert!(scheduler.repair_products(1_000).unwrap() >= 2);
 
     let second = controller
-        .create_deployment(request("p23-second", "second", true, "0 * * * *", 20))
+        .create_version(request("p23-second", "second", true, "0 * * * *", 20))
         .await
         .unwrap();
     let second_id = match second {
-        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
-        CreateDeploymentOutcome::Replay(_) => panic!("second P2.3 deployment replayed"),
+        CreateVersionOutcome::Applied(result) => result.version.id,
+        CreateVersionOutcome::Replay(_) => panic!("second P2.3 version replayed"),
     };
     let second_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
     assert_eq!(second_consumer.consumer_generation, 2);
-    assert_eq!(second_consumer.deployment_id, second_id);
+    assert_eq!(second_consumer.version_id, second_id);
     assert_eq!(
         second_consumer.state,
         open_compute_storage::QueueConsumerState::Paused
     );
 
     let third = controller
-        .create_deployment(request("p23-third", "third", false, "30 * * * *", 30))
+        .create_version(request("p23-third", "third", false, "30 * * * *", 30))
         .await
         .unwrap();
     let third_id = match third {
-        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
-        CreateDeploymentOutcome::Replay(_) => panic!("third P2.3 deployment replayed"),
+        CreateVersionOutcome::Applied(result) => result.version.id,
+        CreateVersionOutcome::Replay(_) => panic!("third P2.3 version replayed"),
     };
     let third_declaration = consumer_repo
-        .deployment_declarations(third_id)
+        .version_declarations(third_id)
         .unwrap()
         .into_iter()
         .next()
@@ -3143,8 +3140,8 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         reconciled.state,
         open_compute_storage::QueueConsumerState::Updating
     );
-    assert_eq!(reconciled.deployment_id, third_id);
-    assert_eq!(reconciled.pending_deployment_id, None);
+    assert_eq!(reconciled.version_id, third_id);
+    assert_eq!(reconciled.pending_version_id, None);
     let pre_promote_crons = open_compute_storage::CronRepository::new(storage.db())
         .live_for_worker(worker.id)
         .unwrap();
@@ -3183,7 +3180,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         .promote(ProductPromotionRequest {
             account_id: account,
             worker_id: worker.id,
-            deployment_id: third_id,
+            version_id: third_id,
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_003,
         })
@@ -3191,7 +3188,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         .unwrap();
     let recovered = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
     assert_eq!(recovered.consumer_generation, 3);
-    assert_eq!(recovered.deployment_id, third_id);
+    assert_eq!(recovered.version_id, third_id);
     assert_eq!(
         recovered.state,
         open_compute_storage::QueueConsumerState::Paused
@@ -3200,7 +3197,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         workers
             .get_worker(account, worker.id)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         Some(third_id)
     );
     let live_crons = open_compute_storage::CronRepository::new(storage.db())
@@ -3224,29 +3221,29 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
 
     let mut retarget = request("p23-retarget", "retarget", true, "ignored", 40);
     retarget.crons = vec!["30 * * * *".to_owned()];
-    let retargeted = controller.create_deployment(retarget).await.unwrap();
+    let retargeted = controller.create_version(retarget).await.unwrap();
     let retargeted_id = match retargeted {
-        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
-        CreateDeploymentOutcome::Replay(_) => panic!("retargeted P2.3 deployment replayed"),
+        CreateVersionOutcome::Applied(result) => result.version.id,
+        CreateVersionOutcome::Replay(_) => panic!("retargeted P2.3 version replayed"),
     };
     let retargeted_consumer = consumer_repo.live_for_queue(queue_id).unwrap().unwrap();
     assert_eq!(retargeted_consumer.consumer_generation, 4);
-    assert_eq!(retargeted_consumer.deployment_id, retargeted_id);
+    assert_eq!(retargeted_consumer.version_id, retargeted_id);
     let retargeted_crons = open_compute_storage::CronRepository::new(storage.db())
         .live_for_worker(worker.id)
         .unwrap();
     assert_eq!(retargeted_crons.len(), 1);
     assert_eq!(retargeted_crons[0].expression, "30 * * * *");
-    assert_eq!(retargeted_crons[0].deployment_id, retargeted_id);
+    assert_eq!(retargeted_crons[0].version_id, retargeted_id);
     let retargeted_declaration = consumer_repo
-        .deployment_declarations(retargeted_id)
+        .version_declarations(retargeted_id)
         .unwrap()
         .into_iter()
         .next()
         .unwrap();
     let retargeted_cron_declarations = vec![open_compute_storage::CronDeclaration {
         id: open_compute_core::CronActivationId::generate(),
-        deployment_id: retargeted_id,
+        version_id: retargeted_id,
         expression: retargeted_crons[0].expression.clone(),
         expression_sha256: retargeted_crons[0].expression_sha256,
         parser_version: retargeted_crons[0].parser_version,
@@ -3340,16 +3337,16 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
     let mut empty = request("p23-empty", "empty", true, "ignored", 10);
     empty.queue_consumers.clear();
     empty.crons = Vec::new();
-    let emptied = controller.create_deployment(empty).await.unwrap();
+    let emptied = controller.create_version(empty).await.unwrap();
     let emptied_id = match emptied {
-        CreateDeploymentOutcome::Applied(result) => result.deployment.id,
-        CreateDeploymentOutcome::Replay(_) => panic!("empty P2.3 deployment replayed"),
+        CreateVersionOutcome::Applied(result) => result.version.id,
+        CreateVersionOutcome::Replay(_) => panic!("empty P2.3 version replayed"),
     };
     assert_eq!(
         workers
             .get_worker(account, worker.id)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         Some(emptied_id)
     );
     assert!(consumer_repo.live_for_queue(queue_id).unwrap().is_none());
@@ -3377,7 +3374,7 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
     let (dir, mock, state, account) = initialized_worker_http_fixture().await;
     let app = http::admin_router(state.clone());
     let worker = open_compute_core::WorkerId::generate();
-    let deployment = open_compute_core::DeploymentId::generate();
+    let version = open_compute_core::VersionId::generate();
     let malformed = [
         ("POST", "/operator/api/v1/accounts/bad/workers".to_owned()),
         ("GET", "/operator/api/v1/accounts/bad/workers".to_owned()),
@@ -3391,19 +3388,19 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
         ),
         (
             "POST",
-            format!("/operator/api/v1/accounts/{account}/workers/bad/deployments"),
+            format!("/operator/api/v1/accounts/{account}/workers/bad/versions"),
         ),
         (
             "GET",
-            format!("/operator/api/v1/accounts/{account}/workers/bad/deployments"),
+            format!("/operator/api/v1/accounts/{account}/workers/bad/versions"),
         ),
         (
             "GET",
-            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments/bad"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/versions/bad"),
         ),
         (
             "DELETE",
-            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments/bad"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/versions/bad"),
         ),
         (
             "POST",
@@ -3446,23 +3443,19 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
         ),
         (
             "POST",
-            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/versions"),
         ),
         (
             "GET",
-            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/versions"),
         ),
         (
             "GET",
-            format!(
-                "/operator/api/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"
-            ),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/versions/{version}"),
         ),
         (
             "DELETE",
-            format!(
-                "/operator/api/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"
-            ),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/versions/{version}"),
         ),
         (
             "POST",
@@ -3526,13 +3519,11 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
         ),
         (
             "POST",
-            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/versions"),
         ),
         (
             "DELETE",
-            format!(
-                "/operator/api/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"
-            ),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/versions/{version}"),
         ),
         (
             "POST",
@@ -3595,7 +3586,7 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/operator/api/v1/accounts/{account}/workers/{worker}/deployments"
+                    "/operator/api/v1/accounts/{account}/workers/{worker}/versions"
                 ))
                 .header("authorization", "Bearer admin-token")
                 .header("idempotency-key", "test-key")
@@ -3611,12 +3602,12 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/operator/api/v1/accounts/{account}/workers/{worker}/deployments"
+                    "/operator/api/v1/accounts/{account}/workers/{worker}/versions"
                 ))
                 .header("authorization", "Bearer admin-token")
                 .header("idempotency-key", "too-large")
                 .header(
-                    "x-open-compute-deployment-metadata",
+                    "x-open-compute-version-metadata",
                     r#"{"mainModule":"index.js"}"#,
                 )
                 .header("content-length", (25 * 1024 * 1024 + 1).to_string())
@@ -3698,7 +3689,7 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
     for path in [
         workers_path.clone(),
         format!("{workers_path}/{worker}"),
-        format!("{workers_path}/{worker}/deployments"),
+        format!("{workers_path}/{worker}/versions"),
         format!("{workers_path}/{worker}/routes"),
     ] {
         let response = app
@@ -3841,17 +3832,17 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
     )
     .unwrap()
     .into_bytes();
-    let deployments_path = format!("{workers_path}/{worker}/deployments");
+    let versions_path = format!("{workers_path}/{worker}/versions");
     let invalid_bundle = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&deployments_path)
+                .uri(&versions_path)
                 .header("authorization", auth)
-                .header("idempotency-key", "deployment-invalid-bundle")
+                .header("idempotency-key", "version-invalid-bundle")
                 .header(
-                    "x-open-compute-deployment-metadata",
+                    "x-open-compute-version-metadata",
                     r#"{"mainModule":"index.js"}"#,
                 )
                 .body(Body::from("not-a-canonical-bundle"))
@@ -3865,11 +3856,11 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&deployments_path)
+                .uri(&versions_path)
                 .header("authorization", auth)
-                .header("idempotency-key", "deployment-mismatch")
+                .header("idempotency-key", "version-mismatch")
                 .header(
-                    "x-open-compute-deployment-metadata",
+                    "x-open-compute-version-metadata",
                     r#"{"mainModule":"other.js"}"#,
                 )
                 .body(Body::from(bundle.clone()))
@@ -3888,29 +3879,29 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
         String::from_utf8_lossy(&mismatch_body)
     );
 
-    let deployment_request = || {
+    let version_request = || {
         Request::builder()
             .method("POST")
-            .uri(&deployments_path)
+            .uri(&versions_path)
             .header("authorization", auth)
-            .header("idempotency-key", "deployment-runtime-failure")
+            .header("idempotency-key", "version-runtime-failure")
             .header(
-                "x-open-compute-deployment-metadata",
+                "x-open-compute-version-metadata",
                 r#"{"mainModule":"index.js"}"#,
             )
             .body(Body::from(bundle.clone()))
             .unwrap()
     };
-    let rejected = app.clone().oneshot(deployment_request()).await.unwrap();
+    let rejected = app.clone().oneshot(version_request()).await.unwrap();
     assert_eq!(rejected.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let replayed_rejection = app.clone().oneshot(deployment_request()).await.unwrap();
+    let replayed_rejection = app.clone().oneshot(version_request()).await.unwrap();
     assert_eq!(replayed_rejection.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     let promote_path = format!("{workers_path}/{worker}/promotions");
-    let missing_deployment = open_compute_core::DeploymentId::generate();
+    let missing_version = open_compute_core::VersionId::generate();
     let promotion_body = serde_json::json!({
-        "targetDeploymentId": missing_deployment,
-        "expectedActiveDeploymentId": null,
+        "targetVersionId": missing_version,
+        "expectedActiveVersionId": null,
     })
     .to_string();
     for _ in 0..2 {
@@ -4397,8 +4388,8 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
     loaded.config.runtime.shutdown_grace_ms = 1_000;
     loaded.config.runtime.kill_timeout_ms = 2_000;
     loaded.config.workers.artifact_gc_interval_ms = 20;
-    loaded.config.workers.deployment_min_retention_ms = 0;
-    loaded.config.workers.retain_rejected_deployments = 1;
+    loaded.config.workers.version_min_retention_ms = 0;
+    loaded.config.workers.retain_rejected_versions = 1;
 
     {
         let storage = open_compute_storage::PlatformStorage::bootstrap(
@@ -4418,30 +4409,32 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
             )
             .unwrap();
         for (index, timestamp) in [(1_u8, 2_i64), (2, 3)] {
-            let deployment = open_compute_core::DeploymentId::generate();
-            repo.insert_staging_deployment(
-                &open_compute_storage::NewDeployment {
-                    id: deployment,
+            let version = open_compute_core::VersionId::generate();
+            repo.insert_staging_version(
+                &open_compute_storage::NewVersion {
+                    id: version,
                     account_id: account,
                     worker_id: worker.id,
-                    content_kind: open_compute_storage::DeploymentContentKind::Worker,
+                    content_kind: open_compute_storage::VersionContentKind::Worker,
                     artifact_sha256: Some([index; 32]),
                     artifact_size: Some(u64::from(index)),
                     artifact_schema_version: Some(1),
                     main_module: Some("index.js".to_owned()),
                     worker_code_sha256: [index.saturating_add(10); 32],
+                    compatibility_date: "2026-08-30".into(),
+                    compatibility_flags: Vec::new(),
                     vars: std::collections::BTreeMap::new(),
                     secrets: std::collections::BTreeMap::new(),
                     request_id: open_compute_core::RequestId::generate(),
                     now_ms: timestamp,
                 },
-                &open_compute_storage::NewDeploymentProducts::default(),
+                &open_compute_storage::NewVersionProducts::default(),
                 1_000_000,
             )
             .unwrap();
             repo.mark_rejected(
-                deployment,
-                open_compute_storage::DeploymentState::Staging,
+                version,
+                open_compute_storage::VersionState::Staging,
                 ErrorCode::BundleInvalid,
                 timestamp,
             )
@@ -4569,7 +4562,7 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
             1_000_000,
         )
         .unwrap();
-    let reservation = store.reserve_deployment_artifact().await;
+    let reservation = store.reserve_version_artifact().await;
     let mut workers = loaded.config.workers;
     workers.artifact_gc_grace_ms = 0;
     let gc_storage = storage.clone();
@@ -4589,26 +4582,28 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
         tokio::time::timeout(Duration::from_millis(20), &mut gc)
             .await
             .is_err(),
-        "GC must wait for the deployment commit reservation"
+        "GC must wait for the version commit reservation"
     );
-    let deployment = open_compute_core::DeploymentId::generate();
-    repo.insert_staging_deployment(
-        &open_compute_storage::NewDeployment {
-            id: deployment,
+    let version = open_compute_core::VersionId::generate();
+    repo.insert_staging_version(
+        &open_compute_storage::NewVersion {
+            id: version,
             account_id: account,
             worker_id: worker.id,
-            content_kind: open_compute_storage::DeploymentContentKind::Worker,
+            content_kind: open_compute_storage::VersionContentKind::Worker,
             artifact_sha256: Some(digest),
             artifact_size: Some(payload.len() as u64),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: [7; 32],
+            compatibility_date: "2026-08-30".into(),
+            compatibility_flags: Vec::new(),
             vars: std::collections::BTreeMap::new(),
             secrets: std::collections::BTreeMap::new(),
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 2,
         },
-        &open_compute_storage::NewDeploymentProducts::default(),
+        &open_compute_storage::NewVersionProducts::default(),
         1_000_000,
     )
     .unwrap();

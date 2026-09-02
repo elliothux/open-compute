@@ -29,7 +29,7 @@ function authority(value: unknown): value is TenantDoAuthority {
   return value !== null && typeof value === "object"
     && typeof Reflect.get(value, "accountId") === "string"
     && typeof Reflect.get(value, "workerId") === "string"
-    && typeof Reflect.get(value, "deploymentId") === "string"
+    && typeof Reflect.get(value, "versionId") === "string"
     && typeof Reflect.get(value, "workerCodeSha256") === "string"
     && typeof Reflect.get(value, "className") === "string";
 }

@@ -9,44 +9,44 @@ fn aead_roundtrip_nonce_context_tamper_key() {
     let crypto = SecretCrypto::new(&key, &fp).unwrap();
     let account = AccountId::generate();
     let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let pt = SecretBytes::new(b"super-secret-value".to_vec());
     let e1 = crypto
-        .encrypt(&pt, account, worker, deployment, "BINDING", "revision-1")
+        .encrypt(&pt, account, worker, version, "BINDING", "revision-1")
         .unwrap();
     let e2 = crypto
-        .encrypt(&pt, account, worker, deployment, "BINDING", "revision-1")
+        .encrypt(&pt, account, worker, version, "BINDING", "revision-1")
         .unwrap();
     assert_ne!(e1.nonce, e2.nonce);
     let back = crypto
-        .decrypt(&e1, account, worker, deployment, "BINDING", "revision-1")
+        .decrypt(&e1, account, worker, version, "BINDING", "revision-1")
         .unwrap();
     assert_eq!(back.expose(), b"super-secret-value");
-    for (bound_account, bound_worker, bound_deployment, name, revision) in [
+    for (bound_account, bound_worker, bound_version, name, revision) in [
         (
             AccountId::generate(),
             worker,
-            deployment,
+            version,
             "BINDING",
             "revision-1",
         ),
         (
             account,
             WorkerId::generate(),
-            deployment,
+            version,
             "BINDING",
             "revision-1",
         ),
         (
             account,
             worker,
-            DeploymentId::generate(),
+            VersionId::generate(),
             "BINDING",
             "revision-1",
         ),
-        (account, worker, deployment, "OTHER", "revision-1"),
-        (account, worker, deployment, "BINDING", "revision-2"),
-        (account, worker, deployment, "BINDINGrevision-", "1"),
+        (account, worker, version, "OTHER", "revision-1"),
+        (account, worker, version, "BINDING", "revision-2"),
+        (account, worker, version, "BINDINGrevision-", "1"),
     ] {
         assert!(
             crypto
@@ -54,7 +54,7 @@ fn aead_roundtrip_nonce_context_tamper_key() {
                     &e1,
                     bound_account,
                     bound_worker,
-                    bound_deployment,
+                    bound_version,
                     name,
                     revision
                 )
@@ -65,14 +65,7 @@ fn aead_roundtrip_nonce_context_tamper_key() {
     tampered.ciphertext[0] ^= 0xff;
     assert!(
         crypto
-            .decrypt(
-                &tampered,
-                account,
-                worker,
-                deployment,
-                "BINDING",
-                "revision-1"
-            )
+            .decrypt(&tampered, account, worker, version, "BINDING", "revision-1")
             .is_err()
     );
     let other_key = SecretBytes::new(vec![9u8; 32]);
@@ -80,7 +73,7 @@ fn aead_roundtrip_nonce_context_tamper_key() {
     let other = SecretCrypto::new(&other_key, &other_fp).unwrap();
     assert_eq!(
         other
-            .decrypt(&e1, account, worker, deployment, "BINDING", "revision-1")
+            .decrypt(&e1, account, worker, version, "BINDING", "revision-1")
             .unwrap_err()
             .code(),
         ErrorCode::MasterKeyMismatch
@@ -88,7 +81,7 @@ fn aead_roundtrip_nonce_context_tamper_key() {
     let same_id_wrong_key = SecretCrypto::new(&other_key, &fp).unwrap();
     assert!(
         same_id_wrong_key
-            .decrypt(&e1, account, worker, deployment, "BINDING", "revision-1")
+            .decrypt(&e1, account, worker, version, "BINDING", "revision-1")
             .is_err()
     );
     let mut wrong_nonce = e1;
@@ -99,7 +92,7 @@ fn aead_roundtrip_nonce_context_tamper_key() {
                 &wrong_nonce,
                 account,
                 worker,
-                deployment,
+                version,
                 "BINDING",
                 "revision-1"
             )
@@ -114,15 +107,15 @@ fn aead_rejects_empty_overlong_name_and_invalid_key_id() {
     let crypto = SecretCrypto::new(&key, &fp).unwrap();
     let account = AccountId::generate();
     let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let pt = SecretBytes::new(b"x".to_vec());
     let err = crypto
-        .encrypt(&pt, account, worker, deployment, "", "revision-1")
+        .encrypt(&pt, account, worker, version, "", "revision-1")
         .unwrap_err();
     assert_eq!(err.code(), ErrorCode::ConfigInvalid);
     let long = "a".repeat(4097);
     let err = crypto
-        .encrypt(&pt, account, worker, deployment, &long, "revision-1")
+        .encrypt(&pt, account, worker, version, &long, "revision-1")
         .unwrap_err();
     assert_eq!(err.code(), ErrorCode::ConfigInvalid);
     assert!(SecretCrypto::new(&key, "deadbeef").is_err());
@@ -150,48 +143,27 @@ fn aead_revision_and_envelope_validation_matrix() {
 
     let account = AccountId::generate();
     let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let plaintext = SecretBytes::new(b"revision-secret".to_vec());
     let envelope = crypto
-        .encrypt(
-            &plaintext,
-            account,
-            worker,
-            deployment,
-            "TOKEN",
-            "revision-1",
-        )
+        .encrypt(&plaintext, account, worker, version, "TOKEN", "revision-1")
         .unwrap();
     assert_eq!(
         crypto
-            .decrypt(
-                &envelope,
-                account,
-                worker,
-                deployment,
-                "TOKEN",
-                "revision-1",
-            )
+            .decrypt(&envelope, account, worker, version, "TOKEN", "revision-1",)
             .unwrap()
             .expose(),
         b"revision-secret"
     );
     assert!(
         crypto
-            .decrypt(
-                &envelope,
-                account,
-                worker,
-                deployment,
-                "TOKEN",
-                "revision-2",
-            )
+            .decrypt(&envelope, account, worker, version, "TOKEN", "revision-2",)
             .is_err()
     );
     for revision in ["", &"r".repeat(4097)] {
         assert_eq!(
             crypto
-                .encrypt(&plaintext, account, worker, deployment, "TOKEN", revision,)
+                .encrypt(&plaintext, account, worker, version, "TOKEN", revision,)
                 .unwrap_err()
                 .code(),
             ErrorCode::SecretInvalid
@@ -207,7 +179,7 @@ fn aead_revision_and_envelope_validation_matrix() {
         mutate(&mut invalid);
         assert!(
             crypto
-                .decrypt(&invalid, account, worker, deployment, "TOKEN", "revision-1",)
+                .decrypt(&invalid, account, worker, version, "TOKEN", "revision-1",)
                 .is_err()
         );
     }
@@ -216,14 +188,7 @@ fn aead_revision_and_envelope_validation_matrix() {
     let other = SecretCrypto::new(&other_key, &other_fingerprint).unwrap();
     assert_eq!(
         other
-            .decrypt(
-                &envelope,
-                account,
-                worker,
-                deployment,
-                "TOKEN",
-                "revision-1",
-            )
+            .decrypt(&envelope, account, worker, version, "TOKEN", "revision-1",)
             .unwrap_err()
             .code(),
         ErrorCode::MasterKeyMismatch

@@ -2,7 +2,7 @@
 
 use super::*;
 use open_compute_core::workflow::{WorkflowRetention, WorkflowStepDeclaration, WorkflowStepKind};
-use open_compute_core::{DeploymentId, WorkflowOperationId};
+use open_compute_core::{VersionId, WorkflowOperationId};
 use open_compute_storage::scheduler::{WorkflowInstanceAction, WorkflowState};
 use open_compute_storage::{
     WorkflowInstanceIdentity, WorkflowOperationKind, WorkflowOperationResult,
@@ -18,7 +18,7 @@ pub(super) fn prepare(
     storage: &PlatformStorage,
     scheduler: &SchedulerStore,
     config: &WorkflowsConfig,
-    deployment: DeploymentId,
+    version: VersionId,
 ) -> Vec<Case> {
     let base = now() - 7_200_000;
     let account = storage.identity().default_account_id;
@@ -29,9 +29,9 @@ pub(super) fn prepare(
     // The snapshot fixture exercises real storage APIs; class execution is covered by the
     // stock-workerd driver Gate, not by manufacturing callback results in this fixture.
     let version = repo
-        .stage_version(account, definition.id, deployment, "Flow", base)
+        .stage_version(account, definition.id, version, "Flow", base)
         .unwrap();
-    repo.finish_version(account, version.target.version_id, true, base)
+    repo.finish_version(account, version.target.workflow_version_id, true, base)
         .unwrap();
     let controller = WorkflowController::new(storage, scheduler, config);
     let mut cases = Vec::new();

@@ -12,7 +12,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-/// Serve every product plane, including deployment-scoped Markdown Conversion.
+/// Serve every product plane, including version-scoped Markdown Conversion.
 #[allow(clippy::too_many_arguments)]
 pub async fn serve_binding_backend_with_document_parser(
     listener: TcpListener,

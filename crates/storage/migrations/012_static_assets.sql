@@ -1,5 +1,5 @@
-CREATE TABLE deployment_assets (
-  deployment_id TEXT PRIMARY KEY REFERENCES worker_deployments(id),
+CREATE TABLE version_assets (
+  version_id TEXT PRIMARY KEY REFERENCES worker_versions(id),
   manifest_sha256 BLOB NOT NULL CHECK(length(manifest_sha256) = 32),
   manifest_size INTEGER NOT NULL CHECK(manifest_size > 0),
   manifest_schema_version INTEGER NOT NULL CHECK(manifest_schema_version = 1),
@@ -12,19 +12,19 @@ CREATE TABLE deployment_assets (
   CHECK(binding_name IS NULL OR length(binding_name) BETWEEN 1 AND 64)
 ) WITHOUT ROWID, STRICT;
 
-CREATE TABLE deployment_object_refs (
-  deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
+CREATE TABLE version_object_refs (
+  version_id TEXT NOT NULL REFERENCES worker_versions(id),
   object_kind TEXT NOT NULL CHECK(object_kind IN ('bundle', 'asset_manifest', 'asset_blob')),
   sha256 BLOB NOT NULL CHECK(length(sha256) = 32),
   size INTEGER NOT NULL CHECK(size >= 0),
   created_at_ms INTEGER NOT NULL,
-  PRIMARY KEY(deployment_id, object_kind, sha256)
+  PRIMARY KEY(version_id, object_kind, sha256)
 ) WITHOUT ROWID, STRICT;
 
-CREATE INDEX deployment_object_refs_digest
-ON deployment_object_refs(sha256, deployment_id);
+CREATE INDEX version_object_refs_digest
+ON version_object_refs(sha256, version_id);
 
-CREATE TABLE deployment_uploads (
+CREATE TABLE version_uploads (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),
   worker_id TEXT NOT NULL REFERENCES workers(id),
@@ -38,7 +38,7 @@ CREATE TABLE deployment_uploads (
   manifest_json BLOB NOT NULL,
   routing_config_json BLOB NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('open', 'finalizing', 'committed', 'aborted', 'expired')),
-  deployment_id TEXT,
+  version_id TEXT,
   finalize_fingerprint BLOB CHECK(finalize_fingerprint IS NULL OR length(finalize_fingerprint) = 32),
   finalize_owner_startup_id TEXT,
   finalize_response_json BLOB,
@@ -51,13 +51,13 @@ CREATE TABLE deployment_uploads (
     (content_kind = 'assets_only' AND bundle_sha256 IS NULL AND bundle_size IS NULL)
   ),
   CHECK(
-    (status IN ('open', 'aborted', 'expired') AND deployment_id IS NULL
+    (status IN ('open', 'aborted', 'expired') AND version_id IS NULL
       AND finalize_fingerprint IS NULL AND finalize_owner_startup_id IS NULL
       AND finalize_response_json IS NULL AND finalize_error_code IS NULL) OR
-    (status = 'finalizing' AND deployment_id IS NOT NULL
+    (status = 'finalizing' AND version_id IS NOT NULL
       AND finalize_fingerprint IS NOT NULL AND finalize_owner_startup_id IS NOT NULL
       AND finalize_response_json IS NULL AND finalize_error_code IS NULL) OR
-    (status = 'committed' AND deployment_id IS NOT NULL
+    (status = 'committed' AND version_id IS NOT NULL
       AND finalize_fingerprint IS NOT NULL AND finalize_owner_startup_id IS NOT NULL
       AND ((finalize_response_json IS NOT NULL AND finalize_error_code IS NULL) OR
            (finalize_response_json IS NULL AND finalize_error_code IS NOT NULL)))
@@ -65,11 +65,11 @@ CREATE TABLE deployment_uploads (
   UNIQUE(account_id, worker_id, idempotency_key)
 ) STRICT;
 
-CREATE INDEX deployment_uploads_worker_status
-ON deployment_uploads(account_id, worker_id, status, expires_at_ms);
+CREATE INDEX version_uploads_worker_status
+ON version_uploads(account_id, worker_id, status, expires_at_ms);
 
-CREATE TABLE deployment_upload_objects (
-  session_id TEXT NOT NULL REFERENCES deployment_uploads(id),
+CREATE TABLE version_upload_objects (
+  session_id TEXT NOT NULL REFERENCES version_uploads(id),
   sha256 BLOB NOT NULL CHECK(length(sha256) = 32),
   object_kind TEXT NOT NULL CHECK(object_kind IN ('bundle', 'asset_manifest', 'asset_blob')),
   size INTEGER NOT NULL CHECK(size >= 0),
@@ -78,42 +78,42 @@ CREATE TABLE deployment_upload_objects (
   PRIMARY KEY(session_id, sha256)
 ) WITHOUT ROWID, STRICT;
 
-CREATE TRIGGER deployment_assets_insert_guard
-BEFORE INSERT ON deployment_assets
-WHEN (SELECT state FROM worker_deployments WHERE id = NEW.deployment_id) != 'staging'
+CREATE TRIGGER version_assets_insert_guard
+BEFORE INSERT ON version_assets
+WHEN (SELECT state FROM worker_versions WHERE id = NEW.version_id) != 'staging'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment assets');
+  SELECT RAISE(ABORT, 'immutable version assets');
 END;
 
-CREATE TRIGGER deployment_assets_update_guard
-BEFORE UPDATE ON deployment_assets
+CREATE TRIGGER version_assets_update_guard
+BEFORE UPDATE ON version_assets
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment assets');
+  SELECT RAISE(ABORT, 'immutable version assets');
 END;
 
-CREATE TRIGGER deployment_assets_delete_guard
-BEFORE DELETE ON deployment_assets
-WHEN (SELECT state FROM worker_deployments WHERE id = OLD.deployment_id) != 'deleting'
+CREATE TRIGGER version_assets_delete_guard
+BEFORE DELETE ON version_assets
+WHEN (SELECT state FROM worker_versions WHERE id = OLD.version_id) != 'deleting'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment assets');
+  SELECT RAISE(ABORT, 'immutable version assets');
 END;
 
-CREATE TRIGGER deployment_object_refs_insert_guard
-BEFORE INSERT ON deployment_object_refs
-WHEN (SELECT state FROM worker_deployments WHERE id = NEW.deployment_id) != 'staging'
+CREATE TRIGGER version_object_refs_insert_guard
+BEFORE INSERT ON version_object_refs
+WHEN (SELECT state FROM worker_versions WHERE id = NEW.version_id) != 'staging'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment object refs');
+  SELECT RAISE(ABORT, 'immutable version object refs');
 END;
 
-CREATE TRIGGER deployment_object_refs_update_guard
-BEFORE UPDATE ON deployment_object_refs
+CREATE TRIGGER version_object_refs_update_guard
+BEFORE UPDATE ON version_object_refs
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment object refs');
+  SELECT RAISE(ABORT, 'immutable version object refs');
 END;
 
-CREATE TRIGGER deployment_object_refs_delete_guard
-BEFORE DELETE ON deployment_object_refs
-WHEN (SELECT state FROM worker_deployments WHERE id = OLD.deployment_id) != 'deleting'
+CREATE TRIGGER version_object_refs_delete_guard
+BEFORE DELETE ON version_object_refs
+WHEN (SELECT state FROM worker_versions WHERE id = OLD.version_id) != 'deleting'
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment object refs');
+  SELECT RAISE(ABORT, 'immutable version object refs');
 END;

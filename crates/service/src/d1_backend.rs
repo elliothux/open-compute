@@ -10,8 +10,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, D1Config, DeploymentId, ErrorCode, OperationClass,
-    PlatformError, ResourceAvailability, ResourceId,
+    AccountId, BindingId, BindingKind, D1Config, ErrorCode, OperationClass, PlatformError,
+    ResourceAvailability, ResourceId, VersionId,
 };
 use open_compute_storage::{
     BindingRepository, D1DatabaseRepository, D1Engine, D1Migration, D1MigrationRecord, D1Paths,
@@ -317,7 +317,7 @@ impl D1BindingService {
         }
         let (binding_id, operation) = parse_path(request.uri().path())?;
         let headers = request.headers();
-        let deployment = parse_header::<DeploymentId>(headers, "x-open-compute-deployment-id")?;
+        let version = parse_header::<VersionId>(headers, "x-open-compute-version-id")?;
         let descriptor = parse_digest(headers)?;
         parse_request_id(headers)?;
         if !content_type_is(headers, D1_FRAME_CONTENT_TYPE) {
@@ -325,7 +325,7 @@ impl D1BindingService {
         }
         let binding = BindingRepository::new(self.storage.db()).authorize(
             binding_id,
-            deployment,
+            version,
             &descriptor,
         )?;
         if binding.binding.kind != BindingKind::D1Database

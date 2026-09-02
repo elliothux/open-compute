@@ -45,7 +45,7 @@ impl DiskAdmission {
             )
         })?;
         let owned_staging_bytes = [
-            data_dir.deployment_staging_dir(),
+            data_dir.version_staging_dir(),
             data_dir.backup_staging_dir(),
             data_dir.root().join("r2-staging"),
         ]

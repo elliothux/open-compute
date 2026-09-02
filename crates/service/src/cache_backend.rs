@@ -10,12 +10,12 @@ use futures::stream;
 use http_body_util::BodyExt as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, ResponseCacheConfig, WorkerId,
+    AccountId, ErrorCode, PlatformError, ResponseCacheConfig, VersionId, WorkerId,
 };
 use open_compute_storage::{
     CacheBodyRef, CacheIdentity, CacheLookupStatus, CacheManager, CacheMethod, CachePurge,
-    CachePut, CacheStoredResponse, CacheSurface, DeploymentState, PlatformStorage,
-    WorkerRepository, deployment_runtime_features,
+    CachePut, CacheStoredResponse, CacheSurface, PlatformStorage, VersionState, WorkerRepository,
+    version_runtime_features,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 const ACCOUNT_HEADER: &str = "x-open-compute-account-id";
 const WORKER_HEADER: &str = "x-open-compute-worker-id";
-const DEPLOYMENT_HEADER: &str = "x-open-compute-deployment-id";
+const VERSION_HEADER: &str = "x-open-compute-version-id";
 const ENTRYPOINT_HEADER: &str = "x-open-compute-entrypoint";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const ENABLED_HEADER: &str = "x-open-compute-cache-automatic-enabled";
@@ -132,7 +132,7 @@ impl CacheBindingService {
     fn authorize(&self, headers: &HeaderMap) -> Result<CacheAuthority, PlatformError> {
         let account = parse_header::<AccountId>(headers, ACCOUNT_HEADER)?;
         let worker = parse_header::<WorkerId>(headers, WORKER_HEADER)?;
-        let deployment = parse_header::<DeploymentId>(headers, DEPLOYMENT_HEADER)?;
+        let version = parse_header::<VersionId>(headers, VERSION_HEADER)?;
         let entrypoint = text_header(headers, ENTRYPOINT_HEADER)?.to_owned();
         if !valid_entrypoint(&entrypoint) {
             return Err(protocol());
@@ -145,14 +145,14 @@ impl CacheBindingService {
         let automatic_enabled = bool_header(headers, ENABLED_HEADER)?;
         let cross_version_cache = bool_header(headers, CROSS_VERSION_HEADER)?;
         let record =
-            WorkerRepository::new(self.storage.db()).get_deployment(account, worker, deployment)?;
-        if record.state != DeploymentState::Ready
+            WorkerRepository::new(self.storage.db()).get_version(account, worker, version)?;
+        if record.state != VersionState::Ready
             || record.deleted_at_ms.is_some()
             || record.worker_code_sha256 != descriptor
         {
             return Err(protocol());
         }
-        let (policies, _) = deployment_runtime_features(self.storage.db(), deployment)?;
+        let (policies, _) = version_runtime_features(self.storage.db(), version)?;
         let selected = policies
             .iter()
             .find(|policy| {
@@ -169,7 +169,7 @@ impl CacheBindingService {
         Ok(CacheAuthority {
             account,
             worker,
-            deployment,
+            version,
             entrypoint,
             automatic_enabled,
             cross_version_cache,
@@ -189,7 +189,7 @@ impl CacheBindingService {
         // Protect the selected remote body until the verified local file pin
         // owns the response stream. A concurrent purge may remove metadata,
         // but artifact GC cannot delete the object in this handoff window.
-        let _artifact_lifecycle = self.artifacts.reserve_deployment_artifact().await;
+        let _artifact_lifecycle = self.artifacts.reserve_version_artifact().await;
         let engine = self
             .manager
             .engine(authority.account, authority.worker, now_ms())?;
@@ -311,7 +311,7 @@ impl CacheBindingService {
             .map_err(|_| limit())?;
         let staged = stage_framed_body(
             request.into_body(),
-            self.storage.data_dir().deployment_staging_dir(),
+            self.storage.data_dir().version_staging_dir(),
             self.config.max_object_bytes,
         )
         .await?;
@@ -377,7 +377,7 @@ impl CacheBindingService {
         // Keep GC excluded from the first immutable-body observation through the
         // SQLite reference commit. Otherwise a concurrent final reference scan
         // can classify this body as an orphan between S3 PUT and metadata commit.
-        let _artifact_lifecycle = self.artifacts.reserve_deployment_artifact().await;
+        let _artifact_lifecycle = self.artifacts.reserve_version_artifact().await;
         let started = Instant::now();
         let artifact = self
             .artifacts
@@ -458,7 +458,7 @@ impl CacheBindingService {
 struct CacheAuthority {
     account: AccountId,
     worker: WorkerId,
-    deployment: DeploymentId,
+    version: VersionId,
     entrypoint: String,
     automatic_enabled: bool,
     cross_version_cache: bool,
@@ -521,7 +521,7 @@ impl CacheRequest {
                 version_scope: if surface == CacheSurface::Automatic
                     && !authority.cross_version_cache
                 {
-                    authority.deployment.to_string()
+                    authority.version.to_string()
                 } else {
                     "shared".to_owned()
                 },

@@ -10,8 +10,8 @@ use crate::{
     search_as_resource_id,
 };
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, DeploymentId, DurableObjectId, DurableObjectState,
-    ErrorCode, PlatformError, ResourceId, ResourceState, WorkerId, durable_object_namespace_prefix,
+    AccountId, BindingId, BindingKind, DurableObjectId, DurableObjectState, ErrorCode,
+    PlatformError, ResourceId, ResourceState, VersionId, WorkerId, durable_object_namespace_prefix,
 };
 use rusqlite::{OptionalExtension, params, params_from_iter};
 use serde::Serialize;
@@ -102,8 +102,8 @@ pub struct AuthorizedDurableObjectDispatch {
     pub namespace_resource_id: ResourceId,
     /// Namespace owner Worker.
     pub worker_id: WorkerId,
-    /// Current active deployment.
-    pub deployment_id: DeploymentId,
+    /// Current active version.
+    pub version_id: VersionId,
     /// Current immutable descriptor digest.
     pub worker_code_sha256: String,
     /// Monotonic route/execution generation.
@@ -132,7 +132,7 @@ pub struct AuthorizedDurableObjectDelete {
 
 struct DispatchAuthorityRow {
     worker_id: String,
-    active_deployment_id: String,
+    active_version_id: String,
     route_generation: i64,
     worker_storage_id: String,
     worker_code_sha256: Vec<u8>,
@@ -144,7 +144,7 @@ struct DispatchAuthorityRow {
 struct AlarmDispatchAuthorityRow {
     account_id: String,
     worker_id: String,
-    deployment_id: String,
+    version_id: String,
     route_generation: i64,
     worker_code_sha256: Vec<u8>,
     class_name: String,
@@ -397,17 +397,17 @@ impl<'a> DurableObjectRepository<'a> {
     pub fn authorize_dispatch(
         &self,
         binding_id: BindingId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         descriptor_sha256: &[u8; 32],
         expected_route_generation: u64,
         object_id: DurableObjectId,
         now_ms: i64,
         allow_create: bool,
     ) -> Result<AuthorizedDurableObjectDispatch, PlatformError> {
-        // Reuse the canonical binding checks before the stronger active-deployment snapshot.
+        // Reuse the canonical binding checks before the stronger active-version snapshot.
         let binding = BindingRepository::new(self.storage.db()).authorize(
             binding_id,
-            deployment_id,
+            version_id,
             descriptor_sha256,
         )?;
         if binding.binding.kind != BindingKind::DoNamespace
@@ -425,26 +425,27 @@ impl<'a> DurableObjectRepository<'a> {
         self.storage.db().with_immediate(|tx| {
             let authority: Option<DispatchAuthorityRow> = tx
                 .query_row(
-                    "SELECT d.worker_id, w.active_deployment_id, w.route_generation,
+                    "SELECT d.worker_id, active.version_id, w.route_generation,
                             w.do_storage_id, d.worker_code_sha256, n.class_name,
                             n.do_storage_id, n.namespace_storage_key
-                     FROM deployment_bindings b
-                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     FROM version_bindings b
+                     JOIN worker_versions d ON d.id = b.version_id
                      JOIN workers w ON w.id = d.worker_id
+                     LEFT JOIN worker_deployments active ON active.id = w.active_deployment_id
                      JOIN do_namespaces n ON n.resource_id = b.resource_id
-                     WHERE b.id = ?1 AND b.deployment_id = ?2 AND b.resource_id = ?3
+                     WHERE b.id = ?1 AND b.version_id = ?2 AND b.resource_id = ?3
                        AND b.descriptor_sha256 = ?4 AND d.state = 'ready'
                        AND w.deleted_at_ms IS NULL",
                     params![
                         binding_id.to_string(),
-                        deployment_id.to_string(),
+                        version_id.to_string(),
                         namespace_id.to_string(),
                         descriptor_sha256.as_slice(),
                     ],
                     |row| {
                         Ok(DispatchAuthorityRow {
                             worker_id: row.get(0)?,
-                            active_deployment_id: row.get(1)?,
+                            active_version_id: row.get(1)?,
                             route_generation: row.get(2)?,
                             worker_storage_id: row.get(3)?,
                             worker_code_sha256: row.get(4)?,
@@ -458,7 +459,7 @@ impl<'a> DurableObjectRepository<'a> {
                 .map_err(|_| db_error())?;
             let Some(DispatchAuthorityRow {
                 worker_id,
-                active_deployment_id,
+                active_version_id,
                 route_generation,
                 worker_storage_id,
                 worker_code_sha256,
@@ -470,11 +471,11 @@ impl<'a> DurableObjectRepository<'a> {
                 return Err(namespace_not_found());
             };
             let route_generation = u64::try_from(route_generation).map_err(|_| invariant())?;
-            if active_deployment_id != deployment_id.to_string()
+            if active_version_id != version_id.to_string()
                 || route_generation != expected_route_generation
             {
                 return Err(PlatformError::new(
-                    ErrorCode::DoDeploymentStale,
+                    ErrorCode::DoVersionStale,
                     "Durable Object dispatch generation is stale",
                 ));
             }
@@ -492,7 +493,7 @@ impl<'a> DurableObjectRepository<'a> {
                 account_id: binding.account_id,
                 namespace_resource_id: namespace_id,
                 worker_id,
-                deployment_id,
+                version_id,
                 worker_code_sha256: hex::encode(array32(&worker_code_sha256)?),
                 route_generation,
                 class_name,
@@ -503,10 +504,10 @@ impl<'a> DurableObjectRepository<'a> {
         })
     }
 
-    /// Reauthorize a scheduler alarm against current namespace, object, and deployment authority.
+    /// Reauthorize a scheduler alarm against current namespace, object, and version authority.
     ///
     /// Unlike a public fetch, this never creates an object and does not depend on a retained
-    /// deployment binding. The caller already holds the private scheduler capability.
+    /// version binding. The caller already holds the private scheduler capability.
     pub fn authorize_alarm_dispatch(
         &self,
         namespace_id: ResourceId,
@@ -522,14 +523,15 @@ impl<'a> DurableObjectRepository<'a> {
         self.storage.db().with_read(|connection| {
             let row: Option<AlarmDispatchAuthorityRow> = connection
                 .query_row(
-                    "SELECT r.account_id, n.owner_worker_id, w.active_deployment_id,
+                    "SELECT r.account_id, n.owner_worker_id, active.version_id,
                             w.route_generation, d.worker_code_sha256, n.class_name,
                             n.do_storage_id, n.namespace_storage_key
                      FROM do_objects o
                      JOIN do_namespaces n ON n.resource_id = o.namespace_resource_id
                      JOIN resources r ON r.id = n.resource_id
                      JOIN workers w ON w.id = n.owner_worker_id
-                     JOIN worker_deployments d ON d.id = w.active_deployment_id
+                     JOIN worker_deployments active ON active.id = w.active_deployment_id
+                     JOIN worker_versions d ON d.id = active.version_id
                      WHERE o.namespace_resource_id = ?1 AND o.object_id = ?2
                        AND o.generation = ?3 AND o.state IN ('creating', 'ready')
                        AND r.state = 'ready' AND w.deleted_at_ms IS NULL AND d.state = 'ready'",
@@ -542,7 +544,7 @@ impl<'a> DurableObjectRepository<'a> {
                         Ok(AlarmDispatchAuthorityRow {
                             account_id: row.get(0)?,
                             worker_id: row.get(1)?,
-                            deployment_id: row.get(2)?,
+                            version_id: row.get(2)?,
                             route_generation: row.get(3)?,
                             worker_code_sha256: row.get(4)?,
                             class_name: row.get(5)?,
@@ -556,7 +558,7 @@ impl<'a> DurableObjectRepository<'a> {
             let Some(AlarmDispatchAuthorityRow {
                 account_id,
                 worker_id,
-                deployment_id,
+                version_id,
                 route_generation,
                 worker_code_sha256,
                 class_name,
@@ -583,7 +585,7 @@ impl<'a> DurableObjectRepository<'a> {
                 account_id: AccountId::from_str(&account_id).map_err(|_| invariant())?,
                 namespace_resource_id: namespace_id,
                 worker_id: WorkerId::from_str(&worker_id).map_err(|_| invariant())?,
-                deployment_id: DeploymentId::from_str(&deployment_id).map_err(|_| invariant())?,
+                version_id: VersionId::from_str(&version_id).map_err(|_| invariant())?,
                 worker_code_sha256: hex::encode(array32(&worker_code_sha256)?),
                 route_generation: u64::try_from(route_generation).map_err(|_| invariant())?,
                 class_name,

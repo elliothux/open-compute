@@ -32,9 +32,9 @@ CREATE INDEX resources_reconcile
 ON resources(state, updated_at_ms, id)
 WHERE state IN ('creating', 'deleting');
 
-CREATE TABLE deployment_bindings (
+CREATE TABLE version_bindings (
   id TEXT PRIMARY KEY CHECK(length(id) = 36 AND id = lower(id)),
-  deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
+  version_id TEXT NOT NULL REFERENCES worker_versions(id),
   name TEXT NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN (
     'kv_namespace', 'r2_bucket', 'd1_database', 'do_namespace', 'vectorize_index',
@@ -47,17 +47,17 @@ CREATE TABLE deployment_bindings (
   config_json BLOB NOT NULL,
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   created_at_ms INTEGER NOT NULL,
-  UNIQUE(deployment_id, name),
+  UNIQUE(version_id, name),
   CHECK(length(name) BETWEEN 1 AND 64)
 ) STRICT;
 
-CREATE INDEX deployment_bindings_resource
-ON deployment_bindings(resource_id, deployment_id, id);
+CREATE INDEX version_bindings_resource
+ON version_bindings(resource_id, version_id, id);
 
 CREATE TABLE resource_referrers (
   resource_id TEXT NOT NULL REFERENCES resources(id),
   referrer_kind TEXT NOT NULL CHECK(referrer_kind IN (
-    'deployment_binding', 'queue_dlq', 'queue_consumer',
+    'version_binding', 'queue_dlq', 'queue_consumer',
     'workflow_definition', 'do_class', 'ai_search_instance'
   )),
   referrer_id TEXT NOT NULL,
@@ -106,15 +106,15 @@ BEGIN
   SELECT RAISE(ABORT, 'resource is referenced');
 END;
 
-CREATE TRIGGER deployment_bindings_insert_guard
-BEFORE INSERT ON deployment_bindings
+CREATE TRIGGER version_bindings_insert_guard
+BEFORE INSERT ON version_bindings
 BEGIN
   SELECT CASE WHEN NOT EXISTS (
     SELECT 1
-    FROM worker_deployments d
+    FROM worker_versions d
     JOIN workers w ON w.id = d.worker_id
     JOIN resources r ON r.id = NEW.resource_id
-    WHERE d.id = NEW.deployment_id
+    WHERE d.id = NEW.version_id
       AND d.state = 'staging'
       AND w.account_id = r.account_id
       AND r.state = 'ready'
@@ -127,68 +127,68 @@ BEGIN
     OR NEW.name GLOB '__*'
   THEN RAISE(ABORT, 'binding name invariant') END;
   SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM deployment_vars
-    WHERE deployment_id = NEW.deployment_id AND name = NEW.name
+    SELECT 1 FROM version_vars
+    WHERE version_id = NEW.version_id AND name = NEW.name
   ) OR EXISTS (
-    SELECT 1 FROM deployment_secrets
-    WHERE deployment_id = NEW.deployment_id AND name = NEW.name
+    SELECT 1 FROM version_secrets
+    WHERE version_id = NEW.version_id AND name = NEW.name
   ) THEN RAISE(ABORT, 'binding env name conflict') END;
 END;
 
-CREATE TRIGGER deployment_bindings_update_guard
-BEFORE UPDATE ON deployment_bindings
+CREATE TRIGGER version_bindings_update_guard
+BEFORE UPDATE ON version_bindings
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment binding');
+  SELECT RAISE(ABORT, 'immutable version binding');
 END;
 
-CREATE TRIGGER deployment_bindings_delete_guard
-BEFORE DELETE ON deployment_bindings
-WHEN (SELECT state FROM worker_deployments WHERE id = OLD.deployment_id)
+CREATE TRIGGER version_bindings_delete_guard
+BEFORE DELETE ON version_bindings
+WHEN (SELECT state FROM worker_versions WHERE id = OLD.version_id)
   NOT IN ('staging', 'deleting')
 BEGIN
-  SELECT RAISE(ABORT, 'immutable deployment binding');
+  SELECT RAISE(ABORT, 'immutable version binding');
 END;
 
-CREATE TRIGGER deployment_bindings_referrer_insert
-AFTER INSERT ON deployment_bindings
+CREATE TRIGGER version_bindings_referrer_insert
+AFTER INSERT ON version_bindings
 BEGIN
   INSERT INTO resource_referrers
     (resource_id, referrer_kind, referrer_id, created_at_ms)
-  VALUES (NEW.resource_id, 'deployment_binding', NEW.id, NEW.created_at_ms);
+  VALUES (NEW.resource_id, 'version_binding', NEW.id, NEW.created_at_ms);
 END;
 
-CREATE TRIGGER deployment_bindings_referrer_delete
-AFTER DELETE ON deployment_bindings
+CREATE TRIGGER version_bindings_referrer_delete
+AFTER DELETE ON version_bindings
 BEGIN
   DELETE FROM resource_referrers
   WHERE resource_id = OLD.resource_id
-    AND referrer_kind = 'deployment_binding'
+    AND referrer_kind = 'version_binding'
     AND referrer_id = OLD.id;
 END;
 
-CREATE TRIGGER deployment_binding_referrer_insert_guard
+CREATE TRIGGER version_binding_referrer_insert_guard
 BEFORE INSERT ON resource_referrers
-WHEN NEW.referrer_kind = 'deployment_binding'
+WHEN NEW.referrer_kind = 'version_binding'
   AND NOT EXISTS (
-    SELECT 1 FROM deployment_bindings
+    SELECT 1 FROM version_bindings
     WHERE id = NEW.referrer_id AND resource_id = NEW.resource_id
   )
 BEGIN
-  SELECT RAISE(ABORT, 'orphan deployment binding referrer');
+  SELECT RAISE(ABORT, 'orphan version binding referrer');
 END;
 
-CREATE TRIGGER deployment_binding_referrer_delete_guard
+CREATE TRIGGER version_binding_referrer_delete_guard
 BEFORE DELETE ON resource_referrers
-WHEN OLD.referrer_kind = 'deployment_binding'
+WHEN OLD.referrer_kind = 'version_binding'
   AND EXISTS (
     SELECT 1
-    FROM deployment_bindings b
-    JOIN worker_deployments d ON d.id = b.deployment_id
+    FROM version_bindings b
+    JOIN worker_versions d ON d.id = b.version_id
     JOIN workers w ON w.id = d.worker_id
     WHERE b.id = OLD.referrer_id
       AND b.resource_id = OLD.resource_id
       AND w.deleted_at_ms IS NULL
   )
 BEGIN
-  SELECT RAISE(ABORT, 'live deployment binding referrer');
+  SELECT RAISE(ABORT, 'live version binding referrer');
 END;

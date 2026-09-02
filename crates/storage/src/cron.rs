@@ -2,7 +2,7 @@
 
 use crate::ControlDb;
 use open_compute_core::{
-    AccountId, CronActivationId, DeploymentId, ErrorCode, PlatformError, WorkerId,
+    AccountId, CronActivationId, ErrorCode, PlatformError, VersionId, WorkerId,
 };
 use rusqlite::{Transaction, params};
 use serde::Serialize;
@@ -12,7 +12,7 @@ use std::str::FromStr;
 /// Cron parser/canonicalization contract shipped by P2.3.
 pub const CRON_PARSER_VERSION: u32 = 1;
 
-/// Frozen Cron config inserted with a staging deployment.
+/// Frozen Cron config inserted with a staging version.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewCronConfig {
     /// Capability version.
@@ -40,11 +40,11 @@ pub struct NewCronDeclaration {
     pub workflow_bindings: Vec<String>,
 }
 
-/// Immutable deployment Cron config.
+/// Immutable version Cron config.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CronDeploymentConfig {
-    /// Owning deployment.
-    pub deployment_id: DeploymentId,
+pub struct CronVersionConfig {
+    /// Owning version.
+    pub version_id: VersionId,
     /// Capability version.
     pub capability_version: u32,
     /// Config digest.
@@ -55,7 +55,7 @@ pub struct CronDeploymentConfig {
     pub declarations: Vec<CronDeclaration>,
 }
 
-impl CronDeploymentConfig {
+impl CronVersionConfig {
     /// Verify the complete canonical Day1 declaration set and its descriptor.
     pub fn validate(&self) -> Result<(), PlatformError> {
         if self.capability_version != 1
@@ -65,7 +65,7 @@ impl CronDeploymentConfig {
                 .windows(2)
                 .any(|pair| pair[0].expression >= pair[1].expression)
             || self.declarations.iter().any(|declaration| {
-                declaration.deployment_id != self.deployment_id
+                declaration.version_id != self.version_id
                     || !valid_declaration(
                         &declaration.expression,
                         &declaration.expression_sha256,
@@ -102,8 +102,8 @@ impl CronDeploymentConfig {
 pub struct CronDeclaration {
     /// Declaration identity.
     pub id: CronActivationId,
-    /// Owning deployment.
-    pub deployment_id: DeploymentId,
+    /// Owning version.
+    pub version_id: VersionId,
     /// Tenant-visible exact expression.
     pub expression: String,
     /// Parser-normalized digest.
@@ -157,8 +157,8 @@ pub struct CronActivationRecord {
     pub account_id: AccountId,
     /// Owning Worker.
     pub worker_id: WorkerId,
-    /// Frozen target deployment.
-    pub deployment_id: DeploymentId,
+    /// Frozen target version.
+    pub version_id: VersionId,
     /// Exact expression.
     pub expression: String,
     /// Parser-normalized digest.
@@ -186,7 +186,7 @@ pub struct CronActivationRecord {
     pub deleted_at_ms: Option<i64>,
 }
 
-/// Control repository for deployment Cron declarations and live activations.
+/// Control repository for version Cron declarations and live activations.
 #[derive(Clone, Copy, Debug)]
 pub struct CronRepository<'a> {
     db: &'a ControlDb,
@@ -207,7 +207,7 @@ impl<'a> CronRepository<'a> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT id, account_id, worker_id, deployment_id, expression,
+                    "SELECT id, account_id, worker_id, version_id, expression,
                             expression_sha256, parser_version, scheduled_handler,
                             workflow_bindings_json, activation_generation,
                             state, availability, availability_code, created_at_ms,
@@ -225,35 +225,35 @@ impl<'a> CronRepository<'a> {
         })
     }
 
-    /// Read one deployment's immutable Cron config.
-    pub fn deployment_config(
+    /// Read one version's immutable Cron config.
+    pub fn version_config(
         &self,
-        deployment_id: DeploymentId,
-    ) -> Result<CronDeploymentConfig, PlatformError> {
+        version_id: VersionId,
+    ) -> Result<CronVersionConfig, PlatformError> {
         self.db.with_read(|connection| {
             let (capability_version, descriptor, created_at_ms): (i64, Vec<u8>, i64) = connection
                 .query_row(
                     "SELECT capability_version, descriptor_sha256, created_at_ms
-                     FROM deployment_cron_configs WHERE deployment_id = ?1",
-                    [deployment_id.to_string()],
+                     FROM version_cron_configs WHERE version_id = ?1",
+                    [version_id.to_string()],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .map_err(|_| invariant())?;
             let mut statement = connection
                 .prepare(
-                    "SELECT id, deployment_id, expression, expression_sha256,
+                    "SELECT id, version_id, expression, expression_sha256,
                             parser_version, scheduled_handler, workflow_bindings_json, created_at_ms
-                     FROM deployment_cron_declarations WHERE deployment_id = ?1
+                     FROM version_cron_declarations WHERE version_id = ?1
                      ORDER BY expression, id",
                 )
                 .map_err(|_| invariant())?;
             let declarations = statement
-                .query_map([deployment_id.to_string()], map_declaration)
+                .query_map([version_id.to_string()], map_declaration)
                 .map_err(|_| invariant())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| invariant())?;
-            let config = CronDeploymentConfig {
-                deployment_id,
+            let config = CronVersionConfig {
+                version_id,
                 capability_version: u32::try_from(capability_version).map_err(|_| invariant())?,
                 descriptor_sha256: digest(descriptor).map_err(|_| invariant())?,
                 created_at_ms,
@@ -272,7 +272,7 @@ impl<'a> CronRepository<'a> {
         self.db.with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT id, account_id, worker_id, deployment_id, expression,
+                    "SELECT id, account_id, worker_id, version_id, expression,
                             expression_sha256, parser_version, scheduled_handler,
                             workflow_bindings_json, activation_generation,
                             state, availability, availability_code, created_at_ms,
@@ -294,7 +294,7 @@ impl<'a> CronRepository<'a> {
         self.db.with_read(|connection| {
             connection
                 .query_row(
-                    "SELECT id, account_id, worker_id, deployment_id, expression,
+                    "SELECT id, account_id, worker_id, version_id, expression,
                             expression_sha256, parser_version, scheduled_handler,
                             workflow_bindings_json, activation_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
@@ -306,12 +306,12 @@ impl<'a> CronRepository<'a> {
         })
     }
 
-    /// Stage an exact activation set for a ready deployment.
+    /// Stage an exact activation set for a ready version.
     pub fn stage_activations(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         generation: u64,
         declarations: &[CronDeclaration],
         now_ms: i64,
@@ -322,7 +322,7 @@ impl<'a> CronRepository<'a> {
                 let id = CronActivationId::generate();
                 tx.execute(
                     "INSERT INTO cron_activations
-                     (id, account_id, worker_id, deployment_id, expression,
+                     (id, account_id, worker_id, version_id, expression,
                       expression_sha256, parser_version, scheduled_handler,
                       workflow_bindings_json, activation_generation,
                       state, availability, availability_code, created_at_ms,
@@ -333,7 +333,7 @@ impl<'a> CronRepository<'a> {
                         id.to_string(),
                         account_id.to_string(),
                         worker_id.to_string(),
-                        deployment_id.to_string(),
+                        version_id.to_string(),
                         declaration.expression,
                         declaration.expression_sha256.as_slice(),
                         i64::from(declaration.parser_version),
@@ -392,7 +392,7 @@ impl<'a> CronRepository<'a> {
         })
     }
 
-    /// Tombstone one fully drained activation and release its deployment referrer.
+    /// Tombstone one fully drained activation and release its version referrer.
     pub fn finish_retire(
         &self,
         id: CronActivationId,
@@ -416,16 +416,16 @@ impl<'a> CronRepository<'a> {
 
 pub(crate) fn insert_staging_config(
     tx: &Transaction<'_>,
-    deployment_id: DeploymentId,
+    version_id: VersionId,
     config: &NewCronConfig,
     now_ms: i64,
 ) -> Result<(), PlatformError> {
     tx.execute(
-        "INSERT INTO deployment_cron_configs
-         (deployment_id, capability_version, descriptor_sha256, created_at_ms)
+        "INSERT INTO version_cron_configs
+         (version_id, capability_version, descriptor_sha256, created_at_ms)
          VALUES (?1, ?2, ?3, ?4)",
         params![
-            deployment_id.to_string(),
+            version_id.to_string(),
             i64::from(config.capability_version),
             config.descriptor_sha256.as_slice(),
             now_ms,
@@ -434,13 +434,13 @@ pub(crate) fn insert_staging_config(
     .map_err(|_| invariant())?;
     for declaration in &config.declarations {
         tx.execute(
-            "INSERT INTO deployment_cron_declarations
-             (id, deployment_id, expression, expression_sha256, parser_version,
+            "INSERT INTO version_cron_declarations
+             (id, version_id, expression, expression_sha256, parser_version,
               scheduled_handler, workflow_bindings_json, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 declaration.id.to_string(),
-                deployment_id.to_string(),
+                version_id.to_string(),
                 declaration.expression,
                 declaration.expression_sha256.as_slice(),
                 i64::from(declaration.parser_version),
@@ -459,7 +459,7 @@ fn read_activation_tx(
     id: CronActivationId,
 ) -> Result<CronActivationRecord, PlatformError> {
     tx.query_row(
-        "SELECT id, account_id, worker_id, deployment_id, expression,
+        "SELECT id, account_id, worker_id, version_id, expression,
                 expression_sha256, parser_version, scheduled_handler, workflow_bindings_json,
                 activation_generation, state,
                 availability, availability_code, created_at_ms, updated_at_ms, deleted_at_ms
@@ -473,7 +473,7 @@ fn read_activation_tx(
 fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronDeclaration> {
     let declaration = CronDeclaration {
         id: parse(&row.get::<_, String>(0)?)?,
-        deployment_id: parse(&row.get::<_, String>(1)?)?,
+        version_id: parse(&row.get::<_, String>(1)?)?,
         expression: row.get(2)?,
         expression_sha256: digest(row.get(3)?)?,
         parser_version: unsigned(row.get(4)?)?,
@@ -499,7 +499,7 @@ fn map_activation(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronActivationRec
         id: parse(&row.get::<_, String>(0)?)?,
         account_id: parse(&row.get::<_, String>(1)?)?,
         worker_id: parse(&row.get::<_, String>(2)?)?,
-        deployment_id: parse(&row.get::<_, String>(3)?)?,
+        version_id: parse(&row.get::<_, String>(3)?)?,
         expression: row.get(4)?,
         expression_sha256: digest(row.get(5)?)?,
         parser_version: unsigned(row.get(6)?)?,

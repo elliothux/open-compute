@@ -14,10 +14,10 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
         .create_definition(f.account, "verdict", 0)
         .unwrap();
     let version = repository
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
+        .stage_version(f.account, definition.id, f.version, "Flow", 1)
         .unwrap();
     repository
-        .finish_version(f.account, version.target.version_id, true, 2)
+        .finish_version(f.account, version.target.workflow_version_id, true, 2)
         .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -103,10 +103,10 @@ async fn quarantined_generation_stops_claims_even_after_operator_resume() {
         .create_definition(f.account, "admission", 0)
         .unwrap();
     let version = repository
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
+        .stage_version(f.account, definition.id, f.version, "Flow", 1)
         .unwrap();
     repository
-        .finish_version(f.account, version.target.version_id, true, 2)
+        .finish_version(f.account, version.target.workflow_version_id, true, 2)
         .unwrap();
     let config = open_compute_core::WorkflowsConfig::default();
     let controller = WorkflowController::new(&f.storage, &f.scheduler, &config);

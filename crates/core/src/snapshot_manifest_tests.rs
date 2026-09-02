@@ -50,7 +50,7 @@ fn manifest() -> PlatformSnapshotManifestV1 {
             "vector_search_cache".to_owned(),
         ],
         immutable_references: vec![SnapshotImmutableReferenceV1 {
-            role: "deployment_artifact".to_owned(),
+            role: "version_artifact".to_owned(),
             sha256: "7".repeat(64),
             object_key: "system/artifacts/v1/sha256/x".to_owned(),
             size: 1,

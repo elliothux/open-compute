@@ -9,7 +9,7 @@ import {
 export class VectorizeTransport extends WorkerEntrypoint<BindingEnv, ResourceBindingProps> {
   #headers(contentType: string): Record<string, string> {
     const props = this.ctx.props;
-    if (!props || typeof props.bindingId !== "string" || typeof props.deploymentId !== "string"
+    if (!props || typeof props.bindingId !== "string" || typeof props.versionId !== "string"
         || typeof props.namespaceResourceId !== "string" || !Number.isSafeInteger(props.resourceSpecGeneration)
         || props.resourceSpecGeneration < 1 || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)) {
       throw bindingError("VECTORIZE_PROTOCOL_ERROR");
@@ -18,7 +18,7 @@ export class VectorizeTransport extends WorkerEntrypoint<BindingEnv, ResourceBin
       [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
       "x-open-compute-startup-generation": currentStartupGeneration(),
       "x-open-compute-binding-id": props.bindingId,
-      "x-open-compute-deployment-id": props.deploymentId,
+      "x-open-compute-version-id": props.versionId,
       "x-open-compute-resource-id": props.namespaceResourceId,
       "x-open-compute-resource-generation": String(props.resourceSpecGeneration),
       "x-open-compute-descriptor-sha256": props.descriptorSha256,

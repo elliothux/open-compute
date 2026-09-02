@@ -99,7 +99,7 @@ fn capability_status_serialization_and_contract_are_strict() {
     let mut products = BTreeMap::new();
     for name in [
         "workers",
-        "deployments",
+        "versions",
         "static_assets",
         "service_bindings",
         "kv",
@@ -126,10 +126,7 @@ fn capability_status_serialization_and_contract_are_strict() {
     ] {
         products.insert(name.to_owned(), unsupported_product());
     }
-    products.insert(
-        "deployments".to_owned(),
-        platform_product(&["OC-DEPLOY-001"]),
-    );
+    products.insert("versions".to_owned(), platform_product(&["OC-DEPLOY-001"]));
     products.insert(
         "kv".to_owned(),
         ProductCapabilityV1 {

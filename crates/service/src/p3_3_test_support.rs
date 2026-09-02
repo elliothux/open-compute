@@ -2,16 +2,16 @@ use open_compute_artifacts::{
     ArtifactCache, ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
 use open_compute_core::{
-    AccountId, CacheConfig, DeploymentId, PlatformConfig, RequestId, StartupId, StorageConfig,
-    SystemClock, WorkerId,
+    AccountId, CacheConfig, PlatformConfig, RequestId, StartupId, StorageConfig, SystemClock,
+    VersionId, WorkerId,
 };
 use open_compute_storage::{
-    BuiltinBindingKind, PlatformStorage, WorkerRepository, deployment_runtime_features,
+    BuiltinBindingKind, PlatformStorage, WorkerRepository, version_runtime_features,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentContent, DeploymentController, DeploymentRuntimeFeatures, ModuleInput, ModuleType,
-    RuntimeValidator, ValidationCandidate,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, RuntimeValidator, ValidationCandidate, VersionContent, VersionController,
+    VersionRuntimeFeatures,
 };
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -27,14 +27,14 @@ pub(super) struct RuntimeFeatureFixture {
     pub(super) artifact_cache: Arc<ArtifactCache>,
     pub(super) account: AccountId,
     pub(super) worker: WorkerId,
-    pub(super) deployment: DeploymentId,
+    pub(super) version: VersionId,
     pub(super) descriptor_sha256: String,
     pub(super) ai_descriptor_sha256: Option<String>,
     pub(super) images_descriptor_sha256: Option<String>,
 }
 
 impl RuntimeFeatureFixture {
-    pub(super) async fn create(features: DeploymentRuntimeFeatures) -> Self {
+    pub(super) async fn create(features: VersionRuntimeFeatures) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let storage = Arc::new(
             PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
@@ -72,11 +72,11 @@ impl RuntimeFeatureFixture {
             BundleLimits::default(),
         )
         .unwrap();
-        let request = CreateDeploymentRequest {
+        let request = CreateVersionRequest {
             account_id: account,
             worker_id: worker,
             idempotency_key: "runtime-features".to_owned(),
-            content: DeploymentContent::Worker {
+            content: VersionContent::Worker {
                 bundle: bundle.into_bytes().into(),
                 assets: None,
             },
@@ -91,20 +91,19 @@ impl RuntimeFeatureFixture {
             request_id: RequestId::generate(),
             now_ms: 1_000,
         };
-        let result = DeploymentController::new(
+        let result = VersionController::new(
             &storage,
             artifacts.clone(),
             Arc::new(AcceptAllValidator),
             BundleLimits::default(),
         )
-        .create_deployment(request)
+        .create_version(request)
         .await
         .unwrap();
-        let CreateDeploymentOutcome::Applied(result) = result else {
-            panic!("first deployment unexpectedly replayed");
+        let CreateVersionOutcome::Applied(result) = result else {
+            panic!("first version unexpectedly replayed");
         };
-        let (_, builtins) =
-            deployment_runtime_features(storage.db(), result.deployment.id).unwrap();
+        let (_, builtins) = version_runtime_features(storage.db(), result.version.id).unwrap();
         let images_descriptor_sha256 = builtins
             .iter()
             .find(|binding| binding.kind == BuiltinBindingKind::Images)
@@ -121,8 +120,8 @@ impl RuntimeFeatureFixture {
             artifact_cache,
             account,
             worker,
-            deployment: result.deployment.id,
-            descriptor_sha256: hex::encode(result.deployment.worker_code_sha256),
+            version: result.version.id,
+            descriptor_sha256: hex::encode(result.version.worker_code_sha256),
             ai_descriptor_sha256,
             images_descriptor_sha256,
         }

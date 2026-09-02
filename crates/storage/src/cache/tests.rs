@@ -21,7 +21,7 @@ fn identity(account: AccountId, worker: WorkerId, surface: CacheSurface) -> Cach
         surface,
         entrypoint: (surface == CacheSurface::Automatic).then(|| "default".to_owned()),
         version_scope: if surface == CacheSurface::Automatic {
-            open_compute_core::DeploymentId::generate().to_string()
+            open_compute_core::VersionId::generate().to_string()
         } else {
             "shared".to_owned()
         },
@@ -118,17 +118,17 @@ fn default_named_worker_and_vary_identities_do_not_cross() {
 }
 
 #[test]
-fn automatic_cache_isolates_deployments_unless_the_key_is_explicitly_shared() {
+fn automatic_cache_isolates_versions_unless_the_key_is_explicitly_shared() {
     let (_temp, manager, account, worker) = manager();
     let engine = manager.engine(account, worker, 1).unwrap();
     let headers = BTreeMap::from([("accept-language".to_owned(), "en".to_owned())]);
-    let deployment_a = identity(account, worker, CacheSurface::Automatic);
-    let mut deployment_b = deployment_a.clone();
-    deployment_b.version_scope = open_compute_core::DeploymentId::generate().to_string();
-    let fence = engine.prepare_put(&deployment_a).unwrap();
+    let version_a = identity(account, worker, CacheSurface::Automatic);
+    let mut version_b = version_a.clone();
+    version_b.version_scope = open_compute_core::VersionId::generate().to_string();
+    let fence = engine.prepare_put(&version_a).unwrap();
     engine
         .put(&CachePut {
-            identity: deployment_a.clone(),
+            identity: version_a.clone(),
             request_headers: headers.clone(),
             response: response(1, 1_000, 1_000, 1_000, "release"),
             expected_fence_generation: fence,
@@ -137,15 +137,15 @@ fn automatic_cache_isolates_deployments_unless_the_key_is_explicitly_shared() {
         })
         .unwrap();
     assert_eq!(
-        engine.lookup(&deployment_a, &headers, 11).unwrap().status,
+        engine.lookup(&version_a, &headers, 11).unwrap().status,
         CacheLookupStatus::Hit
     );
     assert_eq!(
-        engine.lookup(&deployment_b, &headers, 11).unwrap().status,
+        engine.lookup(&version_b, &headers, 11).unwrap().status,
         CacheLookupStatus::Miss
     );
 
-    let mut shared = deployment_a;
+    let mut shared = version_a;
     shared.version_scope = "shared".to_owned();
     let fence = engine.prepare_put(&shared).unwrap();
     engine
@@ -417,7 +417,7 @@ fn cache_identity_metadata_and_purge_validation_reject_every_ambiguous_shape() {
         |value: &mut CacheIdentity| value.entrypoint = None,
         |value: &mut CacheIdentity| value.entrypoint = Some("9bad".to_owned()),
         |value: &mut CacheIdentity| value.cache_name = Some("named".to_owned()),
-        |value: &mut CacheIdentity| value.version_scope = "not-a-deployment".to_owned(),
+        |value: &mut CacheIdentity| value.version_scope = "not-a-version".to_owned(),
     ] {
         let mut value = base.clone();
         mutate(&mut value);

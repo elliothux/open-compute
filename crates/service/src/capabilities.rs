@@ -423,8 +423,8 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
             u64::from(config.hardening.max_routes_per_account),
         ),
         (
-            "hardening.max_deployments_per_worker".to_owned(),
-            u64::from(config.hardening.max_deployments_per_worker),
+            "hardening.max_versions_per_worker".to_owned(),
+            u64::from(config.hardening.max_versions_per_worker),
         ),
         (
             "hardening.max_resources_per_kind_per_account".to_owned(),
@@ -560,8 +560,8 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
             u64::from(config.document_parser.max_concurrency_per_account),
         ),
         (
-            "document_parser.max_concurrency_per_deployment".to_owned(),
-            u64::from(config.document_parser.max_concurrency_per_deployment),
+            "document_parser.max_concurrency_per_version".to_owned(),
+            u64::from(config.document_parser.max_concurrency_per_version),
         ),
         (
             "document_parser.request_timeout_ms".to_owned(),

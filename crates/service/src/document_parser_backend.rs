@@ -1,4 +1,4 @@
-//! Deployment-authorized Markdown Conversion backed by isolated parser children.
+//! Version-authorized Markdown Conversion backed by isolated parser children.
 
 mod process;
 mod protocol;
@@ -11,15 +11,14 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
 use base64::Engine as _;
 use open_compute_core::{
-    AccountId, DeploymentId, DocumentParserConfig, ErrorCode, PlatformError, WorkerId,
+    AccountId, DocumentParserConfig, ErrorCode, PlatformError, VersionId, WorkerId,
 };
 use open_compute_document_parser::{
     HtmlConversionOptions, InputHeader, PARSER_CONTRACT_SHA256, ParseOutput, ParseRequest,
     ParseSuccess, decode_output_frame, encode_input_frame, supported_formats,
 };
 use open_compute_storage::{
-    BuiltinBindingKind, DeploymentState, PlatformStorage, WorkerRepository,
-    deployment_runtime_features,
+    BuiltinBindingKind, PlatformStorage, VersionState, WorkerRepository, version_runtime_features,
 };
 use process::run_parser_child;
 use protocol::*;
@@ -34,20 +33,20 @@ use uuid::Uuid;
 
 const ACCOUNT_HEADER: &str = "x-open-compute-account-id";
 const WORKER_HEADER: &str = "x-open-compute-worker-id";
-const DEPLOYMENT_HEADER: &str = "x-open-compute-deployment-id";
+const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 const MAX_NAME_BYTES: usize = 255;
 const MAX_MIME_BYTES: usize = 128;
 
-/// One deployment-scoped Markdown Conversion service.
+/// One version-scoped Markdown Conversion service.
 pub struct DocumentParserBindingService {
     storage: Arc<PlatformStorage>,
     config: DocumentParserConfig,
     executable: PathBuf,
     global: Arc<Semaphore>,
     accounts: Mutex<HashMap<AccountId, Weak<Semaphore>>>,
-    deployments: Mutex<HashMap<DeploymentId, Weak<Semaphore>>>,
+    versions: Mutex<HashMap<VersionId, Weak<Semaphore>>>,
 }
 
 impl std::fmt::Debug for DocumentParserBindingService {
@@ -83,14 +82,14 @@ impl DocumentParserBindingService {
             storage,
             global: Arc::new(Semaphore::new(config.max_concurrency as usize)),
             accounts: Mutex::new(HashMap::new()),
-            deployments: Mutex::new(HashMap::new()),
+            versions: Mutex::new(HashMap::new()),
             executable,
             config,
         }
     }
 
     /// Parse one AI Search source through the same isolated, resource-limited
-    /// parser child without requiring a tenant deployment identity.
+    /// parser child without requiring a tenant version identity.
     pub async fn parse_for_ai_search(
         &self,
         account: AccountId,
@@ -184,26 +183,23 @@ impl DocumentParserBindingService {
     fn authorize(&self, headers: &HeaderMap) -> Result<ParserAuthority, PlatformError> {
         let account = parse_header::<AccountId>(headers, ACCOUNT_HEADER)?;
         let worker = parse_header::<WorkerId>(headers, WORKER_HEADER)?;
-        let deployment = parse_header::<DeploymentId>(headers, DEPLOYMENT_HEADER)?;
+        let version = parse_header::<VersionId>(headers, VERSION_HEADER)?;
         let digest = hex::decode(text_header(headers, DESCRIPTOR_HEADER)?)
             .ok()
             .and_then(|value| <[u8; 32]>::try_from(value).ok())
             .ok_or_else(protocol)?;
         let record =
-            WorkerRepository::new(self.storage.db()).get_deployment(account, worker, deployment)?;
-        if record.state != DeploymentState::Ready || record.deleted_at_ms.is_some() {
+            WorkerRepository::new(self.storage.db()).get_version(account, worker, version)?;
+        if record.state != VersionState::Ready || record.deleted_at_ms.is_some() {
             return Err(protocol());
         }
-        let (_, bindings) = deployment_runtime_features(self.storage.db(), deployment)?;
+        let (_, bindings) = version_runtime_features(self.storage.db(), version)?;
         if !bindings.iter().any(|binding| {
             binding.kind == BuiltinBindingKind::Ai && binding.descriptor_sha256 == digest
         }) {
             return Err(protocol());
         }
-        Ok(ParserAuthority {
-            account,
-            deployment,
-        })
+        Ok(ParserAuthority { account, version })
     }
 
     fn supported(&self) -> Result<Response, PlatformError> {
@@ -395,24 +391,24 @@ impl DocumentParserBindingService {
                     semaphore
                 })
         };
-        let deployment_semaphore = {
-            let mut deployments = self
-                .deployments
+        let version_semaphore = {
+            let mut versions = self
+                .versions
                 .lock()
                 .map_err(|_| ErrorCode::DocumentUnavailable)?;
-            deployments.retain(|_, semaphore| semaphore.strong_count() > 0);
-            deployments
-                .get(&authority.deployment)
+            versions.retain(|_, semaphore| semaphore.strong_count() > 0);
+            versions
+                .get(&authority.version)
                 .and_then(Weak::upgrade)
                 .unwrap_or_else(|| {
                     let semaphore = Arc::new(Semaphore::new(
-                        self.config.max_concurrency_per_deployment as usize,
+                        self.config.max_concurrency_per_version as usize,
                     ));
-                    deployments.insert(authority.deployment, Arc::downgrade(&semaphore));
+                    versions.insert(authority.version, Arc::downgrade(&semaphore));
                     semaphore
                 })
         };
-        let _deployment = deployment_semaphore
+        let _version = version_semaphore
             .try_acquire_owned()
             .map_err(|_| ErrorCode::DocumentUnavailable)?;
         let _account = account_semaphore

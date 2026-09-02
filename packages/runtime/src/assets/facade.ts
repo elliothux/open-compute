@@ -8,7 +8,7 @@ interface AssetTransport {
   fetchAsset(request: AssetRequestWire): Promise<Response>;
 }
 
-/** Tenant-visible Fetcher facade backed by one deployment-scoped trusted transport. */
+/** Tenant-visible Fetcher facade backed by one version-scoped trusted transport. */
 export class AssetsBinding {
   readonly #transport: AssetTransport;
 

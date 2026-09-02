@@ -5,8 +5,8 @@ use crate::runtime_bridge::{QueueDispatchResult, QueueRetryBatchResult, QueueRet
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{MetricsConfig, StorageConfig};
 use open_compute_core::{
-    DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES, DeploymentId,
-    DeterministicSchedulerClock, durable_object_namespace_prefix,
+    DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES, DeterministicSchedulerClock,
+    VersionId, durable_object_namespace_prefix,
 };
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
@@ -67,7 +67,7 @@ async fn kernel_run_claims_releases_and_shuts_down_without_polling() {
                 object_generation: 1,
                 row_token: "coverage-token-01".to_owned(),
                 due_at_ms: 10,
-                target_deployment_id: DeploymentId::generate(),
+                target_version_id: VersionId::generate(),
                 execution_generation: 1,
                 retry_count: 0,
             },
@@ -242,7 +242,7 @@ fn queue_disposition_precedence_and_membership_are_exact() {
         queue_id: QueueId::generate(),
         consumer_id: QueueConsumerId::generate(),
         consumer_generation: 1,
-        deployment_id: DeploymentId::generate(),
+        version_id: VersionId::generate(),
         worker_id: WorkerId::generate(),
         execution_generation: 1,
         entrypoint: None,

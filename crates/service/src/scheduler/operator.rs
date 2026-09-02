@@ -117,7 +117,7 @@ impl SchedulerService {
             }
             if record.state == QueueConsumerState::Updating
                 && let (Some(pending_declaration), Some(_)) =
-                    (record.pending_declaration_id, record.pending_deployment_id)
+                    (record.pending_declaration_id, record.pending_version_id)
             {
                 let old_generation = record
                     .consumer_generation
@@ -149,8 +149,7 @@ impl SchedulerService {
                 record = queues.get(record.id)?;
                 declaration = pending;
             }
-            let execution_generation = if worker.active_deployment_id == Some(record.deployment_id)
-            {
+            let execution_generation = if worker.active_version_id == Some(record.version_id) {
                 worker.route_generation
             } else {
                 worker
@@ -163,7 +162,7 @@ impl SchedulerService {
                     consumer_id: record.id,
                     queue_id: record.queue_id,
                     consumer_generation: record.consumer_generation,
-                    deployment_id: record.deployment_id,
+                    version_id: record.version_id,
                     worker_id: record.worker_id,
                     execution_generation: self
                         .store
@@ -196,7 +195,7 @@ impl SchedulerService {
                     )?;
                 }
                 QueueConsumerState::Activating
-                    if worker.active_deployment_id == Some(record.deployment_id) =>
+                    if worker.active_version_id == Some(record.version_id) =>
                 {
                     self.store.activate_queue_consumer(
                         record.id,
@@ -208,7 +207,7 @@ impl SchedulerService {
                     }
                 }
                 QueueConsumerState::Updating
-                    if worker.active_deployment_id == Some(record.deployment_id) =>
+                    if worker.active_version_id == Some(record.version_id) =>
                 {
                     let paused = record.availability_code.as_deref()
                         == Some("QUEUE_CONSUMER_DRAINING_PAUSED");
@@ -242,15 +241,14 @@ impl SchedulerService {
         let crons = CronRepository::new(self.storage.db());
         for activation in crons.list_live(limit)? {
             let worker = workers.get_worker(activation.account_id, activation.worker_id)?;
-            let execution_generation =
-                if worker.active_deployment_id == Some(activation.deployment_id) {
-                    worker.route_generation
-                } else {
-                    worker
-                        .route_generation
-                        .checked_add(1)
-                        .ok_or_else(scheduler_task_failed)?
-                };
+            let execution_generation = if worker.active_version_id == Some(activation.version_id) {
+                worker.route_generation
+            } else {
+                worker
+                    .route_generation
+                    .checked_add(1)
+                    .ok_or_else(scheduler_task_failed)?
+            };
             let runtime = self.store.inspect_cron_runtime(
                 activation.id,
                 activation.activation_generation,
@@ -286,7 +284,7 @@ impl SchedulerService {
                     activation_id: activation.id,
                     account_id: activation.account_id,
                     worker_id: activation.worker_id,
-                    deployment_id: activation.deployment_id,
+                    version_id: activation.version_id,
                     execution_generation: self
                         .store
                         .cron_execution_generation(activation.id, activation.activation_generation)?
@@ -300,7 +298,7 @@ impl SchedulerService {
                 })?;
             if activation.state == CronActivationState::Active
                 || (activation.state == CronActivationState::Staging
-                    && worker.active_deployment_id == Some(activation.deployment_id))
+                    && worker.active_version_id == Some(activation.version_id))
             {
                 self.store.activate_cron_schedule(
                     activation.id,
@@ -359,8 +357,8 @@ impl SchedulerService {
                 account_id: record.account_id,
                 queue_id: record.queue_id,
                 worker_id: record.worker_id,
-                deployment_id: record.deployment_id,
-                pending_deployment_id: record.pending_deployment_id,
+                version_id: record.version_id,
+                pending_version_id: record.pending_version_id,
                 generation: record.consumer_generation,
                 state: record.state,
                 projection_exists: runtime.projection_exists,
@@ -383,7 +381,7 @@ impl SchedulerService {
                 id: activation.id,
                 account_id: activation.account_id,
                 worker_id: activation.worker_id,
-                deployment_id: activation.deployment_id,
+                version_id: activation.version_id,
                 expression: activation.expression,
                 parser_version: activation.parser_version,
                 generation: activation.activation_generation,

@@ -176,10 +176,10 @@ impl WorkflowRepository<'_> {
             if !instances::referrers_intact(tx, identity)? { return Err(invariant()); }
             if kind == WorkflowOperationKind::Restart {
                 let ready: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_versions v
-                    JOIN workflow_definitions f ON f.id=v.definition_id JOIN worker_deployments d ON d.id=v.deployment_id
+                    JOIN workflow_definitions f ON f.id=v.definition_id JOIN worker_versions d ON d.id=v.worker_version_id
                     JOIN workers w ON w.id=d.worker_id WHERE v.id=?1 AND v.state='ready' AND f.state='ready'
                       AND f.availability='healthy' AND d.state='ready' AND w.deleted_at_ms IS NULL)",
-                    [identity.target.version_id.to_string()], |row|row.get(0)).map_err(sql_error)?;
+                    [identity.target.workflow_version_id.to_string()], |row|row.get(0)).map_err(sql_error)?;
                 if !ready { return Err(error(ErrorCode::WorkflowVersionNotReady)); }
                 if reservation.state == WorkflowRefState::Retained {
                     let active: u64 = tx.query_row("SELECT COUNT(*) FROM workflow_instance_referrers r
@@ -291,7 +291,7 @@ impl WorkflowRepository<'_> {
                     }
                 }
                 (WorkflowOperationKind::Purge,None) => {
-                    let dangling: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM deployment_referrers WHERE kind='workflow_instance' AND ref_id=?1)
+                    let dangling: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM version_referrers WHERE kind='workflow_instance' AND ref_id=?1)
                         OR EXISTS(SELECT 1 FROM workflow_referrers WHERE referrer_kind='instance' AND referrer_id=?1)",
                         [operation.identity.instance_id.to_string()],|row|row.get(0)).map_err(sql_error)?;
                     if dangling { return Err(invariant()); }

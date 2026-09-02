@@ -488,12 +488,12 @@ async fn collect_and_verify_external_references(
     let mut backup_manifests = Vec::new();
     for reference in &references {
         match reference.role.as_str() {
-            "deployment_artifact" => {
+            "version_artifact" => {
                 let artifact = ArtifactRef::new(1, &reference.sha256, reference.size)?;
                 if artifact.physical_key(&loaded.config.s3.prefix) != reference.object_key {
                     return Err(PlatformError::new(
                         ErrorCode::SnapshotInvalid,
-                        "snapshot deployment artifact reference is outside the configured authority",
+                        "snapshot version artifact reference is outside the configured authority",
                     ));
                 }
                 artifacts.head(&artifact).await?;

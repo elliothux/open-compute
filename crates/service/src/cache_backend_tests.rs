@@ -3,15 +3,13 @@ use crate::p3_3_test_support::RuntimeFeatureFixture;
 use axum::http::Request;
 use futures::StreamExt as _;
 use open_compute_storage::CacheHeader;
-use open_compute_workers::{
-    DeploymentCacheInput, DeploymentCachePolicyInput, DeploymentRuntimeFeatures,
-};
+use open_compute_workers::{VersionCacheInput, VersionCachePolicyInput, VersionRuntimeFeatures};
 use std::collections::HashSet;
 
 async fn fixture() -> (RuntimeFeatureFixture, CacheBindingService) {
-    let fixture = RuntimeFeatureFixture::create(DeploymentRuntimeFeatures {
-        cache: DeploymentCacheInput {
-            default: DeploymentCachePolicyInput {
+    let fixture = RuntimeFeatureFixture::create(VersionRuntimeFeatures {
+        cache: VersionCacheInput {
+            default: VersionCachePolicyInput {
                 enabled: true,
                 cross_version_cache: false,
             },
@@ -20,6 +18,7 @@ async fn fixture() -> (RuntimeFeatureFixture, CacheBindingService) {
         images: None,
         ai: None,
         version_metadata: None,
+        ..VersionRuntimeFeatures::default()
     })
     .await;
     let service = CacheBindingService::new(
@@ -38,7 +37,7 @@ fn request(fixture: &RuntimeFeatureFixture, path: &str, body: Body) -> Request<B
         .uri(path)
         .header(ACCOUNT_HEADER, fixture.account.to_string())
         .header(WORKER_HEADER, fixture.worker.to_string())
-        .header(DEPLOYMENT_HEADER, fixture.deployment.to_string())
+        .header(VERSION_HEADER, fixture.version.to_string())
         .header(ENTRYPOINT_HEADER, "default")
         .header(DESCRIPTOR_HEADER, &fixture.descriptor_sha256)
         .header(ENABLED_HEADER, "true")
@@ -417,7 +416,7 @@ async fn cache_request_deadline_cancels_and_removes_partial_staging() {
         ErrorCode::CacheUnavailable.as_str()
     );
     assert_eq!(
-        std::fs::read_dir(fixture.storage.data_dir().deployment_staging_dir())
+        std::fs::read_dir(fixture.storage.data_dir().version_staging_dir())
             .unwrap()
             .count(),
         0
@@ -527,7 +526,7 @@ async fn cache_body_reference_commit_fences_concurrent_artifact_gc() {
     let gc_store = fixture.artifacts.clone();
     let (acquired_tx, mut acquired_rx) = tokio::sync::oneshot::channel();
     let gc = tokio::spawn(async move {
-        let _fence = gc_store.fence_deployment_gc().await;
+        let _fence = gc_store.fence_version_gc().await;
         let _ = acquired_tx.send(());
     });
     assert!(
@@ -585,7 +584,7 @@ async fn cache_hit_handoff_to_local_stream_pin_fences_remote_gc() {
     let gc_store = fixture.artifacts.clone();
     let (acquired_tx, mut acquired_rx) = tokio::sync::oneshot::channel();
     let gc = tokio::spawn(async move {
-        let fence = gc_store.fence_deployment_gc().await;
+        let fence = gc_store.fence_version_gc().await;
         let _ = acquired_tx.send(());
         gc_store
             .gc_unreferenced(

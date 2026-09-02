@@ -1,20 +1,20 @@
-//! Immutable deployment-binding persistence and runtime authorization.
+//! Immutable version-binding persistence and runtime authorization.
 
-use crate::{ControlDb, DeploymentState, ResourceRecord};
+use crate::{ControlDb, ResourceRecord, VersionState};
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
-    ErrorCode, PlatformError, ResourceAvailability, ResourceId, ResourceState,
+    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode,
+    PlatformError, ResourceAvailability, ResourceId, ResourceState, VersionId,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 use std::str::FromStr;
 
-/// Immutable binding row frozen into one deployment.
+/// Immutable binding row frozen into one version.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeploymentBindingRecord {
+pub struct VersionBindingRecord {
     /// Binding identity.
     pub id: BindingId,
-    /// Owning immutable deployment.
-    pub deployment_id: DeploymentId,
+    /// Owning immutable version.
+    pub version_id: VersionId,
     /// Tenant environment name.
     pub name: String,
     /// Static adapter kind.
@@ -35,9 +35,9 @@ pub struct DeploymentBindingRecord {
     pub created_at_ms: i64,
 }
 
-/// Binding input inserted in the same transaction as a staging deployment.
+/// Binding input inserted in the same transaction as a staging version.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NewDeploymentBinding {
+pub struct NewVersionBinding {
     /// Platform-generated binding identity.
     pub id: BindingId,
     /// Tenant environment name.
@@ -62,10 +62,10 @@ pub struct NewDeploymentBinding {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthorizedBinding {
     /// Immutable binding row.
-    pub binding: DeploymentBindingRecord,
+    pub binding: VersionBindingRecord,
     /// Current resource authority row.
     pub resource: ResourceRecord,
-    /// Owning account resolved through the deployment Worker.
+    /// Owning account resolved through the version Worker.
     pub account_id: AccountId,
 }
 
@@ -83,31 +83,31 @@ impl<'a> BindingRepository<'a> {
     }
 
     /// Read canonical bindings for descriptor reconstruction.
-    pub fn deployment_bindings(
+    pub fn version_bindings(
         &self,
-        deployment_id: DeploymentId,
-    ) -> Result<Vec<DeploymentBindingRecord>, PlatformError> {
+        version_id: VersionId,
+    ) -> Result<Vec<VersionBindingRecord>, PlatformError> {
         self.db
-            .with_read(|conn| read_deployment_bindings_conn(conn, deployment_id))
+            .with_read(|conn| read_version_bindings_conn(conn, version_id))
     }
 
     /// Authorize one backend call from persisted immutable authority.
     pub fn authorize(
         &self,
         binding_id: BindingId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         descriptor_sha256: &[u8; 32],
     ) -> Result<AuthorizedBinding, PlatformError> {
         self.db.with_read(|conn| {
             let row: Option<(
-                DeploymentBindingRecord,
+                VersionBindingRecord,
                 ResourceRecord,
                 AccountId,
                 String,
                 bool,
             )> = conn
                 .query_row(
-                    "SELECT b.id, b.deployment_id, b.name, b.kind, b.resource_id,
+                    "SELECT b.id, b.version_id, b.name, b.kind, b.resource_id,
                             b.resource_spec_generation, b.capability_version,
                             b.permissions_json, b.config_json, b.descriptor_sha256, b.created_at_ms,
                             r.id, r.account_id, r.kind, r.name, r.state, r.availability,
@@ -116,40 +116,40 @@ impl<'a> BindingRepository<'a> {
                             w.account_id, d.state,
                             EXISTS(SELECT 1 FROM resource_referrers rr
                               WHERE rr.resource_id = b.resource_id
-                                AND rr.referrer_kind = 'deployment_binding'
+                                AND rr.referrer_kind = 'version_binding'
                                 AND rr.referrer_id = b.id)
-                     FROM deployment_bindings b
-                     JOIN worker_deployments d ON d.id = b.deployment_id
+                     FROM version_bindings b
+                     JOIN worker_versions d ON d.id = b.version_id
                      JOIN workers w ON w.id = d.worker_id
                      JOIN resources r ON r.id = b.resource_id
-                     WHERE b.id = ?1 AND b.deployment_id = ?2",
-                    params![binding_id.to_string(), deployment_id.to_string()],
+                     WHERE b.id = ?1 AND b.version_id = ?2",
+                    params![binding_id.to_string(), version_id.to_string()],
                     |row| {
                         let binding = map_binding_offset(row, 0)?;
                         let resource = map_resource_offset(row, 11)?;
                         let account: String = row.get(23)?;
-                        let deployment_state: String = row.get(24)?;
+                        let version_state: String = row.get(24)?;
                         let referrer: bool = row.get(25)?;
                         Ok((
                             binding,
                             resource,
                             AccountId::from_str(&account)
                                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                            deployment_state,
+                            version_state,
                             referrer,
                         ))
                     },
                 )
                 .optional()
                 .map_err(|_| db_error())?;
-            let Some((binding, resource, account_id, deployment_state, referrer)) = row else {
+            let Some((binding, resource, account_id, version_state, referrer)) = row else {
                 return Err(PlatformError::new(
                     ErrorCode::BindingNotFound,
                     "binding authority was not found",
                 ));
             };
             if binding.descriptor_sha256 != *descriptor_sha256
-                || deployment_state != DeploymentState::Ready.as_str()
+                || version_state != VersionState::Ready.as_str()
                 || binding.kind != resource.kind
                 || binding.resource_spec_generation != resource.spec_generation
                 || account_id != resource.account_id
@@ -181,29 +181,29 @@ impl<'a> BindingRepository<'a> {
     }
 }
 
-pub(crate) fn read_deployment_bindings_conn(
+pub(crate) fn read_version_bindings_conn(
     conn: &rusqlite::Connection,
-    deployment_id: DeploymentId,
-) -> Result<Vec<DeploymentBindingRecord>, PlatformError> {
+    version_id: VersionId,
+) -> Result<Vec<VersionBindingRecord>, PlatformError> {
     let mut statement = conn
         .prepare(
-            "SELECT b.id, b.deployment_id, b.name, b.kind, b.resource_id,
+            "SELECT b.id, b.version_id, b.name, b.kind, b.resource_id,
                     b.resource_spec_generation, b.capability_version,
                     b.permissions_json, b.config_json, b.descriptor_sha256, b.created_at_ms,
                     r.kind, r.spec_generation, r.state, r.account_id, w.account_id,
                     EXISTS(SELECT 1 FROM resource_referrers rr
                       WHERE rr.resource_id = b.resource_id
-                        AND rr.referrer_kind = 'deployment_binding'
+                        AND rr.referrer_kind = 'version_binding'
                         AND rr.referrer_id = b.id)
-             FROM deployment_bindings b
+             FROM version_bindings b
              JOIN resources r ON r.id = b.resource_id
-             JOIN worker_deployments d ON d.id = b.deployment_id
+             JOIN worker_versions d ON d.id = b.version_id
              JOIN workers w ON w.id = d.worker_id
-             WHERE b.deployment_id = ?1 ORDER BY b.name, b.id",
+             WHERE b.version_id = ?1 ORDER BY b.name, b.id",
         )
         .map_err(|_| db_error())?;
     let rows = statement
-        .query_map([deployment_id.to_string()], |row| {
+        .query_map([version_id.to_string()], |row| {
             let binding = map_binding(row)?;
             let resource_kind: String = row.get(11)?;
             let resource_generation: i64 = row.get(12)?;
@@ -229,20 +229,20 @@ pub(crate) fn read_deployment_bindings_conn(
 
 pub(crate) fn insert_staging_bindings(
     tx: &Transaction<'_>,
-    deployment_id: DeploymentId,
-    bindings: &[NewDeploymentBinding],
+    version_id: VersionId,
+    bindings: &[NewVersionBinding],
     now_ms: i64,
 ) -> Result<(), PlatformError> {
     for binding in bindings {
         tx.execute(
-            "INSERT INTO deployment_bindings
-             (id, deployment_id, name, kind, resource_id, resource_spec_generation,
+            "INSERT INTO version_bindings
+             (id, version_id, name, kind, resource_id, resource_spec_generation,
               capability_version, permissions_json, config_json, descriptor_sha256,
               created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 binding.id.to_string(),
-                deployment_id.to_string(),
+                version_id.to_string(),
                 binding.name,
                 binding.kind.as_str(),
                 binding.resource_id.to_string(),
@@ -264,16 +264,16 @@ pub(crate) fn insert_staging_bindings(
     Ok(())
 }
 
-fn map_binding(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentBindingRecord> {
+fn map_binding(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionBindingRecord> {
     map_binding_offset(row, 0)
 }
 
 fn map_binding_offset(
     row: &rusqlite::Row<'_>,
     offset: usize,
-) -> rusqlite::Result<DeploymentBindingRecord> {
+) -> rusqlite::Result<VersionBindingRecord> {
     let id: String = row.get(offset)?;
-    let deployment: String = row.get(offset + 1)?;
+    let version: String = row.get(offset + 1)?;
     let kind: String = row.get(offset + 3)?;
     let resource: String = row.get(offset + 4)?;
     let generation: i64 = row.get(offset + 5)?;
@@ -291,10 +291,9 @@ fn map_binding_offset(
     {
         return Err(rusqlite::Error::InvalidQuery);
     }
-    Ok(DeploymentBindingRecord {
+    Ok(VersionBindingRecord {
         id: BindingId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        deployment_id: DeploymentId::from_str(&deployment)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(offset + 2)?,
         kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
         resource_id: ResourceId::from_str(&resource).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -348,8 +347,8 @@ fn collect_rows<T>(
 
 fn binding_invariant() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentInvariantViolation,
-        "persisted deployment binding invariant failed",
+        ErrorCode::VersionInvariantViolation,
+        "persisted version binding invariant failed",
     )
 }
 

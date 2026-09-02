@@ -19,10 +19,10 @@ use open_compute_storage::{
     DO_NAMESPACE_SCHEMA_VERSION, QueueContentType, SchedulerStore, WorkerRepository, WorkflowTarget,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    CreateResourceOutcome, CreateResourceRequest, DeploymentBindingInput, DeploymentContent,
-    DeploymentController, DeploymentServiceInput, DurableObjectResourceDriver, ModuleInput,
-    ModuleType, ResourceController, ResourcePins, RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
+    CreateVersionOutcome, CreateVersionRequest, DurableObjectResourceDriver, ModuleInput,
+    ModuleType, ResourceController, ResourcePins, RuntimeValidator, VersionBindingInput,
+    VersionContent, VersionController, VersionServiceInput,
 };
 use p3_services_support::Harness;
 use std::collections::BTreeMap;
@@ -114,7 +114,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         )
         .unwrap(),
     );
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &harness.storage,
         harness.artifacts.clone(),
         validator,
@@ -124,9 +124,9 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         harness.storage.clone(),
         scheduler,
     ));
-    let _target_deployment = deploy(
+    let _target_version = deploy(
         &controller,
-        deployment_request(
+        version_request(
             account,
             target.id,
             "service-event-target-v1",
@@ -137,14 +137,14 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         ),
     )
     .await;
-    let mut event_request = deployment_request(
+    let mut event_request = version_request(
         account,
         events.id,
         "service-event-sources-v1",
         EVENTS,
         BTreeMap::from([(
             "OBJECT".to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::DoNamespace,
                 id: namespace,
                 permissions: CanonicalPermissions::default(),
@@ -153,7 +153,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         )]),
         BTreeMap::from([(
             "TARGET".to_owned(),
-            DeploymentServiceInput {
+            VersionServiceInput {
                 target_worker_id: target.id,
                 entrypoint: None,
             },
@@ -161,8 +161,8 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         2,
     );
     event_request.crons = vec!["* * * * *".to_owned()];
-    let event_deployment = deploy(&controller, event_request).await;
-    let dispatch_target = dispatch_target(account, events.id, &event_deployment, None);
+    let event_version = deploy(&controller, event_request).await;
+    let dispatch_target = dispatch_target(account, events.id, &event_version, None);
 
     let message_id = QueueMessageId::generate();
     let queue = harness
@@ -229,10 +229,10 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
         account_id: account,
         definition_id: WorkflowId::generate(),
         definition_name: "service-events".to_owned(),
-        version_id: WorkflowVersionId::generate(),
+        workflow_version_id: WorkflowVersionId::generate(),
         worker_id: events.id,
-        deployment_id: event_deployment.id,
-        worker_code_sha256: event_deployment.worker_code_sha256,
+        worker_version_id: event_version.id,
+        worker_code_sha256: event_version.worker_code_sha256,
         class_name: "Flow".to_owned(),
         loader_schema_version: 1,
         capability_version: 1,
@@ -297,15 +297,15 @@ fn create_namespace(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn deployment_request(
+fn version_request(
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
     source: &str,
-    bindings: BTreeMap<String, DeploymentBindingInput>,
-    services: BTreeMap<String, DeploymentServiceInput>,
+    bindings: BTreeMap<String, VersionBindingInput>,
+    services: BTreeMap<String, VersionServiceInput>,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -316,11 +316,11 @@ fn deployment_request(
         BundleLimits::default(),
     )
     .unwrap();
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: DeploymentContent::Worker {
+        content: VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -338,26 +338,26 @@ fn deployment_request(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
-) -> open_compute_storage::DeploymentRecord {
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
+) -> open_compute_storage::VersionRecord {
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
 fn dispatch_target(
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     entrypoint: Option<&str>,
 ) -> DispatchTarget {
     DispatchTarget {
         account_id,
         worker_id,
-        deployment_id: deployment.id,
-        worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+        version_id: version.id,
+        worker_code_sha256: hex::encode(version.worker_code_sha256),
         entrypoint: entrypoint.map(str::to_owned),
         route_generation: 1,
         request_id: RequestId::generate(),

@@ -48,7 +48,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
         original.transport.clone(),
         Default::default(),
     )
-    .create_version(account, definition.id, target.deployment_id, "Flow".into())
+    .create_version(account, definition.id, target.version_id, "Flow".into())
     .await
     .unwrap();
     let controller = WorkflowController::new(&original.storage, &store, &config);
@@ -100,7 +100,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
             .completed_step_count,
         1
     );
-    let durable = durable::prepare(&original.storage, &store, &config, target.deployment_id);
+    let durable = durable::prepare(&original.storage, &store, &config, target.version_id);
     // Lose only the terminal observation: no callback result is lost. Maintenance stops
     // all producers/runtime I/O before the two standalone database copies are prepared.
     original.quiesce().await;

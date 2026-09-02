@@ -14,7 +14,7 @@ use open_compute_core::{WorkflowFence, WorkflowInstanceId, WorkflowToken};
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_service::runtime_bridge::{WorkflowOutcome, WorkflowRunRequest};
 use open_compute_service::workflow_http::WorkflowApiState;
-use open_compute_storage::{DeploymentState, SchedulerStore, WorkflowRepository};
+use open_compute_storage::{SchedulerStore, VersionState, WorkflowRepository};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -560,14 +560,14 @@ async fn workflow_runtime_suspension_timeout_parallel_and_native_errors() {
         Default::default(),
     );
     let current = api
-        .create_version(account, definition.id, target.deployment_id, "Flow".into())
+        .create_version(account, definition.id, target.version_id, "Flow".into())
         .await
         .unwrap();
-    assert_eq!(current.state, DeploymentState::Ready);
+    assert_eq!(current.state, VersionState::Ready);
     assert_eq!(current.target.capability_version, 1);
     assert_eq!(
         repository
-            .version(account, current.target.version_id)
+            .version(account, current.target.workflow_version_id)
             .unwrap()
             .target,
         current.target

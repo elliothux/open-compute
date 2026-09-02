@@ -13,7 +13,7 @@ use open_compute_core::{
     PlatformConfig,
 };
 use open_compute_storage::AiSearchObjectReference;
-use open_compute_storage::{DeploymentBindingRecord, ResourceRecord, StagedAiSearchChunk};
+use open_compute_storage::{ResourceRecord, StagedAiSearchChunk, VersionBindingRecord};
 use open_compute_workers::{AiSearchNamespaceResourceDriver, CreateResourceOutcome, ResourcePins};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
@@ -436,10 +436,9 @@ struct SearchBehaviorFixture {
 
 impl SearchBehaviorFixture {
     async fn create() -> Self {
-        let runtime = RuntimeFeatureFixture::create(
-            open_compute_workers::DeploymentRuntimeFeatures::default(),
-        )
-        .await;
+        let runtime =
+            RuntimeFeatureFixture::create(open_compute_workers::VersionRuntimeFeatures::default())
+                .await;
         let pins = ResourcePins::new();
         let namespace_id = match ResourceController::new(
             &runtime.storage,
@@ -491,9 +490,9 @@ impl SearchBehaviorFixture {
         let resource_id = resource.id;
         Authority {
             binding: AuthorizedBinding {
-                binding: DeploymentBindingRecord {
+                binding: VersionBindingRecord {
                     id: BindingId::generate(),
-                    deployment_id: DeploymentId::generate(),
+                    version_id: VersionId::generate(),
                     name: "SEARCH".to_owned(),
                     kind,
                     resource_id,

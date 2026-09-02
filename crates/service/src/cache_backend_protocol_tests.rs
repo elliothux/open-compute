@@ -24,7 +24,7 @@ fn request_policy_and_error_helpers_cover_the_complete_protocol_matrix() {
     let authority = CacheAuthority {
         account: AccountId::generate(),
         worker: WorkerId::generate(),
-        deployment: DeploymentId::generate(),
+        version: VersionId::generate(),
         entrypoint: "main_$1".to_owned(),
         automatic_enabled: true,
         cross_version_cache: false,
@@ -43,7 +43,7 @@ fn request_policy_and_error_helpers_cover_the_complete_protocol_matrix() {
     .unwrap();
     assert_eq!(automatic.0.surface, CacheSurface::Automatic);
     assert_eq!(automatic.0.entrypoint.as_deref(), Some("main_$1"));
-    assert_eq!(automatic.0.version_scope, authority.deployment.to_string());
+    assert_eq!(automatic.0.version_scope, authority.version.to_string());
     assert_eq!(automatic.0.canonical_url, "https://example.test/path");
     assert_eq!(automatic.1["accept-language"], "en, fr");
 

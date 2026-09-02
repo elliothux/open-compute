@@ -58,7 +58,7 @@ fn p1_local_runners_and_runbooks_are_complete_and_safe() {
         "canonical bundle",
         "binding descriptor",
         "request metadata/header bridge",
-        "resource/deployment/cursor ID codec",
+        "resource/version/cursor ID codec",
         "facade RPC frame/structured value",
         "KV cursor and metadata",
         "D1 SQL authorizer and result encoder",

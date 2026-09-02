@@ -54,7 +54,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
         Duration::from_millis(100),
     ));
     let validator: Arc<dyn RuntimeValidator> = Arc::new(|_: ValidationCandidate| async { Ok(()) });
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         open_compute_artifacts::ArtifactStore::new(client),
         validator,
@@ -72,12 +72,12 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
         BundleLimits::default(),
     )
     .unwrap();
-    let CreateDeploymentOutcome::Applied(result) = controller
-        .create_deployment(CreateDeploymentRequest {
+    let CreateVersionOutcome::Applied(result) = controller
+        .create_version(CreateVersionRequest {
             account_id: account,
             worker_id: worker.id,
-            idempotency_key: "epoch-deployment".into(),
-            content: open_compute_workers::DeploymentContent::Worker {
+            idempotency_key: "epoch-version".into(),
+            content: open_compute_workers::VersionContent::Worker {
                 bundle: bundle.into_bytes().into(),
                 assets: None,
             },
@@ -100,7 +100,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
         .await
         .unwrap()
     else {
-        panic!("deployment must be new")
+        panic!("version must be new")
     };
     let consumer = open_compute_storage::QueueConsumerRepository::new(storage.db())
         .live_for_queue(queue.queue.id)
@@ -150,7 +150,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
         .promote(ProductPromotionRequest {
             account_id: account,
             worker_id: worker.id,
-            deployment_id: result.deployment.id,
+            version_id: result.version.id,
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_002,
         })

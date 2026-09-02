@@ -1,11 +1,11 @@
-//! Queue consumer and Cron deployment product validation.
+//! Queue consumer and Cron version product validation.
 
 use super::*;
 
-impl DeploymentController<'_> {
+impl VersionController<'_> {
     pub(super) fn prepare_queue_consumers(
         &self,
-        request: &CreateDeploymentRequest,
+        request: &CreateVersionRequest,
     ) -> Result<Vec<NewQueueConsumerDeclaration>, PlatformError> {
         let queues = QueueRepository::new(self.storage.db());
         let mut seen = HashSet::new();
@@ -14,7 +14,7 @@ impl DeploymentController<'_> {
             if !seen.insert(input.queue) {
                 return Err(PlatformError::new(
                     ErrorCode::QueueConsumerConflict,
-                    "deployment declares the same Queue consumer more than once",
+                    "version declares the same Queue consumer more than once",
                 ));
             }
             validate_entrypoint(input.entrypoint.as_deref())?;
@@ -80,15 +80,13 @@ impl DeploymentController<'_> {
     }
 }
 
-pub(super) fn validate_product_counts(
-    request: &CreateDeploymentRequest,
-) -> Result<(), PlatformError> {
-    if request.queue_consumers.len() > MAX_QUEUE_CONSUMERS_PER_DEPLOYMENT
-        || request.crons.len() > MAX_CRONS_PER_DEPLOYMENT
+pub(super) fn validate_product_counts(request: &CreateVersionRequest) -> Result<(), PlatformError> {
+    if request.queue_consumers.len() > MAX_QUEUE_CONSUMERS_PER_VERSION
+        || request.crons.len() > MAX_CRONS_PER_VERSION
     {
         return Err(PlatformError::new(
             ErrorCode::QuotaExceeded,
-            "deployment contains too many Queue consumers or Cron triggers",
+            "version contains too many Queue consumers or Cron triggers",
         ));
     }
     Ok(())
@@ -115,7 +113,7 @@ fn validate_entrypoint(entrypoint: Option<&str>) -> Result<(), PlatformError> {
 }
 
 pub(super) fn prepare_cron_config(
-    request: &CreateDeploymentRequest,
+    request: &CreateVersionRequest,
     workflow_bindings: &[open_compute_storage::WorkflowBindingDescriptor],
 ) -> Result<NewCronConfig, PlatformError> {
     let mut targets: BTreeMap<String, (bool, Vec<String>)> = BTreeMap::new();
@@ -131,10 +129,10 @@ pub(super) fn prepare_cron_config(
                 .push(binding.name.clone());
         }
     }
-    if targets.len() > MAX_CRONS_PER_DEPLOYMENT {
+    if targets.len() > MAX_CRONS_PER_VERSION {
         return Err(PlatformError::new(
             ErrorCode::QuotaExceeded,
-            "deployment contains too many Cron triggers",
+            "version contains too many Cron triggers",
         ));
     }
     let mut declarations = Vec::with_capacity(targets.len());

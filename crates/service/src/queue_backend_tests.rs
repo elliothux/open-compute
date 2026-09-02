@@ -10,7 +10,7 @@ fn private_request(method: &str, path: &str, content_type: Option<&str>, body: V
         .uri(path)
         .header(REQUEST_HEADER, "550e8400-e29b-41d4-a716-446655440000")
         .header(OUTPUT_GATE_HEADER, "0")
-        .header(DEPLOYMENT_HEADER, DeploymentId::generate().to_string())
+        .header(VERSION_HEADER, VersionId::generate().to_string())
         .header(DESCRIPTOR_HEADER, "00".repeat(32));
     if let Some(content_type) = content_type {
         builder = builder.header(header::CONTENT_TYPE, content_type);
@@ -234,15 +234,15 @@ async fn queue_backend_rejects_every_unauthorized_protocol_shape_before_mutation
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let mut missing_deployment = private_request(
+    let mut missing_version = private_request(
         "POST",
         &send,
         Some(FRAME_CONTENT_TYPE),
         frame(1, -1, &[(2, -1, b"message")]),
     );
-    missing_deployment.headers_mut().remove(DEPLOYMENT_HEADER);
+    missing_version.headers_mut().remove(VERSION_HEADER);
     assert_eq!(
-        backend.handle(missing_deployment).await.status(),
+        backend.handle(missing_version).await.status(),
         StatusCode::BAD_REQUEST
     );
 

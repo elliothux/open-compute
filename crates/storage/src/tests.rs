@@ -5,17 +5,17 @@ use crate::fs as sfs;
 use crate::master_key;
 use crate::migrations::MigrationFault;
 use crate::{
-    DataDir, DeploymentState, IdempotencyReservation, NewDeployment, NewQueueConsumerDeclaration,
-    PlatformStorage, QueueConsumerConfig, QueueConsumerRepository, ReserveResourceCreate,
-    ResourceCreateReservation, ResourceRepository, SYSTEM_DASHBOARD_WORKER_NAME, SecretCrypto,
-    StoredDeploymentSecret, SystemOwnedDeploymentKind, WorkerRepository, atomic_write,
+    DataDir, IdempotencyReservation, NewQueueConsumerDeclaration, NewVersion, PlatformStorage,
+    QueueConsumerConfig, QueueConsumerRepository, ReserveResourceCreate, ResourceCreateReservation,
+    ResourceRepository, SYSTEM_DASHBOARD_WORKER_NAME, SecretCrypto, StoredVersionSecret,
+    SystemOwnedVersionKind, VersionState, WorkerRepository, atomic_write,
     inspect_durable_object_storage,
 };
 use open_compute_core::clock::{DeterministicClock, SystemClock};
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{
-    AccountId, BindingKind, DeploymentId, ErrorCode, HardeningConfig, PlatformReleaseIdentityV1,
-    QueueConsumerId, ResourceId, SecretBytes, WorkerId,
+    AccountId, BindingKind, ErrorCode, HardeningConfig, PlatformReleaseIdentityV1, QueueConsumerId,
+    ResourceId, SecretBytes, VersionId, WorkerId,
 };
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -88,7 +88,7 @@ fn p1_control_inventory_returns_only_fixed_aggregate_counts() {
     let empty = crate::inspect_control_inventory(storage.db()).unwrap();
     assert_eq!(empty.accounts, 1);
     assert_eq!(empty.workers, 0);
-    assert_eq!(empty.deployments, 0);
+    assert_eq!(empty.versions, 0);
     assert_eq!(empty.routes, 0);
     assert_eq!(empty.kv_namespaces, 0);
 
@@ -602,11 +602,11 @@ fn exact_layout_and_no_future_files() {
 }
 
 #[test]
-fn deployment_staging_is_private_and_crash_residue_is_cleared_under_lock() {
+fn version_staging_is_private_and_crash_residue_is_cleared_under_lock() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).expect("boot");
-    let staging = storage.data_dir().deployment_staging_dir();
+    let staging = storage.data_dir().version_staging_dir();
     assert_eq!(
         fs::metadata(&staging).unwrap().permissions().mode() & 0o777,
         0o700
@@ -1297,7 +1297,7 @@ fn inspect_control_db_accepts_uri_special_path_chars() {
 }
 
 #[test]
-fn snapshot_deployment_artifact_inventory_uses_the_canonical_sharded_key() {
+fn snapshot_version_artifact_inventory_uses_the_canonical_sharded_key() {
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
@@ -1307,23 +1307,25 @@ fn snapshot_deployment_artifact_inventory_uses_the_canonical_sharded_key() {
     let (worker, _) = repo
         .create_worker(account, "snapshot-key", request, 1, 1_000_000)
         .unwrap();
-    repo.insert_staging_deployment(
-        &NewDeployment {
-            id: DeploymentId::generate(),
+    repo.insert_staging_version(
+        &NewVersion {
+            id: VersionId::generate(),
             account_id: account,
             worker_id: worker.id,
-            content_kind: crate::DeploymentContentKind::Worker,
+            content_kind: crate::VersionContentKind::Worker,
             artifact_sha256: Some([1; 32]),
             artifact_size: Some(123),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: [2; 32],
+            compatibility_date: "2026-08-30".into(),
+            compatibility_flags: Vec::new(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,
             now_ms: 2,
         },
-        &crate::NewDeploymentProducts::default(),
+        &crate::NewVersionProducts::default(),
         1_000_000,
     )
     .unwrap();
@@ -1336,7 +1338,7 @@ fn snapshot_deployment_artifact_inventory_uses_the_canonical_sharded_key() {
     )
     .unwrap();
     assert_eq!(references.len(), 1);
-    assert_eq!(references[0].role, "deployment_artifact");
+    assert_eq!(references[0].role, "version_artifact");
     assert_eq!(
         references[0].object_key,
         format!("system/artifacts/v1/sha256/01/{}", "01".repeat(31))
@@ -1365,7 +1367,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
         ErrorCode::WorkerNameConflict
     );
 
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let revision = uuid::Uuid::now_v7().to_string();
     let envelope = storage
         .crypto()
@@ -1373,7 +1375,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
             &SecretBytes::new(b"never-persist-plaintext".to_vec()),
             account,
             worker.id,
-            deployment,
+            version,
             "API_TOKEN",
             &revision,
         )
@@ -1383,47 +1385,49 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
     let mut secrets = BTreeMap::new();
     secrets.insert(
         "API_TOKEN".to_owned(),
-        StoredDeploymentSecret {
+        StoredVersionSecret {
             name: "API_TOKEN".to_owned(),
             revision_id: revision.clone(),
             envelope,
         },
     );
     let created = repo
-        .insert_staging_deployment(
-            &NewDeployment {
-                id: deployment,
+        .insert_staging_version(
+            &NewVersion {
+                id: version,
                 account_id: account,
                 worker_id: worker.id,
-                content_kind: crate::DeploymentContentKind::Worker,
+                content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([1; 32]),
                 artifact_size: Some(123),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
                 worker_code_sha256: [2; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars,
                 secrets,
                 request_id: request,
                 now_ms: 2_000,
             },
-            &crate::NewDeploymentProducts::default(),
+            &crate::NewVersionProducts::default(),
             1_000_000,
         )
         .unwrap();
     assert_eq!(created.version_number, 1);
-    assert_eq!(created.state, DeploymentState::Staging);
-    repo.begin_validation(deployment).unwrap();
-    repo.mark_ready(deployment, 2_100).unwrap();
+    assert_eq!(created.state, VersionState::Staging);
+    repo.begin_validation(version).unwrap();
+    repo.mark_ready(version, 2_100).unwrap();
     let promoted = repo
-        .promote(account, worker.id, deployment, None, request, 2_200)
+        .promote(account, worker.id, version, None, request, 2_200)
         .unwrap();
-    assert_eq!(promoted.active_deployment_id, Some(deployment));
+    assert_eq!(promoted.active_version_id, Some(version));
     let resolved = repo
         .resolve_route(None, &format!("{}path", route.path_prefix))
         .unwrap();
-    assert_eq!(resolved.deployment.id, deployment);
+    assert_eq!(resolved.version.id, version);
     let snapshot = repo
-        .deployment_snapshot(account, worker.id, deployment, false)
+        .version_snapshot(account, worker.id, version, false)
         .unwrap();
     let secret = snapshot.secrets.get("API_TOKEN").unwrap();
     let plaintext = storage
@@ -1432,7 +1436,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
             &secret.envelope,
             account,
             worker.id,
-            deployment,
+            version,
             "API_TOKEN",
             &revision,
         )
@@ -1443,17 +1447,17 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
     let conn = Connection::open(&db_path).unwrap();
     assert!(
         conn.execute(
-            "UPDATE worker_deployments SET main_module = 'changed.js' WHERE id = ?1",
-            [deployment.to_string()],
+            "UPDATE worker_versions SET main_module = 'changed.js' WHERE id = ?1",
+            [version.to_string()],
         )
         .is_err()
     );
     drop(conn);
     assert_eq!(
-        repo.tombstone_deployment(account, worker.id, deployment, request, 3_000)
+        repo.tombstone_version(account, worker.id, version, request, 3_000)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentActive
+        ErrorCode::VersionActive
     );
 
     let fingerprint = storage.crypto().fingerprint_request(b"canonical request");
@@ -1530,40 +1534,37 @@ fn p0_2_delete_referrer_recovery_and_worker_identity_are_fenced() {
         .unwrap();
     let b = insert_ready(&repo, account, worker.id, [9; 32], request, 12);
 
-    repo.add_deployment_referrer(b, "control_idempotency", "safe-ref", 13)
+    repo.add_version_referrer(b, "control_idempotency", "safe-ref", 13)
         .unwrap();
-    assert_eq!(repo.deployment_referrers(b).unwrap().len(), 1);
+    assert_eq!(repo.version_referrers(b).unwrap().len(), 1);
     assert_eq!(
-        repo.begin_deployment_delete(account, worker.id, b)
+        repo.begin_version_delete(account, worker.id, b)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentReferenced
+        ErrorCode::VersionReferenced
     );
-    repo.remove_deployment_referrer(b, "control_idempotency", "safe-ref")
+    repo.remove_version_referrer(b, "control_idempotency", "safe-ref")
         .unwrap();
-    repo.begin_deployment_delete(account, worker.id, b).unwrap();
-    assert_eq!(repo.deleting_deployments().unwrap(), vec![b]);
+    repo.begin_version_delete(account, worker.id, b).unwrap();
+    assert_eq!(repo.deleting_versions().unwrap(), vec![b]);
     drop(storage); // crash boundary: deleting is committed, finalization is retryable.
 
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
     let repo = WorkerRepository::new(storage.db());
-    assert_eq!(repo.deleting_deployments().unwrap(), vec![b]);
+    assert_eq!(repo.deleting_versions().unwrap(), vec![b]);
+    assert_eq!(repo.recover_deleting_versions(request, 20, 64).unwrap(), 1);
+    assert!(repo.deleting_versions().unwrap().is_empty());
     assert_eq!(
-        repo.recover_deleting_deployments(request, 20, 64).unwrap(),
-        1
-    );
-    assert!(repo.deleting_deployments().unwrap().is_empty());
-    assert_eq!(
-        repo.get_deployment(account, worker.id, b).unwrap().state,
-        DeploymentState::Tombstoned
+        repo.get_version(account, worker.id, b).unwrap().state,
+        VersionState::Tombstoned
     );
     let refs = repo.referenced_artifacts().unwrap();
     assert_eq!(refs, vec![([9; 32], 100)]);
     assert_eq!(
-        repo.begin_deployment_delete(account, worker.id, a)
+        repo.begin_version_delete(account, worker.id, a)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentActive
+        ErrorCode::VersionActive
     );
 
     let old = insert_ready(&repo, account, worker.id, [7; 32], request, 40);
@@ -1572,20 +1573,20 @@ fn p0_2_delete_referrer_recovery_and_worker_identity_are_fenced() {
     assert!(
         candidates
             .iter()
-            .any(|candidate| candidate.deployment_id == old)
+            .any(|candidate| candidate.version_id == old)
     );
     assert!(
         !candidates
             .iter()
-            .any(|candidate| candidate.deployment_id == newest)
+            .any(|candidate| candidate.version_id == newest)
     );
 
     let expected = repo
-        .list_deployments(account, worker.id)
+        .list_versions(account, worker.id)
         .unwrap()
         .into_iter()
-        .filter(|deployment| deployment.deleted_at_ms.is_none())
-        .map(|deployment| deployment.id)
+        .filter(|version| version.deleted_at_ms.is_none())
+        .map(|version| version.id)
         .collect::<Vec<_>>();
     repo.delete_worker(account, worker.id, &expected, request, 30)
         .unwrap();
@@ -1650,7 +1651,7 @@ fn p0_2_concurrent_promotions_have_one_linearization_winner() {
     let loser = left.err().or_else(|| right.err()).unwrap();
     assert_eq!(loser.code(), ErrorCode::IdempotencyConflict);
     let current = repo.get_worker(account, worker.id).unwrap();
-    assert!(matches!(current.active_deployment_id, Some(id) if id == b || id == c));
+    assert!(matches!(current.active_version_id, Some(id) if id == b || id == c));
     assert_eq!(current.route_generation, generation + 1);
 }
 
@@ -2059,20 +2060,20 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert!(crate::ControlDb::open(Path::new("/"), 100).is_err());
 
     use crate::workers::{
-        array32, db_error, deployment_not_found, idempotency_ref_id, invariant, route_not_found,
-        validate_exact_route, validate_referrer, validate_worker_name, worker_not_found,
+        array32, db_error, idempotency_ref_id, invariant, route_not_found, validate_exact_route,
+        validate_referrer, validate_worker_name, version_not_found, worker_not_found,
     };
     for state in [
-        DeploymentState::Staging,
-        DeploymentState::Validating,
-        DeploymentState::Ready,
-        DeploymentState::Rejected,
-        DeploymentState::Deleting,
-        DeploymentState::Tombstoned,
+        VersionState::Staging,
+        VersionState::Validating,
+        VersionState::Ready,
+        VersionState::Rejected,
+        VersionState::Deleting,
+        VersionState::Tombstoned,
     ] {
-        assert_eq!(DeploymentState::parse(state.as_str()).unwrap(), state);
+        assert_eq!(VersionState::parse(state.as_str()).unwrap(), state);
     }
-    assert!(DeploymentState::parse("bad").is_err());
+    assert!(VersionState::parse("bad").is_err());
     assert_eq!(
         crate::RouteKind::parse("platform_path").unwrap(),
         crate::RouteKind::PlatformPath
@@ -2106,9 +2107,9 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
     assert!(array32(&[0_u8; 32]).is_ok());
     assert!(array32(&[0_u8; 31]).is_err());
     assert_eq!(worker_not_found().code(), ErrorCode::WorkerNotFound);
-    assert_eq!(deployment_not_found().code(), ErrorCode::DeploymentNotFound);
+    assert_eq!(version_not_found().code(), ErrorCode::VersionNotFound);
     assert_eq!(route_not_found().code(), ErrorCode::RouteNotFound);
-    assert_eq!(invariant().code(), ErrorCode::DeploymentInvariantViolation);
+    assert_eq!(invariant().code(), ErrorCode::VersionInvariantViolation);
     assert_eq!(db_error().code(), ErrorCode::Internal);
 }
 
@@ -2179,25 +2180,27 @@ fn insert_ready(
     digest: [u8; 32],
     request: open_compute_core::RequestId,
     now: i64,
-) -> DeploymentId {
-    let id = DeploymentId::generate();
-    repo.insert_staging_deployment(
-        &NewDeployment {
+) -> VersionId {
+    let id = VersionId::generate();
+    repo.insert_staging_version(
+        &NewVersion {
             id,
             account_id: account,
             worker_id: worker,
-            content_kind: crate::DeploymentContentKind::Worker,
+            content_kind: crate::VersionContentKind::Worker,
             artifact_sha256: Some(digest),
             artifact_size: Some(100),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: digest,
+            compatibility_date: "2026-08-30".into(),
+            compatibility_flags: Vec::new(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,
             now_ms: now,
         },
-        &crate::NewDeploymentProducts::default(),
+        &crate::NewVersionProducts::default(),
         1_000_000,
     )
     .unwrap();
@@ -2224,15 +2227,15 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
         .promote(account, target.id, target_v1, None, request, 5)
         .unwrap();
 
-    let caller_deployment = DeploymentId::generate();
+    let caller_version = VersionId::generate();
     let descriptor = [7; 32];
-    let service = crate::NewDeploymentService {
+    let service = crate::NewVersionService {
         binding_name: "CATALOG".to_owned(),
         target_worker_id: target.id,
         entrypoint: Some("CatalogApi".to_owned()),
         descriptor_sha256: descriptor,
     };
-    let self_service = crate::NewDeploymentService {
+    let self_service = crate::NewVersionService {
         binding_name: "SELF".to_owned(),
         target_worker_id: caller.id,
         entrypoint: None,
@@ -2240,46 +2243,48 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
     };
     let declarations = [service, self_service];
     workers
-        .insert_staging_deployment(
-            &NewDeployment {
-                id: caller_deployment,
+        .insert_staging_version(
+            &NewVersion {
+                id: caller_version,
                 account_id: account,
                 worker_id: caller.id,
-                content_kind: crate::DeploymentContentKind::Worker,
+                content_kind: crate::VersionContentKind::Worker,
                 artifact_sha256: Some([2; 32]),
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".to_owned()),
                 worker_code_sha256: [3; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars: BTreeMap::new(),
                 secrets: BTreeMap::new(),
                 request_id: request,
                 now_ms: 6,
             },
-            &crate::NewDeploymentProducts {
+            &crate::NewVersionProducts {
                 services: &declarations,
-                ..crate::NewDeploymentProducts::default()
+                ..crate::NewVersionProducts::default()
             },
             1_000_000,
         )
         .unwrap();
-    workers.begin_validation(caller_deployment).unwrap();
-    workers.mark_ready(caller_deployment, 7).unwrap();
+    workers.begin_validation(caller_version).unwrap();
+    workers.mark_ready(caller_version, 7).unwrap();
     workers
-        .promote(account, caller.id, caller_deployment, None, request, 8)
+        .promote(account, caller.id, caller_version, None, request, 8)
         .unwrap();
 
     let services = crate::ServiceRepository::new(storage.db());
     let first = services
-        .resolve(caller_deployment, "CATALOG", &descriptor)
+        .resolve(caller_version, "CATALOG", &descriptor)
         .unwrap();
-    assert_eq!(first.target_deployment_id, target_v1);
+    assert_eq!(first.target_version_id, target_v1);
     assert_eq!(first.service.entrypoint.as_deref(), Some("CatalogApi"));
     assert_eq!(
         services.inbound_referrers(account, target.id, 10).unwrap(),
         vec![crate::ServiceReferrer {
             caller_worker_id: caller.id,
-            caller_deployment_id: caller_deployment,
+            caller_version_id: caller_version,
             binding_name: "CATALOG".to_owned(),
         }]
     );
@@ -2297,14 +2302,14 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
         .unwrap();
     assert_eq!(
         services
-            .resolve(caller_deployment, "CATALOG", &descriptor)
+            .resolve(caller_version, "CATALOG", &descriptor)
             .unwrap()
-            .target_deployment_id,
+            .target_version_id,
         target_v2
     );
     assert_eq!(
         services
-            .resolve(caller_deployment, "CATALOG", &[8; 32])
+            .resolve(caller_version, "CATALOG", &[8; 32])
             .unwrap_err()
             .code(),
         ErrorCode::ServiceBindingDenied
@@ -2314,10 +2319,10 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
             .delete_worker(account, caller.id, &[], request, 13)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentReferenced
+        ErrorCode::VersionReferenced
     );
     workers
-        .delete_worker(account, caller.id, &[caller_deployment], request, 14)
+        .delete_worker(account, caller.id, &[caller_version], request, 14)
         .unwrap();
 }
 
@@ -2343,26 +2348,28 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
         .create_worker(account, "consumer-race-b", request, 4, 1_000_000)
         .unwrap();
     let create_declaration = |worker_id: WorkerId, now_ms: i64| {
-        let deployment_id = DeploymentId::generate();
+        let version_id = VersionId::generate();
         let declaration_id = QueueConsumerId::generate();
         workers
-            .insert_staging_deployment(
-                &NewDeployment {
-                    id: deployment_id,
+            .insert_staging_version(
+                &NewVersion {
+                    id: version_id,
                     account_id: account,
                     worker_id,
-                    content_kind: crate::DeploymentContentKind::Worker,
+                    content_kind: crate::VersionContentKind::Worker,
                     artifact_sha256: Some([5; 32]),
                     artifact_size: Some(100),
                     artifact_schema_version: Some(1),
                     main_module: Some("index.js".to_owned()),
                     worker_code_sha256: [6; 32],
+                    compatibility_date: "2026-08-30".into(),
+                    compatibility_flags: Vec::new(),
                     vars: BTreeMap::new(),
                     secrets: BTreeMap::new(),
                     request_id: request,
                     now_ms,
                 },
-                &crate::NewDeploymentProducts {
+                &crate::NewVersionProducts {
                     queue_consumers: &[NewQueueConsumerDeclaration {
                         id: declaration_id,
                         queue_id,
@@ -2378,8 +2385,8 @@ fn queue_consumer_unique_index_serializes_concurrent_worker_attachments() {
                 10,
             )
             .unwrap();
-        workers.begin_validation(deployment_id).unwrap();
-        workers.mark_ready(deployment_id, now_ms + 1).unwrap();
+        workers.begin_validation(version_id).unwrap();
+        workers.mark_ready(version_id, now_ms + 1).unwrap();
         QueueConsumerRepository::new(storage.db())
             .declaration(declaration_id)
             .unwrap()
@@ -2453,49 +2460,44 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         .unwrap();
     let ready = insert_ready(&repo, account, worker.id, [3; 32], request, 10);
     assert_eq!(
-        repo.mark_rejected(ready, DeploymentState::Ready, ErrorCode::BundleInvalid, 12)
+        repo.mark_rejected(ready, VersionState::Ready, ErrorCode::BundleInvalid, 12)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentInvariantViolation
+        ErrorCode::VersionInvariantViolation
     );
     assert_eq!(
-        repo.begin_validation(DeploymentId::generate())
+        repo.begin_validation(VersionId::generate())
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotReady
+        ErrorCode::VersionNotReady
     );
     assert_eq!(
-        repo.promote(
-            account,
-            worker.id,
-            DeploymentId::generate(),
-            None,
-            request,
-            13,
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::DeploymentNotFound
+        repo.promote(account, worker.id, VersionId::generate(), None, request, 13,)
+            .unwrap_err()
+            .code(),
+        ErrorCode::VersionNotFound
     );
 
-    let staging = DeploymentId::generate();
-    repo.insert_staging_deployment(
-        &NewDeployment {
+    let staging = VersionId::generate();
+    repo.insert_staging_version(
+        &NewVersion {
             id: staging,
             account_id: account,
             worker_id: worker.id,
-            content_kind: crate::DeploymentContentKind::Worker,
+            content_kind: crate::VersionContentKind::Worker,
             artifact_sha256: Some([4; 32]),
             artifact_size: Some(100),
             artifact_schema_version: Some(1),
             main_module: Some("index.js".to_owned()),
             worker_code_sha256: [4; 32],
+            compatibility_date: "2026-08-30".into(),
+            compatibility_flags: Vec::new(),
             vars: BTreeMap::new(),
             secrets: BTreeMap::new(),
             request_id: request,
             now_ms: 14,
         },
-        &crate::NewDeploymentProducts::default(),
+        &crate::NewVersionProducts::default(),
         1_000_000,
     )
     .unwrap();
@@ -2503,7 +2505,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         repo.promote(account, worker.id, staging, None, request, 15)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotReady
+        ErrorCode::VersionNotReady
     );
     let foreign_account = AccountId::generate();
     storage
@@ -2542,7 +2544,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         repo.promote(account, worker.id, foreign_ready, None, request, 19)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotFound
+        ErrorCode::VersionNotFound
     );
     assert_eq!(
         repo.promote(
@@ -2558,16 +2560,16 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         ErrorCode::WorkerNotFound
     );
     assert_eq!(
-        repo.add_deployment_referrer(staging, "control_idempotency", "ref", 16)
+        repo.add_version_referrer(staging, "control_idempotency", "ref", 16)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotReady
+        ErrorCode::VersionNotReady
     );
     assert_eq!(
-        repo.add_deployment_referrer(DeploymentId::generate(), "control_idempotency", "ref", 16,)
+        repo.add_version_referrer(VersionId::generate(), "control_idempotency", "ref", 16,)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotReady
+        ErrorCode::VersionNotReady
     );
 
     let fingerprint = [9; 32];
@@ -2578,7 +2580,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         ErrorCode::IdempotencyConflict
     );
     assert_eq!(
-        repo.complete_idempotency_with_deployment_ref(
+        repo.complete_idempotency_with_version_ref(
             account,
             "scope",
             "missing",
@@ -2590,11 +2592,11 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         )
         .unwrap_err()
         .code(),
-        ErrorCode::DeploymentInvariantViolation
+        ErrorCode::VersionInvariantViolation
     );
     let expected_ref = crate::workers::idempotency_ref_id(account, "scope", "missing");
     assert_eq!(
-        repo.complete_idempotency_with_deployment_ref(
+        repo.complete_idempotency_with_version_ref(
             account,
             "scope",
             "missing",
@@ -2616,27 +2618,27 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
     );
 
     assert_eq!(
-        repo.begin_deployment_delete(account, worker.id, DeploymentId::generate())
+        repo.begin_version_delete(account, worker.id, VersionId::generate())
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotFound
+        ErrorCode::VersionNotFound
     );
-    repo.begin_deployment_delete(account, worker.id, ready)
+    repo.begin_version_delete(account, worker.id, ready)
         .unwrap();
-    repo.begin_deployment_delete(account, worker.id, ready)
+    repo.begin_version_delete(account, worker.id, ready)
         .unwrap();
     assert_eq!(
-        repo.finalize_deployment_delete(account, worker.id, staging, request, 18)
+        repo.finalize_version_delete(account, worker.id, staging, request, 18)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotFound
+        ErrorCode::VersionNotFound
     );
 
     assert_eq!(
-        repo.deployment_snapshot(account, worker.id, staging, false)
+        repo.version_snapshot(account, worker.id, staging, false)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotReady
+        ErrorCode::VersionNotReady
     );
     let promotable = insert_ready(&repo, account, worker.id, [10; 32], request, 19);
     assert_eq!(
@@ -2644,7 +2646,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             account,
             worker.id,
             promotable,
-            Some(DeploymentId::generate()),
+            Some(VersionId::generate()),
             None,
             request,
             19,
@@ -2662,7 +2664,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
             "conflict.example",
             "/",
             None,
-            Some(DeploymentId::generate()),
+            Some(VersionId::generate()),
             request,
             21,
             1_000_000,
@@ -2750,14 +2752,14 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
     );
 
     let referenced = insert_ready(&repo, account, worker.id, [12; 32], request, 30);
-    repo.begin_deployment_delete(account, worker.id, referenced)
+    repo.begin_version_delete(account, worker.id, referenced)
         .unwrap();
     storage
         .db()
         .with_read(|conn| {
             conn.execute(
-                "INSERT INTO deployment_referrers
-                 (deployment_id, kind, ref_id, created_at_ms) VALUES (?1, 'test', 'late', 31)",
+                "INSERT INTO version_referrers
+                 (version_id, kind, ref_id, created_at_ms) VALUES (?1, 'test', 'late', 31)",
                 [referenced.to_string()],
             )
             .map_err(|_| {
@@ -2767,14 +2769,14 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
         })
         .unwrap();
     assert_eq!(
-        repo.finalize_deployment_delete(account, worker.id, referenced, request, 32)
+        repo.finalize_version_delete(account, worker.id, referenced, request, 32)
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentReferenced
+        ErrorCode::VersionReferenced
     );
 
     let tombstone = insert_ready(&repo, account, worker.id, [13; 32], request, 33);
-    repo.tombstone_deployment(account, worker.id, tombstone, request, 34)
+    repo.tombstone_version(account, worker.id, tombstone, request, 34)
         .unwrap();
 
     for args in [(0, 1, 1), (1, 0, 1), (1, 1, 0), (1, 1, 10_001)] {
@@ -2787,16 +2789,16 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
     }
 
     let expected = repo
-        .list_deployments(account, worker.id)
+        .list_versions(account, worker.id)
         .unwrap()
         .into_iter()
-        .filter(|deployment| deployment.deleted_at_ms.is_none())
-        .map(|deployment| deployment.id)
+        .filter(|version| version.deleted_at_ms.is_none())
+        .map(|version| version.id)
         .collect::<Vec<_>>();
     repo.delete_worker(account, worker.id, &expected, request, 41)
         .unwrap();
     assert_eq!(
-        repo.deployment_snapshot(account, worker.id, ready, false)
+        repo.version_snapshot(account, worker.id, ready, false)
             .unwrap_err()
             .code(),
         ErrorCode::WorkerDeleted
@@ -2810,7 +2812,7 @@ fn worker_repository_rejects_invalid_state_and_ownership_operations() {
 
     for invalid in [0, 10_001] {
         assert_eq!(
-            repo.recover_deleting_deployments(request, 19, invalid)
+            repo.recover_deleting_versions(request, 19, invalid)
                 .unwrap_err()
                 .code(),
             ErrorCode::LimitInvalid
@@ -2884,7 +2886,7 @@ fn bootstrap_with_no_fault_matches_normal_bootstrap_and_rejects_nonregular_stagi
     let (_tmp, root) = unique_root();
     let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap_with_fault(&config, &SystemClock, None).unwrap();
-    let staging = storage.data_dir().deployment_staging_dir();
+    let staging = storage.data_dir().version_staging_dir();
     drop(storage);
 
     fs::create_dir(staging.join("nested")).unwrap();
@@ -4184,13 +4186,13 @@ fn system_dashboard_worker_is_excluded_from_tenant_catalog_and_mutations() {
         ErrorCode::WorkerNotFound
     );
     assert!(
-        repo.get_system_owned_deployment(SystemOwnedDeploymentKind::Dashboard)
+        repo.get_system_owned_version(SystemOwnedVersionKind::Dashboard)
             .unwrap()
             .is_some()
     );
     assert_eq!(
-        repo.get_deployment(account, system_worker.id, DeploymentId::generate())
-            .expect_err("tenant deployment lookup")
+        repo.get_version(account, system_worker.id, VersionId::generate())
+            .expect_err("tenant version lookup")
             .code(),
         ErrorCode::WorkerNotFound
     );

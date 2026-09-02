@@ -8,14 +8,14 @@ pub(super) async fn check(
     supervisor: &WorkerdSupervisor,
     account: AccountId,
     worker: WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     generation: u64,
 ) {
     let failed = dispatch(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/committed-failure?name=confirmed-failure",
     )
@@ -25,7 +25,7 @@ pub(super) async fn check(
         transport,
         account,
         worker,
-        deployment,
+        version,
         generation,
         "/rpc?name=confirmed-failure",
     )
@@ -37,7 +37,7 @@ pub(super) async fn check(
             transport,
             account,
             worker,
-            deployment,
+            version,
             generation,
             "/increment?name=concurrent-recovery",
         )
@@ -50,15 +50,15 @@ pub(super) async fn check(
 
     let pending = tokio::spawn({
         let transport = transport.clone();
-        let deployment = deployment.clone();
+        let version = version.clone();
         async move {
             transport
                 .dispatch(
                     DispatchTarget {
                         account_id: account,
                         worker_id: worker,
-                        deployment_id: deployment.id,
-                        worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                        version_id: version.id,
+                        worker_code_sha256: hex::encode(version.worker_code_sha256),
                         entrypoint: None,
                         route_generation: i64::try_from(generation).unwrap(),
                         request_id: RequestId::generate(),
@@ -80,7 +80,7 @@ pub(super) async fn check(
                 transport,
                 account,
                 worker,
-                deployment,
+                version,
                 generation,
                 "/held-status?name=held-recovery",
             )
@@ -122,7 +122,7 @@ pub(super) async fn check(
             transport,
             account,
             worker,
-            deployment,
+            version,
             generation,
             &format!("/rpc?name={name}"),
         )
@@ -132,7 +132,7 @@ pub(super) async fn check(
             transport,
             account,
             worker,
-            deployment,
+            version,
             generation,
             &format!("/rollback?name={name}"),
         )

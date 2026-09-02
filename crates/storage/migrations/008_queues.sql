@@ -41,18 +41,18 @@ WHERE state IN ('creating', 'deleting') OR availability != 'healthy';
 CREATE TABLE queue_producer_bindings (
   id                         TEXT PRIMARY KEY
                              CHECK(length(id) = 36 AND id = lower(id)),
-  deployment_id              TEXT NOT NULL REFERENCES worker_deployments(id),
+  version_id              TEXT NOT NULL REFERENCES worker_versions(id),
   name                       TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 64),
   queue_id                   TEXT NOT NULL REFERENCES queues(id),
   queue_lifecycle_generation INTEGER NOT NULL CHECK(queue_lifecycle_generation >= 1),
   capability_version         INTEGER NOT NULL CHECK(capability_version >= 1),
   descriptor_sha256          BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   created_at_ms              INTEGER NOT NULL,
-  UNIQUE(deployment_id, name)
+  UNIQUE(version_id, name)
 ) STRICT;
 
 CREATE INDEX queue_producer_bindings_queue
-ON queue_producer_bindings(queue_id, deployment_id, id);
+ON queue_producer_bindings(queue_id, version_id, id);
 
 CREATE TABLE queue_referrers (
   queue_id       TEXT NOT NULL REFERENCES queues(id),
@@ -162,54 +162,54 @@ BEGIN
                    NEW.name GLOB '__*'
     THEN RAISE(ABORT, 'queue binding name invalid') END;
   SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM worker_deployments d
+    SELECT 1 FROM worker_versions d
     JOIN workers w ON w.id = d.worker_id
     JOIN queues q ON q.id = NEW.queue_id
-    WHERE d.id = NEW.deployment_id AND d.state = 'staging'
+    WHERE d.id = NEW.version_id AND d.state = 'staging'
       AND w.account_id = q.account_id
       AND q.state = 'ready' AND q.availability = 'healthy'
       AND q.lifecycle_generation = NEW.queue_lifecycle_generation
   ) THEN RAISE(ABORT, 'queue binding authority invariant') END;
   SELECT CASE WHEN EXISTS (
-    SELECT 1 FROM deployment_vars v
-      WHERE v.deployment_id = NEW.deployment_id AND v.name = NEW.name
+    SELECT 1 FROM version_vars v
+      WHERE v.version_id = NEW.version_id AND v.name = NEW.name
     UNION ALL
-    SELECT 1 FROM deployment_secrets s
-      WHERE s.deployment_id = NEW.deployment_id AND s.name = NEW.name
+    SELECT 1 FROM version_secrets s
+      WHERE s.version_id = NEW.version_id AND s.name = NEW.name
     UNION ALL
-    SELECT 1 FROM deployment_bindings b
-      WHERE b.deployment_id = NEW.deployment_id AND b.name = NEW.name
+    SELECT 1 FROM version_bindings b
+      WHERE b.version_id = NEW.version_id AND b.name = NEW.name
   ) THEN RAISE(ABORT, 'queue binding env conflict') END;
 END;
 
-CREATE TRIGGER deployment_bindings_queue_name_guard
-BEFORE INSERT ON deployment_bindings
+CREATE TRIGGER version_bindings_queue_name_guard
+BEFORE INSERT ON version_bindings
 WHEN EXISTS (
   SELECT 1 FROM queue_producer_bindings q
-  WHERE q.deployment_id = NEW.deployment_id AND q.name = NEW.name
+  WHERE q.version_id = NEW.version_id AND q.name = NEW.name
 )
 BEGIN
-  SELECT RAISE(ABORT, 'deployment binding env conflict');
+  SELECT RAISE(ABORT, 'version binding env conflict');
 END;
 
-CREATE TRIGGER deployment_vars_queue_name_guard
-BEFORE INSERT ON deployment_vars
+CREATE TRIGGER version_vars_queue_name_guard
+BEFORE INSERT ON version_vars
 WHEN EXISTS (
   SELECT 1 FROM queue_producer_bindings q
-  WHERE q.deployment_id = NEW.deployment_id AND q.name = NEW.name
+  WHERE q.version_id = NEW.version_id AND q.name = NEW.name
 )
 BEGIN
-  SELECT RAISE(ABORT, 'deployment variable Queue env conflict');
+  SELECT RAISE(ABORT, 'version variable Queue env conflict');
 END;
 
-CREATE TRIGGER deployment_secrets_queue_name_guard
-BEFORE INSERT ON deployment_secrets
+CREATE TRIGGER version_secrets_queue_name_guard
+BEFORE INSERT ON version_secrets
 WHEN EXISTS (
   SELECT 1 FROM queue_producer_bindings q
-  WHERE q.deployment_id = NEW.deployment_id AND q.name = NEW.name
+  WHERE q.version_id = NEW.version_id AND q.name = NEW.name
 )
 BEGIN
-  SELECT RAISE(ABORT, 'deployment secret Queue env conflict');
+  SELECT RAISE(ABORT, 'version secret Queue env conflict');
 END;
 
 CREATE TRIGGER queue_producer_bindings_update_guard
@@ -221,8 +221,8 @@ END;
 CREATE TRIGGER queue_producer_bindings_delete_guard
 BEFORE DELETE ON queue_producer_bindings
 WHEN NOT EXISTS (
-  SELECT 1 FROM worker_deployments d
-  WHERE d.id = OLD.deployment_id AND d.state IN ('staging', 'deleting')
+  SELECT 1 FROM worker_versions d
+  WHERE d.id = OLD.version_id AND d.state IN ('staging', 'deleting')
 )
 BEGIN
   SELECT RAISE(ABORT, 'queue producer binding delete invariant');
@@ -257,7 +257,7 @@ CREATE TRIGGER queue_referrers_producer_delete_guard
 BEFORE DELETE ON queue_referrers
 WHEN OLD.referrer_kind = 'producer_binding' AND EXISTS (
   SELECT 1 FROM queue_producer_bindings b
-  JOIN worker_deployments d ON d.id = b.deployment_id
+  JOIN worker_versions d ON d.id = b.version_id
   JOIN workers w ON w.id = d.worker_id
   WHERE b.id = OLD.referrer_id AND b.queue_id = OLD.queue_id
     AND w.deleted_at_ms IS NULL

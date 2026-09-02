@@ -39,11 +39,11 @@ use open_compute_storage::{
 };
 use open_compute_workers::{
     AiSearchInstanceResourceDriver, AiSearchInstanceSpec, AiSearchNamespaceResourceDriver,
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    CreateResourceOutcome, CreateResourceRequest, DeploymentAiInput, DeploymentBindingInput,
-    DeploymentContent, DeploymentController, DeploymentPins, DeploymentRuntimeFeatures,
-    ModuleInput, ModuleType, ResourceController, ResourcePins, RuntimeSource, RuntimeValidator,
-    VectorizeIndexSpec, VectorizeResourceDriver,
+    BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
+    CreateVersionOutcome, CreateVersionRequest, ModuleInput, ModuleType, ResourceController,
+    ResourcePins, RuntimeSource, RuntimeValidator, VectorizeIndexSpec, VectorizeResourceDriver,
+    VersionAiInput, VersionBindingInput, VersionContent, VersionController, VersionPins,
+    VersionRuntimeFeatures,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -362,7 +362,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     let binding_listener = bind_binding_backend().await.unwrap();
     let source_addr = source_listener.local_addr().unwrap();
     let binding_addr = binding_listener.local_addr().unwrap();
-    let deployment_pins = DeploymentPins::new();
+    let version_pins = VersionPins::new();
     let resource_pins = ResourcePins::new();
     let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown.subscribe();
@@ -386,7 +386,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     let binding_task = tokio::spawn({
         let storage = storage.clone();
         let auth = binding_auth.clone();
-        let pins = deployment_pins.clone();
+        let pins = version_pins.clone();
         let resources = resource_pins.clone();
         let assets = Arc::new(AssetBindingService::new(
             storage.clone(),
@@ -445,7 +445,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     .with_binding_generation_auth(binding_auth.clone());
     let supervisor_slot = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_deployment_pins(deployment_pins.clone());
+        .with_version_pins(version_pins.clone());
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -485,15 +485,15 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
         .create_worker(account, "p5-search", RequestId::generate(), 1, 1_000_000)
         .unwrap()
         .0;
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts,
         Arc::new(transport.clone()) as Arc<dyn RuntimeValidator>,
         BundleLimits::default(),
     );
-    let deployment = deploy(
+    let version = deploy(
         &controller,
-        deployment_request(
+        version_request(
             account,
             worker.id,
             vectorize_id,
@@ -507,8 +507,7 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
         ($phase:expr) => {{
             let phase = $phase;
             let uri = format!("/gate?phase={phase}");
-            let response =
-                dispatch(&transport, &workers, account, worker.id, &deployment, &uri).await;
+            let response = dispatch(&transport, &workers, account, worker.id, &version, &uri).await;
             if response.0 != 200 {
                 supervisor.shutdown().await;
                 panic!(

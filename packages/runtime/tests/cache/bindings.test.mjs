@@ -8,7 +8,7 @@ const host = moduleUrl(`
 const { tenantEnv } = await importRuntime("loader/bindings.ts", { "./host.js": host });
 
 const snapshot = {
-  loaderKey: "account/worker/deployment",
+  loaderKey: "account/worker/version",
   routeGeneration: 7,
   workerCodeSha256: "ab".repeat(32),
   env: { PUBLIC: "value" },
@@ -29,7 +29,7 @@ test("tenant env creates a cache transport for the current unconfigured entrypoi
       CacheTransport({ props }) { transports.push(props); return props; },
     },
   };
-  const env = tenantEnv(snapshot, ctx, "deployment", {}, false, true, "Named");
+  const env = tenantEnv(snapshot, ctx, "version", {}, false, true, "Named");
   assert.deepEqual(Object.keys(env.__OPEN_COMPUTE_PRIVATE_CACHE).sort(), ["Admin", "Named", "default"]);
   assert.deepEqual(transports.map(value => [
     value.entrypoint, value.automaticEnabled, value.crossVersionCache,
@@ -41,7 +41,7 @@ test("tenant env creates a cache transport for the current unconfigured entrypoi
   assert.equal(env.PUBLIC, "value");
 });
 
-test("tenant env resolves AI from the immutable deployment descriptor", () => {
+test("tenant env resolves AI from the immutable version descriptor", () => {
   let received;
   const configured = {
     ...snapshot,
@@ -50,9 +50,9 @@ test("tenant env resolves AI from the immutable deployment descriptor", () => {
   const env = tenantEnv(configured, { exports: {
     CacheTransport({ props }) { return props; },
     AiTransport({ props }) { received = props; return { transform() {}, supported() {} }; },
-  } }, "deployment", {}, false, true);
+  } }, "version", {}, false, true);
   assert.deepEqual(received, {
-    accountId: "account", workerId: "worker", deploymentId: "deployment",
+    accountId: "account", workerId: "worker", versionId: "version",
     descriptorSha256: "cd".repeat(32),
   });
   assert.equal(typeof env.AI.transform, "function");

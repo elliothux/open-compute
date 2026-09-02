@@ -24,12 +24,12 @@ use open_compute_service::runtime_bridge::{
     DispatchTarget, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
 use open_compute_service::{SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend};
-use open_compute_storage::{DeploymentRecord, PlatformStorage, WorkerRepository};
+use open_compute_storage::{PlatformStorage, VersionRecord, WorkerRepository};
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    CreateResourceOutcome, CreateResourceRequest, DeploymentBindingInput, DeploymentController,
-    KvResourceDriver, ModuleInput, ModuleType, ResourceController, ResourcePins, RuntimeSource,
-    RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
+    CreateVersionOutcome, CreateVersionRequest, KvResourceDriver, ModuleInput, ModuleType,
+    ResourceController, ResourcePins, RuntimeSource, RuntimeValidator, VersionBindingInput,
+    VersionController,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -163,27 +163,26 @@ async fn p0_4_real_kv_matrix() {
         .create_worker(account, "kv-gate", RequestId::generate(), 12, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let deployments =
-        DeploymentController::new(&storage, artifacts, validator, BundleLimits::default());
-    let deployment = deploy(
-        &deployments,
-        deployment_request(account, worker.id, primary, secondary, readonly),
+    let versions = VersionController::new(&storage, artifacts, validator, BundleLimits::default());
+    let version = deploy(
+        &versions,
+        version_request(account, worker.id, primary, secondary, readonly),
     )
     .await;
 
-    let seeded = dispatch(&transport, account, worker.id, &deployment, "/seed", "").await;
+    let seeded = dispatch(&transport, account, worker.id, &version, "/seed", "").await;
     assert_eq!((seeded.status, seeded.body.as_str()), (200, "seeded"));
-    let large = dispatch(&transport, account, worker.id, &deployment, "/large", "").await;
+    let large = dispatch(&transport, account, worker.id, &version, "/large", "").await;
     assert_eq!(
         (large.status, large.body.as_str()),
         (200, "26214400:7:7:true")
     );
-    let cancelled = dispatch(&transport, account, worker.id, &deployment, "/cancel", "").await;
+    let cancelled = dispatch(&transport, account, worker.id, &version, "/cancel", "").await;
     assert_eq!(
         (cancelled.status, cancelled.body.as_str()),
         (200, "cancelled")
     );
-    let snapshot = dispatch(&transport, account, worker.id, &deployment, "/snapshot", "").await;
+    let snapshot = dispatch(&transport, account, worker.id, &version, "/snapshot", "").await;
     assert_eq!(
         snapshot.status,
         200,
@@ -212,28 +211,20 @@ async fn p0_4_real_kv_matrix() {
     assert!(value["manyMeta"][0][1].get("cacheStatus").is_none());
     assert_eq!(value["manyMeta"][1][1], serde_json::Value::Null);
 
-    let first = dispatch(&transport, account, worker.id, &deployment, "/page1", "").await;
+    let first = dispatch(&transport, account, worker.id, &version, "/page1", "").await;
     let first: serde_json::Value = serde_json::from_str(&first.body).unwrap();
     assert_eq!(first["list_complete"], false);
     assert_eq!(first["cacheStatus"], serde_json::Value::Null);
     assert!(first["cursor"].is_string());
     let cursor = first["cursor"].as_str().unwrap();
-    let second = dispatch(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        "/page2",
-        cursor,
-    )
-    .await;
+    let second = dispatch(&transport, account, worker.id, &version, "/page2", cursor).await;
     let second: serde_json::Value = serde_json::from_str(&second.body).unwrap();
     assert_ne!(first["keys"][0]["name"], second["keys"][0]["name"]);
     let tampered = dispatch(
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         "/page2",
         &format!("{cursor}x"),
     )
@@ -249,7 +240,7 @@ async fn p0_4_real_kv_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         "/list-complete",
         "",
     )
@@ -262,7 +253,7 @@ async fn p0_4_real_kv_matrix() {
         &transport,
         account,
         worker.id,
-        &deployment,
+        &version,
         "/list-expiring",
         "",
     )
@@ -274,7 +265,7 @@ async fn p0_4_real_kv_matrix() {
     assert_eq!(expiring["hasCursor"], false);
     assert_eq!(expiring["cacheStatus"], serde_json::Value::Null);
 
-    let failures = dispatch(&transport, account, worker.id, &deployment, "/failures", "").await;
+    let failures = dispatch(&transport, account, worker.id, &version, "/failures", "").await;
     assert_eq!(
         failures.status,
         200,
@@ -382,25 +373,17 @@ async fn p0_4_real_kv_matrix() {
     let old_pid = supervisor.snapshot().pid.unwrap();
     supervisor.report_unhealthy();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
-    let after_restart = dispatch(
-        &transport,
-        account,
-        worker.id,
-        &deployment,
-        "/page2",
-        cursor,
-    )
-    .await;
+    let after_restart = dispatch(&transport, account, worker.id, &version, "/page2", cursor).await;
     assert_eq!(after_restart.status, 200, "{}", after_restart.body);
-    let persisted = dispatch(&transport, account, worker.id, &deployment, "/snapshot", "").await;
+    let persisted = dispatch(&transport, account, worker.id, &version, "/snapshot", "").await;
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&persisted.body).unwrap()["text"],
         "hello"
     );
 
-    let deleted = dispatch(&transport, account, worker.id, &deployment, "/delete", "").await;
+    let deleted = dispatch(&transport, account, worker.id, &version, "/delete", "").await;
     assert_eq!(deleted.body, "deleted");
-    let missing = dispatch(&transport, account, worker.id, &deployment, "/missing", "").await;
+    let missing = dispatch(&transport, account, worker.id, &version, "/missing", "").await;
     assert_eq!(missing.body, "null");
     // Content-Length completion can reach the client before the blocking stream
     // producer drops its pin. Await its existing drain notification, not a sleep.
@@ -451,22 +434,22 @@ fn create_resource(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
-) -> DeploymentRecord {
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
+) -> VersionRecord {
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
-fn deployment_request(
+fn version_request(
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
     primary: ResourceId,
     secondary: ResourceId,
     readonly: ResourceId,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -494,7 +477,7 @@ fn deployment_request(
     ] {
         bindings.insert(
             name.to_owned(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind: BindingKind::KvNamespace,
                 id,
                 permissions,
@@ -502,11 +485,11 @@ fn deployment_request(
             },
         );
     }
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
-        idempotency_key: "kv-deployment".to_owned(),
-        content: open_compute_workers::DeploymentContent::Worker {
+        idempotency_key: "kv-version".to_owned(),
+        content: open_compute_workers::VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -532,7 +515,7 @@ async fn dispatch(
     transport: &WorkerdTransport,
     account_id: AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &DeploymentRecord,
+    version: &VersionRecord,
     path: &str,
     body: &str,
 ) -> DispatchResponse {
@@ -547,8 +530,8 @@ async fn dispatch(
             DispatchTarget {
                 account_id,
                 worker_id,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation: 1,
                 request_id: RequestId::generate(),

@@ -1,13 +1,12 @@
-//! Workflow catalog, version, binding, and live-deployment authority.
+//! Workflow catalog, version, binding, and live-version authority.
 
 use crate::catalog_page::{CatalogColumns, build_catalog_sql, record_catalog_cursor};
 use crate::{
-    CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, DeploymentState,
+    CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, VersionState,
 };
 use open_compute_core::{
-    AccountId, BindingId, DeploymentId, ErrorCode, PlatformError, ResourceAvailability,
-    ResourceState, WorkflowId, WorkflowInstanceId, WorkflowOperationId, WorkflowToken,
-    WorkflowVersionId,
+    AccountId, BindingId, ErrorCode, PlatformError, ResourceAvailability, ResourceState, VersionId,
+    WorkflowId, WorkflowInstanceId, WorkflowOperationId, WorkflowToken, WorkflowVersionId,
 };
 use rusqlite::{OptionalExtension as _, params, params_from_iter};
 use sha2::{Digest as _, Sha256};

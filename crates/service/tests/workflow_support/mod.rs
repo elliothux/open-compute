@@ -17,8 +17,8 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_storage::{PlatformStorage, WorkerRepository};
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentController, ModuleInput, ModuleType, RuntimeSource,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, RuntimeSource, VersionController,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -337,7 +337,7 @@ request_timeout_ms = 3000
         &self,
         source: &str,
         class: &str,
-        bindings: BTreeMap<String, open_compute_workers::DeploymentBindingInput>,
+        bindings: BTreeMap<String, open_compute_workers::VersionBindingInput>,
     ) -> DispatchTarget {
         let account = self.storage.identity().default_account_id;
         let (worker, _) = WorkerRepository::new(self.storage.db())
@@ -357,7 +357,7 @@ request_timeout_ms = 3000
         worker: open_compute_core::WorkerId,
         source: &str,
         class: &str,
-        bindings: BTreeMap<String, open_compute_workers::DeploymentBindingInput>,
+        bindings: BTreeMap<String, open_compute_workers::VersionBindingInput>,
     ) -> DispatchTarget {
         let account = self.storage.identity().default_account_id;
         let bundle = CanonicalBundle::build(
@@ -370,18 +370,18 @@ request_timeout_ms = 3000
             BundleLimits::default(),
         )
         .unwrap();
-        let controller = DeploymentController::new(
+        let controller = VersionController::new(
             &self.storage,
             self.artifacts.clone(),
             Arc::new(self.transport.clone()),
             BundleLimits::default(),
         );
         let result = controller
-            .create_deployment(CreateDeploymentRequest {
+            .create_version(CreateVersionRequest {
                 account_id: account,
                 worker_id: worker,
                 idempotency_key: RequestId::generate().to_string(),
-                content: open_compute_workers::DeploymentContent::Worker {
+                content: open_compute_workers::VersionContent::Worker {
                     bundle: bundle.into_bytes().into(),
                     assets: None,
                 },
@@ -398,14 +398,14 @@ request_timeout_ms = 3000
             })
             .await
             .unwrap();
-        let CreateDeploymentOutcome::Applied(result) = result else {
+        let CreateVersionOutcome::Applied(result) = result else {
             panic!("unexpected replay")
         };
         DispatchTarget {
             account_id: account,
             worker_id: worker,
-            deployment_id: result.deployment.id,
-            worker_code_sha256: hex::encode(result.deployment.worker_code_sha256),
+            version_id: result.version.id,
+            worker_code_sha256: hex::encode(result.version.worker_code_sha256),
             entrypoint: Some(class.into()),
             route_generation: 1,
             request_id: RequestId::generate(),

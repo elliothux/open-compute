@@ -26,7 +26,7 @@ const { TenantFacets } = await importRuntime("durable-objects/facets.ts", {
 const authority = Object.freeze({
   accountId: "019c0000-0000-7000-8000-000000000001",
   workerId: "019c0000-0000-7000-8000-000000000002",
-  deploymentId: "019c0000-0000-7000-8000-000000000003",
+  versionId: "019c0000-0000-7000-8000-000000000003",
   workerCodeSha256: "a".repeat(64),
   objectId: "b".repeat(64),
   namespaceResourceId: "019c0000-0000-7000-8000-000000000004",

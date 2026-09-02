@@ -21,7 +21,7 @@ pub enum PlatformMode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationClass {
-    /// Worker or deployment control-plane mutation.
+    /// Worker or version control-plane mutation.
     Workers,
     /// KV mutation or staging.
     Kv,

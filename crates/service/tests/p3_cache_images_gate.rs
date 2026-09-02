@@ -1,7 +1,7 @@
 //! Real pinned-workerd P3.3 Cache API, automatic cache, Images, and metadata gate.
 //!
 //! This matrix intentionally stays cohesive: every assertion shares one stock-workerd process,
-//! immutable deployment graph, S3 fixture, and restart boundary so the Gate registry executes the
+//! immutable version graph, S3 fixture, and restart boundary so the Gate registry executes the
 //! complete lifecycle exactly once rather than rebuilding equivalent state in separate tests.
 
 use axum::body::{Body, to_bytes};
@@ -31,15 +31,13 @@ use open_compute_service::{
     SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend_with_assets,
 };
 use open_compute_storage::{
-    BuiltinBindingKind, CacheManager, PlatformStorage, WorkerRepository,
-    deployment_runtime_features,
+    BuiltinBindingKind, CacheManager, PlatformStorage, WorkerRepository, version_runtime_features,
 };
 use open_compute_workers::{
-    BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
-    DeploymentCacheInput, DeploymentCachePolicyInput, DeploymentContent, DeploymentController,
-    DeploymentImagesInput, DeploymentPins, DeploymentRuntimeFeatures, DeploymentServiceInput,
-    DeploymentVersionMetadataInput, ModuleInput, ModuleType, ResourcePins, RuntimeSource,
-    RuntimeValidator,
+    BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
+    ModuleType, ResourcePins, RuntimeSource, RuntimeValidator, VersionCacheInput,
+    VersionCachePolicyInput, VersionContent, VersionController, VersionImagesInput, VersionPins,
+    VersionRuntimeFeatures, VersionServiceInput, VersionVersionMetadataInput,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -161,7 +159,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
     let binding_listener = bind_binding_backend().await.unwrap();
     let source_addr = source_listener.local_addr().unwrap();
     let binding_addr = binding_listener.local_addr().unwrap();
-    let deployment_pins = DeploymentPins::new();
+    let version_pins = VersionPins::new();
     let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown.subscribe();
     let source_task = tokio::spawn({
@@ -194,7 +192,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
     let binding_task = tokio::spawn({
         let storage = storage.clone();
         let auth = binding_auth.clone();
-        let pins = deployment_pins.clone();
+        let pins = version_pins.clone();
         let cache_service = cache_service.clone();
         let images = image_service.clone();
         let assets = Arc::new(AssetBindingService::new(
@@ -247,7 +245,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
     .with_binding_generation_auth(binding_auth.clone());
     let supervisor_slot = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_deployment_pins(deployment_pins.clone());
+        .with_version_pins(version_pins.clone());
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -292,7 +290,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
         .unwrap()
         .0;
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts.clone(),
         validator,
@@ -510,12 +508,12 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
 
     let services = BTreeMap::from([(
         "TARGET".to_owned(),
-        DeploymentServiceInput {
+        VersionServiceInput {
             target_worker_id: target.id,
             entrypoint: None,
         },
     )]);
-    let caller_deployment = deploy(
+    let caller_version = deploy(
         &controller,
         request(
             account,
@@ -523,7 +521,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
             "caller",
             CALLER_SOURCE,
             services,
-            DeploymentRuntimeFeatures::default(),
+            VersionRuntimeFeatures::default(),
             true,
             40,
         ),
@@ -536,7 +534,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
         &repo,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/service",
     )
     .await;
@@ -553,7 +551,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
         &repo,
         account,
         caller.id,
-        &caller_deployment,
+        &caller_version,
         "/service",
     )
     .await;
@@ -565,7 +563,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
             &repo,
             account,
             caller.id,
-            &caller_deployment,
+            &caller_version,
             "/rpc"
         )
         .await
@@ -578,7 +576,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
             &repo,
             account,
             caller.id,
-            &caller_deployment,
+            &caller_version,
             "/rpc"
         )
         .await
@@ -680,33 +678,34 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
     binding_task.await.unwrap().unwrap();
 }
 
-fn features(tag: &str) -> DeploymentRuntimeFeatures {
-    DeploymentRuntimeFeatures {
-        cache: DeploymentCacheInput {
-            default: DeploymentCachePolicyInput {
+fn features(tag: &str) -> VersionRuntimeFeatures {
+    VersionRuntimeFeatures {
+        cache: VersionCacheInput {
+            default: VersionCachePolicyInput {
                 enabled: true,
                 cross_version_cache: false,
             },
             entrypoints: BTreeMap::from([(
                 "Named".to_owned(),
-                DeploymentCachePolicyInput {
+                VersionCachePolicyInput {
                     enabled: true,
                     cross_version_cache: false,
                 },
             )]),
         },
-        images: Some(DeploymentImagesInput {
+        images: Some(VersionImagesInput {
             binding: "IMAGES".to_owned(),
         }),
         ai: None,
-        version_metadata: Some(DeploymentVersionMetadataInput {
+        version_metadata: Some(VersionVersionMetadataInput {
             binding: "VERSION".to_owned(),
             tag: Some(tag.to_owned()),
         }),
+        ..VersionRuntimeFeatures::default()
     }
 }
 
-fn shared_features(tag: &str) -> DeploymentRuntimeFeatures {
+fn shared_features(tag: &str) -> VersionRuntimeFeatures {
     let mut features = features(tag);
     features.cache.default.cross_version_cache = true;
     for policy in features.cache.entrypoints.values_mut() {
@@ -735,11 +734,11 @@ fn request(
     worker_id: open_compute_core::WorkerId,
     key: &str,
     source: &str,
-    services: BTreeMap<String, DeploymentServiceInput>,
-    runtime_features: DeploymentRuntimeFeatures,
+    services: BTreeMap<String, VersionServiceInput>,
+    runtime_features: VersionRuntimeFeatures,
     promote: bool,
     now_ms: i64,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![ModuleInput {
@@ -750,11 +749,11 @@ fn request(
         BundleLimits::default(),
     )
     .unwrap();
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: DeploymentContent::Worker {
+        content: VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -772,22 +771,22 @@ fn request(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
     supervisor: &WorkerdSupervisor,
-) -> open_compute_storage::DeploymentRecord {
+) -> open_compute_storage::VersionRecord {
     let result = controller
-        .create_deployment(request)
+        .create_version(request)
         .await
         .unwrap_or_else(|error| {
             panic!(
-                "deployment failed: {error:?}; diagnostics={:?}",
+                "version failed: {error:?}; diagnostics={:?}",
                 supervisor.last_diagnostics()
             )
         });
     match result {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected replay"),
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
     }
 }
 
@@ -796,7 +795,7 @@ async fn dispatch(
     repo: &WorkerRepository<'_>,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     uri: &str,
 ) -> (u16, String, Option<String>, Option<String>) {
     dispatch_request(
@@ -804,7 +803,7 @@ async fn dispatch(
         repo,
         account,
         worker,
-        deployment,
+        version,
         Request::builder()
             .method(Method::GET)
             .uri(uri)
@@ -820,7 +819,7 @@ async fn dispatch_request(
     repo: &WorkerRepository<'_>,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     request: Request<Body>,
 ) -> (u16, String, Option<String>, Option<String>) {
     let route_generation =
@@ -830,8 +829,8 @@ async fn dispatch_request(
             DispatchTarget {
                 account_id: account,
                 worker_id: worker,
-                deployment_id: deployment.id,
-                worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+                version_id: version.id,
+                worker_code_sha256: hex::encode(version.worker_code_sha256),
                 entrypoint: None,
                 route_generation,
                 request_id: RequestId::generate(),
@@ -866,11 +865,11 @@ async fn open_image_session(
     storage: &PlatformStorage,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
     generation: &str,
     bytes: &[u8],
 ) {
-    let (_, bindings) = deployment_runtime_features(storage.db(), deployment.id).unwrap();
+    let (_, bindings) = version_runtime_features(storage.db(), version.id).unwrap();
     let descriptor = bindings
         .iter()
         .find(|binding| binding.kind == BuiltinBindingKind::Images)
@@ -883,7 +882,7 @@ async fn open_image_session(
                 .uri("/internal/images/v1/input")
                 .header("x-open-compute-account-id", account.to_string())
                 .header("x-open-compute-worker-id", worker.to_string())
-                .header("x-open-compute-deployment-id", deployment.id.to_string())
+                .header("x-open-compute-version-id", version.id.to_string())
                 .header("x-open-compute-descriptor-sha256", hex::encode(descriptor))
                 .header("x-open-compute-startup-generation", generation)
                 .body(Body::from(bytes.to_vec()))

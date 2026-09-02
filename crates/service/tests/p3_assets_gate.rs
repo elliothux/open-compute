@@ -28,10 +28,10 @@ use open_compute_service::{
 use open_compute_storage::{PlatformStorage, WorkerRepository};
 use open_compute_workers::{
     AssetEntryV1, AssetHeaderOperation, AssetHeaderRule, AssetManifestV1, AssetRedirectRule,
-    AssetRoutingConfigV1, BundleLimits, CanonicalBundle, CreateDeploymentOutcome,
-    CreateDeploymentRequest, DeploymentAssets, DeploymentContent, DeploymentController,
-    DeploymentPins, HtmlHandling, ModuleInput, ModuleType, NotFoundHandling, ResourcePins,
-    RunWorkerFirst, RuntimeSource, RuntimeValidator,
+    AssetRoutingConfigV1, BundleLimits, CanonicalBundle, CreateVersionOutcome,
+    CreateVersionRequest, HtmlHandling, ModuleInput, ModuleType, NotFoundHandling, ResourcePins,
+    RunWorkerFirst, RuntimeSource, RuntimeValidator, VersionAssets, VersionContent,
+    VersionController, VersionPins,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -88,7 +88,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     let source_addr = source_listener.local_addr().unwrap();
     let binding_listener = bind_binding_backend().await.unwrap();
     let binding_addr = binding_listener.local_addr().unwrap();
-    let deployment_pins = DeploymentPins::new();
+    let version_pins = VersionPins::new();
     let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown.subscribe();
     let source_task = tokio::spawn({
@@ -105,7 +105,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     let binding_task = tokio::spawn({
         let storage = storage.clone();
         let auth = binding_auth.clone();
-        let pins = deployment_pins.clone();
+        let pins = version_pins.clone();
         let asset_service = Arc::new(AssetBindingService::new(
             storage.clone(),
             artifacts.clone(),
@@ -157,7 +157,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     .with_binding_generation_auth(binding_auth.clone());
     let supervisor_slot = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_deployment_pins(deployment_pins.clone());
+        .with_version_pins(version_pins.clone());
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -197,7 +197,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
         .create_worker(account, "static-site", RequestId::generate(), 1, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(transport.clone());
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts.clone(),
         validator,
@@ -239,13 +239,13 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
         },
     )
     .await;
-    let static_deployment = deploy(
+    let static_version = deploy(
         &controller,
-        deployment_request(
+        version_request(
             account,
             static_worker.id,
             "static-assets",
-            DeploymentContent::AssetsOnly {
+            VersionContent::AssetsOnly {
                 assets: static_assets,
             },
             true,
@@ -256,7 +256,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
 
     let home = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_deployment),
+        dispatch_target(account, static_worker.id, &static_version),
         Method::GET,
         "/",
         None,
@@ -273,7 +273,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
 
     let not_modified = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_deployment),
+        dispatch_target(account, static_worker.id, &static_version),
         Method::GET,
         "/",
         Some((header::IF_NONE_MATCH.as_str(), &etag)),
@@ -283,7 +283,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert!(response_body(not_modified).await.is_empty());
     let head = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_deployment),
+        dispatch_target(account, static_worker.id, &static_version),
         Method::HEAD,
         "/",
         None,
@@ -294,7 +294,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert!(response_body(head).await.is_empty());
     let redirect = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_deployment),
+        dispatch_target(account, static_worker.id, &static_version),
         Method::GET,
         "/old?source=gate",
         None,
@@ -304,7 +304,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert_eq!(redirect.headers()[header::LOCATION], "/?source=gate");
     let missing = dispatch(
         &transport,
-        dispatch_target(account, static_worker.id, &static_deployment),
+        dispatch_target(account, static_worker.id, &static_version),
         Method::GET,
         "/absent",
         None,
@@ -312,12 +312,12 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     .await;
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     assert_eq!(response_body(missing).await.as_ref(), b"missing");
-    assert_eq!(deployment_pins.count(static_deployment.id), 0);
-    deployment_pins
-        .fence_and_wait(static_deployment.id, Duration::from_millis(100))
+    assert_eq!(version_pins.count(static_version.id), 0);
+    version_pins
+        .fence_and_wait(static_version.id, Duration::from_millis(100))
         .await
         .unwrap();
-    deployment_pins.unfence(static_deployment.id);
+    version_pins.unfence(static_version.id);
 
     let (hybrid_worker, _) = repo
         .create_worker(account, "hybrid-site", RequestId::generate(), 20, 1_000_000)
@@ -325,7 +325,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     let first = deploy_hybrid(
         &controller,
         &artifacts,
-        HybridDeploymentSpec {
+        HybridVersionSpec {
             account,
             worker: hybrid_worker.id,
             key: "hybrid-v1",
@@ -344,7 +344,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     )
     .await;
     assert_eq!(response_body(default_asset).await.as_ref(), b"asset-v1");
-    assert_eq!(deployment_pins.count(first.id), 0);
+    assert_eq!(version_pins.count(first.id), 0);
     let worker_first = dispatch(
         &transport,
         dispatch_target(account, hybrid_worker.id, &first),
@@ -389,7 +389,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
         dispatch_target(account, hybrid_worker.id, &first),
         Method::GET,
         "/binding",
-        Some(("x-open-compute-deployment-id", "forged")),
+        Some(("x-open-compute-version-id", "forged")),
     )
     .await;
     assert_eq!(
@@ -404,12 +404,12 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
         b"asset-v1",
         "binding headers: {binding_headers:?}"
     );
-    assert_eq!(deployment_pins.count(first.id), 1);
+    assert_eq!(version_pins.count(first.id), 1);
 
     let second = deploy_hybrid(
         &controller,
         &artifacts,
-        HybridDeploymentSpec {
+        HybridVersionSpec {
             account,
             worker: hybrid_worker.id,
             key: "hybrid-v2",
@@ -422,7 +422,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     assert_eq!(
         repo.get_worker(account, hybrid_worker.id)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         Some(second.id)
     );
     let old_asset = dispatch(
@@ -443,12 +443,12 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     )
     .await;
     assert_eq!(response_body(new_asset).await.as_ref(), b"asset-v2");
-    let error = deployment_pins
+    let error = version_pins
         .fence_and_wait(first.id, Duration::from_millis(50))
         .await
         .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::DeploymentReferenced);
-    deployment_pins.unfence(first.id);
+    assert_eq!(error.code(), ErrorCode::VersionReferenced);
+    version_pins.unfence(first.id);
 
     supervisor.shutdown().await;
     assert_eq!(supervisor.owner_registry_len(), 0);
@@ -457,7 +457,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     binding_task.await.unwrap().unwrap();
 }
 
-struct HybridDeploymentSpec<'a> {
+struct HybridVersionSpec<'a> {
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
     key: &'a str,
@@ -467,10 +467,10 @@ struct HybridDeploymentSpec<'a> {
 }
 
 async fn deploy_hybrid(
-    controller: &DeploymentController<'_>,
+    controller: &VersionController<'_>,
     artifacts: &ArtifactStore,
-    spec: HybridDeploymentSpec<'_>,
-) -> open_compute_storage::DeploymentRecord {
+    spec: HybridVersionSpec<'_>,
+) -> open_compute_storage::VersionRecord {
     let routing = AssetRoutingConfigV1 {
         schema_version: 1,
         binding: Some("ASSETS".to_owned()),
@@ -519,11 +519,11 @@ async fn deploy_hybrid(
     .unwrap();
     deploy(
         controller,
-        deployment_request(
+        version_request(
             spec.account,
             spec.worker,
             spec.key,
-            DeploymentContent::Worker {
+            VersionContent::Worker {
                 bundle: bundle.into_bytes().into(),
                 assets: Some(assets),
             },
@@ -538,7 +538,7 @@ async fn assets(
     artifacts: &ArtifactStore,
     files: Vec<(&str, &[u8], &str)>,
     routing: AssetRoutingConfigV1,
-) -> DeploymentAssets {
+) -> VersionAssets {
     let mut entries = Vec::with_capacity(files.len());
     for (path, bytes, content_type) in files {
         let digest = hex::encode(Sha256::digest(bytes));
@@ -558,7 +558,7 @@ async fn assets(
         });
     }
     entries.sort_by(|left, right| left.path.as_bytes().cmp(right.path.as_bytes()));
-    DeploymentAssets {
+    VersionAssets {
         manifest: AssetManifestV1 {
             schema_version: 1,
             entries,
@@ -567,15 +567,15 @@ async fn assets(
     }
 }
 
-fn deployment_request(
+fn version_request(
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
     key: &str,
-    content: DeploymentContent,
+    content: VersionContent,
     promote: bool,
     now_ms: i64,
-) -> CreateDeploymentRequest {
-    CreateDeploymentRequest {
+) -> CreateVersionRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
@@ -594,25 +594,25 @@ fn deployment_request(
 }
 
 async fn deploy(
-    controller: &DeploymentController<'_>,
-    request: CreateDeploymentRequest,
-) -> open_compute_storage::DeploymentRecord {
-    match controller.create_deployment(request).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected deployment replay"),
+    controller: &VersionController<'_>,
+    request: CreateVersionRequest,
+) -> open_compute_storage::VersionRecord {
+    match controller.create_version(request).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected version replay"),
     }
 }
 
 fn dispatch_target(
     account_id: open_compute_core::AccountId,
     worker_id: open_compute_core::WorkerId,
-    deployment: &open_compute_storage::DeploymentRecord,
+    version: &open_compute_storage::VersionRecord,
 ) -> DispatchTarget {
     DispatchTarget {
         account_id,
         worker_id,
-        deployment_id: deployment.id,
-        worker_code_sha256: hex::encode(deployment.worker_code_sha256),
+        version_id: version.id,
+        worker_code_sha256: hex::encode(version.worker_code_sha256),
         entrypoint: None,
         route_generation: 1,
         request_id: RequestId::generate(),

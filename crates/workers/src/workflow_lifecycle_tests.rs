@@ -46,11 +46,15 @@ pub(super) fn durable_fixture() -> (
         .unwrap()
         .current_version_id
         .unwrap();
-    let deployment = repo.version(account, current).unwrap().target.deployment_id;
     let version = repo
-        .stage_version(account, definition, deployment, "Flow", 5)
+        .version(account, current)
+        .unwrap()
+        .target
+        .worker_version_id;
+    let version = repo
+        .stage_version(account, definition, version, "Flow", 5)
         .unwrap();
-    repo.finish_version(account, version.target.version_id, true, 6)
+    repo.finish_version(account, version.target.workflow_version_id, true, 6)
         .unwrap();
     (temp, storage, scheduler, definition)
 }
@@ -324,12 +328,12 @@ fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
             .stage_version(
                 account,
                 definition,
-                identity.target.deployment_id,
+                identity.target.worker_version_id,
                 "Flow",
                 13,
             )
             .unwrap();
-        repo.finish_version(account, newer.target.version_id, true, 13)
+        repo.finish_version(account, newer.target.workflow_version_id, true, 13)
             .unwrap();
         let operation = repo
             .prepare_instance_operation(
@@ -431,7 +435,10 @@ fn restart_saga_replays_each_committed_phase_and_preserves_frozen_version() {
             .unwrap();
         assert_eq!(next.identity.instance_generation, 2);
         assert_eq!(next.identity.target, identity.target);
-        assert_ne!(next.identity.target.version_id, newer.target.version_id);
+        assert_ne!(
+            next.identity.target.workflow_version_id,
+            newer.target.workflow_version_id
+        );
         assert_eq!(next.identity.created_at_ms, 10);
         assert_eq!(next.input_json, OBJECT_VALUE);
         assert_eq!(next.durable.registered_step_count, 0);

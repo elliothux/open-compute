@@ -3,7 +3,7 @@ use crate::workflow_http::tests::{Fixture, fixture};
 use open_compute_core::{RequestId, SecretString, WorkflowId, WorkflowOperationId};
 use open_compute_storage::scheduler::{WorkflowCompletion, WorkflowState};
 use open_compute_storage::{
-    NewDeployment, NewDeploymentProducts, WorkerRepository, WorkflowBindingRecord,
+    NewVersion, NewVersionProducts, WorkerRepository, WorkflowBindingRecord,
 };
 use serde_json::json;
 
@@ -13,10 +13,10 @@ fn ready(f: &Fixture) -> (WorkflowId, WorkflowBindingRecord) {
         .create_definition(f.account, "backend", 0)
         .unwrap();
     let version = repository
-        .stage_version(f.account, definition.id, f.deployment, "Flow", 1)
+        .stage_version(f.account, definition.id, f.version, "Flow", 1)
         .unwrap();
     repository
-        .finish_version(f.account, version.target.version_id, true, 2)
+        .finish_version(f.account, version.target.workflow_version_id, true, 2)
         .unwrap();
     (definition.id, ready_binding(f, definition.id))
 }
@@ -33,44 +33,46 @@ fn ready_binding(f: &Fixture, definition: WorkflowId) -> WorkflowBindingRecord {
             1_000_000,
         )
         .unwrap();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let binding = repository
-        .prepare_binding(f.account, deployment, "FLOW", definition, Vec::new(), 3)
+        .prepare_binding(f.account, version, "FLOW", definition, Vec::new(), 3)
         .unwrap();
     workers
-        .insert_staging_deployment(
-            &NewDeployment {
-                id: deployment,
+        .insert_staging_version(
+            &NewVersion {
+                id: version,
                 account_id: f.account,
                 worker_id: worker.id,
-                content_kind: open_compute_storage::DeploymentContentKind::Worker,
+                content_kind: open_compute_storage::VersionContentKind::Worker,
                 artifact_sha256: Some([3; 32]),
                 artifact_size: Some(100),
                 artifact_schema_version: Some(1),
                 main_module: Some("index.js".into()),
                 worker_code_sha256: [4; 32],
+                compatibility_date: "2026-08-30".into(),
+                compatibility_flags: Vec::new(),
                 vars: Default::default(),
                 secrets: Default::default(),
                 request_id: RequestId::generate(),
                 now_ms: 3,
             },
-            &NewDeploymentProducts {
+            &NewVersionProducts {
                 workflow_bindings: std::slice::from_ref(&binding),
                 ..Default::default()
             },
             100,
         )
         .unwrap();
-    workers.begin_validation(deployment).unwrap();
-    workers.mark_ready(deployment, 4).unwrap();
+    workers.begin_validation(version).unwrap();
+    workers.mark_ready(version, 4).unwrap();
     binding
 }
 
 fn caller(binding: &WorkflowBindingRecord) -> HeaderMap {
     HeaderMap::from_iter([
         (
-            HeaderName::from_static("x-open-compute-deployment-id"),
-            HeaderValue::from_str(&binding.deployment_id.to_string()).unwrap(),
+            HeaderName::from_static("x-open-compute-version-id"),
+            HeaderValue::from_str(&binding.version_id.to_string()).unwrap(),
         ),
         (
             HeaderName::from_static("x-open-compute-descriptor-sha256"),

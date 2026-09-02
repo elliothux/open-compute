@@ -134,7 +134,7 @@ fn dispatch_target(
     Ok(DispatchTarget {
         account_id: version.account_id,
         worker_id: version.worker_id,
-        deployment_id: version.deployment_id,
+        version_id: version.worker_version_id,
         worker_code_sha256: hex::encode(version.worker_code_sha256),
         entrypoint: Some(version.class_name.clone()),
         route_generation: generation,

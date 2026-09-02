@@ -5,7 +5,7 @@ use futures::FutureExt as _;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
-use open_compute_core::{AccountId, DeploymentId, WorkerId};
+use open_compute_core::{AccountId, VersionId, WorkerId};
 use std::panic::AssertUnwindSafe;
 use std::process::Output;
 
@@ -110,7 +110,7 @@ async fn verify_project(
     assert_success(&output);
     let deployed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let worker: WorkerId = deployed["workerId"].as_str().unwrap().parse().unwrap();
-    let first: DeploymentId = deployed["deploymentId"].as_str().unwrap().parse().unwrap();
+    let first: VersionId = deployed["versionId"].as_str().unwrap().parse().unwrap();
     let url = deployed["url"].as_str().unwrap();
     assert!(url.starts_with(origin));
     let response = fetch_json(url).await;
@@ -124,10 +124,10 @@ async fn verify_project(
         repository
             .get_worker(account, worker)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         Some(first)
     );
-    let before = repository.list_deployments(account, worker).unwrap().len();
+    let before = repository.list_versions(account, worker).unwrap().len();
     std::fs::write(
         project.join("value.ts"),
         "export const answer: number = 'wrong';",
@@ -137,14 +137,14 @@ async fn verify_project(
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("TypeScript validation failed"));
     assert_eq!(
-        repository.list_deployments(account, worker).unwrap().len(),
+        repository.list_versions(account, worker).unwrap().len(),
         before
     );
     assert_eq!(
         repository
             .get_worker(account, worker)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         Some(first)
     );
 
@@ -157,12 +157,12 @@ async fn verify_project(
     assert_success(&output);
     let replacement: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(replacement["workerId"], deployed["workerId"]);
-    assert_ne!(replacement["deploymentId"], deployed["deploymentId"]);
+    assert_ne!(replacement["versionId"], deployed["versionId"]);
     assert_eq!(replacement["url"], deployed["url"]);
     let response = fetch_json(url).await;
     assert_eq!(response["answer"], 43);
     assert_eq!(
-        repository.list_deployments(account, worker).unwrap().len(),
+        repository.list_versions(account, worker).unwrap().len(),
         before + 1
     );
 }

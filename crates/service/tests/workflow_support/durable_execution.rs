@@ -9,7 +9,7 @@ use open_compute_service::{
 };
 use open_compute_storage::scheduler::WorkflowState;
 use open_compute_storage::{SchedulerStore, WorkflowRefState, WorkflowRepository};
-use open_compute_workers::DeploymentBindingInput;
+use open_compute_workers::VersionBindingInput;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -44,7 +44,7 @@ async fn production_driver_replays_waits_retries_and_events_after_runtime_restar
         harness.transport.clone(),
         Default::default(),
     );
-    api.create_version(account, definition.id, flow.deployment_id, "Flow".into())
+    api.create_version(account, definition.id, flow.version_id, "Flow".into())
         .await
         .unwrap();
     let caller = harness
@@ -53,7 +53,7 @@ async fn production_driver_replays_waits_retries_and_events_after_runtime_restar
             "",
             BTreeMap::from([(
                 "FLOW".into(),
-                DeploymentBindingInput {
+                VersionBindingInput {
                     kind: BindingKind::Workflow,
                     id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                     permissions: Default::default(),

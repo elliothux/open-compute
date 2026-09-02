@@ -290,7 +290,7 @@ async fn object_reconcile_get_delete_and_force_namespace_delete_converge() {
                 object_generation: 1,
                 row_token: "delete-fence-token".to_owned(),
                 due_at_ms: 100,
-                target_deployment_id: open_compute_core::DeploymentId::generate(),
+                target_version_id: open_compute_core::VersionId::generate(),
                 execution_generation: 1,
                 retry_count: 0,
             },

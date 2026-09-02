@@ -1,20 +1,20 @@
-//! Resumable deployment-upload session authority.
+//! Resumable version-upload session authority.
 
-use crate::{ControlDb, DeploymentContentKind, DeploymentObjectKind};
+use crate::{ControlDb, VersionContentKind, VersionObjectKind};
 use open_compute_core::{
-    AccountId, DeploymentId, DeploymentUploadId, ErrorCode, PlatformError, StartupId, WorkerId,
+    AccountId, ErrorCode, PlatformError, StartupId, VersionId, VersionUploadId, WorkerId,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 use std::str::FromStr;
 
-/// Durable deployment-upload session state.
+/// Durable version-upload session state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DeploymentUploadStatus {
+pub enum VersionUploadStatus {
     /// Objects may still be verified.
     Open,
-    /// A fixed deployment identifier is being committed through the ordinary pipeline.
+    /// A fixed version identifier is being committed through the ordinary pipeline.
     Finalizing,
-    /// The deployment was committed and may be queried after a lost response.
+    /// The version was committed and may be queried after a lost response.
     Committed,
     /// The caller cancelled the session before finalization.
     Aborted,
@@ -22,7 +22,7 @@ pub enum DeploymentUploadStatus {
     Expired,
 }
 
-impl DeploymentUploadStatus {
+impl VersionUploadStatus {
     /// Stable current-schema token.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -49,11 +49,11 @@ impl DeploymentUploadStatus {
 
 /// One declared content-addressed object in an upload session.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeploymentUploadObjectRecord {
+pub struct VersionUploadObjectRecord {
     /// Object digest.
     pub sha256: [u8; 32],
     /// Semantic inventory kind.
-    pub kind: DeploymentObjectKind,
+    pub kind: VersionObjectKind,
     /// Declared and verified byte length.
     pub size: u64,
     /// Whether the platform verified the actual bytes.
@@ -64,9 +64,9 @@ pub struct DeploymentUploadObjectRecord {
 
 /// Durable upload-session projection safe for authenticated control responses.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeploymentUploadRecord {
+pub struct VersionUploadRecord {
     /// Session identifier.
-    pub id: DeploymentUploadId,
+    pub id: VersionUploadId,
     /// Owning account.
     pub account_id: AccountId,
     /// Target Worker.
@@ -76,7 +76,7 @@ pub struct DeploymentUploadRecord {
     /// Secret-keyed normalized input fingerprint.
     pub input_fingerprint: [u8; 32],
     /// Worker or assets-only content discriminator.
-    pub content_kind: DeploymentContentKind,
+    pub content_kind: VersionContentKind,
     /// Optional Worker bundle digest.
     pub bundle_sha256: Option<[u8; 32]>,
     /// Optional Worker bundle length.
@@ -90,9 +90,9 @@ pub struct DeploymentUploadRecord {
     /// Canonical asset routing bytes.
     pub routing_config_json: Vec<u8>,
     /// Current state.
-    pub status: DeploymentUploadStatus,
-    /// Fixed deployment identity once finalization begins.
-    pub deployment_id: Option<DeploymentId>,
+    pub status: VersionUploadStatus,
+    /// Fixed version identity once finalization begins.
+    pub version_id: Option<VersionId>,
     /// Secret-keyed fingerprint of the write-only finalize metadata.
     pub finalize_fingerprint: Option<[u8; 32]>,
     /// Exclusive platform startup generation that most recently owned finalization.
@@ -108,13 +108,13 @@ pub struct DeploymentUploadRecord {
     /// Last durable state change.
     pub updated_at_ms: i64,
     /// Canonically ordered inventory.
-    pub objects: Vec<DeploymentUploadObjectRecord>,
+    pub objects: Vec<VersionUploadObjectRecord>,
 }
 
 /// Ownership result for one serialized finalize attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DeploymentUploadFinalizeDisposition {
-    /// This attempt assigned the deployment identity for the first time.
+pub enum VersionUploadFinalizeDisposition {
+    /// This attempt assigned the version identity for the first time.
     Reserved,
     /// This attempt reclaimed unfinished work after a prior attempt released its lock.
     Recover,
@@ -124,24 +124,24 @@ pub enum DeploymentUploadFinalizeDisposition {
 
 /// Durable upload record plus the action its finalize owner must take.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeploymentUploadFinalize {
+pub struct VersionUploadFinalize {
     /// Current durable upload authority.
-    pub upload: DeploymentUploadRecord,
-    /// Whether to create, recover, or replay the fixed deployment.
-    pub disposition: DeploymentUploadFinalizeDisposition,
+    pub upload: VersionUploadRecord,
+    /// Whether to create, recover, or replay the fixed version.
+    pub disposition: VersionUploadFinalizeDisposition,
 }
 
 /// Durable identity and request proof used to reserve or resume one upload finalization.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BeginDeploymentUploadFinalize {
+pub struct BeginVersionUploadFinalize {
     /// Owning account.
     pub account_id: AccountId,
     /// Owning Worker.
     pub worker_id: WorkerId,
     /// Upload session being finalized.
-    pub upload_id: DeploymentUploadId,
-    /// One fixed deployment identity reused by every retry.
-    pub deployment_id: DeploymentId,
+    pub upload_id: VersionUploadId,
+    /// One fixed version identity reused by every retry.
+    pub version_id: VersionId,
     /// HMAC fingerprint of canonical finalization metadata.
     pub finalize_fingerprint: [u8; 32],
     /// Platform startup generation currently recovering the operation.
@@ -152,20 +152,20 @@ pub struct BeginDeploymentUploadFinalize {
 
 /// One object declared when creating an upload session.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NewDeploymentUploadObject {
+pub struct NewVersionUploadObject {
     /// Object digest.
     pub sha256: [u8; 32],
     /// Semantic object kind.
-    pub kind: DeploymentObjectKind,
+    pub kind: VersionObjectKind,
     /// Exact byte length.
     pub size: u64,
 }
 
 /// Validated upload-session creation input.
 #[derive(Clone, Debug)]
-pub struct NewDeploymentUpload<'a> {
+pub struct NewVersionUpload<'a> {
     /// New session identifier.
-    pub id: DeploymentUploadId,
+    pub id: VersionUploadId,
     /// Owning account.
     pub account_id: AccountId,
     /// Target Worker.
@@ -175,7 +175,7 @@ pub struct NewDeploymentUpload<'a> {
     /// Secret-keyed normalized input fingerprint.
     pub input_fingerprint: [u8; 32],
     /// Worker or assets-only content discriminator.
-    pub content_kind: DeploymentContentKind,
+    pub content_kind: VersionContentKind,
     /// Optional Worker bundle identity.
     pub bundle: Option<([u8; 32], u64)>,
     /// Canonical asset manifest identity.
@@ -185,7 +185,7 @@ pub struct NewDeploymentUpload<'a> {
     /// Canonical asset routing bytes.
     pub routing_config_json: &'a [u8],
     /// Complete deduplicated inventory, including manifest and optional bundle.
-    pub objects: &'a [NewDeploymentUploadObject],
+    pub objects: &'a [NewVersionUploadObject],
     /// Creation timestamp.
     pub now_ms: i64,
     /// Fixed expiration timestamp.
@@ -194,11 +194,11 @@ pub struct NewDeploymentUpload<'a> {
 
 /// Transactional owner for resumable upload state.
 #[derive(Clone, Copy, Debug)]
-pub struct DeploymentUploadRepository<'a> {
+pub struct VersionUploadRepository<'a> {
     db: &'a ControlDb,
 }
 
-impl<'a> DeploymentUploadRepository<'a> {
+impl<'a> VersionUploadRepository<'a> {
     /// Bind the repository to the current control database.
     #[must_use]
     pub const fn new(db: &'a ControlDb) -> Self {
@@ -208,10 +208,10 @@ impl<'a> DeploymentUploadRepository<'a> {
     /// Create one bounded session or replay the identical idempotent input.
     pub fn create_or_get(
         &self,
-        input: &NewDeploymentUpload<'_>,
+        input: &NewVersionUpload<'_>,
         max_open_per_worker: u32,
         max_open_per_account: u32,
-    ) -> Result<DeploymentUploadRecord, PlatformError> {
+    ) -> Result<VersionUploadRecord, PlatformError> {
         validate_new(input, max_open_per_worker, max_open_per_account)?;
         self.db.with_immediate(|tx| {
             expire_open(tx, input.now_ms)?;
@@ -226,7 +226,7 @@ impl<'a> DeploymentUploadRepository<'a> {
             require_live_worker(tx, input.account_id, input.worker_id)?;
             let open: i64 = tx
                 .query_row(
-                    "SELECT COUNT(*) FROM deployment_uploads
+                    "SELECT COUNT(*) FROM version_uploads
                      WHERE worker_id = ?1 AND status IN ('open', 'finalizing')",
                     [input.worker_id.to_string()],
                     |row| row.get(0),
@@ -235,12 +235,12 @@ impl<'a> DeploymentUploadRepository<'a> {
             if open >= i64::from(max_open_per_worker) {
                 return Err(PlatformError::new(
                     ErrorCode::AssetLimitExceeded,
-                    "Worker deployment-upload session quota was exceeded",
+                    "Worker version-upload session quota was exceeded",
                 ));
             }
             let account_open: i64 = tx
                 .query_row(
-                    "SELECT COUNT(*) FROM deployment_uploads
+                    "SELECT COUNT(*) FROM version_uploads
                      WHERE account_id = ?1 AND status IN ('open', 'finalizing')",
                     [input.account_id.to_string()],
                     |row| row.get(0),
@@ -249,15 +249,15 @@ impl<'a> DeploymentUploadRepository<'a> {
             if account_open >= i64::from(max_open_per_account) {
                 return Err(PlatformError::new(
                     ErrorCode::AssetLimitExceeded,
-                    "account deployment-upload session quota was exceeded",
+                    "account version-upload session quota was exceeded",
                 ));
             }
             tx.execute(
-                "INSERT INTO deployment_uploads
+                "INSERT INTO version_uploads
                  (id, account_id, worker_id, idempotency_key, input_fingerprint,
                   content_kind, bundle_sha256, bundle_size, manifest_sha256,
                   manifest_size, manifest_json, routing_config_json, status,
-                  deployment_id, created_at_ms, expires_at_ms, updated_at_ms)
+                  version_id, created_at_ms, expires_at_ms, updated_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
                          ?12, 'open', NULL, ?13, ?14, ?13)",
                 params![
@@ -284,7 +284,7 @@ impl<'a> DeploymentUploadRepository<'a> {
             .map_err(|_| db_error())?;
             for object in input.objects {
                 tx.execute(
-                    "INSERT INTO deployment_upload_objects
+                    "INSERT INTO version_upload_objects
                      (session_id, sha256, object_kind, size, verified, verified_at_ms)
                      VALUES (?1, ?2, ?3, ?4, 0, NULL)",
                     params![
@@ -305,9 +305,9 @@ impl<'a> DeploymentUploadRepository<'a> {
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        upload_id: DeploymentUploadId,
+        upload_id: VersionUploadId,
         now_ms: i64,
-    ) -> Result<DeploymentUploadRecord, PlatformError> {
+    ) -> Result<VersionUploadRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             expire_open(tx, now_ms)?;
             let record = read_tx(tx, upload_id)?;
@@ -321,12 +321,12 @@ impl<'a> DeploymentUploadRepository<'a> {
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        upload_id: DeploymentUploadId,
+        upload_id: VersionUploadId,
         sha256: &[u8; 32],
         now_ms: i64,
-    ) -> Result<DeploymentUploadObjectRecord, PlatformError> {
+    ) -> Result<VersionUploadObjectRecord, PlatformError> {
         let record = self.get(account_id, worker_id, upload_id, now_ms)?;
-        if record.status != DeploymentUploadStatus::Open {
+        if record.status != VersionUploadStatus::Open {
             return Err(conflict());
         }
         record
@@ -341,16 +341,16 @@ impl<'a> DeploymentUploadRepository<'a> {
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        upload_id: DeploymentUploadId,
+        upload_id: VersionUploadId,
         sha256: &[u8; 32],
         size: u64,
         now_ms: i64,
-    ) -> Result<DeploymentUploadRecord, PlatformError> {
+    ) -> Result<VersionUploadRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             expire_open(tx, now_ms)?;
             let record = read_tx(tx, upload_id)?;
             require_scope(&record, account_id, worker_id)?;
-            if record.status != DeploymentUploadStatus::Open {
+            if record.status != VersionUploadStatus::Open {
                 return Err(conflict());
             }
             let object = record
@@ -362,14 +362,14 @@ impl<'a> DeploymentUploadRepository<'a> {
                 return Err(conflict());
             }
             tx.execute(
-                "UPDATE deployment_upload_objects
+                "UPDATE version_upload_objects
                  SET verified = 1, verified_at_ms = COALESCE(verified_at_ms, ?3)
                  WHERE session_id = ?1 AND sha256 = ?2",
                 params![upload_id.to_string(), sha256.as_slice(), now_ms],
             )
             .map_err(|_| db_error())?;
             tx.execute(
-                "UPDATE deployment_uploads SET updated_at_ms = ?2 WHERE id = ?1",
+                "UPDATE version_uploads SET updated_at_ms = ?2 WHERE id = ?1",
                 params![upload_id.to_string(), now_ms],
             )
             .map_err(|_| db_error())?;
@@ -377,16 +377,16 @@ impl<'a> DeploymentUploadRepository<'a> {
         })
     }
 
-    /// Persist the one deployment identity used by all finalize retries.
+    /// Persist the one version identity used by all finalize retries.
     pub fn begin_finalize(
         &self,
-        input: BeginDeploymentUploadFinalize,
-    ) -> Result<DeploymentUploadFinalize, PlatformError> {
-        let BeginDeploymentUploadFinalize {
+        input: BeginVersionUploadFinalize,
+    ) -> Result<VersionUploadFinalize, PlatformError> {
+        let BeginVersionUploadFinalize {
             account_id,
             worker_id,
             upload_id,
-            deployment_id,
+            version_id,
             finalize_fingerprint,
             owner_startup_id,
             now_ms,
@@ -399,78 +399,78 @@ impl<'a> DeploymentUploadRepository<'a> {
                 return Err(incomplete());
             }
             let disposition = match record.status {
-                DeploymentUploadStatus::Open => {
+                VersionUploadStatus::Open => {
                     tx.execute(
-                        "UPDATE deployment_uploads
-                         SET status = 'finalizing', deployment_id = ?2,
+                        "UPDATE version_uploads
+                         SET status = 'finalizing', version_id = ?2,
                              finalize_fingerprint = ?3, finalize_owner_startup_id = ?4,
                              updated_at_ms = ?5
                          WHERE id = ?1",
                         params![
                             upload_id.to_string(),
-                            deployment_id.to_string(),
+                            version_id.to_string(),
                             finalize_fingerprint.as_slice(),
                             owner_startup_id.to_string(),
                             now_ms,
                         ],
                     )
                     .map_err(|_| db_error())?;
-                    DeploymentUploadFinalizeDisposition::Reserved
+                    VersionUploadFinalizeDisposition::Reserved
                 }
-                DeploymentUploadStatus::Finalizing
-                    if record.deployment_id == Some(deployment_id)
+                VersionUploadStatus::Finalizing
+                    if record.version_id == Some(version_id)
                         && record.finalize_fingerprint.as_ref() == Some(&finalize_fingerprint) =>
                 {
                     tx.execute(
-                        "UPDATE deployment_uploads
+                        "UPDATE version_uploads
                          SET finalize_owner_startup_id = ?2, updated_at_ms = ?3
                          WHERE id = ?1",
                         params![upload_id.to_string(), owner_startup_id.to_string(), now_ms,],
                     )
                     .map_err(|_| db_error())?;
-                    DeploymentUploadFinalizeDisposition::Recover
+                    VersionUploadFinalizeDisposition::Recover
                 }
-                DeploymentUploadStatus::Committed
-                    if record.deployment_id == Some(deployment_id)
+                VersionUploadStatus::Committed
+                    if record.version_id == Some(version_id)
                         && record.finalize_fingerprint.as_ref() == Some(&finalize_fingerprint) =>
                 {
-                    DeploymentUploadFinalizeDisposition::Committed
+                    VersionUploadFinalizeDisposition::Committed
                 }
-                DeploymentUploadStatus::Finalizing
-                | DeploymentUploadStatus::Committed
-                | DeploymentUploadStatus::Aborted
-                | DeploymentUploadStatus::Expired => return Err(conflict()),
+                VersionUploadStatus::Finalizing
+                | VersionUploadStatus::Committed
+                | VersionUploadStatus::Aborted
+                | VersionUploadStatus::Expired => return Err(conflict()),
             };
-            Ok(DeploymentUploadFinalize {
+            Ok(VersionUploadFinalize {
                 upload: read_tx(tx, upload_id)?,
                 disposition,
             })
         })
     }
 
-    /// Mark a finalized session committed after the ordinary deployment pipeline succeeds.
+    /// Mark a finalized session committed after the ordinary version pipeline succeeds.
     pub fn mark_committed(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        upload_id: DeploymentUploadId,
-        deployment_id: DeploymentId,
+        upload_id: VersionUploadId,
+        version_id: VersionId,
         response_json: &[u8],
         now_ms: i64,
-    ) -> Result<DeploymentUploadRecord, PlatformError> {
+    ) -> Result<VersionUploadRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             let record = read_tx(tx, upload_id)?;
             require_scope(&record, account_id, worker_id)?;
-            if record.deployment_id != Some(deployment_id)
+            if record.version_id != Some(version_id)
                 || !matches!(
                     record.status,
-                    DeploymentUploadStatus::Finalizing | DeploymentUploadStatus::Committed
+                    VersionUploadStatus::Finalizing | VersionUploadStatus::Committed
                 )
             {
                 return Err(conflict());
             }
             tx.execute(
-                "UPDATE deployment_uploads
+                "UPDATE version_uploads
                  SET status = 'committed', finalize_response_json = ?2, updated_at_ms = ?3
                  WHERE id = ?1",
                 params![upload_id.to_string(), response_json, now_ms],
@@ -485,21 +485,21 @@ impl<'a> DeploymentUploadRepository<'a> {
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        upload_id: DeploymentUploadId,
-        deployment_id: DeploymentId,
+        upload_id: VersionUploadId,
+        version_id: VersionId,
         code: ErrorCode,
         now_ms: i64,
-    ) -> Result<DeploymentUploadRecord, PlatformError> {
+    ) -> Result<VersionUploadRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             let record = read_tx(tx, upload_id)?;
             require_scope(&record, account_id, worker_id)?;
-            if record.deployment_id != Some(deployment_id)
-                || record.status != DeploymentUploadStatus::Finalizing
+            if record.version_id != Some(version_id)
+                || record.status != VersionUploadStatus::Finalizing
             {
                 return Err(conflict());
             }
             tx.execute(
-                "UPDATE deployment_uploads
+                "UPDATE version_uploads
                  SET status = 'committed', finalize_error_code = ?2, updated_at_ms = ?3
                  WHERE id = ?1",
                 params![upload_id.to_string(), code.as_str(), now_ms],
@@ -514,24 +514,24 @@ impl<'a> DeploymentUploadRepository<'a> {
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
-        upload_id: DeploymentUploadId,
+        upload_id: VersionUploadId,
         now_ms: i64,
-    ) -> Result<DeploymentUploadRecord, PlatformError> {
+    ) -> Result<VersionUploadRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             expire_open(tx, now_ms)?;
             let record = read_tx(tx, upload_id)?;
             require_scope(&record, account_id, worker_id)?;
             match record.status {
-                DeploymentUploadStatus::Open => {
+                VersionUploadStatus::Open => {
                     tx.execute(
-                        "UPDATE deployment_uploads
+                        "UPDATE version_uploads
                          SET status = 'aborted', updated_at_ms = ?2 WHERE id = ?1",
                         params![upload_id.to_string(), now_ms],
                     )
                     .map_err(|_| db_error())?;
                 }
-                DeploymentUploadStatus::Aborted | DeploymentUploadStatus::Expired => {}
-                DeploymentUploadStatus::Finalizing | DeploymentUploadStatus::Committed => {
+                VersionUploadStatus::Aborted | VersionUploadStatus::Expired => {}
+                VersionUploadStatus::Finalizing | VersionUploadStatus::Committed => {
                     return Err(conflict());
                 }
             }
@@ -541,13 +541,13 @@ impl<'a> DeploymentUploadRepository<'a> {
 }
 
 fn validate_new(
-    input: &NewDeploymentUpload<'_>,
+    input: &NewVersionUpload<'_>,
     max_open_per_worker: u32,
     max_open_per_account: u32,
 ) -> Result<(), PlatformError> {
     let bundle_shape = match input.content_kind {
-        DeploymentContentKind::Worker => input.bundle.is_some(),
-        DeploymentContentKind::AssetsOnly => input.bundle.is_none(),
+        VersionContentKind::Worker => input.bundle.is_some(),
+        VersionContentKind::AssetsOnly => input.bundle.is_none(),
     };
     if max_open_per_worker == 0
         || max_open_per_account < max_open_per_worker
@@ -563,12 +563,12 @@ fn validate_new(
     }
     let manifest_size = u64::try_from(input.manifest_json.len()).map_err(|_| conflict())?;
     if !input.objects.iter().any(|object| {
-        object.kind == DeploymentObjectKind::AssetManifest
+        object.kind == VersionObjectKind::AssetManifest
             && object.sha256 == input.manifest_sha256
             && object.size == manifest_size
     }) || input.bundle.is_some_and(|bundle| {
         !input.objects.iter().any(|object| {
-            object.kind == DeploymentObjectKind::Bundle
+            object.kind == VersionObjectKind::Bundle
                 && object.sha256 == bundle.0
                 && object.size == bundle.1
         })
@@ -592,10 +592,10 @@ fn read_by_key(
     account_id: AccountId,
     worker_id: WorkerId,
     key: &str,
-) -> Result<Option<DeploymentUploadRecord>, PlatformError> {
+) -> Result<Option<VersionUploadRecord>, PlatformError> {
     let id: Option<String> = tx
         .query_row(
-            "SELECT id FROM deployment_uploads
+            "SELECT id FROM version_uploads
              WHERE account_id = ?1 AND worker_id = ?2 AND idempotency_key = ?3",
             params![account_id.to_string(), worker_id.to_string(), key],
             |row| row.get(0),
@@ -603,7 +603,7 @@ fn read_by_key(
         .optional()
         .map_err(|_| db_error())?;
     id.map(|value| {
-        let upload_id = DeploymentUploadId::from_str(&value).map_err(|_| invariant())?;
+        let upload_id = VersionUploadId::from_str(&value).map_err(|_| invariant())?;
         read_tx(tx, upload_id)
     })
     .transpose()
@@ -611,17 +611,17 @@ fn read_by_key(
 
 fn read_tx(
     tx: &Transaction<'_>,
-    upload_id: DeploymentUploadId,
-) -> Result<DeploymentUploadRecord, PlatformError> {
+    upload_id: VersionUploadId,
+) -> Result<VersionUploadRecord, PlatformError> {
     let mut record = tx
         .query_row(
             "SELECT id, account_id, worker_id, idempotency_key, input_fingerprint,
                     content_kind, bundle_sha256, bundle_size, manifest_sha256,
                     manifest_size, manifest_json, routing_config_json, status,
-                    deployment_id, finalize_fingerprint, finalize_owner_startup_id,
+                    version_id, finalize_fingerprint, finalize_owner_startup_id,
                     finalize_response_json, finalize_error_code,
                     created_at_ms, expires_at_ms, updated_at_ms
-             FROM deployment_uploads WHERE id = ?1",
+             FROM version_uploads WHERE id = ?1",
             [upload_id.to_string()],
             map_upload,
         )
@@ -631,7 +631,7 @@ fn read_tx(
     let mut stmt = tx
         .prepare(
             "SELECT sha256, object_kind, size, verified, verified_at_ms
-             FROM deployment_upload_objects WHERE session_id = ?1
+             FROM version_upload_objects WHERE session_id = ?1
              ORDER BY object_kind, sha256",
         )
         .map_err(|_| db_error())?;
@@ -644,7 +644,7 @@ fn read_tx(
     Ok(record)
 }
 
-fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentUploadRecord> {
+fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionUploadRecord> {
     let id: String = row.get(0)?;
     let account: String = row.get(1)?;
     let worker: String = row.get(2)?;
@@ -655,10 +655,10 @@ fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentUploadRecor
     let manifest_digest: Vec<u8> = row.get(8)?;
     let manifest_size: i64 = row.get(9)?;
     let status: String = row.get(12)?;
-    let deployment: Option<String> = row.get(13)?;
+    let version: Option<String> = row.get(13)?;
     let finalize_fingerprint: Option<Vec<u8>> = row.get(14)?;
     let finalize_owner: Option<String> = row.get(15)?;
-    Ok(DeploymentUploadRecord {
+    Ok(VersionUploadRecord {
         id: id.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
         account_id: account.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: worker.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -666,7 +666,7 @@ fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentUploadRecor
         input_fingerprint: fingerprint
             .try_into()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        content_kind: DeploymentContentKind::parse(&kind)
+        content_kind: VersionContentKind::parse(&kind)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         bundle_sha256: bundle_digest
             .map(|value| value.try_into().map_err(|_| rusqlite::Error::InvalidQuery))
@@ -681,9 +681,8 @@ fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentUploadRecor
         manifest_size: u64::try_from(manifest_size).map_err(|_| rusqlite::Error::InvalidQuery)?,
         manifest_json: row.get(10)?,
         routing_config_json: row.get(11)?,
-        status: DeploymentUploadStatus::parse(&status)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        deployment_id: deployment
+        status: VersionUploadStatus::parse(&status).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        version_id: version
             .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
         finalize_fingerprint: finalize_fingerprint
@@ -701,12 +700,12 @@ fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentUploadRecor
     })
 }
 
-fn map_object(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentUploadObjectRecord> {
+fn map_object(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionUploadObjectRecord> {
     let digest: Vec<u8> = row.get(0)?;
     let kind: String = row.get(1)?;
     let size: i64 = row.get(2)?;
     let verified: i64 = row.get(3)?;
-    Ok(DeploymentUploadObjectRecord {
+    Ok(VersionUploadObjectRecord {
         sha256: digest
             .try_into()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -717,18 +716,18 @@ fn map_object(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentUploadObjec
     })
 }
 
-fn parse_object_kind(value: &str) -> Result<DeploymentObjectKind, PlatformError> {
+fn parse_object_kind(value: &str) -> Result<VersionObjectKind, PlatformError> {
     match value {
-        "bundle" => Ok(DeploymentObjectKind::Bundle),
-        "asset_manifest" => Ok(DeploymentObjectKind::AssetManifest),
-        "asset_blob" => Ok(DeploymentObjectKind::AssetBlob),
+        "bundle" => Ok(VersionObjectKind::Bundle),
+        "asset_manifest" => Ok(VersionObjectKind::AssetManifest),
+        "asset_blob" => Ok(VersionObjectKind::AssetBlob),
         _ => Err(invariant()),
     }
 }
 
 fn expire_open(tx: &Transaction<'_>, now_ms: i64) -> Result<(), PlatformError> {
     tx.execute(
-        "UPDATE deployment_uploads SET status = 'expired', updated_at_ms = ?1
+        "UPDATE version_uploads SET status = 'expired', updated_at_ms = ?1
          WHERE status = 'open' AND expires_at_ms <= ?1",
         [now_ms],
     )
@@ -754,7 +753,7 @@ fn require_live_worker(
 }
 
 fn require_scope(
-    record: &DeploymentUploadRecord,
+    record: &VersionUploadRecord,
     account_id: AccountId,
     worker_id: WorkerId,
 ) -> Result<(), PlatformError> {
@@ -767,36 +766,36 @@ fn require_scope(
 
 fn not_found() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentNotFound,
-        "deployment upload session was not found",
+        ErrorCode::VersionNotFound,
+        "version upload session was not found",
     )
 }
 
 fn incomplete() -> PlatformError {
     PlatformError::new(
         ErrorCode::AssetUploadIncomplete,
-        "deployment upload is missing verified objects",
+        "version upload is missing verified objects",
     )
 }
 
 fn conflict() -> PlatformError {
     PlatformError::new(
         ErrorCode::AssetUploadConflict,
-        "deployment upload conflicts with durable session state",
+        "version upload conflicts with durable session state",
     )
 }
 
 fn invariant() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentInvariantViolation,
-        "deployment upload authority is inconsistent",
+        ErrorCode::VersionInvariantViolation,
+        "version upload authority is inconsistent",
     )
 }
 
 fn db_error() -> PlatformError {
     PlatformError::new(
         ErrorCode::Internal,
-        "deployment upload database operation failed",
+        "version upload database operation failed",
     )
 }
 

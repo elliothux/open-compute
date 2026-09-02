@@ -3,7 +3,7 @@
 #![cfg(feature = "test-support")]
 
 use open_compute_core::{
-    DeploymentId, DurableObjectId, ResourceId, SchedulerFaultPoint, SchedulerKind,
+    DurableObjectId, ResourceId, SchedulerFaultPoint, SchedulerKind, VersionId,
 };
 use open_compute_storage::{
     AlarmProjection, ClaimResult, ClaimedJob, SchedulerStore, scheduler_migration_registry,
@@ -30,7 +30,7 @@ fn projection(namespace: ResourceId, token: &str) -> AlarmProjection {
         object_generation: 1,
         row_token: token.to_owned(),
         due_at_ms: 10,
-        target_deployment_id: DeploymentId::generate(),
+        target_version_id: VersionId::generate(),
         execution_generation: 1,
         retry_count: 0,
     }
@@ -229,7 +229,7 @@ fn p2_1_schema_and_product_scope_remain_frozen() {
     let result = connection.execute(
         "INSERT INTO scheduled_jobs (
            id, kind, namespace_resource_id, object_id, object_generation, row_token,
-           due_at_ms, target_deployment_id, execution_generation, state, retry_count,
+           due_at_ms, target_version_id, execution_generation, state, retry_count,
            created_at_ms, updated_at_ms
          ) VALUES (
            'future', 'queue', 'future', 'future', 1, 'future-token-0001',

@@ -117,7 +117,7 @@ pub(crate) fn refresh_metrics(
     metrics.set_resource_counts([
         inventory.accounts,
         inventory.workers,
-        inventory.deployments,
+        inventory.versions,
         inventory.routes,
         inventory.kv_namespaces,
         inventory.r2_buckets,

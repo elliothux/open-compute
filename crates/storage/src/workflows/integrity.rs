@@ -81,19 +81,19 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
     // The expected sets include timestamps. Moving tables must neither regenerate references
     // nor silently adopt dangling/mismatched references as healthy persisted authority.
     let valid: bool = conn.query_row(
-        "WITH expected_deployment(deployment_id,kind,ref_id,created_at_ms) AS (
-            SELECT deployment_id,'workflow_version',id,created_at_ms FROM workflow_versions
+        "WITH expected_version(version_id,kind,ref_id,created_at_ms) AS (
+            SELECT worker_version_id,'workflow_version',id,created_at_ms FROM workflow_versions
               WHERE state NOT IN ('deleting','tombstoned')
-            UNION ALL SELECT deployment_id,'workflow_instance',instance_id,created_at_ms
+            UNION ALL SELECT worker_version_id,'workflow_instance',instance_id,created_at_ms
               FROM workflow_instance_referrers WHERE state!='released'
          ), expected_definition(definition_id,referrer_kind,referrer_id,created_at_ms) AS (
             SELECT definition_id,'binding',id,created_at_ms FROM workflow_bindings
             UNION ALL SELECT definition_id,'instance',instance_id,created_at_ms
               FROM workflow_instance_referrers WHERE state!='released'
          )
-         SELECT NOT EXISTS(SELECT * FROM expected_deployment EXCEPT SELECT * FROM deployment_referrers)
-           AND NOT EXISTS(SELECT * FROM deployment_referrers WHERE kind IN ('workflow_version','workflow_instance')
-              EXCEPT SELECT * FROM expected_deployment)
+         SELECT NOT EXISTS(SELECT * FROM expected_version EXCEPT SELECT * FROM version_referrers)
+           AND NOT EXISTS(SELECT * FROM version_referrers WHERE kind IN ('workflow_version','workflow_instance')
+              EXCEPT SELECT * FROM expected_version)
            AND NOT EXISTS(SELECT * FROM expected_definition EXCEPT SELECT * FROM workflow_referrers)
            AND NOT EXISTS(SELECT * FROM workflow_referrers EXCEPT SELECT * FROM expected_definition)
            AND NOT EXISTS(SELECT 1 FROM workflow_definitions f WHERE
@@ -101,16 +101,16 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
              (f.current_version_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM workflow_versions v
                WHERE v.id=f.current_version_id AND v.definition_id=f.id AND v.state='ready')))
            AND NOT EXISTS(SELECT 1 FROM workflow_versions v JOIN workflow_definitions f ON f.id=v.definition_id
-             JOIN worker_deployments d ON d.id=v.deployment_id JOIN workers w ON w.id=d.worker_id
+             JOIN worker_versions d ON d.id=v.worker_version_id JOIN workers w ON w.id=d.worker_id
              WHERE w.account_id!=f.account_id OR w.id!=v.worker_id OR d.worker_code_sha256!=v.worker_code_sha256
                OR d.loader_schema_version!=v.loader_schema_version
                OR (v.state NOT IN ('deleting','tombstoned') AND (d.state!='ready' OR w.deleted_at_ms IS NOT NULL)))
            AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN workflow_definitions f ON f.id=b.definition_id
-             JOIN worker_deployments d ON d.id=b.deployment_id JOIN workers w ON w.id=d.worker_id
+             JOIN worker_versions d ON d.id=b.version_id JOIN workers w ON w.id=d.worker_id
              WHERE f.account_id!=w.account_id OR f.lifecycle_generation!=b.definition_lifecycle_generation
                OR f.state!='ready')
-           AND NOT EXISTS(SELECT 1 FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.version_id
-             WHERE r.definition_id!=v.definition_id OR r.deployment_id!=v.deployment_id
+           AND NOT EXISTS(SELECT 1 FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.workflow_version_id
+             WHERE r.definition_id!=v.definition_id OR r.worker_version_id!=v.worker_version_id
                OR (r.state!='released' AND v.state!='ready'))",
         [], |row| row.get(0),
     ).map_err(sql_error)?;

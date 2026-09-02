@@ -5,8 +5,8 @@ CREATE TABLE cron_schedules (
                          CHECK(length(account_id) = 36 AND account_id = lower(account_id)),
   worker_id              TEXT NOT NULL
                          CHECK(length(worker_id) = 36 AND worker_id = lower(worker_id)),
-  deployment_id          TEXT NOT NULL
-                         CHECK(length(deployment_id) = 36 AND deployment_id = lower(deployment_id)),
+  version_id          TEXT NOT NULL
+                         CHECK(length(version_id) = 36 AND version_id = lower(version_id)),
   execution_generation   INTEGER NOT NULL CHECK(execution_generation >= 1),
   activation_generation  INTEGER NOT NULL CHECK(activation_generation >= 1),
   expression             TEXT NOT NULL CHECK(length(expression) BETWEEN 1 AND 256),
@@ -28,8 +28,8 @@ CREATE TABLE cron_runs (
   activation_id         TEXT NOT NULL REFERENCES cron_schedules(activation_id),
   activation_generation INTEGER NOT NULL CHECK(activation_generation >= 1),
   scheduled_at_ms       INTEGER NOT NULL CHECK(scheduled_at_ms >= 0),
-  deployment_id         TEXT NOT NULL
-                        CHECK(length(deployment_id) = 36 AND deployment_id = lower(deployment_id)),
+  version_id         TEXT NOT NULL
+                        CHECK(length(version_id) = 36 AND version_id = lower(version_id)),
   execution_generation  INTEGER NOT NULL CHECK(execution_generation >= 1),
   expression            TEXT NOT NULL CHECK(length(expression) BETWEEN 1 AND 256),
   state                 TEXT NOT NULL CHECK(state IN (
@@ -65,7 +65,7 @@ ON cron_runs(claim_until_ms, id)
 WHERE state = 'claimed';
 
 CREATE TRIGGER cron_schedules_identity_guard
-BEFORE UPDATE OF activation_id, account_id, worker_id, deployment_id, execution_generation,
+BEFORE UPDATE OF activation_id, account_id, worker_id, version_id, execution_generation,
   activation_generation,
   expression, expression_sha256, parser_version ON cron_schedules
 BEGIN
@@ -94,7 +94,7 @@ WHEN NEW.state != 'ready' OR NEW.attempt != 0 OR NEW.no_retry != 0 OR
        SELECT 1 FROM cron_schedules s
        WHERE s.activation_id = NEW.activation_id
          AND s.activation_generation = NEW.activation_generation
-         AND s.deployment_id = NEW.deployment_id
+         AND s.version_id = NEW.version_id
          AND s.execution_generation = NEW.execution_generation
          AND s.expression = NEW.expression AND s.state = 'accepting'
      )
@@ -107,7 +107,7 @@ BEFORE UPDATE ON cron_runs
 WHEN OLD.id != NEW.id OR OLD.activation_id != NEW.activation_id OR
      OLD.activation_generation != NEW.activation_generation OR
      OLD.scheduled_at_ms != NEW.scheduled_at_ms OR
-     OLD.deployment_id != NEW.deployment_id OR
+     OLD.version_id != NEW.version_id OR
      OLD.execution_generation != NEW.execution_generation OR
      OLD.expression != NEW.expression OR OLD.created_at_ms != NEW.created_at_ms
 BEGIN

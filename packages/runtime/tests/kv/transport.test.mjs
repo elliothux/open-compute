@@ -9,7 +9,7 @@ const { KVNamespace } = await importRuntime("kv/transport.ts", {
   "../loader/host.js": host,
 });
 const contentType = "application/vnd.open-compute.kv.v1+frame";
-const props = { bindingId: "binding", deploymentId: "deployment", descriptorSha256: "a".repeat(64),
+const props = { bindingId: "binding", versionId: "version", descriptorSha256: "a".repeat(64),
   resourceSpecGeneration: 1, permissions: { read: true, write: true } };
 const transport = (fetch, permissions = props.permissions) => new KVNamespace(
   { props: { ...props, permissions } }, { BINDING_BACKEND: { fetch }, BINDING_BACKEND_TOKEN: "token" },

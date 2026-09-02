@@ -40,8 +40,8 @@ pub const REQUEST_ID_HEADER: &str = "x-open-compute-request-id";
 const MAX_BODY: usize = 4096;
 const MAX_HEADER_BYTES: usize = 8192;
 const MAX_HEADER_TOTAL: usize = 16_384;
-const MAX_DEPLOYMENT_HEADER_TOTAL: usize =
-    workers_http::MAX_DEPLOYMENT_METADATA_HEADER_BYTES + MAX_HEADER_TOTAL;
+const MAX_VERSION_HEADER_TOTAL: usize =
+    workers_http::MAX_VERSION_METADATA_HEADER_BYTES + MAX_HEADER_TOTAL;
 
 /// Stable error metadata attached internally for low-cardinality product metrics.
 #[derive(Clone, Copy, Debug)]
@@ -676,15 +676,15 @@ pub(crate) fn operator_error_response(error: &PlatformError, request_id: Request
         ErrorCode::AdminAuthRequired => StatusCode::UNAUTHORIZED,
         ErrorCode::AccountNotFound
         | ErrorCode::WorkerNotFound
-        | ErrorCode::DeploymentNotFound
+        | ErrorCode::VersionNotFound
         | ErrorCode::RouteNotFound
         | ErrorCode::EntrypointNotFound
         | ErrorCode::ResourceNotFound => StatusCode::NOT_FOUND,
         ErrorCode::WorkerDeleted => StatusCode::GONE,
         ErrorCode::WorkerNameConflict | ErrorCode::RouteConflict => StatusCode::CONFLICT,
-        ErrorCode::DeploymentNotReady
-        | ErrorCode::DeploymentActive
-        | ErrorCode::DeploymentReferenced
+        ErrorCode::VersionNotReady
+        | ErrorCode::VersionActive
+        | ErrorCode::VersionReferenced
         | ErrorCode::ServiceTargetReferenced
         | ErrorCode::QueueConsumerGenerationStale
         | ErrorCode::IdempotencyConflict
@@ -711,7 +711,7 @@ pub(crate) fn operator_error_response(error: &PlatformError, request_id: Request
         ErrorCode::Internal
         | ErrorCode::CacheCorrupt
         | ErrorCode::RuntimeResultUnknown
-        | ErrorCode::DeploymentInvariantViolation
+        | ErrorCode::VersionInvariantViolation
         | ErrorCode::ArtifactIntegrityError
         | ErrorCode::AssetIntegrityError => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::BAD_REQUEST,
@@ -761,29 +761,28 @@ async fn bounds_middleware(
     {
         return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
     }
-    let direct_deployment_upload = request
+    let direct_version_upload = request
         .uri()
         .path()
         .starts_with("/operator/api/v1/accounts/")
-        && request.uri().path().ends_with("/deployments");
-    let staged_deployment_upload = is_staged_deployment_upload(request.uri().path());
+        && request.uri().path().ends_with("/versions");
+    let staged_version_upload = is_staged_version_upload(request.uri().path());
     let mut header_total = 0_usize;
     for (name, value) in request.headers() {
-        let value_limit = if direct_deployment_upload
-            && name.as_str() == workers_http::DEPLOYMENT_METADATA_HEADER
-        {
-            workers_http::MAX_DEPLOYMENT_METADATA_HEADER_BYTES
-        } else {
-            MAX_HEADER_BYTES
-        };
+        let value_limit =
+            if direct_version_upload && name.as_str() == workers_http::VERSION_METADATA_HEADER {
+                workers_http::MAX_VERSION_METADATA_HEADER_BYTES
+            } else {
+                MAX_HEADER_BYTES
+            };
         if value.len() > value_limit || name.as_str().len() > 256 {
             return Err(StatusCode::PAYLOAD_TOO_LARGE);
         }
         header_total = header_total
             .saturating_add(name.as_str().len())
             .saturating_add(value.len());
-        let total_limit = if direct_deployment_upload {
-            MAX_DEPLOYMENT_HEADER_TOTAL
+        let total_limit = if direct_version_upload {
+            MAX_VERSION_HEADER_TOTAL
         } else {
             MAX_HEADER_TOTAL
         };
@@ -795,7 +794,7 @@ async fn bounds_middleware(
         && kv_http::operator_kv_value_put_path(request.uri().path());
     let r2_object_put = request.method() == Method::PUT
         && r2_http::operator_r2_object_put_path(request.uri().path());
-    let body_limit = if direct_deployment_upload || staged_deployment_upload {
+    let body_limit = if direct_version_upload || staged_version_upload {
         workers_http::HARD_MAX_BUNDLE_BODY
     } else if kv_value_put {
         kv_http::KV_OPERATOR_PUT_MAX_BODY
@@ -855,7 +854,7 @@ async fn bounds_middleware(
     Ok(response)
 }
 
-fn is_staged_deployment_upload(path: &str) -> bool {
+fn is_staged_version_upload(path: &str) -> bool {
     let parts = path
         .strip_prefix('/')
         .unwrap_or(path)
@@ -869,7 +868,7 @@ fn is_staged_deployment_upload(path: &str) -> bool {
         && !parts[4].is_empty()
         && parts[5] == "workers"
         && !parts[6].is_empty()
-        && parts[7] == "deployment-uploads"
+        && parts[7] == "version-uploads"
         && (parts.len() == 8 || !parts[8].is_empty())
         && (parts.len() == 8
             || parts.len() == 9

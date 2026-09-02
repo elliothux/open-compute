@@ -20,9 +20,9 @@ use open_compute_service::scheduler::SchedulerService;
 use open_compute_service::workflow_http::WorkflowApiState;
 use open_compute_service::{SqliteKvBindingExecutor, serve_binding_backend};
 use open_compute_storage::scheduler::{WorkflowCompletion, WorkflowState};
-use open_compute_storage::{DeploymentState, SchedulerStore, WorkflowRepository};
+use open_compute_storage::{SchedulerStore, VersionState, WorkflowRepository};
 use open_compute_workers::{
-    DeploymentBindingInput, ResourcePins, WorkflowController, WorkflowReconcileCursor,
+    ResourcePins, VersionBindingInput, WorkflowController, WorkflowReconcileCursor,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;

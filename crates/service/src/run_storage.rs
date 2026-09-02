@@ -34,7 +34,7 @@ pub(super) fn bootstrap(
     open_compute_storage::R2Staging::open(storage.data_dir().root())?.cleanup()?;
     let workers = WorkerRepository::new(storage.db());
     workers.prune_expired_idempotency(now, config.workers.delete_recovery_batch)?;
-    workers.recover_deleting_deployments(
+    workers.recover_deleting_versions(
         RequestId::generate(),
         now,
         config.workers.delete_recovery_batch,

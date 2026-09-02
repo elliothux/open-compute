@@ -163,7 +163,7 @@ export function makeD1TransportBase(bindingError: BindingError, currentStartupGe
     #props() {
       const props = this.ctx.props;
       if (!props || typeof props.bindingId !== "string"
-          || typeof props.deploymentId !== "string"
+          || typeof props.versionId !== "string"
           || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
           || !Number.isSafeInteger(props.resourceSpecGeneration)
           || props.resourceSpecGeneration < 1) throw bindingError("BINDING_PROTOCOL_ERROR");
@@ -187,7 +187,7 @@ export function makeD1TransportBase(bindingError: BindingError, currentStartupGe
             "content-type": contentType,
             [tokenHeader]: this.env.BINDING_BACKEND_TOKEN,
             "x-open-compute-startup-generation": currentStartupGeneration(),
-            "x-open-compute-deployment-id": props.deploymentId,
+            "x-open-compute-version-id": props.versionId,
             "x-open-compute-descriptor-sha256": props.descriptorSha256,
             "x-open-compute-request-id": crypto.randomUUID(),
           },

@@ -73,9 +73,9 @@ pub(super) fn target_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowTa
         account_id: parse(row, 0)?,
         definition_id: parse(row, 1)?,
         definition_name: row.get(2)?,
-        version_id: parse(row, 3)?,
+        workflow_version_id: parse(row, 3)?,
         worker_id: parse(row, 4)?,
-        deployment_id: parse(row, 5)?,
+        worker_version_id: parse(row, 5)?,
         worker_code_sha256: digest(row, 6)?,
         class_name: row.get(7)?,
         loader_schema_version: row.get(8)?,
@@ -88,7 +88,7 @@ pub(super) fn version_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowV
     Ok(WorkflowVersion {
         target: target_row(row)?,
         version_number: row.get(11)?,
-        state: DeploymentState::parse(&row.get::<_, String>(12)?)
+        state: VersionState::parse(&row.get::<_, String>(12)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         created_at_ms: row.get(13)?,
         rejection_code: row.get(14)?,
@@ -98,7 +98,7 @@ pub(super) fn version_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowV
 pub(super) const DEFINITION_SELECT: &str =
     "SELECT id,account_id,name,state,availability,availability_code,
     lifecycle_generation,current_version_id,created_at_ms,updated_at_ms FROM workflow_definitions";
-pub(super) const VERSION_SELECT: &str = "SELECT f.account_id,f.id,f.name,v.id,v.worker_id,v.deployment_id,
+pub(super) const VERSION_SELECT: &str = "SELECT f.account_id,f.id,f.name,v.id,v.worker_id,v.worker_version_id,
     v.worker_code_sha256,v.class_name,v.loader_schema_version,v.capability_version,v.descriptor_sha256,
     v.version_number,v.state,v.created_at_ms,v.rejection_code FROM workflow_versions v
     JOIN workflow_definitions f ON f.id=v.definition_id";
@@ -109,7 +109,7 @@ pub(crate) fn version_digest(target: &WorkflowTarget) -> Result<[u8; 32], Platfo
     }
     // Display name can change; it is copied only when an instance is created.
     let descriptor = serde_json::json!({"schemaVersion":2,"accountId":target.account_id,"definitionId":target.definition_id,
-        "versionId":target.version_id,"workerId":target.worker_id,"deploymentId":target.deployment_id,
+        "workflowVersionId":target.workflow_version_id,"workerId":target.worker_id,"workerVersionId":target.worker_version_id,
         "workerCodeSha256":hex::encode(target.worker_code_sha256),"className":target.class_name,
         "loaderSchemaVersion":target.loader_schema_version,"capabilityVersion":target.capability_version});
     Ok(Sha256::digest(serde_json::to_vec(&descriptor).map_err(|_| invariant())?).into())

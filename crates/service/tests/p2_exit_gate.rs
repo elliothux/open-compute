@@ -218,7 +218,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
             "/operator/api/v1/accounts/{}/workflows/{}/versions",
             fixture.account, fixture.definition
         ),
-        json!({"deploymentId":fixture.future,"className":"Flow"}),
+        json!({"versionId":fixture.future,"className":"Flow"}),
     )
     .await;
     assert_eq!(version["state"], "ready");
@@ -336,7 +336,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     )
     .unwrap();
     let instance = store.workflow_instance(fence.instance_id).unwrap().unwrap();
-    assert_eq!(instance.identity.target.deployment_id, fixture.frozen);
+    assert_eq!(instance.identity.target.worker_version_id, fixture.frozen);
     store.verify_workflow_history(fence.instance_id).unwrap();
     assert_eq!(
         store

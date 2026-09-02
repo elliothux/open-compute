@@ -32,7 +32,7 @@ pub struct WorkflowRetryPolicy {
     /// Number of additional business attempts, from zero through one hundred.
     pub limit: u32,
     /// Normalized static base delay in milliseconds. `None` means the immutable
-    /// deployment supplies a dynamic delay function on every failed attempt.
+    /// version supplies a dynamic delay function on every failed attempt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delay: Option<u64>,
     /// Frozen deterministic backoff formula.

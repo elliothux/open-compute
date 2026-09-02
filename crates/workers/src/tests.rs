@@ -9,10 +9,10 @@ use open_compute_artifacts::{
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
-    AccountId, CacheConfig, DeploymentId, ErrorCode, PlatformConfig, RequestId, SecretString,
-    StartupId, StorageConfig, WorkerId,
+    AccountId, CacheConfig, ErrorCode, PlatformConfig, RequestId, SecretString, StartupId,
+    StorageConfig, VersionId, WorkerId,
 };
-use open_compute_storage::{DeploymentState, PlatformStorage, WorkerRepository};
+use open_compute_storage::{PlatformStorage, VersionState, WorkerRepository};
 use sha2::Digest as _;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -671,7 +671,7 @@ fn bundle_verifiers_reject_every_canonical_manifest_boundary() {
 fn descriptor_binds_every_runtime_effective_input() {
     let account = AccountId::generate();
     let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![module("index.js", b"export default {}")],
@@ -684,8 +684,10 @@ fn descriptor_binds_every_runtime_effective_input() {
     let descriptor = WorkerCodeDescriptorV1::new(
         account,
         worker,
-        deployment,
+        version,
         0,
+        "2026-08-30".into(),
+        Vec::new(),
         Some((bundle.sha256(), bundle.manifest())),
         None,
         vars,
@@ -700,11 +702,11 @@ fn descriptor_binds_every_runtime_effective_input() {
     )
     .unwrap();
     let encoded = serde_json::to_value(&descriptor).unwrap();
-    assert!(encoded.get("compatibilityDate").is_none());
-    assert!(encoded.get("compatibilityFlags").is_none());
+    assert_eq!(encoded["compatibilityDate"], "2026-08-30");
+    assert_eq!(encoded["compatibilityFlags"], serde_json::json!([]));
     assert_eq!(
         parse_loader_key(&descriptor.loader_key).unwrap(),
-        (account, worker, deployment)
+        (account, worker, version)
     );
     let first = descriptor.sha256().unwrap();
     let mut changed = descriptor.clone();
@@ -788,7 +790,7 @@ fn descriptor_env_date_and_secret_validation_matrix() {
 
     let account = AccountId::generate();
     let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
+    let version = VersionId::generate();
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![module("index.js", b"export default {}")],
@@ -804,8 +806,10 @@ fn descriptor_env_date_and_secret_validation_matrix() {
         WorkerCodeDescriptorV1::new(
             account,
             worker,
-            deployment,
+            version,
             0,
+            "2026-08-30".into(),
+            Vec::new(),
             Some((bundle.sha256(), bundle.manifest())),
             None,
             vars,
@@ -866,26 +870,23 @@ fn descriptor_env_date_and_secret_validation_matrix() {
 fn loader_key_is_strict() {
     let account = AccountId::generate();
     let worker = WorkerId::generate();
-    let deployment = DeploymentId::generate();
-    let key = loader_key(account, worker, deployment);
-    assert_eq!(
-        parse_loader_key(&key).unwrap(),
-        (account, worker, deployment)
-    );
+    let version = VersionId::generate();
+    let key = loader_key(account, worker, version);
+    assert_eq!(parse_loader_key(&key).unwrap(), (account, worker, version));
     assert!(parse_loader_key(&format!("{key}/extra")).is_err());
     assert!(parse_loader_key(&key.replace('-', "%2d")).is_err());
     for invalid in ["", "a/b", "a/b/c", "a/b/c/d"] {
         assert_eq!(
             parse_loader_key(invalid).unwrap_err().code(),
-            ErrorCode::DeploymentInvariantViolation
+            ErrorCode::VersionInvariantViolation
         );
     }
 }
 
 #[tokio::test]
-async fn deployment_pins_timeout_unfence_retire_and_debug_paths() {
-    let id = DeploymentId::generate();
-    let pins = DeploymentPins::new();
+async fn version_pins_timeout_unfence_retire_and_debug_paths() {
+    let id = VersionId::generate();
+    let pins = VersionPins::new();
     assert_eq!(pins.count(id), 0);
     pins.unfence(id);
     pins.retire_fence(id);
@@ -898,7 +899,7 @@ async fn deployment_pins_timeout_unfence_retire_and_debug_paths() {
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentReferenced
+        ErrorCode::VersionReferenced
     );
     pins.unfence(id);
     let second = pins.pin(id).unwrap();
@@ -916,7 +917,7 @@ async fn deployment_pins_timeout_unfence_retire_and_debug_paths() {
 }
 
 #[test]
-fn deployment_pipeline_helper_contracts_cover_failure_code_matrix() {
+fn version_pipeline_helper_contracts_cover_failure_code_matrix() {
     for key in ["", "contains space", "line\nbreak", &"x".repeat(129)] {
         assert_eq!(
             validate_idempotency_key(key).unwrap_err().code(),
@@ -926,15 +927,12 @@ fn deployment_pipeline_helper_contracts_cover_failure_code_matrix() {
     validate_idempotency_key("valid-key_123").unwrap();
 
     let account = AccountId::generate();
-    let first = idempotency_ref_id(account, "deployment.create", "key");
+    let first = idempotency_ref_id(account, "version.create", "key");
     assert_eq!(first.len(), 64);
-    assert_eq!(
-        first,
-        idempotency_ref_id(account, "deployment.create", "key")
-    );
+    assert_eq!(first, idempotency_ref_id(account, "version.create", "key"));
     assert_ne!(
         first,
-        idempotency_ref_id(account, "deployment.create", "other")
+        idempotency_ref_id(account, "version.create", "other")
     );
 
     let mut secrets = BTreeMap::new();
@@ -1002,11 +1000,11 @@ fn deployment_pipeline_helper_contracts_cover_failure_code_matrix() {
         ("ACCOUNT_NOT_FOUND", ErrorCode::AccountNotFound),
         ("WORKER_NOT_FOUND", ErrorCode::WorkerNotFound),
         ("WORKER_DELETED", ErrorCode::WorkerDeleted),
-        ("DEPLOYMENT_NOT_FOUND", ErrorCode::DeploymentNotFound),
-        ("DEPLOYMENT_NOT_READY", ErrorCode::DeploymentNotReady),
+        ("VERSION_NOT_FOUND", ErrorCode::VersionNotFound),
+        ("VERSION_NOT_READY", ErrorCode::VersionNotReady),
         (
-            "DEPLOYMENT_INVARIANT_VIOLATION",
-            ErrorCode::DeploymentInvariantViolation,
+            "VERSION_INVARIANT_VIOLATION",
+            ErrorCode::VersionInvariantViolation,
         ),
         ("BUNDLE_INVALID", ErrorCode::BundleInvalid),
         ("BUNDLE_TOO_LARGE", ErrorCode::BundleTooLarge),
@@ -1078,12 +1076,12 @@ fn artifact_store(mock: &MockS3) -> ArtifactStore {
     ArtifactStore::new(S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap())
 }
 
-fn deployment_request(
+fn version_request(
     account_id: AccountId,
     worker_id: WorkerId,
     key: &str,
     secret: &str,
-) -> CreateDeploymentRequest {
+) -> CreateVersionRequest {
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![module(
@@ -1097,11 +1095,11 @@ fn deployment_request(
     vars.insert("MODE".to_owned(), serde_json::json!("production"));
     let mut secrets = BTreeMap::new();
     secrets.insert("API_TOKEN".to_owned(), SecretString::new(secret));
-    CreateDeploymentRequest {
+    CreateVersionRequest {
         account_id,
         worker_id,
         idempotency_key: key.to_owned(),
-        content: DeploymentContent::Worker {
+        content: VersionContent::Worker {
             bundle: bundle.into_bytes().into(),
             assets: None,
         },
@@ -1119,7 +1117,7 @@ fn deployment_request(
 }
 
 #[tokio::test]
-async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
+async fn version_pipeline_uploads_validates_promotes_and_replays() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("data");
     let storage =
@@ -1140,56 +1138,56 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
         .unwrap();
     let mock = MockS3::spawn("open-compute").await;
     let validator: Arc<dyn RuntimeValidator> = Arc::new(AcceptAllValidator);
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifact_store(&mock),
         validator,
         BundleLimits::default(),
     );
-    let mut request = deployment_request(account, worker.id, "deploy-key", "pipeline-secret-value");
+    let mut request = version_request(account, worker.id, "deploy-key", "pipeline-secret-value");
     request.services.insert(
         "CATALOG".to_owned(),
-        DeploymentServiceInput {
+        VersionServiceInput {
             target_worker_id: target.id,
             entrypoint: Some("CatalogApi".to_owned()),
         },
     );
     request.runtime_features.cache.entrypoints.insert(
         "CachedApi".to_owned(),
-        DeploymentCachePolicyInput {
+        VersionCachePolicyInput {
             enabled: true,
             cross_version_cache: false,
         },
     );
-    let first = controller.create_deployment(request.clone()).await.unwrap();
-    let (deployment_id, descriptor_hash) = match first {
-        CreateDeploymentOutcome::Applied(result) => {
+    let first = controller.create_version(request.clone()).await.unwrap();
+    let (version_id, descriptor_hash) = match first {
+        CreateVersionOutcome::Applied(result) => {
             assert!(result.promoted);
-            assert_eq!(result.deployment.state, DeploymentState::Ready);
+            assert_eq!(result.version.state, VersionState::Ready);
             (
-                result.deployment.id,
-                hex::encode(result.deployment.worker_code_sha256),
+                result.version.id,
+                hex::encode(result.version.worker_code_sha256),
             )
         }
-        CreateDeploymentOutcome::Replay(_) => panic!("first request cannot replay"),
+        CreateVersionOutcome::Replay(_) => panic!("first request cannot replay"),
     };
     assert_eq!(
         repo.get_worker(account, worker.id)
             .unwrap()
-            .active_deployment_id,
-        Some(deployment_id)
+            .active_version_id,
+        Some(version_id)
     );
     assert_eq!(mock.object_count(), 1);
-    let replay = controller.create_deployment(request.clone()).await.unwrap();
+    let replay = controller.create_version(request.clone()).await.unwrap();
     match replay {
-        CreateDeploymentOutcome::Replay(bytes) => {
+        CreateVersionOutcome::Replay(bytes) => {
             let text = String::from_utf8(bytes).unwrap();
-            assert!(text.contains(&deployment_id.to_string()));
+            assert!(text.contains(&version_id.to_string()));
             assert!(!text.contains("pipeline-secret-value"));
         }
-        CreateDeploymentOutcome::Applied(_) => panic!("idempotency replay created a deployment"),
+        CreateVersionOutcome::Applied(_) => panic!("idempotency replay created a version"),
     }
-    assert_eq!(repo.list_deployments(account, worker.id).unwrap().len(), 1);
+    assert_eq!(repo.list_versions(account, worker.id).unwrap().len(), 1);
     assert_eq!(mock.object_count(), 1);
 
     let source = RuntimeSource::new(
@@ -1199,7 +1197,7 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     );
     let snapshot = source
         .resolve(
-            &loader_key(account, worker.id, deployment_id),
+            &loader_key(account, worker.id, version_id),
             &descriptor_hash,
             RuntimeScope::Runtime,
         )
@@ -1232,14 +1230,14 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     assert_eq!(
         source
             .resolve(
-                &loader_key(account, worker.id, deployment_id),
+                &loader_key(account, worker.id, version_id),
                 "bad-descriptor",
                 RuntimeScope::Runtime,
             )
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentInvariantViolation
+        ErrorCode::VersionInvariantViolation
     );
 
     let cache = Arc::new(
@@ -1264,7 +1262,7 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     .with_cache(cache);
     let probe = cached_source
         .resolve(
-            &loader_key(account, worker.id, deployment_id),
+            &loader_key(account, worker.id, version_id),
             &descriptor_hash,
             RuntimeScope::Probe,
         )
@@ -1275,14 +1273,14 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     assert_eq!(
         source
             .resolve(
-                &loader_key(account, worker.id, deployment_id),
+                &loader_key(account, worker.id, version_id),
                 &descriptor_hash,
                 RuntimeScope::Validation,
             )
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentNotReady
+        ErrorCode::VersionNotReady
     );
 
     let mut conflict = request;
@@ -1292,19 +1290,19 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     );
     assert_eq!(
         controller
-            .create_deployment(conflict)
+            .create_version(conflict)
             .await
             .unwrap_err()
             .code(),
         ErrorCode::IdempotencyConflict
     );
-    assert_eq!(repo.deployment_referrers(deployment_id).unwrap().len(), 1);
+    assert_eq!(repo.version_referrers(version_id).unwrap().len(), 1);
     assert_eq!(
         repo.prune_expired_idempotency(10_000 + 24 * 60 * 60 * 1_000 + 1, 64)
             .unwrap(),
         1
     );
-    assert!(repo.deployment_referrers(deployment_id).unwrap().is_empty());
+    assert!(repo.version_referrers(version_id).unwrap().is_empty());
 
     for entry in fs::read_dir(&root).unwrap() {
         let path = entry.unwrap().path();
@@ -1321,30 +1319,30 @@ async fn deployment_pipeline_uploads_validates_promotes_and_replays() {
     // Simulate out-of-band corruption by removing the production guard. The
     // RuntimeSource pre-get descriptor check must still fail closed.
     let conn = rusqlite::Connection::open(root.join("control.sqlite")).unwrap();
-    conn.execute_batch("DROP TRIGGER deployment_immutable_guard;")
+    conn.execute_batch("DROP TRIGGER version_immutable_guard;")
         .unwrap();
     conn.execute(
-        "UPDATE worker_deployments SET worker_code_sha256 = zeroblob(32) WHERE id = ?1",
-        [deployment_id.to_string()],
+        "UPDATE worker_versions SET worker_code_sha256 = zeroblob(32) WHERE id = ?1",
+        [version_id.to_string()],
     )
     .unwrap();
     drop(conn);
     assert_eq!(
         source
             .resolve(
-                &loader_key(account, worker.id, deployment_id),
+                &loader_key(account, worker.id, version_id),
                 &descriptor_hash,
                 RuntimeScope::Runtime,
             )
             .await
             .unwrap_err()
             .code(),
-        ErrorCode::DeploymentInvariantViolation
+        ErrorCode::VersionInvariantViolation
     );
 }
 
 #[tokio::test]
-async fn fixed_upload_finalize_resumes_one_cancelled_validating_deployment() {
+async fn fixed_upload_finalize_resumes_one_cancelled_validating_version() {
     let temp = tempfile::tempdir().unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
@@ -1363,8 +1361,8 @@ async fn fixed_upload_finalize_resumes_one_cancelled_validating_deployment() {
         .0;
     let mock = MockS3::spawn("open-compute").await;
     let artifacts = artifact_store(&mock);
-    let deployment_id = DeploymentId::generate();
-    let request = deployment_request(account, worker.id, "upload-resume", "secret");
+    let version_id = VersionId::generate();
+    let request = version_request(account, worker.id, "upload-resume", "secret");
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let started = Arc::new(std::sync::Mutex::new(Some(started_tx)));
     let blocking_validator: Arc<dyn RuntimeValidator> = Arc::new({
@@ -1383,25 +1381,25 @@ async fn fixed_upload_finalize_resumes_one_cancelled_validating_deployment() {
     let first_artifacts = artifacts.clone();
     let first_request = request.clone();
     let attempt = tokio::spawn(async move {
-        DeploymentController::new(
+        VersionController::new(
             &first_storage,
             first_artifacts,
             blocking_validator,
             BundleLimits::default(),
         )
-        .finalize_upload(first_request, deployment_id)
+        .finalize_upload(first_request, version_id)
         .await
     });
     started_rx.await.unwrap();
     attempt.abort();
     assert!(attempt.await.unwrap_err().is_cancelled());
     let stranded = WorkerRepository::new(storage.db())
-        .get_deployment(account, worker.id, deployment_id)
+        .get_version(account, worker.id, version_id)
         .unwrap();
-    assert_eq!(stranded.state, DeploymentState::Validating);
+    assert_eq!(stranded.state, VersionState::Validating);
     let probe = RuntimeSource::new(storage.clone(), artifacts.clone(), BundleLimits::default())
         .resolve(
-            &loader_key(account, worker.id, deployment_id),
+            &loader_key(account, worker.id, version_id),
             &hex::encode(stranded.worker_code_sha256),
             RuntimeScope::Probe,
         )
@@ -1409,23 +1407,23 @@ async fn fixed_upload_finalize_resumes_one_cancelled_validating_deployment() {
         .unwrap();
     assert!(probe.secrets.is_empty());
 
-    let recovered = DeploymentController::new(
+    let recovered = VersionController::new(
         &storage,
         artifacts,
         Arc::new(AcceptAllValidator),
         BundleLimits::default(),
     )
-    .finalize_upload(request, deployment_id)
+    .finalize_upload(request, version_id)
     .await
     .unwrap();
-    let CreateDeploymentOutcome::Applied(result) = recovered else {
-        panic!("cancelled finalize must complete its fixed deployment");
+    let CreateVersionOutcome::Applied(result) = recovered else {
+        panic!("cancelled finalize must complete its fixed version");
     };
-    assert_eq!(result.deployment.id, deployment_id);
-    assert_eq!(result.deployment.state, DeploymentState::Ready);
+    assert_eq!(result.version.id, version_id);
+    assert_eq!(result.version.state, VersionState::Ready);
     assert_eq!(
         WorkerRepository::new(storage.db())
-            .list_deployments(account, worker.id)
+            .list_versions(account, worker.id)
             .unwrap()
             .len(),
         1
@@ -1456,7 +1454,7 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
         )
         .await
         .unwrap();
-    let assets = DeploymentAssets {
+    let assets = VersionAssets {
         manifest: AssetManifestV1 {
             schema_version: 1,
             entries: vec![AssetEntryV1 {
@@ -1476,17 +1474,17 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
             redirects: Vec::new(),
         },
     };
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         store.clone(),
         Arc::new(AcceptAllValidator),
         BundleLimits::default(),
     );
-    let request = CreateDeploymentRequest {
+    let request = CreateVersionRequest {
         account_id: account,
         worker_id: worker.id,
         idempotency_key: "assets-only".to_owned(),
-        content: DeploymentContent::AssetsOnly {
+        content: VersionContent::AssetsOnly {
             assets: assets.clone(),
         },
         vars: BTreeMap::new(),
@@ -1500,18 +1498,18 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
         request_id: RequestId::generate(),
         now_ms: 10,
     };
-    let result = match controller.create_deployment(request.clone()).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result,
-        CreateDeploymentOutcome::Replay(_) => panic!("first assets deployment replayed"),
+    let result = match controller.create_version(request.clone()).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result,
+        CreateVersionOutcome::Replay(_) => panic!("first assets version replayed"),
     };
     assert_eq!(
-        result.deployment.content_kind,
-        open_compute_storage::DeploymentContentKind::AssetsOnly
+        result.version.content_kind,
+        open_compute_storage::VersionContentKind::AssetsOnly
     );
-    assert!(result.deployment.artifact_sha256.is_none());
-    assert!(result.deployment.main_module.is_none());
-    let stored = open_compute_storage::DeploymentAssetsRepository::new(storage.db())
-        .get(result.deployment.id)
+    assert!(result.version.artifact_sha256.is_none());
+    assert!(result.version.main_module.is_none());
+    let stored = open_compute_storage::VersionAssetsRepository::new(storage.db())
+        .get(result.version.id)
         .unwrap()
         .unwrap();
     assert_eq!(stored.logical_file_count, 1);
@@ -1520,8 +1518,8 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
     assert_eq!(mock.object_count(), 2);
     let static_snapshot = RuntimeSource::new(storage.clone(), store, BundleLimits::default())
         .resolve(
-            &loader_key(account, worker.id, result.deployment.id),
-            &hex::encode(result.deployment.worker_code_sha256),
+            &loader_key(account, worker.id, result.version.id),
+            &hex::encode(result.version.worker_code_sha256),
             RuntimeScope::Runtime,
         )
         .await
@@ -1536,17 +1534,13 @@ async fn assets_only_pipeline_commits_real_refs_without_fabricating_worker_code(
         .vars
         .insert("MODE".to_owned(), serde_json::json!("x"));
     assert_eq!(
-        controller
-            .create_deployment(invalid)
-            .await
-            .unwrap_err()
-            .code(),
+        controller.create_version(invalid).await.unwrap_err().code(),
         ErrorCode::AssetConfigUnsupported
     );
 }
 
 #[tokio::test]
-async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_crons() {
+async fn version_products_validate_ready_queue_dlq_entrypoint_counts_and_crons() {
     let tmp = tempfile::tempdir().unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&tmp.path().join("data")), &SystemClock)
@@ -1581,7 +1575,7 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
     }
     let mock = MockS3::spawn("open-compute").await;
     let validator: Arc<dyn RuntimeValidator> = Arc::new(AcceptAllValidator);
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifact_store(&mock),
         validator,
@@ -1597,33 +1591,33 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
         },
         dead_letter_queue: Some(dlq),
     };
-    let mut valid = deployment_request(account, worker.id, "products-valid", "secret");
+    let mut valid = version_request(account, worker.id, "products-valid", "secret");
     valid.promote = false;
     valid.queue_consumers = vec![consumer.clone()];
     valid.crons = vec!["*/5 * * * *".to_owned(), "*/5 * * * *".to_owned()];
-    let deployment = match controller.create_deployment(valid).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("product deployment replayed"),
+    let version = match controller.create_version(valid).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("product version replayed"),
     };
     let declarations = open_compute_storage::QueueConsumerRepository::new(storage.db())
-        .deployment_declarations(deployment.id)
+        .version_declarations(version.id)
         .unwrap();
     assert_eq!(declarations.len(), 1);
     assert_eq!(declarations[0].dlq_queue_id, Some(dlq));
     assert_eq!(declarations[0].dlq_lifecycle_generation, Some(1));
     let cron = open_compute_storage::CronRepository::new(storage.db())
-        .deployment_config(deployment.id)
+        .version_config(version.id)
         .unwrap();
     assert_eq!(cron.declarations.len(), 1);
     assert_eq!(cron.declarations[0].expression, "*/5 * * * *");
 
     let mut cases = Vec::new();
-    let mut duplicate = deployment_request(account, worker.id, "products-duplicate", "secret");
+    let mut duplicate = version_request(account, worker.id, "products-duplicate", "secret");
     duplicate.promote = false;
     duplicate.queue_consumers = vec![consumer.clone(), consumer.clone()];
     cases.push((duplicate, ErrorCode::QueueConsumerConflict));
 
-    let mut self_dlq = deployment_request(account, worker.id, "products-self-dlq", "secret");
+    let mut self_dlq = version_request(account, worker.id, "products-self-dlq", "secret");
     self_dlq.promote = false;
     self_dlq.queue_consumers = vec![QueueConsumerInput {
         dead_letter_queue: Some(source),
@@ -1631,7 +1625,7 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
     }];
     cases.push((self_dlq, ErrorCode::QueueDlqInvalid));
 
-    let mut pending_dlq = deployment_request(account, worker.id, "products-pending-dlq", "secret");
+    let mut pending_dlq = version_request(account, worker.id, "products-pending-dlq", "secret");
     pending_dlq.promote = false;
     pending_dlq.queue_consumers = vec![QueueConsumerInput {
         dead_letter_queue: Some(pending),
@@ -1639,7 +1633,7 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
     }];
     cases.push((pending_dlq, ErrorCode::QueueDlqInvalid));
 
-    let mut bad_entry = deployment_request(account, worker.id, "products-entry", "secret");
+    let mut bad_entry = version_request(account, worker.id, "products-entry", "secret");
     bad_entry.promote = false;
     bad_entry.queue_consumers = vec![QueueConsumerInput {
         entrypoint: Some("1-invalid".to_owned()),
@@ -1647,7 +1641,7 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
     }];
     cases.push((bad_entry, ErrorCode::EntrypointNotFound));
 
-    let mut not_ready = deployment_request(account, worker.id, "products-not-ready", "secret");
+    let mut not_ready = version_request(account, worker.id, "products-not-ready", "secret");
     not_ready.promote = false;
     not_ready.queue_consumers = vec![QueueConsumerInput {
         queue: pending,
@@ -1656,7 +1650,7 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
     }];
     cases.push((not_ready, ErrorCode::QueueConsumerNotReady));
 
-    let mut invalid_config = deployment_request(account, worker.id, "products-config", "secret");
+    let mut invalid_config = version_request(account, worker.id, "products-config", "secret");
     invalid_config.promote = false;
     invalid_config.queue_consumers = vec![QueueConsumerInput {
         config: open_compute_storage::QueueConsumerConfig {
@@ -1667,23 +1661,19 @@ async fn deployment_products_validate_ready_queue_dlq_entrypoint_counts_and_cron
     }];
     cases.push((invalid_config, ErrorCode::LimitInvalid));
 
-    let mut invalid_cron = deployment_request(account, worker.id, "products-cron", "secret");
+    let mut invalid_cron = version_request(account, worker.id, "products-cron", "secret");
     invalid_cron.promote = false;
     invalid_cron.crons = vec!["not a cron".to_owned()];
     cases.push((invalid_cron, ErrorCode::CronExpressionInvalid));
 
-    let mut too_many = deployment_request(account, worker.id, "products-count", "secret");
+    let mut too_many = version_request(account, worker.id, "products-count", "secret");
     too_many.promote = false;
     too_many.queue_consumers = vec![consumer; 65];
     cases.push((too_many, ErrorCode::QuotaExceeded));
 
     for (request, expected) in cases {
         assert_eq!(
-            controller
-                .create_deployment(request)
-                .await
-                .unwrap_err()
-                .code(),
+            controller.create_version(request).await.unwrap_err().code(),
             expected
         );
     }
@@ -1705,15 +1695,15 @@ fn runtime_source_error_mapping_is_stable_and_sanitized() {
     ));
     assert_eq!(unavailable.code(), ErrorCode::ArtifactUnavailable);
     assert!(!unavailable.message().contains("signed URL"));
-    assert_eq!(not_ready().code(), ErrorCode::DeploymentNotReady);
+    assert_eq!(not_ready().code(), ErrorCode::VersionNotReady);
     assert_eq!(
         source_invariant().code(),
-        ErrorCode::DeploymentInvariantViolation
+        ErrorCode::VersionInvariantViolation
     );
 }
 
 #[tokio::test]
-async fn shared_artifact_gc_waits_for_last_deployment_reference() {
+async fn shared_artifact_gc_waits_for_last_version_reference() {
     let temp = tempfile::tempdir().unwrap();
     let storage = PlatformStorage::bootstrap(&storage_config(temp.path()), &SystemClock).unwrap();
     let mock = MockS3::spawn("open-compute").await;
@@ -1728,31 +1718,31 @@ async fn shared_artifact_gc_waits_for_last_deployment_reference() {
         .create_worker(account, "gc-second", request_id, 2, 1_000_000)
         .unwrap();
     let validator: Arc<dyn RuntimeValidator> = Arc::new(|_| async { Ok(()) });
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts.clone(),
         validator,
         BundleLimits::default(),
     );
-    let mut first = deployment_request(account, first_worker.id, "gc-first", "same-secret");
+    let mut first = version_request(account, first_worker.id, "gc-first", "same-secret");
     first.promote = false;
-    let mut second = deployment_request(account, second_worker.id, "gc-second", "same-secret");
+    let mut second = version_request(account, second_worker.id, "gc-second", "same-secret");
     second.promote = false;
-    let first = match controller.create_deployment(first).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected replay"),
+    let first = match controller.create_version(first).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
     };
-    let second = match controller.create_deployment(second).await.unwrap() {
-        CreateDeploymentOutcome::Applied(result) => result.deployment,
-        CreateDeploymentOutcome::Replay(_) => panic!("unexpected replay"),
+    let second = match controller.create_version(second).await.unwrap() {
+        CreateVersionOutcome::Applied(result) => result.version,
+        CreateVersionOutcome::Replay(_) => panic!("unexpected replay"),
     };
     assert_eq!(first.artifact_sha256, second.artifact_sha256);
     assert_eq!(mock.object_count(), 1);
     let _ = repo.prune_expired_idempotency(i64::MAX, 100).unwrap();
 
-    repo.begin_deployment_delete(account, first_worker.id, first.id)
+    repo.begin_version_delete(account, first_worker.id, first.id)
         .unwrap();
-    repo.finalize_deployment_delete(account, first_worker.id, first.id, request_id, 20)
+    repo.finalize_version_delete(account, first_worker.id, first.id, request_id, 20)
         .unwrap();
     let referenced = repo
         .referenced_artifacts()
@@ -1763,7 +1753,7 @@ async fn shared_artifact_gc_waits_for_last_deployment_reference() {
     assert_eq!(
         artifacts
             .gc_unreferenced(
-                &artifacts.fence_deployment_gc().await,
+                &artifacts.fence_version_gc().await,
                 &referenced,
                 SystemTime::now() + Duration::from_secs(1),
             )
@@ -1773,14 +1763,14 @@ async fn shared_artifact_gc_waits_for_last_deployment_reference() {
     );
     assert_eq!(mock.object_count(), 1);
 
-    repo.begin_deployment_delete(account, second_worker.id, second.id)
+    repo.begin_version_delete(account, second_worker.id, second.id)
         .unwrap();
-    repo.finalize_deployment_delete(account, second_worker.id, second.id, request_id, 21)
+    repo.finalize_version_delete(account, second_worker.id, second.id, request_id, 21)
         .unwrap();
     assert_eq!(
         artifacts
             .gc_unreferenced(
-                &artifacts.fence_deployment_gc().await,
+                &artifacts.fence_version_gc().await,
                 &HashSet::new(),
                 SystemTime::now() + Duration::from_secs(1),
             )
@@ -1820,29 +1810,29 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
         }
     });
     let artifacts = artifact_store(&mock);
-    let controller = DeploymentController::new(
+    let controller = VersionController::new(
         &storage,
         artifacts.clone(),
         validator.clone(),
         BundleLimits::default(),
     );
-    let request = deployment_request(account, worker.id, "rejected-key", "rejected-secret");
+    let request = version_request(account, worker.id, "rejected-key", "rejected-secret");
     assert_eq!(
         controller
-            .create_deployment(request.clone())
+            .create_version(request.clone())
             .await
             .unwrap_err()
             .code(),
         ErrorCode::BundleRuntimeInvalid
     );
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-    let deployments = repo.list_deployments(account, worker.id).unwrap();
-    assert_eq!(deployments.len(), 1);
-    assert_eq!(deployments[0].state, DeploymentState::Rejected);
+    let versions = repo.list_versions(account, worker.id).unwrap();
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0].state, VersionState::Rejected);
     assert_eq!(
         repo.get_worker(account, worker.id)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         None
     );
 
@@ -1850,10 +1840,10 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
     drop(storage);
     let restarted = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let restarted_controller =
-        DeploymentController::new(&restarted, artifacts, validator, BundleLimits::default());
+        VersionController::new(&restarted, artifacts, validator, BundleLimits::default());
     assert_eq!(
         restarted_controller
-            .create_deployment(request)
+            .create_version(request)
             .await
             .unwrap_err()
             .code(),
@@ -1863,7 +1853,7 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
     let restarted_repo = WorkerRepository::new(restarted.db());
     assert_eq!(
         restarted_repo
-            .list_deployments(account, worker.id)
+            .list_versions(account, worker.id)
             .unwrap()
             .len(),
         1
@@ -1872,7 +1862,7 @@ async fn validation_failure_is_rejected_replayed_and_never_promoted() {
         restarted_repo
             .get_worker(account, worker.id)
             .unwrap()
-            .active_deployment_id,
+            .active_version_id,
         None
     );
 }

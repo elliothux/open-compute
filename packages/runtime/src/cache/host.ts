@@ -22,7 +22,7 @@ export class CacheTransport extends WorkerEntrypoint<BindingEnv, CacheTransportP
   #props() {
     const props = this.ctx.props;
     if (!props || typeof props.accountId !== "string" || typeof props.workerId !== "string"
-        || typeof props.deploymentId !== "string" || typeof props.entrypoint !== "string"
+        || typeof props.versionId !== "string" || typeof props.entrypoint !== "string"
         || !/^[0-9a-f]{64}$/.test(props.descriptorSha256)
         || typeof props.automaticEnabled !== "boolean" || typeof props.crossVersionCache !== "boolean") {
       throw bindingError("CACHE_PROTOCOL_ERROR");
@@ -37,7 +37,7 @@ export class CacheTransport extends WorkerEntrypoint<BindingEnv, CacheTransportP
       "x-open-compute-startup-generation": currentStartupGeneration(),
       "x-open-compute-account-id": props.accountId,
       "x-open-compute-worker-id": props.workerId,
-      "x-open-compute-deployment-id": props.deploymentId,
+      "x-open-compute-version-id": props.versionId,
       "x-open-compute-entrypoint": props.entrypoint,
       "x-open-compute-descriptor-sha256": props.descriptorSha256,
       "x-open-compute-cache-automatic-enabled": String(props.automaticEnabled),

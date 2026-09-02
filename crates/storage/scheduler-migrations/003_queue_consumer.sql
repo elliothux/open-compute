@@ -3,8 +3,8 @@ CREATE TABLE queue_consumer_state (
                                  CHECK(length(consumer_id) = 36 AND consumer_id = lower(consumer_id)),
   queue_id                       TEXT NOT NULL UNIQUE REFERENCES queue_state(queue_id),
   consumer_generation            INTEGER NOT NULL CHECK(consumer_generation >= 1),
-  deployment_id                  TEXT NOT NULL
-                                 CHECK(length(deployment_id) = 36 AND deployment_id = lower(deployment_id)),
+  version_id                  TEXT NOT NULL
+                                 CHECK(length(version_id) = 36 AND version_id = lower(version_id)),
   worker_id                      TEXT NOT NULL
                                  CHECK(length(worker_id) = 36 AND worker_id = lower(worker_id)),
   execution_generation           INTEGER NOT NULL CHECK(execution_generation >= 1),
@@ -32,8 +32,8 @@ CREATE TABLE queue_delivery_batches (
   queue_id              TEXT NOT NULL REFERENCES queue_state(queue_id),
   consumer_id           TEXT NOT NULL REFERENCES queue_consumer_state(consumer_id),
   consumer_generation   INTEGER NOT NULL CHECK(consumer_generation >= 1),
-  deployment_id         TEXT NOT NULL
-                        CHECK(length(deployment_id) = 36 AND deployment_id = lower(deployment_id)),
+  version_id         TEXT NOT NULL
+                        CHECK(length(version_id) = 36 AND version_id = lower(version_id)),
   execution_generation  INTEGER NOT NULL CHECK(execution_generation >= 1),
   entrypoint            TEXT CHECK(entrypoint IS NULL OR length(entrypoint) BETWEEN 1 AND 128),
   claim_token           BLOB NOT NULL CHECK(length(claim_token) = 32),
@@ -104,7 +104,7 @@ WHEN NOT EXISTS (
   SELECT 1 FROM queue_consumer_state c
   WHERE c.consumer_id = NEW.consumer_id AND c.queue_id = NEW.queue_id
     AND c.consumer_generation = NEW.consumer_generation
-    AND c.deployment_id = NEW.deployment_id
+    AND c.version_id = NEW.version_id
     AND c.execution_generation = NEW.execution_generation
     AND c.entrypoint IS NEW.entrypoint AND c.state = 'accepting'
     AND NEW.message_count <= c.max_batch_size

@@ -3,8 +3,8 @@
 use crate::assets::{AssetManifestV1, AssetRoutingConfigV1};
 use crate::bundle::{ModuleManifest, WorkerBundleManifest};
 use open_compute_core::{
-    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DeploymentId,
-    ErrorCode, PlatformError, ResourceId, WorkerId,
+    AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode,
+    PlatformError, ResourceId, VersionId, WorkerId,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -16,7 +16,7 @@ pub const SYSTEM_MODULE_PREFIX: &str = "__open_compute__/";
 const SYSTEM_WORKER_MANIFEST: &[u8] =
     include_bytes!("../../../packages/runtime/dist/manifest.json");
 
-/// Immutable asset identity and routing included in the deployment descriptor.
+/// Immutable asset identity and routing included in the version descriptor.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssetDescriptorV1 {
@@ -43,7 +43,7 @@ pub struct SecretDescriptor {
     pub ciphertext_sha256: String,
 }
 
-/// Canonical immutable descriptor for one deployment resource binding.
+/// Canonical immutable descriptor for one version resource binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BindingDescriptorV1 {
@@ -84,13 +84,13 @@ pub struct ServiceDescriptorV1 {
     pub policy_version: u32,
 }
 
-/// Immutable automatic response-cache policy for one deployment.
+/// Immutable automatic response-cache policy for one version.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CachePolicyDescriptorV1 {
     /// Default export policy.
     pub enabled: bool,
-    /// Share automatic entries across deployment versions.
+    /// Share automatic entries across version versions.
     pub cross_version_cache: bool,
     /// Named entrypoint overrides, sorted by entrypoint name.
     #[serde(default)]
@@ -103,12 +103,12 @@ pub struct CachePolicyDescriptorV1 {
 pub struct CacheEntrypointPolicyV1 {
     /// Whether automatic response caching is enabled for the entrypoint.
     pub enabled: bool,
-    /// Share automatic entries across deployment versions.
+    /// Share automatic entries across version versions.
     pub cross_version_cache: bool,
 }
 
 impl CachePolicyDescriptorV1 {
-    /// Validate the complete deployment cache policy.
+    /// Validate the complete version cache policy.
     pub fn validate(&self) -> Result<(), PlatformError> {
         for name in self.entrypoints.keys() {
             if name == "default"
@@ -131,7 +131,7 @@ impl CachePolicyDescriptorV1 {
     }
 }
 
-/// Kind of immutable platform-provided deployment binding.
+/// Kind of immutable platform-provided version binding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinBindingDescriptorKindV1 {
@@ -139,7 +139,7 @@ pub enum BuiltinBindingDescriptorKindV1 {
     Ai,
     /// Local Images transformation capability.
     Images,
-    /// Frozen deployment Version Metadata object.
+    /// Frozen version Version Metadata object.
     VersionMetadata,
 }
 
@@ -153,7 +153,7 @@ pub struct BuiltinBindingDescriptorV1 {
     pub name: String,
     /// Platform-provided binding kind.
     pub kind: BuiltinBindingDescriptorKindV1,
-    /// Optional immutable deployment tag, only for Version Metadata.
+    /// Optional immutable version tag, only for Version Metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
 }
@@ -369,7 +369,7 @@ impl QueueProducerBindingDescriptorV1 {
     }
 }
 
-/// Canonical hash input for every runtime-effective deployment field.
+/// Canonical hash input for every runtime-effective version field.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkerCodeDescriptorV1 {
@@ -377,10 +377,14 @@ pub struct WorkerCodeDescriptorV1 {
     pub schema_version: u32,
     /// Canonical three-segment loader key.
     pub loader_key: String,
-    /// Immutable deployment creation timestamp used by Version Metadata.
+    /// Immutable version creation timestamp used by Version Metadata.
     pub created_at_ms: i64,
-    /// Explicit deployment content union discriminator.
-    pub content_kind: open_compute_storage::DeploymentContentKind,
+    /// Immutable compatibility date used to compile the tenant isolate.
+    pub compatibility_date: String,
+    /// Immutable sorted compatibility flags used to compile the tenant isolate.
+    pub compatibility_flags: Vec<String>,
+    /// Explicit version content union discriminator.
+    pub content_kind: open_compute_storage::VersionContentKind,
     /// Canonical artifact digest.
     pub artifact_sha256: Option<String>,
     /// Artifact schema.
@@ -419,8 +423,10 @@ impl WorkerCodeDescriptorV1 {
     pub fn new(
         account_id: AccountId,
         worker_id: WorkerId,
-        deployment_id: DeploymentId,
+        version_id: VersionId,
         created_at_ms: i64,
+        compatibility_date: String,
+        compatibility_flags: Vec<String>,
         artifact: Option<([u8; 32], &WorkerBundleManifest)>,
         assets: Option<(&AssetManifestV1, &AssetRoutingConfigV1)>,
         canonical_vars: BTreeMap<String, serde_json::Value>,
@@ -433,13 +439,16 @@ impl WorkerCodeDescriptorV1 {
         mut builtin_binding_descriptors: Vec<BuiltinBindingDescriptorV1>,
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
-        if created_at_ms < 0 {
+        if created_at_ms < 0
+            || compatibility_date != "2026-08-30"
+            || !compatibility_flags.is_empty()
+        {
             return Err(binding_invariant());
         }
         let content_kind = if artifact.is_some() {
-            open_compute_storage::DeploymentContentKind::Worker
+            open_compute_storage::VersionContentKind::Worker
         } else {
-            open_compute_storage::DeploymentContentKind::AssetsOnly
+            open_compute_storage::VersionContentKind::AssetsOnly
         };
         if artifact.is_none() && assets.is_none() {
             return Err(binding_invariant());
@@ -451,7 +460,7 @@ impl WorkerCodeDescriptorV1 {
         {
             return Err(PlatformError::new(
                 ErrorCode::SecretInvalid,
-                "deployment contains duplicate secret names",
+                "version contains duplicate secret names",
             ));
         }
         let mut env_names: BTreeSet<&str> = canonical_vars.keys().map(String::as_str).collect();
@@ -460,7 +469,7 @@ impl WorkerCodeDescriptorV1 {
             if !env_names.insert(&secret.name) {
                 return Err(PlatformError::new(
                     ErrorCode::SecretInvalid,
-                    "a deployment env name is used by both a var and a secret",
+                    "a version env name is used by both a var and a secret",
                 ));
             }
             if secret.revision_id.is_empty()
@@ -488,7 +497,7 @@ impl WorkerCodeDescriptorV1 {
             if binding.name.len() > 64 || !env_names.insert(&binding.name) {
                 return Err(PlatformError::new(
                     ErrorCode::BindingTypeMismatch,
-                    "deployment binding names are duplicate or conflict with env",
+                    "version binding names are duplicate or conflict with env",
                 ));
             }
         }
@@ -523,7 +532,7 @@ impl WorkerCodeDescriptorV1 {
             if !env_names.insert(&service.name) {
                 return Err(PlatformError::new(
                     ErrorCode::BindingTypeMismatch,
-                    "Service binding name conflicts with deployment env",
+                    "Service binding name conflicts with version env",
                 ));
             }
         }
@@ -534,7 +543,7 @@ impl WorkerCodeDescriptorV1 {
             if !env_names.insert(&binding.name) {
                 return Err(PlatformError::new(
                     ErrorCode::BindingTypeMismatch,
-                    "platform binding name conflicts with deployment env",
+                    "platform binding name conflicts with version env",
                 ));
             }
         }
@@ -546,11 +555,11 @@ impl WorkerCodeDescriptorV1 {
             {
                 return Err(PlatformError::new(
                     ErrorCode::BindingTypeMismatch,
-                    "asset binding name conflicts with deployment env",
+                    "asset binding name conflicts with version env",
                 ));
             }
         }
-        if content_kind == open_compute_storage::DeploymentContentKind::AssetsOnly
+        if content_kind == open_compute_storage::VersionContentKind::AssetsOnly
             && (!canonical_vars.is_empty()
                 || !secret_revisions.is_empty()
                 || !binding_descriptors.is_empty()
@@ -570,7 +579,7 @@ impl WorkerCodeDescriptorV1 {
         {
             return Err(PlatformError::new(
                 ErrorCode::AssetConfigUnsupported,
-                "assets-only deployments cannot declare an execution environment",
+                "assets-only versions cannot declare an execution environment",
             ));
         }
         let (artifact_sha256, artifact_schema_version, main_module, ordered_modules) = artifact
@@ -594,8 +603,10 @@ impl WorkerCodeDescriptorV1 {
             .transpose()?;
         Ok(Self {
             schema_version: 1,
-            loader_key: loader_key(account_id, worker_id, deployment_id),
+            loader_key: loader_key(account_id, worker_id, version_id),
             created_at_ms,
+            compatibility_date,
+            compatibility_flags,
             content_kind,
             artifact_sha256,
             artifact_schema_version,
@@ -619,7 +630,7 @@ impl WorkerCodeDescriptorV1 {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, PlatformError> {
         serde_json::to_vec(self).map_err(|_| {
             PlatformError::new(
-                ErrorCode::DeploymentInvariantViolation,
+                ErrorCode::VersionInvariantViolation,
                 "WorkerCode descriptor could not be canonicalized",
             )
         })
@@ -633,27 +644,23 @@ impl WorkerCodeDescriptorV1 {
 
 /// Construct the immutable logical loader key.
 #[must_use]
-pub fn loader_key(
-    account_id: AccountId,
-    worker_id: WorkerId,
-    deployment_id: DeploymentId,
-) -> String {
-    format!("{account_id}/{worker_id}/{deployment_id}")
+pub fn loader_key(account_id: AccountId, worker_id: WorkerId, version_id: VersionId) -> String {
+    format!("{account_id}/{worker_id}/{version_id}")
 }
 
 /// Strictly parse a loader key without percent decoding or alternate forms.
-pub fn parse_loader_key(key: &str) -> Result<(AccountId, WorkerId, DeploymentId), PlatformError> {
+pub fn parse_loader_key(key: &str) -> Result<(AccountId, WorkerId, VersionId), PlatformError> {
     let mut parts = key.split('/');
     let account = parts.next().ok_or_else(invalid_key)?;
     let worker = parts.next().ok_or_else(invalid_key)?;
-    let deployment = parts.next().ok_or_else(invalid_key)?;
+    let version = parts.next().ok_or_else(invalid_key)?;
     if parts.next().is_some() || key.contains('%') {
         return Err(invalid_key());
     }
     Ok((
         AccountId::from_str(account).map_err(|_| invalid_key())?,
         WorkerId::from_str(worker).map_err(|_| invalid_key())?,
-        DeploymentId::from_str(deployment).map_err(|_| invalid_key())?,
+        VersionId::from_str(version).map_err(|_| invalid_key())?,
     ))
 }
 
@@ -673,7 +680,7 @@ pub fn canonicalize_vars(
     if vars.len() > max_count {
         return Err(PlatformError::new(
             ErrorCode::ResourceLimitExceeded,
-            "deployment contains too many vars",
+            "version contains too many vars",
         ));
     }
     let mut values = BTreeMap::new();
@@ -762,7 +769,7 @@ pub fn ciphertext_sha256(nonce: &[u8], ciphertext: &[u8]) -> String {
 
 fn invalid_key() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentInvariantViolation,
+        ErrorCode::VersionInvariantViolation,
         "loader key is not the canonical three-ID form",
     )
 }
@@ -777,13 +784,13 @@ fn invalid_env() -> PlatformError {
 fn env_too_large() -> PlatformError {
     PlatformError::new(
         ErrorCode::ResourceLimitExceeded,
-        "deployment environment exceeds its configured limit",
+        "version environment exceeds its configured limit",
     )
 }
 
 fn binding_invariant() -> PlatformError {
     PlatformError::new(
-        ErrorCode::DeploymentInvariantViolation,
+        ErrorCode::VersionInvariantViolation,
         "binding descriptor invariant failed",
     )
 }

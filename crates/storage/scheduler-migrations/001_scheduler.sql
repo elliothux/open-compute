@@ -22,7 +22,7 @@ CREATE TABLE scheduled_jobs (
   object_generation     INTEGER NOT NULL CHECK(object_generation >= 1),
   row_token             TEXT NOT NULL,
   due_at_ms             INTEGER NOT NULL CHECK(due_at_ms > 0),
-  target_deployment_id  TEXT NOT NULL,
+  target_version_id  TEXT NOT NULL,
   execution_generation  INTEGER NOT NULL CHECK(execution_generation >= 0),
   state                 TEXT NOT NULL CHECK(state IN (
                            'scheduled', 'claimed', 'discarding'

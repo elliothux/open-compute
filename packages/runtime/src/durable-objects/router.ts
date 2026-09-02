@@ -74,7 +74,7 @@ function orderFromHeaders(headers: Headers): DoOrder {
 
 function assertAuthority(authority: unknown): asserts authority is ResolvedDoAuthority {
   if (!record(authority)) throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
-  for (const name of ["accountId", "workerId", "deploymentId", "workerCodeSha256", "namespaceResourceId", "objectId", "className", "hostKey"]) {
+  for (const name of ["accountId", "workerId", "versionId", "workerCodeSha256", "namespaceResourceId", "objectId", "className", "hostKey"]) {
     if (typeof authority[name] !== "string") throw stableFailure("DO_INTERNAL_PROTOCOL_ERROR");
   }
   for (const name of ["objectGeneration", "routeGeneration"]) {
@@ -122,9 +122,9 @@ function backendHeaders(request: Request, env: DoHostEnv) {
       "x-open-compute-startup-generation",
       /^[^\x00-\x1f]{1,128}$/,
     ),
-    "x-open-compute-deployment-id": value(
+    "x-open-compute-version-id": value(
       request.headers,
-      "x-open-compute-deployment-id",
+      "x-open-compute-version-id",
       /^[0-9a-f-]{36}$/,
     ),
     "x-open-compute-descriptor-sha256": value(
@@ -190,7 +190,7 @@ function hostHeaders(request: Request, authority: ResolvedDoAuthority): Headers 
   const headers = new Headers(request.headers);
   headers.set("x-open-compute-account-id", authority.accountId);
   headers.set("x-open-compute-worker-id", authority.workerId);
-  headers.set("x-open-compute-deployment-id", authority.deploymentId);
+  headers.set("x-open-compute-version-id", authority.versionId);
   headers.set("x-open-compute-worker-code-sha256", authority.workerCodeSha256);
   headers.set("x-open-compute-route-generation", String(authority.routeGeneration));
   headers.set("x-open-compute-object-id", authority.objectId);

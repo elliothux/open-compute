@@ -42,7 +42,7 @@ pub(super) async fn verify(harness: &Harness, definition: WorkflowId) {
     .map(|(name, kind, id)| {
         (
             name.into(),
-            DeploymentBindingInput {
+            VersionBindingInput {
                 kind,
                 id,
                 permissions: Default::default(),
