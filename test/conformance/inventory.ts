@@ -75,6 +75,8 @@ export interface InventoryProduct {
 export interface CapabilityInventory {
   schema_version: 1;
   source: InventorySource;
+  managementApi: Record<string, unknown>;
+  wrangler: Record<string, unknown>;
   products: Record<string, InventoryProduct>;
 }
 
@@ -315,6 +317,7 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
     const detail = leftover.map(([name, list]) => `${JSON.stringify(name)}:${list.slice(0, 5).map(member => member.id).join("|")}`).join("; ");
     throw new Error(`target members escaped public products: ${detail}`);
   }
+  const p6 = record(JSON.parse(readFileSync(join(ROOT, "openapi/p6-capability.json"), "utf8")), "P6 capability");
   return {
     inventory: {
       schema_version: 1,
@@ -325,6 +328,8 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
         index_sha256: sha256(sourceText),
         ast_sha256: fingerprint.sha256,
       },
+      managementApi: record(p6.managementApi, "P6 managementApi"),
+      wrangler: record(p6.wrangler, "P6 wrangler"),
       products,
     },
     coverage,

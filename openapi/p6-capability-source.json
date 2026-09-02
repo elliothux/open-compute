@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "managementApi": {
+    "root": "/client/v4",
+    "vendorRoutes": [
+      "GET /open-compute/capabilities",
+      "GET /open-compute/system/status",
+      "GET /open-compute/scheduler",
+      "POST /open-compute/scheduler/pause",
+      "POST /open-compute/scheduler/resume",
+      "POST /open-compute/scheduler/repair",
+      "GET /open-compute/cache",
+      "POST /open-compute/cache/garbage-collection",
+      "GET /open-compute/images/capacity",
+      "GET /accounts/{account_id}/open-compute/workers/{script_name}/endpoints",
+      "GET /accounts/{account_id}/open-compute/durable-objects",
+      "GET /accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects",
+      "POST /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
+      "GET /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
+      "POST /accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore",
+      "POST /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
+      "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
+      "POST /accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore"
+    ],
+    "legacyRoutes": [
+      "/operator/api/**",
+      "/v1/accounts/**",
+      "/v1/operator/**",
+      "/v1/scheduler/**"
+    ]
+  },
+  "wrangler": {
+    "plannedFields": [
+      "$schema", "env", "name", "account_id", "compatibility_date", "compatibility_flags", "main",
+      "find_additional_modules", "preserve_file_names", "base_dir", "workers_dev", "tsconfig", "jsx_factory",
+      "jsx_fragment", "migrations", "exports", "triggers", "rules", "build", "no_bundle", "minify",
+      "keep_names", "upload_source_maps", "assets", "cache", "define", "vars", "secrets", "durable_objects",
+      "workflows", "kv_namespaces", "queues", "r2_buckets", "d1_databases", "vectorize",
+      "ai_search_namespaces", "ai_search", "services", "ai", "images", "version_metadata", "send_metrics",
+      "dependencies_instrumentation", "dev", "keep_vars"
+    ],
+    "deferredFields": {
+      "observability": "P7"
+    },
+    "unsupportedDeferredFields": {
+      "limits": "P8",
+      "worker_loaders": "P9"
+    },
+    "plannedBindings": [
+      "plain_text", "json", "secret_text", "kv_namespace", "r2_bucket", "d1", "vectorize",
+      "ai_search_namespace", "ai_search", "ai", "durable_object_namespace", "queue", "workflow", "service",
+      "images", "version_metadata", "assets"
+    ],
+    "unsupportedBindings": [
+      "worker_loader", "browser", "hyperdrive", "analytics_engine", "dispatch_namespace", "mtls_certificate",
+      "ratelimit", "pipeline", "secrets_store_secret", "send_email", "service_environment", "unsafe"
+    ],
+    "commands": [
+      "whoami", "deploy", "versions upload", "versions list", "versions view", "versions deploy",
+      "deployments list", "deployments status", "rollback", "secret put", "secret list", "secret delete",
+      "secret bulk", "kv namespace create", "kv namespace list", "kv namespace delete", "kv key put",
+      "kv key get", "kv key list", "kv key delete", "d1 create", "d1 list", "d1 info", "d1 execute",
+      "d1 migrations apply", "d1 delete", "r2 bucket create", "r2 bucket list", "r2 bucket delete",
+      "r2 object put", "r2 object get", "r2 object delete", "vectorize create", "vectorize list",
+      "vectorize get", "vectorize delete", "vectorize insert", "vectorize upsert", "vectorize query",
+      "vectorize get-vectors", "vectorize delete-vectors", "vectorize info", "vectorize create-metadata-index",
+      "vectorize list-metadata-index", "vectorize delete-metadata-index", "ai-search namespace create",
+      "ai-search namespace list", "ai-search namespace get", "ai-search namespace update",
+      "ai-search namespace delete", "ai-search create", "ai-search list", "ai-search get", "ai-search update",
+      "ai-search delete", "ai-search stats", "ai-search search", "ai-search jobs", "queues create",
+      "queues list", "queues delete", "workflows"
+    ],
+    "deferredCommands": {
+      "tail": "P7"
+    },
+    "unsupportedCommands": [
+      "dev --remote"
+    ]
+  }
+}

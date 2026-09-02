@@ -1,5 +1,19 @@
 {
   "schemaVersion": 1,
+  "managementApi": {
+    "authority": "openapi/p6-capability.json",
+    "status": "planned",
+    "routeCount": 153,
+    "legacyRouteCount": 4
+  },
+  "wrangler": {
+    "authority": "openapi/p6-capability.json",
+    "version": "4.127.1",
+    "status": "planned",
+    "fieldCount": 96,
+    "bindingCount": 29,
+    "commandCount": 64
+  },
   "contracts": [
     {
       "id": "workers.runtime.common",

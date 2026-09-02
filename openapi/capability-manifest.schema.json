@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-compute.dev/schemas/p6-capability-manifest.json",
+  "title": "open-compute P6 management and Wrangler capability projection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "managementApi", "wrangler"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "managementApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "routes", "legacyRoutes"],
+      "properties": {
+        "root": {"const": "/client/v4"},
+        "routes": {"type": "array", "items": {"$ref": "#/$defs/item"}},
+        "legacyRoutes": {"type": "array", "items": {"$ref": "#/$defs/item"}}
+      }
+    },
+    "wrangler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "configSchemaSha256", "fields", "bindings", "commands"],
+      "properties": {
+        "version": {"const": "4.127.1"},
+        "configSchemaSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "fields": {"type": "array", "items": {"$ref": "#/$defs/item"}},
+        "bindings": {"type": "array", "items": {"$ref": "#/$defs/item"}},
+        "commands": {"type": "array", "items": {"$ref": "#/$defs/item"}}
+      }
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "source"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {"enum": ["supported", "supported_with_deviation", "planned", "unsupported"]},
+        "source": {"type": "string", "minLength": 1},
+        "stage": {"type": "string"},
+        "operationId": {"type": "string"},
+        "operationSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "requestMediaType": {"enum": ["json", "multipart", "raw", "none"]},
+        "constraint": {"type": "string"}
+      }
+    }
+  }
+}

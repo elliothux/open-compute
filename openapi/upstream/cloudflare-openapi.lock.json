@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/cloudflare/api-schemas",
+  "revision": "b8687f42e28fbfcb296a350f7dbf16349ea900af",
+  "path": "openapi.json",
+  "blobSha": "f329d81329d34f022a4ed273b8db299398850635",
+  "sha256": "2ffedbbf8b25361a3be2062b7793946e7b9efc0e48b462da68f3195f12ab052b",
+  "openapiVersion": "3.0.3",
+  "apiVersion": "4.0.0",
+  "wrangler": {
+    "version": "4.127.1",
+    "npmIntegrity": "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw==",
+    "npmShasum": "fe7e443a8152878ed6951f68bf37181f0f7a8b5e",
+    "packageSha256": "f076e0a2cbff001c064a584f1abbde0dd2a58002ab38db5f57abaa2224bab043",
+    "packageJsonSha256": "5d6bc5d81260d127d676dd67432927291084172bf2f17d16145fe0796f9fc65a",
+    "configSchemaSha256": "e42dc556dcb039aa1103d4811b1f58497e2676aceee20488d9ceb1d8ab712018",
+    "cliSha256": "ba531de00d3c21615f3d523df4e83a94d487de68d77225aa703463b6a2979406"
+  },
+  "cloudflareSdk": {
+    "version": "7.1.0",
+    "npmIntegrity": "sha512-eb6WtiAbhuqdWmBdVo6fuXQgEBkYjhOeujRDYLEUWEZIECuABvDLz2DUYTwpN/4KyFecM4JtMHgZn5prlFUjLg==",
+    "npmShasum": "58c155ed29323ca7aaaed61f750b337a9f6ca384",
+    "packageSha256": "57cca8de9f72799d0c23cc1f2e289ac16d150a23352e9e7676ef22aee676139a",
+    "packageJsonSha256": "c6660b3ccbf65cf168fc396ab19ae2c91aebbca8be5691b9f016471c028cd753",
+    "npmGitHead": "faaaf89ed8064a9fb54de538ec3e89487f1302b0",
+    "repositoryTagRevision": "f41ff03a918b1de9c323326f7320f25fbcab4440",
+    "indexSha256": "eba5060fd67285ccc8f897cac04f0a791fd2a5959dc97d61052b704c36e52e4c",
+    "workersScriptsResourceSha256": "1894b92c2188e6e14a793488621225be9ec4a8c7d28900b69f2460b841df8d3b"
+  },
+  "subsetPath": "openapi/cloudflare-v4-subset.json",
+  "subsetSha256": "d36cf963d0e1d1a68f799abe0ac4aebc6eea0011da9a91e48a091b88e0bd351d",
+  "subsetManifestSha256": "add06013170ceb956a1591dfb6490659f5035159f6226bdec0bd359b0b8b147d",
+  "extensionSha256": "adad8894d396b545f4f2efa951be0930e738cd634bb3d1d4c92055e28ce8ba89",
+  "capabilitySha256": "b2731197948bb8c6702eae647dc597a67e5a36bb6a4086d60ca2272577d455fc",
+  "capabilitySchemaSha256": "5839a5f8f285d328666a7cde851a15d33c110308b69574016b235aa5a2c9016c"
+}
