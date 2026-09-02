@@ -1,6 +1,6 @@
 # Bindings
 
-`env` 上的资源。在项目中用 `bindings` 对象、`services` 数组，以及 `assets` / `images` / `version_metadata` 声明。
+Resources on `env`. Declare them with the `bindings` object, the `services` array, and `assets` / `images` / `version_metadata`.
 
 ```json
 {
@@ -24,24 +24,24 @@
 }
 ```
 
-`permissions` 可选 `{ "read": true, "write": false }`。Durable Object 与 Workflow 必须提供 `className`：只用于核对生成的 framework config 中的 class 语义，不作为资源 ID 发给平台。Workflow 可选 `schedules` 字符串数组。
+`permissions` is optional `{ "read": true, "write": false }`. Durable Object and Workflow bindings must provide `className`: it is only used to check class semantics in generated framework config, and is not sent to the platform as a resource ID. Workflows may set a `schedules` string array.
 
-更改配置后重新生成类型：
+Regenerate types after changing config:
 
 ```sh
 bun run oc types --config open-compute.json
 ```
 
-运行时细节见 [Runtime APIs · bindings](/workers/runtime-apis/bindings)。
+Runtime detail: [Runtime APIs · bindings](/workers/runtime-apis/bindings).
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| 租户只看见声明过的名字 | 是 | 是 |
-| KV / R2 / D1 / DO / Queue / Workflow / Service / Assets / Images / Version Metadata 的 Worker 里用的 API | 是，见 [Cloudflare bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | 同一套符号 |
-| 配置形态 | Wrangler 分产品顶层数组（`kv_namespaces` 等） | `bindings` 对象，值为 `{type, id, permissions?}` |
-| Service Bindings | 同账户 Worker | `services: [{binding, service, entrypoint?}]`；部署时解析同账户 Worker 名并冻结目标 ID；仅限本平台 |
-| Workers AI、Vectorize、Hyperdrive、mTLS、Rate Limiting、Secrets Store、Analytics Engine、Browser Rendering | 是 | 不提供 |
-| 写配置即创建资源 | Wrangler 可创建部分资源 | 资源必须已在平台上存在 |
+| Tenants only see declared names | Yes | Yes |
+| Worker-side APIs for KV / R2 / D1 / DO / Queue / Workflow / Service / Assets / Images / Version Metadata | Yes — [Cloudflare bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | Same symbols |
+| Config shape | Wrangler per-product top-level arrays (`kv_namespaces`, …) | `bindings` object with `{type, id, permissions?}` |
+| Service Bindings | Same-account Workers | `services: [{binding, service, entrypoint?}]`; deploy time resolves the same-account Worker name and freezes a target ID; same-platform only |
+| Workers AI, Vectorize, Hyperdrive, mTLS, Rate Limiting, Secrets Store, Analytics Engine, Browser Rendering | Yes | Not provided |
+| Writing config creates the resource | Wrangler can create some resources | The resource must already exist on the platform |
 

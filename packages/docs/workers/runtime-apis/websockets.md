@@ -1,6 +1,6 @@
 # WebSockets
 
-标准 WebSocket 升级，以及 Durable Object 上的 hibernation。
+Standard WebSocket upgrade, plus hibernation on Durable Objects.
 
 ```ts
 export default {
@@ -16,15 +16,15 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-DO hibernation：`state.acceptWebSocket`、tags、`webSocketMessage` / `webSocketClose` / `webSocketError`、serialize/deserialize attachment。对照 [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/) 与 Durable Objects 的 hibernation API。
+DO hibernation: `state.acceptWebSocket`, tags, `webSocketMessage` / `webSocketClose` / `webSocketError`, serialize/deserialize attachment. See [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/) and the Durable Objects hibernation API.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| `WebSocketPair`、`accept()`、消息与关闭 | 是 | 是 |
-| hibernation：accept / tags / get、auto-response、attachment 重建 | 是 | 是 |
-| 连接落地 | Cloudflare 边缘网络升级 | 本机一个 workerd |
-| duration 计费 | 是 | 不提供 |
-| Durable Object 位置 | 全球 placement | 本机 |
+| `WebSocketPair`, `accept()`, messages and close | Yes | Yes |
+| Hibernation: accept / tags / get, auto-response, attachment reconstruction | Yes | Yes |
+| Where connections land | Global-edge upgrade | One workerd on this node |
+| Duration billing | Yes | Not provided |
+| Durable Object placement | Global placement | This node |
 

@@ -1,18 +1,18 @@
-# 行为差异
+# Behavior differences
 
-Workflows 的 binding / instance API 与 Cloudflare 对齐；步骤状态存在本机 SQLite。
+The Workflows binding / instance API matches Cloudflare. Execution authority is local SQLite on this node.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| Binding / instance API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | 相同：`create` / `get` / `createBatch` / `deleteBatch`、`step.do` / sleep / event、status / pause / resume / terminate / restart |
-| 执行 | 跨地域 | 本机本地 SQLite |
-| Callback | — | 结果提交前可能重复执行；replay 跳过已经落盘的步骤回调 |
-| 外部副作用 | — | 不随 Workflow snapshot 回滚 |
-| Dashboard / observability | 提供 | 不提供 |
-| Binding | wrangler | `{ type, id, className }`；`className` 必填 |
+| Binding / instance API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | Same: `create` / `get` / `createBatch` / `deleteBatch`, `step.do` / sleep / event, status / pause / resume / terminate / restart |
+| Execution | Cross-region | Local SQLite on the node running ocd |
+| Callbacks | — | At-least-once until result commit; replay skips durable-complete callbacks |
+| External side effects | — | Do not roll back with Workflow snapshots |
+| Dashboard / observability | Available | Not provided |
+| Binding | wrangler | `{ type, id, className }`; `className` required |
 
-batch / rollback / structured-clone / parallel 是实现行为。
+Batch / rollback / structured-clone / parallel are implemented behavior.
 
-见[兼容性](/platform/compatibility)。
+See [Compatibility](/platform/compatibility).

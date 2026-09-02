@@ -1,26 +1,34 @@
 # KV
 
-Workers KV 是 Worker 可访问的键值存储。在 open-compute 上，每个 namespace 对应运行 `ocd` 的主机上的一份 SQLite 数据。
+Workers KV is a data storage that allows you to store and retrieve key-value data from a Worker. On this platform, each namespace is a SQLite database on the node running ocd.
 
-例如：
+For example, you can use Workers KV for:
 
-- 缓存 API 响应
-- 存储用户配置
-- 存储会话
+- Caching API responses
+- Storing user configurations / preferences
+- Storing user authentication details
 
 ```ts
 export default {
   async fetch(request, env, ctx): Promise<Response> {
+    // write a key-value pair
     await env.KV.put("KEY", "VALUE");
+
+    // read a key-value pair
     const value = await env.KV.get("KEY");
+
+    // list all key-value pairs
     const allKeys = await env.KV.list();
+
+    // delete a key-value pair
     await env.KV.delete("KEY");
+
     return Response.json({ value, allKeys });
   },
 } satisfies ExportedHandler<{ KV: KVNamespace }>;
 ```
 
-在 `open-compute.json` 中绑定已存在的 namespace：
+Bind an existing namespace in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
 
 ```json
 {
@@ -32,23 +40,23 @@ export default {
 }
 ```
 
-`id` 必须指向平台上已有的 namespace。可选 `permissions`：`{ "read": true, "write": true }`。语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+`id` is an existing namespace on this platform. Optional `permissions`: `{ "read": true, "write": true }`. Binding grammar: [Workers configuration · bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| Worker API | [KV API](https://developers.cloudflare.com/kv/api/) | 相同：`put` / `get` / `getWithMetadata` / `list` / `delete`，以及 text / json / arrayBuffer / stream、metadata、TTL、批量 get、list cursor |
-| 存储位置 | Cloudflare 边缘网络 | 本机 SQLite |
-| `cacheTtl` | 边缘缓存 | 接受该参数，但不建立边缘缓存 |
-| 数据驻留（Jurisdictions） | 提供 | 不提供 |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker 绑定 |
+| Worker API | [Cloudflare KV API](https://developers.cloudflare.com/kv/api/) | Same: `put` / `get` / `getWithMetadata` / `list` / `delete`, text / json / arrayBuffer / stream, metadata, TTL, bulk get, list cursor |
+| Replication | Global edge | Single-node SQLite on the node running ocd |
+| `cacheTtl` | Colo cache | Parameter accepted; no colo cache |
+| Jurisdictions | Available | Not provided |
+| REST / `client.v4` | Available | Not provided; use the Worker binding |
 
-## 本节
+## Next
 
-- [上手](/kv/get-started/)
-- [概念](/kv/concepts/)
-- [指南](/kv/guides/)
-- [示例](/kv/examples/)
-- [限制](/kv/platform/limits)
-- [行为差异](/kv/platform/deviations)
+- [Get started](/kv/get-started/)
+- [Concepts](/kv/concepts/)
+- [Guides](/kv/guides/)
+- [Examples](/kv/examples/)
+- [Limits](/kv/platform/limits)
+- [Behavior differences](/kv/platform/deviations)

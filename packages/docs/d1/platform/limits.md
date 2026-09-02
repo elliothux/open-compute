@@ -1,8 +1,8 @@
-# 限额
+# Limits
 
-Worker API 形状与 [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/) 对齐。本机配额来自 `ocd` 的 `[d1]`。运行中精确值以 `ocd capabilities --json` 的 `limits` 为准。嵌入默认包括：
+Worker API shape matches the [D1 Worker API](https://developers.cloudflare.com/d1/worker-api/). Local quotas come from `ocd` `[d1]`. Live numbers are `limits` from `ocd capabilities --json`. Embedded defaults include:
 
-| 项 | 默认 |
+| Item | Default |
 | --- | --- |
 | `database_quota_bytes` | 1 GiB |
 | `max_open_databases` | 32 |
@@ -12,4 +12,4 @@ Worker API 形状与 [D1 Worker API](https://developers.cloudflare.com/d1/worker
 | `query_timeout_ms` | 30000 |
 | `batch_timeout_ms` | 30000 |
 
-不提供 Cloudflare 套餐、replica 数量或按 region 的容量承诺。
+Cloudflare plans, replica counts, and per-region capacity are not provided.

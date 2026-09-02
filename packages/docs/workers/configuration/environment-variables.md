@@ -1,6 +1,6 @@
-# 环境变量
+# Environment variables
 
-`vars` 是公开、非密钥的值，以 structured-clone 兼容的 JSON 进入 `env`。
+`vars` are public, non-secret values. Structured-clone-compatible JSON enters `env`.
 
 ```json
 {
@@ -20,15 +20,15 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-`bun run oc types` 会把字面量写入 `worker-configuration.d.ts`（例如 `GREETING: "Hello from TypeScript"`）。更改 vars 后重新生成类型。离线 bundle 不包含 vars；`run` / `deploy` 才注入。
+`bun run oc types` writes literals into `worker-configuration.d.ts` (for example `GREETING: "Hello from TypeScript"`). Regenerate types after changing vars. Offline bundles do not contain vars; `run` / `deploy` inject them.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| 公开字符串/JSON 注入 `env`，不是密钥 | 是，见 [Environment variables](https://developers.cloudflare.com/workers/configuration/environment-variables/) | 是 |
-| Wrangler `[vars]` TOML | 是 | 不提供 |
-| 控制台编辑 / Wrangler environments 产品 | 是 | 不提供 |
-| 未知顶层键 | 可能被忽略 | 整个项目配置失败 |
-| 密钥存放位置 | Secrets 产品 | [secrets](/workers/configuration/secrets)，不可放入 `vars` |
+| Public strings/JSON on `env`, not secrets | Yes — [Environment variables](https://developers.cloudflare.com/workers/configuration/environment-variables/) | Yes |
+| Wrangler `[vars]` TOML | Yes | Not provided |
+| Dashboard editor / Wrangler environments product | Yes | Not provided |
+| Unknown top-level keys | May be ignored | Fail the whole project config |
+| Where secrets live | Secrets product | [secrets](/workers/configuration/secrets), not `vars` |
 

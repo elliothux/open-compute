@@ -1,23 +1,23 @@
-# 上手
+# Get started
 
-创建 namespace，在 `open-compute.json` 中绑定，再用 `oc` 运行 Worker。`oc run` 不会再起一个 workerd。若平台尚未就绪，见 [ocd 上手](/ocd/get-started)。
+Create a namespace, bind it in `open-compute.json`, and run the Worker with `oc`. `oc run` does not start another workerd. If the platform is not up, start with [ocd get started](/ocd/get-started).
 
-## 1. 创建 namespace
+## 1. Create a namespace
 
-资源必须先在open-compute 上存在；写入 `open-compute.json` 不会创建 KV。以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
+The resource must already exist on the platform; writing `open-compute.json` does not create KV. The following is the platform control plane. Cloudflare REST and `client.v4` are not provided.
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
-# 若 admin 监听需要认证，加 Authorization: Bearer $OPEN_COMPUTE_ADMIN_TOKEN
+# If the admin listener requires auth, add Authorization: Bearer $OPEN_COMPUTE_ADMIN_TOKEN
 curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/kv/namespaces" \
   -H "content-type: application/json" \
   -H "idempotency-key: kv-create-1" \
   -d '{"name":"my-kv"}'
 ```
 
-成功时返回 `{ "resourceId": "...", "state": "ready" }`。把 `resourceId` 填进项目配置。
+Success returns `{ "resourceId": "...", "state": "ready" }`. Put `resourceId` in the project config.
 
-## 2. 绑定
+## 2. Bind
 
 ```json
 {
@@ -29,7 +29,7 @@ curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/kv/namespaces" \
 }
 ```
 
-普通产品 binding 为 `{ type, id, permissions? }`。可选 `permissions`：`{ "read": true, "write": true }`。语法见 [bindings](/workers/configuration/bindings)。
+Ordinary product bindings are `{ type, id, permissions? }`. Optional `permissions`: `{ "read": true, "write": true }`. Grammar: [bindings](/workers/configuration/bindings).
 
 ```sh
 bun run oc types --config open-compute.json
@@ -57,10 +57,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 4. 运行
+## 4. Run
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/kv/concepts/)、[指南](/kv/guides/)。
+The CLI is `oc`, not Wrangler. Next: [Concepts](/kv/concepts/), [Guides](/kv/guides/).

@@ -1,10 +1,10 @@
-# 上手
+# Get started
 
-创建 Queue，在 `open-compute.json` 中绑定 producer，再用 `oc` 运行 Worker。`oc run` 不会再起一个 workerd。见 [ocd 上手](/ocd/get-started)。
+Create a Queue, bind a producer in `open-compute.json`, and run the Worker with `oc`. `oc run` does not start another workerd. See [ocd get started](/ocd/get-started).
 
-## 1. 创建 Queue
+## 1. Create a Queue
 
-以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
+The following is the platform control plane. Cloudflare REST and `client.v4` are not provided.
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
@@ -14,7 +14,7 @@ curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/queues" \
   -d '{"name":"jobs"}'
 ```
 
-响应是 `{ "queue": { "id": "...", ... } }`。把 `queue.id` 填进 binding。
+The response is `{ "queue": { "id": "...", ... } }`. Put `queue.id` in the binding.
 
 ## 2. Producer binding
 
@@ -28,7 +28,7 @@ curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/queues" \
 }
 ```
 
-当前 `open-compute.json` 没有 Wrangler 风格的 consumers 数组；未知字段会拒绝。Consumer 是 Worker 导出的 `queue` handler。平台按 deployment 上的 push consumer 投递。
+Current `open-compute.json` has no Wrangler-style consumers array; unknown fields are rejected. The consumer is the Worker's exported `queue` handler. The platform delivers via a push consumer on the deployment.
 
 ```sh
 bun run oc types --config open-compute.json
@@ -51,10 +51,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 4. 运行
+## 4. Run
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/queues/concepts/)。
+The CLI is `oc`, not Wrangler. Next: [Concepts](/queues/concepts/).

@@ -283,37 +283,37 @@ export default defineConfig({
   },
   locales: {
     root: {
+      label: "English",
+      lang: "en-US",
+      description: "open-compute developer documentation",
+      themeConfig: {
+        nav: [
+          { text: "Get started", link: "/get-started" },
+          { text: "Directory", link: "/directory" },
+          { text: "ocd", link: "/ocd/" },
+        ],
+        sidebar: sidebar("", enCopy),
+        outline: { label: "On this page", level: [2, 3] },
+        langMenuLabel: "Change language",
+      },
+    },
+    zh: {
       label: "简体中文",
       lang: "zh-CN",
       description: "open-compute 开发者文档",
       themeConfig: {
         nav: [
-          { text: "开始", link: "/get-started" },
-          { text: "产品目录", link: "/directory" },
-          { text: "ocd", link: "/ocd/" },
+          { text: "开始", link: "/zh/get-started" },
+          { text: "产品目录", link: "/zh/directory" },
+          { text: "ocd", link: "/zh/ocd/" },
         ],
-        sidebar: sidebar("", zhCopy),
+        sidebar: sidebar("/zh", zhCopy),
         outline: { label: "本页", level: [2, 3] },
         docFooter: { prev: "上一页", next: "下一页" },
         darkModeSwitchLabel: "外观",
         sidebarMenuLabel: "菜单",
         returnToTopLabel: "回到顶部",
         langMenuLabel: "切换语言",
-      },
-    },
-    en: {
-      label: "English",
-      lang: "en-US",
-      description: "open-compute developer documentation",
-      themeConfig: {
-        nav: [
-          { text: "Get started", link: "/en/get-started" },
-          { text: "Directory", link: "/en/directory" },
-          { text: "ocd", link: "/en/ocd/" },
-        ],
-        sidebar: sidebar("/en", enCopy),
-        outline: { label: "On this page", level: [2, 3] },
-        langMenuLabel: "Change language",
       },
     },
   },

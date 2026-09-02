@@ -1,10 +1,10 @@
-# 指南
+# Guides
 
-## 创建 namespace 并绑定
+## Create a namespace and bind
 
-见[上手](/durable-objects/get-started/)。binding 必须有 `className`。
+See [Get started](/durable-objects/get-started/). The binding must include `className`.
 
-## 从 Worker 调用
+## Call from a Worker
 
 ```ts
 const id = env.COUNTER.idFromName("global");
@@ -12,7 +12,7 @@ const stub = env.COUNTER.get(id);
 return stub.fetch(request);
 ```
 
-`get(id, { locationHint: "weur" })` 合法，但 hint 没有地理效果。
+`get(id, { locationHint: "weur" })` is legal, but the hint has no geographic effect.
 
 ## storage
 
@@ -25,8 +25,8 @@ await this.ctx.storage.transaction(async (txn) => {
 this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY, body TEXT)");
 ```
 
-SQL 不能查询 `__open_compute_do_*` 内部表。
+SQL cannot query `__open_compute_do_*` internal tables.
 
-## Alarms 与 hibernation
+## Alarms and hibernation
 
-Alarms：[alarms](/durable-objects/alarms)。Hibernation：[WebSockets](/workers/runtime-apis/websockets) 或[概念](/durable-objects/concepts/)。
+Alarms: [alarms](/durable-objects/alarms). Hibernation: [WebSockets](/workers/runtime-apis/websockets) or [Concepts](/durable-objects/concepts/).

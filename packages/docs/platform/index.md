@@ -1,28 +1,28 @@
-# 平台
+# Platform
 
-open-compute 在单机上提供与 Cloudflare Workers 文档一致的 Worker API。存储、调度与部署均在本机完成。
+open-compute runs the declared Cloudflare Workers programming model on a single node. The Worker API matches Cloudflare's documentation; storage, scheduling, and deploy live on this node.
 
 ```sh
 ocd --config /etc/open-compute/config.toml capabilities --json
 ```
 
-省略 `--config` 时，`limits` 来自内嵌默认配置。JSON 顶层字段：`schema_version`、`release`、`runtime`、`products`、`limits`。
+`--config` is optional for `capabilities`. When omitted, `limits` come from the embedded default config. Top-level JSON: `schema_version`, `release`, `runtime`, `products`, `limits`.
 
-## 兼容性
+## Compatibility
 
-| 方面 | 说明 |
+| Area | Detail |
 | --- | --- |
-| Worker API | Workers、KV、D1、R2、Durable Objects、Queues、Workflows、Cache、Images 的 Worker 用法与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 一致。签名索引见 [API 参考](/platform/reference/api/)。 |
-| 数据与进程 | 单机：一个 `ocd`、一个锁定版本的 `workerd`、数据位于本机。不提供全球边缘网络、控制台、计费，以及 Cloudflare REST / `client.v4`。 |
-| 项目配置 | `open-compute.json`，不是 `wrangler.jsonc`。未知字段将被拒绝。 |
-| 限制 | 以运行中的 `ocd capabilities --json` 为准。 |
-| 行为差异 | 见[行为差异](/platform/deviations)。 |
-| 未提供的产品 | 见[不支持](/platform/unsupported)。 |
+| Worker API | Worker-side symbols for Workers, KV, D1, R2, Durable Objects, Queues, Workflows, Cache, and Images match [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/). Signature index: [API reference](/platform/reference/api/). |
+| Topology | Single node: one `ocd`, one pinned `workerd`, local authority storage. No global edge, dashboard, billing, or Cloudflare REST v4 / `client.v4`. |
+| Project config | `open-compute.json`, not `wrangler.jsonc`. Unknown fields are rejected. |
+| Limits | From `ocd capabilities --json` on the running binary. |
+| Behavior differences | [Behavior differences](/platform/deviations). |
+| Products not provided | [Unsupported](/platform/unsupported). |
 
-## 本节
+## In this section
 
-- [兼容性](/platform/compatibility) — 产品、Worker API 与数据位置
-- [行为差异](/platform/deviations) — 出站、限额与存储位置
-- [限制](/platform/limits) — 运行中的 `capabilities.limits`
-- [不支持](/platform/unsupported) — 未提供的 Cloudflare 产品
-- [API 参考](/platform/reference/api/) — 按产品统计的 API 成员入口
+- [Compatibility](/platform/compatibility) — products, Worker APIs, single-node topology
+- [Behavior differences](/platform/deviations) — TCP, limits, storage topology, and other behavior
+- [Limits](/platform/limits) — live `capabilities.limits`
+- [Unsupported](/platform/unsupported) — Cloudflare products that are not provided
+- [API reference](/platform/reference/api/) — generated member-index entry

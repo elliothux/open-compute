@@ -1,10 +1,10 @@
-# 上手
+# Get started
 
-创建 database，在 `open-compute.json` 中绑定，再用 `oc` 运行 Worker。`oc run` 不会再起一个 workerd。若平台尚未就绪，见 [ocd 上手](/ocd/get-started)。
+Create a database, bind it in `open-compute.json`, and run the Worker with `oc`. `oc run` does not start another workerd. If the platform is not up, see [ocd get started](/ocd/get-started).
 
-## 1. 创建 database
+## 1. Create a database
 
-以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
+The following is the platform control plane. Cloudflare REST and `client.v4` are not provided.
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
@@ -14,9 +14,9 @@ curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/d1/databases" \
   -d '{"name":"my-db"}'
 ```
 
-成功返回 `{ "resourceId": "...", "state": "ready" }`。
+Success returns `{ "resourceId": "...", "state": "ready" }`.
 
-## 2. 绑定
+## 2. Bind
 
 ```json
 {
@@ -51,10 +51,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 4. 运行
+## 4. Run
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/d1/concepts/)、[指南](/d1/guides/)。
+The CLI is `oc`, not Wrangler. Next: [Concepts](/d1/concepts/), [Guides](/d1/guides/).

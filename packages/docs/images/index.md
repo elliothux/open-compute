@@ -1,12 +1,12 @@
 # Images
 
-Images 在运行 `ocd` 的主机上对请求体中的图像执行变换，并受尺寸与并发限制。这不是 Cloudflare 托管 Images：不提供图像库、上传签名或 URL 变换。
+Images is a bounded local raster-transform binding. Input is request-body bytes. Transforms run on the node running ocd. This is not hosted Cloudflare Images.
 
-例如：
+For example, you can use Images for:
 
-- 缩放请求体中的图像
-- 叠加图像，输出 jpeg / png / webp / avif
-- 使用 `info()` 读取格式信息
+- Resizing and converting request-body images
+- Overlay and output jpeg / png / webp / avif
+- Inspecting format with `info()`
 
 ```ts
 export default {
@@ -21,7 +21,7 @@ export default {
 } satisfies ExportedHandler<{ IMAGES: ImagesBinding }>;
 ```
 
-在 `open-compute.json` 中声明。Images 不是 `bindings` 中的资源 ID，使用顶层字段：
+Declare it in `open-compute.json`. Images is not a resource id in `bindings`. Use top-level `"images": { "binding": "IMAGES" }` only:
 
 ```json
 {
@@ -31,26 +31,26 @@ export default {
 }
 ```
 
-语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+See [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| Binding API | Images 调用链 | 相同：`input` → `transform` / `draw` → `output` → `response()`，以及 `info()` |
-| 产品形态 | 托管 Cloudflare Images | 对本机请求体中的图像做变换 |
-| 输入 | 托管图像 ID 或 URL | `ReadableStream` 字节 |
-| 上传 / 签名 | 提供 | 不提供 |
-| URL 变换 | 提供 | 不提供 |
-| 视频 | 提供 | 不提供 |
-| AI 放大 | 提供 | 不提供 |
-| 配置 | wrangler `images` | `"images": { "binding": "IMAGES" }` |
+| Binding API | Images binding chain | Same chain: `input` → `transform` / `draw` → `output` → `response()`, plus `info()` |
+| Product | Hosted Cloudflare Images | Bounded local raster binding |
+| Input | Hosted image id or URL | `ReadableStream` bytes |
+| Upload / signing | Available | Not provided |
+| URL transform | Available | Not provided |
+| Video | Available | Not provided |
+| AI upscale | Available | Not provided |
+| Binding | wrangler `images` | `"images": { "binding": "IMAGES" }` |
 
-## 本节
+## Next
 
-- [上手](/images/get-started/)
-- [概念](/images/concepts/)
-- [指南](/images/guides/)
-- [示例](/images/examples/)
-- [限制](/images/platform/limits)
-- [行为差异](/images/platform/deviations)
+- [Get started](/images/get-started/)
+- [Concepts](/images/concepts/)
+- [Guides](/images/guides/)
+- [Examples](/images/examples/)
+- [Limits](/images/platform/limits)
+- [Behavior differences](/images/platform/deviations)

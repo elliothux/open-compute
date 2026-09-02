@@ -1,8 +1,8 @@
-# 限额
+# Limits
 
-本机配额来自 `ocd` 的 `[images]`。运行中精确值以 `ocd capabilities --json` 为准。嵌入默认包括：
+Local quotas come from `ocd` `[images]`. Live numbers come from `ocd capabilities --json`. Embedded defaults include:
 
-| 项 | 默认 |
+| Item | Default |
 | --- | --- |
 | `max_input_bytes` | 20 MiB |
 | `max_output_bytes` | 20 MiB |
@@ -15,4 +15,4 @@
 | `max_concurrency` | 4 |
 | `request_timeout_ms` | 10000 |
 
-这些不是 Cloudflare Images 套餐配额。
+These are not Cloudflare Images plan quotas.

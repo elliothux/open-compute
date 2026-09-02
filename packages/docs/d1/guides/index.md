@@ -1,8 +1,8 @@
-# 指南
+# Guides
 
-## 创建 database
+## Create a database
 
-见[上手](/d1/get-started/)。`POST /v1/accounts/{accountId}/d1/databases`，`{ "name": "..." }`。不提供 Cloudflare REST。
+See [Get started](/d1/get-started/). `POST /v1/accounts/{accountId}/d1/databases` with `{ "name": "..." }`. Cloudflare REST is not provided.
 
 ## prepare / bind / batch
 
@@ -15,9 +15,9 @@ const batch = await env.DB.batch([
 ]);
 ```
 
-`bind` 支持 SQLite 的 `?` / `?NNN`。`batch` 顺序执行并提交。
+`bind` supports SQLite `?` / `?NNN`. `batch` executes and commits sequentially.
 
-## session 与 bookmark
+## Sessions and bookmarks
 
 ```ts
 const session = env.DB.withSession("first-primary");
@@ -31,7 +31,7 @@ if (bookmark) {
 }
 ```
 
-bookmark 是不透明字符串，只保证本库本地顺序可见性。
+A bookmark is an opaque string. It only preserves local sequential visibility on this database.
 
 ## dump()
 
@@ -39,12 +39,12 @@ bookmark 是不透明字符串，只保证本库本地顺序可见性。
 try {
   await env.DB.dump();
 } catch (error) {
-  // hosted 非 alpha：拒绝
+  // hosted non-alpha: rejected
 }
 ```
 
-`dump()` 不是备份 API。平台备份走 `ocd backup`，与 D1 binding 无关。
+`dump()` is not a backup API. Platform backups are `ocd backup`, unrelated to the D1 binding.
 
 ## meta
 
-`rows_read` / `rows_written` 是本地 SQLite 执行计数。`served_by_region` / `served_by_colo` / `served_by_primary` 不是地理或 replica 身份。
+`rows_read` / `rows_written` are local SQLite execution counters. `served_by_region` / `served_by_colo` / `served_by_primary` are not geography or replica identity.

@@ -1,12 +1,12 @@
 # Workflows
 
-Workflows 是可从中断处恢复的多步工作流。已完成步骤的结果会持久化；进程退出后可以从检查点继续。步骤状态存储在本机 SQLite。
+Workflows are replayable multi-step applications. Execution authority is local SQLite on the node running ocd.
 
-例如：
+For example, you can use Workflows for:
 
-- 带持久化步骤的多步流程
-- 休眠与等待事件
-- 中断后从检查点恢复
+- Multi-step applications with durable steps
+- Sleep and wait for events
+- Replay after interruption
 
 ```ts
 export class MyWorkflow extends WorkflowEntrypoint<Env, { hello: string }> {
@@ -26,7 +26,7 @@ export default {
 } satisfies ExportedHandler<{ FLOW: Workflow }>;
 ```
 
-在 `open-compute.json` 中绑定。Workflow 必须指定 `className`：
+Bind in `open-compute.json`. Workflow bindings require `className`:
 
 ```json
 {
@@ -38,24 +38,24 @@ export default {
 }
 ```
 
-可选 `schedules`（字符串数组）。语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+Optional `schedules` is a string array. Grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| 绑定 / 实例 API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | 相同：`create` / `get` / `createBatch` / `deleteBatch`、`step.do` / sleep / event、status / pause / resume / terminate / restart |
-| 执行位置 | 可跨地区 | 本机 SQLite |
-| 步骤回调 | — | 结果提交前可能重复执行；已持久化的步骤在重放时跳过 |
-| 外部副作用 | — | 不随 Workflow 快照回滚 |
-| 控制台 / 可观测性 | 提供 | 不提供 |
-| 绑定 | wrangler | `{ type, id, className }`，必须指定 `className` |
+| Binding / instance API | [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) | Same: `create` / `get` / `createBatch` / `deleteBatch`, `step.do` / sleep / event, status / pause / resume / terminate / restart |
+| Execution | Cross-region | Local SQLite on the node running ocd |
+| Callbacks | — | At-least-once until result commit; replay skips durable-complete callbacks |
+| External side effects | — | Do not roll back with Workflow snapshots |
+| Dashboard / observability | Available | Not provided |
+| Binding | wrangler | `{ type, id, className }`; `className` required |
 
-## 本节
+## Next
 
-- [上手](/workflows/get-started/)
-- [概念](/workflows/concepts/)
-- [指南](/workflows/guides/)
-- [示例](/workflows/examples/)
-- [限制](/workflows/platform/limits)
-- [行为差异](/workflows/platform/deviations)
+- [Get started](/workflows/get-started/)
+- [Concepts](/workflows/concepts/)
+- [Guides](/workflows/guides/)
+- [Examples](/workflows/examples/)
+- [Limits](/workflows/platform/limits)
+- [Behavior differences](/workflows/platform/deviations)

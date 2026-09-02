@@ -1,6 +1,6 @@
-# 示例
+# Examples
 
-Workflow class 导出 `run`；Worker 用 binding 创建实例。外部 IO 放进 `step.do` 并做成幂等。不依赖 Cloudflare dashboard 查看实例。
+Export a Workflow class with `run`; the Worker creates instances through the binding. Put external I/O in `step.do` and make it idempotent. Instance inspection does not depend on a Cloudflare dashboard.
 
 ```ts
 export class MyWorkflow extends WorkflowEntrypoint<Env, { hello: string }> {
@@ -30,4 +30,4 @@ export default {
 }
 ```
 
-`create` / `get` / `step.do` / `status` 与 [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) 对齐。`className` 必须有。步骤状态存在本机 SQLite。创建 definition 见[上手](/workflows/get-started/)。
+`create` / `get` / `step.do` / `status` match [Cloudflare Workflows](https://developers.cloudflare.com/workflows/). `className` is required. Execution authority is local SQLite. Create the definition: [Get started](/workflows/get-started/).

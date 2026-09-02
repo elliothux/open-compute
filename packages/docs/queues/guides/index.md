@@ -1,4 +1,4 @@
-# 指南
+# Guides
 
 ## Producer
 
@@ -14,7 +14,7 @@ await env.QUEUE.sendBatch(
 const m = await env.QUEUE.metrics();
 ```
 
-单条最大 128 KiB，batch 最多 100 条 / 256 KiB 合计，delay 最大 86400 秒。无效 content type 与空 batch 是 `TypeError`；超大 batch / 非法 delay 是 `Error`。见 [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/)。
+Max 128 KiB per message, 100 messages / 256 KiB per batch, delay at most 86400 seconds. Invalid content type and empty batch are `TypeError`; oversized batch / illegal delay are `Error`. See [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/).
 
 ## Consumer
 
@@ -33,4 +33,4 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-Handler 成功且无显式 decision → ack；失败且无显式 decision → retry。`open-compute.json` 不使用 Wrangler consumers 数组。
+Handler success with no explicit decision → ack; failure with no explicit decision → retry. `open-compute.json` does not use a Wrangler consumers array.

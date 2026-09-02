@@ -1,27 +1,27 @@
-# Scheduler 恢复
+# Scheduler recovery
 
-触发信号：due lag、expired lease、repair backlog 或 scheduler DB 无法检查。影响面包括 Alarm、Queue、Cron、Workflow；普通 Worker/DO fetch 可处于 degraded。
+Trigger: due lag, expired lease, repair backlog, or scheduler DB not inspectable. Blast radius includes Alarm, Queue, Cron, Workflow; ordinary Worker/DO fetch may be degraded.
 
-只读诊断：
+Read-only diagnosis:
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 ```
 
-优先等待 token/expiry recovery 和 bounded repair。先使用 `/v1/scheduler`、`/v1/operator/workflows` 检查各 pool；Workflow 的 Unknown dispatch 保留 lease，不能把它当成可立即重试的业务失败。
+Prefer waiting for token/expiry recovery and bounded repair. Inspect pools via `/v1/scheduler` and `/v1/operator/workflows` first. An Unknown Workflow dispatch keeps its lease; do not treat it as a business failure you can retry immediately.
 
-Queue consumer 和 Cron activation 的 dispatch epoch 冻结在 scheduler projection 中。添加或编辑 HTTP route 不会替换它；重试 promotion 或启动 reconcile 复用该 epoch，并继续严格校验 target、descriptor 与产品 generation。不要把当前 Worker route revision 写回已创建的 projection 或 claim。
+Queue consumer and Cron activation dispatch epochs are frozen in the scheduler projection. Adding or editing an HTTP route does not replace them. Retrying promotion or starting reconcile reuses that epoch and still strictly validates target, descriptor, and product generation. Do not write the current Worker route revision back into an already created projection or claim.
 
-只要 control 中存在 Queue、Cron activation、Workflow instance（包括 released/terminal/retained）、Workflow operation 或 Workflow version，就不能通过空库重建恢复调度历史。Workflow purge 在释放 control 引用后，scheduler 仍可能留有 GC receipt；损坏文件无法证明这些记录不存在。此时停止服务并按 [fresh-host restore](/ocd/incidents/fresh-host) 恢复整机 snapshot；这不会撤销已发生的外部副作用。不要手动删除 referrer、operation、receipt 或 step row 绕过检查。
+If control still has a Queue, Cron activation, Workflow instance (including released/terminal/retained), Workflow operation, or Workflow version, you cannot rebuild scheduling history from an empty database. After Workflow purge releases control references, scheduler may still hold GC receipts; a corrupt file cannot prove those records are absent. Stop the service and restore a full-platform snapshot with [fresh-host restore](/ocd/incidents/fresh-host). That does not undo external side effects that already happened. Do not delete referrer, operation, receipt, or step rows to bypass the check.
 
-Workflow 的 waiting/paused 不占执行并发；`/v1/operator/workflows` 包含等待、inbox、retention 和 operation 计数。`workflow_*_results`、`workflow_consumed_events` 等保留历史指标是 gauge，restart/purge 可以降低它们；`workflow_event_intake_total` 和 `workflow_lifecycle_total` 是本进程观察到的调用结果。固定 metrics 预算现在至少需要 567 条序列，默认仍为 1024。
+Workflow waiting/paused does not consume execution concurrency. `/v1/operator/workflows` includes waiting, inbox, retention, and operation counts. Retention history metrics such as `workflow_*_results` and `workflow_consumed_events` are gauges; restart/purge can lower them. `workflow_event_intake_total` and `workflow_lifecycle_total` are this process's observed call results. The fixed metrics budget now needs at least 567 series; the default remains 1024.
 
-运行时未能确认 callback drain 时，当前 Workflow 执行路径会隔离当前 workerd generation。operator resume 不能解除隔离；只有 supervisor 启动的新 generation 才能重新接纳 Workflow。已有 lease 保留给 Unknown recovery，不按业务 retry 增加 attempt。
+If the runtime cannot confirm callback drain, the current Workflow execution path isolates the current workerd generation. Operator resume cannot lift that isolation; only a supervisor-started new generation can admit Workflow again. Existing leases stay for Unknown recovery and do not increment attempt as a business retry.
 
-允许的 mutation：以下命令仅用于 **control 可验证且没有上述产品 authority** 的 alarm-only 数据目录，并要求 scheduler DB 确认损坏、service 已停止。命令会在移动文件前拒绝持有产品 authority 的目录：
+Allowed mutation: the following command is only for an **alarm-only data directory whose control plane is verifiable and that has none of the product authority above**, and only after the scheduler DB is confirmed corrupt and the service is stopped. The command refuses directories that still hold product authority before it moves files:
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml scheduler recover-corrupt --backup-name scheduler-corrupt-20260826
 ```
 
-`--backup-name` 是创建在 `data/diagnostics/scheduler-recovery/` 下的唯一目录名。预期旧 DB 被精确隔离，空 projection 从 DO alarm authority repair，不伪造已投递。control/DO authority 也损坏、未知 token 重复 commit 或 backlog 不收敛是停止条件，并转整机 restore。回滚是保留隔离副本并恢复整机 snapshot。验证是 repair dry-run、alarm sentinel、lease expiry、重启和 lag 回到界限。
+`--backup-name` is a unique directory created under `data/diagnostics/scheduler-recovery/`. Expect the old DB to be isolated exactly, an empty projection repaired from DO alarm authority, and no fabricated deliveries. Stop conditions: control/DO authority also corrupt, unknown tokens double-committed, or backlog not converging — then full-platform restore. Rollback is keeping the isolated copy and restoring a full snapshot. Verification: repair dry-run, alarm sentinel, lease expiry, restart, and lag back within bounds.

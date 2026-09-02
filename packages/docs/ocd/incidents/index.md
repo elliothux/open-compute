@@ -1,19 +1,19 @@
-# 故障手册
+# Incident handbook
 
-出事时按症状走，不要先翻源码或内部 crate。本章按症状分页：停止条件、允许的 mutation、回滚与验证都写在对应页面。命令与内嵌 `ocd docs <name>` 一致。
+When something breaks, follow the symptom. Do not start in the source tree or an internal crate. This chapter is one page per symptom: stop conditions, allowed mutations, rollback, and verification are on each page. Commands match embedded `ocd docs <name>`.
 
-路径示例用 `/etc/open-compute/config.toml`。部分内嵌 runbook 写成 `platform.toml`；`--config` 只要绝对路径。全新主机恢复和 master key 恢复用单独的 `recovery.toml` / `recovery-master.key`，与日常配置分开。
+Path examples use `/etc/open-compute/config.toml`. Some embedded runbooks write `platform.toml`; `--config` only needs an absolute path. Fresh-host restore and master-key recovery use a separate `recovery.toml` / `recovery-master.key`, not the daily config.
 
-除非该节写明允许，否则不要：覆盖已有 data-dir、force、自愈改 SQLite、PATH 搜索或下载 workerd、把失败 upload 当 committed、生成新 master key 盖住旧平台。
+Unless a section explicitly allows it, do not: overwrite an existing data-dir, force, self-heal SQLite, search `PATH` or download workerd, treat a failed upload as committed, or generate a new master key over an old platform.
 
-按症状打开对应页面：
+Open the matching page by symptom:
 
-- [当前 release 恢复](/ocd/incidents/current-release)
-- [全新主机恢复](/ocd/incidents/fresh-host)
-- [磁盘压力](/ocd/incidents/disk)
-- [SQLite 损坏](/ocd/incidents/sqlite)
-- [S3 故障](/ocd/incidents/s3)
-- [workerd 崩溃循环](/ocd/incidents/workerd)
-- [Master key 丢失](/ocd/incidents/master-key)
-- [Scheduler 恢复](/ocd/incidents/scheduler)
-- [收集 support bundle](/ocd/incidents/support-bundle)
+- [Current-release restore](/ocd/incidents/current-release)
+- [Fresh-host restore](/ocd/incidents/fresh-host)
+- [Disk pressure](/ocd/incidents/disk)
+- [SQLite corruption](/ocd/incidents/sqlite)
+- [S3 outage](/ocd/incidents/s3)
+- [workerd crash loop](/ocd/incidents/workerd)
+- [Master-key loss](/ocd/incidents/master-key)
+- [Scheduler recovery](/ocd/incidents/scheduler)
+- [Collect a support bundle](/ocd/incidents/support-bundle)

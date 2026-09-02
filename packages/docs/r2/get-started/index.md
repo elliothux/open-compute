@@ -1,10 +1,10 @@
-# 上手
+# Get started
 
-`ocd` 必须已经就绪，并且配置了 S3（`[s3]` + `r2_prefix`）。创建逻辑 bucket，在 `open-compute.json` 中绑定，再用 `oc` 运行 Worker。`oc run` 不会再起一个 workerd。见 [ocd 上手](/ocd/get-started) 和 [配置](/ocd/configuration)。
+`ocd` must already be ready, with S3 configured (`[s3]` plus `r2_prefix`). Create a logical bucket, bind it in `open-compute.json`, and run the Worker with `oc`. `oc run` does not start another workerd. See [ocd get started](/ocd/get-started) and [configuration](/ocd/configuration).
 
-## 1. 创建逻辑 bucket
+## 1. Create a logical bucket
 
-以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。对象字节进入配置的 S3 prefix，不进入 SQLite。
+The following is the platform control plane. Cloudflare REST and `client.v4` are not provided. Object bytes go to the configured S3 prefix, not SQLite.
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
@@ -14,9 +14,9 @@ curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/r2/buckets" \
   -d '{"name":"my-bucket"}'
 ```
 
-成功返回 `{ "resourceId": "...", "state": "ready" }`。
+Success returns `{ "resourceId": "...", "state": "ready" }`.
 
-## 2. 绑定
+## 2. Bind
 
 ```json
 {
@@ -48,10 +48,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 4. 运行
+## 4. Run
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/r2/concepts/)、[指南](/r2/guides/)。
+The CLI is `oc`, not Wrangler. Next: [Concepts](/r2/concepts/), [Guides](/r2/guides/).

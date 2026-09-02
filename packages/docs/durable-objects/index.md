@@ -1,12 +1,12 @@
 # Durable Objects
 
-Durable Object 将计算与强一致存储绑定在同一对象上。在 open-compute 上，所有对象运行在本机的单个 `workerd` 进程中。
+Durable Objects bind compute and strongly consistent storage to one object. On this platform every object lives on the single local `workerd` process.
 
-例如：
+For example, you can use Durable Objects for:
 
-- 在多个客户端之间协调状态
-- 每个对象独立的强一致存储
-- Alarms 与 WebSocket hibernation
+- Coordinating state among multiple clients
+- Strongly consistent per-object storage
+- Alarms and WebSocket hibernation
 
 ```ts
 export class Counter {
@@ -26,7 +26,7 @@ export default {
 } satisfies ExportedHandler<{ COUNTER: DurableObjectNamespace }>;
 ```
 
-在 `open-compute.json` 中绑定。Durable Object 必须指定 `className`：
+Bind in `open-compute.json`. Durable Object bindings require `className`:
 
 ```json
 {
@@ -38,25 +38,25 @@ export default {
 }
 ```
 
-`className` 仅用于核对 class，不会作为资源 ID 提交给平台。语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+`className` only checks class semantics in generated framework config. It is not sent as the resource id. Grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`、stub `fetch` / RPC、`state.storage` 的 KV 与 SQL、transaction、output gate |
-| 对象位置 | 按地区调度，`locationHint` / jurisdiction / migration | 全部位于本机单个 workerd；`locationHint` / jurisdiction / migration 不产生地理效果 |
-| Alarms | 提供 | 提供：`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` |
-| Hibernation | 提供 | 提供 |
-| 绑定 | wrangler `durable_objects` | `{ type, id, className }`，必须指定 `className` |
-| `Fetcher.connect()` | 通用出站 | 使用绑定声明的连接，而非第二条通用出站通道 |
+| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`, stub `fetch` / RPC, `state.storage` KV and SQL, transactions, output gate |
+| Placement | Geographic scheduling, `locationHint` / jurisdiction / migration | All objects on one local workerd; `locationHint` / jurisdiction / migration have no geo effect |
+| Alarms | Available | 7 methods supported: `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler |
+| Hibernation | Available | Supported |
+| Binding | wrangler `durable_objects` | `{ type, id, className }`; `className` required |
+| `Fetcher.connect()` | General outbound | Declared capability tunnel |
 
-## 本节
+## Next
 
-- [上手](/durable-objects/get-started/)
-- [概念](/durable-objects/concepts/)
-- [指南](/durable-objects/guides/)
-- [示例](/durable-objects/examples/)
+- [Get started](/durable-objects/get-started/)
+- [Concepts](/durable-objects/concepts/)
+- [Guides](/durable-objects/guides/)
+- [Examples](/durable-objects/examples/)
 - [Alarms](/durable-objects/alarms)
-- [限制](/durable-objects/platform/limits)
-- [行为差异](/durable-objects/platform/deviations)
+- [Limits](/durable-objects/platform/limits)
+- [Behavior differences](/durable-objects/platform/deviations)

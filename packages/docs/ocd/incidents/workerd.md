@@ -1,14 +1,14 @@
-# workerd 崩溃循环
+# workerd crash loop
 
-触发信号：restart counter 持续增长、readiness runtime unavailable、activation 或 WebSocket 大量失败。影响面是 tenant execution；ocd control plane 仍应存活。
+Trigger: restart counter keeps climbing, readiness runtime unavailable, mass activation or WebSocket failures. Blast radius is tenant execution; the ocd control plane should still be alive.
 
-只读诊断：
+Read-only diagnosis:
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml capabilities --json
 /opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 ```
 
-允许的 mutation 是停止 service、恢复同一 release package 中的 verified workerd/runtime assets，再启动；不得 PATH 搜索、自动下载或扩大 abort allowlist。只替换并校验完整 `ocd`，不单独替换缓存中的 workerd 或 JS。
+Allowed mutation: stop the service, restore verified workerd/runtime assets from the **same** release package, then start. Do not search `PATH`, auto-download, or widen an abort allowlist. Replace and verify the complete `ocd`; do not swap cached workerd or JS by themselves.
 
-预期 supervisor bounded backoff、reap 旧 process group、旧 generation token 失效。停止条件是 digest/version 不匹配、未知 orphan identity 或 localDisk compatibility 未通过。回滚是恢复完整旧 package 加其 snapshot，而不是单换 binary。验证是 doctor full、G0/P0 runtime smoke、DO/alarms/basic WebSocket 和无 orphan/FD 泄漏。
+Expect bounded supervisor backoff, reaping the old process group, and old-generation tokens becoming invalid. Stop conditions: digest/version mismatch, unknown orphan identity, or localDisk compatibility not passing. Rollback is the complete old package plus its snapshot, not a single binary swap. Verification: doctor full, G0/P0 runtime smoke, DO/alarms/basic WebSocket, and no orphan/FD leaks.

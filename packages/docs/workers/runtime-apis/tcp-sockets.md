@@ -1,6 +1,6 @@
 # TCP sockets
 
-`connect()` 从 `cloudflare:sockets` 导入，用于建立出站 TCP。API 形状与 [Cloudflare TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/) 对齐；网络策略边界不同。
+`connect()` is imported from `cloudflare:sockets` for outbound TCP. The API shape matches [Cloudflare TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/). The network policy boundary does not.
 
 ```ts
 import { connect } from "cloudflare:sockets";
@@ -16,16 +16,16 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-完整 `Socket` / `SocketAddress` / `SocketOptions` / `startTls()` 签名见 Cloudflare 原文。不可在 global scope 创建并跨请求共享 socket。
+Full `Socket` / `SocketAddress` / `SocketOptions` / `startTls()` signatures: [Cloudflare TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/). Do not create a socket in global scope and share it across requests.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| `connect(address, options?)` 返回带 `readable` / `writable` / `opened` / `closed` / `close()` / `startTls()` 的 `Socket` | 是 | 是 |
-| `secureTransport`：`off` \| `on` \| `starttls` | 是 | 是 |
-| 租户通用出站 `fetch()`、`cloudflare:sockets.connect()`、`node:net` | Cloudflare 托管网络策略 | 共享唯一的 stock-workerd `Network(allow=["public"])` |
-| 命名 Service/DO 的 `Fetcher.connect()` | 托管策略 | 使用绑定声明的连接，而非第二条通用出站通道 |
-| Cloudflare 自有 IP 段封禁 / Worker self-connect（TCP Loop）/ 默认 SMTP 25 封禁 | 是，见 [troubleshooting](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/#troubleshooting) | 不提供 |
-| private / loopback / link-local / metadata / Unix | 拒绝 | public 地址层拒绝 |
+| `connect(address, options?)` returns a `Socket` with `readable` / `writable` / `opened` / `closed` / `close()` / `startTls()` | Yes | Yes |
+| `secureTransport`: `off` \| `on` \| `starttls` | Yes | Yes |
+| Tenant general outbound `fetch()`, `cloudflare:sockets.connect()`, `node:net` | Cloudflare hosted network policy | Share one stock-workerd `Network(allow=["public"])` |
+| Named Service/DO `Fetcher.connect()` | Hosted policy | Uses the declared capability tunnel; not a second general outbound |
+| Cloudflare-owned IP-range block / Worker self-connect (TCP Loop) / default SMTP port 25 prohibition | Yes — [troubleshooting](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/#troubleshooting) | Not provided |
+| Private / loopback / link-local / metadata / Unix | Rejected | Rejected by the public address layer |
 

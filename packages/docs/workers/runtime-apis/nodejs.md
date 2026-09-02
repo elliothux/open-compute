@@ -1,6 +1,6 @@
-# Node.js 兼容
+# Node.js compatibility
 
-pinned baseline 已经提供 Node 兼容，因此 `node:` 导入不需要在项目中开启 flag。这不是 Node 主机：没有 `node_modules` 运行时、没有完整 Node 标准库作为操作系统、未实现的 API 不会被 polyfill。
+The pinned baseline already includes Node compatibility, so `node:` imports do not need a project-level flag. This is not a Node host: there is no `node_modules` runtime, no full Node standard library as an OS, and unimplemented APIs are not polyfilled.
 
 ```ts
 import { Buffer } from "node:buffer";
@@ -14,16 +14,16 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-工具链不提供 Node 运行环境、不填补未实现的产品 API、也不下载远程 import。
+The toolchain does not provide a Node runtime, does not fill in unimplemented product APIs, and does not download remote imports.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| 可用的 `node:` 模块集合 | 是，见 [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | 与 pinned workerd 在该 compatibility date 上的表面对齐 |
-| 成功 import 等于完整 Node | 否 | 否 |
-| 每个 Worker 可关闭 `nodejs_compat` | 是 | 不提供；baseline 已包含 |
-| 未实现的 Node API | 失败或受 flag 约束 | 失败，不会静默 polyfill |
-| `node:net` 出站 | Cloudflare 托管网络策略 | 与通用出站相同，见 [TCP sockets](/workers/runtime-apis/tcp-sockets) |
-| 请求路径运行时 | workerd | workerd；不在 Bun/Node 中执行生产请求 |
+| Available `node:` modules | Yes — [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | Aligned with pinned workerd at this compatibility date |
+| Successful import means full Node | No | No |
+| Per-Worker `nodejs_compat` flag to turn off | Yes | Not provided; included in the baseline |
+| Unimplemented Node APIs | Fail or flag-gated | Fail; not silently polyfilled |
+| `node:net` outbound | Cloudflare hosted network policy | Same general outbound; see [TCP sockets](/workers/runtime-apis/tcp-sockets) |
+| Request-path runtime | workerd | workerd; production requests do not execute inside Bun/Node |
 

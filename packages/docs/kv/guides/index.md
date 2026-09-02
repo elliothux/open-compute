@@ -1,10 +1,10 @@
-# 指南
+# Guides
 
-## 创建 namespace
+## Create a namespace
 
-见[上手](/kv/get-started/)。本平台 `POST /v1/accounts/{accountId}/kv/namespaces`，body `{ "name": "..." }`，需要 `idempotency-key`。不提供 Cloudflare REST。
+See [Get started](/kv/get-started/). Platform `POST /v1/accounts/{accountId}/kv/namespaces` with `{ "name": "..." }` and an `idempotency-key`. Cloudflare REST is not provided.
 
-## 绑定
+## Bind
 
 ```json
 "bindings": {
@@ -12,7 +12,7 @@
 }
 ```
 
-可选 `permissions`。改完后运行 `bun run oc types --config open-compute.json`。
+`permissions` is optional. After edits, run `bun run oc types --config open-compute.json`.
 
 ## get / put / list / delete
 
@@ -28,6 +28,6 @@ const listed = await env.KV.list({ prefix: "user:", limit: 100 });
 await env.KV.delete("user:1");
 ```
 
-bulk get：`env.KV.get(["a", "b"])`。stream 值不要经 JSON 膨胀；上限仍是 25 MiB。完整方法见 [Cloudflare KV API](https://developers.cloudflare.com/kv/api/)。
+Bulk get: `env.KV.get(["a", "b"])`. Do not inflate stream values through JSON; the cap is still 25 MiB. Full methods: [Cloudflare KV API](https://developers.cloudflare.com/kv/api/).
 
-写入后立即在本机可见。无全球传播等待。
+A write is immediately visible on this node. There is no global propagation wait.

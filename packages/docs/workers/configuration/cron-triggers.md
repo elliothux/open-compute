@@ -1,6 +1,6 @@
 # Cron Triggers
 
-Cron 在 open-compute 上按 UTC 表达式触发 Worker 的 `scheduled()`。这不是 Cloudflare 控制台中的触发器界面。
+Cron on this platform runs the Worker's `scheduled()` on UTC expressions. This is not the Cloudflare dashboard trigger UI.
 
 ```ts
 export default {
@@ -10,25 +10,25 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-`controller.cron` 是部署时声明的精确字符串。`controller.scheduledTime` 是该 logical slot 的时间。
+`controller.cron` is the exact string declared on the deployment. `controller.scheduledTime` is that logical slot's time.
 
-## 表达式
+## Expressions
 
-只接受**五个 UTC 字段**：minute、hour、day-of-month、month、day-of-week。没有秒字段、没有 year、没有本地时区或 DST。
+Only **five UTC fields**: minute, hour, day-of-month, month, day-of-week. No seconds field, no year, no local timezone or DST.
 
-本机已文档化的 Quartz-like 扩展：`*` `,` `-` `/` `L` `W` `#`，以及大小写不敏感的三字母月份/星期名。weekday 数字按 Cloudflare fixture：`1=Sunday` … `7=Saturday`。
+Documented local Quartz-like extensions: `*` `,` `-` `/` `L` `W` `#`, plus case-insensitive three-letter month/weekday names. Weekday numbers follow the Cloudflare fixture: `1=Sunday` … `7=Saturday`.
 
-平台部署元数据字段是 `crons: string[]`。`open-compute.json` 没有 Wrangler `triggers` / `triggers.crons`；写入该键将作为未知字段被拒绝。Workflow 的 cron 走 binding 上的 `schedules`，不是 Worker `scheduled()`。
+The platform deployment metadata field is `crons: string[]`. `open-compute.json` has no Wrangler `triggers` / `triggers.crons`; adding one is an unknown field and fails. Workflow cron uses `schedules` on the workflow binding, not Worker `scheduled()`.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| `scheduled()` handler | 是，见 [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) | 是 |
-| 五字段 cron | 是，见 [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | 是；仅 UTC |
-| `noRetry()` | 是 | 是 |
-| 项目文件中的 `triggers.crons` | Wrangler | 不允许；部署元数据字段为 `crons: string[]` |
-| 错过触发后的恢复 | 托管调度语义 | 宽限时间内最多补最近一次，不回放停机期间的全部触发 |
-| 已知失败重试 | 托管策略 | 按配置有限次重试；调用 `noRetry()` 除外 |
-| 错过触发的默认宽限 | 套餐相关 | `scheduler.cron_misfire_grace_ms = 300000`（五分钟）；精确值以 `ocd capabilities --json` 的 `limits` 为准 |
+| `scheduled()` handler | Yes — [scheduled()](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) | Yes |
+| Five-field cron | Yes — [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/) | Yes; UTC only |
+| `noRetry()` | Yes | Yes |
+| `triggers.crons` in the project file | Wrangler | Not allowed; deployment metadata field is `crons: string[]` |
+| Misfire recovery | Hosted scheduler semantics | Projects at most the latest slot within grace; does not replay complete downtime history |
+| Retry on known failure | Hosted policy | Configured bounded local retry unless `noRetry()` is called |
+| Default misfire grace | Plan-dependent | `scheduler.cron_misfire_grace_ms = 300000` (five minutes); exact values from `ocd capabilities --json` `limits` |
 

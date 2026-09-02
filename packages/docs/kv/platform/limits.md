@@ -1,10 +1,10 @@
-# 限额
+# Limits
 
-Worker API 上限与 Cloudflare KV 对齐：键 512 字节、值 25 MiB、metadata 1024 字节、bulk get 100、list 1000、`expirationTtl` ≥ 60s。这是 API 形状，不是 Cloudflare 套餐。
+Worker API ceilings match Cloudflare KV: 512-byte keys, 25 MiB values, 1024-byte metadata, bulk get 100, list 1000, `expirationTtl` ≥ 60s. That is API shape, not a Cloudflare plan.
 
-本机配额来自 `ocd` 配置的 `[kv]`。运行中的精确值以 `ocd capabilities --json` 的 `limits` 为准。嵌入默认包括：
+Local quotas come from the `ocd` `[kv]` config. Live numbers are `limits` from `ocd capabilities --json`. Embedded defaults include:
 
-| 项 | 默认 |
+| Item | Default |
 | --- | --- |
 | `namespace_quota_bytes` | 1 GiB |
 | `max_connections` | 64 |
@@ -12,4 +12,4 @@ Worker API 上限与 Cloudflare KV 对齐：键 512 字节、值 25 MiB、metada
 | `max_active_streams` | 16 |
 | `operation_timeout_ms` | 30000 |
 
-不提供 Cloudflare 计费，也不提供按套餐放大的全球 KV 配额。
+Cloudflare billing and plan-scaled global KV quotas are not provided.

@@ -1,12 +1,12 @@
 # Queues
 
-Queues 将消息从生产者 Worker 投递给消费者 Worker。投递语义为 at-least-once：在崩溃或重试时，消息可能被重复处理。队列状态存储在本机 `scheduler.sqlite`。
+Queues deliver messages from a producer Worker to a consumer Worker. Delivery is at-least-once. Durability comes from `scheduler.sqlite` on the node running ocd.
 
-例如：
+For example, you can use Queues for:
 
-- 解耦生产者与消费者 Worker
-- 缓冲异步任务
-- 失败后重试投递
+- Decoupling producer and consumer Workers
+- Buffering work for asynchronous processing
+- Retrying failed deliveries
 
 ```ts
 export default {
@@ -23,7 +23,7 @@ export default {
 } satisfies ExportedHandler<{ QUEUE: Queue }>;
 ```
 
-在 `open-compute.json` 中绑定生产者：
+Bind a producer in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
 
 ```json
 {
@@ -35,25 +35,25 @@ export default {
 }
 ```
 
-消费者为 Worker 的 `queue` 处理函数。`open-compute.json` 不使用 Wrangler 的 `[[queues.consumers]]`。语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+A consumer is the Worker's `queue` handler. `open-compute.json` does not use Wrangler `[[queues.consumers]]`. Binding grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | 相同：`send` / `sendBatch`、`contentType`（json / text / bytes / v8）、`delaySeconds`、`metrics`、消费者 `MessageBatch` / `ack` / `retry` |
-| 存储位置 | 全球复制 | 本机 `scheduler.sqlite` |
-| 投递语义 | at-least-once | at-least-once；不提供 exactly-once |
-| 全局 FIFO | 提供 | 不提供 |
-| 无法识别的 native dispatch | — | 可能保留消息 lease，后续投递可能使用同一 attempt 编号 |
-| Pull consumer | 提供 | 不提供 |
-| 绑定 | wrangler `queues` | 生产者 `{ type, id, permissions? }`；消费者为 Worker `queue` 处理函数 |
+| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: `send` / `sendBatch`, `contentType` (json / text / bytes / v8), `delaySeconds`, `metrics`, consumer `MessageBatch` / `ack` / `retry` |
+| Durability | Global replication | Local `scheduler.sqlite` on the node running ocd |
+| Delivery | At-least-once | At-least-once |
+| Global FIFO | Available | Not provided |
+| Unknown native dispatch | — | May retain the lease; duplicate attempt numbers possible |
+| Pull consumer | Available | Not provided |
+| Binding | wrangler `queues` | Producer `{ type, id, permissions? }`; consumer is the Worker `queue` handler |
 
-## 本节
+## Next
 
-- [上手](/queues/get-started/)
-- [概念](/queues/concepts/)
-- [指南](/queues/guides/)
-- [示例](/queues/examples/)
-- [限制](/queues/platform/limits)
-- [行为差异](/queues/platform/deviations)
+- [Get started](/queues/get-started/)
+- [Concepts](/queues/concepts/)
+- [Guides](/queues/guides/)
+- [Examples](/queues/examples/)
+- [Limits](/queues/platform/limits)
+- [Behavior differences](/queues/platform/deviations)

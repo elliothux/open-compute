@@ -1,6 +1,6 @@
 # Workers Cache
 
-部署配置驱动的 HTTP 响应缓存，以及租户 Cache API。
+HTTP response cache driven by deployment config, plus the tenant Cache API.
 
 ```json
 {
@@ -13,18 +13,18 @@
 }
 ```
 
-`cache.enabled` 打开默认 HTTP cache。`cross_version_cache` 允许跨部署版本共享；默认隔离。`exports.<name>` 只能覆盖具名 Worker entrypoint 的缓存策略。自动缓存需要显式 `s-maxage` 或 `max-age`。
+`cache.enabled` turns on the default HTTP cache. `cross_version_cache` allows sharing across deployment versions; isolation is the default. `exports.<name>` may only override cache policy for a named Worker entrypoint. Automatic caching requires an explicit `s-maxage` or `max-age`.
 
-Cache API（`caches.default` / `caches.open`）见 [Runtime APIs · Cache](/workers/runtime-apis/cache)。
+The Cache API (`caches.default` / `caches.open`) is documented at [Runtime APIs · Cache](/workers/runtime-apis/cache).
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| `cache.enabled`、entrypoint override、`cross_version_cache` | 是，见 [Workers Cache configuration](https://developers.cloudflare.com/workers/cache/configuration/) | 配置形状对齐 |
-| Cache API 符号 | 是，见 [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | 是 |
-| 缓存在哪 | 全球 / colo | 本机 |
-| 自动缓存 TTL | 可含启发式 TTL | 需要显式 `s-maxage` 或 `max-age`；无启发式 TTL |
-| 全球复制 / purge 传播 / tiered cache / Cache Rules / Cache Deception Armor / 套餐相关行为 | 是 | 不提供 |
-| 对象大小配额 | Cloudflare 产品配额 | 默认每个缓存对象 16 MiB、每个 Worker 1 GiB 逻辑 body 字节；精确值由 `ocd capabilities --json` 给出 |
+| `cache.enabled`, entrypoint overrides, `cross_version_cache` | Yes — [Workers Cache configuration](https://developers.cloudflare.com/workers/cache/configuration/) | Matching config shape |
+| Cache API symbols | Yes — [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | Yes |
+| Cache authority | Global / colo | Single-node local authority |
+| Automatic cache TTL | May include heuristic TTL | Requires explicit `s-maxage` or `max-age`; no heuristic TTL |
+| Global replication / purge propagation / tiered cache / Cache Rules / Cache Deception Armor / plan-dependent behavior | Yes | Not provided |
+| Object size quota | Cloudflare product quota | Default 16 MiB per cached object and 1 GiB of logical body bytes per Worker; live values from `ocd capabilities --json` |
 

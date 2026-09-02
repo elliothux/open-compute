@@ -1,13 +1,13 @@
 # Workers
 
-在本机运行 Cloudflare 模块 Worker。`ocd` 启动锁定版本的 `workerd`。不提供全球边缘网络、`workers.dev` 或 Cloudflare 控制台。
+Workers is a serverless execution environment that runs Cloudflare module Workers on this platform. One `ocd` process supervises one pinned `workerd` child on the node. The platform does not provide a global edge, `workers.dev`, or a Cloudflare dashboard.
 
-可以：
+With Workers you can:
 
-- 使用 `oc run` 部署模块 Worker（`export default { fetch }`）
-- 绑定 KV、R2、D1、Durable Objects、Queues、Workflows 以及其他 Worker
-- 使用 UTC cron 触发 `scheduled()`
-- 在同一份部署中提供静态资源
+- Deploy a module Worker (`export default { fetch }`) with `oc run`
+- Bind KV, R2, D1, Durable Objects, Queues, Workflows, and other Workers
+- Schedule `scheduled()` with UTC cron expressions
+- Serve Static Assets from the same immutable deployment
 
 ```ts
 export default {
@@ -20,34 +20,34 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-仓库示例为 `examples/hello-worker/`。针对已运行的 `ocd` 部署（默认 origin `http://127.0.0.1:8787`）：
+The sample in this repository is `examples/hello-worker/`. Deploy it against a running `ocd` (default origin `http://127.0.0.1:8787`):
 
 ```sh
 bun run oc run --config examples/hello-worker/open-compute.json --ocd <ocd-path>
 ```
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| 模块 Worker（`export default { fetch }`） | 提供 | 提供 |
-| isolate、`env` 绑定、`fetch` / `scheduled` / `queue` | 提供 | 提供 |
-| Cache API、WebSocket hibernation、`cloudflare:sockets`、`node:` | 提供 | 提供，与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 一致 |
-| 全球 Anycast / workers.dev / 自定义域名产品 | 提供 | 不提供 |
-| 项目文件 | wrangler.jsonc | `open-compute.json`（未知字段将被拒绝） |
-| 项目 JSON 中的 compatibilityDate | 提供 | 不允许；由 runtime 锁定（当前 `2026-08-30`） |
-| 部署状态 | Cloudflare 控制面 | 本机 SQLite；`ocd` 监督当前 `workerd` 进程 |
+| Module Worker (`export default { fetch }`) | Yes | Yes |
+| Isolates, `env` bindings, `fetch` / `scheduled` / `queue` | Yes | Yes |
+| Cache API, WebSocket hibernation, `cloudflare:sockets`, `node:` imports | Yes | Yes — same [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) |
+| Global Anycast / workers.dev / Custom Domains product | Yes | Not provided |
+| Project file | wrangler.jsonc | `open-compute.json` (unknown fields rejected) |
+| compatibilityDate in project JSON | Yes | Not allowed; frozen in the runtime lock (`2026-08-30`) |
+| Deploy authority | Cloudflare control plane | Local SQLite and one supervised runtime generation |
 
-## 本节
+## In this section
 
-- [快速开始](/workers/get-started/)
-- [概念](/workers/concepts/)
-- [示例](/workers/examples/)
-- [配置](/workers/configuration/)（[绑定](/workers/configuration/bindings)、[兼容日期](/workers/configuration/compatibility-dates)、[兼容标志](/workers/configuration/compatibility-flags)、[Cron](/workers/configuration/cron-triggers)、[环境变量](/workers/configuration/environment-variables)、[密钥](/workers/configuration/secrets)、[路由](/workers/configuration/routing)）
-- [版本与部署](/workers/versions-and-deployments/)
-- [静态资源](/workers/static-assets/)
-- [缓存](/workers/cache/)
-- [运行时 API](/workers/runtime-apis/)（[handlers](/workers/runtime-apis/handlers)、[bindings](/workers/runtime-apis/bindings)、[cache](/workers/runtime-apis/cache)、[WebSockets](/workers/runtime-apis/websockets)、[TCP](/workers/runtime-apis/tcp-sockets)、[Node.js](/workers/runtime-apis/nodejs)）
-- [限制](/workers/platform/limits) · [已知问题](/workers/platform/known-issues) · [更新日志](/workers/platform/changelog)
+- [Get started](/workers/get-started/)
+- [Concepts](/workers/concepts/)
+- [Examples](/workers/examples/)
+- [Configuration](/workers/configuration/) ([bindings](/workers/configuration/bindings), [compatibility dates](/workers/configuration/compatibility-dates), [flags](/workers/configuration/compatibility-flags), [Cron](/workers/configuration/cron-triggers), [environment variables](/workers/configuration/environment-variables), [secrets](/workers/configuration/secrets), [routing](/workers/configuration/routing))
+- [Versions and deployments](/workers/versions-and-deployments/)
+- [Static Assets](/workers/static-assets/)
+- [Cache](/workers/cache/)
+- [Runtime APIs](/workers/runtime-apis/) ([handlers](/workers/runtime-apis/handlers), [bindings](/workers/runtime-apis/bindings), [cache](/workers/runtime-apis/cache), [WebSockets](/workers/runtime-apis/websockets), [TCP](/workers/runtime-apis/tcp-sockets), [Node.js](/workers/runtime-apis/nodejs))
+- [Limits](/workers/platform/limits) · [Known issues](/workers/platform/known-issues) · [Changelog](/workers/platform/changelog)
 
-若尚未运行 `ocd`，见 [ocd 安装](/ocd/get-started)。
+If the platform is not running yet, start at [ocd get started](/ocd/get-started).

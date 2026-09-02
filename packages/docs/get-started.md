@@ -1,14 +1,14 @@
-# 开始
+# Get started
 
-将仓库中的 hello Worker 部署到已就绪的 `ocd`。
+This guide runs a hello Worker on a ready `ocd`.
 
-## 1. 安装 ocd，确认 `/health/ready`
+## 1. ocd installed, and `/health/ready`
 
-按[安装与首次启动](/ocd/get-started)运行 `ocd`。本页假定 `GET /health/ready` 已返回 200。`oc run` 不会再启动 workerd；它将 Worker 部署到已在运行的本地平台。
+Follow [Install and first start](/ocd/get-started) until `ocd` is running. This page assumes `GET /health/ready` already returns 200. `oc run` does not start another workerd; it activates the Worker on the already-running local platform.
 
 ## 2. Hello Worker
 
-使用仓库中的 `examples/hello-worker`。项目文件为 `open-compute.json`：
+Use `examples/hello-worker` from the repo. The project file is `open-compute.json`:
 
 ```json
 {
@@ -20,7 +20,7 @@
 }
 ```
 
-入口为模块 Worker：
+The entry is a module Worker:
 
 ```ts
 export default {
@@ -33,18 +33,18 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 3. 获取 Worker URL
+## 3. It prints a URL
 
-在仓库根目录执行：
+From the repository root:
 
 ```sh
 bun run oc run --config examples/hello-worker/open-compute.json --ocd <path-to-ocd>
 ```
 
-成功时打印 Worker URL。将 `<path-to-ocd>` 替换为 `ocd` 二进制路径，或设置环境变量 `OPEN_COMPUTE_OCD`。
+On success it prints the Worker URL. Replace `<path-to-ocd>` with the path to the `ocd` binary (or set `OPEN_COMPUTE_OCD`).
 
-## `open-compute.json` 不是 `wrangler.jsonc`
+## `open-compute.json` is not `wrangler.jsonc`
 
-配置借用了 Wrangler 的部分字段名（`name`、`main`、`vars`），但 **`open-compute.json` 不是完整的 `wrangler.jsonc`**。未知字段将被拒绝。项目 JSON 不含 `compatibilityDate`：兼容日期由平台锁定，见 `ocd capabilities --json` 中的 `runtime.effective_compatibility_date`。
+The config borrows some Wrangler field names (`name`, `main`, `vars`), but **`open-compute.json` is not `wrangler.jsonc`**. Unknown fields are rejected. There is no `compatibilityDate` in the project JSON: the platform freezes the compatibility date. See `runtime.effective_compatibility_date` from `ocd capabilities --json`.
 
-下一步：[产品目录](/directory)。将 `ocd` 作为服务运行时，见[运维](/ocd/)。
+Next: [Directory](/directory). To run `ocd` as a service, see [Operate](/ocd/).

@@ -1,16 +1,16 @@
-# 行为差异
+# Behavior differences
 
-R2 的 Worker API 与 Cloudflare 对齐；对象字节落在配置的 S3-compatible provider。
+The R2 Worker API matches Cloudflare. Object bytes live on the configured S3-compatible provider.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | 相同：`head` / `get` / `put` / `delete` / `list`、条件写、checksum、multipart、HTTP metadata |
-| 对象字节 | Cloudflare R2 存储 | 配置的 S3-compatible provider |
-| 全球 placement | 提供 | 不提供 |
-| r2.dev 公开产品 | 提供 | 不提供 |
-| Jurisdictional restrictions | 提供 | 不提供 |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker binding 或 provider 的 S3 API |
+| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | Same: `head` / `get` / `put` / `delete` / `list`, conditional writes, checksums, multipart, HTTP metadata |
+| Object bytes | Cloudflare R2 storage | Configured S3-compatible provider |
+| Global placement | Available | Not provided |
+| r2.dev public product | Available | Not provided |
+| Jurisdictional restrictions | Available | Not provided |
+| REST / `client.v4` | Available | Not provided; use the Worker binding or the provider S3 API |
 
-见[兼容性](/platform/compatibility)。
+See [Compatibility](/platform/compatibility).

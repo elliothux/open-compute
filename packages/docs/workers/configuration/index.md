@@ -1,6 +1,6 @@
-# 配置
+# Configuration
 
-Worker 项目文件是 `open-compute.json`。必须包含 `name`，并选择一种内容形态：`main`、`assets`、`main` + `assets`，或 `frameworkOutput`。parser 只接受下列已实现字段；未知字段会被拒绝。
+The Worker project file is `open-compute.json`. It must have `name` and one content shape: `main`, `assets`, `main` + `assets`, or `frameworkOutput`. The parser accepts only the implemented fields below. Unknown fields are rejected.
 
 ```json
 {
@@ -10,41 +10,41 @@ Worker 项目文件是 `open-compute.json`。必须包含 `name`，并选择一�
 }
 ```
 
-## 字段
+## Fields
 
-| 字段 | 作用 |
+| Field | Role |
 | --- | --- |
-| `name` | Worker 名，`[a-z0-9]` 加内部连字符 |
-| `main` | 入口 TS，相对配置文件目录 |
-| `frameworkOutput` | 已构建框架产物；不能再和显式 `main` / `assets` 组合 |
-| `tsconfig` | 默认 `tsconfig.json` |
-| `vars` | 公开变量，JSON 值进入 `env` |
-| `secrets` | `{ "TOKEN": { "env": "MY_TOKEN" } }`，只引用环境变量 |
-| `bindings` | 对象：键是 `env` 名，值是 `{type, id, permissions?}`；DO / Workflow 还要 `className`；Workflow 可选 `schedules` |
-| `services` | 数组 `[{binding, service, entrypoint?}]` |
-| `assets` | `directory`、`binding?`、`run_worker_first`、`html_handling`、`not_found_handling`、`publish_source_maps` |
-| `cache` | `enabled`、`cross_version_cache` |
-| `exports` | 具名 Worker entrypoint 的 cache 覆盖，只接受 `{"type":"worker","cache":{...}}` |
+| `name` | Worker name, `[a-z0-9]` with internal hyphens |
+| `main` | TS entry, relative to the config file directory |
+| `frameworkOutput` | Already-built framework output; cannot combine with explicit `main` / `assets` |
+| `tsconfig` | Defaults to `tsconfig.json` |
+| `vars` | Public variables; JSON values enter `env` |
+| `secrets` | `{ "TOKEN": { "env": "MY_TOKEN" } }`; environment references only |
+| `bindings` | Object: key is the `env` name, value is `{type, id, permissions?}`. DO / Workflow also need `className`. Workflow may set `schedules` |
+| `services` | Array `[{binding, service, entrypoint?}]` |
+| `assets` | `directory`, `binding?`, `run_worker_first`, `html_handling`, `not_found_handling`, `publish_source_maps` |
+| `cache` | `enabled`, `cross_version_cache` |
+| `exports` | Cache overrides for named Worker entrypoints; only `{"type":"worker","cache":{...}}` |
 | `images` | `{ "binding": "IMAGES" }` |
 | `version_metadata` | `{ "binding": "VERSION", "tag"? }` |
-| `accountId` | 覆盖默认账户 |
-| `endpoint` | 平台 origin，默认 `http://127.0.0.1:8787` |
+| `accountId` | Override the default account |
+| `endpoint` | Platform origin; default `http://127.0.0.1:8787` |
 
-`main`、`frameworkOutput`、assets directory 与 `tsconfig` 相对配置文件目录解析，且不能逃逸项目边界。Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不能要求 Worker-first。所有 binding 名共用同一 `env` 命名空间。文件最大 64 KiB，必须是正规 JSON（不是 jsonc）。
+`main`, `frameworkOutput`, the assets directory, and `tsconfig` resolve relative to the config file directory and cannot escape the project boundary. Assets-only projects cannot declare vars, secrets, product/service bindings, or Worker-first. All binding names share one `env` namespace. The file is at most 64 KiB and must be strict JSON (not jsonc).
 
-`bindings.type`：`kv_namespace`、`r2_bucket`、`d1_database`、`do_namespace`、`queue_producer`、`workflow`。
+`bindings.type`: `kv_namespace`, `r2_bucket`, `d1_database`, `do_namespace`, `queue_producer`, `workflow`.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| `vars`、secrets、assets routing、cache enabled、service bindings 语义 | 是，对照 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) | 字段名借用常见 Wrangler 配置；不是完整 `wrangler.jsonc` 兼容层 |
-| 模块 Worker 的 `main` 指向 TS/JS 入口 | 是 | 是 |
-| `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags` | 是 | 不允许 |
-| `workers_dev`、Custom Domains、`routes`、placement、observability、AI、vectorize | 是 | 不提供；未知键失败，不会忽略 |
-| 控制面 | Cloudflare 控制面 | 本机 `ocd` HTTP API |
+| `vars`, secrets, assets routing, cache enabled, service-binding semantics | Yes — [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) | Field names borrow common Wrangler configuration; not a full `wrangler.jsonc` compatibility layer |
+| Module Worker `main` points at a TS/JS entry | Yes | Yes |
+| `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags` | Yes | Not allowed |
+| `workers_dev`, Custom Domains, `routes`, placement, observability, AI, vectorize | Yes | Not provided; unknown keys fail rather than being ignored |
+| Control plane | Cloudflare REST | Local `ocd` HTTP API |
 
-## 本节
+## In this section
 
 - [bindings](/workers/configuration/bindings)
 - [compatibility dates](/workers/configuration/compatibility-dates)

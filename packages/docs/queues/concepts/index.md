@@ -1,21 +1,21 @@
-# 概念
+# Concepts
 
-Queue 在 control catalog 中有身份，消息行存储在 `scheduler.sqlite`。生产者绑定将 `send` 写入该存储；push consumer 从中领取 batch，并 dispatch 到 Worker 的 `queue` 处理函数。
+A Queue has an identity in the control catalog. Message rows live in `scheduler.sqlite`. A producer binding writes `send` into that authority. A push consumer claims a batch and dispatches it to the Worker's `queue` handler.
 
-每个 Queue 同时最多一个 active push consumer。投递语义为 at-least-once：处理函数在 ack 之前崩溃时会重新投递。不提供全局 FIFO。retry、并发与崩溃都可能打乱相对顺序。
+Each Queue has at most one active push consumer at a time. Delivery is at-least-once: a crash before ack retries. Global FIFO is not provided. Retry, concurrency, and crashes can reorder.
 
-## 无法识别的 native dispatch
+## Unknown dispatch
 
-若 native dispatch 结果未知（进程 / workerd 在确认前退出），lease 保留，**不**消耗租户 `max_retries`。恢复后可能以**同一 attempt number**再次投递。这不是 exactly-once。
+If the native dispatch outcome is unknown (process / workerd gone before confirmation), the lease is retained and the tenant `max_retries` budget is **not** consumed. Recovery may deliver again with the **same attempt number**. This is not exactly-once.
 
-[Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) 的 send / batch / delay / content types / ack / retry / metrics 与 Cloudflare 对齐。单条消息 first-call-wins。
+[Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) for send / batch / delay / content types / ack / retry / metrics match Cloudflare. Per-message first-call-wins.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | 相同：send / batch / delay / content types / ack / retry / metrics |
-| 耐久性 | 全球复制 | 本机 `scheduler.sqlite` |
-| 投递 | at-least-once | at-least-once；无法识别的 native dispatch 不释放该消息的 lease |
-| 全局 FIFO | 提供 | 不提供 |
-| Pull consumer | 提供 | 不提供 |
+| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: send / batch / delay / content types / ack / retry / metrics |
+| Durability | Global replication | Local `scheduler.sqlite` on the node running ocd |
+| Delivery | At-least-once | At-least-once; unknown dispatch keeps the lease |
+| Global FIFO | Available | Not provided |
+| Pull consumer | Available | Not provided |

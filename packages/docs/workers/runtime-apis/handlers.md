@@ -1,6 +1,6 @@
 # Handlers
 
-模块 Worker 导出对象上的方法。
+Methods on the module Worker's exported object.
 
 ```ts
 export default {
@@ -12,16 +12,16 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-Durable Object 的 `alarm()` 在 DO 类上，不是 default export。见 [DO Alarms](https://developers.cloudflare.com/durable-objects/api/alarms/)。
+Durable Object `alarm()` lives on the DO class, not the default export. See [DO Alarms](https://developers.cloudflare.com/durable-objects/api/alarms/).
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| `fetch`、`scheduled`、`queue` 的参数和返回值 | 是，见 [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | 是 |
-| `ctx.waitUntil`、`ctx.passThroughOnException` | 是 | 按 workerd 行为 |
-| Email handler / Tail handler | 是 | 不提供 |
-| Cron 触发 | 托管 Cron | UTC 五字段；错过触发后最多补宽限时间内最近一次，见 [Cron Triggers](/workers/configuration/cron-triggers) |
-| Queue 投递 | 全球队列语义 | 本机投递，可能重复，不是全局先进先出 |
-| 项目文件中的 `triggers.crons` / queue consumer 数组 | Wrangler | 不允许；平台部署元数据接受 `crons` 与 `queue_consumers` |
+| `fetch`, `scheduled`, and `queue` arguments and return values | Yes — [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | Yes |
+| `ctx.waitUntil`, `ctx.passThroughOnException` | Yes | Follow workerd |
+| Email handler / Tail handler | Yes | Not provided |
+| Cron trigger | Hosted Cron | UTC five-field; misfire projects at most the latest slot in grace — [Cron Triggers](/workers/configuration/cron-triggers) |
+| Queue delivery | Global queue semantics | Single-node at-least-once, not global FIFO |
+| `triggers.crons` / queue-consumer array in the project file | Wrangler | Not allowed; platform deployment metadata accepts `crons` and `queue_consumers` |
 

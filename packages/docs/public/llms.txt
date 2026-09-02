@@ -2,7 +2,7 @@
 
 > Developer documentation for open-compute: a serverless platform that runs the declared Cloudflare Workers programming model on a single node (`ocd` + pinned `workerd`). No global edge, billing, or Cloudflare dashboard.
 
-Origin: https://open-compute.dev
+Origin: https://open-compute.dev/
 
 Each product below is a top-level docs URL. Live limits come from `ocd capabilities --json` on the running binary.
 
@@ -12,7 +12,7 @@ Each product below is a top-level docs URL. Live limits come from `ocd capabilit
 - [Get started](https://open-compute.dev/get-started): Hello Worker on a ready ocd
 - [Directory](https://open-compute.dev/directory): Product catalog
 
-## Top-level (zh, default `/`)
+## Top-level (en, default `/`)
 
 - [Workers](https://open-compute.dev/workers/)
 - [KV](https://open-compute.dev/kv/)
@@ -25,21 +25,21 @@ Each product below is a top-level docs URL. Live limits come from `ocd capabilit
 - [Platform](https://open-compute.dev/platform/)
 - [ocd](https://open-compute.dev/ocd/)
 
-## Top-level (en, `/en/`)
+## Top-level (zh, `/zh/`)
 
-- [Workers](https://open-compute.dev/en/workers/)
-- [KV](https://open-compute.dev/en/kv/)
-- [D1](https://open-compute.dev/en/d1/)
-- [R2](https://open-compute.dev/en/r2/)
-- [Durable Objects](https://open-compute.dev/en/durable-objects/)
-- [Queues](https://open-compute.dev/en/queues/)
-- [Workflows](https://open-compute.dev/en/workflows/)
-- [Images](https://open-compute.dev/en/images/)
-- [Platform](https://open-compute.dev/en/platform/)
-- [ocd](https://open-compute.dev/en/ocd/)
+- [Workers](https://open-compute.dev/zh/workers/)
+- [KV](https://open-compute.dev/zh/kv/)
+- [D1](https://open-compute.dev/zh/d1/)
+- [R2](https://open-compute.dev/zh/r2/)
+- [Durable Objects](https://open-compute.dev/zh/durable-objects/)
+- [Queues](https://open-compute.dev/zh/queues/)
+- [Workflows](https://open-compute.dev/zh/workflows/)
+- [Images](https://open-compute.dev/zh/images/)
+- [Platform](https://open-compute.dev/zh/platform/)
+- [ocd](https://open-compute.dev/zh/ocd/)
 
-## English start
+## Chinese start
 
-- [Overview](https://open-compute.dev/en/)
-- [Get started](https://open-compute.dev/en/get-started)
-- [Directory](https://open-compute.dev/en/directory)
+- [Overview](https://open-compute.dev/zh/)
+- [Get started](https://open-compute.dev/zh/get-started)
+- [Directory](https://open-compute.dev/zh/directory)

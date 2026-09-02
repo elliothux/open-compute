@@ -1,10 +1,10 @@
-# 示例
+# Examples
 
-计数器见[概述](/durable-objects/)。Hibernation 在本地这一个 workerd 上运行。
+The counter sample is on the [overview](/durable-objects/). Hibernation runs on the single local workerd.
 
-## 计数器
+## Counter
 
-见[概述](/durable-objects/)的 `Counter` 示例。
+See the `Counter` sample on the [overview](/durable-objects/).
 
 ## Hibernation WebSocket
 
@@ -22,4 +22,4 @@ export class Room {
 }
 ```
 
-完整 hibernation API 见 [WebSockets](/workers/runtime-apis/websockets)。Alarms 示例见 [alarms](/durable-objects/alarms)。
+Full hibernation API: [WebSockets](/workers/runtime-apis/websockets). Alarm sample: [alarms](/durable-objects/alarms).

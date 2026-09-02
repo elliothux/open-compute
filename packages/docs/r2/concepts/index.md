@@ -1,18 +1,18 @@
-# 概念
+# Concepts
 
-逻辑 bucket 是平台 catalog 里的资源。对象字节落在配置的 S3-compatible provider 上（`r2_prefix` 与平台 `prefix` 必须不相交）。Worker 通过 binding 看到 Cloudflare R2 那一套方法。同一份字节也可以用 provider 的 S3 API 读写——那是存储协议，不是 Cloudflare 管理面。
+A logical bucket is a catalog resource. Object bytes live on the configured S3-compatible provider (`r2_prefix` must be disjoint from the platform `prefix`). The Worker sees Cloudflare R2 methods through the binding. The same bytes can also be read and written with the provider's S3 API — that is the storage protocol, not the Cloudflare control plane.
 
-不提供全球 placement。对象位于配置的那一个 endpoint / bucket。
+Global placement is not provided. Objects sit at the one endpoint / bucket you configured.
 
-`put` / `get` / `head` / `delete` / `list`、range、条件（etag / 时间）、checksum、multipart、custom metadata、HTTP metadata 与 [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) 对齐。
+`put` / `get` / `head` / `delete` / `list`, range, conditionals (etag / time), checksums, multipart, custom metadata, and HTTP metadata match the [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/).
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | 相同：`put` / `get` / `head` / `delete` / `list`、range、条件写、checksum、multipart、metadata |
-| 对象字节 | Cloudflare R2 存储 | 配置的 S3-compatible provider |
-| 全球 placement | 提供 | 不提供 |
-| Jurisdictional restrictions | 提供 | 不提供 |
-| 公开 bucket 域名 | Cloudflare 托管 | 不提供 |
-| 平台备份 | 对象存储 PITR | 覆盖本机 SQLite 数据，不是对象存储 PITR |
+| Worker API | [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) | Same: `put` / `get` / `head` / `delete` / `list`, range, conditionals, checksums, multipart, metadata |
+| Object bytes | Cloudflare R2 storage | Configured S3-compatible provider |
+| Global placement | Available | Not provided |
+| Jurisdictional restrictions | Available | Not provided |
+| Public bucket hostname | Cloudflare-hosted | Not provided |
+| Platform backups | Object-store PITR | Cover local SQLite authority, not object-store PITR |

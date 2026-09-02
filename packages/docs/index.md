@@ -1,36 +1,36 @@
 # open-compute
 
-单机 Workers 平台。`ocd` 启动锁定版本的 `workerd`，Worker API 与 Cloudflare 文档一致。不提供全球边缘网络、计费或 Cloudflare 控制台。
+A serverless platform for building Workers applications on a single node. open-compute runs the declared Cloudflare Workers programming model (`ocd` + pinned `workerd`). It does not provide a global edge, billing, or the Cloudflare dashboard.
 
-使用 `oc` 部署 Worker，使用 `ocd` 运行平台。项目配置为 `open-compute.json`。
+Deploy module Workers with `oc`. Run the platform as a service with `ocd`. The project file is `open-compute.json`.
 
-[开始](/get-started) · [产品目录](/directory)
+[Get started](/get-started) · [Directory](/directory)
 
-## 计算
+## Compute
 
-- [Workers](/workers/) — 在本机 `workerd` 中运行模块 Worker
-- [Durable Objects](/durable-objects/) — 有状态对象，存储强一致
-- [Workflows](/workflows/) — 可从中断处恢复的多步工作流
-- [Queues](/queues/) — Worker 间消息队列（at-least-once）
+- [Workers](/workers/) — Module Workers, executed by local `workerd`
+- [Durable Objects](/durable-objects/) — Stateful compute with strongly consistent storage
+- [Workflows](/workflows/) — Replayable multi-step applications
+- [Queues](/queues/) — At-least-once message delivery
 
-## 存储
+## Storage
 
-- [KV](/kv/) — 键值存储
+- [KV](/kv/) — Low-latency key-value storage
 - [D1](/d1/) — SQL
-- [R2](/r2/) — 对象存储（数据位于配置的 S3）
+- [R2](/r2/) — Object storage (bytes live on the S3 you configured)
 
-## 媒体
+## Media
 
-- [Cache](/workers/cache/) — Workers Cache 与 Cache API
-- [Images](/images/) — 本地图像变换（受尺寸与并发限制）
+- [Cache](/workers/cache/) — Workers Cache and the Cache API
+- [Images](/images/) — Bounded local raster transforms
 
-## 平台
+## Platform
 
-- [平台](/platform/) — 兼容性、限制与行为差异
-- [限制](/platform/limits) — 以运行中的 `ocd capabilities --json` 为准
-- [兼容性](/platform/compatibility) — 产品、Worker API 与数据位置
-- [行为差异](/platform/deviations) — 相对 Cloudflare 托管环境的差异
+- [Platform](/platform/) — Compatibility, limits, and behavior differences
+- [Limits](/platform/limits) — `capabilities.limits` from the running binary
+- [Compatibility](/platform/compatibility) — Products, Worker APIs, single-node topology
+- [Behavior differences](/platform/deviations) — Single-node topology and runtime behavior
 
-## 运维
+## Operate
 
-安装 `ocd`、编写配置、作为服务运行，以及故障手册：[ocd](/ocd/)。
+Install `ocd`, write config, run it as a service, and the incident handbook: [ocd](/ocd/).

@@ -1,17 +1,17 @@
-# API 参考
+# API reference
 
-Worker 签名以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。本页列出已提供产品及其文档入口。与托管环境的差异见[行为差异](/platform/deviations)。
+Worker signatures follow [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/). This page lists shipped products and their docs. Differences from Cloudflare's hosted environment: [Behavior differences](/platform/deviations).
 
-| 产品 | 文档 |
+| Product | Docs |
 | --- | --- |
-| Workers | [Workers](/workers/)、[运行时 API](/workers/runtime-apis/) |
+| Workers | [Workers](/workers/), [Runtime APIs](/workers/runtime-apis/) |
 | KV | [KV](/kv/) |
 | R2 | [R2](/r2/) |
 | D1 | [D1](/d1/) |
 | Durable Objects | [Durable Objects](/durable-objects/) |
 | Alarms | [Alarms](/durable-objects/alarms) |
 | Queues | [Queues](/queues/) |
-| Cron | [Cron 触发器](/workers/configuration/cron-triggers) |
+| Cron | [Cron triggers](/workers/configuration/cron-triggers) |
 | Workflows | [Workflows](/workflows/) |
 | Cache API | [Cache API](/workers/runtime-apis/cache) |
 | Workers Cache | [Workers Cache](/workers/cache/) |
@@ -19,4 +19,4 @@ Worker 签名以 [Workers runtime APIs](https://developers.cloudflare.com/worker
 | Version Metadata | [Bindings](/workers/runtime-apis/bindings) |
 | WebSocket hibernation | [WebSockets](/workers/runtime-apis/websockets) |
 
-运行中的发行身份以 `ocd capabilities --json` 为准。
+Release identity comes from `ocd capabilities --json` on the running binary.

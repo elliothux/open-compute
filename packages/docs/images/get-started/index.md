@@ -1,8 +1,8 @@
-# 上手
+# Get started
 
-没有资源可创建：Images 是部署级 binding，不引用 namespace id。`ocd` 必须就绪。
+There is no resource to create: Images is a deployment-scoped binding and does not reference a namespace id. `ocd` must be ready.
 
-## 1. 声明 binding
+## 1. Declare the binding
 
 ```json
 {
@@ -12,7 +12,7 @@
 }
 ```
 
-不要写进 `bindings`，也不要提供 Cloudflare Images 账户 ID。
+Do not put it in `bindings`. Do not supply a Cloudflare Images account id.
 
 ```sh
 bun run oc types --config open-compute.json
@@ -25,7 +25,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (!request.body) return new Response("empty", { status: 400 });
     const info = await env.IMAGES.info(request.body);
-    // info.format 是 jpeg | png | webp
+    // info.format is jpeg | png | webp
     const out = await env.IMAGES
       .input(request.body)
       .transform({ width: 320, fit: "contain" })
@@ -35,12 +35,12 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-输入必须是请求体字节。不提供 `https://imagedelivery.net/...` URL transform，也不提供上传 / 签名。
+Input must be request-body bytes. URL transforms such as `https://imagedelivery.net/...` and upload / signing are not provided.
 
-## 3. 运行
+## 3. Run
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/images/concepts/)。
+The CLI is `oc`, not Wrangler. Next: [Concepts](/images/concepts/).

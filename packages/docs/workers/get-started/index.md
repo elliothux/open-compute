@@ -1,17 +1,17 @@
-# 快速开始
+# Get started
 
-使用 CLI 将模块 Worker 编译、校验并激活到已运行的本机 `ocd`。`oc run` 不会再启动一个 workerd。平台尚未启动时，先完成 [ocd 上手](/ocd/get-started)。
+Use the CLI to type-check, bundle, validate, and activate a module Worker on a running local `ocd`. `oc run` does not start another workerd. If the platform is not running, complete [ocd get started](/ocd/get-started) first.
 
 ```sh
 bun run oc run --config examples/hello-worker/open-compute.json \
   --ocd "$PWD/target/debug/ocd"
 ```
 
-默认平台 origin 为 `http://127.0.0.1:8787`。该命令执行 TypeScript 检查、Rolldown 打包、创建或复用同名 Worker、校验并 promote，然后打印可访问 URL。源码变更后再次执行同一命令即可更新；当前不提供 watch / HMR。远端部署使用 `oc deploy`，且只接受 HTTPS origin。
+The default platform origin is `http://127.0.0.1:8787`. The command type-checks, bundles with Rolldown, creates or reuses a Worker of the same name, validates and promotes, then prints a reachable URL. Re-run the same command after source changes. Watch / HMR is not provided. Remote deploys use `oc deploy` and accept HTTPS origins only.
 
 ## Hello Worker
 
-仓库路径为 `examples/hello-worker/`。`open-compute.json`：
+From `examples/hello-worker/`. `open-compute.json`:
 
 ```json
 {
@@ -23,7 +23,7 @@ bun run oc run --config examples/hello-worker/open-compute.json \
 }
 ```
 
-`src/index.ts`：
+`src/index.ts`:
 
 ```ts
 export default {
@@ -36,7 +36,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-同目录还包含 `package.json`（`@open-compute/workers-types`）、`tsconfig.json`，以及由 `bun run oc types` 生成的 `worker-configuration.d.ts`。离线产物：
+The same directory also has `package.json` (`@open-compute/workers-types`), `tsconfig.json`, and `worker-configuration.d.ts` from `bun run oc types`. Offline artifacts:
 
 ```sh
 bun run oc build --config examples/hello-worker/open-compute.json \
@@ -44,18 +44,18 @@ bun run oc build --config examples/hello-worker/open-compute.json \
 bun run oc types --config examples/hello-worker/open-compute.json
 ```
 
-`build` 的 `--out` 必须指向尚不存在的文件。`types` 不需要 `ocd`。管理令牌读取 `OPEN_COMPUTE_ADMIN_TOKEN`（或 `--token-env`）。
+`build --out` must be a file that does not already exist. `types` does not need `ocd`. The admin token is read from `OPEN_COMPUTE_ADMIN_TOKEN` (or `--token-env`).
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| 模块 Worker（`export default { fetch }`） | 是 | 是 |
-| handler 签名、`Response.json`、`env` 注入 | 是，见 [Workers CLI 上手](https://developers.cloudflare.com/workers/get-started/guide/) | 是 |
-| 类型包 | `@cloudflare/workers-types` | pinned `@open-compute/workers-types` |
-| CLI | Wrangler | `oc`（`bun run oc ...`） |
-| 项目文件 | wrangler.jsonc | `open-compute.json`（未知字段将被拒绝） |
-| C3 脚手架 / Cloudflare 登录 / workers.dev 预览 / 控制台 | 是 | 不提供 |
-| `--ocd` / `OPEN_COMPUTE_OCD` | 不适用 | 必须指向匹配版本的 `ocd`，用于编码 bundle；`run` 要求平台已在监听 |
+| Module Worker (`export default { fetch }`) | Yes | Yes |
+| Handler signatures, `Response.json`, `env` injection | Yes — [Workers CLI guide](https://developers.cloudflare.com/workers/get-started/guide/) | Yes |
+| Types package | `@cloudflare/workers-types` | Pinned `@open-compute/workers-types` |
+| CLI | Wrangler | `oc` (`bun run oc ...`) |
+| Project file | wrangler.jsonc | `open-compute.json` (unknown fields rejected) |
+| C3 scaffolder / Cloudflare login / workers.dev preview / dashboard | Yes | Not provided |
+| `--ocd` / `OPEN_COMPUTE_OCD` | N/A | Must point at a matching `ocd` to encode the bundle; `run` requires the platform to be listening |
 
-下一步：[概念](/workers/concepts/)、[配置](/workers/configuration/)。
+Next: [Concepts](/workers/concepts/), [Configuration](/workers/configuration/).

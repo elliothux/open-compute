@@ -1,20 +1,20 @@
 # Changelog
 
-以本机发行身份为准，不以本页文字为准。
+Trust the release identity on the node, not prose in this file.
 
 ```sh
 ocd capabilities --json
 ```
 
-读取 `release`：`platform_version`、`git_revision`、`workerd_version`、`workerd_lock_sha256`、schema 版本。仓库 git tag（若有）指向源码；**运行中的契约是 `capabilities.release`。**
+Read `release`: `platform_version`, `git_revision`, `workerd_version`, `workerd_lock_sha256`, schema versions. Repo git tags (if present) point at source; **the running contract is `capabilities.release`.**
 
-导航位置对应 [Cloudflare Workers changelog](https://developers.cloudflare.com/workers/platform/changelog/)。那是托管发布说明，不是这份二进制的。
+This slot matches [Cloudflare Workers changelog](https://developers.cloudflare.com/workers/platform/changelog/). That is hosted release notes, not this binary's.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| 手写日期列表 | 是 | 不提供 |
-| workerd / types pin 变更 | 托管发布 | 一次依赖升级，反映在 lock 的 `effective_compatibility_date` 与 `workerd_version` |
-| 当前 lock 日期 | 不适用 | `2026-08-30`；若 JSON 中的值不同，以 JSON 为准 |
+| Hand-written date list | Yes | Not provided |
+| workerd / types pin change | Hosted release | A dependency bump; shows up as `effective_compatibility_date` and `workerd_version` in the lock |
+| Current lock date | N/A | `2026-08-30`; if the JSON differs, trust the JSON |
 

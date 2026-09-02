@@ -1,18 +1,18 @@
-# 当前 release 恢复
+# Current-release restore
 
-触发信号：当前二进制损坏、主机恢复，或 schema/运行时身份校验失败。影响面是平台数据目录、当前 executable/runtime pin 和快照中的全部状态。项目没有跨历史开发版本的升级产品路径。
+Trigger: current binary is corrupt, host recovery, or schema/runtime identity checks fail. Blast radius is the platform data directory, the current executable/runtime pin, and all authority in the snapshot. There is no product upgrade path across historical development versions.
 
-只读诊断：核对二进制 capability 的完整 release 身份及当前配置，不修改已有数据库：
+Read-only diagnosis: compare the binary capability's full release identity with the current config; do not modify existing databases:
 
 ```sh
 /opt/open-compute/ocd capabilities --json
 /opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 ```
 
-允许的 mutation：经 operator 确认后停止 service，使用同一 release 的已验证二进制，按[全新主机恢复](/ocd/incidents/fresh-host)将经过认证的快照恢复到明确指定的新目录。恢复前必须满足 source release、配置策略、master key、S3 authority 和完整 schema 身份校验。不得直接覆盖、降级、自行修复或清空现有目录。发行构建、下载 runtime 和替换二进制仍需单独批准。
+Allowed mutation: after operator confirmation, stop the service, use a verified binary of the **same** release, and restore an authenticated snapshot into an explicitly new directory using [fresh-host restore](/ocd/incidents/fresh-host). Source release, config policy, master key, S3 authority, and full schema identity must match first. Do not overwrite, downgrade, self-repair, or empty the existing directory. Building a release, downloading a runtime, and replacing the binary still need separate approval.
 
-预期是当前 schema 被严格验证，恢复只发布完整的新目录并写入 `last-restore.json`。未知或不匹配 schema、checksum、release/pin、配置策略、快照签名或 key 是停止条件；不存在通过升级命令绕过检查的路径。
+Expect the current schema to be strictly verified. Restore publishes only a complete new directory and writes `last-restore.json`. Unknown or mismatched schema, checksum, release/pin, config policy, snapshot signature, or key are stop conditions. There is no upgrade command that bypasses these checks.
 
-回滚当前数据状态同样使用同一 release 的已验证快照和全新目录，并接受该快照的明确 RPO；恢复不会撤销快照之后的外部副作用。Worker 的部署 promote/rollback 是另一个仍然支持的产品操作，不等同于平台历史版本升级。
+Rolling back current data state likewise uses a verified snapshot of the same release into a brand-new directory, accepting that snapshot's RPO. Restore does not undo external side effects after the snapshot. Worker deployment promote/rollback is a separate supported product operation; it is not a platform history upgrade.
 
-验证包括只读 doctor、当前产品 smoke、重启写读及 snapshot inspect；没有实际执行的验证不得记为成功。
+Verification: read-only doctor, current product smoke, write/read after restart, and snapshot inspect. Do not record a verification that was not actually executed.

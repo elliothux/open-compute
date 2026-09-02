@@ -1,16 +1,16 @@
-# 行为差异
+# Behavior differences
 
-KV 的 Worker API 与 Cloudflare 对齐；存储拓扑不同。
+The KV Worker API matches Cloudflare. The storage topology does not.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| Worker API | [KV API](https://developers.cloudflare.com/kv/api/) | 相同：`put` / `get` / `getWithMetadata` / `list` / `delete`，text / json / arrayBuffer / stream、metadata、TTL、bulk get、list cursor |
-| 复制 | Cloudflare 边缘网络 | 运行 `ocd` 的主机上的单节点 SQLite |
-| `cacheTtl` | Colo cache | 接受该参数；无 colo cache |
-| Jurisdictions | 提供 | 不提供 |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker binding |
-| REST bulk write / delete | 提供 | 不提供 |
+| Worker API | [Cloudflare KV API](https://developers.cloudflare.com/kv/api/) | Same: `put` / `get` / `getWithMetadata` / `list` / `delete`, text / json / arrayBuffer / stream, metadata, TTL, bulk get, list cursor |
+| Replication | Global edge | Single-node SQLite on the node running ocd |
+| `cacheTtl` | Colo cache | Parameter accepted; no colo cache |
+| Jurisdictions | Available | Not provided |
+| REST / `client.v4` | Available | Not provided; use the Worker binding |
+| REST bulk write / delete | Available | Not provided |
 
-见[兼容性](/platform/compatibility)。
+See [Compatibility](/platform/compatibility).

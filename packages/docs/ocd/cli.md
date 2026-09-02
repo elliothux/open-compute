@@ -1,25 +1,25 @@
-# 常用命令
+# CLI reference
 
-以 `ocd --help` 和当前二进制为准。`--config` 是全局选项，必须是绝对路径；不从 cwd 或 `$HOME` 搜索。下面不编造未实现的 flag。
+Trust `ocd --help` and the current binary. `--config` is global and must be an absolute path; it is never searched from cwd or `$HOME`. Flags below are from the CLI source; none are invented.
 
-不需要配置即可运行：`--help`、`--version`、`docs`、`licenses`、`capabilities`、`config init`、`worker bundle`。其余子命令都要 `--config`。
+No config required: `--help`, `--version`, `docs`, `licenses`, `capabilities`, `config init`, `worker bundle`. Every other subcommand needs `--config`.
 
 ## `docs`
 
-列出或打印打进二进制的运维手册。仓库目录怎么改都不改变手册名。
+List or print an operator runbook embedded in the executable. Repository path changes do not rename these manuals.
 
 ```sh
 ocd docs
 ocd docs install-and-first-start
 ```
 
-手册名（无 `.md`）：`backup-and-retention`、`collect-support-bundle`、`disk-pressure`、`fresh-host-restore`、`install-and-first-start`、`master-key-loss-and-recovery`、`s3-outage`、`scheduler-recovery`、`sqlite-corruption`、`current-release-recovery`、`workerd-crash-loop`。
+Names (no `.md`): `backup-and-retention`, `collect-support-bundle`, `disk-pressure`, `fresh-host-restore`, `install-and-first-start`, `master-key-loss-and-recovery`, `s3-outage`, `scheduler-recovery`, `sqlite-corruption`, `current-release-recovery`, `workerd-crash-loop`.
 
-站点页面是给运维读的正文；`ocd docs` 输出的是内嵌 runbook。两者命令应一致。若 runbook 示例写成 `platform.toml`，仍用你的绝对 `--config` 路径。
+Site pages are the operator-facing prose; `ocd docs` prints the embedded runbooks. Commands should match. If a runbook example uses `platform.toml`, still pass your absolute `--config` path.
 
 ## `licenses`
 
-打印打进本可执行文件的许可证（Open Compute 与内嵌 Cloudflare workerd）。
+Print licenses included in this executable (Open Compute and embedded Cloudflare workerd).
 
 ```sh
 ocd licenses
@@ -27,7 +27,7 @@ ocd licenses
 
 ## `capabilities`
 
-打印版本化的产品与发行契约。`--json` 输出 `schema_version`、`release`、`runtime`、`products`、`limits`。读法见[兼容性](/platform/compatibility)。
+Print the versioned product and release contract. `--json` emits `schema_version`, `release`, `runtime`, `products`, `limits`. How to read it: [Compatibility](/platform/compatibility).
 
 ```sh
 ocd capabilities --json
@@ -42,11 +42,11 @@ ocd --config /etc/open-compute/config.toml config check
 ocd --config /etc/open-compute/config.toml config check --json
 ```
 
-`init`：`--data-dir` 绝对路径；完整 starter TOML 写到 stdout；不建文件、不写密钥。JSON check 成功形如 `{"schema_version":1,"command":"config_check","result":"ok"}`，人读输出是 `CONFIG_OK`。
+`init`: `--data-dir` is absolute; a complete starter TOML goes to stdout; no files or secrets are created. A successful JSON check looks like `{"schema_version":1,"command":"config_check","result":"ok"}`; human output is `CONFIG_OK`.
 
 ## `run`
 
-启动平台进程。首次运行在拿到锁之后生成身份、数据库和 master key，并物化内嵌 runtime。
+Start the platform process. First run generates identity, databases, and the master key after taking the lock, then materializes the embedded runtime.
 
 ```sh
 ocd --config /etc/open-compute/config.toml run
@@ -54,7 +54,7 @@ ocd --config /etc/open-compute/config.toml run
 
 ## `doctor`
 
-默认只读。`--full` 授权 S3 canary 和临时 workerd 编译/启动/停止。`--json` 输出版本化报告。详见 [健康检查](/ocd/health)。
+Default is read-only. `--full` authorizes an S3 canary and a temporary workerd compile/start/stop. `--json` emits a versioned report. See [Health checks](/ocd/health).
 
 ```sh
 ocd --config /etc/open-compute/config.toml doctor --json
@@ -63,29 +63,29 @@ ocd --config /etc/open-compute/config.toml doctor --full --json
 
 ## `backup`
 
-离线整机快照。子命令：
+Offline full-platform snapshots.
 
-| 命令 | 作用 |
+| Command | Role |
 | --- | --- |
-| `backup create --name <label>` | 创建并完整校验一份 committed snapshot |
-| `backup list` | 列出本平台已认证的 committed snapshot |
-| `backup inspect --snapshot <uuid> [--verify]` | 检查一份；`--verify` 校验每个对象 |
-| `backup delete --snapshot <uuid>` | 删除这一份的自有对象；manifest 最后删 |
-| `backup retention-plan --keep-last <n> [--max-age-seconds] [--keep-label]` | 只出计划，不删 |
-| `backup cleanup-incomplete` | 清超过 grace 的不完整上传 |
-| `backup restore --snapshot <uuid>` | 恢复到**空的**新 data-dir |
-| `backup cleanup-restore --staging <uuid>` | 按失败 receipt 精确清 staging |
-| `backup attest-restore-smoke --snapshot <uuid> --passed` | 记录产品 smoke 已通过；不能替代实际执行过的 smoke |
+| `backup create --name <label>` | Create and fully verify a committed snapshot |
+| `backup list` | List authenticated committed snapshots for this platform |
+| `backup inspect --snapshot <uuid> [--verify]` | Inspect one; `--verify` hashes every object |
+| `backup delete --snapshot <uuid>` | Delete that snapshot's owned objects; manifest last |
+| `backup retention-plan --keep-last <n> [--max-age-seconds] [--keep-label]` | Plan only; no deletes |
+| `backup cleanup-incomplete` | Remove incomplete uploads older than grace |
+| `backup restore --snapshot <uuid>` | Restore into an **empty** new data-dir |
+| `backup cleanup-restore --staging <uuid>` | Exact staging cleanup from a failure receipt |
+| `backup attest-restore-smoke --snapshot <uuid> --passed` | Record that product smoke passed; does not replace actually running smoke |
 
-均需 `--config`；均可 `--json`。流程见 [备份与保留](/ocd/backup) 和 [故障手册](/ocd/incidents/)。
+All require `--config`; all accept `--json`. Procedures: [Backup and retention](/ocd/backup) and the [incident handbook](/ocd/incidents/).
 
-## 事故时才会用到的命令
+## Commands used during incidents
 
 ```sh
 ocd --config /etc/open-compute/config.toml support-bundle --output /var/tmp/open-compute-support-20260826.tar --json
 ocd --config /etc/open-compute/config.toml scheduler recover-corrupt --backup-name scheduler-corrupt-20260826
 ```
 
-`support-bundle`：`--output` 必须是绝对路径、目标不存在、不是符号链接。`scheduler recover-corrupt` 仅用于 control 可验证且不含 Queue/Cron/Workflow 状态的 alarm-only 目录。完整停止条件见 [故障手册](/ocd/incidents/)。
+`support-bundle`: `--output` must be an absolute path that does not exist and is not a symlink. `scheduler recover-corrupt` is only for an alarm-only directory whose control plane is verifiable and that has no Queue/Cron/Workflow authority. Full stop conditions: [incident handbook](/ocd/incidents/).
 
-`ocd worker bundle` 是离线开发者工具，从 stdin 读版本化 build JSON、向 stdout 写 bundle。运维装机用不到。Worker 编程面见[开始](/get-started)与[兼容性](/platform/compatibility)。
+`ocd worker bundle` is an offline developer tool: versioned build JSON on stdin, canonical bundle on stdout. It is not part of installing the daemon. Worker programming: [Get started](/get-started) and [Compatibility](/platform/compatibility).

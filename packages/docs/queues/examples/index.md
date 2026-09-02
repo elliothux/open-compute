@@ -1,6 +1,6 @@
-# 示例
+# Examples
 
-Producer 用 `queue_producer` binding 的 `send`；consumer 是同一 Worker 上的 `queue` handler。把平台返回的 `queue.id` 填进 binding，然后 `oc types` / `oc run`。
+The producer uses `send` on a `queue_producer` binding; the consumer is the `queue` handler on the same Worker. Put the platform `queue.id` in the binding, then `oc types` / `oc run`.
 
 ```ts
 export default {
@@ -28,4 +28,4 @@ export default {
 }
 ```
 
-`send` / `sendBatch`、`contentType`、`delaySeconds`、`ack` / `retry` 与 [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) 对齐。耐久性来自本机 `scheduler.sqlite`。消息可能被处理多次。不提供全局先进先出 或 exactly-once。创建 Queue 见[上手](/queues/get-started/)。
+`send` / `sendBatch`, `contentType`, `delaySeconds`, `ack` / `retry` match the [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/). Durability is local `scheduler.sqlite`. Delivery is at-least-once. Global FIFO and exactly-once are not provided. Create the queue: [Get started](/queues/get-started/).

@@ -1,24 +1,24 @@
-# 概念
+# Concepts
 
-所有 Durable Object 运行在本机单个 workerd 进程中。`idFromName` / `newUniqueId` 仍然生成稳定 ID。`get(id, { locationHint: "wnam" })` 会接受合法 hint，但不会把对象调度到另一个地区——不提供第二个 colo。
+Every Durable Object runs in the one local workerd. `idFromName` / `newUniqueId` still mint stable IDs. `get(id, { locationHint: "wnam" })` accepts a legal hint but does not schedule the object into another region — a second colo is not provided.
 
-`jurisdiction("eu")` 同样只编码进 ID，没有地理隔离效果。
+`jurisdiction("eu")` is likewise encoded into the ID with no geographic isolation effect.
 
-每个对象有自己的 storage（KV + SQL）。SQL 看不到平台内部 alarm 表。
+Each object has its own storage (KV + SQL). SQL cannot see the platform-internal alarm table.
 
 ## Alarms
 
-见 [Alarms](/durable-objects/alarms)。`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` 处理函数均支持。调度仍在本机。
+See [Alarms](/durable-objects/alarms). `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler are supported. Scheduling still happens on this node.
 
 ## WebSocket hibernation
 
-`state.acceptWebSocket`、`webSocketMessage` / `webSocketClose` / `webSocketError`、tags、attachment serialize/deserialize 均支持。运行时细节见 [WebSockets](/workers/runtime-apis/websockets)。对象仍位于本机单个 workerd 进程，不提供跨边缘休眠迁移。
+`state.acceptWebSocket`, `webSocketMessage` / `webSocketClose` / `webSocketError`, tags, and attachment serialize/deserialize are supported. Runtime details: [WebSockets](/workers/runtime-apis/websockets). The object still lives on this one workerd. Cross-edge hibernation migration is not provided.
 
-[Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) 的 namespace / stub / storage / RPC / hibernation / alarms 与 Cloudflare 对齐。
+The [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) for namespace / stub / storage / RPC / hibernation / alarms matches Cloudflare.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace / stub / storage / RPC / hibernation / alarms |
-| 放置 | 地理调度 | 本机单个 workerd 进程；`locationHint` 与 jurisdiction 不改变放置 |
+| API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | Same: namespace / stub / storage / RPC / hibernation / alarms |
+| Placement | Geographic scheduling | One local workerd; location hints and jurisdiction do not change placement |

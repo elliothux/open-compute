@@ -1,21 +1,21 @@
-# 概念
+# Concepts
 
-引擎在 `ocd` 进程里做有限制的图片处理。session 有 TTL 和并发上限。输出不会自动进 Workers Cache；要缓存就显式用 Cache API。
+The engine runs bounded raster transforms inside the `ocd` process. Sessions have a TTL and a concurrency cap. Output is not automatically stored in Workers Cache; cache it explicitly with the Cache API if you need that.
 
-支持输入 jpeg / png / webp（`info`）。输出 jpeg / png / webp / avif。`max_frames = 1`：没有动画。
+Input formats for `info` are jpeg / png / webp. Output is jpeg / png / webp / avif. `max_frames = 1`: no animation.
 
-不提供：
+Not provided:
 
-- 上传、签名 URL、Image Delivery
-- `https://.../cdn-cgi/image/` URL transform
-- 视频
+- upload, signed URLs, Image Delivery
+- `https://.../cdn-cgi/image/` URL transforms
+- video
 - AI upscale
-- Cloudflare 产品配额 / 计费
+- Cloudflare product quotas / billing
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| Binding API | Images binding 链 | 相同链：`input` / `transform` / `draw` / `output` / `response()` / `info()` |
-| 产品 | 托管 Cloudflare Images | 本机图片处理绑定 |
-| 上传 / 签名 / URL transform / 视频 / AI upscale | 提供 | 不提供 |
+| Binding API | Images binding chain | Same chain: `input` / `transform` / `draw` / `output` / `response()` / `info()` |
+| Product | Hosted Cloudflare Images | Bounded local raster binding |
+| Upload / signing / URL transform / video / AI upscale | Available | Not provided |

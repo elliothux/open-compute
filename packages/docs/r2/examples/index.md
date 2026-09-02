@@ -1,6 +1,6 @@
-# 示例
+# Examples
 
-用 Worker binding 读写对象。对象字节落在配置的 S3-compatible provider。
+Read and write objects through the Worker binding. Object bytes live on the configured S3-compatible provider.
 
 ```ts
 export default {
@@ -24,4 +24,4 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-配置见[上手](/r2/get-started/)。
+Config: [Get started](/r2/get-started/).

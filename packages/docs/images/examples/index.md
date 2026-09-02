@@ -1,6 +1,6 @@
-# 示例
+# Examples
 
-把原始字节 POST 到 Worker，走 `input` → `transform` → `output`。不构造 `imagedelivery.net` 或 `/cdn-cgi/image/` URL。
+POST raw bytes to the Worker and run `input` → `transform` → `output`. Do not construct an `imagedelivery.net` or `/cdn-cgi/image/` URL.
 
 ```ts
 export default {
@@ -23,4 +23,4 @@ export default {
 }
 ```
 
-链是 `input` / `transform` / `draw` / `output` / `response()` / `info()`。完整选项见[指南](/images/guides/)。这是本机图像变换（有大小限制） binding，不是托管 Cloudflare Images。配置见[上手](/images/get-started/)。
+The chain is `input` / `transform` / `draw` / `output` / `response()` / `info()`. Options: [Guides](/images/guides/). This is a bounded local raster transform binding, not hosted Cloudflare Images. Setup: [Get started](/images/get-started/).

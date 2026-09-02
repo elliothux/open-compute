@@ -1,6 +1,6 @@
-# 指南
+# Guides
 
-## 声明
+## Declare
 
 ```json
 "images": { "binding": "IMAGES" }
@@ -17,6 +17,6 @@ const result = await env.IMAGES
 return result.response({ headers: { "cache-control": "public, max-age=3600" } });
 ```
 
-`fit`：`scale-down` | `contain` | `cover` | `crop` | `pad`。未知选项抛 `IMAGE_OPTION_UNSUPPORTED`。`anim` 只能是省略或 `false`。
+`fit`: `scale-down` | `contain` | `cover` | `crop` | `pad`. Unknown options throw `IMAGE_OPTION_UNSUPPORTED`. `anim` is omit or `false`.
 
-不提供 Cloudflare Images 的 upload API 或 signing。
+The Cloudflare Images upload API and signing are not provided.

@@ -1,56 +1,56 @@
-# 安装与首次启动
+# Install and first start
 
-触发信号：新主机尚未生成平台身份，或 readiness 从未成功。影响面是整台单节点平台。
+Trigger: a new host has not generated platform identity, or readiness has never succeeded. Blast radius is the entire single-node platform.
 
-## 装这一个文件
+## Install this one file
 
-只安装匹配 OS/CPU 的一个 `ocd` 文件到 `/opt/open-compute/ocd`，校验发行方提供的 SHA-256。没有相邻 workerd、runtime 或 share 目录要求。运行时不会安装或下载任何工具，也不要在旁边再放一份 workerd。
+Install only the OS/CPU-matching `ocd` file at `/opt/open-compute/ocd` and verify the publisher SHA-256. There is no adjacent workerd, runtime, or share directory requirement. Runtime does not install or download any tools, and you must not place a separate workerd next to the binary.
 
-发行物是单文件，但首次运行会在 data-dir 里解压并校验内嵌 runtime（`data/runtime/packages/<payload-sha256>/`）。这不是「磁盘上永远只有这一个文件」。data-dir 与（macOS 上）staging 所在文件系统必须允许执行。Linux 官方 workerd 需要 glibc 2.35+；容器示例用 Ubuntu 24.04，不用 scratch/Alpine。
+The artifact is a single file, but the first run extracts and verifies the embedded runtime under the data-dir (`data/runtime/packages/<payload-sha256>/`). That is not "the disk will ever contain only this file". The filesystems that hold the data-dir and (on macOS) staging must be executable. Official Linux workerd needs glibc 2.35+; the container example uses Ubuntu 24.04, not scratch/Alpine.
 
-## 配置与账户
+## Config and accounts
 
-只读诊断与准备：`ocd config init` 向 stdout 输出模板，不初始化文件或密钥：
+Read-only prep: `ocd config init` writes a template to stdout and does not initialize files or secrets:
 
 ```sh
 /opt/open-compute/ocd config init --data-dir /var/lib/open-compute > /etc/open-compute/config.toml
 ```
 
-把它保存为**新的** `/etc/open-compute/config.toml`（不要覆盖已有文件），设置 S3 endpoint、bucket 和 env/file 凭据引用。配置、凭据与数据目录由专用服务账户拥有。
+Save it as a **new** `/etc/open-compute/config.toml` (do not overwrite an existing file). Set the S3 endpoint, bucket, and env/file credential references. Config, credentials, and the data directory are owned by a dedicated service account.
 
-本站点与 README、安装手册、systemd/container 示例统一使用 `/etc/open-compute/config.toml`。`--config` 必须是绝对路径，不从 cwd 或 `$HOME` 搜索。部分内嵌 runbook 仍把示例写成 `/etc/open-compute/platform.toml`；那只是文件名示例，不是另一套配置格式。macOS launchd 示例用 `/usr/local/etc/open-compute/config.toml` 和 `/usr/local/var/open-compute`。
+This site, the README, the install runbook, and the systemd/container examples use `/etc/open-compute/config.toml`. `--config` must be an absolute path; it is never searched from cwd or `$HOME`. Some embedded runbooks still show `/etc/open-compute/platform.toml` as an example filename; that is not a second config format. The macOS launchd example uses `/usr/local/etc/open-compute/config.toml` and `/usr/local/var/open-compute`.
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml config check --json
 /opt/open-compute/ocd capabilities --json
 ```
 
-`--help`、`--version`、`capabilities`、`docs`、`licenses`、`config init/check` 都不物化 runtime。
+`--help`, `--version`, `capabilities`, `docs`, `licenses`, and `config init/check` do not materialize the runtime.
 
-## 第一次 `run`
+## First `run`
 
-允许的 mutation：预置专用账户和可写 data-dir，配置 S3 authority 后运行：
+Allowed mutation: provision the dedicated account and a writable data-dir, configure S3 authority, then:
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml run
 ```
 
-首次启动取得数据目录排他锁后生成平台身份、数据库和 master key，离线解压并验证内嵌 runtime，随后检查 S3、编译系统配置并启动 workerd。预期 `/health/live` 和 `/health/ready` 均成功。
+After taking the exclusive data-dir lock, first start generates platform identity, databases, and the master key, extracts and verifies the embedded runtime offline, then checks S3, compiles the system config, and starts workerd. Expect both `/health/live` and `/health/ready` to succeed.
 
-不要在同一 data-dir 上起第二个 `ocd`（`DATA_DIR_IN_USE`）。
+Do not start a second `ocd` on the same data-dir (`DATA_DIR_IN_USE`).
 
-## `doctor --full` 的时机
+## When `doctor --full` is allowed
 
-普通 `doctor` 不初始化目录。需要已有数据和身份的完整诊断，应在**首次成功运行并正常停机之后**执行：它持有数据目录排他锁，并做 S3 canary / 临时 runtime。
+Plain `doctor` does not initialize the directory. Full diagnostics that need existing data and identity run only after the **first successful run and a clean shutdown**: they take the exclusive data-dir lock and perform an S3 canary / temporary runtime.
 
 ```sh
 /opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --full --json
 ```
 
-不要在首次初始化前要求 `doctor --full` 成功。
+Do not require `doctor --full` to succeed before first initialization.
 
-## 停止条件与回滚
+## Stop conditions and rollback
 
-停止条件：master key、S3 authority、runtime digest、权限或空间检查失败。不要反复生成 key，也不要以外部 workerd 或重新下载绕过错误。回滚为停止进程并保留 config、key 和 data-dir。
+Stop conditions: master key, S3 authority, runtime digest, permission, or free-space checks fail. Do not regenerate keys in a loop, and do not bypass errors with an external workerd or a re-download. Rollback is: stop the process and keep config, key, and data-dir.
 
-验证包括一次 smoke Worker 请求、重启后读取，以及停机后的完整 doctor。
+Verification: one smoke Worker request, a read after restart, and a full doctor after shutdown.

@@ -1,18 +1,18 @@
-# 概念
+# Concepts
 
-Workflow definition 是 catalog 资源。实例与 step 状态存储在本机 SQLite。`run` 重放时，已提交的 `step.do` 不再执行 callback；未提交的 callback 在提交前可能重复执行。
+A Workflow definition is a catalog resource. Instance and step state live in local SQLite. When `run` is replayed, `step.do` callbacks that already committed are skipped; uncommitted callbacks may run again (at-least-once until commit).
 
-对 KV / R2 / 外部 HTTP 的副作用**不会**随 Workflow snapshot 回滚。外部写入应做成幂等。
+Side effects on KV / R2 / external HTTP do **not** roll back with a Workflow snapshot. Make external writes idempotent.
 
-不提供跨区域 placement，也不提供 Cloudflare dashboard 中的 Workflow 可观测性。
+Cross-region placement and Workflow observability in a Cloudflare dashboard are not provided.
 
-[Workflows](https://developers.cloudflare.com/workflows/) 的 class / `step.do` / instance handle 与 Cloudflare 对齐。有界并行 `step.do`（默认最多 4 路）是实现行为。
+[Workflows](https://developers.cloudflare.com/workflows/) class / `step.do` / instance handle match Cloudflare. Bounded parallel `step.do` (default at most 4) is implemented behavior.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| API | [Workflows](https://developers.cloudflare.com/workflows/) | 相同：class / `step.do` / instance handle |
-| 执行 | 跨地域 | 本机 SQLite |
-| Callback | — | 提交前可能重复执行；已完成的 callback 在 replay 时跳过 |
-| 外部副作用 | — | 不随 snapshot 回滚 |
+| API | [Workflows](https://developers.cloudflare.com/workflows/) | Same: class / `step.do` / instance handle |
+| Execution | Cross-region | Local SQLite on the node running ocd |
+| Callbacks | — | At-least-once until commit; completed callbacks skip on replay |
+| External side effects | — | Do not roll back with the snapshot |

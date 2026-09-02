@@ -1,17 +1,17 @@
-# 行为差异
+# Behavior differences
 
-Queues 的 JavaScript API 与 Cloudflare 对齐；耐久性来自本机 `scheduler.sqlite`。
+The Queues JavaScript API matches Cloudflare. Durability comes from `scheduler.sqlite` on this node.
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | 相同：`send` / `sendBatch`、`contentType`（json / text / bytes / v8）、`delaySeconds`、`metrics`、consumer `MessageBatch` / `ack` / `retry` |
-| 耐久性 | 全球复制 | 本机 `scheduler.sqlite` |
-| 投递 | at-least-once | at-least-once |
-| 全局先进先出 | 提供 | 不提供 |
-| 无法识别的 native dispatch | — | 可能保留该消息的 lease；后续投递可能使用同一 attempt 编号 |
-| Pull consumer | 提供 | 不提供 |
-| Binding | wrangler `queues` | producer `{ type, id, permissions? }`；consumer 为 Worker `queue` handler |
+| JavaScript API | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: `send` / `sendBatch`, `contentType` (json / text / bytes / v8), `delaySeconds`, `metrics`, consumer `MessageBatch` / `ack` / `retry` |
+| Durability | Global replication | Local `scheduler.sqlite` on the node running ocd |
+| Delivery | At-least-once | At-least-once |
+| Global FIFO | Available | Not provided |
+| Unknown native dispatch | — | May retain the lease; duplicate attempt numbers possible |
+| Pull consumer | Available | Not provided |
+| Binding | wrangler `queues` | Producer `{ type, id, permissions? }`; consumer is the Worker `queue` handler |
 
-见[兼容性](/platform/compatibility)。
+See [Compatibility](/platform/compatibility).

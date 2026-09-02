@@ -1,34 +1,34 @@
-# 运维概述
+# Operator overview
 
-`ocd` 是 open-compute 的平台进程：在单节点上监督锁定版本的 `workerd`，对外提供控制面和数据面。
+`ocd` is the open-compute platform process: it supervises a pinned `workerd` on a single node and exposes the control plane and the data plane.
 
-## 发行物
+## Artifact
 
-发行物是一个匹配 OS/CPU 的 `ocd` 文件。workerd、系统 Worker、默认配置和运维手册都内嵌其中。运行时不会下载 runtime，也不要在二进制旁另行放置 workerd。
+The issued artifact is one file: an `ocd` matching the OS/CPU. workerd, system Workers, the default config, and the operator runbooks are embedded. The running process will not download a runtime, and you must not place a separate workerd next to it.
 
-一个 `ocd` 对应一个 data-dir 和一个 workerd 子进程。不要在同一 data-dir 上启动第二个 `ocd`。
+One `ocd` owns one data-dir and one workerd child. Do not start a second `ocd` on the same data-dir.
 
-## 前置条件
+## What you still provide
 
-- 一份绝对路径的配置文件
-- 一块本机可写的 data-dir（SQLite、身份、master key、运行时解压均在其中）
-- 一个 S3 兼容存储，用来放 R2、Worker bundle、Static Assets 和大对象
+- An absolute-path configuration file
+- A locally writable data-dir (SQLite, identity, master key, and runtime extraction live here)
+- An S3-compatible store for R2, Worker bundles, Static Assets, and large objects
 
-密钥只走配置里的 `env:` / `file:` 引用，不要写进 unit、镜像或仓库。
+Secrets travel only as `env:` / `file:` references in config. Do not put them in units, images, or the repository.
 
-## 注意
+## Do not assume
 
-- 单文件发行物在首次运行时会在 data-dir 里解压并校验内嵌 runtime。
-- 备份覆盖本机 SQLite 数据；R2 仍绑定你配置的 bucket，不是对象存储的时间点恢复。
-- `/health/live` 只表示进程存活。`/health/ready` 是准入；不要因 readiness 失败而重启。
-- 租户只能使用部署里声明的 binding，不能访问 SQLite 路径、S3 凭据或其他租户的资源。
+- A single-file artifact still extracts and verifies the embedded runtime inside the data-dir on first run.
+- Backups cover local SQLite authority. R2 stays bound to the bucket you configured; it is not object-store point-in-time recovery.
+- `/health/live` only means the process is alive. `/health/ready` is admission; do not restart from a readiness failure.
+- Tenants can only touch bindings declared in the deployment. They do not get SQLite paths, S3 credentials, or anyone else's resources.
 
-## 本节
+## In this section
 
-- [安装与首次启动](/ocd/get-started)
-- [配置](/ocd/configuration)
-- [部署](/ocd/deploy)
-- [健康检查](/ocd/health)
-- [备份与保留](/ocd/backup)
-- [常用命令](/ocd/cli)
-- [故障手册](/ocd/incidents/)
+- [Install and first start](/ocd/get-started)
+- [Configuration](/ocd/configuration)
+- [Deploy](/ocd/deploy)
+- [Health checks](/ocd/health)
+- [Backup and retention](/ocd/backup)
+- [CLI reference](/ocd/cli)
+- [Incident handbook](/ocd/incidents/)

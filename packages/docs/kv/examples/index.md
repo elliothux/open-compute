@@ -1,6 +1,6 @@
-# 示例
+# Examples
 
-## 读写 JSON
+## Read/write JSON
 
 ```ts
 export default {
@@ -27,4 +27,4 @@ for (const key of page.keys) {
 }
 ```
 
-配置见[上手](/kv/get-started/)。不提供 Cloudflare geolocation 或全球 purge。
+Config: [Get started](/kv/get-started/). Cloudflare geolocation and global purge are not provided.

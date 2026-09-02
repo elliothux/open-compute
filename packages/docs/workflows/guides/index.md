@@ -1,12 +1,12 @@
-# 指南
+# Guides
 
-创建 definition，在 `open-compute.json` 中绑定 `className`，再用 `oc` 创建实例。已提交的 step 在 replay 时跳过。
+Create a definition, bind `className` in `open-compute.json`, then create instances with `oc`. Committed steps are skipped on replay.
 
-## 创建并绑定
+## Create and bind
 
-见[上手](/workflows/get-started/)。binding 必须有 `className`。可选 `schedules`。
+See [Get started](/workflows/get-started/). The binding must include `className`. `schedules` is optional.
 
-## 创建实例
+## Create an instance
 
 ```ts
 const instance = await env.FLOW.create({ params: { hello: "world" } });
@@ -14,7 +14,7 @@ const same = await env.FLOW.get(instance.id);
 await same.status();
 ```
 
-`createBatch` / `deleteBatch` 每批 1–100 条。
+`createBatch` / `deleteBatch` are 1–100 per call.
 
 ## step.do
 
@@ -23,4 +23,4 @@ await step.do("charge", async () => chargeCustomer());
 await step.sleep("wait", "1 minute");
 ```
 
-已提交的 step 在 replay 时跳过。未提交的 callback 可能重复，直到结果写入 SQLite。外部副作用不随 snapshot 回滚。
+Committed steps are skipped on replay. Uncommitted callbacks may repeat until the result is written to SQLite. External side effects do not roll back with the snapshot.

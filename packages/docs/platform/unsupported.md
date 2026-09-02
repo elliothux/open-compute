@@ -1,8 +1,8 @@
-# 不支持
+# Unsupported
 
-open-compute 不提供下列 Cloudflare 产品。部署时会在边界拒绝它们。不要仅因 upstream types 中存在同名符号，就将其视为已注入的 binding。
+open-compute does not provide the following Cloudflare products. The deployment authority rejects them at the boundary. Do not treat a name in upstream types as an injected binding.
 
-| 名称 | Cloudflare 产品 |
+| Name | Cloudflare product |
 | --- | --- |
 | `analytics_engine` | Analytics Engine |
 | `ai` | Workers AI |
@@ -13,4 +13,4 @@ open-compute 不提供下列 Cloudflare 产品。部署时会在边界拒绝它�
 | `rate_limiting` | Rate Limiting |
 | `workers_for_platforms` | Workers for Platforms |
 
-已提供的产品见[产品目录](/directory)和[兼容性](/platform/compatibility)。
+The provided surface is the [Directory](/directory) and [Compatibility](/platform/compatibility).

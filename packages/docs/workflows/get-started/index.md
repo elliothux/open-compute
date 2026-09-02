@@ -1,10 +1,10 @@
-# 上手
+# Get started
 
-创建 definition，绑定 class，再用 `oc` 运行。`ocd` 必须就绪。
+Create a definition, bind the class, then `oc run`. `ocd` must be ready.
 
-## 1. 创建 definition
+## 1. Create a definition
 
-以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
+The following is the platform control plane. Cloudflare REST and `client.v4` are not provided.
 
 ```sh
 ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
@@ -14,9 +14,9 @@ curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/workflows" \
   -d '{"name":"orders"}'
 ```
 
-响应含 definition 的 `id`。把它填进 binding。
+The response includes the definition `id`. Put it in the binding.
 
-## 2. 绑定
+## 2. Bind
 
 ```json
 {
@@ -28,7 +28,7 @@ curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/workflows" \
 }
 ```
 
-`className` 必须有。
+`className` is required.
 
 ```sh
 bun run oc types --config open-compute.json
@@ -51,10 +51,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 4. 运行
+## 4. Run
 
 ```sh
 bun run oc run --config open-compute.json --ocd <path-to-ocd>
 ```
 
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/workflows/concepts/)。
+The CLI is `oc`, not Wrangler. Next: [Concepts](/workflows/concepts/).

@@ -1,6 +1,6 @@
 # Cache API
 
-`caches.default`、`caches.open()`、`put` / `match` / `delete`。`caches.default` 与该 Worker 的默认 HTTP response cache 共享逻辑存储。
+`caches.default`, `caches.open()`, `put` / `match` / `delete`. `caches.default` shares logical storage with that Worker's default HTTP response cache.
 
 ```ts
 export default {
@@ -16,15 +16,15 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-部署侧 `cache.enabled` 见 [Workers Cache](/workers/cache/)。
+Deployment-side `cache.enabled`: [Workers Cache](/workers/cache/).
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| `caches.default` / `caches.open` / `put` / `match` / `delete` | 是，见 [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | 是 |
-| 条件请求、Vary、Range | 是 | 按 pinned workerd 与本机 cache |
-| 缓存范围 | 全球 / colo CDN | 单节点 |
-| 自动缓存 TTL | 可含启发式 TTL | 需要显式 `s-maxage` 或 `max-age`；无启发式 TTL |
-| 全球 purge / Cache Tags | 是 | 不提供 |
+| `caches.default` / `caches.open` / `put` / `match` / `delete` | Yes — [Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/) | Yes |
+| Conditional requests, Vary, Range | Yes | Pinned workerd plus the local cache authority |
+| Cache scope | Global / colo CDN | Single-node |
+| Automatic cache TTL | May include heuristic TTL | Requires explicit `s-maxage` or `max-age`; no heuristic TTL |
+| Global purge / Cache Tags | Yes | Not provided |
 

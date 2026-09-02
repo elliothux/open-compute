@@ -1,6 +1,6 @@
 # Runtime APIs
 
-Worker 在本机 workerd isolate 中运行与 Cloudflare Workers 对齐的 runtime 表面。完整成员以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。
+Workers run the Cloudflare-aligned runtime surface in a workerd isolate on this node. For identical APIs, use [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/).
 
 ```ts
 export default {
@@ -10,27 +10,27 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-## 表面
+## Surfaces
 
-| 表面 | Cloudflare | open-compute |
+| Surface | Cloudflare | open-compute |
 | --- | --- | --- |
-| Handlers（`fetch`、`scheduled`、`queue`） | [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | [handlers](/workers/runtime-apis/handlers) |
+| Handlers (`fetch`, `scheduled`, `queue`) | [Handlers](https://developers.cloudflare.com/workers/runtime-apis/handlers/) | [handlers](/workers/runtime-apis/handlers) |
 | Bindings / `env` | [Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/) | [bindings](/workers/runtime-apis/bindings) |
 | Cache API | [Cache](https://developers.cloudflare.com/workers/runtime-apis/cache/) | [cache](/workers/runtime-apis/cache) |
-| WebSockets | [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/) | [websockets](/workers/runtime-apis/websockets)；hibernation 可用 |
+| WebSockets | [WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/) | [websockets](/workers/runtime-apis/websockets); hibernation available |
 | TCP sockets | [TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/) | [tcp-sockets](/workers/runtime-apis/tcp-sockets) |
 | Node.js | [Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) | [nodejs](/workers/runtime-apis/nodejs) |
-| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | [Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) | 对齐；本站不复述 |
-| Durable Objects / Alarms | [Durable Objects](https://developers.cloudflare.com/durable-objects/api/) | 见 Durable Objects 产品页 |
-| KV / R2 / D1 / Queues / Workflows | 各产品文档 | 本站对应产品页 |
+| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | [Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) | Aligned; not restated here |
+| Durable Objects / Alarms | [Durable Objects](https://developers.cloudflare.com/durable-objects/api/) | Durable Objects product pages |
+| KV / R2 / D1 / Queues / Workflows | Each product's docs | Matching product pages on this site |
 
-## 兼容性
+## Compatibility
 
-| 主题 | Cloudflare | open-compute |
+| Topic | Cloudflare | open-compute |
 | --- | --- | --- |
-| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | 是 | 是 |
-| Alarms、Version Metadata、WebSocket hibernation | 是 | 是 |
-| Workers AI / Vectorize 等非本平台产品 | 是 | 不提供 |
-| 出站 TCP / `fetch` 网络策略 | Cloudflare 托管策略 | 见 [TCP sockets](/workers/runtime-apis/tcp-sockets) |
-| 请求级 CPU / subrequest 配额 | 是 | 见 [限制](/workers/platform/limits) |
+| `fetch` / Request / Response / Streams / HTMLRewriter / Web Crypto / RPC | Yes | Yes |
+| Alarms, Version Metadata, WebSocket hibernation | Yes | Yes |
+| Workers AI / Vectorize and other non-platform products | Yes | Not provided |
+| Outbound TCP / `fetch` network policy | Cloudflare hosted policy | See [TCP sockets](/workers/runtime-apis/tcp-sockets) |
+| Request-scoped CPU / subrequest quotas | Yes | See [Limits](/workers/platform/limits) |
 
