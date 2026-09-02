@@ -23,19 +23,20 @@ export default {
 } satisfies ExportedHandler<{ QUEUE: Queue }>;
 ```
 
-Bind a producer in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
+Bind a producer with Wrangler's standard Queues field:
 
 ```json
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "bindings": {
-    "QUEUE": { "type": "queue_producer", "id": "<queue-id>" }
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
+    "consumers": [{ "queue": "jobs", "max_batch_size": 10 }]
   }
 }
 ```
 
-A consumer is the Worker's `queue` handler. `open-compute.json` does not use Wrangler `[[queues.consumers]]`. Binding grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
+A consumer targets the Worker's `queue` handler through `queues.consumers`. Binding grammar: [bindings](/workers/configuration/bindings). Pinned Wrangler owns queue provisioning and consumer configuration.
 
 ## Compatibility
 
@@ -47,7 +48,7 @@ A consumer is the Worker's `queue` handler. `open-compute.json` does not use Wra
 | Global FIFO | Available | Not provided |
 | Unknown native dispatch | — | May retain the lease; duplicate attempt numbers possible |
 | Pull consumer | Available | Not provided |
-| Binding | wrangler `queues` | Producer `{ type, id, permissions? }`; consumer is the Worker `queue` handler |
+| Binding | Wrangler `queues` | Standard `producers` and `consumers` entries |
 
 ## Next
 

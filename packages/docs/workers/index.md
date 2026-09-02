@@ -4,7 +4,7 @@ Workers is a serverless execution environment that runs Cloudflare module Worker
 
 With Workers you can:
 
-- Deploy a module Worker (`export default { fetch }`) with `oc run`
+- Deploy a module Worker (`export default { fetch }`) with `oc deploy`
 - Bind KV, R2, D1, Durable Objects, Queues, Workflows, and other Workers
 - Schedule `scheduled()` with UTC cron expressions
 - Serve Static Assets from the same immutable deployment
@@ -23,7 +23,7 @@ export default {
 The sample in this repository is `examples/hello-worker/`. Deploy it against a running `ocd` (default origin `http://127.0.0.1:8787`):
 
 ```sh
-bun run oc run --config examples/hello-worker/open-compute.json --ocd <ocd-path>
+bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 ```
 
 ## Compatibility
@@ -34,8 +34,8 @@ bun run oc run --config examples/hello-worker/open-compute.json --ocd <ocd-path>
 | Isolates, `env` bindings, `fetch` / `scheduled` / `queue` | Yes | Yes |
 | Cache API, WebSocket hibernation, `cloudflare:sockets`, `node:` imports | Yes | Yes — same [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) |
 | Global Anycast / workers.dev / Custom Domains product | Yes | Not provided |
-| Project file | wrangler.jsonc | `open-compute.json` (unknown fields rejected) |
-| compatibilityDate in project JSON | Yes | Not allowed; frozen in the runtime lock (`2026-08-30`) |
+| Project file | `wrangler.jsonc` | Same pinned Wrangler schema |
+| `compatibility_date` | Yes | Required and persisted per immutable Version |
 | Deploy authority | Cloudflare control plane | Local SQLite and one supervised runtime generation |
 
 ## In this section

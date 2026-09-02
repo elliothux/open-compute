@@ -14,6 +14,6 @@ The D1 Worker API matches Cloudflare. The storage topology does not.
 | Bookmarks | Cross-replica causality | Local ordering on the same database |
 | `rows_read` / `rows_written` | Billing counters | Local SQLite execution counts |
 | `dump()` | Rejected on hosted non-alpha | Rejected (`D1_DUMP_ERROR`) |
-| REST / `client.v4` | Available | Not provided; use the Worker binding |
+| REST / `/client/v4` | Available | Compatible database and query operations |
 
 See [Compatibility](/platform/compatibility).

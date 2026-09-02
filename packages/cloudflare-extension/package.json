@@ -1,0 +1,25 @@
+{
+  "name": "@open-compute/cloudflare-extension",
+  "homepage": "https://open-compute.dev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "bun scripts/generate-types.ts",
+    "check:schema": "bun scripts/generate-types.ts --check",
+    "typecheck": "bun run check:schema && tsc --project tsconfig.json --noEmit",
+    "test": "bun test tests/*.test.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "cloudflare": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}

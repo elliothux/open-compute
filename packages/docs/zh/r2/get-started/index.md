@@ -1,57 +1,30 @@
-# 上手
+# R2 上手
 
-`ocd` 必须已经就绪，并且配置了 S3（`[s3]` + `r2_prefix`）。创建逻辑 bucket，在 `open-compute.json` 中绑定，再用 `oc` 运行 Worker。`oc run` 不会再起一个 workerd。见 [ocd 上手](/zh/ocd/get-started) 和 [配置](/zh/ocd/configuration)。
-
-## 1. 创建逻辑 bucket
-
-以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。对象字节进入配置的 S3 prefix，不进入 SQLite。
+通过受支持的 Cloudflare v4 API 创建逻辑 bucket：
 
 ```sh
-ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
-curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/r2/buckets" \
+curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   -H "content-type: application/json" \
-  -H "idempotency-key: r2-create-1" \
   -d '{"name":"my-bucket"}'
 ```
 
-成功返回 `{ "resourceId": "...", "state": "ready" }`。
-
-## 2. 绑定
+用标准 Wrangler 配置绑定 bucket 名称：
 
 ```json
 {
   "name": "r2-app",
   "main": "src/index.ts",
-  "bindings": {
-    "BUCKET": { "type": "r2_bucket", "id": "<resourceId>" }
-  }
+  "compatibility_date": "2026-08-30",
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "my-bucket" }]
 }
 ```
 
-```sh
-bun run oc types --config open-compute.json
-```
-
-## 3. Worker
-
-```ts
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === "PUT") {
-      await env.BUCKET.put("hello", request.body);
-      return new Response("ok");
-    }
-    const object = await env.BUCKET.get("hello");
-    if (!object) return new Response("missing", { status: 404 });
-    return new Response(object.body);
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-## 4. 运行
+Worker 使用标准 `R2Bucket` API。bucket 管理走 `/client/v4`；对象字节走 Worker binding 或 S3-compatible object API。
 
 ```sh
-bun run oc run --config open-compute.json --ocd <path-to-ocd>
+bun run oc types --config wrangler.jsonc
+bun run oc deploy --config wrangler.jsonc
 ```
 
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/zh/r2/concepts/)、[指南](/zh/r2/guides/)。
+下一步：[概念](/zh/r2/concepts/)和[指南](/zh/r2/guides/)。

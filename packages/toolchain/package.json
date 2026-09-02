@@ -12,9 +12,9 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@open-compute/operator-sdk": "workspace:*",
     "rolldown": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "wrangler": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:"

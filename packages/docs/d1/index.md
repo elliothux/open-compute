@@ -19,19 +19,19 @@ export default {
 } satisfies ExportedHandler<{ DB: D1Database }>;
 ```
 
-Bind an existing database in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
+Bind an existing database with Wrangler's standard D1 field:
 
 ```json
 {
   "name": "d1-app",
   "main": "src/index.ts",
-  "bindings": {
-    "DB": { "type": "d1_database", "id": "<d1-database-id>" }
-  }
+  "d1_databases": [
+    { "binding": "DB", "database_name": "app", "database_id": "<d1-database-id>" }
+  ]
 }
 ```
 
-`id` is an existing database on this platform. Binding grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
+`id` is an existing database on this platform. Binding grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc deploy` / `oc types`.
 
 ## Compatibility
 
@@ -45,7 +45,7 @@ Bind an existing database in `open-compute.json`. Ordinary product bindings are 
 | Bookmarks | Cross-replica causality | Local ordering on the same database |
 | `rows_read` / `rows_written` | Billing counters | Local SQLite execution counts |
 | `dump()` | Rejected on hosted non-alpha | Rejected (`D1_DUMP_ERROR`) |
-| REST / `client.v4` | Available | Not provided; use the Worker binding |
+| REST / `client/v4` | Available | Compatible account-scoped database and query operations |
 
 ## Next
 

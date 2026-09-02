@@ -1,6 +1,6 @@
 # 部署
 
-本节只覆盖如何将**已发行的**、匹配 OS/CPU 的 `ocd` 作为长期服务运行：container、systemd、launchd。不是 Worker 代码部署（那是 `oc run` / `oc deploy`，见[开始](/zh/get-started)）。不讲如何从源码编出这个文件。
+本节只覆盖如何将**已发行的**、匹配 OS/CPU 的 `ocd` 作为长期服务运行：container、systemd、launchd。不是 Worker 代码部署（那是 `oc deploy` / `oc deploy`，见[开始](/zh/get-started)）。不讲如何从源码编出这个文件。
 
 共同契约：一个 `ocd`、一份绝对路径配置、一块可写可执行的 data-dir、外接 S3。永远不要把凭据写进镜像、unit、plist 或发行包；用配置里的 env/file 引用。重启依据是进程退出或 `/health/live` 失败，**不要**因 `/health/ready` 的 503 重启。
 

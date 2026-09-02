@@ -50,9 +50,6 @@ ONCE = {
     'dashboard': (
         'dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api',
     ),
-    'operator-sdk': (
-        'operator_sdk_matches_live_admin_router_contract',
-    ),
     'p3-services-hard': ('p3_services_native_rpc_type_pipeline_and_lifecycle_matrix',),
     'p3-services-events': (
         'p3_service_calls_from_queue_cron_do_and_workflow_event_sources',

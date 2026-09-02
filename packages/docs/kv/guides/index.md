@@ -2,17 +2,15 @@
 
 ## Create a namespace
 
-See [Get started](/kv/get-started/). Platform `POST /v1/accounts/{accountId}/kv/namespaces` with `{ "name": "..." }` and an `idempotency-key`. Cloudflare REST is not provided.
+See [Get started](/kv/get-started/). Namespace CRUD uses `/client/v4/accounts/{account_id}/storage/kv/namespaces` through the official SDK or pinned Wrangler.
 
 ## Bind
 
 ```json
-"bindings": {
-  "KV": { "type": "kv_namespace", "id": "<resourceId>" }
-}
+"kv_namespaces": [{ "binding": "KV", "id": "<namespace-id>" }]
 ```
 
-`permissions` is optional. After edits, run `bun run oc types --config open-compute.json`.
+After edits, run `bun run oc types --config wrangler.jsonc`.
 
 ## get / put / list / delete
 

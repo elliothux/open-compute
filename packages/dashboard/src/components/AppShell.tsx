@@ -187,7 +187,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="min-w-0">
                 <div className="truncate text-base font-semibold">Operator dashboard</div>
                 <div className="hidden truncate text-sm text-kumo-subtle md:block">
-                  Manage the open-compute platform through the Operator API.
+                  Manage open-compute through the Cloudflare v4 API.
                 </div>
               </div>
             </div>

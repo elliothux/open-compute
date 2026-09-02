@@ -46,9 +46,7 @@ export default {
 {
   "name": "kv-demo",
   "main": "src/index.ts",
-  "bindings": {
-    "KV": { "type": "kv_namespace", "id": "<kv-namespace-id>" }
-  }
+  "kv_namespaces": [{ "binding": "KV", "id": "<kv-namespace-id>" }]
 }
 ```
 
@@ -69,7 +67,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-表达式为 UTC 五字段，并支持已文档化的本机 Quartz-like 扩展。错过触发后，宽限时间内最多补最近一次。平台部署元数据字段为 `crons`（字符串数组）。`open-compute.json` 没有 Wrangler 的 `triggers` 键；写入该键将作为未知字段被拒绝。
+表达式使用 Wrangler 接受的标准 UTC cron 语法，并通过 `triggers.crons` 字符串数组声明。
 
 ## Service Binding `fetch`
 

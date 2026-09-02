@@ -24,10 +24,10 @@ export default {
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "bindings": {
-    "FLOW": { "type": "workflow", "id": "<workflow-id>", "className": "MyWorkflow" }
-  }
+  "workflows": [
+    { "binding": "FLOW", "name": "flow", "class_name": "MyWorkflow" }
+  ]
 }
 ```
 
-`create` / `get` / `step.do` / `status` 与 [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) 对齐。`className` 必须有。步骤状态存在本机 SQLite。创建 definition 见[上手](/zh/workflows/get-started/)。
+`create` / `get` / `step.do` / `status` 与 [Cloudflare Workflows](https://developers.cloudflare.com/workflows/) 对齐。`class_name` 必须有。步骤状态存在本机 SQLite。创建 definition 见[上手](/zh/workflows/get-started/)。

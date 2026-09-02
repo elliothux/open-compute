@@ -4,7 +4,7 @@
 
 可以：
 
-- 使用 `oc run` 部署模块 Worker（`export default { fetch }`）
+- 使用 `oc deploy` 部署模块 Worker（`export default { fetch }`）
 - 绑定 KV、R2、D1、Durable Objects、Queues、Workflows 以及其他 Worker
 - 使用 UTC cron 触发 `scheduled()`
 - 在同一份部署中提供静态资源
@@ -23,7 +23,7 @@ export default {
 仓库示例为 `examples/hello-worker/`。针对已运行的 `ocd` 部署（默认 origin `http://127.0.0.1:8787`）：
 
 ```sh
-bun run oc run --config examples/hello-worker/open-compute.json --ocd <ocd-path>
+bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 ```
 
 ## 兼容性
@@ -34,8 +34,8 @@ bun run oc run --config examples/hello-worker/open-compute.json --ocd <ocd-path>
 | isolate、`env` 绑定、`fetch` / `scheduled` / `queue` | 提供 | 提供 |
 | Cache API、WebSocket hibernation、`cloudflare:sockets`、`node:` | 提供 | 提供，与 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 一致 |
 | 全球 Anycast / workers.dev / 自定义域名产品 | 提供 | 不提供 |
-| 项目文件 | wrangler.jsonc | `open-compute.json`（未知字段将被拒绝） |
-| 项目 JSON 中的 compatibilityDate | 提供 | 不允许；由 runtime 锁定（当前 `2026-08-30`） |
+| 项目文件 | `wrangler.jsonc` | 使用相同的固定 Wrangler schema |
+| `compatibility_date` | 提供 | 必填，并按不可变 Version 持久化 |
 | 部署状态 | Cloudflare 控制面 | 本机 SQLite；`ocd` 监督当前 `workerd` 进程 |
 
 ## 本节

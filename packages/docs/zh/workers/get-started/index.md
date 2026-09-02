@@ -1,61 +1,24 @@
-# 快速开始
+# 上手
 
-使用 CLI 将模块 Worker 编译、校验并激活到已运行的本机 `ocd`。`oc run` 不会再启动一个 workerd。平台尚未启动时，先完成 [ocd 上手](/zh/ocd/get-started)。
-
-```sh
-bun run oc run --config examples/hello-worker/open-compute.json \
-  --ocd "$PWD/target/debug/ocd"
-```
-
-默认平台 origin 为 `http://127.0.0.1:8787`。该命令执行 TypeScript 检查、Rolldown 打包、创建或复用同名 Worker、校验并 promote，然后打印可访问 URL。源码变更后再次执行同一命令即可更新；当前不提供 watch / HMR。远端部署使用 `oc deploy`，且只接受 HTTPS origin。
-
-## Hello Worker
-
-仓库路径为 `examples/hello-worker/`。`open-compute.json`：
-
-```json
-{
-  "name": "hello-typescript",
-  "main": "src/index.ts",
-  "vars": {
-    "GREETING": "Hello from TypeScript"
-  }
-}
-```
-
-`src/index.ts`：
-
-```ts
-export default {
-  fetch(request: Request, env: Env): Response {
-    return Response.json({
-      message: env.GREETING,
-      pathname: new URL(request.url).pathname,
-    });
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-同目录还包含 `package.json`（`@open-compute/workers-types`）、`tsconfig.json`，以及由 `bun run oc types` 生成的 `worker-configuration.d.ts`。离线产物：
+通过精确锁定的 Wrangler client 部署模块 Worker：
 
 ```sh
-bun run oc build --config examples/hello-worker/open-compute.json \
+CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4 \
+CLOUDFLARE_API_TOKEN=<token> \
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
+bun run oc deploy --config examples/hello-worker/wrangler.jsonc
+```
+
+示例是标准 Wrangler 项目，包含 `name`、`main`、`compatibility_date`、`workers_dev: false` 和 `vars`。在线 upload 与 activation 由 `wrangler@4.127.1` 负责。
+
+本地命令仍然保留：
+
+```sh
+bun run oc build --config examples/hello-worker/wrangler.jsonc \
   --ocd "$PWD/target/debug/ocd" --out /absolute/new-worker.bundle
-bun run oc types --config examples/hello-worker/open-compute.json
+bun run oc types --config examples/hello-worker/wrangler.jsonc
 ```
 
-`build` 的 `--out` 必须指向尚不存在的文件。`types` 不需要 `ocd`。管理令牌读取 `OPEN_COMPUTE_ADMIN_TOKEN`（或 `--token-env`）。
+`build` 使用 TypeScript 7 做类型检查、使用 Rolldown bundle、校验配置的 assets，并写出单一 Worker bundle；不会覆盖已有文件。assets-only 项目直接用 Wrangler 部署。`types` 默认写入 `worker-configuration.d.ts`。
 
-## 兼容性
-
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| 模块 Worker（`export default { fetch }`） | 是 | 是 |
-| handler 签名、`Response.json`、`env` 注入 | 是，见 [Workers CLI 上手](https://developers.cloudflare.com/workers/get-started/guide/) | 是 |
-| 类型包 | `@cloudflare/workers-types` | pinned `@open-compute/workers-types` |
-| CLI | Wrangler | `oc`（`bun run oc ...`） |
-| 项目文件 | wrangler.jsonc | `open-compute.json`（未知字段将被拒绝） |
-| C3 脚手架 / Cloudflare 登录 / workers.dev 预览 / 控制台 | 是 | 不提供 |
-| `--ocd` / `OPEN_COMPUTE_OCD` | 不适用 | 必须指向匹配版本的 `ocd`，用于编码 bundle；`run` 要求平台已在监听 |
-
-下一步：[概念](/zh/workers/concepts/)、[配置](/zh/workers/configuration/)。
+下一步：[配置](/zh/workers/configuration/)和[版本与部署](/zh/workers/versions-and-deployments/)。

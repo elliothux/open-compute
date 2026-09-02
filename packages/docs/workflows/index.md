@@ -26,19 +26,19 @@ export default {
 } satisfies ExportedHandler<{ FLOW: Workflow }>;
 ```
 
-Bind in `open-compute.json`. Workflow bindings require `className`:
+Bind in `wrangler.jsonc` with Wrangler's standard Workflow field:
 
 ```json
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "bindings": {
-    "FLOW": { "type": "workflow", "id": "<workflow-id>", "className": "MyWorkflow" }
-  }
+  "workflows": [
+    { "binding": "FLOW", "name": "flow", "class_name": "MyWorkflow" }
+  ]
 }
 ```
 
-Optional `schedules` is a string array. Grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
+Grammar: [bindings](/workers/configuration/bindings). Pinned Wrangler owns Workflow definition deployment; the official SDK owns instances and lifecycle operations.
 
 ## Compatibility
 
@@ -49,7 +49,7 @@ Optional `schedules` is a string array. Grammar: [bindings](/workers/configurati
 | Callbacks | — | At-least-once until result commit; replay skips durable-complete callbacks |
 | External side effects | — | Do not roll back with Workflow snapshots |
 | Dashboard / observability | Available | Not provided |
-| Binding | wrangler | `{ type, id, className }`; `className` required |
+| Binding | Wrangler | Standard `workflows[].binding/name/class_name`; `class_name` required |
 
 ## Next
 

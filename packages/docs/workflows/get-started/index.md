@@ -1,60 +1,23 @@
-# Get started
+# Workflows get started
 
-Create a definition, bind the class, then `oc run`. `ocd` must be ready.
-
-## 1. Create a definition
-
-The following is the platform control plane. Cloudflare REST and `client.v4` are not provided.
-
-```sh
-ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
-curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/workflows" \
-  -H "content-type: application/json" \
-  -H "idempotency-key: wf-create-1" \
-  -d '{"name":"orders"}'
-```
-
-The response includes the definition `id`. Put it in the binding.
-
-## 2. Bind
+A Workflow definition is created or updated through the official API when Wrangler deploys a Worker that exports the class. Bind it with standard configuration:
 
 ```json
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "bindings": {
-    "FLOW": { "type": "workflow", "id": "<definition-id>", "className": "MyWorkflow" }
-  }
+  "compatibility_date": "2026-08-30",
+  "workflows": [
+    { "binding": "FLOW", "name": "orders", "class_name": "MyWorkflow" }
+  ]
 }
 ```
 
-`className` is required.
+Export `MyWorkflow extends WorkflowEntrypoint` and use `env.FLOW.create` to start instances. The official Workflows API under `/client/v4/accounts/{account_id}/workflows` manages definitions, versions, instances, status, and events.
 
 ```sh
-bun run oc types --config open-compute.json
+bun run oc types --config wrangler.jsonc
+bun run oc deploy --config wrangler.jsonc
 ```
 
-## 3. Worker
-
-```ts
-export class MyWorkflow extends WorkflowEntrypoint<Env, { hello: string }> {
-  async run(event: WorkflowEvent<{ hello: string }>, step: WorkflowStep) {
-    return step.do("echo", async () => event.payload);
-  }
-}
-
-export default {
-  async fetch(_request: Request, env: Env): Promise<Response> {
-    const instance = await env.FLOW.create({ params: { hello: "world" } });
-    return Response.json({ id: instance.id });
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-## 4. Run
-
-```sh
-bun run oc run --config open-compute.json --ocd <path-to-ocd>
-```
-
-The CLI is `oc`, not Wrangler. Next: [Concepts](/workflows/concepts/).
+Next: [Concepts](/workflows/concepts/).

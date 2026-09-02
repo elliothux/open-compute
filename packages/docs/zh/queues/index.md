@@ -23,19 +23,20 @@ export default {
 } satisfies ExportedHandler<{ QUEUE: Queue }>;
 ```
 
-在 `open-compute.json` 中绑定生产者：
+在 `wrangler.jsonc` 中绑定生产者：
 
 ```json
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "bindings": {
-    "QUEUE": { "type": "queue_producer", "id": "<queue-id>" }
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
+    "consumers": [{ "queue": "jobs", "max_batch_size": 10 }]
   }
 }
 ```
 
-消费者为 Worker 的 `queue` 处理函数。`open-compute.json` 不使用 Wrangler 的 `[[queues.consumers]]`。语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+消费者通过 `queues.consumers` 指向 Worker 的 `queue` handler。语法见[绑定](/zh/workers/configuration/bindings)。固定 Wrangler 负责 queue provisioning 与 consumer 配置。
 
 ## 兼容性
 
@@ -47,7 +48,7 @@ export default {
 | 全局 FIFO | 提供 | 不提供 |
 | 无法识别的 native dispatch | — | 可能保留消息 lease，后续投递可能使用同一 attempt 编号 |
 | Pull consumer | 提供 | 不提供 |
-| 绑定 | wrangler `queues` | 生产者 `{ type, id, permissions? }`；消费者为 Worker `queue` 处理函数 |
+| 绑定 | Wrangler `queues` | 标准 `producers` 与 `consumers` 条目 |
 
 ## 本节
 

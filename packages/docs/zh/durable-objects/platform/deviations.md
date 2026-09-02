@@ -10,7 +10,7 @@ Durable Objects 的 Worker / class API 与 Cloudflare 对齐；所有对象落�
 | 放置 | 地理调度，`locationHint` / jurisdiction / migration | 全部对象在本地这一个 workerd；`locationHint` / jurisdiction / migration 无地理效果 |
 | Alarms | 提供 | 支持 7 个方法 |
 | Hibernation | 提供 | 支持 |
-| Binding | wrangler `durable_objects` | `{ type, id, className }`；`className` 必填 |
+| Binding | Wrangler `durable_objects` | 标准 `name`、`class_name` 与可选 `script_name` |
 | `Fetcher.connect()` | 通用出网 | 绑定声明的连接 |
 
 见[兼容性](/zh/platform/compatibility)。

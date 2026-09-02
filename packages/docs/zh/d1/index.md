@@ -19,19 +19,19 @@ export default {
 } satisfies ExportedHandler<{ DB: D1Database }>;
 ```
 
-在 `open-compute.json` 中绑定已存在的 database：
+在 `wrangler.jsonc` 中绑定已存在的 database：
 
 ```json
 {
   "name": "d1-app",
   "main": "src/index.ts",
-  "bindings": {
-    "DB": { "type": "d1_database", "id": "<d1-database-id>" }
-  }
+  "d1_databases": [
+    { "binding": "DB", "database_name": "app", "database_id": "<d1-database-id>" }
+  ]
 }
 ```
 
-`id` 必须指向平台上已有的 database。语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+`id` 必须指向平台上已有的 database。语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc deploy` / `oc types`。
 
 ## 兼容性
 
@@ -45,7 +45,7 @@ export default {
 | Bookmark | 跨副本因果顺序 | 同一数据库上的本地顺序 |
 | `rows_read` / `rows_written` | 计费计数 | 本地 SQLite 执行计数 |
 | `dump()` | 托管非 alpha 拒绝 | 同样拒绝（`D1_DUMP_ERROR`） |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker 绑定 |
+| REST / `client/v4` | 提供 | 兼容 account-scoped database 与 query 操作 |
 
 ## 本节
 

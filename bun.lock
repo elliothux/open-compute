@@ -16,15 +16,26 @@
         "@open-compute/workers-types": "workspace:*",
       },
     },
+    "packages/cloudflare-extension": {
+      "name": "@open-compute/cloudflare-extension",
+      "version": "0.1.0",
+      "dependencies": {
+        "cloudflare": "catalog:",
+      },
+      "devDependencies": {
+        "typescript": "catalog:",
+      },
+    },
     "packages/dashboard": {
       "name": "@open-compute/dashboard",
       "version": "0.1.0",
       "dependencies": {
         "@cloudflare/kumo": "catalog:",
-        "@open-compute/operator-sdk": "workspace:*",
+        "@open-compute/cloudflare-extension": "workspace:*",
         "@phosphor-icons/react": "catalog:",
         "@tanstack/react-query": "catalog:",
         "@tanstack/react-router": "catalog:",
+        "cloudflare": "catalog:",
         "date-fns": "catalog:",
         "react": "catalog:",
         "react-dom": "catalog:",
@@ -49,18 +60,6 @@
         "vitepress": "catalog:",
       },
     },
-    "packages/operator-sdk": {
-      "name": "@open-compute/operator-sdk",
-      "version": "0.1.0",
-      "dependencies": {
-        "zod": "catalog:",
-      },
-      "devDependencies": {
-        "@types/node": "catalog:",
-        "rolldown": "catalog:",
-        "typescript": "catalog:",
-      },
-    },
     "packages/runtime": {
       "name": "@open-compute/runtime",
       "version": "0.1.0",
@@ -77,9 +76,9 @@
         "oc": "./dist/oc.js",
       },
       "dependencies": {
-        "@open-compute/operator-sdk": "workspace:*",
         "rolldown": "catalog:",
         "typescript": "catalog:",
+        "wrangler": "catalog:",
       },
       "devDependencies": {
         "@types/node": "catalog:",
@@ -129,6 +128,7 @@
     "@types/react": "19.2.8",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.1.1",
+    "cloudflare": "7.1.0",
     "date-fns": "4.4.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -137,6 +137,7 @@
     "typescript": "7.0.2",
     "vite": "8.2.2",
     "vitepress": "1.6.4",
+    "wrangler": "4.127.1",
     "zod": "4.5.4",
   },
   "packages": {
@@ -402,13 +403,13 @@
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
+    "@open-compute/cloudflare-extension": ["@open-compute/cloudflare-extension@workspace:packages/cloudflare-extension"],
+
     "@open-compute/dashboard": ["@open-compute/dashboard@workspace:packages/dashboard"],
 
     "@open-compute/docs": ["@open-compute/docs@workspace:packages/docs"],
 
     "@open-compute/example-hello-worker": ["@open-compute/example-hello-worker@workspace:examples/hello-worker"],
-
-    "@open-compute/operator-sdk": ["@open-compute/operator-sdk@workspace:packages/operator-sdk"],
 
     "@open-compute/p4-vinext-qualification": ["@open-compute/p4-vinext-qualification@workspace:test/applications/vinext"],
 
@@ -787,6 +788,8 @@
     "chrome-trace-event": ["chrome-trace-event@1.0.4", "", {}, "sha512-rNjApaLzuwaOTjCiT8lSDdGN1APCiqkChLMJxJPWLunPAt5fy8xgU9/jNOchV84wfIxrA0lRQB7oCT8jrn/wrQ=="],
 
     "client-only": ["client-only@0.0.1", "", {}, "sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA=="],
+
+    "cloudflare": ["cloudflare@7.1.0", "", { "bin": { "cloudflare": "bin/cli" } }, "sha512-eb6WtiAbhuqdWmBdVo6fuXQgEBkYjhOeujRDYLEUWEZIECuABvDLz2DUYTwpN/4KyFecM4JtMHgZn5prlFUjLg=="],
 
     "cnfast": ["cnfast@0.0.8", "", { "bin": { "cnfast": "bin/cli.js" } }, "sha512-EjXKMfGfdwtV4AcNSQ6AwQaVzpC1B7IxeiwA3FlhTXz+YFlMKVi4c1JX9tgD2QOlahQXjB8KUXrBaYG+3v871Q=="],
 

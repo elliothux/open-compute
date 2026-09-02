@@ -24,19 +24,17 @@ export default {
 } satisfies ExportedHandler<{ BUCKET: R2Bucket }>;
 ```
 
-在 `open-compute.json` 中绑定已存在的 bucket：
+在 `wrangler.jsonc` 中绑定已存在的 bucket：
 
 ```json
 {
   "name": "r2-app",
   "main": "src/index.ts",
-  "bindings": {
-    "BUCKET": { "type": "r2_bucket", "id": "<r2-bucket-id>" }
-  }
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "files" }]
 }
 ```
 
-`id` 必须指向平台上已有的逻辑 bucket。语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+`bucket_name` 必须指向 account 中已有的逻辑 bucket。语法见[绑定](/zh/workers/configuration/bindings)。bucket 与 object 操作使用固定 Wrangler 或官方 SDK。
 
 ## 兼容性
 
@@ -47,7 +45,7 @@ export default {
 | 全球就近存放 | 提供 | 不提供 |
 | r2.dev 公开访问 | 提供 | 不提供 |
 | 数据驻留限制 | 提供 | 不提供 |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker 绑定或存储商的 S3 API |
+| REST / `client/v4` | 提供 | 兼容 account-scoped bucket 与 object 操作 |
 
 ## 本节
 

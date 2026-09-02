@@ -15,7 +15,7 @@ There is no resource to create: Images is a deployment-scoped binding and does n
 Do not put it in `bindings`. Do not supply a Cloudflare Images account id.
 
 ```sh
-bun run oc types --config open-compute.json
+bun run oc types --config wrangler.jsonc
 ```
 
 ## 2. Worker
@@ -40,7 +40,7 @@ Input must be request-body bytes. URL transforms such as `https://imagedelivery.
 ## 3. Run
 
 ```sh
-bun run oc run --config open-compute.json --ocd <path-to-ocd>
+bun run oc deploy --config wrangler.jsonc
 ```
 
 The CLI is `oc`, not Wrangler. Next: [Concepts](/images/concepts/).

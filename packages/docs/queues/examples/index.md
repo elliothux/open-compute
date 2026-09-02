@@ -1,6 +1,6 @@
 # Examples
 
-The producer uses `send` on a `queue_producer` binding; the consumer is the `queue` handler on the same Worker. Put the platform `queue.id` in the binding, then `oc types` / `oc run`.
+The producer uses `send` on a queue binding; the consumer is the `queue` handler on the same Worker. Declare both through Wrangler, then run `oc types` / `oc deploy`.
 
 ```ts
 export default {
@@ -22,8 +22,9 @@ export default {
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "bindings": {
-    "QUEUE": { "type": "queue_producer", "id": "<queue.id>" }
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
+    "consumers": [{ "queue": "jobs" }]
   }
 }
 ```

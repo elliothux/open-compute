@@ -1,55 +1,20 @@
 # 配置
 
-Worker 项目文件是 `open-compute.json`。必须包含 `name`，并选择一种内容形态：`main`、`assets`、`main` + `assets`，或 `frameworkOutput`。parser 只接受下列已实现字段；未知字段会被拒绝。
+`wrangler@4.127.1/config-schema.json` 是唯一项目语法 authority。本地 adapter 直接调用 Wrangler 的 config/environment resolver，不维护第二套 parser。
 
 ```json
 {
-  "name": "hello-typescript",
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "app",
   "main": "src/index.ts",
-  "vars": { "GREETING": "Hello from TypeScript" }
+  "compatibility_date": "2026-08-30",
+  "workers_dev": false,
+  "vars": { "LOG_LEVEL": "info" }
 }
 ```
 
-## 字段
+P6 支持标准 `name`、`account_id`、`main`、`compatibility_date`、`compatibility_flags`、`env`、build 字段、`vars`、各产品 binding 数组、Service Bindings、Static Assets、cron triggers、Images、Workers AI、Version Metadata、cache 配置，以及仅供本地使用的 `secrets.required` 声明。通过 Wrangler schema 不代表远端能力已实现；不支持的 server 能力会在 API 或 upload validation 阶段 fail closed。
 
-| 字段 | 作用 |
-| --- | --- |
-| `name` | Worker 名，`[a-z0-9]` 加内部连字符 |
-| `main` | 入口 TS，相对配置文件目录 |
-| `frameworkOutput` | 已构建框架产物；不能再和显式 `main` / `assets` 组合 |
-| `tsconfig` | 默认 `tsconfig.json` |
-| `vars` | 公开变量，JSON 值进入 `env` |
-| `secrets` | `{ "TOKEN": { "env": "MY_TOKEN" } }`，只引用环境变量 |
-| `bindings` | 对象：键是 `env` 名，值是 `{type, id, permissions?}`；DO / Workflow 还要 `className`；Workflow 可选 `schedules` |
-| `services` | 数组 `[{binding, service, entrypoint?}]` |
-| `assets` | `directory`、`binding?`、`run_worker_first`、`html_handling`、`not_found_handling`、`publish_source_maps` |
-| `cache` | `enabled`、`cross_version_cache` |
-| `exports` | 具名 Worker entrypoint 的 cache 覆盖，只接受 `{"type":"worker","cache":{...}}` |
-| `images` | `{ "binding": "IMAGES" }` |
-| `version_metadata` | `{ "binding": "VERSION", "tag"? }` |
-| `accountId` | 覆盖默认账户 |
-| `endpoint` | 平台 origin，默认 `http://127.0.0.1:8787` |
+框架 adapter 保留用户的 `wrangler.jsonc`，并生成标准 `.wrangler/deploy/config.json` redirect，指向生成的 Wrangler 配置。`oc deploy` / `oc run` 调用固定 Wrangler；`oc build` / `oc types` 保留本地 build 与类型生成职责。
 
-`main`、`frameworkOutput`、assets directory 与 `tsconfig` 相对配置文件目录解析，且不能逃逸项目边界。Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不能要求 Worker-first。所有 binding 名共用同一 `env` 命名空间。文件最大 64 KiB，必须是正规 JSON（不是 jsonc）。
-
-`bindings.type`：`kv_namespace`、`r2_bucket`、`d1_database`、`do_namespace`、`queue_producer`、`workflow`。
-
-## 兼容性
-
-| 主题 | Cloudflare | open-compute |
-| --- | --- | --- |
-| `vars`、secrets、assets routing、cache enabled、service bindings 语义 | 是，对照 [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) | 字段名借用常见 Wrangler 配置；不是完整 `wrangler.jsonc` 兼容层 |
-| 模块 Worker 的 `main` 指向 TS/JS 入口 | 是 | 是 |
-| `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags` | 是 | 不允许 |
-| `workers_dev`、Custom Domains、`routes`、placement、observability、AI、vectorize | 是 | 不提供；未知键失败，不会忽略 |
-| 控制面 | Cloudflare 控制面 | 本机 `ocd` HTTP API |
-
-## 本节
-
-- [bindings](/zh/workers/configuration/bindings)
-- [compatibility dates](/zh/workers/configuration/compatibility-dates)
-- [compatibility flags](/zh/workers/configuration/compatibility-flags)
-- [Cron](/zh/workers/configuration/cron-triggers)
-- [vars](/zh/workers/configuration/environment-variables)
-- [secrets](/zh/workers/configuration/secrets)
-- [routing](/zh/workers/configuration/routing)
+参见[绑定](/zh/workers/configuration/bindings)、[兼容日期](/zh/workers/configuration/compatibility-dates)、[兼容 flags](/zh/workers/configuration/compatibility-flags)、[Cron](/zh/workers/configuration/cron-triggers)、[变量](/zh/workers/configuration/environment-variables)和[密钥](/zh/workers/configuration/secrets)。

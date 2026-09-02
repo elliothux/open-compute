@@ -1,10 +1,10 @@
 # Guides
 
-Create a definition, bind `className` in `open-compute.json`, then create instances with `oc`. Committed steps are skipped on replay.
+Create a definition, bind `class_name` in `wrangler.jsonc`, then create instances through the official SDK. Committed steps are skipped on replay.
 
 ## Create and bind
 
-See [Get started](/workflows/get-started/). The binding must include `className`. `schedules` is optional.
+See [Get started](/workflows/get-started/). The binding must include `class_name`. `schedules` is optional.
 
 ## Create an instance
 

@@ -1,55 +1,20 @@
 # Configuration
 
-The Worker project file is `open-compute.json`. It must have `name` and one content shape: `main`, `assets`, `main` + `assets`, or `frameworkOutput`. The parser accepts only the implemented fields below. Unknown fields are rejected.
+`wrangler@4.127.1/config-schema.json` is the only project grammar authority. The local adapter calls Wrangler's config and environment resolvers; it does not maintain a second parser.
 
 ```json
 {
-  "name": "hello-typescript",
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "app",
   "main": "src/index.ts",
-  "vars": { "GREETING": "Hello from TypeScript" }
+  "compatibility_date": "2026-08-30",
+  "workers_dev": false,
+  "vars": { "LOG_LEVEL": "info" }
 }
 ```
 
-## Fields
+Supported P6 fields include standard `name`, `account_id`, `main`, `compatibility_date`, `compatibility_flags`, `env`, build fields, `vars`, product binding arrays, Service Bindings, Static Assets, cron triggers, Images, Workers AI, Version Metadata, cache configuration, and the local-only `secrets.required` declaration. A field passing Wrangler schema validation is not sufficient by itself: unsupported server capabilities fail closed during API or upload validation.
 
-| Field | Role |
-| --- | --- |
-| `name` | Worker name, `[a-z0-9]` with internal hyphens |
-| `main` | TS entry, relative to the config file directory |
-| `frameworkOutput` | Already-built framework output; cannot combine with explicit `main` / `assets` |
-| `tsconfig` | Defaults to `tsconfig.json` |
-| `vars` | Public variables; JSON values enter `env` |
-| `secrets` | `{ "TOKEN": { "env": "MY_TOKEN" } }`; environment references only |
-| `bindings` | Object: key is the `env` name, value is `{type, id, permissions?}`. DO / Workflow also need `className`. Workflow may set `schedules` |
-| `services` | Array `[{binding, service, entrypoint?}]` |
-| `assets` | `directory`, `binding?`, `run_worker_first`, `html_handling`, `not_found_handling`, `publish_source_maps` |
-| `cache` | `enabled`, `cross_version_cache` |
-| `exports` | Cache overrides for named Worker entrypoints; only `{"type":"worker","cache":{...}}` |
-| `images` | `{ "binding": "IMAGES" }` |
-| `version_metadata` | `{ "binding": "VERSION", "tag"? }` |
-| `accountId` | Override the default account |
-| `endpoint` | Platform origin; default `http://127.0.0.1:8787` |
+Framework adapters keep the user `wrangler.jsonc` and emit the standard `.wrangler/deploy/config.json` redirect to a generated Wrangler config. `oc deploy` and `oc run` invoke pinned Wrangler; `oc build` and `oc types` keep local build and type-generation responsibilities.
 
-`main`, `frameworkOutput`, the assets directory, and `tsconfig` resolve relative to the config file directory and cannot escape the project boundary. Assets-only projects cannot declare vars, secrets, product/service bindings, or Worker-first. All binding names share one `env` namespace. The file is at most 64 KiB and must be strict JSON (not jsonc).
-
-`bindings.type`: `kv_namespace`, `r2_bucket`, `d1_database`, `do_namespace`, `queue_producer`, `workflow`.
-
-## Compatibility
-
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| `vars`, secrets, assets routing, cache enabled, service-binding semantics | Yes — [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/) | Field names borrow common Wrangler configuration; not a full `wrangler.jsonc` compatibility layer |
-| Module Worker `main` points at a TS/JS entry | Yes | Yes |
-| `compatibility_date` / `compatibility_flags` / `compatibilityDate` / `compatibilityFlags` | Yes | Not allowed |
-| `workers_dev`, Custom Domains, `routes`, placement, observability, AI, vectorize | Yes | Not provided; unknown keys fail rather than being ignored |
-| Control plane | Cloudflare REST | Local `ocd` HTTP API |
-
-## In this section
-
-- [bindings](/workers/configuration/bindings)
-- [compatibility dates](/workers/configuration/compatibility-dates)
-- [compatibility flags](/workers/configuration/compatibility-flags)
-- [Cron](/workers/configuration/cron-triggers)
-- [vars](/workers/configuration/environment-variables)
-- [secrets](/workers/configuration/secrets)
-- [routing](/workers/configuration/routing)
+See [Bindings](/workers/configuration/bindings), [compatibility dates](/workers/configuration/compatibility-dates), [compatibility flags](/workers/configuration/compatibility-flags), [Cron](/workers/configuration/cron-triggers), [variables](/workers/configuration/environment-variables), and [secrets](/workers/configuration/secrets).

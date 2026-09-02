@@ -350,16 +350,16 @@ run_smoke() {
   live=$(probe_endpoint live http://127.0.0.1:8787/health/live)
   ready=$(probe_endpoint ready http://127.0.0.1:8787/health/ready)
   dashboard=$(probe_endpoint dashboard http://127.0.0.1:8787/operator/)
-  meta=$(
-    probe_endpoint meta http://127.0.0.1:8787/operator/api/v1/meta \
+  capabilities=$(
+    probe_endpoint capabilities http://127.0.0.1:8787/client/v4/open-compute/capabilities \
       -H "Authorization: Bearer $OPEN_COMPUTE_ADMIN_TOKEN"
   )
 
   stop_ocd
 
-  if [ "$live" != "200" ] || [ "$meta" != "200" ] || [ "$dashboard" != "200" ]; then
+  if [ "$live" != "200" ] || [ "$capabilities" != "200" ] || [ "$dashboard" != "200" ]; then
     sed -n '1,80p' "$ocd_log" >&2
-    fail "smoke failed (live=$live meta=$meta ready=$ready dashboard=$dashboard)"
+    fail "smoke failed (live=$live capabilities=$capabilities ready=$ready dashboard=$dashboard)"
   fi
 
   echo "open-compute dev-test: smoke passed"

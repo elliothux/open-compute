@@ -1,61 +1,24 @@
 # Get started
 
-Use the CLI to type-check, bundle, validate, and activate a module Worker on a running local `ocd`. `oc run` does not start another workerd. If the platform is not running, complete [ocd get started](/ocd/get-started) first.
+Deploy a module Worker through the exact pinned Wrangler client:
 
 ```sh
-bun run oc run --config examples/hello-worker/open-compute.json \
-  --ocd "$PWD/target/debug/ocd"
+CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4 \
+CLOUDFLARE_API_TOKEN=<token> \
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
+bun run oc deploy --config examples/hello-worker/wrangler.jsonc
 ```
 
-The default platform origin is `http://127.0.0.1:8787`. The command type-checks, bundles with Rolldown, creates or reuses a Worker of the same name, validates and promotes, then prints a reachable URL. Re-run the same command after source changes. Watch / HMR is not provided. Remote deploys use `oc deploy` and accept HTTPS origins only.
+The example is a standard Wrangler project with `name`, `main`, `compatibility_date`, `workers_dev: false`, and `vars`. Re-run the same command after changing source. Online upload and activation are owned by `wrangler@4.127.1`.
 
-## Hello Worker
-
-From `examples/hello-worker/`. `open-compute.json`:
-
-```json
-{
-  "name": "hello-typescript",
-  "main": "src/index.ts",
-  "vars": {
-    "GREETING": "Hello from TypeScript"
-  }
-}
-```
-
-`src/index.ts`:
-
-```ts
-export default {
-  fetch(request: Request, env: Env): Response {
-    return Response.json({
-      message: env.GREETING,
-      pathname: new URL(request.url).pathname,
-    });
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-The same directory also has `package.json` (`@open-compute/workers-types`), `tsconfig.json`, and `worker-configuration.d.ts` from `bun run oc types`. Offline artifacts:
+Local-only commands remain available:
 
 ```sh
-bun run oc build --config examples/hello-worker/open-compute.json \
+bun run oc build --config examples/hello-worker/wrangler.jsonc \
   --ocd "$PWD/target/debug/ocd" --out /absolute/new-worker.bundle
-bun run oc types --config examples/hello-worker/open-compute.json
+bun run oc types --config examples/hello-worker/wrangler.jsonc
 ```
 
-`build --out` must be a file that does not already exist. `types` does not need `ocd`. The admin token is read from `OPEN_COMPUTE_ADMIN_TOKEN` (or `--token-env`).
+`build` type-checks with TypeScript 7, bundles with Rolldown, validates configured assets, and writes one Worker bundle without overwriting an existing file. Assets-only projects deploy directly with Wrangler. `types` writes `worker-configuration.d.ts` by default.
 
-## Compatibility
-
-| Topic | Cloudflare | open-compute |
-| --- | --- | --- |
-| Module Worker (`export default { fetch }`) | Yes | Yes |
-| Handler signatures, `Response.json`, `env` injection | Yes — [Workers CLI guide](https://developers.cloudflare.com/workers/get-started/guide/) | Yes |
-| Types package | `@cloudflare/workers-types` | Pinned `@open-compute/workers-types` |
-| CLI | Wrangler | `oc` (`bun run oc ...`) |
-| Project file | wrangler.jsonc | `open-compute.json` (unknown fields rejected) |
-| C3 scaffolder / Cloudflare login / workers.dev preview / dashboard | Yes | Not provided |
-| `--ocd` / `OPEN_COMPUTE_OCD` | N/A | Must point at a matching `ocd` to encode the bundle; `run` requires the platform to be listening |
-
-Next: [Concepts](/workers/concepts/), [Configuration](/workers/configuration/).
+Next: [Configuration](/workers/configuration/) and [Versions and deployments](/workers/versions-and-deployments/).

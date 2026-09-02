@@ -1,5 +1,3 @@
-import { parseAccountId, type AccountId } from "@open-compute/operator-sdk";
-
 const AUTH_SESSION_KEY = "open-compute.operator.auth";
 
 interface StoredAuthSession {
@@ -17,7 +15,7 @@ function isStoredAuthSession(value: unknown): value is StoredAuthSession {
 }
 
 /** Read the persisted operator session for this browser tab. */
-export function readAuthSession(): { token: string; accountId: AccountId } | null {
+export function readAuthSession(): { token: string; accountId: string } | null {
   try {
     const raw = sessionStorage.getItem(AUTH_SESSION_KEY);
     if (!raw) return null;
@@ -28,7 +26,7 @@ export function readAuthSession(): { token: string; accountId: AccountId } | nul
     }
     return {
       token: parsed.token,
-      accountId: parseAccountId(parsed.accountId),
+      accountId: parsed.accountId,
     };
   } catch {
     sessionStorage.removeItem(AUTH_SESSION_KEY);
@@ -37,7 +35,7 @@ export function readAuthSession(): { token: string; accountId: AccountId } | nul
 }
 
 /** Persist operator credentials for refresh recovery within the same tab. */
-export function writeAuthSession(token: string, accountId: AccountId): void {
+export function writeAuthSession(token: string, accountId: string): void {
   const payload: StoredAuthSession = { token, accountId };
   sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(payload));
 }

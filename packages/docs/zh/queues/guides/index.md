@@ -33,4 +33,4 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-Handler 成功且无显式 decision → ack；失败且无显式 decision → retry。`open-compute.json` 不使用 Wrangler consumers 数组。
+Handler 成功且无显式 decision → ack；失败且无显式 decision → retry。consumer 配置使用 Wrangler 标准 `queues.consumers`。

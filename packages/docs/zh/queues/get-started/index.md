@@ -1,60 +1,33 @@
-# 上手
+# Queues 上手
 
-创建 Queue，在 `open-compute.json` 中绑定 producer，再用 `oc` 运行 Worker。`oc run` 不会再起一个 workerd。见 [ocd 上手](/zh/ocd/get-started)。
-
-## 1. 创建 Queue
-
-以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
+通过受支持的 Cloudflare v4 API 创建 Queue：
 
 ```sh
-ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
-curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/queues" \
+curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/queues" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   -H "content-type: application/json" \
-  -H "idempotency-key: queue-create-1" \
-  -d '{"name":"jobs"}'
+  -d '{"queue_name":"jobs"}'
 ```
 
-响应是 `{ "queue": { "id": "...", ... } }`。把 `queue.id` 填进 binding。
-
-## 2. Producer binding
+使用标准 Wrangler producer/consumer 配置：
 
 ```json
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "bindings": {
-    "QUEUE": { "type": "queue_producer", "id": "<queue.id>" }
+  "compatibility_date": "2026-08-30",
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
+    "consumers": [{ "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 5 }]
   }
 }
 ```
 
-当前 `open-compute.json` 没有 Wrangler 风格的 consumers 数组；未知字段会拒绝。Consumer 是 Worker 导出的 `queue` handler。平台按 deployment 上的 push consumer 投递。
+producer 使用 `env.QUEUE.send`；Worker 导出标准 `queue` handler。
 
 ```sh
-bun run oc types --config open-compute.json
+bun run oc types --config wrangler.jsonc
+bun run oc deploy --config wrangler.jsonc
 ```
 
-## 3. Worker
-
-```ts
-export default {
-  async fetch(_request: Request, env: Env): Promise<Response> {
-    await env.QUEUE.send({ hello: "world" });
-    await env.QUEUE.sendBatch([{ body: { hello: "batch" } }]);
-    return new Response("queued");
-  },
-  async queue(batch: MessageBatch<{ hello: string }>): Promise<void> {
-    for (const message of batch.messages) {
-      message.ack();
-    }
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-## 4. 运行
-
-```sh
-bun run oc run --config open-compute.json --ocd <path-to-ocd>
-```
-
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/zh/queues/concepts/)。
+下一步：[概念](/zh/queues/concepts/)。

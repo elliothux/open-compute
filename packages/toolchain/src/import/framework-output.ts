@@ -484,7 +484,7 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
     .some(key => config[key] !== undefined);
   const generatedRuntimeFeatures = hasGeneratedRuntimeFeatures
     ? parseRuntimeFeatures(config, new Set([
-      ...Object.keys(project.vars), ...Object.keys(project.secrets), ...Object.keys(project.bindings),
+      ...Object.keys(project.vars), ...project.secrets, ...Object.keys(project.bindings),
       ...Object.keys(services), ...(project.assets?.binding === undefined ? [] : [project.assets.binding]),
     ]))
     : undefined;

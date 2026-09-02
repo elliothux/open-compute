@@ -1,320 +1,82 @@
-import { OperatorApiError, parseResourceId, parseSha256Digest } from "@open-compute/operator-sdk";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { z } from "zod";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@cloudflare/kumo/components/button";
-import { Input } from "@cloudflare/kumo/components/input";
-import { Surface } from "@cloudflare/kumo/components/surface";
-import { CreateResourceDialog } from "../../../components/CreateResourceDialog";
-import { DetailTabs } from "../../../components/DetailTabs";
-import { BackLink, DataTable, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/PageLayout";
-import { docsLinks } from "../../../lib/docs";
-import { useMutationFeedback } from "../../../features/toast/useMutationFeedback";
-import { sha256Hex } from "../../../lib/hash";
-import { formatTimestamp } from "../../../lib/format";
+import { ConfirmActionDialog } from "../../../components/ConfirmActionDialog";
+import { DataTable, ErrorState, LoadingState, PageHeader, SectionHeader, StatusBadge } from "../../../components/PageLayout";
 import { useAuth } from "../../../features/auth/AuthProvider";
-import { queryKeys } from "../../../queries/keys";
-import { invalidateD1DatabasesQueries } from "../../../queries/invalidate";
+import { useMutationFeedback } from "../../../features/toast/useMutationFeedback";
 
-const d1DetailSearchSchema = z.object({
-  tab: z.enum(["tables", "query", "migrations", "backups"]).optional(),
-});
+export const Route = createFileRoute("/_authenticated/d1/$databaseId")({ component: D1DetailPage });
 
-export const Route = createFileRoute("/_authenticated/d1/$databaseId")({
-  validateSearch: search => d1DetailSearchSchema.parse(search),
-  component: D1StudioPage,
-});
-
-function D1StudioPage() {
-  const { databaseId: databaseIdParam } = Route.useParams();
-  const { tab: tabParam } = Route.useSearch();
-  const activeTab = tabParam ?? "tables";
-  const navigate = useNavigate({ from: Route.fullPath });
-  const databaseId = parseResourceId(databaseIdParam);
+function D1DetailPage() {
+  const { databaseId } = Route.useParams();
   const { client, accountId } = useAuth();
-  const queryClient = useQueryClient();
   const feedback = useMutationFeedback();
+  const enabled = client !== null && accountId !== null;
   const [sql, setSql] = useState("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;");
-  const [migrationId, setMigrationId] = useState("1");
-  const [migrationName, setMigrationName] = useState("");
-  const [migrationSql, setMigrationSql] = useState("");
-  const [restoreBackupTarget, setRestoreBackupTarget] = useState<string | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
-
-  const tablesQuery = useQuery({
-    queryKey: queryKeys.d1Tables(accountId ?? "", databaseIdParam),
-    queryFn: ({ signal }) => client!.d1.listTables({ accountId: accountId!, databaseId, signal }),
-    enabled: Boolean(client && accountId) && activeTab === "tables",
+  const database = useQuery({
+    queryKey: ["cloudflare-v4", "d1", databaseId],
+    queryFn: ({ signal }) => client!.cloudflare.d1.database.get(databaseId, { account_id: accountId! }, { signal }),
+    enabled,
   });
-  const migrationsQuery = useQuery({
-    queryKey: queryKeys.d1Migrations(accountId ?? "", databaseIdParam),
-    queryFn: ({ signal }) => client!.d1.listMigrations({ accountId: accountId!, databaseId, signal }),
-    enabled: Boolean(client && accountId) && activeTab === "migrations",
+  const backups = useQuery({
+    queryKey: ["cloudflare-v4", "d1", databaseId, "backups"],
+    queryFn: ({ signal }) => client!.openCompute.backups.d1.list(accountId!, databaseId, { signal }),
+    enabled,
   });
-  const backupsQuery = useQuery({
-    queryKey: queryKeys.d1Backups(accountId ?? "", databaseIdParam),
-    queryFn: ({ signal }) => client!.d1.listBackups({ accountId: accountId!, databaseId, signal }),
-    enabled: Boolean(client && accountId) && activeTab === "backups",
+  const query = useMutation({
+    mutationFn: () => client!.cloudflare.d1.database.query(databaseId, { account_id: accountId!, sql }),
+    onError: error => feedback.failure(error, "Unable to execute the D1 query."),
   });
-  const queryMutation = useMutation({
-    mutationFn: () => client!.d1.query({ accountId: accountId!, databaseId, sql }),
-    onSuccess: () => feedback.success("Query completed."),
-    onError: error => feedback.failure(error, "Query failed."),
+  const createBackup = useMutation({
+    mutationFn: () => client!.openCompute.backups.d1.create(accountId!, databaseId),
+    onSuccess: async () => { await backups.refetch(); feedback.success("D1 backup created."); },
+    onError: error => feedback.failure(error, "Unable to create the D1 backup."),
   });
-  const applyMigrationMutation = useMutation({
-    mutationFn: async () => {
-      const id = Number.parseInt(migrationId, 10);
-      if (!Number.isFinite(id) || id <= 0) throw new Error("Migration id must be a positive integer.");
-      const trimmedSql = migrationSql.trim();
-      const trimmedName = migrationName.trim();
-      if (!trimmedName || !trimmedSql) throw new Error("Migration name and SQL are required.");
-      const digest = parseSha256Digest(await sha256Hex(trimmedSql));
-      return client!.d1.applyMigrations({
-        accountId: accountId!,
-        databaseId,
-        idempotencyKey: crypto.randomUUID(),
-        migrations: [{ id, name: trimmedName, sha256: digest, sql: trimmedSql }],
-      });
-    },
+  const restore = useMutation({
+    mutationFn: (backupID: string) => client!.openCompute.backups.d1.restore(accountId!, backupID),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.d1Migrations(accountId!, databaseIdParam) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.d1Tables(accountId!, databaseIdParam) });
-      setMigrationSql("");
-      feedback.success("Migration applied.");
-    },
-    onError: error => feedback.failure(error, "Migration failed."),
-  });
-  const createBackupMutation = useMutation({
-    mutationFn: () => client!.d1.createBackup({
-      accountId: accountId!,
-      databaseId,
-      idempotencyKey: crypto.randomUUID(),
-    }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.d1Backups(accountId!, databaseIdParam) });
-      feedback.success("Backup created.");
-    },
-    onError: error => feedback.failure(error, "Backup failed."),
-  });
-  const restoreBackupMutation = useMutation({
-    mutationFn: (params: { backupId: string; newName: string }) => client!.d1.restoreDatabase({
-      accountId: accountId!,
-      backupId: params.backupId,
-      newName: params.newName,
-      idempotencyKey: crypto.randomUUID(),
-    }),
-    onSuccess: async result => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.d1Backups(accountId!, databaseIdParam) }),
-        invalidateD1DatabasesQueries(queryClient, accountId!),
-      ]);
-      setRestoreBackupTarget(null);
+      setRestoreTarget(null);
       setMutationError(null);
-      feedback.success(`Restored database ${result.resourceId}.`);
+      await Promise.all([database.refetch(), backups.refetch()]);
+      feedback.success("D1 backup restored.");
     },
     onError: error => {
-      setMutationError(
-        error instanceof OperatorApiError ? error.message : "Unable to restore database.",
-      );
+      setMutationError(error instanceof Error ? error.message : "Unable to restore the D1 backup.");
+      feedback.failure(error, "Unable to restore the D1 backup.");
     },
   });
-
-  const columns = queryMutation.data?.results[0]
-    ? Object.keys(queryMutation.data.results[0]).map(key => ({ key, label: key }))
-    : [];
-
-  return (
-    <div>
-      <PageHeader
-        title={`D1 database ${databaseIdParam}`}
-        description="Inspect schema, run bounded SQL, apply migrations, and manage backups."
-        docsUrl={docsLinks.storage}
-        resourceId={databaseIdParam}
-        resourceLabel="Database ID"
-        actions={<BackLink to="/d1" label="Back to D1" />}
-      />
-      <DetailTabs
-        tabs={[
-          { id: "tables", label: "Tables" },
-          { id: "query", label: "Query" },
-          { id: "migrations", label: "Migrations" },
-          { id: "backups", label: "Backups" },
-        ]}
-        activeTab={activeTab}
-        onTabChange={tabId => {
-          void navigate({
-            search: prev => ({
-              ...prev,
-              tab: tabId as "tables" | "query" | "migrations" | "backups",
-            }),
-          });
-        }}
-      />
-      <CreateResourceDialog
-        title="Restore D1 database"
-        description="Creates a new database from the selected backup."
-        nameLabel="New database name"
-        namePlaceholder="restored-database"
-        submitLabel="Restore database"
-        open={Boolean(restoreBackupTarget)}
-        errorMessage={restoreBackupTarget ? mutationError : null}
-        isPending={restoreBackupMutation.isPending}
-        onClose={() => {
-          setRestoreBackupTarget(null);
-          setMutationError(null);
-        }}
-        onSubmit={newName => {
-          if (!restoreBackupTarget) return;
-          restoreBackupMutation.mutate({ backupId: restoreBackupTarget, newName });
-        }}
-      />
-      {activeTab === "tables" ? (
-        <Surface className="p-4">
-          {tablesQuery.isLoading ? (
-            <LoadingState label="Loading tables…" />
-          ) : tablesQuery.error ? (
-            <ErrorState message="Unable to load tables." />
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {(tablesQuery.data?.tables ?? []).map(table => (
-                <li key={table.name}>
-                  <button
-                    type="button"
-                    className="text-kumo-link"
-                    onClick={() => {
-                      setSql(`SELECT * FROM ${table.name} LIMIT 50;`);
-                      void navigate({ search: prev => ({ ...prev, tab: "query" }) });
-                    }}
-                  >
-                    {table.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Surface>
-      ) : null}
-      {activeTab === "query" ? (
-        <Surface className="p-4">
-          <div className="mb-3 text-sm font-medium">SQL editor</div>
-          <textarea value={sql} onChange={event => setSql(event.target.value)} rows={8} className="font-mono text-sm" />
-          <div className="mt-3 flex gap-2">
-            <Button onClick={() => queryMutation.mutate()} disabled={queryMutation.isPending}>
-              {queryMutation.isPending ? "Running…" : "Run query"}
-            </Button>
-          </div>
-          {queryMutation.error ? <div className="mt-3"><ErrorState message="Query failed." /></div> : null}
-          {queryMutation.data ? (
-            <div className="mt-4">
-              <DataTable
-                columns={columns.length > 0 ? columns : [{ key: "result", label: "Result" }]}
-                rows={(queryMutation.data.results ?? []).map(row =>
-                  columns.length > 0
-                    ? Object.fromEntries(columns.map(column => [column.key, String(row[column.key] ?? "")]))
-                    : { result: JSON.stringify(row) },
-                )}
-                emptyLabel="The query returned no rows."
-              />
-            </div>
-          ) : null}
-        </Surface>
-      ) : null}
-      {activeTab === "migrations" ? (
-        <section className="space-y-4">
-          <Surface className="p-4">
-            <div className="mb-3 text-sm font-medium">Apply migration</div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Input label="Migration id" value={migrationId} onChange={event => setMigrationId(event.target.value)} />
-              <Input label="Name" value={migrationName} onChange={event => setMigrationName(event.target.value)} placeholder="0001_init.sql" />
-            </div>
-            <textarea
-              className="mt-3 w-full font-mono text-sm"
-              rows={6}
-              value={migrationSql}
-              onChange={event => setMigrationSql(event.target.value)}
-              placeholder="CREATE TABLE ..."
-            />
-            <Button
-              className="mt-3"
-              variant="primary"
-              disabled={applyMigrationMutation.isPending}
-              onClick={() => applyMigrationMutation.mutate()}
-            >
-              {applyMigrationMutation.isPending ? "Applying…" : "Apply migration"}
-            </Button>
-          </Surface>
-          {migrationsQuery.isLoading ? (
-            <LoadingState label="Loading migrations…" />
-          ) : migrationsQuery.error ? (
-            <ErrorState message="Unable to load migrations." />
-          ) : (
-            <DataTable
-              columns={[
-                { key: "id", label: "ID" },
-                { key: "name", label: "Name" },
-                { key: "sha256", label: "SHA-256" },
-                { key: "applied", label: "Applied" },
-              ]}
-              rows={(migrationsQuery.data?.migrations ?? []).map(migration => ({
-                id: migration.id,
-                name: migration.name,
-                sha256: <code className="[font-size:0.9em]">{migration.sha256.slice(0, 12)}…</code>,
-                applied: formatTimestamp(migration.appliedAtMs),
-              }))}
-              emptyLabel="No migrations have been applied yet."
-            />
-          )}
-        </section>
-      ) : null}
-      {activeTab === "backups" ? (
-        <section className="space-y-4">
-          <div>
-            <Button
-              variant="primary"
-              disabled={createBackupMutation.isPending}
-              onClick={() => createBackupMutation.mutate()}
-            >
-              {createBackupMutation.isPending ? "Creating…" : "Create backup"}
-            </Button>
-          </div>
-          {backupsQuery.isLoading ? (
-            <LoadingState label="Loading backups…" />
-          ) : backupsQuery.error ? (
-            <ErrorState message="Unable to load backups." />
-          ) : (
-            <DataTable
-              columns={[
-                { key: "id", label: "Backup ID" },
-                { key: "state", label: "State" },
-                { key: "size", label: "Size" },
-                { key: "created", label: "Created" },
-                { key: "actions", label: "" },
-              ]}
-              rows={(backupsQuery.data?.backups ?? []).map(backup => ({
-                id: <code className="[font-size:0.9em]">{backup.id}</code>,
-                state: <StatusBadge value={backup.state} />,
-                size: backup.sizeBytes?.toLocaleString() ?? "—",
-                created: formatTimestamp(backup.createdAtMs),
-                actions: backup.state === "ready" ? (
-                  <button
-                    type="button"
-                    className="text-sm text-kumo-link"
-                    disabled={restoreBackupMutation.isPending}
-                    onClick={() => {
-                      setMutationError(null);
-                      setRestoreBackupTarget(backup.id);
-                    }}
-                  >
-                    Restore
-                  </button>
-                ) : null,
-              }))}
-              emptyLabel="No backups exist for this database."
-            />
-          )}
-        </section>
-      ) : null}
-    </div>
-  );
+  return <div>
+    <PageHeader title={database.data?.name ?? "D1 database"} resourceId={databaseId} actions={<Button variant="secondary" onClick={() => createBackup.mutate()} disabled={createBackup.isPending}>Create backup</Button>} />
+    <ConfirmActionDialog title="Restore D1 backup" description="Restore the selected backup to this database." resourceLabel="backup ID" confirmValue={restoreTarget ?? ""} submitLabel="Restore backup" open={restoreTarget !== null} errorMessage={restoreTarget ? mutationError : null} isPending={restore.isPending} onClose={() => { setRestoreTarget(null); setMutationError(null); }} onConfirm={() => { if (restoreTarget) restore.mutate(restoreTarget); }} />
+    {database.isLoading || backups.isLoading ? <LoadingState /> : database.error || backups.error ? <ErrorState message="Unable to load D1 database details." /> : <>
+      <DataTable columns={[{ key: "property", label: "Property" }, { key: "value", label: "Value" }]} rows={[
+        { property: "Created", value: database.data?.created_at ?? "unknown" },
+        { property: "Tables", value: database.data?.num_tables ?? "unknown" },
+        { property: "File size", value: database.data?.file_size ?? "unknown" },
+        { property: "Jurisdiction", value: database.data?.jurisdiction ?? "default" },
+        { property: "Read replication", value: database.data?.read_replication?.mode ?? "unknown" },
+      ]} />
+      <div className="mt-6">
+        <SectionHeader title="Query" description="Execute SQL through the official D1 query endpoint." />
+        <textarea aria-label="SQL query" className="min-h-36 w-full rounded border p-3 font-mono text-sm" value={sql} onChange={event => setSql(event.target.value)} />
+        <div className="mt-3"><Button variant="primary" disabled={!sql.trim() || query.isPending} onClick={() => query.mutate()}>{query.isPending ? "Running…" : "Run query"}</Button></div>
+        {query.error ? <div className="mt-3"><ErrorState message="Query failed." /></div> : null}
+        {query.data ? <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-kumo-tinted p-4 text-sm">{JSON.stringify(query.data.result, null, 2)}</pre> : null}
+      </div>
+      <div className="mt-6">
+        <SectionHeader title="Backups" />
+        <DataTable columns={[{ key: "id", label: "Backup" }, { key: "state", label: "State" }, { key: "size", label: "Size" }, { key: "created", label: "Created" }, { key: "actions", label: "" }]} rows={(backups.data ?? []).map(backup => ({
+          id: backup.id,
+          state: <StatusBadge value={backup.state} />,
+          size: backup.size,
+          created: backup.created_on,
+          actions: <Button variant="secondary" onClick={() => setRestoreTarget(backup.id)} disabled={restore.isPending}>Restore</Button>,
+        }))} emptyLabel="No backups found." />
+      </div>
+    </>}
+  </div>;
 }

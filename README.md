@@ -95,7 +95,7 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 | Images | █████████░ 95% |
 | Version Metadata | ██████████ 100% |
 | WebSocket Hibernation | ██████████ 100% |
-| Operator API · SDK · Dashboard | In design |
+| Cloudflare v4 · Wrangler · Dashboard | In implementation |
 
 The remaining 5% is single-node reality — global edge topology and hosted fleet quotas — not missing methods. Exact scope: [compatibility matrix](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
 
@@ -112,7 +112,10 @@ bun run build
 Ship your first Worker:
 
 ```sh
-bun run oc run --config examples/hello-worker/open-compute.json
+CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4 \\
+CLOUDFLARE_API_TOKEN="$OPEN_COMPUTE_DEPLOY_TOKEN" \\
+CLOUDFLARE_ACCOUNT_ID="$OPEN_COMPUTE_ACCOUNT_ID" \\
+bun run oc run --config examples/hello-worker/wrangler.jsonc
 ```
 
 Type-checked, bundled, deployed, and served — one command. In production it is even smaller: **one executable, one config file, one data directory.** No build tooling on the host, no runtime downloads, no network required at startup.

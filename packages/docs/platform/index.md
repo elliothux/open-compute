@@ -13,8 +13,8 @@ ocd --config /etc/open-compute/config.toml capabilities --json
 | Area | Detail |
 | --- | --- |
 | Worker API | Worker-side symbols for Workers, KV, D1, R2, Durable Objects, Queues, Workflows, Cache, and Images match [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/). Signature index: [API reference](/platform/reference/api/). |
-| Topology | Single node: one `ocd`, one pinned `workerd`, local authority storage. No global edge, dashboard, billing, or Cloudflare REST v4 / `client.v4`. |
-| Project config | `open-compute.json`, not `wrangler.jsonc`. Unknown fields are rejected. |
+| Topology | Single node: one `ocd`, one pinned `workerd`, and local authority storage. Management uses the compatible `/client/v4` API and SDK-backed dashboard; global edge and billing are not provided. |
+| Project config | Standard `wrangler.jsonc`, parsed by pinned `wrangler@4.127.1`; unsupported server capabilities fail closed. |
 | Limits | From `ocd capabilities --json` on the running binary. |
 | Behavior differences | [Behavior differences](/platform/deviations). |
 | Products not provided | [Unsupported](/platform/unsupported). |

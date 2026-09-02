@@ -2,7 +2,7 @@
 
 ## 创建 namespace 并绑定
 
-见[上手](/zh/durable-objects/get-started/)。binding 必须有 `className`。
+见[上手](/zh/durable-objects/get-started/)。binding 必须有 `class_name`。
 
 ## 从 Worker 调用
 

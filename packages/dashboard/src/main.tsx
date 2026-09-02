@@ -9,7 +9,7 @@ import {
   QueryClientProvider,
   useQueryClient,
 } from "@tanstack/react-query";
-import { OperatorApiError } from "@open-compute/operator-sdk";
+import { APIError } from "cloudflare/error";
 import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
 import { ThemeProvider } from "./features/theme/ThemeProvider";
 import { ToastProvider } from "./features/toast/ToastProvider";
@@ -26,7 +26,7 @@ function AuthenticatedQueryProvider({ children }: { children: ReactNode }) {
     const client = new QueryClient({
       queryCache: new QueryCache({
         onError: (error) => {
-          if (error instanceof OperatorApiError && error.status === 401) {
+          if (error instanceof APIError && error.status === 401) {
             clearAuth();
             client.clear();
             redirectToLogin();
@@ -36,7 +36,7 @@ function AuthenticatedQueryProvider({ children }: { children: ReactNode }) {
       defaultOptions: {
         queries: {
           retry(failureCount, error) {
-            if (error instanceof OperatorApiError) {
+            if (error instanceof APIError) {
               if (error.status === 401 || error.status === 403) return false;
               if (error.status >= 400 && error.status < 500) return false;
             }
@@ -48,7 +48,7 @@ function AuthenticatedQueryProvider({ children }: { children: ReactNode }) {
         mutations: {
           retry: false,
           onError: (error) => {
-            if (error instanceof OperatorApiError && error.status === 401) {
+            if (error instanceof APIError && error.status === 401) {
               clearAuth();
               client.clear();
               redirectToLogin();

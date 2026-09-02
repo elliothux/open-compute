@@ -26,19 +26,19 @@ export default {
 } satisfies ExportedHandler<{ FLOW: Workflow }>;
 ```
 
-在 `open-compute.json` 中绑定。Workflow 必须指定 `className`：
+在 `wrangler.jsonc` 中使用 Wrangler 标准 Workflow 字段绑定：
 
 ```json
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "bindings": {
-    "FLOW": { "type": "workflow", "id": "<workflow-id>", "className": "MyWorkflow" }
-  }
+  "workflows": [
+    { "binding": "FLOW", "name": "flow", "class_name": "MyWorkflow" }
+  ]
 }
 ```
 
-可选 `schedules`（字符串数组）。语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+语法见[绑定](/zh/workers/configuration/bindings)。固定 Wrangler 负责 Workflow definition 部署；官方 SDK 负责 instance 与 lifecycle 操作。
 
 ## 兼容性
 
@@ -49,7 +49,7 @@ export default {
 | 步骤回调 | — | 结果提交前可能重复执行；已持久化的步骤在重放时跳过 |
 | 外部副作用 | — | 不随 Workflow 快照回滚 |
 | 控制台 / 可观测性 | 提供 | 不提供 |
-| 绑定 | wrangler | `{ type, id, className }`，必须指定 `className` |
+| 绑定 | Wrangler | 标准 `workflows[].binding/name/class_name`，必须指定 `class_name` |
 
 ## 本节
 

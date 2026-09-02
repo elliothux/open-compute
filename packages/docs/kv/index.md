@@ -28,19 +28,17 @@ export default {
 } satisfies ExportedHandler<{ KV: KVNamespace }>;
 ```
 
-Bind an existing namespace in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
+Bind an existing namespace with Wrangler's standard KV field:
 
 ```json
 {
   "name": "kv-app",
   "main": "src/index.ts",
-  "bindings": {
-    "KV": { "type": "kv_namespace", "id": "<kv-namespace-id>" }
-  }
+  "kv_namespaces": [{ "binding": "KV", "id": "<kv-namespace-id>" }]
 }
 ```
 
-`id` is an existing namespace on this platform. Optional `permissions`: `{ "read": true, "write": true }`. Binding grammar: [Workers configuration · bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
+`id` is an existing namespace in the account. Binding grammar: [Workers configuration · bindings](/workers/configuration/bindings). Use pinned Wrangler or the official SDK for namespace and value operations.
 
 ## Compatibility
 
@@ -50,7 +48,7 @@ Bind an existing namespace in `open-compute.json`. Ordinary product bindings are
 | Replication | Global edge | Single-node SQLite on the node running ocd |
 | `cacheTtl` | Colo cache | Parameter accepted; no colo cache |
 | Jurisdictions | Available | Not provided |
-| REST / `client.v4` | Available | Not provided; use the Worker binding |
+| REST / `client/v4` | Available | Compatible account-scoped namespace and value operations |
 
 ## Next
 

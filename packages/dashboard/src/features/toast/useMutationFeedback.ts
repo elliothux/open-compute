@@ -1,4 +1,4 @@
-import { OperatorApiError } from "@open-compute/operator-sdk";
+import { APIError } from "cloudflare/error";
 import { useToast } from "./ToastProvider";
 
 export function useMutationFeedback() {
@@ -12,7 +12,7 @@ export function useMutationFeedback() {
       pushToast(
         typeof error === "string"
           ? error
-          : error instanceof OperatorApiError
+          : error instanceof APIError
             ? error.message
             : fallback,
         "error",

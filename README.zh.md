@@ -99,7 +99,7 @@ open-compute **就是这一层**——而且只有**一个文件**。
 | Images | █████████░ 95% |
 | Version Metadata | ██████████ 100% |
 | WebSocket Hibernation | ██████████ 100% |
-| Operator API · SDK · Dashboard | 设计中 |
+| Cloudflare v4 · Wrangler · Dashboard | 实施中 |
 
 剩下的 5% 是单节点的客观现实——全球边缘拓扑与托管 fleet 配额——不是缺方法。
 精确支持面：[兼容矩阵](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
@@ -117,7 +117,10 @@ bun run build
 发布你的第一个 Worker：
 
 ```sh
-bun run oc run --config examples/hello-worker/open-compute.json
+CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4 \\
+CLOUDFLARE_API_TOKEN="$OPEN_COMPUTE_DEPLOY_TOKEN" \\
+CLOUDFLARE_ACCOUNT_ID="$OPEN_COMPUTE_ACCOUNT_ID" \\
+bun run oc run --config examples/hello-worker/wrangler.jsonc
 ```
 
 类型检查、打包、部署、对外服务——一条命令。生产环境更简单：**一个可执行文件、一个配置文件、

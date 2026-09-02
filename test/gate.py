@@ -59,7 +59,6 @@ CARGO_TARGETS = {
     'p2-exit': ('open-compute-service', 'p2_exit_gate', False),
     'p3-assets': ('open-compute-service', 'p3_assets_gate', False),
     'dashboard': ('open-compute-service', 'dashboard_gate', False),
-    'operator-sdk': ('open-compute-service', 'operator_sdk_gate', False),
     'p3-services-hard': ('open-compute-service', 'p3_services_hard', False),
     'p3-services-product': ('open-compute-service', 'p3_services_product', False),
     'p3-services-events': ('open-compute-service', 'p3_services_events', False),
@@ -78,7 +77,7 @@ TYPED_TARGETS = {
 TARGETS = {**CARGO_TARGETS, **TYPED_TARGETS}
 P3_PRODUCT_TARGETS = [
     'p3-assets', 'p3-services-hard', 'p3-services-product', 'p3-services-events',
-    'p3-services-recovery', 'p3-cache-images', 'dashboard', 'operator-sdk',
+    'p3-services-recovery', 'p3-cache-images', 'dashboard',
 ]
 GROUPS = {
     'p0': [name for name in CARGO_TARGETS if name.startswith('p0-')],

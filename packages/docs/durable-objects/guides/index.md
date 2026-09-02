@@ -2,7 +2,7 @@
 
 ## Create a namespace and bind
 
-See [Get started](/durable-objects/get-started/). The binding must include `className`.
+See [Get started](/durable-objects/get-started/). The binding must include `class_name`.
 
 ## Call from a Worker
 

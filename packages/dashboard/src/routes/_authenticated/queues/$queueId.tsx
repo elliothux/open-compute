@@ -1,141 +1,112 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@cloudflare/kumo/components/button";
-import { parseQueueId } from "@open-compute/operator-sdk";
+import { DataTable, ErrorState, LoadingState, PageHeader, SectionHeader, StatusBadge } from "../../../components/PageLayout";
 import { QueueConfigDialog, type QueueConfigInput } from "../../../components/QueueConfigDialog";
-import { BackLink, ErrorState, LoadingState, PageHeader, StatusBadge } from "../../../components/PageLayout";
-import { docsLinks } from "../../../lib/docs";
-import { useMutationFeedback } from "../../../features/toast/useMutationFeedback";
-import { formatTimestamp } from "../../../lib/format";
 import { useAuth } from "../../../features/auth/AuthProvider";
-import { queryKeys } from "../../../queries/keys";
+import { useMutationFeedback } from "../../../features/toast/useMutationFeedback";
 
-export const Route = createFileRoute("/_authenticated/queues/$queueId")({
-  component: QueueDetailPage,
-});
+export const Route = createFileRoute("/_authenticated/queues/$queueId")({ component: QueueDetailPage });
 
 function QueueDetailPage() {
-  const { queueId: queueIdParam } = Route.useParams();
-  const queueId = parseQueueId(queueIdParam);
+  const { queueId } = Route.useParams();
   const { client, accountId } = useAuth();
-  const queryClient = useQueryClient();
   const feedback = useMutationFeedback();
+  const enabled = client !== null && accountId !== null;
   const [configOpen, setConfigOpen] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
-
-  const queueQuery = useQuery({
-    queryKey: queryKeys.queue(accountId ?? "", queueIdParam),
-    queryFn: ({ signal }) => client!.queues.get({ accountId: accountId!, queueId, signal }),
-    enabled: Boolean(client && accountId),
+  const queue = useQuery({
+    queryKey: ["cloudflare-v4", "queues", queueId],
+    queryFn: ({ signal }) => client!.cloudflare.queues.get(queueId, { account_id: accountId! }, { signal }),
+    enabled,
   });
-
-  const queue = queueQuery.data?.queue;
-  const updateConfigMutation = useMutation({
-    mutationFn: (input: QueueConfigInput) => client!.queues.updateConfig({
-      accountId: accountId!,
-      queueId,
-      expectedConfigGeneration: queue!.configGeneration,
-      idempotencyKey: crypto.randomUUID(),
-      ...(input.deliveryDelaySeconds !== undefined ? { deliveryDelaySeconds: input.deliveryDelaySeconds } : {}),
-      ...(input.retentionSeconds !== undefined ? { retentionSeconds: input.retentionSeconds } : {}),
-      ...(input.maxBacklogBytes !== undefined ? { maxBacklogBytes: input.maxBacklogBytes } : {}),
+  const metrics = useQuery({
+    queryKey: ["cloudflare-v4", "queues", queueId, "metrics"],
+    queryFn: ({ signal }) => client!.cloudflare.queues.getMetrics(queueId, { account_id: accountId! }, { signal }),
+    enabled,
+  });
+  const consumers = useQuery({
+    queryKey: ["cloudflare-v4", "queues", queueId, "consumers"],
+    queryFn: ({ signal }) => client!.cloudflare.queues.consumers.list(queueId, { account_id: accountId! }, { signal }),
+    enabled,
+  });
+  const configMutation = useMutation({
+    mutationFn: (input: QueueConfigInput) => client!.cloudflare.queues.edit(queueId, {
+      account_id: accountId!,
+      settings: {
+        ...(input.deliveryDelaySeconds !== undefined ? { delivery_delay: input.deliveryDelaySeconds } : {}),
+        ...(input.retentionSeconds !== undefined ? { message_retention_period: input.retentionSeconds } : {}),
+      },
     }),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.queue(accountId!, queueIdParam) }),
-        queryClient.invalidateQueries({ queryKey: ["operator", "queues", accountId!] }),
-      ]);
       setConfigOpen(false);
       setMutationError(null);
-      feedback.success("Queue configuration saved.");
+      await queue.refetch();
+      feedback.success("Queue configuration updated.");
     },
     onError: error => {
       setMutationError(error instanceof Error ? error.message : "Unable to update queue configuration.");
       feedback.failure(error, "Unable to update queue configuration.");
     },
   });
-
-  return (
-    <div>
-      <PageHeader
-        title={queue?.name ?? queueIdParam}
-        description="Queue configuration, lifecycle generation, and bounded backlog settings."
-        docsUrl={docsLinks.platform}
-        resourceId={queueIdParam}
-        resourceLabel="Queue ID"
-        actions={(
-          <>
-            <Button variant="primary" disabled={!queue} onClick={() => setConfigOpen(true)}>Edit configuration</Button>
-            <BackLink to="/queues" label="Back to queues" />
-          </>
-        )}
-      />
-      <QueueConfigDialog
-        open={configOpen}
-        mode="edit"
-        {...(queue ? { initial: {
-          deliveryDelaySeconds: queue.deliveryDelaySeconds,
-          retentionSeconds: queue.retentionSeconds,
-          maxBacklogBytes: queue.maxBacklogBytes,
-        } } : {})}
-        errorMessage={mutationError}
-        isPending={updateConfigMutation.isPending}
-        onClose={() => {
-          setConfigOpen(false);
-          setMutationError(null);
-        }}
-        onSubmit={input => updateConfigMutation.mutate(input)}
-      />
-      {queueQuery.isLoading ? <LoadingState /> : null}
-      {queueQuery.error ? <ErrorState message="Unable to load the Queue." /> : null}
-      {queue ? (
-        <dl className="grid gap-4 rounded-lg border border-kumo-line bg-kumo-elevated p-6 sm:grid-cols-2">
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">Queue ID</dt>
-            <dd className="mt-1 font-mono text-sm">{queue.id}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">State</dt>
-            <dd className="mt-1"><StatusBadge value={queue.state} /></dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">Availability</dt>
-            <dd className="mt-1"><StatusBadge value={queue.availability} /></dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">Config generation</dt>
-            <dd className="mt-1 font-mono text-sm">{queue.configGeneration}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">Lifecycle generation</dt>
-            <dd className="mt-1 font-mono text-sm">{queue.lifecycleGeneration}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">Retention</dt>
-            <dd className="mt-1 text-sm">{queue.retentionSeconds}s</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">Delivery delay</dt>
-            <dd className="mt-1 text-sm">{queue.deliveryDelaySeconds}s</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">Max backlog</dt>
-            <dd className="mt-1 text-sm">{queue.maxBacklogBytes.toLocaleString()} bytes</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-kumo-subtle">Updated</dt>
-            <dd className="mt-1 text-sm">{formatTimestamp(queue.updatedAtMs)}</dd>
-          </div>
-        </dl>
-      ) : null}
-      <div className="mt-6 text-sm text-kumo-subtle">
-        Pause and resume queue consumers from the{" "}
-        <Link to="/platform" className="text-kumo-link">
-          Platform
-        </Link>{" "}
-        page using the reported consumer generation fence.
+  const deliveryMutation = useMutation({
+    mutationFn: (paused: boolean) => client!.cloudflare.queues.edit(queueId, {
+      account_id: accountId!,
+      settings: { delivery_paused: paused },
+    }),
+    onSuccess: async (_result, paused) => {
+      await queue.refetch();
+      feedback.success(paused ? "Queue delivery paused." : "Queue delivery resumed.");
+    },
+    onError: error => feedback.failure(error, "Unable to update queue delivery."),
+  });
+  const paused = queue.data?.settings?.delivery_paused === true;
+  return <div>
+    <PageHeader
+      title={queue.data?.queue_name ?? "Queue"}
+      resourceId={queueId}
+      description="Inspect metrics and consumers, and update queue delivery settings through the official Queues API."
+      actions={<>
+        <Button variant="secondary" disabled={!queue.data || deliveryMutation.isPending} onClick={() => deliveryMutation.mutate(!paused)}>{paused ? "Resume delivery" : "Pause delivery"}</Button>
+        <Button variant="primary" disabled={!queue.data} onClick={() => setConfigOpen(true)}>Edit configuration</Button>
+      </>}
+    />
+    <QueueConfigDialog
+      mode="edit"
+      open={configOpen}
+      initial={{
+        ...(queue.data?.settings?.delivery_delay === undefined ? {} : { deliveryDelaySeconds: queue.data.settings.delivery_delay }),
+        ...(queue.data?.settings?.message_retention_period === undefined ? {} : { retentionSeconds: queue.data.settings.message_retention_period }),
+      }}
+      errorMessage={configOpen ? mutationError : null}
+      isPending={configMutation.isPending}
+      onClose={() => { setConfigOpen(false); setMutationError(null); }}
+      onSubmit={input => configMutation.mutate(input)}
+    />
+    {queue.isLoading || consumers.isLoading || metrics.isLoading ? <LoadingState /> : queue.error || consumers.error || metrics.error ? <ErrorState message="Unable to load Queue details." /> : <>
+      <DataTable columns={[{ key: "name", label: "Metric" }, { key: "value", label: "Value" }]} rows={[
+        { name: "Delivery", value: <StatusBadge value={paused ? "paused" : "active"} /> },
+        { name: "Backlog messages", value: metrics.data?.backlog_count ?? 0 },
+        { name: "Backlog bytes", value: metrics.data?.backlog_bytes ?? 0 },
+        { name: "Oldest message timestamp", value: metrics.data?.oldest_message_timestamp_ms || "unknown" },
+      ]} />
+      <div className="mt-6">
+        <SectionHeader title="Consumers" />
+        <DataTable columns={[
+          { key: "id", label: "Consumer" },
+          { key: "type", label: "Type" },
+          { key: "target", label: "Target" },
+          { key: "batch", label: "Batch size" },
+          { key: "retries", label: "Retries" },
+        ]} rows={(consumers.data?.result ?? []).map(item => ({
+          id: item.consumer_id ?? "unknown",
+          type: item.type ?? "unknown",
+          target: "script_name" in item ? item.script_name ?? "unknown" : "HTTP pull",
+          batch: item.settings?.batch_size ?? "default",
+          retries: item.settings?.max_retries ?? "default",
+        }))} emptyLabel="No consumers found." />
       </div>
-    </div>
-  );
+    </>}
+  </div>;
 }

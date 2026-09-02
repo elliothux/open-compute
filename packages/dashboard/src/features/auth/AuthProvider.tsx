@@ -1,27 +1,24 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { createOperatorClient, type AccountId, type OperatorClient } from "@open-compute/operator-sdk";
+import { createManagementClient, type ManagementClient } from "../../lib/cloudflare";
 import { clearAuthSession, readAuthSession, writeAuthSession } from "./authSession";
 
 interface AuthContextValue {
   token: string | null;
-  accountId: AccountId | null;
-  client: OperatorClient | null;
+  accountId: string | null;
+  client: ManagementClient | null;
   setToken: (token: string | null) => void;
-  setAccountId: (accountId: AccountId | null) => void;
+  setAccountId: (accountId: string | null) => void;
   clearAuth: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function createClient(token: string | null): OperatorClient | null {
+function createClient(token: string | null): ManagementClient | null {
   if (!token) return null;
-  return createOperatorClient({
-    baseUrl: new URL("/operator/api/v1/", window.location.origin),
-    getAccessToken: () => token,
-  });
+  return createManagementClient(token);
 }
 
-function initialAuthState(): { token: string | null; accountId: AccountId | null } {
+function initialAuthState(): { token: string | null; accountId: string | null } {
   const stored = readAuthSession();
   if (!stored) {
     return { token: null, accountId: null };
@@ -51,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setAccountId = useCallback((next: AccountId | null) => {
+  const setAccountId = useCallback((next: string | null) => {
     setAuthState(previous => {
       if (!next) {
         if (!previous.token) clearAuthSession();

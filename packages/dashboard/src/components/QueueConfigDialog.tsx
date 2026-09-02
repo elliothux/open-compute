@@ -7,7 +7,6 @@ export type QueueConfigInput = {
   name?: string;
   deliveryDelaySeconds?: number;
   retentionSeconds?: number;
-  maxBacklogBytes?: number;
 };
 
 interface QueueConfigDialogProps {
@@ -38,23 +37,19 @@ export function QueueConfigDialog({
   const [name, setName] = useState("");
   const [deliveryDelay, setDeliveryDelay] = useState("");
   const [retention, setRetention] = useState("");
-  const [maxBacklog, setMaxBacklog] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setName(initial?.name ?? "");
     setDeliveryDelay(initial?.deliveryDelaySeconds?.toString() ?? "");
     setRetention(initial?.retentionSeconds?.toString() ?? "");
-    setMaxBacklog(initial?.maxBacklogBytes?.toString() ?? "");
-  }, [initial?.deliveryDelaySeconds, initial?.maxBacklogBytes, initial?.name, initial?.retentionSeconds, open]);
+  }, [initial?.deliveryDelaySeconds, initial?.name, initial?.retentionSeconds, open]);
 
   const deliveryDelaySeconds = parseOptionalInteger(deliveryDelay);
   const retentionSeconds = parseOptionalInteger(retention);
-  const maxBacklogBytes = parseOptionalInteger(maxBacklog);
   const numericValuesValid =
     (deliveryDelay === "" || (deliveryDelaySeconds !== undefined && deliveryDelaySeconds >= 0))
-    && (retention === "" || (retentionSeconds !== undefined && retentionSeconds > 0))
-    && (maxBacklog === "" || (maxBacklogBytes !== undefined && maxBacklogBytes > 0));
+    && (retention === "" || (retentionSeconds !== undefined && retentionSeconds > 0));
   const canSubmit = numericValuesValid && (mode === "edit" || Boolean(name.trim()));
 
   return (
@@ -69,12 +64,11 @@ export function QueueConfigDialog({
             ...(mode === "create" ? { name: name.trim() } : {}),
             ...(deliveryDelaySeconds !== undefined ? { deliveryDelaySeconds } : {}),
             ...(retentionSeconds !== undefined ? { retentionSeconds } : {}),
-            ...(maxBacklogBytes !== undefined ? { maxBacklogBytes } : {}),
           });
         }}>
           <Dialog.Title>{mode === "create" ? "Create queue" : "Edit queue configuration"}</Dialog.Title>
           <Dialog.Description>
-            Configure delivery delay, retention, and the bounded backlog limit. Values are stored as seconds and bytes.
+            Configure delivery delay and message retention through the Cloudflare Queues API.
           </Dialog.Description>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             {mode === "create" ? (
@@ -84,9 +78,6 @@ export function QueueConfigDialog({
             ) : null}
             <Input label="Delivery delay (seconds)" type="number" min={0} step={1} value={deliveryDelay} onChange={event => setDeliveryDelay(event.target.value)} />
             <Input label="Retention (seconds)" type="number" min={1} step={1} value={retention} onChange={event => setRetention(event.target.value)} />
-            <div className="sm:col-span-2">
-              <Input label="Maximum backlog (bytes)" type="number" min={1} step={1} value={maxBacklog} onChange={event => setMaxBacklog(event.target.value)} />
-            </div>
           </div>
           {!numericValuesValid ? <p className="mt-3 text-sm text-kumo-danger" role="alert">Enter whole-number limits in the allowed range.</p> : null}
           {errorMessage ? <p className="mt-3 text-sm text-kumo-danger" role="alert">{errorMessage}</p> : null}

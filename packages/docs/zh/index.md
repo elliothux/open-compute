@@ -2,7 +2,7 @@
 
 单机 Workers 平台。`ocd` 启动锁定版本的 `workerd`，Worker API 与 Cloudflare 文档一致。不提供全球边缘网络、计费或 Cloudflare 控制台。
 
-使用 `oc` 部署 Worker，使用 `ocd` 运行平台。项目配置为 `open-compute.json`。
+使用 `oc` 部署 Worker，使用 `ocd` 运行平台。项目配置为 `wrangler.jsonc`。
 
 [开始](/zh/get-started) · [产品目录](/zh/directory)
 

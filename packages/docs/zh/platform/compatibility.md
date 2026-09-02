@@ -38,6 +38,6 @@ D1 覆盖 database / session / prepared statement / result / meta、错误与 bi
 
 ## 运行时
 
-兼容日期由平台锁定，`open-compute.json` 不得设置 `compatibilityDate` 或 flags。以 `runtime.effective_compatibility_date` 为准。不要替换二进制旁的 workerd，也不要从 `PATH` 另行解析 runtime。
+兼容日期由平台锁定，`wrangler.jsonc` 不得设置 `compatibilityDate` 或 flags。以 `runtime.effective_compatibility_date` 为准。不要替换二进制旁的 workerd，也不要从 `PATH` 另行解析 runtime。
 
 未提供的产品见[不支持](/zh/platform/unsupported)。运维可通过 `ocd capabilities --json` 查看运行中的二进制。

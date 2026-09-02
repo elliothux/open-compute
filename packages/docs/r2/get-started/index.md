@@ -1,57 +1,30 @@
-# Get started
+# R2 get started
 
-`ocd` must already be ready, with S3 configured (`[s3]` plus `r2_prefix`). Create a logical bucket, bind it in `open-compute.json`, and run the Worker with `oc`. `oc run` does not start another workerd. See [ocd get started](/ocd/get-started) and [configuration](/ocd/configuration).
-
-## 1. Create a logical bucket
-
-The following is the platform control plane. Cloudflare REST and `client.v4` are not provided. Object bytes go to the configured S3 prefix, not SQLite.
+Create a logical bucket through the supported Cloudflare v4 API:
 
 ```sh
-ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
-curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/r2/buckets" \
+curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   -H "content-type: application/json" \
-  -H "idempotency-key: r2-create-1" \
   -d '{"name":"my-bucket"}'
 ```
 
-Success returns `{ "resourceId": "...", "state": "ready" }`.
-
-## 2. Bind
+Bind the bucket name with standard Wrangler configuration:
 
 ```json
 {
   "name": "r2-app",
   "main": "src/index.ts",
-  "bindings": {
-    "BUCKET": { "type": "r2_bucket", "id": "<resourceId>" }
-  }
+  "compatibility_date": "2026-08-30",
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "my-bucket" }]
 }
 ```
 
-```sh
-bun run oc types --config open-compute.json
-```
-
-## 3. Worker
-
-```ts
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === "PUT") {
-      await env.BUCKET.put("hello", request.body);
-      return new Response("ok");
-    }
-    const object = await env.BUCKET.get("hello");
-    if (!object) return new Response("missing", { status: 404 });
-    return new Response(object.body);
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-## 4. Run
+Worker code uses standard `R2Bucket` methods. Bucket management uses `/client/v4`; object bytes use the Worker binding or the S3-compatible object API.
 
 ```sh
-bun run oc run --config open-compute.json --ocd <path-to-ocd>
+bun run oc types --config wrangler.jsonc
+bun run oc deploy --config wrangler.jsonc
 ```
 
-The CLI is `oc`, not Wrangler. Next: [Concepts](/r2/concepts/), [Guides](/r2/guides/).
+Next: [Concepts](/r2/concepts/) and [Guides](/r2/guides/).

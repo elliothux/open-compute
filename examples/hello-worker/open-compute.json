@@ -1,7 +1,0 @@
-{
-  "name": "hello-typescript",
-  "main": "src/index.ts",
-  "vars": {
-    "GREETING": "Hello from TypeScript"
-  }
-}

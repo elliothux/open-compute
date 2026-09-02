@@ -1,0 +1,10 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "hello-typescript",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-30",
+  "workers_dev": false,
+  "vars": {
+    "GREETING": "Hello from TypeScript"
+  }
+}

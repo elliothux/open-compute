@@ -38,6 +38,6 @@ D1 covers database / session / prepared statement / result / meta, errors and bi
 
 ## Runtime
 
-The platform freezes the compatibility date. `open-compute.json` cannot set `compatibilityDate` or flags. Use `runtime.effective_compatibility_date`. Do not swap a workerd beside the binary, search `PATH`, or download another runtime.
+The platform freezes the compatibility date. `wrangler.jsonc` cannot set `compatibilityDate` or flags. Use `runtime.effective_compatibility_date`. Do not swap a workerd beside the binary, search `PATH`, or download another runtime.
 
 Products that are not provided: [Unsupported](/platform/unsupported). Operators can inspect the running binary with `ocd capabilities --json`.

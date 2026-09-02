@@ -10,7 +10,7 @@ The KV Worker API matches Cloudflare. The storage topology does not.
 | Replication | Global edge | Single-node SQLite on the node running ocd |
 | `cacheTtl` | Colo cache | Parameter accepted; no colo cache |
 | Jurisdictions | Available | Not provided |
-| REST / `client.v4` | Available | Not provided; use the Worker binding |
+| REST / `/client/v4` | Available | Compatible namespace and value operations |
 | REST bulk write / delete | Available | Not provided |
 
 See [Compatibility](/platform/compatibility).

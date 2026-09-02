@@ -2,7 +2,7 @@
 
 ## Create a database
 
-See [Get started](/d1/get-started/). `POST /v1/accounts/{accountId}/d1/databases` with `{ "name": "..." }`. Cloudflare REST is not provided.
+See [Get started](/d1/get-started/). Database CRUD and query use `/client/v4/accounts/{account_id}/d1/database` through the official SDK or pinned Wrangler.
 
 ## prepare / bind / batch
 

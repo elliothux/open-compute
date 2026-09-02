@@ -26,19 +26,19 @@ export default {
 } satisfies ExportedHandler<{ COUNTER: DurableObjectNamespace }>;
 ```
 
-Bind in `open-compute.json`. Durable Object bindings require `className`:
+Bind in `wrangler.jsonc` with Wrangler's standard Durable Object field:
 
 ```json
 {
   "name": "do-app",
   "main": "src/index.ts",
-  "bindings": {
-    "COUNTER": { "type": "do_namespace", "id": "<do-namespace-id>", "className": "Counter" }
+  "durable_objects": {
+    "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   }
 }
 ```
 
-`className` only checks class semantics in generated framework config. It is not sent as the resource id. Grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
+The class is part of the uploaded Worker; Durable Object migrations follow Wrangler's standard `migrations` field. Grammar: [bindings](/workers/configuration/bindings).
 
 ## Compatibility
 
@@ -48,7 +48,7 @@ Bind in `open-compute.json`. Durable Object bindings require `className`:
 | Placement | Geographic scheduling, `locationHint` / jurisdiction / migration | All objects on one local workerd; `locationHint` / jurisdiction / migration have no geo effect |
 | Alarms | Available | 7 methods supported: `getAlarm` / `setAlarm` / `deleteAlarm` and the `alarm()` handler |
 | Hibernation | Available | Supported |
-| Binding | wrangler `durable_objects` | `{ type, id, className }`; `className` required |
+| Binding | Wrangler `durable_objects` | Standard `name` and `class_name`; `class_name` required |
 | `Fetcher.connect()` | General outbound | Declared capability tunnel |
 
 ## Next

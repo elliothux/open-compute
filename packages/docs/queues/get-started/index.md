@@ -1,60 +1,33 @@
-# Get started
+# Queues get started
 
-Create a Queue, bind a producer in `open-compute.json`, and run the Worker with `oc`. `oc run` does not start another workerd. See [ocd get started](/ocd/get-started).
-
-## 1. Create a Queue
-
-The following is the platform control plane. Cloudflare REST and `client.v4` are not provided.
+Create a Queue through the supported Cloudflare v4 API:
 
 ```sh
-ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
-curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/queues" \
+curl -sS -X POST "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/queues" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   -H "content-type: application/json" \
-  -H "idempotency-key: queue-create-1" \
-  -d '{"name":"jobs"}'
+  -d '{"queue_name":"jobs"}'
 ```
 
-The response is `{ "queue": { "id": "...", ... } }`. Put `queue.id` in the binding.
-
-## 2. Producer binding
+Use standard Wrangler producer and consumer configuration:
 
 ```json
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "bindings": {
-    "QUEUE": { "type": "queue_producer", "id": "<queue.id>" }
+  "compatibility_date": "2026-08-30",
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
+    "consumers": [{ "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 5 }]
   }
 }
 ```
 
-Current `open-compute.json` has no Wrangler-style consumers array; unknown fields are rejected. The consumer is the Worker's exported `queue` handler. The platform delivers via a push consumer on the deployment.
+The producer uses `env.QUEUE.send`; the Worker exports the standard `queue` handler.
 
 ```sh
-bun run oc types --config open-compute.json
+bun run oc types --config wrangler.jsonc
+bun run oc deploy --config wrangler.jsonc
 ```
 
-## 3. Worker
-
-```ts
-export default {
-  async fetch(_request: Request, env: Env): Promise<Response> {
-    await env.QUEUE.send({ hello: "world" });
-    await env.QUEUE.sendBatch([{ body: { hello: "batch" } }]);
-    return new Response("queued");
-  },
-  async queue(batch: MessageBatch<{ hello: string }>): Promise<void> {
-    for (const message of batch.messages) {
-      message.ack();
-    }
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-## 4. Run
-
-```sh
-bun run oc run --config open-compute.json --ocd <path-to-ocd>
-```
-
-The CLI is `oc`, not Wrangler. Next: [Concepts](/queues/concepts/).
+Next: [Concepts](/queues/concepts/).

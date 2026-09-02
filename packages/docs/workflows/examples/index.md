@@ -24,10 +24,10 @@ export default {
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "bindings": {
-    "FLOW": { "type": "workflow", "id": "<workflow-id>", "className": "MyWorkflow" }
-  }
+  "workflows": [
+    { "binding": "FLOW", "name": "flow", "class_name": "MyWorkflow" }
+  ]
 }
 ```
 
-`create` / `get` / `step.do` / `status` match [Cloudflare Workflows](https://developers.cloudflare.com/workflows/). `className` is required. Execution authority is local SQLite. Create the definition: [Get started](/workflows/get-started/).
+`create` / `get` / `step.do` / `status` match [Cloudflare Workflows](https://developers.cloudflare.com/workflows/). `class_name` is required. Execution authority is local SQLite. Create the definition: [Get started](/workflows/get-started/).

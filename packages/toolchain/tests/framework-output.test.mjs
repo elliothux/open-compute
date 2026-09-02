@@ -43,7 +43,7 @@ async function fixture(t, wrangler = {}) {
   await writeFile(join(root, "dist", "client", "index.html"), "<main>app</main>");
   await writeFile(join(root, "dist", "client", "assets", "app-abc.js"), "globalThis.client = true;");
   return {
-    project: root, name: "framework-local", vars: {}, secrets: {}, bindings: {}, services: {},
+    project: root, configPath: ".wrangler/deploy/config.json", name: "framework-local", vars: {}, secrets: [], bindings: {}, services: {},
     frameworkOutput: ".wrangler/deploy/config.json",
     runtimeFeatures: {
       cache: { enabled: false, crossVersionCache: false, entrypoints: {} },

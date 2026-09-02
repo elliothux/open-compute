@@ -1,6 +1,6 @@
 # 示例
 
-Producer 用 `queue_producer` binding 的 `send`；consumer 是同一 Worker 上的 `queue` handler。把平台返回的 `queue.id` 填进 binding，然后 `oc types` / `oc run`。
+Producer 通过 queue binding 调用 `send`；consumer 是同一 Worker 上的 `queue` handler。通过 Wrangler 声明两者，然后运行 `oc types` / `oc deploy`。
 
 ```ts
 export default {
@@ -22,8 +22,9 @@ export default {
 {
   "name": "queue-app",
   "main": "src/index.ts",
-  "bindings": {
-    "QUEUE": { "type": "queue_producer", "id": "<queue.id>" }
+  "queues": {
+    "producers": [{ "binding": "QUEUE", "queue": "jobs" }],
+    "consumers": [{ "queue": "jobs" }]
   }
 }
 ```

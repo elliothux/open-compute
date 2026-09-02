@@ -18,7 +18,7 @@ Only **five UTC fields**: minute, hour, day-of-month, month, day-of-week. No sec
 
 Documented local Quartz-like extensions: `*` `,` `-` `/` `L` `W` `#`, plus case-insensitive three-letter month/weekday names. Weekday numbers follow the Cloudflare fixture: `1=Sunday` … `7=Saturday`.
 
-The platform deployment metadata field is `crons: string[]`. `open-compute.json` has no Wrangler `triggers` / `triggers.crons`; adding one is an unknown field and fails. Workflow cron uses `schedules` on the workflow binding, not Worker `scheduled()`.
+Declare Worker cron triggers with standard `triggers.crons`. Workflow schedules remain on the standard Workflow binding and do not invoke the Worker's `scheduled()` handler.
 
 ## Compatibility
 
@@ -31,4 +31,3 @@ The platform deployment metadata field is `crons: string[]`. `open-compute.json`
 | Misfire recovery | Hosted scheduler semantics | Projects at most the latest slot within grace; does not replay complete downtime history |
 | Retry on known failure | Hosted policy | Configured bounded local retry unless `noRetry()` is called |
 | Default misfire grace | Plan-dependent | `scheduler.cron_misfire_grace_ms = 300000` (five minutes); exact values from `ocd capabilities --json` `limits` |
-

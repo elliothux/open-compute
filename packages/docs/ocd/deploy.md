@@ -1,6 +1,6 @@
 # Deploy
 
-This page covers running an **already issued** OS/CPU-matching `ocd` file as a long-running service: container, systemd, and launchd. It is not Worker code deploy (`oc run` / `oc deploy`; see [Get started](/get-started)). It does not cover building that file from source.
+This page covers running an **already issued** OS/CPU-matching `ocd` file as a long-running service: container, systemd, and launchd. It is not Worker code deploy (`oc deploy` / `oc deploy`; see [Get started](/get-started)). It does not cover building that file from source.
 
 Shared contract: one `ocd`, one absolute-path config, one writable executable data-dir, and external S3. Never embed credentials in images, units, plists, or release archives; use env/file refs from config. Restart on process exit or `/health/live` failure, **never** on `/health/ready` 503.
 

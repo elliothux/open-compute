@@ -26,19 +26,19 @@ export default {
 } satisfies ExportedHandler<{ COUNTER: DurableObjectNamespace }>;
 ```
 
-在 `open-compute.json` 中绑定。Durable Object 必须指定 `className`：
+在 `wrangler.jsonc` 中使用 Wrangler 标准 Durable Object 字段绑定：
 
 ```json
 {
   "name": "do-app",
   "main": "src/index.ts",
-  "bindings": {
-    "COUNTER": { "type": "do_namespace", "id": "<do-namespace-id>", "className": "Counter" }
+  "durable_objects": {
+    "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
   }
 }
 ```
 
-`className` 仅用于核对 class，不会作为资源 ID 提交给平台。语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+class 随 Worker 上传；Durable Object migration 使用 Wrangler 标准 `migrations` 字段。语法见[绑定](/zh/workers/configuration/bindings)。
 
 ## 兼容性
 
@@ -48,7 +48,7 @@ export default {
 | 对象位置 | 按地区调度，`locationHint` / jurisdiction / migration | 全部位于本机单个 workerd；`locationHint` / jurisdiction / migration 不产生地理效果 |
 | Alarms | 提供 | 提供：`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` |
 | Hibernation | 提供 | 提供 |
-| 绑定 | wrangler `durable_objects` | `{ type, id, className }`，必须指定 `className` |
+| 绑定 | Wrangler `durable_objects` | 标准 `name` 与 `class_name`，必须指定 `class_name` |
 | `Fetcher.connect()` | 通用出站 | 使用绑定声明的连接，而非第二条通用出站通道 |
 
 ## 本节

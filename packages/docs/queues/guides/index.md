@@ -33,4 +33,4 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-Handler success with no explicit decision → ack; failure with no explicit decision → retry. `open-compute.json` does not use a Wrangler consumers array.
+Handler success with no explicit decision → ack; failure with no explicit decision → retry. Declare consumer settings with Wrangler's standard `queues.consumers` entries.

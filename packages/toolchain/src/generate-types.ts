@@ -75,7 +75,7 @@ export function generateEnvTypes(project: WorkerProject, outputPath: string): st
   const output = resolve(outputPath);
   const properties = new Map<string, string>();
   for (const [key, value] of Object.entries(project.vars)) defineEnv(properties, key, jsonType(value));
-  for (const key of Object.keys(project.secrets)) defineEnv(properties, key, "string");
+  for (const key of project.secrets) defineEnv(properties, key, "string");
   for (const [key, binding] of Object.entries(project.bindings)) {
     defineEnv(properties, key, BINDING_TYPES[binding.type]);
   }

@@ -2,17 +2,15 @@
 
 ## 创建 namespace
 
-见[上手](/zh/kv/get-started/)。本平台 `POST /v1/accounts/{accountId}/kv/namespaces`，body `{ "name": "..." }`，需要 `idempotency-key`。不提供 Cloudflare REST。
+见[上手](/zh/kv/get-started/)。namespace CRUD 通过官方 SDK 或固定 Wrangler 使用 `/client/v4/accounts/{account_id}/storage/kv/namespaces`。
 
 ## 绑定
 
 ```json
-"bindings": {
-  "KV": { "type": "kv_namespace", "id": "<resourceId>" }
-}
+"kv_namespaces": [{ "binding": "KV", "id": "<namespace-id>" }]
 ```
 
-可选 `permissions`。改完后运行 `bun run oc types --config open-compute.json`。
+改完后运行 `bun run oc types --config wrangler.jsonc`。
 
 ## get / put / list / delete
 

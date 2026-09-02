@@ -10,7 +10,7 @@ The Durable Objects Worker / class API matches Cloudflare. Every object lives on
 | Placement | Geographic scheduling, `locationHint` / jurisdiction / migration | All objects on one local workerd; `locationHint` / jurisdiction / migration have no geo effect |
 | Alarms | Available | 7 methods supported |
 | Hibernation | Available | Supported |
-| Binding | wrangler `durable_objects` | `{ type, id, className }`; `className` required |
+| Binding | Wrangler `durable_objects` | Standard `name`, `class_name`, and optional `script_name` |
 | `Fetcher.connect()` | General outbound | Declared capability tunnel |
 
 See [Compatibility](/platform/compatibility).

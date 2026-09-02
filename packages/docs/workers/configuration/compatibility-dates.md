@@ -1,19 +1,16 @@
 # Compatibility dates
 
-This platform has one effective compatibility date: `effective_compatibility_date` from the formal runtime lock, currently **`2026-08-30`**. Projects cannot choose a date.
+Every deployed Version declares standard `compatibility_date`. It must fall inside the range advertised by `GET /client/v4/open-compute/capabilities`; the current example uses **`2026-08-30`**.
 
 ```sh
-ocd capabilities --json
+curl -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  "$CLOUDFLARE_API_BASE_URL/open-compute/capabilities"
 ```
 
-Read `runtime.effective_compatibility_date`. The live value is the JSON on the node.
-
-The meaning of the date matches Cloudflare: it selects workerd's observable behavior as of that day. See [Cloudflare compatibility dates](https://developers.cloudflare.com/workers/configuration/compatibility-dates/).
-
-## Compatibility
+Read `compatibility_date.minimum` and `compatibility_date.maximum`. The date selects workerd's observable behavior as documented by [Cloudflare compatibility dates](https://developers.cloudflare.com/workers/configuration/compatibility-dates/).
 
 | Topic | Cloudflare | open-compute |
 | --- | --- | --- |
 | Date selects workerd observable behavior | Yes | Yes |
-| Per-project `compatibility_date` / `compatibilityDate` | Yes | Not allowed; putting one in `open-compute.json` is an unknown field and fails |
-| How the date changes | Project config | Changing the platform pin (`workerd.lock.json`) |
+| Per-project `compatibility_date` | Yes | Required and persisted per immutable Version |
+| Supported range | Cloudflare runtime | Extension capabilities plus the formal runtime pin |

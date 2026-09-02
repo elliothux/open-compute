@@ -8,13 +8,13 @@ Read-only diagnosis:
 /opt/open-compute/ocd --config /etc/open-compute/config.toml doctor --json
 ```
 
-Prefer waiting for token/expiry recovery and bounded repair. Inspect pools via `/v1/scheduler` and `/v1/operator/workflows` first. An Unknown Workflow dispatch keeps its lease; do not treat it as a business failure you can retry immediately.
+Prefer waiting for token/expiry recovery and bounded repair. Inspect scheduler state through `/client/v4/open-compute/scheduler` and Workflow instances through the official account Workflows API. An Unknown Workflow dispatch keeps its lease; do not treat it as a business failure you can retry immediately.
 
 Queue consumer and Cron activation dispatch epochs are frozen in the scheduler projection. Adding or editing an HTTP route does not replace them. Retrying promotion or starting reconcile reuses that epoch and still strictly validates target, descriptor, and product generation. Do not write the current Worker route revision back into an already created projection or claim.
 
 If control still has a Queue, Cron activation, Workflow instance (including released/terminal/retained), Workflow operation, or Workflow version, you cannot rebuild scheduling history from an empty database. After Workflow purge releases control references, scheduler may still hold GC receipts; a corrupt file cannot prove those records are absent. Stop the service and restore a full-platform snapshot with [fresh-host restore](/ocd/incidents/fresh-host). That does not undo external side effects that already happened. Do not delete referrer, operation, receipt, or step rows to bypass the check.
 
-Workflow waiting/paused does not consume execution concurrency. `/v1/operator/workflows` includes waiting, inbox, retention, and operation counts. Retention history metrics such as `workflow_*_results` and `workflow_consumed_events` are gauges; restart/purge can lower them. `workflow_event_intake_total` and `workflow_lifecycle_total` are this process's observed call results. The fixed metrics budget now needs at least 567 series; the default remains 1024.
+Workflow waiting/paused does not consume execution concurrency. The official Workflow instance response exposes lifecycle state and steps. Retention history metrics such as `workflow_*_results` and `workflow_consumed_events` are gauges; restart/purge can lower them. `workflow_event_intake_total` and `workflow_lifecycle_total` are this process's observed call results. The fixed metrics budget now needs at least 567 series; the default remains 1024.
 
 If the runtime cannot confirm callback drain, the current Workflow execution path isolates the current workerd generation. Operator resume cannot lift that isolation; only a supervisor-started new generation can admit Workflow again. Existing leases stay for Unknown recovery and do not increment attempt as a business retry.
 

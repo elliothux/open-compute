@@ -24,19 +24,17 @@ export default {
 } satisfies ExportedHandler<{ BUCKET: R2Bucket }>;
 ```
 
-Bind an existing logical bucket in `open-compute.json`. Ordinary product bindings are `{ type, id, permissions? }`:
+Bind an existing logical bucket with Wrangler's standard R2 field:
 
 ```json
 {
   "name": "r2-app",
   "main": "src/index.ts",
-  "bindings": {
-    "BUCKET": { "type": "r2_bucket", "id": "<r2-bucket-id>" }
-  }
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "files" }]
 }
 ```
 
-`id` is an existing logical bucket on this platform. Binding grammar: [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
+`bucket_name` names an existing logical bucket in the account. Binding grammar: [bindings](/workers/configuration/bindings). Use pinned Wrangler or the official SDK for bucket and object operations.
 
 ## Compatibility
 
@@ -47,7 +45,7 @@ Bind an existing logical bucket in `open-compute.json`. Ordinary product binding
 | Global placement | Available | Not provided |
 | r2.dev public product | Available | Not provided |
 | Jurisdictional restrictions | Available | Not provided |
-| REST / `client.v4` | Available | Not provided; use the Worker binding or the provider S3 API |
+| REST / `client/v4` | Available | Compatible account-scoped bucket and object operations |
 
 ## Next
 

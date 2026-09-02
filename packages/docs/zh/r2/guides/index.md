@@ -2,7 +2,7 @@
 
 ## 创建 bucket
 
-见[上手](/zh/r2/get-started/)。`POST /v1/accounts/{accountId}/r2/buckets`。不提供 Cloudflare REST。
+见[上手](/zh/r2/get-started/)。bucket CRUD 通过官方 SDK 或固定 Wrangler 使用 `/client/v4/accounts/{account_id}/r2/buckets`。
 
 ## Worker 读写
 

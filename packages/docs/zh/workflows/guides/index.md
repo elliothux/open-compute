@@ -1,10 +1,10 @@
 # 指南
 
-创建 definition，在 `open-compute.json` 中绑定 `className`，再用 `oc` 创建实例。已提交的 step 在 replay 时跳过。
+创建 definition，在 `wrangler.jsonc` 中绑定 `class_name`，再通过官方 SDK 创建实例。已提交的 step 在 replay 时跳过。
 
 ## 创建并绑定
 
-见[上手](/zh/workflows/get-started/)。binding 必须有 `className`。可选 `schedules`。
+见[上手](/zh/workflows/get-started/)。binding 必须有 `class_name`。可选 `schedules`。
 
 ## 创建实例
 

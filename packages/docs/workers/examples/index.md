@@ -46,9 +46,7 @@ export default {
 {
   "name": "kv-demo",
   "main": "src/index.ts",
-  "bindings": {
-    "KV": { "type": "kv_namespace", "id": "<kv-namespace-id>" }
-  }
+  "kv_namespaces": [{ "binding": "KV", "id": "<kv-namespace-id>" }]
 }
 ```
 
@@ -69,7 +67,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-Expressions are five UTC fields plus the documented local Quartz-like extensions. On misfire, recovery projects at most the latest slot within grace. The platform deployment metadata field is `crons` (string array). `open-compute.json` has no Wrangler `triggers` key; adding one is an unknown field and fails.
+Expressions use the standard UTC cron syntax accepted by Wrangler. Declare them through the `triggers.crons` string array.
 
 ## Service Binding `fetch`
 

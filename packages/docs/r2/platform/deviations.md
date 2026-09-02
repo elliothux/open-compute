@@ -11,6 +11,6 @@ The R2 Worker API matches Cloudflare. Object bytes live on the configured S3-com
 | Global placement | Available | Not provided |
 | r2.dev public product | Available | Not provided |
 | Jurisdictional restrictions | Available | Not provided |
-| REST / `client.v4` | Available | Not provided; use the Worker binding or the provider S3 API |
+| REST / `/client/v4` | Available | Compatible bucket and object operations |
 
 See [Compatibility](/platform/compatibility).

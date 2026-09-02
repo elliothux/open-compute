@@ -1,60 +1,23 @@
-# 上手
+# Workflows 上手
 
-创建 definition，绑定 class，再用 `oc` 运行。`ocd` 必须就绪。
-
-## 1. 创建 definition
-
-以下为本平台控制面。不提供 Cloudflare REST / `client.v4`。
-
-```sh
-ACCOUNT_ID=$(curl -sS http://127.0.0.1:8787/v1/account | python3 -c 'import json,sys; print(json.load(sys.stdin)["accountId"])')
-curl -sS -X POST "http://127.0.0.1:8787/v1/accounts/$ACCOUNT_ID/workflows" \
-  -H "content-type: application/json" \
-  -H "idempotency-key: wf-create-1" \
-  -d '{"name":"orders"}'
-```
-
-响应含 definition 的 `id`。把它填进 binding。
-
-## 2. 绑定
+Wrangler 部署导出 class 的 Worker 时，通过官方 API 创建或更新 Workflow definition。使用标准配置绑定：
 
 ```json
 {
   "name": "flow-app",
   "main": "src/index.ts",
-  "bindings": {
-    "FLOW": { "type": "workflow", "id": "<definition-id>", "className": "MyWorkflow" }
-  }
+  "compatibility_date": "2026-08-30",
+  "workflows": [
+    { "binding": "FLOW", "name": "orders", "class_name": "MyWorkflow" }
+  ]
 }
 ```
 
-`className` 必须有。
+导出 `MyWorkflow extends WorkflowEntrypoint`，通过 `env.FLOW.create` 创建实例。位于 `/client/v4/accounts/{account_id}/workflows` 的官方 Workflows API 管理 definition、version、instance、status 和 event。
 
 ```sh
-bun run oc types --config open-compute.json
+bun run oc types --config wrangler.jsonc
+bun run oc deploy --config wrangler.jsonc
 ```
 
-## 3. Worker
-
-```ts
-export class MyWorkflow extends WorkflowEntrypoint<Env, { hello: string }> {
-  async run(event: WorkflowEvent<{ hello: string }>, step: WorkflowStep) {
-    return step.do("echo", async () => event.payload);
-  }
-}
-
-export default {
-  async fetch(_request: Request, env: Env): Promise<Response> {
-    const instance = await env.FLOW.create({ params: { hello: "world" } });
-    return Response.json({ id: instance.id });
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-## 4. 运行
-
-```sh
-bun run oc run --config open-compute.json --ocd <path-to-ocd>
-```
-
-CLI 为 `oc`，不是 Wrangler。下一步：[概念](/zh/workflows/concepts/)。
+下一步：[概念](/zh/workflows/concepts/)。

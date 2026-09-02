@@ -2,7 +2,7 @@
 
 A serverless platform for building Workers applications on a single node. open-compute runs the declared Cloudflare Workers programming model (`ocd` + pinned `workerd`). It does not provide a global edge, billing, or the Cloudflare dashboard.
 
-Deploy module Workers with `oc`. Run the platform as a service with `ocd`. The project file is `open-compute.json`.
+Deploy module Workers with `oc`. Run the platform as a service with `ocd`. The project file is `wrangler.jsonc`.
 
 [Get started](/get-started) · [Directory](/directory)
 

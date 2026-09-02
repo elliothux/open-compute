@@ -21,7 +21,7 @@ export default {
 } satisfies ExportedHandler<{ IMAGES: ImagesBinding }>;
 ```
 
-Declare it in `open-compute.json`. Images is not a resource id in `bindings`. Use top-level `"images": { "binding": "IMAGES" }` only:
+Declare it in `wrangler.jsonc`. Images is not a resource id in `bindings`. Use top-level `"images": { "binding": "IMAGES" }` only:
 
 ```json
 {
@@ -31,7 +31,7 @@ Declare it in `open-compute.json`. Images is not a resource id in `bindings`. Us
 }
 ```
 
-See [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc run` / `oc types`.
+See [bindings](/workers/configuration/bindings). The CLI is `oc` / `oc deploy` / `oc types`.
 
 ## Compatibility
 

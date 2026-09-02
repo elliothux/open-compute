@@ -4,7 +4,8 @@ import { Button } from "@cloudflare/kumo/components/button";
 import { BrandLogo } from "../components/BrandLogo";
 import { Surface } from "@cloudflare/kumo/components/surface";
 import { Input } from "@cloudflare/kumo/components/input";
-import { createOperatorClient, OperatorApiError } from "@open-compute/operator-sdk";
+import { APIError } from "cloudflare/error";
+import { createManagementClient } from "../lib/cloudflare";
 import { useAuth } from "../features/auth/AuthProvider";
 
 export const Route = createFileRoute("/login")({
@@ -28,17 +29,16 @@ function LoginPage() {
         setError("Enter an admin token to continue.");
         return;
       }
-      const nextClient = createOperatorClient({
-        baseUrl: new URL("/operator/api/v1/", window.location.origin),
-        getAccessToken: () => trimmed,
-      });
-      const account = await nextClient.system.account();
+      const nextClient = createManagementClient(trimmed);
+      const accounts = await nextClient.cloudflare.accounts.list({ per_page: 2 });
+      const account = accounts.result[0];
+      if (account?.id === undefined) throw new Error("No accessible account was returned.");
       setToken(trimmed);
-      setAccountId(account.accountId);
+      setAccountId(account.id);
       await navigate({ to: "/" });
     } catch (caught) {
       setToken(null);
-      if (caught instanceof OperatorApiError) {
+      if (caught instanceof APIError) {
         setError(caught.message);
       } else {
         setError("Unable to verify the admin token.");

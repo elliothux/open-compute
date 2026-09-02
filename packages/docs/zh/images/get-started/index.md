@@ -15,7 +15,7 @@
 不要写进 `bindings`，也不要提供 Cloudflare Images 账户 ID。
 
 ```sh
-bun run oc types --config open-compute.json
+bun run oc types --config wrangler.jsonc
 ```
 
 ## 2. Worker
@@ -40,7 +40,7 @@ export default {
 ## 3. 运行
 
 ```sh
-bun run oc run --config open-compute.json --ocd <path-to-ocd>
+bun run oc deploy --config wrangler.jsonc
 ```
 
 CLI 为 `oc`，不是 Wrangler。下一步：[概念](/zh/images/concepts/)。

@@ -2,7 +2,7 @@
 
 ## 创建 database
 
-见[上手](/zh/d1/get-started/)。`POST /v1/accounts/{accountId}/d1/databases`，`{ "name": "..." }`。不提供 Cloudflare REST。
+见[上手](/zh/d1/get-started/)。database CRUD 与 query 通过官方 SDK 或固定 Wrangler 使用 `/client/v4/accounts/{account_id}/d1/database`。
 
 ## prepare / bind / batch
 

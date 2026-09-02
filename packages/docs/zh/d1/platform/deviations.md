@@ -14,6 +14,6 @@ D1 的 Worker API 与 Cloudflare 对齐；存储拓扑不同。
 | Bookmark | 跨副本因果 | 同一数据库的本地顺序 |
 | `rows_read` / `rows_written` | 计费计数 | 本地 SQLite 执行计数 |
 | `dump()` | hosted 非 alpha 拒绝 | 同样拒绝（`D1_DUMP_ERROR`） |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker binding |
+| REST / `/client/v4` | 提供 | 兼容 database 与 query 操作 |
 
 见[兼容性](/zh/platform/compatibility)。

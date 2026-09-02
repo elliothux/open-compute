@@ -13,10 +13,11 @@
   },
   "dependencies": {
     "@cloudflare/kumo": "catalog:",
-    "@open-compute/operator-sdk": "workspace:*",
+    "@open-compute/cloudflare-extension": "workspace:*",
     "@phosphor-icons/react": "catalog:",
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-router": "catalog:",
+    "cloudflare": "catalog:",
     "date-fns": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

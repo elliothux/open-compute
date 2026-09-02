@@ -1,22 +1,21 @@
 # Compatibility flags
 
-Compatibility flags 由平台 runtime lock 控制。项目 JSON 不能设置它们。
+项目使用 Wrangler 标准 `compatibility_flags` 数组。server 只接受 extension capabilities 广告且 pinned runtime 支持的 flag。
 
 ```json
 {
   "name": "hello-typescript",
-  "main": "src/index.ts"
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": []
 }
 ```
 
-不可写入 `compatibilityFlags`。当前 lock：`requiredCompatibilityFlags` 为空；`systemCompatibilityFlags` 为 `experimental` 和 `service_binding_extra_handlers`。这是可执行文件身份的一部分，不是项目级开关。
-
-## 兼容性
+使用 Wrangler 的 snake_case 字段。内部 system flags 仍属于 executable identity，不复制到项目配置。
 
 | 主题 | Cloudflare | open-compute |
 | --- | --- | --- |
-| flag 名字与语义 | 是，见 [Cloudflare compatibility flags](https://developers.cloudflare.com/workers/configuration/compatibility-flags/) | 来自 workerd / 同一套名字 |
-| pinned baseline 已提供 Node 兼容，`node:` 导入无需再开 flag | 取决于项目 flag | 是 |
-| 项目 JSON 中的 `compatibilityFlags` / `compatibility_flags` | 是 | 不允许；未知字段失败 |
-| 将 Wrangler flag 列表转发给平台 | Wrangler | 不提供 |
-| 查看实际集合 | 控制台 / Wrangler | `ocd capabilities --json` 的 `runtime`，以及仓库 `packages/runtime/workerd.lock.json` |
+| flag 名称与语义 | [Cloudflare compatibility flags](https://developers.cloudflare.com/workers/configuration/compatibility-flags/) | 来自 workerd 的相同名称 |
+| 项目 `compatibility_flags` | 是 | 按不可变 Version 持久化和验证 |
+| 不支持的 flag | upload 失败 | fail closed |
+| 实际支持集合 | Dashboard / Wrangler | extension capabilities 与 `packages/runtime/workerd.lock.json` |

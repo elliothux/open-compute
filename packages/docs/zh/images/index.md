@@ -21,7 +21,7 @@ export default {
 } satisfies ExportedHandler<{ IMAGES: ImagesBinding }>;
 ```
 
-在 `open-compute.json` 中声明。Images 不是 `bindings` 中的资源 ID，使用顶层字段：
+在 `wrangler.jsonc` 中声明。Images 不是 `bindings` 中的资源 ID，使用顶层字段：
 
 ```json
 {
@@ -31,7 +31,7 @@ export default {
 }
 ```
 
-语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc deploy` / `oc types`。
 
 ## 兼容性
 

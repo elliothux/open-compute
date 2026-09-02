@@ -20,19 +20,17 @@ export default {
 } satisfies ExportedHandler<{ KV: KVNamespace }>;
 ```
 
-在 `open-compute.json` 中绑定已存在的 namespace：
+在 `wrangler.jsonc` 中绑定已存在的 namespace：
 
 ```json
 {
   "name": "kv-app",
   "main": "src/index.ts",
-  "bindings": {
-    "KV": { "type": "kv_namespace", "id": "<kv-namespace-id>" }
-  }
+  "kv_namespaces": [{ "binding": "KV", "id": "<kv-namespace-id>" }]
 }
 ```
 
-`id` 必须指向平台上已有的 namespace。可选 `permissions`：`{ "read": true, "write": true }`。语法见 [绑定](/zh/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+`id` 必须指向 account 中已有的 namespace。语法见[绑定](/zh/workers/configuration/bindings)。namespace 与 value 操作使用固定 Wrangler 或官方 SDK。
 
 ## 兼容性
 
@@ -42,7 +40,7 @@ export default {
 | 存储位置 | Cloudflare 边缘网络 | 本机 SQLite |
 | `cacheTtl` | 边缘缓存 | 接受该参数，但不建立边缘缓存 |
 | 数据驻留（Jurisdictions） | 提供 | 不提供 |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker 绑定 |
+| REST / `client/v4` | 提供 | 兼容 account-scoped namespace 与 value 操作 |
 
 ## 本节
 

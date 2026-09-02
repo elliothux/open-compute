@@ -2,7 +2,7 @@
 
 ## Create a bucket
 
-See [Get started](/r2/get-started/). `POST /v1/accounts/{accountId}/r2/buckets`. Cloudflare REST is not provided.
+See [Get started](/r2/get-started/). Bucket CRUD uses `/client/v4/accounts/{account_id}/r2/buckets` through the official SDK or pinned Wrangler.
 
 ## Worker reads and writes
 

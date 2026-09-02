@@ -10,7 +10,7 @@ KV 的 Worker API 与 Cloudflare 对齐；存储拓扑不同。
 | 复制 | Cloudflare 边缘网络 | 运行 `ocd` 的主机上的单节点 SQLite |
 | `cacheTtl` | Colo cache | 接受该参数；无 colo cache |
 | Jurisdictions | 提供 | 不提供 |
-| REST / `client.v4` | 提供 | 不提供；使用 Worker binding |
+| REST / `/client/v4` | 提供 | 兼容 namespace 与 value 操作 |
 | REST bulk write / delete | 提供 | 不提供 |
 
 见[兼容性](/zh/platform/compatibility)。

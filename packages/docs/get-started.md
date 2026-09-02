@@ -1,50 +1,31 @@
 # Get started
 
-This guide runs a hello Worker on a ready `ocd`.
+Use the repository example with the exact pinned Wrangler transport. Start `ocd` first and wait for `GET /health/ready` to return 200.
 
-## 1. ocd installed, and `/health/ready`
+```sh
+export CLOUDFLARE_API_BASE_URL=http://127.0.0.1:8787/client/v4
+export CLOUDFLARE_API_TOKEN=<token>
+export CLOUDFLARE_ACCOUNT_ID=<account-id>
+bun run oc deploy --config examples/hello-worker/wrangler.jsonc
+```
 
-Follow [Install and first start](/ocd/get-started) until `ocd` is running. This page assumes `GET /health/ready` already returns 200. `oc run` does not start another workerd; it activates the Worker on the already-running local platform.
+`oc deploy` is a thin wrapper around `wrangler@4.127.1 deploy`. Authentication, multipart upload, Versions, Deployments, Secrets, Static Assets, and resource provisioning use the Cloudflare v4 contract.
 
-## 2. Hello Worker
-
-Use `examples/hello-worker` from the repo. The project file is `open-compute.json`:
+The project uses standard Wrangler configuration:
 
 ```json
 {
+  "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "hello-typescript",
   "main": "src/index.ts",
+  "compatibility_date": "2026-08-30",
+  "workers_dev": false,
   "vars": {
     "GREETING": "Hello from TypeScript"
   }
 }
 ```
 
-The entry is a module Worker:
+For offline validation, `oc build` keeps the repository's TypeScript 7 and Rolldown checks and emits one Worker bundle. `oc types` generates local `Env` types. Neither command contacts the management API. Static Assets are validated locally and uploaded only by Wrangler.
 
-```ts
-export default {
-  fetch(request: Request, env: Env): Response {
-    return Response.json({
-      message: env.GREETING,
-      pathname: new URL(request.url).pathname,
-    });
-  },
-} satisfies ExportedHandler<Env>;
-```
-
-## 3. It prints a URL
-
-From the repository root:
-
-```sh
-bun run oc run --config examples/hello-worker/open-compute.json --ocd <path-to-ocd>
-```
-
-On success it prints the Worker URL. Replace `<path-to-ocd>` with the path to the `ocd` binary (or set `OPEN_COMPUTE_OCD`).
-
-## `open-compute.json` is not `wrangler.jsonc`
-
-The config borrows some Wrangler field names (`name`, `main`, `vars`), but **`open-compute.json` is not `wrangler.jsonc`**. Unknown fields are rejected. There is no `compatibilityDate` in the project JSON: the platform freezes the compatibility date. See `runtime.effective_compatibility_date` from `ocd capabilities --json`.
-
-Next: [Directory](/directory). To run `ocd` as a service, see [Operate](/ocd/).
+Next: [Workers configuration](/workers/configuration/) and [ocd operations](/ocd/).
