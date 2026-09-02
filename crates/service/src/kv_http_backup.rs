@@ -1,101 +1,68 @@
-//! Durable D1 backup and restore workflows shared by the active management API.
+//! Durable KV backup and restore workflows shared by the active management API.
 
 use super::*;
-use sha2::Digest as _;
-use std::io::Read;
-use std::os::unix::fs::OpenOptionsExt as _;
+use crate::metrics::MetricsRegistry;
 
-const D1_BACKUP_MANIFEST_SCHEMA: u32 = 1;
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct D1BackupManifest {
-    backup_schema: u32,
-    backup_id: String,
-    source_resource_id: ResourceId,
-    d1_schema_version: u32,
-    sqlite_user_version: u32,
-    sha256: String,
-    size_bytes: u64,
-    created_at_ms: i64,
-}
-
-/// Create or replay one immutable D1 database backup.
+/// Create or replay one immutable KV namespace backup.
 pub(crate) async fn create_backup(
-    api: &D1ApiState,
+    api: &KvApiState,
     account_id: AccountId,
     resource_id: ResourceId,
     key: String,
     now_ms: i64,
-) -> Result<open_compute_storage::D1BackupRecord, PlatformError> {
+) -> Result<open_compute_storage::KvBackupRecord, PlatformError> {
     let _admission = api
         .storage
-        .reserve_mutation(api.config.database_quota_bytes)?;
-    let user_version = api.backend.user_version(account_id, resource_id).await?;
-    let mut canonical = b"open-compute/d1-backup/v1\0".to_vec();
+        .reserve_mutation(api.config.namespace_quota_bytes)?;
+    let mut canonical = b"open-compute/kv-backup/v1\0".to_vec();
     canonical.extend_from_slice(account_id.as_uuid().as_bytes());
     canonical.extend_from_slice(resource_id.as_uuid().as_bytes());
     let fingerprint = api.storage.crypto().fingerprint_request(&canonical);
     let storage = api.storage.clone();
+    let reservation_storage = storage.clone();
     let candidate = uuid::Uuid::now_v7().hyphenated().to_string();
-    let (database, backup) = tokio::task::spawn_blocking(move || {
-        let database = D1DatabaseRepository::new(storage.db()).get(account_id, resource_id)?;
-        let backup = D1DatabaseRepository::new(storage.db()).create_backup(
+    let (namespace, backup) = tokio::task::spawn_blocking(move || {
+        let namespace =
+            KvNamespaceRepository::new(reservation_storage.db()).get(account_id, resource_id)?;
+        let backup = KvNamespaceRepository::new(reservation_storage.db()).create_backup(
             resource_id,
             &candidate,
-            database.schema_version,
-            user_version,
+            namespace.schema_version,
             &key,
             &fingerprint,
             now_ms,
         )?;
-        Ok::<_, PlatformError>((database, backup))
+        Ok::<_, PlatformError>((namespace, backup))
     })
     .await
     .map_err(|_| internal())??;
-    if backup.state == D1BackupState::Ready {
+    if backup.state == KvBackupState::Ready {
         return Ok(backup);
     }
-    if backup.state == D1BackupState::Failed {
+    if backup.state == KvBackupState::Failed {
         return Err(replayed_backup_failure(&backup));
     }
-    if backup.state != D1BackupState::Creating {
+    if backup.state != KvBackupState::Creating {
         return Err(PlatformError::new(
             ErrorCode::IdempotencyConflict,
-            "D1 backup cannot resume from its current state",
+            "KV backup operation cannot resume from its current state",
         ));
     }
+
+    let pin = api.pins.try_pin(resource_id)?;
     let backup_id = backup.id.clone();
-    let stage = api
-        .storage
+    let stage = storage
         .data_dir()
         .backup_staging_dir()
-        .join(format!("{backup_id}.d1.sqlite"));
-    crate::sqlite_staging::remove_sqlite_staging(&stage);
-    match api
-        .backend
-        .online_backup(account_id, resource_id, stage.clone())
-        .await
-    {
-        Ok(value) if value == backup.sqlite_user_version => {}
-        Ok(_) => {
-            let error = PlatformError::new(
-                ErrorCode::D1MigrationDrift,
-                "D1 schema changed while backup was reserved",
-            );
-            fail_backup(&api.storage, &backup.id, error.code(), now_ms).await;
-            crate::sqlite_staging::remove_sqlite_staging(&stage);
-            return Err(error);
-        }
-        Err(error) => {
-            fail_backup(&api.storage, &backup.id, error.code(), now_ms).await;
-            crate::sqlite_staging::remove_sqlite_staging(&stage);
-            return Err(error);
-        }
-    }
-    let prepared = tokio::task::spawn_blocking({
-        let stage = stage.clone();
-        move || hash_file(&stage)
+        .join(format!("{backup_id}.sqlite"));
+    let stage_for_backup = stage.clone();
+    let prepared = tokio::task::spawn_blocking(move || {
+        crate::sqlite_staging::remove_sqlite_staging(&stage_for_backup);
+        let paths = KvPaths::open(storage.data_dir().root())?;
+        let database =
+            paths.resolve_storage_key(&namespace.storage_key, account_id, resource_id)?;
+        KvEngine::from_record(database, &namespace)?.online_backup(&stage_for_backup)?;
+        hash_file(&stage_for_backup)
     })
     .await
     .map_err(|_| internal())
@@ -103,25 +70,26 @@ pub(crate) async fn create_backup(
     let (digest, size) = match prepared {
         Ok(value) => value,
         Err(error) => {
-            fail_backup(&api.storage, &backup.id, error.code(), now_ms).await;
+            drop(pin);
             crate::sqlite_staging::remove_sqlite_staging(&stage);
+            fail_backup(&api.storage, &backup.id, error.code(), now_ms).await;
             return Err(error);
         }
     };
-    let base = format!("backups/d1/{resource_id}/{backup_id}");
+
+    let base = format!("backups/kv/{account_id}/{resource_id}/{backup_id}");
     let relative = format!("{base}/data.sqlite");
     let response = match api
         .artifacts
-        .put_d1_backup_file(&relative, &stage, &hex::encode(digest), size)
+        .put_kv_backup_file(&relative, &stage, &hex::encode(digest), size)
         .await
     {
         Ok(object_key) => {
-            let manifest = D1BackupManifest {
-                backup_schema: D1_BACKUP_MANIFEST_SCHEMA,
+            let manifest = KvBackupManifest {
+                backup_schema: KV_BACKUP_MANIFEST_SCHEMA,
                 backup_id: backup.id.clone(),
                 source_resource_id: resource_id,
-                d1_schema_version: database.schema_version,
-                sqlite_user_version: backup.sqlite_user_version,
+                kv_schema_version: backup.kv_schema_version,
                 sha256: hex::encode(digest),
                 size_bytes: size,
                 created_at_ms: backup.created_at_ms,
@@ -129,7 +97,7 @@ pub(crate) async fn create_backup(
             match serde_json::to_vec(&manifest).map_err(|_| internal()) {
                 Ok(encoded) => match api
                     .artifacts
-                    .put_d1_backup_manifest(
+                    .put_kv_backup_manifest(
                         &format!("{base}/manifest.json"),
                         bytes::Bytes::from(encoded),
                     )
@@ -139,7 +107,7 @@ pub(crate) async fn create_backup(
                         let storage = api.storage.clone();
                         let backup_id = backup.id.clone();
                         tokio::task::spawn_blocking(move || {
-                            D1DatabaseRepository::new(storage.db()).complete_backup(
+                            KvNamespaceRepository::new(storage.db()).complete_backup(
                                 &backup_id,
                                 &object_key,
                                 &digest,
@@ -152,7 +120,7 @@ pub(crate) async fn create_backup(
                         .and_then(|result| result)
                     }
                     Err(error) => {
-                        let _ = api.artifacts.delete_d1_backup(&object_key).await;
+                        let _ = api.artifacts.delete_kv_backup(&object_key).await;
                         Err(error)
                     }
                 },
@@ -161,6 +129,7 @@ pub(crate) async fn create_backup(
         }
         Err(error) => Err(error),
     };
+    drop(pin);
     crate::sqlite_staging::remove_sqlite_staging(&stage);
     match response {
         Ok(backup) => Ok(backup),
@@ -171,9 +140,10 @@ pub(crate) async fn create_backup(
     }
 }
 
-/// Restore a ready D1 backup as a new database and return its immutable ID.
+/// Restore a ready KV backup as a new namespace and return its immutable ID.
 pub(crate) async fn restore_backup(
-    api: &D1ApiState,
+    api: &KvApiState,
+    metrics: &MetricsRegistry,
     account_id: AccountId,
     backup_id: String,
     new_name: String,
@@ -184,14 +154,14 @@ pub(crate) async fn restore_backup(
     let storage = api.storage.clone();
     let selected_backup_id = backup_id.clone();
     let backup = tokio::task::spawn_blocking(move || {
-        D1DatabaseRepository::new(storage.db()).get_backup(account_id, &selected_backup_id)
+        KvNamespaceRepository::new(storage.db()).get_backup(account_id, &selected_backup_id)
     })
     .await
     .map_err(|_| internal())??;
-    if backup.state != D1BackupState::Ready {
+    if backup.state != KvBackupState::Ready {
         return Err(PlatformError::new(
             ErrorCode::ResourceNotReady,
-            "D1 backup is not ready",
+            "KV backup is not ready for restore",
         ));
     }
     let (Some(object_key), Some(digest), Some(size)) =
@@ -202,32 +172,38 @@ pub(crate) async fn restore_backup(
     let _admission = api
         .storage
         .reserve_mutation(size.saturating_mul(2).max(1))?;
-    let manifest_key = api.artifacts.d1_backup_manifest_key(&object_key)?;
-    let manifest_bytes = api.artifacts.get_d1_backup_manifest(&manifest_key).await?;
-    match serde_json::from_slice::<D1BackupManifest>(&manifest_bytes) {
+    let manifest_key = api.artifacts.kv_backup_manifest_key(&object_key)?;
+    let manifest_bytes = api.artifacts.get_kv_backup_manifest(&manifest_key).await?;
+    match serde_json::from_slice::<KvBackupManifest>(&manifest_bytes) {
         Ok(value)
             if serde_json::to_vec(&value).ok().as_deref() == Some(manifest_bytes.as_ref())
-                && value.backup_schema == D1_BACKUP_MANIFEST_SCHEMA
+                && value.backup_schema == KV_BACKUP_MANIFEST_SCHEMA
                 && value.backup_id == backup.id
                 && value.source_resource_id == backup.source_resource_id
-                && value.d1_schema_version == backup.d1_schema_version
-                && value.sqlite_user_version == backup.sqlite_user_version
+                && value.kv_schema_version == backup.kv_schema_version
                 && value.sha256 == hex::encode(digest)
                 && value.size_bytes == size
                 && value.created_at_ms == backup.created_at_ms => {}
         _ => {
+            metrics.inc_kv_corruption(1);
             return Err(PlatformError::new(
                 ErrorCode::ArtifactIntegrityError,
-                "D1 backup manifest failed integrity validation",
+                "KV backup manifest failed integrity validation",
             ));
         }
     }
-    crate::d1_backend::ensure_d1_storage_headroom(&api.storage)?;
+    let storage = api.storage.clone();
+    let source_resource = backup.source_resource_id;
+    let source = tokio::task::spawn_blocking(move || {
+        ResourceRepository::new(storage.db()).get(account_id, source_resource)
+    })
+    .await
+    .map_err(|_| internal())??;
     let stage = api
         .storage
         .data_dir()
         .backup_staging_dir()
-        .join(format!("{}.d1.restore", uuid::Uuid::now_v7().hyphenated()));
+        .join(format!("{}.restore", uuid::Uuid::now_v7().hyphenated()));
     let stage_for_create = stage.clone();
     let mut file = tokio::task::spawn_blocking(move || {
         std::fs::OpenOptions::new()
@@ -241,13 +217,13 @@ pub(crate) async fn restore_backup(
     .map_err(|_| internal())?
     .map_err(|_| {
         PlatformError::new(
-            ErrorCode::D1DatabaseFull,
-            "failed to create D1 restore staging file",
+            ErrorCode::KvStorageFull,
+            "failed to create KV restore staging file",
         )
     })?;
     if let Err(error) = api
         .artifacts
-        .download_d1_backup(&object_key, &hex::encode(digest), size, &mut file)
+        .download_kv_backup(&object_key, &hex::encode(digest), size, &mut file)
         .await
     {
         crate::sqlite_staging::remove_sqlite_staging(&stage);
@@ -264,20 +240,22 @@ pub(crate) async fn restore_backup(
         "restore-{}",
         hex::encode(sha2::Sha256::digest(key.as_bytes()))
     );
+    let storage = api.storage.clone();
     let operation = RestoreOperation {
         account_id,
+        source_account: source.account_id,
+        source_resource: source.id,
         backup_id: backup.id,
         new_name,
         idempotency_key: restore_key,
         request_id,
         now_ms,
-        quota_bytes: api.config.database_quota_bytes,
+        quota_bytes: api.config.namespace_quota_bytes,
         max_resources_per_account: api.max_resources_per_account,
     };
-    let storage = api.storage.clone();
     let stage_for_restore = stage.clone();
     let restored = tokio::task::spawn_blocking(move || {
-        restore_downloaded_database(&storage, &stage_for_restore, &operation)
+        restore_downloaded_namespace(&storage, &stage_for_restore, &operation)
     })
     .await
     .map_err(|_| internal())?;
@@ -294,6 +272,8 @@ pub(crate) async fn restore_backup(
 
 struct RestoreOperation {
     account_id: AccountId,
+    source_account: AccountId,
+    source_resource: ResourceId,
     backup_id: String,
     new_name: String,
     idempotency_key: String,
@@ -303,13 +283,13 @@ struct RestoreOperation {
     max_resources_per_account: u32,
 }
 
-fn restore_downloaded_database(
+fn restore_downloaded_namespace(
     storage: &PlatformStorage,
     source: &std::path::Path,
     operation: &RestoreOperation,
 ) -> Result<CreateResourceOutcome, PlatformError> {
     let operation_now = operation.now_ms;
-    let mut canonical = b"open-compute/d1-restore/v1\0".to_vec();
+    let mut canonical = b"open-compute/kv-restore/v1\0".to_vec();
     canonical.extend_from_slice(operation.account_id.as_uuid().as_bytes());
     canonical.extend_from_slice(operation.backup_id.as_bytes());
     canonical.push(0);
@@ -320,16 +300,16 @@ fn restore_downloaded_database(
     let reservation = repository.reserve_create(
         &ReserveResourceCreate {
             account_id: operation.account_id,
-            kind: BindingKind::D1Database,
+            kind: BindingKind::KvNamespace,
             name: &operation.new_name,
             idempotency_key: &operation.idempotency_key,
             fingerprint_key_id: storage.crypto().fingerprint_key_id(),
             request_fingerprint: &fingerprint,
             resource_id: ResourceId::generate(),
-            driver_schema_version: D1_DATABASE_SCHEMA_VERSION,
+            driver_schema_version: open_compute_storage::KV_SCHEMA_VERSION,
             request_id: operation.request_id,
             now_ms: operation_now,
-            expires_at_ms: operation_now.saturating_add(IDEMPOTENCY_TTL_MS),
+            expires_at_ms: operation_now.saturating_add(24 * 60 * 60 * 1000),
         },
         operation.max_resources_per_account,
     )?;
@@ -340,19 +320,19 @@ fn restore_downloaded_database(
         ResourceCreateReservation::Failed(_) => {
             return Err(PlatformError::new(
                 ErrorCode::ResourceInvariantViolation,
-                "D1 restore idempotency is in a failed state",
+                "KV restore idempotency is in a failed state",
             ));
         }
         ResourceCreateReservation::Reserved(resource)
         | ResourceCreateReservation::Continue(resource) => resource,
     };
-    let catalog = D1DatabaseRepository::new(storage.db());
-    let storage_key = D1Paths::storage_key(resource.account_id, resource.id);
+    let catalog = KvNamespaceRepository::new(storage.db());
+    let storage_key = KvPaths::storage_key(resource.account_id, resource.id);
     let record = if resource.state == ResourceState::Creating {
-        catalog.ensure_restoring_database(
+        catalog.ensure_restoring_namespace(
             &resource,
             &storage_key,
-            D1_DATABASE_SCHEMA_VERSION,
+            open_compute_storage::KV_SCHEMA_VERSION,
             operation.quota_bytes,
             &operation.backup_id,
         )?
@@ -362,29 +342,35 @@ fn restore_downloaded_database(
     if record.restore_backup_id.as_deref() != Some(operation.backup_id.as_str()) {
         return Err(PlatformError::new(
             ErrorCode::ResourceInvariantViolation,
-            "D1 restore intent does not match durable authority",
+            "KV restore intent does not match durable authority",
         ));
     }
-    let paths = D1Paths::open(storage.data_dir().root())?;
+    let paths = KvPaths::open(storage.data_dir().root())?;
     let live = paths.resolve_storage_key(&storage_key, resource.account_id, resource.id)?;
     if live.exists() {
-        D1Engine::from_record(live, &record)?.quick_check()?;
+        let engine = KvEngine::from_record(live, &record)?;
+        if engine.restore_backup_id()?.as_deref() != Some(operation.backup_id.as_str()) {
+            return Err(PlatformError::new(
+                ErrorCode::ResourceInvariantViolation,
+                "KV restore database does not match durable intent",
+            ));
+        }
     } else {
-        let candidates = paths.staging_candidates(resource.id)?;
+        let candidates = paths.namespace_staging_candidates(resource.id)?;
         if candidates.len() > 1 {
             return Err(PlatformError::new(
                 ErrorCode::ResourceInvariantViolation,
-                "D1 restore has multiple physical candidates",
+                "KV restore has multiple physical candidates",
             ));
         }
         let staging = if let Some(staging) = candidates.first() {
-            if D1Engine::from_record(staging.join("data.sqlite"), &record)
-                .and_then(|engine| engine.quick_check())
-                .is_ok()
-            {
+            let valid = KvEngine::from_record(staging.join("data.sqlite"), &record)
+                .and_then(|engine| engine.restore_backup_id())
+                .is_ok_and(|marker| marker.as_deref() == Some(operation.backup_id.as_str()));
+            if valid {
                 staging.clone()
             } else {
-                paths.remove_operation_dir(staging)?;
+                paths.remove_namespace_staging(staging)?;
                 create_restored_staging(source, operation, &resource, &paths)?
             }
         } else {
@@ -397,7 +383,7 @@ fn restore_downloaded_database(
     } else if resource.state != ResourceState::Ready {
         return Err(PlatformError::new(
             ErrorCode::ResourceNotReady,
-            "D1 restore cannot resume from this resource state",
+            "KV restore cannot resume from this resource state",
         ));
     }
     let result = CreateResourceResult {
@@ -419,19 +405,22 @@ fn create_restored_staging(
     source: &std::path::Path,
     operation: &RestoreOperation,
     resource: &open_compute_storage::ResourceRecord,
-    paths: &D1Paths,
+    paths: &KvPaths,
 ) -> Result<std::path::PathBuf, PlatformError> {
-    let staging = paths.create_database_staging(resource.id)?;
-    let result = D1Engine::restore_as_new(
+    let staging = paths.create_namespace_staging(resource.id)?;
+    let result = KvEngine::restore(
         source,
         &staging.join("data.sqlite"),
+        operation.source_account,
+        operation.source_resource,
         resource.account_id,
         resource.id,
-        resource.created_at_ms,
+        &operation.backup_id,
+        operation.now_ms,
         operation.quota_bytes,
     );
     if let Err(error) = result {
-        let _ = paths.remove_operation_dir(&staging);
+        let _ = paths.remove_namespace_staging(&staging);
         return Err(error);
     }
     Ok(staging)
@@ -446,20 +435,20 @@ async fn fail_backup(
     let storage = storage.clone();
     let backup_id = backup_id.to_owned();
     let _ = tokio::task::spawn_blocking(move || {
-        D1DatabaseRepository::new(storage.db()).fail_backup(&backup_id, code, now_ms)
+        KvNamespaceRepository::new(storage.db()).fail_backup(&backup_id, code, now_ms)
     })
     .await;
 }
 
-fn replayed_backup_failure(backup: &open_compute_storage::D1BackupRecord) -> PlatformError {
+fn replayed_backup_failure(backup: &open_compute_storage::KvBackupRecord) -> PlatformError {
     let code = backup
         .error_code
         .as_deref()
-        .map_or(ErrorCode::Internal, d1_error_code);
-    PlatformError::new(code, "D1 backup operation previously failed")
+        .map_or(ErrorCode::Internal, kv_error_code);
+    PlatformError::new(code, "KV backup operation previously failed")
 }
 
-fn d1_error_code(value: &str) -> ErrorCode {
+fn kv_error_code(value: &str) -> ErrorCode {
     [
         ErrorCode::ResourceNotFound,
         ErrorCode::ResourceNotReady,
@@ -470,10 +459,10 @@ fn d1_error_code(value: &str) -> ErrorCode {
         ErrorCode::S3Unavailable,
         ErrorCode::DiskHardLimit,
         ErrorCode::LimitInvalid,
-        ErrorCode::D1DatabaseFull,
-        ErrorCode::D1DatabaseCorrupt,
-        ErrorCode::D1IdentityMismatch,
-        ErrorCode::D1MigrationDrift,
+        ErrorCode::KvStorageFull,
+        ErrorCode::KvUnavailable,
+        ErrorCode::KvCorrupt,
+        ErrorCode::KvBusy,
         ErrorCode::Internal,
     ]
     .into_iter()
@@ -481,7 +470,7 @@ fn d1_error_code(value: &str) -> ErrorCode {
     .unwrap_or(ErrorCode::Internal)
 }
 
-fn hash_file(path: &std::path::Path) -> Result<([u8; 32], u64), PlatformError> {
+pub(super) fn hash_file(path: &std::path::Path) -> Result<([u8; 32], u64), PlatformError> {
     let mut file = std::fs::File::open(path).map_err(|_| internal())?;
     let mut hasher = sha2::Sha256::new();
     let mut total = 0_u64;

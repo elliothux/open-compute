@@ -36,7 +36,7 @@ const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
 #[path = "d1_http_backup.rs"]
-mod backup;
+pub(crate) mod backup;
 
 /// Shared D1 control-plane composition state.
 #[derive(Clone)]
@@ -109,14 +109,6 @@ pub fn control_router() -> Router<HttpState> {
         .route(
             "/v1/accounts/{account_id}/d1/databases",
             post(create_database).get(list_databases),
-        )
-        .route(
-            "/v1/accounts/{account_id}/d1/databases:restore",
-            post(backup::restore_database),
-        )
-        .route(
-            "/v1/accounts/{account_id}/d1/databases/{resource_id}/backups",
-            post(backup::create_backup).get(backup::list_backups),
         )
         .route(
             "/v1/accounts/{account_id}/d1/databases/{resource_id}/migrations",

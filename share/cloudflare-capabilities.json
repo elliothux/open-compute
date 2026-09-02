@@ -1365,7 +1365,8 @@
         "id": "GET /open-compute/capabilities",
         "method": "GET",
         "path": "/open-compute/capabilities",
-        "status": "planned",
+        "operationId": "open-compute-get-open-compute-capabilities",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1373,7 +1374,8 @@
         "id": "GET /open-compute/system/status",
         "method": "GET",
         "path": "/open-compute/system/status",
-        "status": "planned",
+        "operationId": "open-compute-get-open-compute-system-status",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1381,7 +1383,8 @@
         "id": "GET /open-compute/scheduler",
         "method": "GET",
         "path": "/open-compute/scheduler",
-        "status": "planned",
+        "operationId": "open-compute-get-open-compute-scheduler",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1389,7 +1392,8 @@
         "id": "POST /open-compute/scheduler/pause",
         "method": "POST",
         "path": "/open-compute/scheduler/pause",
-        "status": "planned",
+        "operationId": "open-compute-post-open-compute-scheduler-pause",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1397,7 +1401,8 @@
         "id": "POST /open-compute/scheduler/resume",
         "method": "POST",
         "path": "/open-compute/scheduler/resume",
-        "status": "planned",
+        "operationId": "open-compute-post-open-compute-scheduler-resume",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1405,7 +1410,8 @@
         "id": "POST /open-compute/scheduler/repair",
         "method": "POST",
         "path": "/open-compute/scheduler/repair",
-        "status": "planned",
+        "operationId": "open-compute-post-open-compute-scheduler-repair",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1413,7 +1419,8 @@
         "id": "GET /open-compute/cache",
         "method": "GET",
         "path": "/open-compute/cache",
-        "status": "planned",
+        "operationId": "open-compute-get-open-compute-cache",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1421,7 +1428,8 @@
         "id": "POST /open-compute/cache/garbage-collection",
         "method": "POST",
         "path": "/open-compute/cache/garbage-collection",
-        "status": "planned",
+        "operationId": "open-compute-post-open-compute-cache-garbage-collection",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1429,7 +1437,8 @@
         "id": "GET /open-compute/images/capacity",
         "method": "GET",
         "path": "/open-compute/images/capacity",
-        "status": "planned",
+        "operationId": "open-compute-get-open-compute-images-capacity",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1437,7 +1446,8 @@
         "id": "GET /accounts/{account_id}/open-compute/workers/{script_name}/endpoints",
         "method": "GET",
         "path": "/accounts/{account_id}/open-compute/workers/{script_name}/endpoints",
-        "status": "planned",
+        "operationId": "open-compute-get-accounts-account-id-open-compute-workers-script-name-endpoints",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1445,7 +1455,8 @@
         "id": "GET /accounts/{account_id}/open-compute/durable-objects",
         "method": "GET",
         "path": "/accounts/{account_id}/open-compute/durable-objects",
-        "status": "planned",
+        "operationId": "open-compute-get-accounts-account-id-open-compute-durable-objects",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1453,7 +1464,8 @@
         "id": "GET /accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects",
         "method": "GET",
         "path": "/accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects",
-        "status": "planned",
+        "operationId": "open-compute-get-accounts-account-id-open-compute-durable-objects-namespace-id-objects",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1461,7 +1473,8 @@
         "id": "POST /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
         "method": "POST",
         "path": "/accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
-        "status": "planned",
+        "operationId": "open-compute-post-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1469,7 +1482,8 @@
         "id": "GET /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
         "method": "GET",
         "path": "/accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
-        "status": "planned",
+        "operationId": "open-compute-get-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1477,15 +1491,17 @@
         "id": "POST /accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore",
         "method": "POST",
         "path": "/accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore",
-        "status": "planned",
+        "operationId": "open-compute-post-accounts-account-id-open-compute-kv-backups-backup-id-restore",
+        "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "json"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
         "method": "POST",
         "path": "/accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
-        "status": "planned",
+        "operationId": "open-compute-post-accounts-account-id-open-compute-d1-databases-database-id-backups",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1493,7 +1509,8 @@
         "id": "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
         "method": "GET",
         "path": "/accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
-        "status": "planned",
+        "operationId": "open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-backups",
+        "status": "supported",
         "source": "open-compute-extension",
         "requestMediaType": "none"
       },
@@ -1501,10 +1518,14 @@
         "id": "POST /accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore",
         "method": "POST",
         "path": "/accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore",
-        "status": "planned",
+        "operationId": "open-compute-post-accounts-account-id-open-compute-d1-backups-backup-id-restore",
+        "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "json"
       }
+    ],
+    "deviations": [
+      "OC-MANAGEMENT-COMPATIBILITY-DATE-001"
     ],
     "legacyRoutes": [
       {

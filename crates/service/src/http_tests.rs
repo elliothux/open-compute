@@ -5,7 +5,6 @@ use open_compute_core::config::{MetricsConfig, SecretReference};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::SystemTime;
 use tower::ServiceExt;
 
 fn metrics() -> Arc<MetricsRegistry> {
@@ -14,26 +13,6 @@ fn metrics() -> Arc<MetricsRegistry> {
 
 #[tokio::test]
 async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
-    let snapshot = SupervisorSnapshot {
-        state: SupervisorState::Running,
-        reason: ReadinessReason::Ready,
-        last_transition_at: SystemTime::UNIX_EPOCH,
-        attempt: 3,
-        last_exit: None,
-        next_retry_at: None,
-        pid: Some(1),
-        pgid: Some(1),
-        binary_digest: "digest".to_owned(),
-        config_digest: "config".to_owned(),
-        startup_id: None,
-        token_fingerprint: None,
-        listen_port: Some(8080),
-    };
-    let sanitized = SanitizedSupervisor::from(&snapshot);
-    assert_eq!(sanitized.state, SupervisorState::Running);
-    assert_eq!(sanitized.reason, ReadinessReason::Ready);
-    assert_eq!(sanitized.attempt, 3);
-
     for (path, expected) in [
         ("/health/live", "/health/live"),
         ("/health/ready", "/health/ready"),
@@ -220,15 +199,7 @@ fn state_constructor_resolves_file_auth_and_debug_is_redacted() {
         },
         ..ServerConfig::default()
     };
-    let state = HttpState::new(
-        HealthCoordinator::new(),
-        metrics(),
-        true,
-        false,
-        &server,
-        Arc::new(|| None),
-    )
-    .unwrap();
+    let state = HttpState::new(HealthCoordinator::new(), metrics(), true, false, &server).unwrap();
     let debug = format!("{state:?}");
     assert!(debug.contains("admin_auth: true"));
     assert!(!debug.contains("admin-secret"));

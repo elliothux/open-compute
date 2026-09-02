@@ -91,7 +91,7 @@ impl AccountAuthority {
 
     fn account(&self) -> Result<Account, V4Error> {
         Ok(Account {
-            id: self.public_id.clone(),
+            id: self.public_id().to_owned(),
             name: ACCOUNT_NAME,
             kind: "standard",
             created_on: timestamp(self.created_at_ms)?,

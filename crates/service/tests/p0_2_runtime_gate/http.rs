@@ -40,7 +40,7 @@ pub(super) async fn api_matrix(
         },
         ..ServerConfig::default()
     };
-    let state = HttpState::new(health, metrics, false, false, &server, Arc::new(|| None))
+    let state = HttpState::new(health, metrics, false, false, &server)
         .unwrap()
         .with_worker_api(WorkerApiState::new(
             storage.clone(),

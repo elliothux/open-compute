@@ -1,4 +1,6 @@
 use super::*;
+use crate::cloudflare_v4::V4ResourceKind;
+use crate::cloudflare_v4::accounts::AccountAuthority;
 use crate::health::HealthCoordinator;
 use crate::http;
 use crate::kv_backend::SqliteKvBindingExecutor;
@@ -22,6 +24,7 @@ struct Fixture {
     pins: ResourcePins,
     router: Router,
     account: AccountId,
+    authority: AccountAuthority,
 }
 
 async fn fixture() -> Fixture {
@@ -94,20 +97,29 @@ request_timeout_ms = 500
     assert!(format!("{api:?}").contains("KvApiState"));
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
+    let authority = AccountAuthority::new(storage.identity().platform_id, account, 1_000);
     let state = HttpState::for_test(
         HealthCoordinator::new(),
         metrics,
         false,
         Some(SecretString::new("admin-secret")),
     )
-    .with_kv_api(api);
+    .with_kv_api(api)
+    .with_cloudflare_v4_account(authority.clone())
+    .with_platform_storage(storage.clone());
+    let router = http::admin_router(state.clone()).merge(
+        Router::new()
+            .nest("/operator/api", control_router())
+            .with_state(state),
+    );
     Fixture {
         _temp: temp,
         _mock: mock,
         storage,
         pins,
-        router: http::admin_router(state),
+        router,
         account,
+        authority,
     }
 }
 
@@ -133,9 +145,12 @@ fn request_auth(
     if let Some(token) = token {
         builder = builder.header("authorization", format!("Bearer {token}"));
     }
-    builder
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap()
+    let body = if body.is_null() {
+        Body::empty()
+    } else {
+        Body::from(serde_json::to_vec(&body).unwrap())
+    };
+    builder.body(body).unwrap()
 }
 
 async fn response_json(response: Response) -> (StatusCode, Value) {
@@ -283,9 +298,12 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
         )
         .unwrap();
 
+    let public_source = fixture
+        .authority
+        .public_resource_id(V4ResourceKind::KvNamespace, source);
     let backup_uri = format!(
-        "/operator/api/v1/accounts/{}/kv/namespaces/{source}/backups",
-        fixture.account
+        "/client/v4/accounts/{}/open-compute/kv/namespaces/{public_source}/backups",
+        fixture.authority.public_id()
     );
     let (status, backup_body) = response_json(
         fixture
@@ -301,8 +319,8 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
             .unwrap(),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let backup_id = backup_body["backup"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(status, StatusCode::OK);
+    let backup_id = backup_body["result"]["id"].as_str().unwrap().to_owned();
     let (status, replayed_backup) = response_json(
         fixture
             .router
@@ -318,20 +336,19 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(replayed_backup["backup"]["id"], backup_id);
+    assert_eq!(replayed_backup["result"]["id"], backup_id);
 
-    let list_uri = format!("/operator/api/v1/accounts/{}/kv/backups", fixture.account);
     let (status, backups) = response_json(
         fixture
             .router
             .clone()
-            .oneshot(request("GET", &list_uri, Value::Null, None))
+            .oneshot(request("GET", &backup_uri, Value::Null, None))
             .await
             .unwrap(),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(backups["backups"].as_array().unwrap().len(), 1);
+    assert_eq!(backups["result"].as_array().unwrap().len(), 1);
     assert!(!backups.to_string().contains("objectKey"));
 
     let source_uri = format!(
@@ -355,38 +372,41 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
     );
 
     let restore_uri = format!(
-        "/operator/api/v1/accounts/{}/kv/namespaces:restore",
-        fixture.account
+        "/client/v4/accounts/{}/open-compute/kv/backups/{backup_id}/restore",
+        fixture.authority.public_id()
     );
     let first = fixture.router.clone().oneshot(request(
         "POST",
         &restore_uri,
-        json!({"backupId": backup_id, "newName": "restored-a"}),
+        json!({"name": "restored-a"}),
         Some("restore-source-a"),
     ));
     let second = fixture.router.clone().oneshot(request(
         "POST",
         &restore_uri,
-        json!({"backupId": backup_id, "newName": "restored-b"}),
+        json!({"name": "restored-b"}),
         Some("restore-source-b"),
     ));
     let (first, second) = tokio::join!(first, second);
     let first = response_json(first.unwrap()).await;
     let second = response_json(second.unwrap()).await;
     let (restored_body, restored_name, restore_key) = match (first, second) {
-        ((StatusCode::CREATED, body), (StatusCode::TOO_MANY_REQUESTS, _)) => {
+        ((StatusCode::OK, body), (StatusCode::TOO_MANY_REQUESTS, _)) => {
             (body, "restored-a", "restore-source-a")
         }
-        ((StatusCode::TOO_MANY_REQUESTS, _), (StatusCode::CREATED, body)) => {
+        ((StatusCode::TOO_MANY_REQUESTS, _), (StatusCode::OK, body)) => {
             (body, "restored-b", "restore-source-b")
         }
         statuses => panic!("one concurrent restore must win the only quota slot: {statuses:?}"),
     };
-    let restored: ResourceId = restored_body["resourceId"]
-        .as_str()
+    let restored = ResourceRepository::new(fixture.storage.db())
+        .list(fixture.account, Some(BindingKind::KvNamespace))
         .unwrap()
-        .parse()
-        .unwrap();
+        .into_iter()
+        .find(|record| record.name == restored_name)
+        .unwrap()
+        .id;
+    assert_eq!(restored_body["result"]["name"], restored_name);
     assert_ne!(restored, source);
     let record = KvNamespaceRepository::new(fixture.storage.db())
         .get(fixture.account, restored)
@@ -412,7 +432,7 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
             .oneshot(request(
                 "POST",
                 &restore_uri,
-                json!({"backupId": backup_id, "newName": restored_name}),
+                json!({"name": restored_name}),
                 Some(restore_key),
             ))
             .await
@@ -420,7 +440,7 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(replayed_restore["resourceId"], restored.to_string());
+    assert_eq!(replayed_restore["result"]["name"], restored_name);
     let backup_staging_entries = std::fs::read_dir(fixture.storage.data_dir().backup_staging_dir())
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
@@ -436,38 +456,6 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
             .unwrap()
             .value,
         b"keep"
-    );
-
-    let delete_backup_uri = format!("{list_uri}/{backup_id}");
-    assert_eq!(
-        fixture
-            .router
-            .clone()
-            .oneshot(request(
-                "DELETE",
-                &delete_backup_uri,
-                Value::Null,
-                Some("delete-backup"),
-            ))
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::ACCEPTED
-    );
-    assert_eq!(
-        fixture
-            .router
-            .clone()
-            .oneshot(request(
-                "DELETE",
-                &delete_backup_uri,
-                Value::Null,
-                Some("delete-backup"),
-            ))
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::OK
     );
 }
 
@@ -502,9 +490,12 @@ async fn control_validation_and_s3_failure_are_sanitized() {
 
     let source = create_namespace(&fixture, "s3-failure", "create-s3-failure").await;
     fixture._mock.set_fault(Fault::ServerError);
+    let public_source = fixture
+        .authority
+        .public_resource_id(V4ResourceKind::KvNamespace, source);
     let backup_uri = format!(
-        "/operator/api/v1/accounts/{}/kv/namespaces/{source}/backups",
-        fixture.account
+        "/client/v4/accounts/{}/open-compute/kv/namespaces/{public_source}/backups",
+        fixture.authority.public_id()
     );
     let (status, body) = response_json(
         fixture
@@ -543,7 +534,7 @@ async fn control_validation_and_s3_failure_are_sanitized() {
     )
     .await;
     assert_eq!(replay_status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(replay_body["error"]["code"], body["error"]["code"]);
+    assert_eq!(replay_body["errors"][0]["code"], body["errors"][0]["code"]);
     let replayed = KvNamespaceRepository::new(fixture.storage.db())
         .list_backups(fixture.account)
         .unwrap();
@@ -727,8 +718,8 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
     }
 
     let restore_uri = format!(
-        "/operator/api/v1/accounts/{}/kv/namespaces:restore",
-        fixture.account
+        "/client/v4/accounts/{}/open-compute/kv/backups/missing/restore",
+        fixture.authority.public_id()
     );
     assert_eq!(
         fixture
@@ -737,7 +728,7 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
             .oneshot(request(
                 "POST",
                 &restore_uri,
-                json!({"backupId": "missing", "newName": "x"}),
+                json!({"name": "x"}),
                 Some("missing-backup"),
             ))
             .await
@@ -751,25 +742,32 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
     KvNamespaceRepository::new(fixture.storage.db())
         .create_backup(source, &creating_id, 1, "not-ready", &[4; 32], 10)
         .unwrap();
+    let not_ready_restore_uri = format!(
+        "/client/v4/accounts/{}/open-compute/kv/backups/{creating_id}/restore",
+        fixture.authority.public_id()
+    );
     assert_eq!(
         fixture
             .router
             .clone()
             .oneshot(request(
                 "POST",
-                &restore_uri,
-                json!({"backupId": creating_id, "newName": "x"}),
+                &not_ready_restore_uri,
+                json!({"name": "x"}),
                 Some("not-ready-backup"),
             ))
             .await
             .unwrap()
             .status(),
-        StatusCode::CONFLICT
+        StatusCode::SERVICE_UNAVAILABLE
     );
 
+    let public_source = fixture
+        .authority
+        .public_resource_id(V4ResourceKind::KvNamespace, source);
     let backup_uri = format!(
-        "/operator/api/v1/accounts/{}/kv/namespaces/{source}/backups",
-        fixture.account
+        "/client/v4/accounts/{}/open-compute/kv/namespaces/{public_source}/backups",
+        fixture.authority.public_id()
     );
     let (_, backup) = response_json(
         fixture
@@ -786,6 +784,11 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
     )
     .await;
     fixture._mock.set_fault(Fault::ServerError);
+    let restore_uri = format!(
+        "/client/v4/accounts/{}/open-compute/kv/backups/{}/restore",
+        fixture.authority.public_id(),
+        backup["result"]["id"].as_str().unwrap()
+    );
     assert_eq!(
         fixture
             .router
@@ -793,10 +796,7 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
             .oneshot(request(
                 "POST",
                 &restore_uri,
-                json!({
-                    "backupId": backup["backup"]["id"],
-                    "newName": "download-failure"
-                }),
+                json!({"name": "download-failure"}),
                 Some("restore-download-failure"),
             ))
             .await
@@ -823,7 +823,7 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
         );
     }
     assert_eq!(
-        hash_file(fixture._temp.path()).unwrap_err().code(),
+        backup::hash_file(fixture._temp.path()).unwrap_err().code(),
         ErrorCode::Internal
     );
 }

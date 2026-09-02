@@ -15,7 +15,7 @@ use crate::dashboard::bootstrap_dashboard;
 use crate::do_http::DoApiState;
 use crate::document_parser_backend::DocumentParserBindingService;
 use crate::health::HealthCoordinator;
-use crate::http::{self, HttpState, SanitizedSupervisor};
+use crate::http::{self, HttpState};
 use crate::images_backend::ImageBindingService;
 use crate::kv_backend::SqliteKvBindingExecutor;
 use crate::kv_http::KvApiState;
@@ -547,7 +547,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     queue_api.reconcile_pending().await?;
     metrics.set_do_storage_watermark(0);
     let maintenance_do_api = do_api.clone();
-    let supervisor_for_http = supervisor_handle.clone();
     let binding_executor = Arc::new(
         SqliteKvBindingExecutor::with_config(
             storage.clone(),
@@ -579,12 +578,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         loaded.config.metrics.enabled,
         loaded.config.dashboard.enabled,
         &loaded.config.server,
-        Arc::new(move || {
-            supervisor_for_http
-                .lock()
-                .ok()
-                .and_then(|g| g.as_ref().map(|s| SanitizedSupervisor::from(&s.snapshot())))
-        }),
     )?
     .with_cloudflare_v4_account(crate::cloudflare_v4::accounts::AccountAuthority::new(
         storage.identity().platform_id,

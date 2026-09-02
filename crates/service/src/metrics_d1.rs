@@ -15,6 +15,7 @@ pub(crate) enum D1Operation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum D1Lifecycle {
     Backup,
+    Restore,
     Migration,
 }
 
@@ -204,6 +205,12 @@ pub(super) fn write_d1_metrics(out: &mut String, metrics: &Inner) {
     );
     write_outcomes(
         out,
+        "d1_restore_total",
+        "D1 restore outcomes",
+        metrics.d1_restore,
+    );
+    write_outcomes(
+        out,
         "d1_migration_total",
         "D1 migration outcomes",
         metrics.d1_migration,
@@ -289,6 +296,7 @@ impl super::MetricsRegistry {
         let mut guard = self.lock();
         let values = match lifecycle {
             D1Lifecycle::Backup => &mut guard.d1_backup,
+            D1Lifecycle::Restore => &mut guard.d1_restore,
             D1Lifecycle::Migration => &mut guard.d1_migration,
         };
         values[usize::from(success)] = values[usize::from(success)].saturating_add(1);

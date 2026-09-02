@@ -60,6 +60,10 @@ pub(crate) enum V4Permission {
     /// Catalog, resource, and status reads.
     Read,
     /// Standard Worker or product resource mutations.
+    #[allow(
+        dead_code,
+        reason = "P6 product subrouters consume this shared permission during integration"
+    )]
     ProductWrite,
     /// Installation maintenance, backup, or restore.
     Maintenance,
@@ -84,6 +88,8 @@ pub(crate) enum V4Error {
     Unavailable,
     /// Current state conflicts with the operation.
     Conflict,
+    /// A persisted or downloaded artifact failed integrity validation.
+    IntegrityFailure,
     /// The operation is outside the declared release capability.
     Unsupported,
     /// Local bounded admission is temporarily saturated.
@@ -111,6 +117,7 @@ impl V4Error {
             Self::NotFound => 9_100_004,
             Self::Unavailable => 9_100_005,
             Self::Conflict => 9_100_006,
+            Self::IntegrityFailure => 9_100_009,
             Self::Unsupported => 9_100_007,
             Self::Internal => 9_100_008,
             Self::RateLimited => 9_102_001,
@@ -126,6 +133,7 @@ impl V4Error {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::Conflict => StatusCode::CONFLICT,
+            Self::IntegrityFailure => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unsupported => StatusCode::NOT_IMPLEMENTED,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
@@ -141,6 +149,7 @@ impl V4Error {
             Self::NotFound => "the requested resource was not found",
             Self::Unavailable => "the requested capability is unavailable",
             Self::Conflict => "the request conflicts with current state",
+            Self::IntegrityFailure => "artifact integrity validation failed",
             Self::Unsupported => "the requested capability is not supported",
             Self::Internal => "the request could not be completed",
             Self::RateLimited => "local admission is temporarily saturated",

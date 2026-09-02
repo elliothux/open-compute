@@ -163,52 +163,47 @@ async fn build_operator_http_state(
     );
     let queue_api = QueueApiState::new(storage.clone(), scheduler.clone());
     queue_api.reconcile_pending().await?;
-    Ok(HttpState::new(
-        health,
-        metrics.clone(),
-        false,
-        false,
-        server,
-        Arc::new(|| None),
-    )?
-    .with_worker_api(worker_api)
-    .with_kv_api(KvApiState::new(
-        storage.clone(),
-        artifacts.clone(),
-        resource_pins.clone(),
-        binding_executor,
-        KvConfig::default(),
-        max_resources,
-        delete_drain,
-    ))
-    .with_r2_api(r2_api)
-    .with_d1_api(D1ApiState::new(
-        storage.clone(),
-        artifacts,
-        resource_pins.clone(),
-        d1_backend,
-        D1Config::default(),
-        max_resources,
-        delete_drain,
-    ))
-    .with_do_api(
-        DoApiState::new(
-            storage.clone(),
-            resource_pins,
-            transport.clone(),
-            DurableObjectsConfig::default(),
-            delete_drain,
-        )
-        .with_metrics(metrics.clone())
-        .with_scheduler(Some(scheduler.clone())),
+    Ok(
+        HttpState::new(health, metrics.clone(), false, false, server)?
+            .with_worker_api(worker_api)
+            .with_kv_api(KvApiState::new(
+                storage.clone(),
+                artifacts.clone(),
+                resource_pins.clone(),
+                binding_executor,
+                KvConfig::default(),
+                max_resources,
+                delete_drain,
+            ))
+            .with_r2_api(r2_api)
+            .with_d1_api(D1ApiState::new(
+                storage.clone(),
+                artifacts,
+                resource_pins.clone(),
+                d1_backend,
+                D1Config::default(),
+                max_resources,
+                delete_drain,
+            ))
+            .with_do_api(
+                DoApiState::new(
+                    storage.clone(),
+                    resource_pins,
+                    transport.clone(),
+                    DurableObjectsConfig::default(),
+                    delete_drain,
+                )
+                .with_metrics(metrics.clone())
+                .with_scheduler(Some(scheduler.clone())),
+            )
+            .with_queue_api(Some(queue_api))
+            .with_workflow_api(Some(WorkflowApiState::new(
+                storage,
+                scheduler,
+                transport,
+                WorkflowsConfig::default(),
+            ))),
     )
-    .with_queue_api(Some(queue_api))
-    .with_workflow_api(Some(WorkflowApiState::new(
-        storage,
-        scheduler,
-        transport,
-        WorkflowsConfig::default(),
-    ))))
 }
 
 fn artifact_client(mock: &MockS3) -> S3ArtifactClient {

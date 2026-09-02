@@ -12,13 +12,14 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use open_compute_core::{AccountId, BindingKind, ErrorCode, PlatformError, ResourceId};
 use open_compute_storage::{
-    D1BackupRecord, D1DatabaseRepository, DurableObjectRepository, KvBackupRecord,
-    KvNamespaceRepository, ResourceRepository, WorkerOwnership, WorkerRepository,
+    DurableObjectRepository, ResourceRepository, WorkerOwnership, WorkerRepository,
 };
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const WRANGLER_VERSION: &str = "4.127.1";
+
+mod backups;
 
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
@@ -46,22 +47,7 @@ pub(super) fn router() -> Router<HttpState> {
             "/accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects",
             get(durable_object_records),
         )
-        .route(
-            "/accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
-            get(kv_backups).post(unsupported_maintenance),
-        )
-        .route(
-            "/accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore",
-            post(unsupported_maintenance),
-        )
-        .route(
-            "/accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
-            get(d1_backups).post(unsupported_maintenance),
-        )
-        .route(
-            "/accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore",
-            post(unsupported_maintenance),
-        )
+        .merge(backups::router())
 }
 
 async fn capabilities(State(_state): State<HttpState>, request: Request) -> Response {
@@ -79,8 +65,13 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
         Ok(value) => value,
         Err(_) => return error_response(V4Error::Internal, context.request_id()),
     };
+    let contract: serde_json::Value =
+        match serde_json::from_slice(include_bytes!("../../../../openapi/p6-capability.json")) {
+            Ok(value) => value,
+            Err(_) => return error_response(V4Error::Internal, context.request_id()),
+        };
     let mut endpoints = BTreeMap::new();
-    if let Some(routes) = inventory
+    if let Some(routes) = contract
         .pointer("/managementApi/routes")
         .and_then(serde_json::Value::as_array)
     {
@@ -104,6 +95,29 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
             );
         }
     }
+    let mut deviations = BTreeSet::new();
+    if let Some(products) = inventory
+        .get("products")
+        .and_then(serde_json::Value::as_object)
+    {
+        for product in products.values() {
+            if product.get("status").and_then(serde_json::Value::as_str)
+                == Some("supported_with_deviation")
+            {
+                insert_deviations(&mut deviations, product.get("deviations"));
+            }
+            if let Some(members) = product.get("members").and_then(serde_json::Value::as_array) {
+                for member in members {
+                    if member.get("status").and_then(serde_json::Value::as_str)
+                        == Some("supported_with_deviation")
+                    {
+                        insert_deviations(&mut deviations, member.get("deviations"));
+                    }
+                }
+            }
+        }
+    }
+    insert_deviations(&mut deviations, contract["managementApi"].get("deviations"));
     success_response(
         context,
         Capabilities {
@@ -115,9 +129,20 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
             },
             compatibility_flags: &lock.required_compatibility_flags,
             endpoints,
-            deviations: ["OC-MANAGEMENT-COMPATIBILITY-DATE-001"],
+            deviations: deviations.into_iter().collect(),
         },
     )
+}
+
+fn insert_deviations(output: &mut BTreeSet<String>, value: Option<&serde_json::Value>) {
+    if let Some(values) = value.and_then(serde_json::Value::as_array) {
+        output.extend(
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(ToOwned::to_owned),
+        );
+    }
 }
 
 async fn system_status(State(state): State<HttpState>, request: Request) -> Response {
@@ -412,89 +437,6 @@ async fn durable_object_records(
     }
 }
 
-async fn kv_backups(
-    State(state): State<HttpState>,
-    Path((account, namespace)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    let context = match read_context(&request, V4Permission::Read) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let (account, namespace) = match resolve_resource(
-        &state,
-        &account,
-        &namespace,
-        V4ResourceKind::KvNamespace,
-        BindingKind::KvNamespace,
-    ) {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
-    let Some(storage) = state.platform_storage() else {
-        return error_response(V4Error::Unavailable, context.request_id());
-    };
-    match KvNamespaceRepository::new(storage.db()).list_backups(account) {
-        Ok(backups) => backup_list_response(
-            context,
-            backups
-                .into_iter()
-                .filter(|backup| backup.source_resource_id == namespace)
-                .map(Backup::try_from)
-                .collect(),
-        ),
-        Err(error) => platform_error(error, context),
-    }
-}
-
-async fn d1_backups(
-    State(state): State<HttpState>,
-    Path((account, database)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    let context = match read_context(&request, V4Permission::Read) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let (account, database) = match resolve_resource(
-        &state,
-        &account,
-        &database,
-        V4ResourceKind::D1Database,
-        BindingKind::D1Database,
-    ) {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
-    let Some(storage) = state.platform_storage() else {
-        return error_response(V4Error::Unavailable, context.request_id());
-    };
-    match D1DatabaseRepository::new(storage.db()).list_backups(account, database) {
-        Ok(backups) => {
-            backup_list_response(context, backups.into_iter().map(Backup::try_from).collect())
-        }
-        Err(error) => platform_error(error, context),
-    }
-}
-
-async fn unsupported_maintenance(State(_state): State<HttpState>, request: Request) -> Response {
-    let context = match bodyless_context(request, V4Permission::Maintenance).await {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    error_response(V4Error::Unsupported, context.request_id())
-}
-
-fn backup_list_response(
-    context: V4RequestContext,
-    backups: Result<Vec<Backup>, V4Error>,
-) -> Response {
-    match backups {
-        Ok(value) => success_response(context, value),
-        Err(error) => error_response(error, context.request_id()),
-    }
-}
-
 fn resolve_account(state: &HttpState, public: &str) -> Result<AccountId, V4Error> {
     state
         .cloudflare_v4_account()
@@ -570,7 +512,7 @@ struct Capabilities<'a> {
     compatibility_date: CompatibilityDate<'a>,
     compatibility_flags: &'a [String],
     endpoints: BTreeMap<&'a str, &'static str>,
-    deviations: [&'static str; 1],
+    deviations: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -633,38 +575,4 @@ struct DurableObjectRecord {
     id: String,
     namespace_id: String,
     created_on: String,
-}
-
-#[derive(Serialize)]
-struct Backup {
-    id: String,
-    created_on: String,
-    state: &'static str,
-    size: u64,
-}
-
-impl TryFrom<KvBackupRecord> for Backup {
-    type Error = V4Error;
-
-    fn try_from(value: KvBackupRecord) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: value.id,
-            created_on: timestamp(value.created_at_ms)?,
-            state: value.state.as_str(),
-            size: value.size_bytes.unwrap_or(0),
-        })
-    }
-}
-
-impl TryFrom<D1BackupRecord> for Backup {
-    type Error = V4Error;
-
-    fn try_from(value: D1BackupRecord) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: value.id,
-            created_on: timestamp(value.created_at_ms)?,
-            state: value.state.as_str(),
-            size: value.size_bytes.unwrap_or(0),
-        })
-    }
 }

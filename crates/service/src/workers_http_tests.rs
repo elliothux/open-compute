@@ -1024,35 +1024,16 @@ async fn worker_and_route_failures_replay_after_storage_restart_without_mutation
 }
 
 #[tokio::test]
-async fn operator_sqlite_reads_remain_available_when_supervisor_is_stopped() {
-    use crate::http::{SanitizedSupervisor, admin_router};
-    use open_compute_core::ReadinessReason;
-    use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
+async fn removed_operator_api_is_neutral_without_runtime_state() {
+    use crate::http::admin_router;
     use open_compute_storage::WorkerRepository;
-    use std::time::SystemTime;
     use tower::ServiceExt;
 
     let (_temp, _mock, api, account) = worker_api_fixture().await;
     WorkerRepository::new(api.storage.db())
         .create_worker(account, "listed", RequestId::generate(), 1, 100)
         .unwrap();
-    let snapshot = SupervisorSnapshot {
-        state: SupervisorState::Stopped,
-        reason: ReadinessReason::RuntimeStarting,
-        last_transition_at: SystemTime::UNIX_EPOCH,
-        attempt: 1,
-        last_exit: None,
-        next_retry_at: None,
-        pid: None,
-        pgid: None,
-        binary_digest: "digest".to_owned(),
-        config_digest: "config".to_owned(),
-        startup_id: None,
-        token_fingerprint: None,
-        listen_port: None,
-    };
-    let supervisor = Arc::new(move || Some(SanitizedSupervisor::from(&snapshot)));
-    let router = admin_router(authorized_http_state(api).with_supervisor(supervisor));
+    let router = admin_router(authorized_http_state(api));
     for path in [
         "/operator/api/v1/account".to_owned(),
         format!("/operator/api/v1/accounts/{account}/workers"),

@@ -46,6 +46,7 @@ impl SnapshotPins {
     }
 
     /// Refuse exact immutable-object deletion while any authenticated manifest pins it.
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn ensure_unpinned(&self, key: &str) -> Result<(), PlatformError> {
         match self {
             Self::Verified { object_keys, .. } if !object_keys.contains(key) => Ok(()),

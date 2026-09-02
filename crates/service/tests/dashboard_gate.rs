@@ -275,16 +275,9 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
         },
         ..ServerConfig::default()
     };
-    let state = HttpState::new(
-        HealthCoordinator::new(),
-        metrics,
-        true,
-        true,
-        &server,
-        Arc::new(|| None),
-    )
-    .expect("dashboard gate HTTP state")
-    .with_dashboard_dispatch(Arc::new(RwLock::new(Some(dispatch))));
+    let state = HttpState::new(HealthCoordinator::new(), metrics, true, true, &server)
+        .expect("dashboard gate HTTP state")
+        .with_dashboard_dispatch(Arc::new(RwLock::new(Some(dispatch))));
     let router = admin_router(state);
 
     let home = router

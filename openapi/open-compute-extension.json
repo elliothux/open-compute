@@ -14,7 +14,7 @@
     "/open-compute/capabilities": {
       "get": {
         "operationId": "open-compute-get-open-compute-capabilities",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -54,7 +54,7 @@
     "/open-compute/system/status": {
       "get": {
         "operationId": "open-compute-get-open-compute-system-status",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -94,7 +94,7 @@
     "/open-compute/scheduler": {
       "get": {
         "operationId": "open-compute-get-open-compute-scheduler",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -134,7 +134,7 @@
     "/open-compute/scheduler/pause": {
       "post": {
         "operationId": "open-compute-post-open-compute-scheduler-pause",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -174,7 +174,7 @@
     "/open-compute/scheduler/resume": {
       "post": {
         "operationId": "open-compute-post-open-compute-scheduler-resume",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -214,7 +214,7 @@
     "/open-compute/scheduler/repair": {
       "post": {
         "operationId": "open-compute-post-open-compute-scheduler-repair",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -254,7 +254,7 @@
     "/open-compute/cache": {
       "get": {
         "operationId": "open-compute-get-open-compute-cache",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -294,7 +294,7 @@
     "/open-compute/cache/garbage-collection": {
       "post": {
         "operationId": "open-compute-post-open-compute-cache-garbage-collection",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -334,7 +334,7 @@
     "/open-compute/images/capacity": {
       "get": {
         "operationId": "open-compute-get-open-compute-images-capacity",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [],
         "x-open-compute-request-body": "none",
         "responses": {
@@ -374,7 +374,7 @@
     "/accounts/{account_id}/open-compute/workers/{script_name}/endpoints": {
       "get": {
         "operationId": "open-compute-get-accounts-account-id-open-compute-workers-script-name-endpoints",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",
@@ -431,7 +431,7 @@
     "/accounts/{account_id}/open-compute/durable-objects": {
       "get": {
         "operationId": "open-compute-get-accounts-account-id-open-compute-durable-objects",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",
@@ -480,7 +480,7 @@
     "/accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects": {
       "get": {
         "operationId": "open-compute-get-accounts-account-id-open-compute-durable-objects-namespace-id-objects",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",
@@ -537,7 +537,7 @@
     "/accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups": {
       "post": {
         "operationId": "open-compute-post-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",
@@ -602,7 +602,7 @@
       },
       "get": {
         "operationId": "open-compute-get-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",
@@ -659,7 +659,7 @@
     "/accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore": {
       "post": {
         "operationId": "open-compute-post-accounts-account-id-open-compute-kv-backups-backup-id-restore",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",
@@ -726,7 +726,7 @@
     "/accounts/{account_id}/open-compute/d1/databases/{database_id}/backups": {
       "post": {
         "operationId": "open-compute-post-accounts-account-id-open-compute-d1-databases-database-id-backups",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",
@@ -791,7 +791,7 @@
       },
       "get": {
         "operationId": "open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-backups",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",
@@ -848,7 +848,7 @@
     "/accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore": {
       "post": {
         "operationId": "open-compute-post-accounts-account-id-open-compute-d1-backups-backup-id-restore",
-        "x-open-compute-capability-status": "planned",
+        "x-open-compute-capability-status": "supported",
         "parameters": [
           {
             "name": "account_id",

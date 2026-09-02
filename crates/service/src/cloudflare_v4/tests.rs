@@ -132,7 +132,7 @@ async fn vendor_capabilities_and_system_status_use_the_canonical_envelope() {
         .unwrap()
         .len();
     let authority_count = serde_json::from_slice::<serde_json::Value>(include_bytes!(
-        "../../../../share/cloudflare-capabilities.json"
+        "../../../../openapi/p6-capability.json"
     ))
     .unwrap()["managementApi"]["routes"]
         .as_array()
@@ -177,6 +177,53 @@ async fn bodyless_vendor_posts_reject_content() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(json(response).await["errors"][0]["code"], 9_100_003);
+}
+
+#[tokio::test]
+async fn backup_routes_authenticate_before_parsing_and_reject_get_bodies() {
+    let (state, authority) = state();
+    let path = format!(
+        "/accounts/{}/open-compute/kv/namespaces/00000000000000000000000000000000/backups",
+        authority.public_id()
+    );
+    let unauthenticated = app(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&path)
+                .header("idempotency-key", "has space")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let malformed = app(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&path)
+                .header(header::AUTHORIZATION, "Bearer admin-token")
+                .header("idempotency-key", "has space")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+
+    let get_with_body = app(state)
+        .oneshot(
+            Request::builder()
+                .uri(path)
+                .header(header::AUTHORIZATION, "Bearer read-token")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get_with_body.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

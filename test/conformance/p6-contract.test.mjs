@@ -16,16 +16,24 @@ test("P6 pinned OpenAPI subset and capability projection are internally reproduc
   assert.equal(catalog.wrangler.commandCount, capability.wrangler.commands.length);
 });
 
-test("vendor extension operations have stable typed envelopes and bodyless requests", () => {
+test("vendor extension operations have stable typed envelopes and exact request media", () => {
   const operations = Object.entries(extension.paths).flatMap(([path, methods]) =>
     Object.entries(methods).map(([method, operation]) => ({ path, method, operation })),
   );
   assert.equal(operations.length, 18);
   assert.equal(operations.filter(({ method }) => method === "post").length, 8);
   assert.equal(new Set(operations.map(({ operation }) => operation.operationId)).size, 18);
-  assert.ok(operations.every(({ operation }) => operation["x-open-compute-capability-status"] === "planned"));
-  assert.ok(operations.every(({ operation }) =>
-    operation["x-open-compute-request-body"] === "none" && operation.requestBody === undefined));
+  assert.ok(operations.every(({ operation }) => operation["x-open-compute-capability-status"] === "supported"));
+  const restores = operations.filter(({ operation }) => operation.operationId.endsWith("-restore"));
+  assert.equal(restores.length, 2);
+  assert.ok(restores.every(({ operation }) =>
+    operation["x-open-compute-request-body"] === "json"
+      && operation.requestBody.required === true
+      && operation.requestBody.content["application/json"].schema.$ref
+        === "#/components/schemas/RestoreRequest"));
+  assert.ok(operations.filter(({ operation }) => !operation.operationId.endsWith("-restore"))
+    .every(({ operation }) => operation["x-open-compute-request-body"] === "none"
+      && operation.requestBody === undefined));
   for (const { operation } of operations) {
     assert.equal(operation.responses["4XX"].content["application/json"].schema.$ref,
       "#/components/schemas/ErrorEnvelope");
@@ -43,6 +51,8 @@ test("vendor extension operations have stable typed envelopes and bodyless reque
   assert.equal(extension.components.schemas.ErrorEnvelope.properties.success.const, false);
   assert.equal(extension.components.schemas.ErrorEnvelope.properties.result.type, "null");
   assert.equal(extension.components.schemas.ErrorEnvelope.properties.errors.minItems, 1);
+  assert.deepEqual(extension.components.schemas.RestoredResource.properties.kind.enum,
+    ["kv_namespace", "d1_database"]);
 });
 
 test("settings surfaces, asset upload variants, and old routes are classified exactly", () => {

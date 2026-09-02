@@ -139,8 +139,9 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
   }
   for (const id of source.managementApi.vendorRoutes) {
     const [method, path] = operationKey(id);
-    routes.push({ id, method: method.toUpperCase(), path, status: "planned", source: "open-compute-extension",
-      requestMediaType: "none" });
+    routes.push({ id, method: method.toUpperCase(), path,
+      operationId: EXTENSION_OPERATIONS[id][0], status: "supported", source: "open-compute-extension",
+      requestMediaType: RESTORE_OPERATIONS.has(id) ? "json" : "none" });
   }
   const topFields = Object.keys(configSchema.definitions?.RawConfig?.properties ?? {});
   if (topFields.length === 0) throw new Error("Wrangler RawConfig field inventory is empty");
@@ -179,6 +180,7 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
     managementApi: {
       root: source.managementApi.root,
       routes,
+      deviations: source.managementApi.deviations,
       legacyRoutes: source.managementApi.legacyRoutes.map(id =>
         ({ id, status: "unsupported", source: "day1-negative-route-inventory" })),
     },
@@ -201,11 +203,16 @@ const EXTENSION_OPERATIONS = {
   "GET /accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects": ["open-compute-get-accounts-account-id-open-compute-durable-objects-namespace-id-objects", "DurableObjectRecordsResponse", ["200"]],
   "POST /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups": ["open-compute-post-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups", "BackupResponse", ["200", "201"]],
   "GET /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups": ["open-compute-get-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups", "BackupsResponse", ["200"]],
-  "POST /accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore": ["open-compute-post-accounts-account-id-open-compute-kv-backups-backup-id-restore", "BackupResponse", ["200", "201"]],
+  "POST /accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore": ["open-compute-post-accounts-account-id-open-compute-kv-backups-backup-id-restore", "RestoredResourceResponse", ["200", "201"]],
   "POST /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups": ["open-compute-post-accounts-account-id-open-compute-d1-databases-database-id-backups", "BackupResponse", ["200", "201"]],
   "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups": ["open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-backups", "BackupsResponse", ["200"]],
-  "POST /accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore": ["open-compute-post-accounts-account-id-open-compute-d1-backups-backup-id-restore", "BackupResponse", ["200", "201"]],
+  "POST /accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore": ["open-compute-post-accounts-account-id-open-compute-d1-backups-backup-id-restore", "RestoredResourceResponse", ["200", "201"]],
 };
+
+const RESTORE_OPERATIONS = new Set([
+  "POST /accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore",
+  "POST /accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore",
+]);
 
 function successEnvelope(result) {
   return {
@@ -276,8 +283,17 @@ function extensionSchemas() {
     DurableObjectRecord: objectSchema(["id", "namespace_id", "created_on"], {
       id: string, namespace_id: string, created_on: { type: "string", format: "date-time" },
     }),
-    Backup: objectSchema(["id", "created_on", "state", "size"], {
+    Backup: objectSchema(["id", "created_on", "state"], {
       id: string, created_on: { type: "string", format: "date-time" }, state: string, size: nonNegativeInteger,
+    }),
+    RestoreRequest: objectSchema(["name"], {
+      name: { type: "string", minLength: 1, maxLength: 128, pattern: "^[^\\u0000-\\u001F\\u007F]+$" },
+    }),
+    RestoredResource: objectSchema(["id", "name", "kind", "created_on"], {
+      id: string,
+      name: { type: "string", minLength: 1, maxLength: 128 },
+      kind: { type: "string", enum: ["kv_namespace", "d1_database"] },
+      created_on: { type: "string", format: "date-time" },
     }),
   };
   schemas.ErrorEnvelope = objectSchema(["success", "result", "errors", "messages"], {
@@ -297,6 +313,7 @@ function extensionSchemas() {
     DurableObjectRecordsResponse: { type: "array", items: { $ref: "#/components/schemas/DurableObjectRecord" } },
     BackupResponse: { $ref: "#/components/schemas/Backup" },
     BackupsResponse: { type: "array", items: { $ref: "#/components/schemas/Backup" } },
+    RestoredResourceResponse: { $ref: "#/components/schemas/RestoredResource" },
   })) schemas[name] = successEnvelope(result);
   return schemas;
 }
@@ -315,11 +332,15 @@ export function buildExtension(source) {
       name: match[1], in: "path", required: true, schema: { $ref: "#/components/schemas/PathSegment" },
     }));
     paths[path] ??= {};
+    const restore = RESTORE_OPERATIONS.has(id);
     paths[path][method] = {
       operationId,
-      "x-open-compute-capability-status": "planned",
+      "x-open-compute-capability-status": "supported",
       parameters,
-      "x-open-compute-request-body": "none",
+      "x-open-compute-request-body": restore ? "json" : "none",
+      ...(restore ? { requestBody: { required: true, content: {
+        "application/json": { schema: { $ref: "#/components/schemas/RestoreRequest" } },
+      } } } : {}),
       responses: Object.fromEntries([
         ...successStatuses.map(status => [status, { description: "Successful vendor extension response", content: {
           "application/json": { schema: { $ref: `#/components/schemas/${responseSchema}` } },
@@ -406,9 +427,11 @@ export function validateCommitted({ openapiPath, wranglerRoot, sdkRoot } = {}) {
     throw new Error("vendor extension operation IDs are incomplete or duplicated");
   }
   for (const operation of extensionOperations) {
-    if (operation["x-open-compute-capability-status"] !== "planned"
-        || operation["x-open-compute-request-body"] !== "none"
-        || operation.requestBody !== undefined) {
+    const restore = operation.operationId.endsWith("-restore");
+    if (operation["x-open-compute-capability-status"] !== "supported"
+        || operation["x-open-compute-request-body"] !== (restore ? "json" : "none")
+        || (restore ? operation.requestBody?.content?.["application/json"]?.schema?.$ref
+              !== "#/components/schemas/RestoreRequest" : operation.requestBody !== undefined)) {
       throw new Error(`vendor extension operation contract drift: ${operation.operationId}`);
     }
     for (const [status, response] of Object.entries(operation.responses)) {

@@ -23,12 +23,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use axum::{Json, Router};
 use open_compute_core::config::ServerConfig;
-use open_compute_core::{
-    ErrorCode, OperationClass, PlatformError, ReadinessReason, RequestId, SecretString,
-};
-use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
+use open_compute_core::{ErrorCode, OperationClass, PlatformError, RequestId, SecretString};
 use open_compute_storage::PlatformStorage;
-use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
@@ -57,7 +53,6 @@ pub struct HttpState {
     read_only_secret: Option<Arc<SecretString>>,
     cloudflare_v4_account: Option<Arc<AccountAuthority>>,
     platform_storage: Option<Arc<PlatformStorage>>,
-    supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
     #[cfg(any(test, feature = "test-support"))]
     test_runtime_restart: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     worker_api: Option<Arc<WorkerApiState>>,
@@ -105,27 +100,6 @@ impl std::fmt::Debug for HttpState {
     }
 }
 
-/// Redacted supervisor fields allowed on `/health/status`.
-#[derive(Clone, Debug, Serialize)]
-pub struct SanitizedSupervisor {
-    /// Supervisor state token.
-    pub state: SupervisorState,
-    /// Stable readiness reason.
-    pub reason: ReadinessReason,
-    /// Attempt counter.
-    pub attempt: u32,
-}
-
-impl From<&SupervisorSnapshot> for SanitizedSupervisor {
-    fn from(snap: &SupervisorSnapshot) -> Self {
-        Self {
-            state: snap.state,
-            reason: snap.reason,
-            attempt: snap.attempt,
-        }
-    }
-}
-
 impl HttpState {
     /// Build state. Resolves admin auth when configured.
     pub fn new(
@@ -134,7 +108,6 @@ impl HttpState {
         metrics_enabled: bool,
         dashboard_enabled: bool,
         server: &ServerConfig,
-        supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
     ) -> Result<Self, PlatformError> {
         let admin_secret = Arc::new(resolve_admin_auth(&server.admin_auth)?);
         let deployer_secret = Arc::new(resolve_bearer_auth(&server.deployer_auth)?);
@@ -158,7 +131,6 @@ impl HttpState {
             read_only_secret: Some(read_only_secret),
             cloudflare_v4_account: None,
             platform_storage: None,
-            supervisor,
             #[cfg(any(test, feature = "test-support"))]
             test_runtime_restart: None,
             worker_api: None,
@@ -203,7 +175,6 @@ impl HttpState {
             read_only_secret: None,
             cloudflare_v4_account: None,
             platform_storage: None,
-            supervisor: Arc::new(|| None),
             test_runtime_restart: None,
             worker_api: None,
             kv_api: None,
@@ -224,17 +195,6 @@ impl HttpState {
     #[must_use]
     pub fn with_dashboard_enabled(mut self, enabled: bool) -> Self {
         self.dashboard_enabled = enabled;
-        self
-    }
-
-    /// Override supervisor snapshot reporting for operator status tests.
-    #[cfg(any(test, feature = "test-support"))]
-    #[must_use]
-    pub fn with_supervisor(
-        mut self,
-        supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
-    ) -> Self {
-        self.supervisor = supervisor;
         self
     }
 

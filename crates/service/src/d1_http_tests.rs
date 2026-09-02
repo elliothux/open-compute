@@ -1,4 +1,6 @@
 use super::*;
+use crate::cloudflare_v4::V4ResourceKind;
+use crate::cloudflare_v4::accounts::AccountAuthority;
 use crate::health::HealthCoordinator;
 use crate::http;
 use crate::metrics::MetricsRegistry;
@@ -21,6 +23,7 @@ struct Fixture {
     router: Router,
     account: AccountId,
     metrics: Arc<MetricsRegistry>,
+    authority: AccountAuthority,
 }
 
 async fn fixture() -> Fixture {
@@ -95,21 +98,30 @@ request_timeout_ms = 500
     assert!(format!("{api:?}").contains("D1ApiState"));
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
+    let authority = AccountAuthority::new(storage.identity().platform_id, account, 1_000);
     let state = HttpState::for_test(
         HealthCoordinator::new(),
         metrics.clone(),
         false,
         Some(SecretString::new("admin-secret")),
     )
-    .with_d1_api(api);
+    .with_d1_api(api)
+    .with_cloudflare_v4_account(authority.clone())
+    .with_platform_storage(storage.clone());
+    let router = http::admin_router(state.clone()).merge(
+        Router::new()
+            .nest("/operator/api", control_router())
+            .with_state(state),
+    );
     Fixture {
         _temp: temp,
         _mock: mock,
         storage,
         pins,
-        router: http::admin_router(state),
+        router,
         account,
         metrics,
+        authority,
     }
 }
 
@@ -135,9 +147,12 @@ fn request_auth(
     if let Some(token) = token {
         builder = builder.header("authorization", format!("Bearer {token}"));
     }
-    builder
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap()
+    let body = if body.is_null() {
+        Body::empty()
+    } else {
+        Body::from(serde_json::to_vec(&body).unwrap())
+    };
+    builder.body(body).unwrap()
 }
 
 async fn response_json(response: Response) -> (StatusCode, Value) {
@@ -287,7 +302,13 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
         )
         .unwrap();
 
-    let backups = format!("{collection}/{source}/backups");
+    let public_source = fixture
+        .authority
+        .public_resource_id(V4ResourceKind::D1Database, source);
+    let backups = format!(
+        "/client/v4/accounts/{}/open-compute/d1/databases/{public_source}/backups",
+        fixture.authority.public_id()
+    );
     let (status, backup_body) = response_json(
         fixture
             .router
@@ -302,8 +323,8 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
             .unwrap(),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let backup_id = backup_body["backup"]["id"].as_str().unwrap();
+    assert_eq!(status, StatusCode::OK);
+    let backup_id = backup_body["result"]["id"].as_str().unwrap();
     assert_eq!(
         fixture
             .router
@@ -328,30 +349,33 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
             .unwrap(),
     )
     .await;
-    assert_eq!(backup_list["backups"].as_array().unwrap().len(), 1);
+    assert_eq!(backup_list["result"].as_array().unwrap().len(), 1);
     assert!(!backup_list.to_string().contains("objectKey"));
 
-    let restore = format!("{collection}:restore");
+    let restore = format!(
+        "/client/v4/accounts/{}/open-compute/d1/backups/{backup_id}/restore",
+        fixture.authority.public_id()
+    );
     let first = fixture.router.clone().oneshot(request(
         "POST",
         &restore,
-        json!({"backupId": backup_id, "newName": "restored-a"}),
+        json!({"name": "restored-a"}),
         Some("restore-primary-a"),
     ));
     let second = fixture.router.clone().oneshot(request(
         "POST",
         &restore,
-        json!({"backupId": backup_id, "newName": "restored-b"}),
+        json!({"name": "restored-b"}),
         Some("restore-primary-b"),
     ));
     let (first, second) = tokio::join!(first, second);
     let first = response_json(first.unwrap()).await;
     let second = response_json(second.unwrap()).await;
     let (restored_body, restored_name, restore_key) = match (first, second) {
-        ((StatusCode::CREATED, body), (StatusCode::TOO_MANY_REQUESTS, _)) => {
+        ((StatusCode::OK, body), (StatusCode::TOO_MANY_REQUESTS, _)) => {
             (body, "restored-a", "restore-primary-a")
         }
-        ((StatusCode::TOO_MANY_REQUESTS, _), (StatusCode::CREATED, body)) => {
+        ((StatusCode::TOO_MANY_REQUESTS, _), (StatusCode::OK, body)) => {
             (body, "restored-b", "restore-primary-b")
         }
         statuses => panic!("one concurrent restore must win the only quota slot: {statuses:?}"),
@@ -363,7 +387,7 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
             .oneshot(request(
                 "POST",
                 &restore,
-                json!({"backupId": backup_id, "newName": restored_name}),
+                json!({"name": restored_name}),
                 Some(restore_key),
             ))
             .await
@@ -371,11 +395,14 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
             .status(),
         StatusCode::OK
     );
-    let restored: ResourceId = restored_body["resourceId"]
-        .as_str()
+    let restored = ResourceRepository::new(fixture.storage.db())
+        .list(fixture.account, Some(BindingKind::D1Database))
         .unwrap()
-        .parse()
-        .unwrap();
+        .into_iter()
+        .find(|record| record.name == restored_name)
+        .unwrap()
+        .id;
+    assert_eq!(restored_body["result"]["name"], restored_name);
     assert_ne!(restored, source);
     let backup_staging_entries = std::fs::read_dir(fixture.storage.data_dir().backup_staging_dir())
         .unwrap()
@@ -702,9 +729,12 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
             D1QueryLimits::query(&D1Config::default()).unwrap(),
         )
         .unwrap();
+    let public_source = fixture
+        .authority
+        .public_resource_id(V4ResourceKind::D1Database, source);
     let backup_uri = format!(
-        "/operator/api/v1/accounts/{}/d1/databases/{source}/backups",
-        fixture.account
+        "/client/v4/accounts/{}/open-compute/d1/databases/{public_source}/backups",
+        fixture.authority.public_id()
     );
 
     fixture
@@ -726,7 +756,7 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
         )
         .await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(body["error"]["code"], "S3_UNAVAILABLE");
+        assert_eq!(body["success"], false);
     }
     let failed = D1DatabaseRepository::new(fixture.storage.db())
         .list_backups(fixture.account, source)
@@ -734,8 +764,9 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].state, D1BackupState::Failed);
     let restore_uri = format!(
-        "/operator/api/v1/accounts/{}/d1/databases:restore",
-        fixture.account
+        "/client/v4/accounts/{}/open-compute/d1/backups/{}/restore",
+        fixture.authority.public_id(),
+        failed[0].id
     );
     assert_eq!(
         fixture
@@ -744,13 +775,13 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
             .oneshot(request(
                 "POST",
                 &restore_uri,
-                json!({"backupId": failed[0].id.clone(), "newName": "not-ready"}),
+                json!({"name": "not-ready"}),
                 Some("restore-not-ready"),
             ))
             .await
             .unwrap()
             .status(),
-        StatusCode::CONFLICT
+        StatusCode::SERVICE_UNAVAILABLE
     );
 
     fixture
@@ -770,8 +801,8 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
             .unwrap(),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let backup_id = body["backup"]["id"].as_str().unwrap();
+    assert_eq!(status, StatusCode::OK);
+    let backup_id = body["result"]["id"].as_str().unwrap();
 
     fixture
         ._mock
@@ -782,8 +813,11 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
             .clone()
             .oneshot(request(
                 "POST",
-                &restore_uri,
-                json!({"backupId": backup_id, "newName": "must-not-publish"}),
+                &format!(
+                    "/client/v4/accounts/{}/open-compute/d1/backups/{backup_id}/restore",
+                    fixture.authority.public_id()
+                ),
+                json!({"name": "must-not-publish"}),
                 Some("corrupt-restore"),
             ))
             .await
@@ -791,7 +825,7 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(body["error"]["code"], "ARTIFACT_INTEGRITY_ERROR");
+    assert_eq!(body["success"], false);
     let rendered = fixture
         .metrics
         .render(&open_compute_core::PlatformStatus::starting());
