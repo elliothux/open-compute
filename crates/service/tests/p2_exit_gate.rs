@@ -275,7 +275,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
             &database,
             "SELECT count(*) FROM workflow_instances WHERE run_token IS NOT NULL",
         ) == 0)
-        .then_some(())
+            .then_some(())
     })
     .await;
     request(&client, public, "/resume/chain", json!({})).await;
