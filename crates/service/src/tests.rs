@@ -1011,7 +1011,7 @@ async fn liveness_ready_status_and_bounds() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/operator/metrics")
+                .uri("/metrics")
                 .body(Body::empty())
                 .unwrap(),
         )

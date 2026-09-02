@@ -4,8 +4,9 @@ pub(crate) mod accounts;
 mod vendor;
 mod wire;
 
+pub(crate) use accounts::V4ResourceKind;
 pub(crate) use wire::{
-    V4Error, V4OfficialError, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
+    V4Error, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
     paginated_response, request_context, success_response,
 };
 

@@ -591,6 +591,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         storage.identity().default_account_id,
         storage.identity().created_at_ms,
     ))
+    .with_platform_storage(storage.clone())
     .with_dashboard_dispatch(dashboard_dispatch.clone())
     .with_worker_api(worker_api)
     .with_kv_api(

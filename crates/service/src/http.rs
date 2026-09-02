@@ -27,6 +27,7 @@ use open_compute_core::{
     ErrorCode, OperationClass, PlatformError, ReadinessReason, RequestId, SecretString,
 };
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
+use open_compute_storage::PlatformStorage;
 use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
@@ -39,8 +40,6 @@ pub const REQUEST_ID_HEADER: &str = "x-open-compute-request-id";
 const MAX_BODY: usize = 4096;
 const MAX_HEADER_BYTES: usize = 8192;
 const MAX_HEADER_TOTAL: usize = 16_384;
-const MAX_VERSION_HEADER_TOTAL: usize =
-    workers_http::MAX_VERSION_METADATA_HEADER_BYTES + MAX_HEADER_TOTAL;
 
 /// Stable error metadata attached internally for low-cardinality product metrics.
 #[derive(Clone, Copy, Debug)]
@@ -57,6 +56,7 @@ pub struct HttpState {
     deployer_secret: Option<Arc<SecretString>>,
     read_only_secret: Option<Arc<SecretString>>,
     cloudflare_v4_account: Option<Arc<AccountAuthority>>,
+    platform_storage: Option<Arc<PlatformStorage>>,
     supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
     #[cfg(any(test, feature = "test-support"))]
     test_runtime_restart: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
@@ -85,6 +85,7 @@ impl std::fmt::Debug for HttpState {
                 "cloudflare_v4_account",
                 &self.cloudflare_v4_account.is_some(),
             )
+            .field("platform_storage", &self.platform_storage.is_some())
             .field(
                 "test_runtime_restart",
                 &cfg!(any(test, feature = "test-support")),
@@ -156,6 +157,7 @@ impl HttpState {
             deployer_secret: Some(deployer_secret),
             read_only_secret: Some(read_only_secret),
             cloudflare_v4_account: None,
+            platform_storage: None,
             supervisor,
             #[cfg(any(test, feature = "test-support"))]
             test_runtime_restart: None,
@@ -200,6 +202,7 @@ impl HttpState {
             deployer_secret: None,
             read_only_secret: None,
             cloudflare_v4_account: None,
+            platform_storage: None,
             supervisor: Arc::new(|| None),
             test_runtime_restart: None,
             worker_api: None,
@@ -423,6 +426,19 @@ impl HttpState {
     pub(crate) fn cloudflare_v4_account(&self) -> Option<&AccountAuthority> {
         self.cloudflare_v4_account.as_deref()
     }
+
+    /// Attach the one platform persistence authority for v4 vendor inspection.
+    #[must_use]
+    pub(crate) fn with_platform_storage(mut self, storage: Arc<PlatformStorage>) -> Self {
+        self.platform_storage = Some(storage);
+        self
+    }
+
+    /// Borrow the one platform persistence authority.
+    #[must_use]
+    pub(crate) fn platform_storage(&self) -> Option<&Arc<PlatformStorage>> {
+        self.platform_storage.as_ref()
+    }
 }
 
 /// Public routes only.
@@ -454,7 +470,7 @@ pub fn admin_router(state: HttpState) -> Router {
         )
         .merge(removed_management_router(false));
     if metrics_enabled {
-        router = router.route("/operator/metrics", get(metrics_handler));
+        router = router.route("/metrics", get(metrics_handler));
     }
     router = router
         .route("/operator", any(operator_surface))
@@ -484,7 +500,7 @@ pub fn merged_router(state: HttpState) -> Router {
         )
         .merge(removed_management_router(false));
     if metrics_enabled {
-        router = router.route("/operator/metrics", get(metrics_handler));
+        router = router.route("/metrics", get(metrics_handler));
     }
     router
         .route("/operator", any(operator_surface))
@@ -520,6 +536,7 @@ fn removed_management_router(reserve_v4: bool) -> Router<HttpState> {
     let mut router = Router::new()
         .route("/operator/api", any(neutral_not_found))
         .route("/operator/api/{*rest}", any(neutral_not_found))
+        .route("/operator/metrics", any(neutral_not_found))
         .route("/v1", any(neutral_not_found))
         .route("/v1/{*rest}", any(neutral_not_found));
     if reserve_v4 {
@@ -771,40 +788,21 @@ async fn bounds_middleware(
         && request.method() != Method::HEAD
         && matches!(
             request.uri().path(),
-            "/health/live"
-                | "/health/ready"
-                | "/operator/api/v1/system/status"
-                | "/operator/metrics"
+            "/health/live" | "/health/ready" | "/metrics"
         )
     {
         return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
     }
-    let direct_version_upload = request
-        .uri()
-        .path()
-        .starts_with("/operator/api/v1/accounts/")
-        && request.uri().path().ends_with("/versions");
-    let staged_version_upload = is_staged_version_upload(request.uri().path());
+    let worker_upload = is_v4_worker_upload(request.uri().path());
     let mut header_total = 0_usize;
     for (name, value) in request.headers() {
-        let value_limit =
-            if direct_version_upload && name.as_str() == workers_http::VERSION_METADATA_HEADER {
-                workers_http::MAX_VERSION_METADATA_HEADER_BYTES
-            } else {
-                MAX_HEADER_BYTES
-            };
-        if value.len() > value_limit || name.as_str().len() > 256 {
+        if value.len() > MAX_HEADER_BYTES || name.as_str().len() > 256 {
             return Err(StatusCode::PAYLOAD_TOO_LARGE);
         }
         header_total = header_total
             .saturating_add(name.as_str().len())
             .saturating_add(value.len());
-        let total_limit = if direct_version_upload {
-            MAX_VERSION_HEADER_TOTAL
-        } else {
-            MAX_HEADER_TOTAL
-        };
-        if header_total > total_limit {
+        if header_total > MAX_HEADER_TOTAL {
             return Err(StatusCode::PAYLOAD_TOO_LARGE);
         }
     }
@@ -812,7 +810,7 @@ async fn bounds_middleware(
         && kv_http::operator_kv_value_put_path(request.uri().path());
     let r2_object_put = request.method() == Method::PUT
         && r2_http::operator_r2_object_put_path(request.uri().path());
-    let body_limit = if direct_version_upload || staged_version_upload {
+    let body_limit = if worker_upload {
         workers_http::HARD_MAX_BUNDLE_BODY
     } else if kv_value_put {
         kv_http::KV_OPERATOR_PUT_MAX_BODY
@@ -872,26 +870,28 @@ async fn bounds_middleware(
     Ok(response)
 }
 
-fn is_staged_version_upload(path: &str) -> bool {
+fn is_v4_worker_upload(path: &str) -> bool {
     let parts = path
         .strip_prefix('/')
         .unwrap_or(path)
         .split('/')
         .collect::<Vec<_>>();
-    parts.len() >= 8
-        && parts[0] == "operator"
-        && parts[1] == "api"
-        && parts[2] == "v1"
-        && parts[3] == "accounts"
-        && !parts[4].is_empty()
-        && parts[5] == "workers"
-        && !parts[6].is_empty()
-        && parts[7] == "version-uploads"
-        && (parts.len() == 8 || !parts[8].is_empty())
-        && (parts.len() == 8
-            || parts.len() == 9
-            || (parts.len() == 10 && parts[9] == "finalize")
-            || (parts.len() == 11 && parts[9] == "objects" && !parts[10].is_empty()))
+    if parts.len() < 7
+        || parts[0] != "client"
+        || parts[1] != "v4"
+        || parts[2] != "accounts"
+        || parts[3].is_empty()
+        || parts[4] != "workers"
+    {
+        return false;
+    }
+    (parts.len() == 8 && parts[5] == "scripts" && !parts[6].is_empty() && parts[7] == "versions")
+        || (parts.len() == 7 && parts[5] == "scripts" && !parts[6].is_empty())
+        || (parts.len() == 8
+            && parts[5] == "assets"
+            && parts[6] == "upload"
+            && !parts[7].is_empty())
+        || (parts.len() == 7 && parts[5] == "assets" && parts[6] == "upload")
 }
 
 fn product_operation(path: &str) -> Option<OperationClass> {
@@ -916,11 +916,9 @@ fn bound_route(path: &str) -> &'static str {
     match path {
         "/health/live" => "/health/live",
         "/health/ready" => "/health/ready",
-        "/operator/api/v1/system/status" => "/operator/api/v1/system/status",
-        "/operator/metrics" => "/operator/metrics",
-        _ if path.starts_with("/operator/api/v1/accounts/") => {
-            "/operator/api/v1/accounts/:account/workers/*"
-        }
+        "/metrics" => "/metrics",
+        _ if path.starts_with("/client/v4/accounts/") => "/client/v4/accounts/:account/*",
+        _ if path.starts_with("/client/v4/open-compute/") => "/client/v4/open-compute/*",
         _ if path.starts_with("/__workers/") => "/__workers/:account/:worker/*",
         _ => "/other",
     }

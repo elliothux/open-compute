@@ -37,14 +37,14 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
     for (path, expected) in [
         ("/health/live", "/health/live"),
         ("/health/ready", "/health/ready"),
+        ("/metrics", "/metrics"),
         (
-            "/operator/api/v1/system/status",
-            "/operator/api/v1/system/status",
+            "/client/v4/open-compute/system/status",
+            "/client/v4/open-compute/*",
         ),
-        ("/operator/metrics", "/operator/metrics"),
         (
-            "/operator/api/v1/accounts/a/workers",
-            "/operator/api/v1/accounts/:account/workers/*",
+            "/client/v4/accounts/a/workers/scripts",
+            "/client/v4/accounts/:account/*",
         ),
         ("/__workers/a/w", "/__workers/:account/:worker/*"),
         ("/tenant-controlled", "/other"),
@@ -52,7 +52,7 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
         assert_eq!(bound_route(path), expected);
     }
     assert_eq!(
-        product_operation("/operator/api/v1/accounts/a/kv/namespaces"),
+        product_operation("/client/v4/accounts/a/storage/kv/namespaces"),
         Some(OperationClass::Kv)
     );
     assert_eq!(product_operation("/__workers/a/w"), None);
@@ -67,7 +67,7 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
     let response = admin_router(authenticated)
         .oneshot(
             Request::builder()
-                .uri("/operator/metrics")
+                .uri("/metrics")
                 .header(header::AUTHORIZATION, "Bearer admin-secret")
                 .body(Body::empty())
                 .unwrap(),
@@ -95,7 +95,7 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
     let response = admin_router(protected)
         .oneshot(
             Request::builder()
-                .uri("/operator/metrics")
+                .uri("/metrics")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -326,7 +326,7 @@ async fn legacy_operator_paths_return_not_found() {
         "/v1/account",
         "/v1/accounts/a/workers",
         "/health/status",
-        "/metrics",
+        "/operator/metrics",
     ] {
         let response = admin_router(state.clone())
             .oneshot(
@@ -343,7 +343,7 @@ async fn legacy_operator_paths_return_not_found() {
 }
 
 #[tokio::test]
-async fn unknown_operator_api_path_returns_json_not_found() {
+async fn metrics_requires_canonical_unauthorized_envelope() {
     let state = HttpState::for_test(
         HealthCoordinator::new(),
         metrics(),
@@ -353,94 +353,7 @@ async fn unknown_operator_api_path_returns_json_not_found() {
     let response = admin_router(state)
         .oneshot(
             Request::builder()
-                .uri("/operator/api/v1/not-a-route")
-                .header(header::AUTHORIZATION, "Bearer admin-secret")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok()),
-        Some("application/json")
-    );
-    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["ok"], false);
-    assert_eq!(json["error"]["code"], "RESOURCE_NOT_FOUND");
-}
-
-#[tokio::test]
-async fn unknown_operator_api_path_requires_auth_before_not_found() {
-    let state = HttpState::for_test(
-        HealthCoordinator::new(),
-        metrics(),
-        true,
-        Some(SecretString::new("admin-secret")),
-    );
-    let response = admin_router(state)
-        .oneshot(
-            Request::builder()
-                .uri("/operator/api/v1/not-a-route")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["ok"], false);
-    assert_eq!(json["error"]["code"], "ADMIN_AUTH_REQUIRED");
-}
-
-#[tokio::test]
-async fn operator_api_requires_admin_auth() {
-    let state = HttpState::for_test(
-        HealthCoordinator::new(),
-        metrics(),
-        true,
-        Some(SecretString::new("admin-secret")),
-    );
-    let response = admin_router(state)
-        .oneshot(
-            Request::builder()
-                .uri("/operator/api/v1/account")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok()),
-        Some("application/json")
-    );
-    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["ok"], false);
-    assert_eq!(json["error"]["code"], "ADMIN_AUTH_REQUIRED");
-}
-
-#[tokio::test]
-async fn operator_metrics_requires_canonical_unauthorized_envelope() {
-    let state = HttpState::for_test(
-        HealthCoordinator::new(),
-        metrics(),
-        true,
-        Some(SecretString::new("admin-secret")),
-    );
-    let response = admin_router(state)
-        .oneshot(
-            Request::builder()
-                .uri("/operator/metrics")
+                .uri("/metrics")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -453,34 +366,21 @@ async fn operator_metrics_requires_canonical_unauthorized_envelope() {
 }
 
 #[tokio::test]
-async fn system_status_remains_available_when_supervisor_is_stopped() {
-    let snapshot = SupervisorSnapshot {
-        state: SupervisorState::Stopped,
-        reason: ReadinessReason::RuntimeStarting,
-        last_transition_at: SystemTime::UNIX_EPOCH,
-        attempt: 2,
-        last_exit: None,
-        next_retry_at: None,
-        pid: None,
-        pgid: None,
-        binary_digest: "digest".to_owned(),
-        config_digest: "config".to_owned(),
-        startup_id: None,
-        token_fingerprint: None,
-        listen_port: None,
-    };
-    let supervisor = Arc::new(move || Some(SanitizedSupervisor::from(&snapshot)));
+async fn system_status_remains_available_while_starting() {
     let state = HttpState::for_test(
         HealthCoordinator::new(),
         metrics(),
         false,
         Some(SecretString::new("admin-secret")),
     )
-    .with_supervisor(supervisor);
+    .with_v4_tokens(
+        SecretString::new("deployer-secret"),
+        SecretString::new("read-secret"),
+    );
     let response = admin_router(state)
         .oneshot(
             Request::builder()
-                .uri("/operator/api/v1/system/status")
+                .uri("/client/v4/open-compute/system/status")
                 .header(header::AUTHORIZATION, "Bearer admin-secret")
                 .body(Body::empty())
                 .unwrap(),
@@ -490,7 +390,8 @@ async fn system_status_remains_available_when_supervisor_is_stopped() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["supervisor"]["state"], "STOPPED");
+    assert_eq!(json["success"], true);
+    assert_eq!(json["result"]["state"], "STARTING");
 }
 
 #[tokio::test]
@@ -505,7 +406,7 @@ async fn runtime_operator_control_returns_unavailable_without_supervisor() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/operator/api/__test/runtime/restart")
+                .uri("/__test/runtime/restart")
                 .header(header::AUTHORIZATION, "Bearer admin-secret")
                 .header("x-open-compute-test-ack", "restart-generation")
                 .body(Body::empty())
@@ -544,7 +445,7 @@ async fn public_listener_does_not_expose_operator_api() {
 }
 
 #[tokio::test]
-async fn merged_listener_serves_operator_api_before_tenant_fallback() {
+async fn merged_listener_neutrally_rejects_removed_operator_api() {
     let state = HttpState::for_test(
         HealthCoordinator::new(),
         metrics(),
@@ -561,8 +462,5 @@ async fn merged_listener_serves_operator_api_before_tenant_fallback() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["apiVersion"], "v1");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

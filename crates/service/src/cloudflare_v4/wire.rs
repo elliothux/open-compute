@@ -50,9 +50,7 @@ impl V4RequestContext {
             }
             V4Role::ReadOnly => matches!(permission, V4Permission::Read),
         };
-        granted
-            .then_some(())
-            .ok_or(V4Error::Official(V4OfficialError::PermissionDenied))
+        granted.then_some(()).ok_or(V4Error::PermissionDenied)
     }
 }
 
@@ -78,6 +76,8 @@ pub(crate) enum V4Error {
     PermissionDenied,
     /// Request fields, query, path, or content type are invalid.
     InvalidRequest,
+    /// A registered request field is invalid, with a stable JSON pointer.
+    InvalidField(&'static str),
     /// The addressed account or resource does not exist.
     NotFound,
     /// Required local authority is not ready.
@@ -97,12 +97,6 @@ pub(crate) enum V4Error {
 pub(crate) enum V4OfficialError {
     /// Cloudflare common authentication failure.
     Authentication,
-    /// Cloudflare common authorization failure.
-    PermissionDenied,
-    /// A request violates the endpoint schema.
-    InvalidRequest {
-        source_pointer: Option<&'static str>,
-    },
     /// A bounded request exceeds the endpoint maximum.
     RequestTooLarge,
 }
@@ -113,7 +107,7 @@ impl V4Error {
             Self::Official(error) => error.code(),
             Self::AuthenticationRequired => 9_100_001,
             Self::PermissionDenied => 9_100_002,
-            Self::InvalidRequest => 9_100_003,
+            Self::InvalidRequest | Self::InvalidField(_) => 9_100_003,
             Self::NotFound => 9_100_004,
             Self::Unavailable => 9_100_005,
             Self::Conflict => 9_100_006,
@@ -128,7 +122,7 @@ impl V4Error {
             Self::Official(error) => error.status(),
             Self::AuthenticationRequired => StatusCode::UNAUTHORIZED,
             Self::PermissionDenied => StatusCode::FORBIDDEN,
-            Self::InvalidRequest => StatusCode::BAD_REQUEST,
+            Self::InvalidRequest | Self::InvalidField(_) => StatusCode::BAD_REQUEST,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::Conflict => StatusCode::CONFLICT,
@@ -143,7 +137,7 @@ impl V4Error {
             Self::Official(error) => error.message(),
             Self::AuthenticationRequired => "authentication is required",
             Self::PermissionDenied => "permission is denied",
-            Self::InvalidRequest => "the request is invalid",
+            Self::InvalidRequest | Self::InvalidField(_) => "the request is invalid",
             Self::NotFound => "the requested resource was not found",
             Self::Unavailable => "the requested capability is unavailable",
             Self::Conflict => "the request conflicts with current state",
@@ -155,7 +149,7 @@ impl V4Error {
 
     const fn source_pointer(self) -> Option<&'static str> {
         match self {
-            Self::Official(V4OfficialError::InvalidRequest { source_pointer }) => source_pointer,
+            Self::InvalidField(source_pointer) => Some(source_pointer),
             _ => None,
         }
     }
@@ -171,7 +165,7 @@ impl V4Error {
 impl V4OfficialError {
     const fn code(self) -> u32 {
         match self {
-            Self::Authentication | Self::PermissionDenied | Self::InvalidRequest { .. } => 10_000,
+            Self::Authentication => 10_000,
             Self::RequestTooLarge => 10_027,
         }
     }
@@ -179,8 +173,6 @@ impl V4OfficialError {
     const fn status(self) -> StatusCode {
         match self {
             Self::Authentication => StatusCode::UNAUTHORIZED,
-            Self::PermissionDenied => StatusCode::FORBIDDEN,
-            Self::InvalidRequest { .. } => StatusCode::BAD_REQUEST,
             Self::RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         }
     }
@@ -188,8 +180,6 @@ impl V4OfficialError {
     const fn message(self) -> &'static str {
         match self {
             Self::Authentication => "Authentication error",
-            Self::PermissionDenied => "Permission denied",
-            Self::InvalidRequest { .. } => "Invalid request",
             Self::RequestTooLarge => "Request body is too large",
         }
     }

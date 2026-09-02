@@ -1,7 +1,7 @@
 //! Minimal fixed-installation Cloudflare account discovery surface.
 
 use super::{
-    V4Error, V4OfficialError, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
+    V4Error, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
     paginated_response, request_context, success_response,
 };
 use crate::http::HttpState;
@@ -9,7 +9,7 @@ use axum::Router;
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
 use axum::routing::get;
-use open_compute_core::{AccountId, PlatformId};
+use open_compute_core::{AccountId, PlatformId, ResourceId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use url::form_urlencoded;
@@ -26,6 +26,27 @@ pub(crate) struct AccountAuthority {
     membership_id: String,
     platform_id: PlatformId,
     created_at_ms: i64,
+}
+
+/// Domain separators for stable public resource identifiers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum V4ResourceKind {
+    /// KV namespace resource.
+    KvNamespace,
+    /// D1 database resource.
+    D1Database,
+    /// Durable Object namespace resource.
+    DurableObjectNamespace,
+}
+
+impl V4ResourceKind {
+    const fn scope(self) -> &'static str {
+        match self {
+            Self::KvNamespace => "kv-namespace",
+            Self::D1Database => "d1-database",
+            Self::DurableObjectNamespace => "durable-object-namespace",
+        }
+    }
 }
 
 impl AccountAuthority {
@@ -51,6 +72,21 @@ impl AccountAuthority {
     /// Public Cloudflare-compatible account identifier.
     pub(crate) fn public_id(&self) -> &str {
         &self.public_id
+    }
+
+    /// Map an internal resource identity to a stable, domain-separated public 32-hex ID.
+    pub(crate) fn public_resource_id(&self, kind: V4ResourceKind, id: ResourceId) -> String {
+        stable_id(kind.scope(), self.platform_id, Some(&id.to_string()))
+    }
+
+    /// Compare a public resource ID without exposing the internal UUID.
+    pub(crate) fn matches_public_resource_id(
+        &self,
+        kind: V4ResourceKind,
+        id: ResourceId,
+        public: &str,
+    ) -> bool {
+        public.len() == 32 && self.public_resource_id(kind, id) == public
     }
 
     fn account(&self) -> Result<Account, V4Error> {
@@ -261,9 +297,7 @@ impl CollectionQuery {
                 "per_page" => {
                     per_page = parse_usize(&value)?;
                     if !(5..=50).contains(&per_page) {
-                        return Err(V4Error::Official(V4OfficialError::InvalidRequest {
-                            source_pointer: None,
-                        }));
+                        return Err(V4Error::InvalidField("/per_page"));
                     }
                 }
                 "name" if matches!(kind, CollectionKind::Accounts) => name = one(name, &value)?,
@@ -276,9 +310,7 @@ impl CollectionQuery {
                         && matches!(value.as_ref(), "id" | "account.name" | "status") => {}
                 "status" if matches!(kind, CollectionKind::Memberships) && value == "accepted" => {}
                 _ => {
-                    return Err(V4Error::Official(V4OfficialError::InvalidRequest {
-                        source_pointer: None,
-                    }));
+                    return Err(V4Error::InvalidRequest);
                 }
             }
         }
@@ -292,24 +324,18 @@ impl CollectionQuery {
 
 fn one(existing: Option<String>, value: &str) -> Result<Option<String>, V4Error> {
     if existing.is_some() || value.is_empty() || value.len() > 100 {
-        return Err(V4Error::Official(V4OfficialError::InvalidRequest {
-            source_pointer: None,
-        }));
+        return Err(V4Error::InvalidRequest);
     }
     Ok(Some(value.to_owned()))
 }
 
 fn parse_usize(value: &str) -> Result<usize, V4Error> {
-    let parsed = value.parse::<usize>().map_err(|_| {
-        V4Error::Official(V4OfficialError::InvalidRequest {
-            source_pointer: None,
-        })
-    })?;
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_| V4Error::InvalidRequest)?;
     (parsed > 0)
         .then_some(parsed)
-        .ok_or(V4Error::Official(V4OfficialError::InvalidRequest {
-            source_pointer: None,
-        }))
+        .ok_or(V4Error::InvalidRequest)
 }
 
 fn role_name(role: V4Role) -> &'static str {
