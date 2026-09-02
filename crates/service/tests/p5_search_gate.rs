@@ -5,7 +5,7 @@ mod support;
 
 use axum::Router;
 use axum::body::{Body, Bytes, to_bytes};
-use axum::http::{Method, Request, header};
+use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use axum::routing::post;
 use open_compute_artifacts::{
     AiSearchObjectStore, ArtifactCache, ArtifactStore, MapEnv, MockS3, S3ArtifactClient,
@@ -54,6 +54,8 @@ use support::*;
 const EMBEDDING_ALIAS: &str = "@cf/qwen/qwen3-embedding-0.6b";
 const GENERATION_ALIAS: &str = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const EMBEDDING_KEY_ENV: &str = "OPEN_COMPUTE_TEST_EMBEDDING_API_KEY";
+const EMBEDDING_BASE_URL_ENV: &str = "OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL";
+const EMBEDDING_FIXTURE_SECRET: &str = "fixture-secret";
 
 const TENANT_SOURCE: &str = r##"
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -321,10 +323,6 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
         .map(PathBuf::from)
         .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
-    assert!(
-        std::env::var(EMBEDDING_KEY_ENV).is_ok_and(|value| !value.is_empty()),
-        "OPEN_COMPUTE_TEST_EMBEDDING_API_KEY must authenticate the local TEI fixture"
-    );
     let root = repo_root();
     let lock = root.join("packages/runtime/workerd.lock.json");
     let temporary = tempfile::tempdir().unwrap();
@@ -337,7 +335,15 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     );
     let mock = MockS3::spawn("open-compute").await;
     let (chat_base_url, chat_shutdown, chat_task) = spawn_chat_fixture().await;
-    let ai = ai_config(&chat_base_url);
+    let embedding_fixture = match std::env::var(EMBEDDING_BASE_URL_ENV) {
+        Ok(url) if !url.is_empty() => None,
+        _ => Some(spawn_embedding_fixture().await),
+    };
+    let embedding_base_url = embedding_fixture
+        .as_ref()
+        .map(|(url, _, _)| url.clone())
+        .unwrap_or_else(|| std::env::var(EMBEDDING_BASE_URL_ENV).unwrap());
+    let ai = ai_config(&chat_base_url, &embedding_base_url, temporary.path());
     let (artifacts, s3_client) = artifact_store(&mock);
     let artifact_cache = Arc::new(
         ArtifactCache::open(
@@ -731,4 +737,8 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
     binding_task.await.unwrap().unwrap();
     let _ = chat_shutdown.send(());
     chat_task.await.unwrap();
+    if let Some((_, embedding_shutdown, embedding_task)) = embedding_fixture {
+        let _ = embedding_shutdown.send(());
+        embedding_task.await.unwrap();
+    }
 }

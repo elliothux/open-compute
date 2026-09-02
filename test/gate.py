@@ -446,6 +446,8 @@ def execute_target(name, executable, directory, target, *, list_only=False):
         env['BUN_RUNTIME_TRANSPILER_CACHE_PATH'] = '0'
     else:
         env = dict(os.environ, TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary))
+    if name == 'p5-search':
+        env.setdefault('OPEN_COMPUTE_TEST_EMBEDDING_API_KEY', 'fixture-secret')
     # Repetition belongs only to this runner, including when a test spawns its own fixture.
     env.pop('OPEN_COMPUTE_GATE_ROUNDS', None)
     start = time.monotonic()

@@ -121,6 +121,38 @@ class GateTests(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs['timeout'], 600)
             self.assertNotIn('OPEN_COMPUTE_GATE_ROUNDS', run.call_args.kwargs['env'])
 
+    def test_p5_search_defaults_fixture_embedding_key(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
+            target = self.targets(['p5-search'])['p5-search']
+            captured = {}
+            def execute(command, **kwargs):
+                captured['env'] = kwargs['env']
+                return SimpleNamespace(returncode=0)
+            with patch.dict(os.environ, {'PATH': '/usr/bin'}, clear=True), \
+                 patch.object(gate.subprocess, 'run', side_effect=execute):
+                result = gate.execute_target(
+                    'p5-search', '/compiled/test', Path(temp)/'default', target)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(
+                captured['env']['OPEN_COMPUTE_TEST_EMBEDDING_API_KEY'], 'fixture-secret')
+            captured.clear()
+            with patch.dict(os.environ, {
+                    'PATH': '/usr/bin',
+                    'OPEN_COMPUTE_TEST_EMBEDDING_API_KEY': 'operator-key',
+            }), patch.object(gate.subprocess, 'run', side_effect=execute):
+                result = gate.execute_target(
+                    'p5-search', '/compiled/test', Path(temp)/'operator', target)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(
+                captured['env']['OPEN_COMPUTE_TEST_EMBEDDING_API_KEY'], 'operator-key')
+            captured.clear()
+            with patch.dict(os.environ, {'PATH': '/usr/bin'}, clear=True), \
+                 patch.object(gate.subprocess, 'run', side_effect=execute):
+                result = gate.execute_target(
+                    'p0-2', '/compiled/test', Path(temp)/'other', self.targets(['p0-2'])['p0-2'])
+            self.assertEqual(result['exit_code'], 0)
+            self.assertNotIn('OPEN_COMPUTE_TEST_EMBEDDING_API_KEY', captured['env'])
+
     def test_cli_policy_import_does_not_create_source_tree_bytecode(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

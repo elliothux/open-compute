@@ -1,6 +1,8 @@
 //! Host fixtures, resource setup, deployment dispatch, and local provider helpers.
 
 use super::*;
+use sha2::{Digest as _, Sha256};
+use std::os::unix::fs::PermissionsExt;
 
 pub(super) fn create_vectorize(
     storage: &PlatformStorage,
@@ -280,32 +282,19 @@ pub(super) async fn dispatch(
     (status, body)
 }
 
-pub(super) fn ai_config(chat_base_url: &str) -> AiConfig {
-    let base_url = std::env::var("OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8080/v1".to_owned());
+pub(super) fn ai_config(
+    chat_base_url: &str,
+    embedding_base_url: &str,
+    secret_root: &Path,
+) -> AiConfig {
     let mut config = AiConfig::default();
-    let tokenizer_path = std::env::var_os("OPEN_COMPUTE_TEST_TOKENIZER_PATH").map_or_else(
-        || {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../.temp/tei-hf/hub/models--Qwen--Qwen3-Embedding-0.6B/blobs/def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a")
-        },
-        PathBuf::from,
-    )
-        .canonicalize()
-        .expect("pinned Qwen3 tokenizer artifact");
-    let tokenizer_sha256 =
-        std::env::var("OPEN_COMPUTE_TEST_TOKENIZER_SHA256").unwrap_or_else(|_| {
-            "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a".to_owned()
-        });
+    let (tokenizer_path, tokenizer_sha256) = tokenizer_artifact();
     config.providers.insert(
         "fixture".to_owned(),
         AiProviderConfig {
-            base_url,
+            base_url: embedding_base_url.to_owned(),
             auth: AiAuthConfig::Bearer {
-                secret: SecretReference {
-                    env: Some(EMBEDDING_KEY_ENV.to_owned()),
-                    file: None,
-                },
+                secret: embedding_secret(secret_root),
             },
         },
     );
@@ -352,6 +341,159 @@ pub(super) fn ai_config(chat_base_url: &str) -> AiConfig {
     config.default_generation_model = Some(GENERATION_ALIAS.to_owned());
     config.validate().unwrap();
     config
+}
+
+fn tokenizer_artifact() -> (PathBuf, String) {
+    if let Some(path) = std::env::var_os("OPEN_COMPUTE_TEST_TOKENIZER_PATH") {
+        let tokenizer_path = PathBuf::from(path)
+            .canonicalize()
+            .expect("pinned tokenizer artifact");
+        let tokenizer_sha256 =
+            std::env::var("OPEN_COMPUTE_TEST_TOKENIZER_SHA256").unwrap_or_else(|_| {
+                "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a".to_owned()
+            });
+        return (tokenizer_path, tokenizer_sha256);
+    }
+    let tokenizer_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/tokenizer-word-level.json")
+        .canonicalize()
+        .expect("in-repo tokenizer fixture");
+    let bytes = std::fs::read(&tokenizer_path).expect("tokenizer fixture bytes");
+    (tokenizer_path, hex::encode(Sha256::digest(bytes)))
+}
+
+fn embedding_secret(root: &Path) -> SecretReference {
+    match std::env::var(EMBEDDING_KEY_ENV) {
+        Ok(value) if !value.is_empty() => SecretReference {
+            env: Some(EMBEDDING_KEY_ENV.to_owned()),
+            file: None,
+        },
+        _ => {
+            let path = root.join("embedding-api-key");
+            std::fs::write(&path, EMBEDDING_FIXTURE_SECRET).unwrap();
+            let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+            permissions.set_mode(0o600);
+            std::fs::set_permissions(&path, permissions).unwrap();
+            SecretReference {
+                env: None,
+                file: Some(path),
+            }
+        }
+    }
+}
+
+pub(super) async fn spawn_embedding_fixture() -> (
+    String,
+    tokio::sync::oneshot::Sender<()>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route("/v1/embeddings", post(embedding_fixture)),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    (format!("http://{address}/v1"), shutdown_tx, task)
+}
+
+pub(super) async fn embedding_fixture(
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::http::Response<String> {
+    let authorized = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        == Some("Bearer fixture-secret");
+    if !authorized {
+        return axum::http::Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .body(String::new())
+            .unwrap();
+    }
+    let request: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(_) => {
+            return axum::http::Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(String::new())
+                .unwrap();
+        }
+    };
+    if request.get("model") != Some(&serde_json::json!(EMBEDDING_ALIAS)) {
+        return axum::http::Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(String::new())
+            .unwrap();
+    }
+    let inputs = match request.get("input") {
+        Some(serde_json::Value::String(value)) => vec![value.clone()],
+        Some(serde_json::Value::Array(values)) => {
+            let mut inputs = Vec::with_capacity(values.len());
+            for value in values {
+                let Some(input) = value.as_str() else {
+                    return axum::http::Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(String::new())
+                        .unwrap();
+                };
+                inputs.push(input.to_owned());
+            }
+            inputs
+        }
+        _ => {
+            return axum::http::Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(String::new())
+                .unwrap();
+        }
+    };
+    let data: Vec<serde_json::Value> = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, input)| {
+            serde_json::json!({
+                "object": "embedding",
+                "index": index,
+                "embedding": fixture_embedding(input),
+            })
+        })
+        .collect();
+    axum::http::Response::builder()
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "object": "list",
+                "model": EMBEDDING_ALIAS,
+                "data": data,
+                "usage": {
+                    "prompt_tokens": inputs.len() as u64,
+                    "total_tokens": inputs.len() as u64
+                }
+            })
+            .to_string(),
+        )
+        .unwrap()
+}
+
+fn fixture_embedding(text: &str) -> Vec<f32> {
+    let mut values = vec![0.0_f32; 1_024];
+    for token in text.split_whitespace() {
+        let digest = Sha256::digest(token.as_bytes());
+        let index = u32::from_le_bytes(digest[..4].try_into().unwrap()) as usize % 1_024;
+        values[index] += 1.0;
+    }
+    if values.iter().all(|value| *value == 0.0) {
+        values[0] = 1.0;
+    }
+    values
 }
 
 pub(super) async fn spawn_chat_fixture() -> (
