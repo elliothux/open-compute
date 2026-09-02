@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+pub mod ai_search;
 pub mod assets;
 pub mod bundle;
 pub mod d1;
@@ -15,12 +16,16 @@ pub mod r2;
 pub mod resource_lifecycle;
 pub mod resource_pins;
 pub mod runtime_source;
+pub mod vectorize;
 pub mod workflows;
 pub use workflows::{
     WorkflowController, WorkflowCreateInput, WorkflowEventInput, WorkflowReconcileCursor,
     WorkflowStatus,
 };
 
+pub use ai_search::{
+    AiSearchInstanceResourceDriver, AiSearchInstanceSpec, AiSearchNamespaceResourceDriver,
+};
 pub use assets::{
     AssetEntryV1, AssetHeaderOperation, AssetHeaderRule, AssetManifestV1, AssetRedirectRule,
     AssetRequest, AssetResponsePlan, AssetRoutingConfigV1, DeploymentAssets, HtmlHandling,
@@ -45,7 +50,7 @@ pub use durable_objects::DurableObjectResourceDriver;
 pub use kv::KvResourceDriver;
 pub use pins::{DeploymentPin, DeploymentPins};
 pub use pipeline::{
-    CreateDeploymentOutcome, CreateDeploymentRequest, CreateDeploymentResult,
+    CreateDeploymentOutcome, CreateDeploymentRequest, CreateDeploymentResult, DeploymentAiInput,
     DeploymentBindingInput, DeploymentBundle, DeploymentCacheInput, DeploymentCachePolicyInput,
     DeploymentContent, DeploymentController, DeploymentImagesInput, DeploymentRuntimeFeatures,
     DeploymentServiceInput, DeploymentVersionMetadataInput, ProductPromotionCoordinator,
@@ -61,11 +66,12 @@ pub use resource_lifecycle::{
 };
 pub use resource_pins::{ResourcePin, ResourcePins};
 pub use runtime_source::{
-    DurableObjectFacadeIdentity, RuntimeAssetBinding, RuntimeAssets, RuntimeBinding,
-    RuntimeCachePolicy, RuntimeImagesBinding, RuntimeModule, RuntimePayload, RuntimeQueueBinding,
-    RuntimeScheduledTarget, RuntimeScope, RuntimeServiceBinding, RuntimeSnapshot, RuntimeSource,
-    RuntimeVersionMetadataBinding,
+    DurableObjectFacadeIdentity, RuntimeAiBinding, RuntimeAssetBinding, RuntimeAssets,
+    RuntimeBinding, RuntimeCachePolicy, RuntimeImagesBinding, RuntimeModule, RuntimePayload,
+    RuntimeQueueBinding, RuntimeScheduledTarget, RuntimeScope, RuntimeServiceBinding,
+    RuntimeSnapshot, RuntimeSource, RuntimeVersionMetadataBinding,
 };
+pub use vectorize::{VectorizeIndexSpec, VectorizeResourceDriver};
 
 #[cfg(test)]
 mod tests;

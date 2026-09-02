@@ -157,6 +157,16 @@ pub struct RuntimeImagesBinding {
     pub descriptor_sha256: String,
 }
 
+/// Verified standard Workers AI binding limited to Markdown Conversion.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAiBinding {
+    /// Tenant environment name.
+    pub name: String,
+    /// Independently verified canonical descriptor digest.
+    pub descriptor_sha256: String,
+}
+
 /// Verified immutable deployment Version Metadata binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -223,6 +233,8 @@ pub struct RuntimeSnapshot {
     pub services: Vec<RuntimeServiceBinding>,
     /// Verified automatic response-cache policy.
     pub cache_policy: RuntimeCachePolicy,
+    /// Optional Workers AI Markdown Conversion capability.
+    pub ai_binding: Option<RuntimeAiBinding>,
     /// Optional local Images capability.
     pub images_binding: Option<RuntimeImagesBinding>,
     /// Optional immutable Version Metadata environment object.
@@ -248,6 +260,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("scheduled_target_count", &self.scheduled_targets.len())
             .field("service_count", &self.services.len())
             .field("cache_enabled", &self.cache_policy.enabled)
+            .field("ai_binding", &self.ai_binding.is_some())
             .field("images_binding", &self.images_binding.is_some())
             .field(
                 "version_metadata_binding",
@@ -612,10 +625,12 @@ impl RuntimeSource {
         }
         cache_policy.validate()?;
         let mut builtin_descriptors = Vec::with_capacity(snapshot.builtin_bindings.len());
+        let mut ai_binding = None;
         let mut images_binding = None;
         let mut version_metadata_binding = None;
         for binding in &snapshot.builtin_bindings {
             let kind = match binding.kind {
+                BuiltinBindingKind::Ai => BuiltinBindingDescriptorKindV1::Ai,
                 BuiltinBindingKind::Images => BuiltinBindingDescriptorKindV1::Images,
                 BuiltinBindingKind::VersionMetadata => {
                     BuiltinBindingDescriptorKindV1::VersionMetadata
@@ -628,6 +643,12 @@ impl RuntimeSource {
                 return Err(invariant());
             }
             match binding.kind {
+                BuiltinBindingKind::Ai => {
+                    ai_binding = Some(RuntimeAiBinding {
+                        name: binding.name.clone(),
+                        descriptor_sha256: hex::encode(digest),
+                    });
+                }
                 BuiltinBindingKind::Images => {
                     images_binding = Some(RuntimeImagesBinding {
                         name: binding.name.clone(),
@@ -728,6 +749,7 @@ impl RuntimeSource {
                 fail_open: self.cache_fail_open,
                 entrypoints: cache_policy.entrypoints,
             },
+            ai_binding,
             images_binding,
             version_metadata_binding,
             asset_binding,
@@ -761,6 +783,8 @@ impl RuntimeSource {
             scheduled_targets: &'a [RuntimeScheduledTarget],
             services: &'a [RuntimeServiceBinding],
             cache_policy: &'a RuntimeCachePolicy,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            ai_binding: Option<&'a RuntimeAiBinding>,
             #[serde(skip_serializing_if = "Option::is_none")]
             images_binding: Option<&'a RuntimeImagesBinding>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -858,6 +882,7 @@ impl RuntimeSource {
             scheduled_targets: &snapshot.scheduled_targets,
             services: &snapshot.services,
             cache_policy: &snapshot.cache_policy,
+            ai_binding: snapshot.ai_binding.as_ref(),
             images_binding: snapshot.images_binding.as_ref(),
             version_metadata_binding: snapshot.version_metadata_binding.as_ref(),
             asset_binding: snapshot.asset_binding.as_ref(),

@@ -7,7 +7,8 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 
 /** A reference to an existing resource, validated again by the Rust authority. */
 export interface WorkerBinding {
-  type: "kv_namespace" | "r2_bucket" | "d1_database" | "do_namespace" | "queue_producer" | "workflow";
+  type: "kv_namespace" | "r2_bucket" | "d1_database" | "do_namespace" | "queue_producer" | "workflow"
+    | "vectorize_index" | "ai_search_namespace" | "ai_search_instance";
   id: string;
   className?: string;
   permissions?: { read: boolean; write: boolean };
@@ -27,6 +28,7 @@ export interface RuntimeFeatures {
     entrypoints: Record<string, { enabled: boolean; crossVersionCache: boolean }>;
   };
   images?: { binding: string };
+  ai?: { binding: string };
   versionMetadata?: { binding: string; tag?: string };
 }
 
@@ -112,13 +114,17 @@ export function parseRuntimeFeatures(
     return { binding: name, ...(tag && raw.tag !== undefined ? { tag: raw.tag as string } : {}) };
   };
   const images = binding(value.images, "images");
+  const ai = binding(value.ai, "AI");
   const versionMetadata = binding(value.version_metadata, "version metadata", true);
-  if (images && versionMetadata && images.binding === versionMetadata.binding) {
+  const platformNames = [images?.binding, ai?.binding, versionMetadata?.binding]
+    .filter((name): name is string => name !== undefined);
+  if (new Set(platformNames).size !== platformNames.length) {
     throw new Error("platform binding names conflict");
   }
   return {
     cache: { ...defaultPolicy, entrypoints },
     ...(images === undefined ? {} : { images }),
+    ...(ai === undefined ? {} : { ai }),
     ...(versionMetadata === undefined ? {} : { versionMetadata }),
   };
 }
@@ -145,7 +151,7 @@ export async function loadProject(path: string): Promise<WorkerProject> {
   try { value = JSON.parse(content); }
   catch { throw new Error("project config must be valid JSON"); }
   if (!record(value)) throw new Error("project config must be an object");
-  knownKeys(value, ["main", "frameworkOutput", "name", "tsconfig", "vars", "secrets", "bindings", "services", "assets", "cache", "exports", "images", "version_metadata", "accountId", "endpoint"], "project");
+  knownKeys(value, ["main", "frameworkOutput", "name", "tsconfig", "vars", "secrets", "bindings", "services", "assets", "cache", "exports", "images", "ai", "version_metadata", "accountId", "endpoint"], "project");
   const name = string(value.name, "name");
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) throw new Error("invalid Worker name");
   const vars = value.vars === undefined ? {} : value.vars;
@@ -173,7 +179,9 @@ export async function loadProject(path: string): Promise<WorkerProject> {
       if (!record(item)) throw new Error("invalid Worker binding");
       knownKeys(item, ["type", "id", "className", "permissions", "schedules"], "binding");
       const kind = item.type;
-      if (kind !== "kv_namespace" && kind !== "r2_bucket" && kind !== "d1_database" && kind !== "do_namespace" && kind !== "queue_producer" && kind !== "workflow") {
+      if (kind !== "kv_namespace" && kind !== "r2_bucket" && kind !== "d1_database" && kind !== "do_namespace"
+          && kind !== "queue_producer" && kind !== "workflow" && kind !== "vectorize_index"
+          && kind !== "ai_search_namespace" && kind !== "ai_search_instance") {
         throw new Error("unsupported Worker binding type");
       }
       const binding: WorkerBinding = { type: kind, id: string(item.id, "binding id") };
@@ -290,7 +298,8 @@ export async function loadProject(path: string): Promise<WorkerProject> {
       && (Object.keys(variables).length || Object.keys(secrets).length || Object.keys(bindings).length
         || Object.keys(services).length
         || runtimeFeatures.cache.enabled || Object.keys(runtimeFeatures.cache.entrypoints).length
-        || runtimeFeatures.images !== undefined || runtimeFeatures.versionMetadata !== undefined
+        || runtimeFeatures.images !== undefined || runtimeFeatures.ai !== undefined
+        || runtimeFeatures.versionMetadata !== undefined
         || runWorkerFirstRequiresCode(assets.runWorkerFirst))) {
     throw new Error("assets-only projects cannot declare an execution environment");
   }

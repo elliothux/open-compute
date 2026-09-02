@@ -34,6 +34,7 @@ const project = {
   services: { SELF: { service: "hello" } }, endpoint: "http://127.0.0.1:1",
   runtimeFeatures: {
     cache: { enabled: false, crossVersionCache: false, entrypoints: {} },
+    ai: { binding: "AI" },
   },
 };
 
@@ -86,6 +87,7 @@ test("uses the authoritative account and route and sends secrets only in authent
   assert.deepEqual(metadata.cache, {
     enabled: false, crossVersionCache: false, entrypoints: {},
   });
+  assert.deepEqual(metadata.ai, { binding: "AI" });
   assert.equal(metadata.promote, true);
 });
 

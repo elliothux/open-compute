@@ -86,9 +86,19 @@ const MIGRATIONS: &[ControlMigration] = &[
         checksum: &MIGRATION_014_SHA256,
     },
     ControlMigration {
-        name: "015_system_owned_workers",
-        sql: include_str!("../migrations/015_system_owned_workers.sql"),
+        name: "015_vectorize",
+        sql: include_str!("../migrations/015_vectorize.sql"),
         checksum: &MIGRATION_015_SHA256,
+    },
+    ControlMigration {
+        name: "016_ai_search",
+        sql: include_str!("../migrations/016_ai_search.sql"),
+        checksum: &MIGRATION_016_SHA256,
+    },
+    ControlMigration {
+        name: "017_system_owned_workers",
+        sql: include_str!("../migrations/017_system_owned_workers.sql"),
+        checksum: &MIGRATION_017_SHA256,
     },
 ];
 const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
@@ -426,7 +436,7 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
     if version >= 14 {
         tables.extend(["deployment_cache_policies", "deployment_builtin_bindings"]);
     }
-    if version >= 15 {
+    if version >= 17 {
         tables.push("system_owned_deployments");
     }
     for table in tables {

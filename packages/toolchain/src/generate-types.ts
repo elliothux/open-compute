@@ -14,6 +14,9 @@ const BINDING_TYPES = {
   do_namespace: "DurableObjectNamespace",
   queue_producer: "Queue",
   workflow: "Workflow",
+  vectorize_index: "Vectorize",
+  ai_search_namespace: "AiSearchNamespace",
+  ai_search_instance: "AiSearchInstance",
 } as const;
 
 function isErrno(error: unknown, code: string): boolean {
@@ -82,6 +85,13 @@ export function generateEnvTypes(project: WorkerProject, outputPath: string): st
   if (project.assets?.binding !== undefined) defineEnv(properties, project.assets.binding, "Fetcher");
   if (project.runtimeFeatures.images !== undefined) {
     defineEnv(properties, project.runtimeFeatures.images.binding, "ImagesBinding");
+  }
+  if (project.runtimeFeatures.ai !== undefined) {
+    defineEnv(
+      properties,
+      project.runtimeFeatures.ai.binding,
+      'import("open-compute:ai").OpenComputeAi',
+    );
   }
   if (project.runtimeFeatures.versionMetadata !== undefined) {
     defineEnv(properties, project.runtimeFeatures.versionMetadata.binding, "WorkerVersionMetadata");

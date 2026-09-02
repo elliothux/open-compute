@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Data 1",
+    "Data 4"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 6,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "Data 1",
+      "expected_fixture_id": "tika-ods-footer"
+    }
+  ],
+  "review_notes": "Reviewed directly from ODF content.xml."
+}

@@ -476,6 +476,8 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
             services: None,
             cache: None,
             images: None,
+            document_parser: None,
+            ai_search: None,
         };
         dispatch(
             state,

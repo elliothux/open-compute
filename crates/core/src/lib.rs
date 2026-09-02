@@ -32,10 +32,13 @@ pub use capability::{
 };
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    CacheConfig, D1Config, DurableObjectsConfig, HardeningConfig, ImagesConfig, KvConfig,
-    MetricsConfig, PlatformConfig, QueuesConfig, R2Config, ResponseCacheConfig, RuntimeConfig,
-    S3Config, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference,
-    ServerConfig, StorageConfig, WorkersConfig, validate_bootstrap_config_path,
+    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
+    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig, CacheConfig,
+    D1Config, DocumentParserConfig, DurableObjectsConfig, HardeningConfig, ImagesConfig, KvConfig,
+    MetricsConfig, PlatformConfig, QueuesConfig, R2Config, ResolvedEmbeddingModelContract,
+    ResolvedTokenizerContract, ResponseCacheConfig, RuntimeConfig, S3Config, SchedulerConfig,
+    SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference, ServerConfig, StorageConfig,
+    WorkersConfig, validate_bootstrap_config_path,
 };
 pub use cron::CronSchedule;
 pub use durable_objects::{

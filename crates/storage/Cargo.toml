@@ -20,6 +20,7 @@ fallible-iterator.workspace = true
 hex.workspace = true
 hmac.workspace = true
 open-compute-core = { path = "../core" }
+open-compute-search = { path = "../search" }
 rand.workspace = true
 rusqlite.workspace = true
 rustix.workspace = true

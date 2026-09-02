@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Sample Word Document Title",
+    "This is a sample Microsoft Word Document."
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 3,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "Sample Word Document Title",
+      "expected_fixture_id": "tika-docx-basic"
+    }
+  ],
+  "review_notes": "Reviewed with macOS textutil and OOXML document content."
+}

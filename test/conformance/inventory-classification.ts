@@ -62,13 +62,13 @@ export const TARGET_PRODUCT_DEVIATIONS: Record<string, readonly string[]> = {
   workflows: ["OC-WORKFLOW-001"],
   cron: ["OC-CRON-001"],
   cache_api: ["OC-CACHE-001", "OC-CACHE-002"],
+  ai: ["OC-AI-MARKDOWN-001", "OC-AI-SEARCH-001"],
+  vectorize: ["OC-VECTORIZE-001"],
 };
 
 export const NON_TARGET_PUBLIC_PRODUCTS = [
   "analytics_engine",
-  "ai",
   "browser_rendering",
-  "vectorize",
   "hyperdrive",
   "mtls",
   "rate_limiting",
@@ -77,6 +77,12 @@ export const NON_TARGET_PUBLIC_PRODUCTS = [
 
 /** First match wins. Non-target Cloudflare products are listed before workers remainder. */
 export const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
+  { product: "ai", class: "target", exact: [
+    "AiSearchItem", "AiSearchItems", "AiSearchJob", "AiSearchJobs",
+    "AiSearchInstance", "AiSearchNamespace",
+    "MarkdownDocument", "OutputFormat", "ConversionResponse",
+    "ConversionOutputOptions", "SupportedFileFormat", "ToMarkdownService",
+  ] },
   { product: "ai", class: "non_target", prefixes: [
     "Ai", "BaseAi", "Base_Ai", "AutoRAG", "AutoRag", "AIGateway", "AiGateway",
     "ChatCompletion", "ChatCompletions", "ChatTemplate", "ResponseInput", "ResponseOutput", "ResponseFunction",
@@ -96,7 +102,14 @@ export const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
     "ResponsesInput", "ResponsesOutput", "ResponsesFunctionTool",
     "ComparisonFilter", "CompoundFilter", "StreamOptions",
   ] },
-  { product: "vectorize", class: "non_target", prefixes: ["Vectorize", "VectorFloatArray"] },
+  { product: "vectorize", class: "target", exact: [
+    "Vectorize", "VectorizeAsyncMutation", "VectorizeDistanceMetric", "VectorFloatArray",
+    "VectorizeIndexInfo", "VectorizeMatch", "VectorizeMatches", "VectorizeMetadataRetrievalLevel",
+    "VectorizeQueryOptions", "VectorizeVector", "VectorizeVectorMetadata",
+    "VectorizeVectorMetadataFilter", "VectorizeVectorMetadataFilterCollectionOp",
+    "VectorizeVectorMetadataFilterOp", "VectorizeVectorMetadataValue",
+  ] },
+  { product: "vectorize", class: "non_target", prefixes: ["Vectorize"] },
   { product: "hyperdrive", class: "non_target", prefixes: ["Hyperdrive"] },
   { product: "analytics_engine", class: "non_target", prefixes: ["AnalyticsEngine"] },
   { product: "browser_rendering", class: "non_target", prefixes: ["Browser"] },
@@ -143,7 +156,7 @@ export const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
   { product: "markdown", class: "non_target", prefixes: [
     "MarkdownDocument", "ToMarkdown", "ConversionResponse", "ConversionOutput",
     "ConversionOptions", "ConversionRequest", "SupportedFileFormat",
-  ], exact: ["OutputFormat"] },
+  ] },
   { product: "kv", class: "target", prefixes: ["KVNamespace"] },
   { product: "r2", class: "target", prefixes: ["R2"] },
   { product: "d1", class: "target", prefixes: ["D1"] },
@@ -210,6 +223,11 @@ export const MEMBER_PRODUCT_OVERRIDES: ReadonlyMap<string, string> = new Map([
   ["CloudflareWorkersModule.DurableObject.webSocketError", "websocket_hibernation"],
   ["WebSocket.serializeAttachment", "websocket_hibernation"],
   ["WebSocket.deserializeAttachment", "websocket_hibernation"],
+]);
+
+/** Supported members of otherwise non-target upstream declarations. */
+export const PARTIAL_TARGET_SYMBOLS: ReadonlyMap<string, { product: string; members: ReadonlySet<string> }> = new Map([
+  ["Ai", { product: "ai", members: new Set(["aiGatewayLogId", "toMarkdown"]) }],
 ]);
 
 const EXACT = new Map<string, Classification>();

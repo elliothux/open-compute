@@ -3,6 +3,7 @@
 use crate::capabilities::platform_release_metadata;
 use crate::config_load::LoadedConfig;
 use crate::metrics::MetricsRegistry;
+use crate::{ai_tokenizer::AiTokenizerRegistry, auth::resolve_admin_auth};
 #[path = "doctor_runtime.rs"]
 mod runtime;
 #[path = "doctor_workflow.rs"]
@@ -10,7 +11,7 @@ mod workflow;
 use open_compute_artifacts::{
     ArtifactCache, S3ArtifactClient, resolve_s3_credentials, sample_cache_integrity,
 };
-use open_compute_core::{ErrorCode, PlatformError, ResourceAvailability};
+use open_compute_core::{AiAuthConfig, AiConfig, ErrorCode, PlatformError, ResourceAvailability};
 use open_compute_storage::{
     inspect_control_db, inspect_data_root, inspect_durable_object_storage, inspect_master_key,
     inspect_p23_cross_database, inspect_resources, inspect_scheduler_db, read_operation_receipt,
@@ -142,6 +143,19 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
             "metrics.max_series cannot contain the required fixed series set",
             None,
         );
+    }
+    match inspect_ai_provider_config(&loaded.config.ai) {
+        Ok(value) => checks.push(ok(
+            "ai_provider_config",
+            "AI provider, model, credential, and offline tokenizer contracts are ready",
+            Some(value),
+        )),
+        Err(error) => checks.push(failed(
+            "ai_provider_config",
+            error.code(),
+            error.message(),
+            None,
+        )),
     }
 
     let inspect = match inspect_data_root(&loaded.config.storage) {
@@ -699,6 +713,26 @@ pub async fn doctor_report(loaded: &LoadedConfig, mode: DoctorMode) -> DoctorRep
         result,
         checks,
     }
+}
+
+fn inspect_ai_provider_config(config: &AiConfig) -> Result<String, PlatformError> {
+    config.validate()?;
+    for provider in config.providers.values() {
+        if let AiAuthConfig::Bearer { secret } = &provider.auth {
+            let _ = resolve_admin_auth(secret)?;
+        }
+    }
+    let _ = AiTokenizerRegistry::load(config)?;
+    for alias in config.embedding_models.keys() {
+        let _ = config.resolve_embedding_model(Some(alias))?;
+        let _ = config.resolve_tokenizer(Some(alias))?;
+    }
+    Ok(format!(
+        "providers={} embedding_models={} generation_models={}",
+        config.providers.len(),
+        config.embedding_models.len(),
+        config.generation_models.len(),
+    ))
 }
 
 fn operation_receipt_check(loaded: &LoadedConfig, name: &'static str) -> DoctorCheck {

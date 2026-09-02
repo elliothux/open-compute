@@ -15,6 +15,8 @@ fn release() -> PlatformReleaseIdentityV1 {
         scheduler_schema_version: 1,
         kv_schema_version: 1,
         d1_schema_version: 1,
+        vectorize_schema_version: 1,
+        ai_search_schema_version: 1,
         snapshot_format_version: 1,
     }
 }
@@ -30,6 +32,8 @@ fn release_identity_and_metadata_validate_complete_registries() {
             ("scheduler".to_owned(), 1),
             ("kv".to_owned(), 1),
             ("d1".to_owned(), 1),
+            ("vectorize".to_owned(), 1),
+            ("ai_search".to_owned(), 1),
         ]),
         schema_definitions: vec![
             ReleaseSchemaDefinitionV1 {
@@ -43,9 +47,16 @@ fn release_identity_and_metadata_validate_complete_registries() {
                 sha256: "e".repeat(64),
             },
         ],
-        object_formats: ["artifacts", "d1_backups", "kv_backups", "r2", "snapshots"]
-            .map(|name| (name.to_owned(), 1))
-            .into(),
+        object_formats: [
+            "ai_search_objects",
+            "artifacts",
+            "d1_backups",
+            "kv_backups",
+            "r2",
+            "snapshots",
+        ]
+        .map(|name| (name.to_owned(), 1))
+        .into(),
         workerd_local_disk_gate_result: "gate".to_owned(),
         conformance_result: "conformance".to_owned(),
         websocket_hibernation_result: "no-go".to_owned(),

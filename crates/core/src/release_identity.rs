@@ -33,6 +33,10 @@ pub struct PlatformReleaseIdentityV1 {
     pub kv_schema_version: u32,
     /// Current D1 resource schema version.
     pub d1_schema_version: u32,
+    /// Current Vectorize per-index schema version.
+    pub vectorize_schema_version: u32,
+    /// Current AI Search per-instance schema version.
+    pub ai_search_schema_version: u32,
     /// Full platform snapshot format version.
     pub snapshot_format_version: u32,
 }
@@ -53,6 +57,8 @@ impl PlatformReleaseIdentityV1 {
             && self.scheduler_schema_version > 0
             && self.kv_schema_version > 0
             && self.d1_schema_version > 0
+            && self.vectorize_schema_version > 0
+            && self.ai_search_schema_version > 0
             && self.snapshot_format_version == 1
     }
 }
@@ -96,13 +102,17 @@ impl PlatformReleaseMetadataV1 {
     pub fn validate(&self) -> bool {
         self.schema_version == 1
             && self.release.validate()
-            && self.target_schemas.len() == 4
+            && self.target_schemas.len() == 6
             && self.target_schemas.get("control").copied()
                 == Some(self.release.control_schema_version)
             && self.target_schemas.get("scheduler").copied()
                 == Some(self.release.scheduler_schema_version)
             && self.target_schemas.get("kv").copied() == Some(self.release.kv_schema_version)
             && self.target_schemas.get("d1").copied() == Some(self.release.d1_schema_version)
+            && self.target_schemas.get("vectorize").copied()
+                == Some(self.release.vectorize_schema_version)
+            && self.target_schemas.get("ai_search").copied()
+                == Some(self.release.ai_search_schema_version)
             && !self.schema_definitions.is_empty()
             && self
                 .schema_definitions
@@ -123,7 +133,14 @@ impl PlatformReleaseMetadataV1 {
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>()
-                == ["artifacts", "d1_backups", "kv_backups", "r2", "snapshots"]
+                == [
+                    "ai_search_objects",
+                    "artifacts",
+                    "d1_backups",
+                    "kv_backups",
+                    "r2",
+                    "snapshots",
+                ]
             && self.object_formats.values().all(|version| *version > 0)
             && self.object_formats.get("snapshots").copied()
                 == Some(self.release.snapshot_format_version)

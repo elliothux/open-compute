@@ -1,0 +1,17 @@
+[package]
+name = "open-compute-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Pure bounded vector and metadata search algorithms"
+publish.workspace = true
+
+[dependencies]
+open-compute-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

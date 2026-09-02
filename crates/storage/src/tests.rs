@@ -2024,7 +2024,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 15);
+    assert_eq!(crate::migrations::current_schema_version(), 17);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2967,6 +2967,8 @@ fn p1_release_identity() -> PlatformReleaseIdentityV1 {
         scheduler_schema_version: u32::try_from(crate::current_scheduler_schema_version()).unwrap(),
         kv_schema_version: crate::KV_SCHEMA_VERSION,
         d1_schema_version: crate::D1_DATABASE_SCHEMA_VERSION,
+        vectorize_schema_version: crate::vectorize::VECTORIZE_SCHEMA_VERSION,
+        ai_search_schema_version: crate::ai_search::AI_SEARCH_SCHEMA_VERSION,
         snapshot_format_version: 1,
     }
 }

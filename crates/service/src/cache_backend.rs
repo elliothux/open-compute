@@ -450,7 +450,7 @@ impl CacheBindingService {
             .manager
             .engine(authority.account, authority.worker, now)?;
         let deleted = engine.purge(&purge, now)?;
-        Ok(axum::Json(serde_json::json!({ "success": true, "deleted": deleted })).into_response())
+        Ok(axum::Json(serde_json::json!({ "deleted": deleted, "success": true })).into_response())
     }
 }
 

@@ -26,6 +26,16 @@ pub enum ComponentName {
     Scheduler,
     /// Snapshot and restore operator receipts.
     Operations,
+    /// Per-index Vectorize SQLite authority.
+    VectorizeStorage,
+    /// Durable Vectorize mutation coordinator.
+    VectorizeMutations,
+    /// Per-instance AI Search SQLite and immutable-object authority.
+    AiSearchStorage,
+    /// Durable AI Search indexing coordinator.
+    AiSearchIndexing,
+    /// Operator-configured AI provider catalog and request pools.
+    AiModels,
 }
 
 impl ComponentName {
@@ -42,6 +52,11 @@ impl ComponentName {
             Self::Runtime => "runtime",
             Self::Scheduler => "scheduler",
             Self::Operations => "operations",
+            Self::VectorizeStorage => "vectorize_storage",
+            Self::VectorizeMutations => "vectorize_mutations",
+            Self::AiSearchStorage => "ai_search_storage",
+            Self::AiSearchIndexing => "ai_search_indexing",
+            Self::AiModels => "ai_models",
         }
     }
 }
@@ -170,6 +185,11 @@ impl PlatformStatus {
                 ComponentHealth::starting(ComponentName::Runtime),
                 ComponentHealth::starting(ComponentName::Scheduler),
                 ComponentHealth::starting(ComponentName::Operations),
+                ComponentHealth::starting(ComponentName::VectorizeStorage),
+                ComponentHealth::starting(ComponentName::VectorizeMutations),
+                ComponentHealth::starting(ComponentName::AiSearchStorage),
+                ComponentHealth::starting(ComponentName::AiSearchIndexing),
+                ComponentHealth::starting(ComponentName::AiModels),
             ],
         }
     }

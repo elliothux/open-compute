@@ -303,6 +303,7 @@ fn every_error_and_readiness_token_formats_stably() {
         ReadinessReason::S3Degraded,
         ReadinessReason::DiskSoftLimit,
         ReadinessReason::SnapshotStale,
+        ReadinessReason::SearchUnavailable,
         ReadinessReason::Ready,
     ];
     for reason in reasons {

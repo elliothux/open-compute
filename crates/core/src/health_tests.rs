@@ -100,6 +100,11 @@ fn component_labels_and_transition_matrix_are_complete() {
         ComponentName::Runtime,
         ComponentName::Scheduler,
         ComponentName::Operations,
+        ComponentName::VectorizeStorage,
+        ComponentName::VectorizeMutations,
+        ComponentName::AiSearchStorage,
+        ComponentName::AiSearchIndexing,
+        ComponentName::AiModels,
     ];
     for name in names {
         assert_eq!(name.to_string(), name.as_str());

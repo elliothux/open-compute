@@ -12,8 +12,6 @@
 | [Day 1 Workers Standard limits](day1-workers-standard-limits.md) | 设计完成；structural limits、Version settings 与 stock workerd runtime enforcer 尚未实施，CPU/subrequest/memory/startup/connection 当前受 `OC-WKR-LIMIT-001` 阻断 |
 | [Day 1 Dynamic Workers / Worker Loader](day1-dynamic-workers-worker-loader.md) | 合同与架构完成；`worker_loaders` v4/Version 支持受 upstream stock workerd nested-loader、limits 与 bounded-cache G0 阻断；Workers for Platforms 不在范围内 |
 | [Day 1 Workers Logs 与 realtime tail](day1-workers-logs-realtime-tail.md) | 设计完成；stock workerd Tail 采集、`wrangler tail`、Workers Logs persistence/Telemetry query 与 Dashboard Live Tail 尚未实施 |
-| [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md) | Research/Day1 方案完成；Vectorize、AI provider、AI Search、恢复与兼容 Gate 尚未实现 |
-| [P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md) | Research/Day1 方案完成；CF-compatible `env.AI.toMarkdown`/AI Search API、Xberg parser child、38-file corpus 与四平台 Gate 尚未实现 |
 
 新的管理面与项目配置目标由 [Day 1 Cloudflare v4 API 与 Wrangler 子集兼容设计](day1-cloudflare-v4-wrangler-compatibility.md)
 定义。Operator API 与 Dashboard 已完成并归档：见[设计文档](implemented/operator-api-dashboard.md)、
@@ -23,6 +21,8 @@
 
 已完成的 `ocd` Day1 命名改造见[设计归档](implemented/ocd-day1-rename.md)与
 [完成记录](implemented/ocd-day1-rename-results.md)。
+P5 核心实现见 [Vectorize 与 AI Search](implemented/p5-vectorize-ai-search.md)、
+[Xberg 文档解析](implemented/p5-7-xberg-document-parsing.md)及[完成记录](implemented/p5-vectorize-ai-search-results.md)。
 
 ## 待验收
 
@@ -32,6 +32,7 @@
 | [Runtime 跨平台发行验收](runtime-layout-release-acceptance.md) | CI、跨平台、特权 egress 与正式发行资格尚未执行 |
 | [Cloudflare Workflow 远端 differential](cloudflare-runtime-compatibility-acceptance.md) | 本地实现完成；托管端因 credential 条件尚未运行 |
 | [Static Assets / Service Binding 远端资格](p3-assets-service-bindings-acceptance.md) | 两项核心实现已归档；直接 Cloudflare differential 尚未执行 |
+| [P5 剩余发行验收](p5-release-acceptance.md) | P5 本地核心已归档；可复现 benchmark report、四平台、完整 parser process matrix、托管 rich-document differential 与正式 package 尚待完成 |
 
 ## 跨阶段总方案
 

@@ -19,6 +19,9 @@ bun run test:js
 export RUSTFLAGS='-D warnings'
 export OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=/abs/pinned/workerd-platform.gz
 export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
+# 仅 p5-search：本机 OpenAI-compatible embedding fixture
+export OPEN_COMPUTE_TEST_EMBEDDING_API_KEY=fixture-secret
+export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
 ```
 
 唯一正式 pin 是 `packages/runtime/workerd.lock.json`。`packages/runtime/dist/` 不提交 Git；
@@ -36,6 +39,7 @@ export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
 ./test/gate.py p0-2 p2-3 --jobs 2
 ./test/gate.py workflow --list
 ./test/gate.py p3-contract
+./test/gate.py p5-search
 # 外部写入；仅在明确授权、预置账号与 Wrangler OAuth/token credential 后选择：
 ./test/gate.py p3-cf-diff
 # 在同一个冻结报告中合成本地 contract 与 remote qualification：
@@ -67,6 +71,7 @@ export OPEN_COMPUTE_TEST_WORKERD=/abs/verified/workerd
 | `p3-isolation`、`p3-recovery` | 两账户 fail-closed 与 P3 产品隔离；进程/快照/跨产品 crash recovery 与清理 |
 | `p3` | `p3-contract`、P0/P1/P2/Workflow 与全部 P3/L6 本地目标，不含外部 differential |
 | `p3-cf-diff` | 显式真实 Cloudflare portable differential；不属于 `all` 或 `--workspace` |
+| `p5-search`、`p5` | 本机 embedding fixture + stock workerd 的 Vectorize 全 stable method/filter、AI Search upload→durable indexing→hybrid retrieval 与 `AI.toMarkdown`；只使用本地 SQLite/S3 fixture，不写 Cloudflare 账号 |
 | `runtime`、`single-binary` | supervisor、单文件离线首启/重启/损坏路径 |
 | `p0`、`p1`、`p2`、`all` | 对应集合；多个选择取并集，每个选定目标与 case 执行一次 |
 
@@ -157,6 +162,8 @@ coverage 使用 cargo-llvm-cov `show-env --sh` 的外部运行器接口和相同
 产物放在 `target/llvm-cov-target/`，每进程 profile 名包含 PID/模块身份。supervisor 夹具的环境
 由生产 spawn 清空，其默认 profile 留在本轮 `.temp/gate-run/` 诊断目录；不向生产环境透传变量，
 夹具仍按原有测试源码规则排除，生产模块的插桩与计数不变。
+`crates/search/examples/exact_search_benchmark.rs` 是单独留存报告的发行 benchmark，不计入
+production Rust 行覆盖率；不得把生产模块移入 `examples/` 规避门槛。
 `./test/coverage.sh --jobs 1` 可串行诊断，不清理普通 `target/debug/` 缓存。
 真实运行时测试缺少 workerd 即失败，不允许静默 `return` 成为通过证据。
 

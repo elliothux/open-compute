@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Lorem ipsum dolor sit amet",
+    "Maecenas ornare tortor velit"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "Lorem ipsum dolor sit amet",
+      "expected_fixture_id": "tika-docx-features"
+    }
+  ],
+  "review_notes": "Reviewed with textutil; feature-rich Latin placeholder content."
+}

@@ -21,6 +21,8 @@ pub struct DeploymentCachePolicyRecord {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinBindingKind {
+    /// Workers AI binding limited to the verified Markdown Conversion surface.
+    Ai,
     /// Local Images transformation session factory.
     Images,
     /// Frozen deployment version metadata object.
@@ -32,6 +34,7 @@ impl BuiltinBindingKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Ai => "ai",
             Self::Images => "images",
             Self::VersionMetadata => "version_metadata",
         }
@@ -39,6 +42,7 @@ impl BuiltinBindingKind {
 
     fn parse(value: &str) -> Result<Self, PlatformError> {
         match value {
+            "ai" => Ok(Self::Ai),
             "images" => Ok(Self::Images),
             "version_metadata" => Ok(Self::VersionMetadata),
             _ => Err(invariant()),

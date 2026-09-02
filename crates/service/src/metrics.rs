@@ -26,6 +26,8 @@ mod r2;
 mod resource;
 #[path = "metrics_scheduler.rs"]
 mod scheduler;
+#[path = "metrics_search.rs"]
+mod search;
 #[path = "metrics_service.rs"]
 mod service;
 #[path = "metrics_workflow.rs"]
@@ -54,12 +56,14 @@ pub use resource::{BindingBackendOperation, ResourceOperation};
 use resource::{binding_operation_index, resource_operation_index, write_resource_metrics};
 use scheduler::write_scheduler_metrics;
 pub(crate) use scheduler::{AlarmMutation, AlarmOutcome, AlarmRepairSource, SchedulerClaimOutcome};
+pub(crate) use search::{AiIndexStage, AiProviderCapability, AiProviderOutcome, AiSearchOperation};
+use search::{SearchMetrics, write_search_metrics};
 pub(crate) use service::ServiceMetricOperation;
 use service::{service_operation_index, write_service_metrics};
 pub(crate) use workflow::WorkflowOutcome;
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 640;
+pub const REQUIRED_SERIES: u64 = 722;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -298,6 +302,7 @@ struct Inner {
     queue: queue::QueueMetrics,
     workflow: workflow::WorkflowMetrics,
     cache_images: cache_images::CacheImagesMetrics,
+    search: SearchMetrics,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -416,6 +421,7 @@ impl MetricsRegistry {
                 queue: queue::QueueMetrics::default(),
                 workflow: workflow::WorkflowMetrics::default(),
                 cache_images: cache_images::CacheImagesMetrics::default(),
+                search: SearchMetrics::default(),
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -627,6 +633,59 @@ impl MetricsRegistry {
         guard.binding_protocol_errors = guard.binding_protocol_errors.saturating_add(1);
     }
 
+    /// Record one Vectorize read/query or mutation request without identity labels.
+    pub(crate) fn observe_vectorize_request(&self, mutation: bool, success: bool) {
+        self.lock()
+            .search
+            .observe_vectorize_request(mutation, success);
+    }
+
+    /// Publish one bounded Vectorize coordinator pass.
+    pub(crate) fn observe_vectorize_coordinator(
+        &self,
+        indexes: u32,
+        applied: u32,
+        claimed: u32,
+        blocked: u32,
+    ) {
+        self.lock()
+            .search
+            .observe_vectorize_coordinator(indexes, applied, claimed, blocked);
+    }
+
+    /// Record one AI Search operation without tenant or resource labels.
+    pub(crate) fn observe_ai_search_request(&self, operation: AiSearchOperation, success: bool) {
+        self.lock().search.observe_request(operation, success);
+    }
+
+    /// Publish the current durable AI Search job state counts.
+    pub(crate) fn set_ai_search_jobs(&self, counts: [u64; 8]) {
+        self.lock().search.set_jobs(counts);
+    }
+
+    /// Record the last bounded indexing stage duration.
+    pub(crate) fn observe_ai_index_stage(&self, stage: AiIndexStage, duration: Duration) {
+        self.lock().search.observe_stage(stage, duration);
+    }
+
+    /// Record one provider result using only bounded capability/outcome labels.
+    pub(crate) fn observe_ai_provider(
+        &self,
+        capability: AiProviderCapability,
+        outcome: AiProviderOutcome,
+        inputs: u64,
+        response_bytes: u64,
+    ) {
+        self.lock()
+            .search
+            .observe_provider(capability, outcome, inputs, response_bytes);
+    }
+
+    /// Record an AI Search immutable-object operation (`0=upload`, `1=download`, `2=gc`, `3=verify`).
+    pub(crate) fn observe_ai_search_s3(&self, operation: usize, success: bool) {
+        self.lock().search.observe_s3(operation, success);
+    }
+
     /// Record one authenticated Service invocation without identifier-valued labels.
     pub(crate) fn observe_service_invocation(
         &self,
@@ -792,6 +851,7 @@ impl MetricsRegistry {
         )
         .ok();
         write_p1_metrics(&mut out, &g.p1);
+        write_search_metrics(&mut out, &g.search);
         write_help(
             &mut out,
             "sqlite_operation_duration_seconds",
@@ -901,7 +961,7 @@ fn escape(value: &str) -> String {
         .replace('"', "\\\"")
 }
 
-fn component_order() -> [ComponentName; 9] {
+fn component_order() -> [ComponentName; 14] {
     [
         ComponentName::Cache,
         ComponentName::ControlDb,
@@ -912,6 +972,11 @@ fn component_order() -> [ComponentName; 9] {
         ComponentName::Runtime,
         ComponentName::S3,
         ComponentName::Scheduler,
+        ComponentName::VectorizeStorage,
+        ComponentName::VectorizeMutations,
+        ComponentName::AiSearchStorage,
+        ComponentName::AiSearchIndexing,
+        ComponentName::AiModels,
     ]
 }
 

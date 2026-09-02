@@ -25,14 +25,18 @@ import serviceScopeSource from "service-scope-source";
 import socketTunnelSource from "socket-tunnel-source";
 import cacheFacadeSource from "cache-facade-source";
 import imagesFacadeSource from "images-facade-source";
+import aiFacadeSource from "ai-facade-source";
+import vectorizeFacadeSource from "vectorize-facade-source";
+import aiSearchFacadeSource from "ai-search-facade-source";
 import {
-  ASSET_FACADE_MODULE, CACHE_FACADE_MODULE, D1_FACADE_MODULE, DO_ALARM_SHIM_MODULE, DO_FACADE_MODULE, DO_ID_CODEC_MODULE,
+  AI_FACADE_MODULE, AI_SEARCH_FACADE_MODULE, ASSET_FACADE_MODULE, CACHE_FACADE_MODULE, D1_FACADE_MODULE, DO_ALARM_SHIM_MODULE, DO_FACADE_MODULE, DO_ID_CODEC_MODULE,
   DO_FACETS_MODULE, DO_OUTPUT_GATE_MODULE,
   DO_WRAPPER_MODULE, INTERNAL_MODULE_PREFIX, LOADED_ISOLATE_WRAPPER_MODULE,
   IMAGES_FACADE_MODULE, KV_FACADE_MODULE, QUEUE_FACADE_MODULE, R2_FACADE_MODULE, SERIALIZATION_CODEC_MODULE,
   SERIALIZATION_DECODE_MODULE, SERIALIZATION_ENCODE_MODULE, SERIALIZATION_FORMAT_MODULE,
   SERVICE_FACADE_MODULE, SERVICE_SCOPE_MODULE,
   SOCKET_TUNNEL_MODULE,
+  VECTORIZE_FACADE_MODULE,
   VALIDATION_MODULE, WORKFLOW_FACADE_MODULE,
   WORKFLOW_CODEC_MODULE, WORKFLOW_DURATION_MODULE, WORKFLOW_RUNNER_MODULE, WORKFLOW_WRAPPER_MODULE,
   WRAPPER_RUNTIME_MODULE, generateBindingWrapper, generateValidationWrapper,
@@ -105,6 +109,11 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
   const cacheAvailable = !durableObject && !workflow;
   if (cacheAvailable) modules[CACHE_FACADE_MODULE] = { js: cacheFacadeSource };
   if (snapshot.imagesBinding && cacheAvailable) modules[IMAGES_FACADE_MODULE] = { js: imagesFacadeSource };
+  if (snapshot.aiBinding) modules[AI_FACADE_MODULE] = { js: aiFacadeSource };
+  if (has("vectorize_index")) modules[VECTORIZE_FACADE_MODULE] = { js: vectorizeFacadeSource };
+  if (has("ai_search_namespace") || has("ai_search_instance")) {
+    modules[AI_SEARCH_FACADE_MODULE] = { js: aiSearchFacadeSource };
+  }
   modules[SERVICE_FACADE_MODULE] = { js: serviceFacadeSource };
   if (workflow || has("workflow")) modules[WORKFLOW_CODEC_MODULE] = { js: workflowCodecSource };
   if (workflow) {
@@ -122,6 +131,7 @@ export function modulesFor(snapshot: RuntimeSnapshot, validation: boolean, entry
       mainModule: snapshot.mainModule, bindings: snapshot.bindings, services: snapshot.services,
       entrypointName, durableObject, workflow, assetBindingName: snapshot.assetBinding?.name,
       imagesBindingName: cacheAvailable ? snapshot.imagesBinding?.name : undefined,
+      aiBindingName: snapshot.aiBinding?.name,
       scheduledTargets: snapshot.scheduledTargets,
       cacheAvailable,
       cacheFailOpen: snapshot.cachePolicy.failOpen,

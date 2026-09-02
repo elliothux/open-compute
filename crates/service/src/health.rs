@@ -50,6 +50,35 @@ impl HealthCoordinator {
         set_component_locked(&mut status, name, state, reason)
     }
 
+    /// Publish the latest result of a required Vectorize or AI Search background loop.
+    pub(crate) fn set_search_background(
+        &self,
+        name: ComponentName,
+        healthy: bool,
+    ) -> Result<(), PlatformError> {
+        debug_assert!(matches!(
+            name,
+            ComponentName::VectorizeMutations | ComponentName::AiSearchIndexing
+        ));
+        let mut status = self.lock();
+        let component = status
+            .components
+            .iter_mut()
+            .find(|component| component.name == name)
+            .expect("fixed component set");
+        if component.state == ComponentState::Draining {
+            return Ok(());
+        }
+        let (state, reason) = if healthy {
+            (ComponentState::Healthy, ReadinessReason::Ready)
+        } else {
+            (ComponentState::Degraded, ReadinessReason::SearchUnavailable)
+        };
+        component.transition(state, Some(reason))?;
+        status.recompute();
+        Ok(())
+    }
+
     /// Map a supervisor snapshot onto the runtime component.
     ///
     /// Intermediate `watch` states may be coalesced; this bridges skipped
@@ -84,6 +113,11 @@ impl HealthCoordinator {
             ComponentName::Runtime,
             ComponentName::Scheduler,
             ComponentName::Operations,
+            ComponentName::VectorizeStorage,
+            ComponentName::VectorizeMutations,
+            ComponentName::AiSearchStorage,
+            ComponentName::AiSearchIndexing,
+            ComponentName::AiModels,
         ];
         let mut status = self.lock();
         for name in names {

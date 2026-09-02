@@ -104,6 +104,8 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         "cron",
         "workflows",
         "cache_api",
+        "ai",
+        "vectorize",
         "version_metadata",
         "websocket_hibernation",
     ] {
@@ -137,9 +139,7 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
     }
     for name in [
         "analytics_engine",
-        "ai",
         "browser_rendering",
-        "vectorize",
         "hyperdrive",
         "mtls",
         "rate_limiting",

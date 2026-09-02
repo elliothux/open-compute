@@ -1,0 +1,23 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "This document has bold and italic text."
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "This document has bold and italic text.",
+      "expected_fixture_id": "tika-odt-embedded"
+    }
+  ],
+  "review_notes": "Reviewed from content.xml and archive members; embedded picture must not trigger recursive indexing."
+}

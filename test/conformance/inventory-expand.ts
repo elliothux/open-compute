@@ -90,6 +90,7 @@ interface ExpandState {
   includeStatic: boolean;
   optionalOverride?: boolean;
   readonlyOverride?: boolean;
+  allowedMembers?: ReadonlySet<string>;
 }
 
 export function collapse(text: string): string {
@@ -255,7 +256,7 @@ function pushMember(
   node: Node,
   flags?: { readonly?: boolean; optional?: boolean; static?: boolean },
 ): void {
-  if (isNonPublic(node) || state.seen.has(node)) return;
+  if (isNonPublic(node) || state.seen.has(node) || (state.allowedMembers !== undefined && !state.allowedMembers.has(member))) return;
   state.seen.add(node);
   state.added += 1;
   state.surface = true;
@@ -455,13 +456,14 @@ export function expandTargetDeclaration(
   statement: Statement,
   aliases: Map<string, string>,
   index: Map<string, DeclarationRow[]>,
+  allowedMembers?: ReadonlySet<string>,
 ): { added: number; surface: boolean; names: string[] } {
   if (isFunctionDeclaration(statement)) {
     const local = statement.name?.text;
     if (local === undefined) return { added: 0, surface: false, names: [] };
     const exported = aliases.get(local) ?? local;
     const symbol = prefix === "" ? GLOBAL_SYMBOL : prefix.slice(0, -1);
-    const state = createState(members, memberProduct(symbol, exported, product), symbol, prefix, index);
+    const state = createState(members, memberProduct(symbol, exported, product), symbol, prefix, index, allowedMembers);
     state.includeStatic = true;
     pushMember(state, exported, "function", statement);
     return { added: state.added, surface: true, names: [qualify(prefix, local)] };
@@ -476,7 +478,7 @@ export function expandTargetDeclaration(
       const qualified = qualify(prefix, declaration.name.text);
       if (classifySymbol(qualified).class !== "target") continue;
       const exported = aliases.get(declaration.name.text) ?? declaration.name.text;
-      const state = createState(members, memberProduct(symbol, exported, product), symbol, prefix, index);
+      const state = createState(members, memberProduct(symbol, exported, product), symbol, prefix, index, allowedMembers);
       state.includeStatic = true;
       pushMember(state, exported, "var", declaration);
       added += state.added;
@@ -488,7 +490,7 @@ export function expandTargetDeclaration(
   const name = declarationName(statement);
   if (name === undefined) return { added: 0, surface: false, names: [] };
   const qualified = qualify(prefix, name);
-  const state = createState(members, product, qualified, prefix, index);
+  const state = createState(members, product, qualified, prefix, index, allowedMembers);
   state.includeStatic = isClassDeclaration(statement) || isInterfaceDeclaration(statement);
   state.visiting.add(qualified);
   expandDeclarationShape(state, statement);
@@ -501,6 +503,7 @@ function createState(
   symbol: string,
   prefix: string,
   index: Map<string, DeclarationRow[]>,
+  allowedMembers?: ReadonlySet<string>,
 ): ExpandState {
   return {
     product,
@@ -513,6 +516,7 @@ function createState(
     added: 0,
     surface: false,
     includeStatic: false,
+    ...(allowedMembers === undefined ? {} : { allowedMembers }),
   };
 }
 

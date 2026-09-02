@@ -159,7 +159,7 @@ pub async fn backup_create(
     let mut prepared = prepare_platform_snapshot(&data_dir, &request)?;
     // The prepared bytes are already reflected in `statvfs`; do not count them twice.
     ensure_snapshot_headroom(loaded, 0)?;
-    prepared.manifest.immutable_references = collect_and_verify_external_references(
+    let mut immutable_references = collect_and_verify_external_references(
         loaded,
         &artifact_store,
         &r2_store,
@@ -167,6 +167,22 @@ pub async fn backup_create(
         identity.platform_id,
     )
     .await?;
+    immutable_references.extend(prepared.manifest.immutable_references.clone());
+    immutable_references.sort_by(|left, right| {
+        left.object_key
+            .cmp(&right.object_key)
+            .then(left.role.cmp(&right.role))
+    });
+    for reference in immutable_references
+        .iter()
+        .filter(|reference| reference.role == "ai_search_object")
+    {
+        objects
+            .verify_external_reference(&reference.object_key, &reference.sha256, reference.size)
+            .await?;
+    }
+    immutable_references.dedup();
+    prepared.manifest.immutable_references = immutable_references;
     for file in &prepared.files {
         objects
             .put_file(

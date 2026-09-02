@@ -1,7 +1,8 @@
 //! P1.2/P1.3 full snapshot and fresh-host restore integration Gate.
 
 mod common;
-
+#[path = "p1_snapshot_restore/p5_search.rs"]
+mod p5_search;
 #[path = "p1_snapshot_restore/staged_validation.rs"]
 mod staged_validation;
 
@@ -9,7 +10,7 @@ use common::load_file_only_platform_config;
 
 use base64::Engine as _;
 use open_compute_artifacts::{
-    MockS3, S3ArtifactClient, SnapshotObjectStore, resolve_s3_credentials,
+    AiSearchObjectStore, MockS3, S3ArtifactClient, SnapshotObjectStore, resolve_s3_credentials,
 };
 use open_compute_core::{
     CronActivationId, DeploymentId, ErrorCode, PlatformSnapshotManifestV1, RequestId, SystemClock,
@@ -191,6 +192,15 @@ async fn snapshot_restore_gate() {
         prefix: "system/",
     });
     let source_loaded = load_file_only_platform_config(&source_config);
+    let p5_credentials =
+        resolve_s3_credentials(&source_loaded.config.s3).expect("P5 S3 credentials");
+    let p5_client = S3ArtifactClient::connect(
+        &source_loaded.config.s3,
+        &p5_credentials,
+        source_loaded.config.hardening.max_snapshot_file_bytes,
+    )
+    .expect("P5 S3 client");
+    let p5_objects = AiSearchObjectStore::new(p5_client);
     let storage = PlatformStorage::bootstrap(&source_loaded.config.storage, &SystemClock)
         .expect("source bootstrap");
     let scheduler_path = storage
@@ -309,6 +319,8 @@ async fn snapshot_restore_gate() {
         b"durable-object-sentinel",
         0o600,
     );
+    let p5_object_path = root.join("p5-ai-search-object.txt");
+    let p5_fixture = p5_search::seed(&storage, &p5_objects, &p5_object_path).await;
     let platform_id = storage.identity().platform_id;
     drop(scheduler);
     drop(storage);
@@ -376,6 +388,25 @@ async fn snapshot_restore_gate() {
         .expect("manifest bytes");
     let original_manifest: PlatformSnapshotManifestV1 =
         serde_json::from_slice(&original_manifest_bytes).expect("manifest JSON");
+    assert!(original_manifest.files.iter().any(|file| {
+        file.role == open_compute_core::SnapshotFileRole::VectorizeSqlite
+            && file.logical_id == p5_fixture.vectorize_id.to_string()
+    }));
+    assert!(original_manifest.files.iter().any(|file| {
+        file.role == open_compute_core::SnapshotFileRole::AiSearchSqlite
+            && file.logical_id == p5_fixture.ai_search_id.to_string()
+    }));
+    assert!(
+        original_manifest
+            .immutable_references
+            .iter()
+            .any(|reference| {
+                reference.role == "ai_search_object"
+                    && reference.object_key == p5_fixture.object_key
+                    && reference.sha256 == hex::encode(p5_fixture.object.sha256)
+                    && reference.size == p5_fixture.object.size
+            })
+    );
     let recovery_key = inspect_master_key(&source_loaded.config.storage).expect("recovery key");
     staged_validation::reject_invalid_staging(
         &snapshot_objects,
@@ -471,6 +502,30 @@ async fn snapshot_restore_gate() {
         &first_object.object_key,
         fs::read(saved_object).expect("saved snapshot object"),
     );
+
+    p5_objects
+        .delete_exact(&p5_fixture.object, &p5_fixture.object_key)
+        .await
+        .expect("remove AI Search object fixture");
+    assert!(
+        backup_inspect(&source_loaded, &first.snapshot_id, true)
+            .await
+            .is_err(),
+        "snapshot verification must fail closed when an AI Search object is missing"
+    );
+    let mut missing_p5_object_restore = source_loaded.clone();
+    missing_p5_object_restore.config.storage.data_dir = root.join("missing-p5-object-restore");
+    assert!(
+        backup_restore(&missing_p5_object_restore, &first.snapshot_id)
+            .await
+            .is_err(),
+        "restore must fail closed before publication when an AI Search object is missing"
+    );
+    assert!(!missing_p5_object_restore.config.storage.data_dir.exists());
+    p5_objects
+        .put_file(&p5_fixture.object, &p5_object_path)
+        .await
+        .expect("restore AI Search object fixture");
 
     let cli_created = run_cli_json(
         &source_config,
@@ -663,6 +718,7 @@ async fn snapshot_restore_gate() {
         let restored_storage =
             PlatformStorage::bootstrap(&restore_loaded.config.storage, &SystemClock)
                 .expect("bootstrap restored Queue authority");
+        p5_search::assert_restored(&restored_storage, &p5_fixture);
         let restored_queue = QueueRepository::new(restored_storage.db())
             .get(account_id, snapshot_queue)
             .expect("restored Queue catalog");
@@ -719,6 +775,10 @@ async fn snapshot_restore_gate() {
         assert!(cron.projection_exists);
         assert_eq!(cron.ready_runs, 1);
     }
+    p5_objects
+        .verify(&p5_fixture.object, &p5_fixture.object_key)
+        .await
+        .expect("restored snapshot retains AI Search external object");
     assert!(
         backup_attest_restore_smoke(&restore_loaded, &first.snapshot_id, false)
             .await

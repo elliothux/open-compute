@@ -1,0 +1,23 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "test content"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": 1,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "test content",
+      "expected_fixture_id": "lc4j-pdf-equivalent"
+    }
+  ],
+  "review_notes": "Reviewed with PDFKit; member of the cross-format equivalence group."
+}

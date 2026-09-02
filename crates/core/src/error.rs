@@ -453,6 +453,28 @@ pub enum ErrorCode {
     ImageUnavailable,
     /// The private Images facade protocol was malformed.
     ImageProtocolError,
+    /// Document bytes, file identity, or detected container are malformed.
+    DocumentInputInvalid,
+    /// The document format is outside the verified Markdown Conversion allowlist.
+    DocumentFormatUnsupported,
+    /// The document requires OCR, which is outside the current parser contract.
+    DocumentOcrRequired,
+    /// The document is encrypted and no password surface is supported.
+    DocumentEncrypted,
+    /// The document has no indexable text content.
+    DocumentEmpty,
+    /// A document or batch exceeded a fixed byte, output, or concurrency limit.
+    DocumentLimitExceeded,
+    /// A requested Markdown Conversion option is unsupported or invalid.
+    DocumentOptionUnsupported,
+    /// The isolated parser child exceeded its fixed wall deadline.
+    DocumentTimeout,
+    /// The isolated parser child or native parser is unavailable.
+    DocumentUnavailable,
+    /// The private Markdown Conversion or parser-child protocol was malformed.
+    DocumentProtocolError,
+    /// A supported document could not be converted by the frozen parser contract.
+    DocumentParseFailed,
     /// A secret-safe internal P0.2 failure.
     Internal,
 }
@@ -691,6 +713,17 @@ impl ErrorCode {
             Self::ImageTimeout => "IMAGE_TIMEOUT",
             Self::ImageUnavailable => "IMAGE_UNAVAILABLE",
             Self::ImageProtocolError => "IMAGE_PROTOCOL_ERROR",
+            Self::DocumentInputInvalid => "DOCUMENT_INPUT_INVALID",
+            Self::DocumentFormatUnsupported => "UNSUPPORTED_CONTENT_TYPE",
+            Self::DocumentOcrRequired => "DOCUMENT_OCR_REQUIRED",
+            Self::DocumentEncrypted => "DOCUMENT_ENCRYPTED",
+            Self::DocumentEmpty => "DOCUMENT_EMPTY",
+            Self::DocumentLimitExceeded => "DOCUMENT_LIMIT_EXCEEDED",
+            Self::DocumentOptionUnsupported => "DOCUMENT_OPTION_UNSUPPORTED",
+            Self::DocumentTimeout => "DOCUMENT_TIMEOUT",
+            Self::DocumentUnavailable => "DOCUMENT_UNAVAILABLE",
+            Self::DocumentProtocolError => "DOCUMENT_PROTOCOL_ERROR",
+            Self::DocumentParseFailed => "DOCUMENT_PARSE_FAILED",
             Self::Internal => "INTERNAL",
         }
     }
@@ -740,6 +773,8 @@ pub enum ReadinessReason {
     DiskSoftLimit,
     /// The latest committed full-platform snapshot is missing or too old.
     SnapshotStale,
+    /// Vectorize or AI Search background authority is temporarily unavailable.
+    SearchUnavailable,
     /// All required components are ready.
     Ready,
 }
@@ -766,6 +801,7 @@ impl ReadinessReason {
             Self::S3Degraded => "S3_DEGRADED",
             Self::DiskSoftLimit => "DISK_SOFT_LIMIT",
             Self::SnapshotStale => "SNAPSHOT_STALE",
+            Self::SearchUnavailable => "SEARCH_UNAVAILABLE",
             Self::Ready => "READY",
         }
     }

@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Here is some text",
+    "page 2"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "Here is some text",
+      "expected_fixture_id": "tika-odt-footer"
+    }
+  ],
+  "review_notes": "Reviewed directly from ODF content.xml."
+}

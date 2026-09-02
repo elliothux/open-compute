@@ -18,6 +18,7 @@ async fn fixture() -> (RuntimeFeatureFixture, CacheBindingService) {
             entrypoints: BTreeMap::new(),
         },
         images: None,
+        ai: None,
         version_metadata: None,
     })
     .await;

@@ -11,7 +11,8 @@ use open_compute_core::{
 use open_compute_runtime::{embedded_runtime_assets_sha256, embedded_runtime_lock};
 use open_compute_storage::{
     D1_DATABASE_SCHEMA_VERSION, KV_SCHEMA_VERSION, QUEUE_MAX_BATCH_BYTES, QUEUE_MAX_BATCH_MESSAGES,
-    QUEUE_MAX_DELAY_SECONDS, QUEUE_MAX_MESSAGE_BYTES, current_scheduler_schema_version, migrations,
+    QUEUE_MAX_DELAY_SECONDS, QUEUE_MAX_MESSAGE_BYTES, ai_search::AI_SEARCH_SCHEMA_VERSION,
+    current_scheduler_schema_version, migrations, vectorize::VECTORIZE_SCHEMA_VERSION,
 };
 
 use serde::Serialize;
@@ -39,6 +40,7 @@ struct SnapshotPolicyV1<'a> {
     cache: &'a CacheConfig,
     response_cache: &'a open_compute_core::ResponseCacheConfig,
     images: &'a open_compute_core::ImagesConfig,
+    document_parser: &'a open_compute_core::DocumentParserConfig,
 }
 
 /// Build the complete production capability registry from embedded release inputs.
@@ -66,6 +68,8 @@ pub fn platform_capabilities(
             .map_err(|_| capability_invalid())?,
         kv_schema_version: KV_SCHEMA_VERSION,
         d1_schema_version: D1_DATABASE_SCHEMA_VERSION,
+        vectorize_schema_version: VECTORIZE_SCHEMA_VERSION,
+        ai_search_schema_version: AI_SEARCH_SCHEMA_VERSION,
         snapshot_format_version: SNAPSHOT_FORMAT_VERSION,
     };
     let (type_source, products) = product_registry()?;
@@ -122,9 +126,12 @@ pub fn platform_release_metadata(
             ),
             ("kv".to_owned(), KV_SCHEMA_VERSION),
             ("d1".to_owned(), D1_DATABASE_SCHEMA_VERSION),
+            ("vectorize".to_owned(), VECTORIZE_SCHEMA_VERSION),
+            ("ai_search".to_owned(), AI_SEARCH_SCHEMA_VERSION),
         ]),
         schema_definitions,
         object_formats: BTreeMap::from([
+            ("ai_search_objects".to_owned(), 1),
             ("artifacts".to_owned(), 1),
             ("kv_backups".to_owned(), 1),
             ("d1_backups".to_owned(), 1),
@@ -160,6 +167,7 @@ pub fn platform_config_policy_sha256(loaded: &LoadedConfig) -> Result<String, Pl
         cache: &config.cache,
         response_cache: &config.response_cache,
         images: &config.images,
+        document_parser: &config.document_parser,
     })
     .map_err(|_| capability_invalid())?;
     let mut digest = Sha256::new();
@@ -526,6 +534,50 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
         (
             "images.request_timeout_ms".to_owned(),
             config.images.request_timeout_ms,
+        ),
+        (
+            "document_parser.max_input_bytes".to_owned(),
+            config.document_parser.max_input_bytes,
+        ),
+        (
+            "document_parser.max_batch_bytes".to_owned(),
+            config.document_parser.max_batch_bytes,
+        ),
+        (
+            "document_parser.max_batch_files".to_owned(),
+            u64::from(config.document_parser.max_batch_files),
+        ),
+        (
+            "document_parser.max_output_bytes".to_owned(),
+            config.document_parser.max_output_bytes,
+        ),
+        (
+            "document_parser.max_concurrency".to_owned(),
+            u64::from(config.document_parser.max_concurrency),
+        ),
+        (
+            "document_parser.max_concurrency_per_account".to_owned(),
+            u64::from(config.document_parser.max_concurrency_per_account),
+        ),
+        (
+            "document_parser.max_concurrency_per_deployment".to_owned(),
+            u64::from(config.document_parser.max_concurrency_per_deployment),
+        ),
+        (
+            "document_parser.request_timeout_ms".to_owned(),
+            config.document_parser.request_timeout_ms,
+        ),
+        (
+            "document_parser.max_address_space_bytes".to_owned(),
+            config.document_parser.max_address_space_bytes,
+        ),
+        (
+            "document_parser.max_cpu_seconds".to_owned(),
+            config.document_parser.max_cpu_seconds,
+        ),
+        (
+            "document_parser.max_stderr_bytes".to_owned(),
+            config.document_parser.max_stderr_bytes,
         ),
         (
             "hardening.snapshot_stale_after_ms".to_owned(),

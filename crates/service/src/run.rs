@@ -1,7 +1,10 @@
 //! Production `run` composition and shutdown.
 
+use crate::ai_search_backend::AiSearchBindingService;
 use crate::asset_backend::AssetBindingService;
-use crate::binding_backend::{bind_binding_backend, serve_binding_backend_with_assets};
+use crate::binding_backend::{
+    bind_binding_backend, serve_binding_backend_with_ai_search_and_snapshot_pins,
+};
 use crate::cache_backend::CacheBindingService;
 use crate::cache_images_http::CacheImagesApiState;
 use crate::capabilities::{platform_capabilities, platform_release_metadata};
@@ -10,6 +13,7 @@ use crate::d1_backend::D1BindingService;
 use crate::d1_http::D1ApiState;
 use crate::dashboard::bootstrap_dashboard;
 use crate::do_http::DoApiState;
+use crate::document_parser_backend::DocumentParserBindingService;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState, SanitizedSupervisor};
 use crate::images_backend::ImageBindingService;
@@ -26,6 +30,7 @@ use crate::r2_maintenance::R2Maintenance;
 use crate::runtime_bridge::{WorkerdTransport, bind_runtime_source, serve_runtime_source};
 use crate::runtime_generation::RuntimeGenerationResources;
 use crate::scheduler::SchedulerService;
+use crate::search_http::SearchApiState;
 use crate::service_invocations::ServiceInvocationRegistry;
 use crate::snapshot_pins::{SnapshotPins, load_snapshot_pins};
 use crate::workers_http::WorkerApiState;
@@ -34,8 +39,8 @@ pub(super) mod p1;
 #[path = "run_storage.rs"]
 mod storage_bootstrap;
 use open_compute_artifacts::{
-    ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore, R2ObjectStore,
-    S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
+    ARTIFACT_KEY_VERSION, AiSearchObjectStore, ArtifactCache, ArtifactRef, ArtifactStore,
+    R2ObjectStore, S3ArtifactClient, preflight_r2, preflight_s3, resolve_s3_credentials,
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::{
@@ -221,6 +226,19 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         ComponentState::Healthy,
         Some(ReadinessReason::Ready),
     )?;
+    for component in [
+        ComponentName::VectorizeStorage,
+        ComponentName::VectorizeMutations,
+        ComponentName::AiSearchStorage,
+        ComponentName::AiSearchIndexing,
+        ComponentName::AiModels,
+    ] {
+        health.set_component(
+            component,
+            ComponentState::Healthy,
+            Some(ReadinessReason::Ready),
+        )?;
+    }
 
     let mut redactor = Redactor::new();
     let runtime_lease_path = storage.data_dir().runtime_dir().join("child.lease");
@@ -346,6 +364,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     );
 
     let r2_objects = R2ObjectStore::new(client.clone());
+    let ai_search_objects = AiSearchObjectStore::new(client.clone());
     let store = ArtifactStore::new(client);
     let cache = match ArtifactCache::open(
         storage.data_dir().artifact_cache_dir(),
@@ -374,6 +393,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         ImageBindingService::new(storage.clone(), loaded.config.images.clone())
             .with_metrics(metrics.clone()),
     );
+    let document_parser = Arc::new(DocumentParserBindingService::new(
+        storage.clone(),
+        loaded.config.document_parser.clone(),
+    )?);
     metrics.set_cache(cache.total_bytes().await, cache.entry_count(), 0, 0);
     record(&opts, "cache");
     if let Err(err) = fail_after(&opts, FailAfterDummy::Cache, &metrics, StartStage::Cache) {
@@ -591,6 +614,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         loaded.config.workers.clone(),
         snapshot_pins.clone(),
         metrics.clone(),
+    ))
+    .with_search_api(SearchApiState::new(
+        storage.clone(),
+        resource_pins.clone(),
+        loaded.config.storage.sqlite_busy_timeout_ms,
+        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     ));
 
     #[cfg(feature = "test-support")]
@@ -663,7 +692,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let maintenance_pins = deployment_pins.clone();
     let maintenance_resource_pins = resource_pins.clone();
     let maintenance_metrics = metrics.clone();
-    let maintenance_snapshot_pins = snapshot_pins;
+    let maintenance_snapshot_pins = snapshot_pins.clone();
     let maintenance_task = tokio::spawn(async move {
         let mut r2_maintenance = R2Maintenance::default();
         let mut interval = tokio::time::interval(Duration::from_millis(
@@ -756,8 +785,21 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     ));
     let binding_service_invocations = service_invocations.clone();
     let binding_images = images.clone();
+    let binding_document_parser = document_parser.clone();
+    let binding_health = health.clone();
+    let binding_ai_search = Arc::new(
+        AiSearchBindingService::new(
+            storage.clone(),
+            resource_pins.clone(),
+            loaded.config.ai.clone(),
+            ai_search_objects,
+            snapshot_pins.clone(),
+            document_parser.clone(),
+        )?
+        .with_metrics(metrics.clone()),
+    );
     let binding_backend_task = tokio::spawn(async move {
-        serve_binding_backend_with_assets(
+        serve_binding_backend_with_ai_search_and_snapshot_pins(
             binding_backend_listener,
             binding_storage,
             binding_auth,
@@ -774,6 +816,9 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             binding_service_invocations,
             Some(response_cache),
             Some(binding_images),
+            binding_document_parser,
+            binding_ai_search,
+            Some(binding_health),
             async move {
                 let _ = shutdown_binding.changed().await;
             },

@@ -244,11 +244,15 @@ fn validate_resource_catalog(
     let expected = control.with_read(|connection| {
         let mut statement = connection
             .prepare(
-                "SELECT r.account_id, r.id, r.kind, COALESCE(k.storage_key, d.storage_key)
+                "SELECT r.account_id, r.id, r.kind,
+                        COALESCE(k.storage_key, d.storage_key, v.storage_key, a.storage_key)
                  FROM resources r
                  LEFT JOIN kv_namespaces k ON k.resource_id = r.id
                  LEFT JOIN d1_databases d ON d.resource_id = r.id
-                 WHERE r.state != 'tombstoned' AND r.kind IN ('kv_namespace', 'd1_database')
+                 LEFT JOIN vectorize_indexes v ON v.resource_id = r.id
+                 LEFT JOIN ai_search_instances a ON a.resource_id = r.id
+                 WHERE r.state != 'tombstoned'
+                   AND r.kind IN ('kv_namespace', 'd1_database', 'vectorize_index', 'ai_search_instance')
                  ORDER BY r.kind, r.account_id, r.id",
             )
             .map_err(|_| restore_invalid())?;
@@ -270,6 +274,8 @@ fn validate_resource_catalog(
             let product = match kind.as_str() {
                 "kv_namespace" => "kv",
                 "d1_database" => "d1",
+                "vectorize_index" => "vectorize",
+                "ai_search_instance" => "ai-search",
                 _ => return Err(restore_invalid()),
             };
             if storage_key != format!("v1/{account}/{resource}/data.sqlite") {
@@ -288,12 +294,57 @@ fn validate_resource_catalog(
         .filter(|entry| {
             matches!(
                 entry.role,
-                SnapshotFileRole::KvSqlite | SnapshotFileRole::D1Sqlite
+                SnapshotFileRole::KvSqlite
+                    | SnapshotFileRole::D1Sqlite
+                    | SnapshotFileRole::VectorizeSqlite
+                    | SnapshotFileRole::AiSearchSqlite
             )
         })
         .map(|entry| (entry.logical_id.clone(), entry.restore_path.clone()))
         .collect();
     if expected != actual {
+        return Err(restore_invalid());
+    }
+    for entry in manifest.files.iter().filter(|entry| {
+        matches!(
+            entry.role,
+            SnapshotFileRole::VectorizeSqlite | SnapshotFileRole::AiSearchSqlite
+        )
+    }) {
+        validate_owned_resource_db(root, entry, busy_timeout_ms)?;
+    }
+    Ok(())
+}
+
+fn validate_owned_resource_db(
+    root: &Path,
+    entry: &open_compute_core::SnapshotFileV1,
+    busy_timeout_ms: u64,
+) -> Result<(), PlatformError> {
+    let path = crate::control_db::leaf_nofollow_path(&root.join(&entry.restore_path))?;
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|_| restore_invalid())?;
+    connection
+        .busy_timeout(std::time::Duration::from_millis(busy_timeout_ms))
+        .map_err(|_| restore_invalid())?;
+    let table = match entry.role {
+        SnapshotFileRole::VectorizeSqlite => "index_meta",
+        SnapshotFileRole::AiSearchSqlite => "instance_meta",
+        _ => return Err(restore_invalid()),
+    };
+    let sql = format!("SELECT resource_id, schema_version FROM {table} WHERE singleton=1");
+    let (resource_id, schema_version): (String, i64) = connection
+        .query_row(&sql, [], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|_| restore_invalid())?;
+    let expected_schema = match entry.role {
+        SnapshotFileRole::VectorizeSqlite => crate::vectorize::VECTORIZE_SCHEMA_VERSION,
+        SnapshotFileRole::AiSearchSqlite => crate::ai_search::AI_SEARCH_SCHEMA_VERSION,
+        _ => return Err(restore_invalid()),
+    };
+    if resource_id != entry.logical_id || schema_version != i64::from(expected_schema) {
         return Err(restore_invalid());
     }
     Ok(())

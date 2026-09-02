@@ -33,6 +33,9 @@ export {
 export { ServiceTransport } from "../services/transport.js";
 export { CacheTransport } from "../cache/host.js";
 export { ImageTransport } from "../images/host.js";
+export { AiTransport } from "../ai/host.js";
+export { VectorizeTransport } from "../vectorize/host.js";
+export { AiSearchTransport } from "../ai-search/host.js";
 
 const MAX_QUEUE_MESSAGES = 100;
 const MAX_QUEUE_BODY_BYTES = 128 * 1024;

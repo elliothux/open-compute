@@ -129,6 +129,7 @@ pub(crate) fn load_assets(
         }
         workers.push((rel, bytes));
     }
+    workers.sort_unstable_by(|left, right| left.0.cmp(&right.0));
     if workers.is_empty() {
         return Err(PlatformError::new(
             ErrorCode::ConfigCompileFailed,

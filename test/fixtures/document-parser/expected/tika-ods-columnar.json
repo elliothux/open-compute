@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Record Number",
+    "This is row 10 of 10"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "Record Number",
+      "expected_fixture_id": "tika-ods-columnar"
+    }
+  ],
+  "review_notes": "Reviewed directly from ODF content.xml; row ordering oracle."
+}

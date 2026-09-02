@@ -1,0 +1,23 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "optionalhyphen"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": 1,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "optionalhyphen",
+      "expected_fixture_id": "tika-pdf-optional-hyphen"
+    }
+  ],
+  "review_notes": "Reviewed with PDFKit; optional hyphen must not split the word."
+}

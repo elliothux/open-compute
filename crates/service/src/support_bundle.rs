@@ -7,10 +7,12 @@ use crate::doctor::{DoctorMode, doctor_report};
 use crate::metrics::MetricsRegistry;
 use base64::Engine as _;
 use open_compute_artifacts::resolve_s3_credentials;
-use open_compute_core::{ErrorCode, PlatformError, PlatformStatus};
+use open_compute_core::{
+    AiAuthConfig, BindingKind, ErrorCode, PlatformError, PlatformStatus, ResourceAvailability,
+};
 use open_compute_storage::{
-    inspect_control_db, inspect_master_key, inspect_operator_event_count, inspect_scheduler_db,
-    read_operation_receipt,
+    AI_SEARCH_SCHEMA_VERSION, VECTORIZE_SCHEMA_VERSION, inspect_control_db, inspect_master_key,
+    inspect_operator_event_count, inspect_resources, inspect_scheduler_db, read_operation_receipt,
 };
 use rustix::fs::{Mode, OFlags};
 use serde::Serialize;
@@ -66,6 +68,7 @@ pub async fn create_support_bundle(
         json_entry("schema.json", &schema_summary(loaded))?,
         json_entry("files.json", &file_summary(loaded))?,
         json_entry("operator-events.json", &operator_event_summary(loaded))?,
+        json_entry("search.json", &search_summary(loaded)?)?,
     ];
     entries.extend(receipt_entries(loaded)?);
     entries.sort_by(|left, right| left.0.cmp(&right.0));
@@ -184,7 +187,10 @@ fn file_summary(loaded: &LoadedConfig) -> serde_json::Value {
     if let Ok(entries) = std::fs::read_dir(root) {
         for entry in entries.flatten().take(128) {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if matches!(name.as_str(), "keys" | "do" | "kv" | "d1") {
+            if matches!(
+                name.as_str(),
+                "keys" | "do" | "kv" | "d1" | "vectorize" | "ai-search"
+            ) {
                 values.push(serde_json::json!({"name": name, "type": "redacted_tree"}));
                 continue;
             }
@@ -206,6 +212,99 @@ fn operator_event_summary(loaded: &LoadedConfig) -> serde_json::Value {
     let counts =
         inspect_operator_event_count(&path, loaded.config.storage.sqlite_busy_timeout_ms).ok();
     serde_json::json!({"schema_version": 1, "bounded_total": counts})
+}
+
+pub(crate) fn search_summary(loaded: &LoadedConfig) -> Result<serde_json::Value, PlatformError> {
+    let path = loaded.config.storage.data_dir.join("control.sqlite");
+    let resources = inspect_resources(&path, loaded.config.storage.sqlite_busy_timeout_ms, 10_000)?;
+    let counts = |kind| {
+        let selected = resources.iter().filter(|resource| resource.kind == kind);
+        let total = selected.clone().count();
+        let healthy = selected
+            .clone()
+            .filter(|resource| resource.availability == ResourceAvailability::Healthy)
+            .count();
+        let degraded = selected
+            .clone()
+            .filter(|resource| resource.availability == ResourceAvailability::Degraded)
+            .count();
+        let unavailable = selected
+            .filter(|resource| resource.availability == ResourceAvailability::Unavailable)
+            .count();
+        serde_json::json!({
+            "total": total,
+            "healthy": healthy,
+            "degraded": degraded,
+            "unavailable": unavailable,
+        })
+    };
+    Ok(serde_json::json!({
+        "schema_version": 1,
+        "resource_count_bound": 10_000,
+        "resources": {
+            "vectorize_index": counts(BindingKind::VectorizeIndex),
+            "ai_search_namespace": counts(BindingKind::AiSearchNamespace),
+            "ai_search_instance": counts(BindingKind::AiSearchInstance),
+        },
+        "contracts": {
+            "vectorize_schema_version": VECTORIZE_SCHEMA_VERSION,
+            "ai_search_schema_version": AI_SEARCH_SCHEMA_VERSION,
+            "ai_provider_contract_sha256": ai_provider_contract_sha256(loaded)?,
+        }
+    }))
+}
+
+fn ai_provider_contract_sha256(loaded: &LoadedConfig) -> Result<String, PlatformError> {
+    let config = &loaded.config.ai;
+    config.validate()?;
+    let mut digest = sha2::Sha256::new();
+    digest.update(b"open-compute/ai-provider-catalog/v1\0");
+    for value in [
+        u64::from(config.max_provider_in_flight),
+        u64::from(config.max_embedding_inputs_per_batch),
+        config.max_embedding_request_bytes,
+        config.max_embedding_response_bytes,
+        config.provider_timeout_ms,
+        config.query_timeout_ms,
+    ] {
+        digest_part(&mut digest, &value.to_be_bytes());
+    }
+    digest_part(
+        &mut digest,
+        config
+            .default_embedding_model
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes(),
+    );
+    digest_part(
+        &mut digest,
+        config
+            .default_generation_model
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes(),
+    );
+    for (name, provider) in &config.providers {
+        digest_part(&mut digest, name.as_bytes());
+        digest_part(&mut digest, provider.base_url.as_bytes());
+        digest_part(&mut digest, provider.auth.kind_token().as_bytes());
+    }
+    for alias in config.embedding_models.keys() {
+        let contract = config.resolve_embedding_model(Some(alias))?;
+        digest_part(&mut digest, contract.contract_sha256.as_bytes());
+    }
+    for (alias, model) in &config.generation_models {
+        digest_part(&mut digest, alias.as_bytes());
+        let bytes = serde_json::to_vec(model).map_err(|_| bundle_invalid())?;
+        digest_part(&mut digest, &bytes);
+    }
+    Ok(hex::encode(digest.finalize()))
+}
+
+fn digest_part(digest: &mut sha2::Sha256, value: &[u8]) {
+    digest.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+    digest.update(value);
 }
 
 fn receipt_entries(loaded: &LoadedConfig) -> Result<Vec<(String, Vec<u8>)>, PlatformError> {
@@ -251,6 +350,11 @@ fn secret_needles(loaded: &LoadedConfig) -> Result<Vec<Vec<u8>>, PlatformError> 
             .as_bytes()
             .to_vec(),
     );
+    for provider in loaded.config.ai.providers.values() {
+        if let AiAuthConfig::Bearer { secret } = &provider.auth {
+            values.push(resolve_admin_auth(secret)?.expose().as_bytes().to_vec());
+        }
+    }
     values.retain(|value| value.len() >= 4);
     Ok(values)
 }

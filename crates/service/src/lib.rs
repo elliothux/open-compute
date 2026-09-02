@@ -2,6 +2,11 @@
 
 #![deny(missing_docs)]
 
+pub mod ai_provider;
+pub mod ai_search_backend;
+pub mod ai_search_config;
+pub mod ai_search_coordinator;
+mod ai_tokenizer;
 pub mod asset_backend;
 pub mod auth;
 mod backup_attestation;
@@ -22,6 +27,7 @@ pub mod dashboard;
 mod dashboard_tests;
 pub mod do_http;
 pub mod doctor;
+pub mod document_parser_backend;
 pub mod embedded_dashboard;
 pub mod exit;
 pub mod health;
@@ -46,10 +52,13 @@ pub mod runtime_bridge;
 pub mod runtime_generation;
 pub mod scheduler;
 pub mod scheduler_http;
+pub mod search_http;
 pub mod service_invocations;
 mod snapshot_pins;
 mod sqlite_staging;
 pub mod support_bundle;
+pub mod vectorize_backend;
+pub mod vectorize_coordinator;
 mod worker_cli;
 pub mod workers_http;
 pub mod workflow_backend;
@@ -72,9 +81,11 @@ pub fn product_promotion_for_test(
 
 #[cfg(any(test, feature = "test-support"))]
 pub use binding_backend::UnavailableKvBindingExecutor;
+#[cfg(any(test, feature = "test-support"))]
+pub use binding_backend::serve_binding_backend_with_ai_search;
 pub use binding_backend::{
     KvBindingExecutor, bind_binding_backend, serve_binding_backend,
-    serve_binding_backend_with_assets,
+    serve_binding_backend_with_assets, serve_binding_backend_with_document_parser,
 };
 pub use cli::{Cli, Command, execute};
 pub use d1_backend::D1BindingService;
@@ -92,6 +103,8 @@ pub use r2_http::R2ApiState;
 pub use run::run_platform;
 #[cfg(any(test, feature = "test-support"))]
 pub use run::{FailAfter, RunOptions, run_platform_with};
+pub use scheduler::SchedulerService;
+pub use search_http::SearchApiState;
 
 #[cfg(test)]
 mod tests;

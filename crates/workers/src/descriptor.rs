@@ -135,6 +135,8 @@ impl CachePolicyDescriptorV1 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinBindingDescriptorKindV1 {
+    /// Workers AI binding limited to Markdown Conversion.
+    Ai,
     /// Local Images transformation capability.
     Images,
     /// Frozen deployment Version Metadata object.
@@ -165,7 +167,7 @@ impl BuiltinBindingDescriptorV1 {
     ) -> Result<Self, PlatformError> {
         validate_env_name(&name)?;
         if name.len() > 64
-            || matches!(kind, BuiltinBindingDescriptorKindV1::Images) && tag.is_some()
+            || !matches!(kind, BuiltinBindingDescriptorKindV1::VersionMetadata) && tag.is_some()
             || tag.as_deref().is_some_and(|value| {
                 value.is_empty()
                     || value.len() > 128

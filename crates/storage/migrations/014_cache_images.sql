@@ -10,14 +10,14 @@ CREATE TABLE deployment_cache_policies (
 CREATE TABLE deployment_builtin_bindings (
   deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
   binding_name TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('images', 'version_metadata')),
+  kind TEXT NOT NULL CHECK(kind IN ('ai', 'images', 'version_metadata')),
   tag TEXT,
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   PRIMARY KEY(deployment_id, binding_name),
   UNIQUE(deployment_id, kind),
   CHECK(length(binding_name) BETWEEN 1 AND 64),
   CHECK(tag IS NULL OR length(tag) BETWEEN 1 AND 128),
-  CHECK((kind = 'images' AND tag IS NULL) OR kind = 'version_metadata')
+  CHECK((kind IN ('ai', 'images') AND tag IS NULL) OR kind = 'version_metadata')
 ) WITHOUT ROWID, STRICT;
 
 CREATE TRIGGER deployment_cache_policies_insert_guard

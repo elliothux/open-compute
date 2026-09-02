@@ -698,6 +698,7 @@ fn features(tag: &str) -> DeploymentRuntimeFeatures {
         images: Some(DeploymentImagesInput {
             binding: "IMAGES".to_owned(),
         }),
+        ai: None,
         version_metadata: Some(DeploymentVersionMetadataInput {
             binding: "VERSION".to_owned(),
             tag: Some(tag.to_owned()),

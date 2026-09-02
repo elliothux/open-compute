@@ -314,7 +314,11 @@ impl<'a, D: ResourceDriver> ResourceController<'a, D> {
                     Err(error) => return Err(error),
                 },
                 ResourceState::Deleting => {
-                    self.driver.begin_delete(&resource)?;
+                    match self.driver.begin_delete(&resource) {
+                        Ok(()) => {}
+                        Err(error) if error.code() == ErrorCode::ResourceNotReady => continue,
+                        Err(error) => return Err(error),
+                    }
                     self.driver.finalize_delete(&resource)?;
                     repository.mark_tombstoned(
                         resource.account_id,

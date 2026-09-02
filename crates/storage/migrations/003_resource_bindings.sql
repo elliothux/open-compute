@@ -2,7 +2,8 @@ CREATE TABLE resources (
   id TEXT PRIMARY KEY CHECK(length(id) = 36 AND id = lower(id)),
   account_id TEXT NOT NULL REFERENCES accounts(id),
   kind TEXT NOT NULL CHECK(kind IN (
-    'kv_namespace', 'r2_bucket', 'd1_database', 'do_namespace'
+    'kv_namespace', 'r2_bucket', 'd1_database', 'do_namespace', 'vectorize_index',
+    'ai_search_namespace', 'ai_search_instance'
   )),
   name TEXT NOT NULL,
   state TEXT NOT NULL CHECK(state IN (
@@ -36,7 +37,8 @@ CREATE TABLE deployment_bindings (
   deployment_id TEXT NOT NULL REFERENCES worker_deployments(id),
   name TEXT NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN (
-    'kv_namespace', 'r2_bucket', 'd1_database', 'do_namespace'
+    'kv_namespace', 'r2_bucket', 'd1_database', 'do_namespace', 'vectorize_index',
+    'ai_search_namespace', 'ai_search_instance'
   )),
   resource_id TEXT NOT NULL REFERENCES resources(id),
   resource_spec_generation INTEGER NOT NULL CHECK(resource_spec_generation >= 1),
@@ -56,7 +58,7 @@ CREATE TABLE resource_referrers (
   resource_id TEXT NOT NULL REFERENCES resources(id),
   referrer_kind TEXT NOT NULL CHECK(referrer_kind IN (
     'deployment_binding', 'queue_dlq', 'queue_consumer',
-    'workflow_definition', 'do_class'
+    'workflow_definition', 'do_class', 'ai_search_instance'
   )),
   referrer_id TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL,

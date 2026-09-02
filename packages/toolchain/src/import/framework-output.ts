@@ -25,9 +25,9 @@ const GENERATED_CONFIG_KEYS = [
   "cache", "python_modules", "dev", "no_bundle",
 ] as const;
 const UNSUPPORTED_GENERATED_BINDING_KEYS = [
-  "define", "dispatch_namespaces", "ai", "vectorize", "hyperdrive", "browser",
+  "define", "dispatch_namespaces", "hyperdrive", "browser",
   "mtls_certificates", "unsafe", "cloudchamber", "send_email", "connect",
-  "analytics_engine_datasets", "ai_search_namespaces", "ai_search", "agent_memory", "pipelines",
+  "analytics_engine_datasets", "agent_memory", "pipelines",
   "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship", "worker_loaders",
   "ratelimits", "vpc_services", "vpc_networks", "logfwdr",
 ] as const;
@@ -202,6 +202,24 @@ function generatedBindings(config: Record<string, unknown>, project: WorkerProje
       type: "workflow",
       className: className(item.class_name, "generated framework Workflow class"),
     });
+  }
+  for (const item of generatedArray(config.vectorize, "generated framework Vectorize bindings")) {
+    onlyKeys(item, ["binding", "index_name", "remote"], "generated framework Vectorize binding");
+    string(item.index_name, "generated framework Vectorize index name");
+    if (item.remote !== undefined && typeof item.remote !== "boolean") throw new Error("generated framework Vectorize remote selector is invalid");
+    add(bindingName(item.binding, "generated framework Vectorize binding name"), { type: "vectorize_index" });
+  }
+  for (const item of generatedArray(config.ai_search_namespaces, "generated framework AI Search namespace bindings")) {
+    onlyKeys(item, ["binding", "namespace", "remote"], "generated framework AI Search namespace binding");
+    string(item.namespace, "generated framework AI Search namespace");
+    if (item.remote !== undefined && typeof item.remote !== "boolean") throw new Error("generated framework AI Search namespace remote selector is invalid");
+    add(bindingName(item.binding, "generated framework AI Search namespace binding name"), { type: "ai_search_namespace" });
+  }
+  for (const item of generatedArray(config.ai_search, "generated framework AI Search instance bindings")) {
+    onlyKeys(item, ["binding", "instance_name", "remote"], "generated framework AI Search instance binding");
+    string(item.instance_name, "generated framework AI Search instance name");
+    if (item.remote !== undefined && typeof item.remote !== "boolean") throw new Error("generated framework AI Search instance remote selector is invalid");
+    add(bindingName(item.binding, "generated framework AI Search instance binding name"), { type: "ai_search_instance" });
   }
   if (declarations.size !== Object.keys(project.bindings).length) {
     throw new Error("generated framework bindings differ from the project");
@@ -462,7 +480,7 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
   assertImportedCompatibility(config.compatibility_date, config.compatibility_flags, await loadFormalRuntimeLock());
   generatedBindings(config, project);
   const services = reconciledServices(config.services, project.services);
-  const hasGeneratedRuntimeFeatures = ["cache", "exports", "images", "version_metadata"]
+  const hasGeneratedRuntimeFeatures = ["cache", "exports", "images", "ai", "version_metadata"]
     .some(key => config[key] !== undefined);
   const generatedRuntimeFeatures = hasGeneratedRuntimeFeatures
     ? parseRuntimeFeatures(config, new Set([
@@ -473,7 +491,8 @@ export async function importFrameworkOutput(project: WorkerProject): Promise<Fra
   if (generatedRuntimeFeatures !== undefined) {
     const projectExplicit = project.runtimeFeatures.cache.enabled
       || Object.keys(project.runtimeFeatures.cache.entrypoints).length > 0
-      || project.runtimeFeatures.images !== undefined || project.runtimeFeatures.versionMetadata !== undefined;
+      || project.runtimeFeatures.images !== undefined || project.runtimeFeatures.ai !== undefined
+      || project.runtimeFeatures.versionMetadata !== undefined;
     if (projectExplicit && JSON.stringify(generatedRuntimeFeatures) !== JSON.stringify(project.runtimeFeatures)) {
       throw new Error("generated framework runtime features conflict with the project");
     }

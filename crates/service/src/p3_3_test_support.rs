@@ -29,6 +29,7 @@ pub(super) struct RuntimeFeatureFixture {
     pub(super) worker: WorkerId,
     pub(super) deployment: DeploymentId,
     pub(super) descriptor_sha256: String,
+    pub(super) ai_descriptor_sha256: Option<String>,
     pub(super) images_descriptor_sha256: Option<String>,
 }
 
@@ -108,6 +109,10 @@ impl RuntimeFeatureFixture {
             .iter()
             .find(|binding| binding.kind == BuiltinBindingKind::Images)
             .map(|binding| hex::encode(binding.descriptor_sha256));
+        let ai_descriptor_sha256 = builtins
+            .iter()
+            .find(|binding| binding.kind == BuiltinBindingKind::Ai)
+            .map(|binding| hex::encode(binding.descriptor_sha256));
         Self {
             _temp: temp,
             _mock: mock,
@@ -118,6 +123,7 @@ impl RuntimeFeatureFixture {
             worker,
             deployment: result.deployment.id,
             descriptor_sha256: hex::encode(result.deployment.worker_code_sha256),
+            ai_descriptor_sha256,
             images_descriptor_sha256,
         }
     }

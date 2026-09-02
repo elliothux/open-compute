@@ -13,6 +13,7 @@ use crate::queue_http::{self, QueueApiState};
 use crate::r2_http::{self, R2ApiState};
 use crate::scheduler::SchedulerService;
 use crate::scheduler_http;
+use crate::search_http::{self, SearchApiState};
 use crate::workers_http::{self, WorkerApiState};
 use crate::workflow_http::{self, WorkflowApiState};
 use axum::body::Body;
@@ -67,6 +68,7 @@ pub struct HttpState {
     scheduler: Option<Arc<SchedulerService>>,
     cache_images_api: Option<Arc<CacheImagesApiState>>,
     dashboard_dispatch: Arc<RwLock<Option<DashboardDispatch>>>,
+    search_api: Option<Arc<SearchApiState>>,
 }
 
 impl std::fmt::Debug for HttpState {
@@ -89,6 +91,7 @@ impl std::fmt::Debug for HttpState {
             .field("scheduler", &self.scheduler.is_some())
             .field("cache_images_api", &self.cache_images_api.is_some())
             .field("dashboard_dispatch", &"<async>")
+            .field("search_api", &self.search_api.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -144,6 +147,7 @@ impl HttpState {
             scheduler: None,
             cache_images_api: None,
             dashboard_dispatch: Arc::new(RwLock::new(None)),
+            search_api: None,
         })
     }
 
@@ -183,6 +187,7 @@ impl HttpState {
             scheduler: None,
             cache_images_api: None,
             dashboard_dispatch: Arc::new(RwLock::new(None)),
+            search_api: None,
         }
     }
 
@@ -336,6 +341,19 @@ impl HttpState {
     pub(crate) const fn metrics(&self) -> &Arc<MetricsRegistry> {
         &self.metrics
     }
+
+    /// Attach Vectorize and AI Search operator lifecycle authority.
+    #[must_use]
+    pub fn with_search_api(mut self, api: SearchApiState) -> Self {
+        self.search_api = Some(Arc::new(api));
+        self
+    }
+
+    /// Borrow the optional Vectorize and AI Search operator authority.
+    #[must_use]
+    pub(crate) fn search_api(&self) -> Option<&Arc<SearchApiState>> {
+        self.search_api.as_ref()
+    }
 }
 
 /// Public routes only.
@@ -366,6 +384,7 @@ fn operator_api_router(state: HttpState) -> Router<HttpState> {
         .merge(queue_http::control_router())
         .merge(workflow_http::control_router())
         .merge(cache_images_http::control_router())
+        .merge(search_http::control_router())
         .merge(test_control_router())
         .route("/v1/{*rest}", any(operator_api_not_found))
         .layer(middleware::from_fn_with_state(
@@ -442,6 +461,8 @@ async fn operator_meta() -> Response {
             "scheduler",
             "cache",
             "images",
+            "vectorize",
+            "ai-search",
         ],
     }))
     .into_response()

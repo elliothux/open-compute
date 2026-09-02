@@ -22,11 +22,11 @@ const PINNED = {
   workers_types_version: "5.20260830.1",
   ast_sha256: "da29f5ec1d9a81cc0094bd083ed3b28013573fcb2d4febd9fd62aecbfb53c6b3",
   named_declarations: 1165,
-  target_declarations: 421,
-  target_declarations_with_surface: 382,
-  target_declarations_type_only: 39,
-  inventoried_members: 2097,
-  inventoried_symbols: 333,
+  target_declarations: 449,
+  target_declarations_with_surface: 403,
+  target_declarations_type_only: 46,
+  inventoried_members: 2178,
+  inventoried_symbols: 354,
 };
 
 const reportPromise = generateInventoryTwice();
@@ -195,6 +195,19 @@ test("target member evidence is complete and raw TCP coverage is exact", async (
   assert.equal(inventory.products.images.kind, "platform");
   assert.equal(inventory.products.images.status, "supported_with_deviation");
   assert.equal(inventory.products.static_assets.kind, "platform");
+  assert.equal(inventory.products.ai.kind, "target");
+  assert.equal(inventory.products.ai.members.length, 54);
+  for (const id of [
+    "ai::Ai::aiGatewayLogId:property#0",
+    "ai::Ai::toMarkdown:method#0",
+    "ai::AiSearchNamespace::create:method#0",
+    "ai::AiSearchInstance::search:method#0",
+    "ai::AiSearchItems::uploadAndPoll:method#0",
+    "ai::AiSearchJobs::create:method#0",
+    "ai::ToMarkdownService::supported:method#0",
+  ]) assert.equal(byId.get(id)?.status, "supported_with_deviation", id);
+  assert.deepEqual([...namesOf(inventory, "Ai")], ["aiGatewayLogId", "toMarkdown"]);
+  assert.equal(membersOf(inventory, "Ai").length, 4);
   assert.equal(
     catalog.blockedGaps.some(gap => gap.id === "workers.raw-tcp-security-boundary"),
     false,

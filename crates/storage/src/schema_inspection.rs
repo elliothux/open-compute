@@ -2,7 +2,8 @@
 
 use crate::scheduler::inspect_scheduler_schema_version;
 use crate::{
-    ControlDb, D1_DATABASE_SCHEMA_VERSION, D1Paths, DataDir, KV_SCHEMA_VERSION, KvPaths,
+    AI_SEARCH_SCHEMA_VERSION, AiSearchPaths, ControlDb, D1_DATABASE_SCHEMA_VERSION, D1Paths,
+    DataDir, KV_SCHEMA_VERSION, KvPaths, VECTORIZE_SCHEMA_VERSION, VectorizePaths,
     current_scheduler_schema_version, migrations,
 };
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId, ResourceState};
@@ -21,10 +22,18 @@ pub struct CurrentSchemaState {
     pub kv: u32,
     /// Current D1 resource schema version.
     pub d1: u32,
+    /// Current Vectorize per-index schema version.
+    pub vectorize: u32,
+    /// Current AI Search per-instance schema version.
+    pub ai_search: u32,
     /// Number of ready KV databases checked.
     pub kv_files: u32,
     /// Number of ready D1 databases checked.
     pub d1_files: u32,
+    /// Number of ready Vectorize databases checked.
+    pub vectorize_files: u32,
+    /// Number of ready AI Search instance databases checked.
+    pub ai_search_files: u32,
 }
 
 /// Verify current schemas and resource files without applying or repairing any schema.
@@ -52,12 +61,15 @@ pub fn inspect_current_schema(
         let mut statement = connection
             .prepare(
                 "SELECT r.kind, r.account_id, r.id, r.state, r.driver_schema_version,
-                        COALESCE(k.storage_key, d.storage_key),
-                        COALESCE(k.schema_version, d.schema_version)
+                        COALESCE(k.storage_key, d.storage_key, v.storage_key, a.storage_key),
+                        COALESCE(k.schema_version, d.schema_version, v.schema_version, a.schema_version)
                  FROM resources r
                  LEFT JOIN kv_namespaces k ON k.resource_id = r.id
                  LEFT JOIN d1_databases d ON d.resource_id = r.id
-                 WHERE r.state != 'tombstoned' AND r.kind IN ('kv_namespace', 'd1_database')
+                 LEFT JOIN vectorize_indexes v ON v.resource_id = r.id
+                 LEFT JOIN ai_search_instances a ON a.resource_id = r.id
+                 WHERE r.state != 'tombstoned'
+                   AND r.kind IN ('kv_namespace', 'd1_database', 'vectorize_index', 'ai_search_instance')
                  ORDER BY r.kind, r.account_id, r.id",
             )
             .map_err(|_| schema_invalid())?;
@@ -82,8 +94,12 @@ pub fn inspect_current_schema(
         scheduler: u32::try_from(scheduler).map_err(|_| schema_invalid())?,
         kv: KV_SCHEMA_VERSION,
         d1: D1_DATABASE_SCHEMA_VERSION,
+        vectorize: VECTORIZE_SCHEMA_VERSION,
+        ai_search: AI_SEARCH_SCHEMA_VERSION,
         kv_files: 0,
         d1_files: 0,
+        vectorize_files: 0,
+        ai_search_files: 0,
     };
     for (kind, account, resource, lifecycle, driver_version, storage_key, version) in resources {
         let account: AccountId = account.parse().map_err(|_| schema_invalid())?;
@@ -101,6 +117,18 @@ pub fn inspect_current_schema(
                 D1Paths::storage_key(account, resource),
                 state.d1,
                 &mut state.d1_files,
+            ),
+            "vectorize_index" => (
+                "vectorize",
+                VectorizePaths::storage_key(account, resource),
+                state.vectorize,
+                &mut state.vectorize_files,
+            ),
+            "ai_search_instance" => (
+                "ai-search",
+                AiSearchPaths::storage_key(account, resource),
+                state.ai_search,
+                &mut state.ai_search_files,
             ),
             _ => return Err(schema_invalid()),
         };

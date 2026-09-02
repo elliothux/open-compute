@@ -2,12 +2,14 @@
 
 use crate::{
     ControlDb, D1_DATABASE_SCHEMA_VERSION, DataDir, KV_SCHEMA_VERSION, MasterKey,
-    current_scheduler_schema_version, inspect_control_db, inspect_scheduler_db, migrations,
+    ai_search::AI_SEARCH_SCHEMA_VERSION, current_scheduler_schema_version, inspect_control_db,
+    inspect_scheduler_db, migrations, vectorize::VECTORIZE_SCHEMA_VERSION,
 };
 use hmac::{Hmac, Mac};
 use open_compute_core::{
     AccountId, ErrorCode, HardeningConfig, PlatformError, PlatformReleaseIdentityV1,
-    PlatformSnapshotManifestV1, ResourceId, SnapshotFileRole, SnapshotFileV1, SnapshotTotalsV1,
+    PlatformSnapshotManifestV1, ResourceId, SnapshotFileRole, SnapshotFileV1,
+    SnapshotImmutableReferenceV1, SnapshotTotalsV1,
 };
 use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest, Sha256};
@@ -107,6 +109,8 @@ pub fn prepare_platform_snapshot(
             != Some(request.release.scheduler_schema_version)
         || request.release.kv_schema_version != KV_SCHEMA_VERSION
         || request.release.d1_schema_version != D1_DATABASE_SCHEMA_VERSION
+        || request.release.vectorize_schema_version != VECTORIZE_SCHEMA_VERSION
+        || request.release.ai_search_schema_version != AI_SEARCH_SCHEMA_VERSION
     {
         return Err(PlatformError::new(
             ErrorCode::SchemaUnsupported,
@@ -128,6 +132,7 @@ pub fn prepare_platform_snapshot(
             .checked_add(file.entry.size)
             .ok_or_else(snapshot_invalid)
     })?;
+    let immutable_references = ai_search_references(&files, request.sqlite_busy_timeout_ms)?;
     let mut source_schemas = BTreeMap::new();
     source_schemas.insert(
         "control".to_owned(),
@@ -139,6 +144,8 @@ pub fn prepare_platform_snapshot(
     );
     source_schemas.insert("kv".to_owned(), KV_SCHEMA_VERSION);
     source_schemas.insert("d1".to_owned(), D1_DATABASE_SCHEMA_VERSION);
+    source_schemas.insert("vectorize".to_owned(), VECTORIZE_SCHEMA_VERSION);
+    source_schemas.insert("ai_search".to_owned(), AI_SEARCH_SCHEMA_VERSION);
     let manifest = PlatformSnapshotManifestV1 {
         schema_version: 1,
         snapshot_id: request.snapshot_id.to_owned(),
@@ -152,11 +159,13 @@ pub fn prepare_platform_snapshot(
         r2_prefix_fingerprint: request.r2_prefix_fingerprint.to_owned(),
         config_policy_sha256: request.config_policy_sha256.to_owned(),
         excluded_local_state: vec![
+            "ann_cache".to_owned(),
             "images_sessions".to_owned(),
             "response_cache".to_owned(),
             "runtime_cache".to_owned(),
+            "vector_search_cache".to_owned(),
         ],
-        immutable_references: Vec::new(),
+        immutable_references,
         files: files.iter().map(|file| file.entry.clone()).collect(),
         totals: SnapshotTotalsV1 {
             files: u32::try_from(files.len()).map_err(|_| snapshot_invalid())?,
@@ -176,6 +185,43 @@ pub fn prepare_platform_snapshot(
         files,
         staging_dir,
     })
+}
+
+fn ai_search_references(
+    files: &[PreparedSnapshotFile],
+    busy_timeout_ms: u64,
+) -> Result<Vec<SnapshotImmutableReferenceV1>, PlatformError> {
+    let mut references = Vec::new();
+    for file in files
+        .iter()
+        .filter(|file| file.entry.role == SnapshotFileRole::AiSearchSqlite)
+    {
+        for reference in crate::ai_search::inspect_ai_search_object_references(
+            &file.staging_path,
+            &file.entry.logical_id,
+            busy_timeout_ms,
+        )? {
+            references.push(SnapshotImmutableReferenceV1 {
+                role: "ai_search_object".to_owned(),
+                sha256: hex::encode(reference.object_sha256),
+                object_key: reference.object_key,
+                size: reference.object_size,
+            });
+        }
+    }
+    references.sort_by(|left, right| {
+        left.object_key
+            .cmp(&right.object_key)
+            .then(left.sha256.cmp(&right.sha256))
+            .then(left.size.cmp(&right.size))
+    });
+    for pair in references.windows(2) {
+        if pair[0].object_key == pair[1].object_key && pair[0] != pair[1] {
+            return Err(snapshot_invalid());
+        }
+    }
+    references.dedup();
+    Ok(references)
 }
 
 /// Conservatively estimate bytes that will be copied into local snapshot staging.
@@ -236,6 +282,8 @@ fn prepare_files(
             SnapshotFileRole::SchedulerSqlite => "snapshot scheduler copy failed",
             SnapshotFileRole::KvSqlite => "snapshot KV copy failed",
             SnapshotFileRole::D1Sqlite => "snapshot D1 copy failed",
+            SnapshotFileRole::VectorizeSqlite => "snapshot Vectorize copy failed",
+            SnapshotFileRole::AiSearchSqlite => "snapshot AI Search copy failed",
             SnapshotFileRole::DurableObjectFile => "snapshot localDisk copy failed",
         };
         if source.sqlite {
@@ -334,12 +382,14 @@ fn resource_sources(
         let mut statement = connection
             .prepare(
                 "SELECT r.account_id, r.id, r.kind,
-                        COALESCE(k.storage_key, d.storage_key)
+                        COALESCE(k.storage_key, d.storage_key, v.storage_key, a.storage_key)
                  FROM resources r
                  LEFT JOIN kv_namespaces k ON k.resource_id = r.id
                  LEFT JOIN d1_databases d ON d.resource_id = r.id
+                 LEFT JOIN vectorize_indexes v ON v.resource_id = r.id
+                 LEFT JOIN ai_search_instances a ON a.resource_id = r.id
                  WHERE r.state != 'tombstoned'
-                   AND r.kind IN ('kv_namespace', 'd1_database')
+                   AND r.kind IN ('kv_namespace', 'd1_database', 'vectorize_index', 'ai_search_instance')
                  ORDER BY r.kind, r.account_id, r.id",
             )
             .map_err(|_| snapshot_invalid())?;
@@ -365,6 +415,8 @@ fn resource_sources(
             let (role, product) = match kind.as_str() {
                 "kv_namespace" => (SnapshotFileRole::KvSqlite, "kv"),
                 "d1_database" => (SnapshotFileRole::D1Sqlite, "d1"),
+                "vectorize_index" => (SnapshotFileRole::VectorizeSqlite, "vectorize"),
+                "ai_search_instance" => (SnapshotFileRole::AiSearchSqlite, "ai-search"),
                 _ => return Err(snapshot_invalid()),
             };
             let restore_path = format!("{product}/{account}/{resource}/data.sqlite");

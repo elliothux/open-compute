@@ -12,7 +12,7 @@ Open Compute 只有一种生产发行形式：按平台构建的单个 `ocd` 可
 - 当前目标平台正式 pin 对应的官方 workerd gzip；
 - 完整多平台 lock、Cap'n Proto 模板、生成的系统 Worker JS 和 manifest；
 - 默认 TOML、Open Compute/workerd 许可证及运维手册；
-- Rust 中已有的 SQL schema 和其他编译期资源。
+- Rust 中已有的 SQL schema、Xberg MIT license 和其他编译期资源。
 
 TS 源码、Bun、Node、Rolldown、用户 bundle、数据库、master key、S3 与凭据不打入二进制。
 许可证用 `ocd licenses` 查看；`ocd docs` 列出手册，
@@ -74,9 +74,11 @@ S3 是平台 authority 的一部分，仍需用户预置；单文件不是内嵌
 
 ```text
 ocd（用户下载的唯一文件）
-  └─ data/runtime/packages/<payload-sha256>/
-       ├─ workerd
-       └─ runtime/{workerd.lock.json,config.capnp,dist/...}
+  ├─ data/runtime/packages/<payload-sha256>/
+  │    ├─ workerd
+  │    └─ runtime/{workerd.lock.json,config.capnp,dist/...}
+  ├─ workerd                                  # 常驻、受监督
+  └─ ocd __document-parser-v1                 # 每个转换文件一个瞬时自派生 child
 ```
 
 必须先取得 data-dir 排他锁，才能物化、清理中断的私有 staging、编译与启动。
@@ -86,6 +88,10 @@ ocd（用户下载的唯一文件）
 
 workerd 仍是受监督子进程。Linux 执行已验证 fd；macOS 还会创建受日志追踪的临时 executable。
 保持现有 readiness、重启、优雅退出、强制回收和孤儿身份验证。
+Markdown Conversion 的 parser child 使用同一 `ocd` 文件的隐藏内部模式：清空环境、独立 0700 OS 临时工作目录、
+一个 OCDP frame、固定 CPU/address-space/wall/stdout/stderr budget，并由父进程按 process group 终止和回收。
+它不初始化配置、data-dir、SQLite、S3、master key、listener 或 workerd，也不是第二个 daemon；Xberg panic/abort
+只使当前文件返回稳定错误。support bundle 不采集输入文档、Markdown、pipe 或 child stderr 正文。
 运行时磁盘会产生独立文件；“单二进制”指分发物，不指单进程或零磁盘写入。
 data-dir 与 macOS staging 所在文件系统必须允许执行，并为解压文件、执行副本及业务状态留足空间。
 

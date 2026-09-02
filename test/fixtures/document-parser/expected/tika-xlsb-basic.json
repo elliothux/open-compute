@@ -1,0 +1,16 @@
+{
+  "status": "error",
+  "error": "UNSUPPORTED_CONTENT_TYPE",
+  "must_contain": [],
+  "must_not_contain": [],
+  "min_normalized_chars": 0,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [],
+  "review_notes": "Xberg 1.0.14 transitively uses calamine 0.36.1, which panics at calamine/src/xlsb/mod.rs:309 on this fixed workbook; release panic=abort makes XLSB unsafe to admit, so P5.7 reports it unsupported."
+}

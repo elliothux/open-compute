@@ -25,6 +25,9 @@ export const SERVICE_SCOPE_MODULE = `${INTERNAL_MODULE_PREFIX}services/scope.js`
 export const SOCKET_TUNNEL_MODULE = `${INTERNAL_MODULE_PREFIX}sockets/tunnel.js`;
 export const CACHE_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}cache/facade.js`;
 export const IMAGES_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}images/facade.js`;
+export const AI_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}ai/facade.js`;
+export const VECTORIZE_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}vectorize/facade.js`;
+export const AI_SEARCH_FACADE_MODULE = `${INTERNAL_MODULE_PREFIX}ai-search/facade.js`;
 export const WRAPPER_RUNTIME_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/runtime.js`;
 export const DO_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/durable-object.js`;
 export const WORKFLOW_WRAPPER_MODULE = `${INTERNAL_MODULE_PREFIX}loader/wrappers/workflow.js`;
@@ -40,6 +43,7 @@ export interface WrapperOptions {
   workflow?: boolean | undefined;
   assetBindingName?: string | undefined;
   imagesBindingName?: string | undefined;
+  aiBindingName?: string | undefined;
   cacheAvailable: boolean;
   automaticCacheEnabled: boolean;
   cacheFailOpen: boolean;
@@ -52,7 +56,7 @@ function fromWrapper(module: string): string { return JSON.stringify(`./${module
 /** Only module wiring and validated data are generated; behavior lives in TS modules. */
 export function generateBindingWrapper(options: WrapperOptions): string {
   const { mainModule, bindings, services, entrypointName, durableObject, workflow = false,
-    assetBindingName, imagesBindingName, cacheAvailable, automaticCacheEnabled,
+    assetBindingName, imagesBindingName, aiBindingName, cacheAvailable, automaticCacheEnabled,
     cacheFailOpen, automaticCacheEntrypoints = [], scheduledTargets = [] } = options;
   if (entrypointName !== undefined && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypointName)) {
     throw new Error("invalid entrypoint name");
@@ -99,6 +103,10 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     lines.push(`import { ImagesBinding } from ${fromWrapper(IMAGES_FACADE_MODULE)};`);
     factories.push(`{ names: ${JSON.stringify([imagesBindingName])}, create: ImagesBinding }`);
   }
+  if (aiBindingName !== undefined) {
+    lines.push(`import { AiBinding } from ${fromWrapper(AI_FACADE_MODULE)};`);
+    factories.push(`{ names: ${JSON.stringify([aiBindingName])}, create: AiBinding }`);
+  }
   for (const [kind, version, module, exported] of [
     ["kv_namespace", 1, KV_FACADE_MODULE, "KVNamespace"],
     ["r2_bucket", 1, R2_FACADE_MODULE, "R2Bucket"],
@@ -106,6 +114,9 @@ export function generateBindingWrapper(options: WrapperOptions): string {
     ["do_namespace", 1, DO_FACADE_MODULE, "DurableObjectNamespace"],
     ["queue_producer", 1, QUEUE_FACADE_MODULE, "QueueProducer"],
     ["workflow", 1, WORKFLOW_FACADE_MODULE, "WorkflowBinding"],
+    ["vectorize_index", 1, VECTORIZE_FACADE_MODULE, "VectorizeBinding"],
+    ["ai_search_namespace", 1, AI_SEARCH_FACADE_MODULE, "AiSearchNamespaceBinding"],
+    ["ai_search_instance", 1, AI_SEARCH_FACADE_MODULE, "AiSearchInstanceBinding"],
   ] as const) {
     const names = bindings.filter(binding => binding.kind === kind && binding.capabilityVersion === version).map(binding => binding.name);
     if (names.length === 0) continue;
