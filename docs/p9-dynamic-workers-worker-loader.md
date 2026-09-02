@@ -1,11 +1,11 @@
-# Day 1 Dynamic Workers / Worker Loader 设计
+# P9：Dynamic Workers / Worker Loader 设计
 
 状态：合同与架构设计完成；存在 stock workerd G0 blocker，待 upstream 能力、实施与验收。
 
-本文细化 [Day 1 Cloudflare v4 API 与 Wrangler 子集兼容设计](day1-cloudflare-v4-wrangler-compatibility.md)
+本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](p6-cloudflare-v4-wrangler-compatibility.md)
 中的 `worker_loaders` binding，以及 open-compute 已有的内部 WorkerLoader 调度。limits 的统一定义见
-[Workers Standard limits 专项设计](day1-workers-standard-limits.md)，日志与 tails 见
-[Workers Logs / realtime tail 专项设计](day1-workers-logs-realtime-tail.md)。
+[Workers Standard limits 专项设计](p8-workers-standard-limits.md)，日志与 tails 见
+[Workers Logs / realtime tail 专项设计](p7-workers-logs-realtime-tail.md)。
 
 ## 1. 范围与结论
 
@@ -243,9 +243,18 @@ const child = env.LOADER.get(id, async () => ({
 }));
 ```
 
-open-compute 不把 KV/D1/R2 native backend handle、内部 token、physical resource ID 或 filesystem path 直接放入
-child env。parent 若要给 child 资源，必须显式传递受 scope 的 service capability；authority 仍由 parent Version 的
-binding 和 runtime snapshot 决定。
+open-compute 不把 KV/D1/R2/Vectorize/AI Search native facade、Workers AI transport、内部 token、provider
+credential、physical resource ID 或 filesystem path 直接放入 child env。parent 若要给 child 资源，必须显式传递
+受 scope 的 service capability；authority 仍由 parent Version 的 binding、permissions 和 runtime snapshot 决定。
+
+P5 已实现的能力进入同一规则，不获得特例：
+
+- Vectorize wrapper 分开 query/read 与 insert/upsert/delete 权限，并固定一个 parent 已绑定的 index；
+- AI Search instance wrapper 可只开放 search/chat，namespace wrapper 的 create/update/delete/items/jobs 必须额外
+  获得 parent 的 write permission，并可继续收窄 instance allowlist；
+- Markdown Conversion wrapper 只转发 `toMarkdown()`/`supported()`，不因 parent 存在 `env.AI` 就暴露完整 Workers
+  AI、provider endpoint 或 credential；
+- wrapper 的 props 只含 opaque scope 和有界 policy，不能包含原始文档、向量、查询内容或 secret。
 
 固定 stock workerd 对 serialized `env` 有约 1 MiB 硬边界。Day 1 保留该确定性边界并通过 types/source fixture
 锁定；它不能被误写成“128 个 variables × 5 KB”的精确 Cloudflare plan 等价物。
@@ -479,7 +488,7 @@ Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
 - modules、compat、env、globalOutbound、tails、entrypoints；
 - `load()` unnamed lifecycle；
 - `get()` named cache、async callback、failure retry；
-- custom bindings 与 scope-safe resource facade；
+- custom bindings 与 scope-safe KV/D1/R2/Vectorize/AI Search/Markdown Conversion resource facade；
 - experimental streaming tails fail closed。
 
 ### DW4：limits 与 observability
@@ -515,6 +524,9 @@ Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
 | env 1 MiB boundary ±1 | 与 fixed workerd estimate 行为一致 |
 | omitted / null / redirected outbound | inherit / block / proxy 三态 |
 | scoped KV/D1/R2 custom binding | child 只能访问被授予 prefix/operations |
+| scoped Vectorize capability | query/read 与 mutation 权限分离；不能切换到未授权 index |
+| scoped AI Search instance/namespace capability | instance allowlist 和 read/write 方法集生效；不能观察 provider credential 或内部 resource ID |
+| scoped Markdown Conversion capability | 只开放已声明的 `toMarkdown()`/`supported()`，完整 Workers AI 仍不可达 |
 | system namespace guessing | 永远不能命中/观察 system isolate |
 | user tail + system collector | 都收到一次；child response 不等待 tail |
 | streaming tails non-empty | Day 1 明确拒绝 |
@@ -533,6 +545,8 @@ Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
 - internal system loader 与 public loader namespace 有不可绕过的 domain separation；
 - `load/get/WorkerStub/WorkerCode` 全合同通过 black-box 与 source-backed Gate；
 - modules/env size、compat、bindings、egress、tails 与 errors 对齐固定 Cloudflare contract；
+- P5 的 Vectorize、AI Search 与 Markdown Conversion 只能通过 parent 显式传递的 scope-safe service capability
+  到达 child，权限收窄、identity、redaction 与 negative reachability Gate 通过；
 - Dynamic Worker custom limits 与 4 distinct in-flight limit 真实执行；
 - named cache 有 bounded eviction/cleanup，cold/warm/restart 不改变功能正确性；
 - Workers Logs/realtime tail 正确归属 ordinary parent 与 Dynamic child；

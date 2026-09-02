@@ -1,4 +1,4 @@
-# Day 1 Cloudflare v4 API 与 Wrangler 子集兼容设计
+# P6：Cloudflare v4 API 与 Wrangler 子集兼容设计
 
 状态：设计完成，尚未实施与验收
 
@@ -25,15 +25,23 @@
 但按本文实施时，必须把其中“tenant 不得选择 compatibility date 或 flags”的当前限制改成以 Worker Version
 为单位的兼容日期和 flag 合同，并重新取得对应 Gate 证据。
 
+P5 已经实现 Vectorize、AI Search namespace/instance/items/jobs/search/chat 和 `env.AI.toMarkdown()` 的本地
+domain/runtime authority，见[完成记录](implemented/p5-vectorize-ai-search-results.md)。因此 P6 不再把
+`vectorize`、`ai_search_namespaces`、`ai_search` 或 `ai` 一概列为 unsupported；P6 的工作是把这些现有能力接到
+固定 Wrangler multipart 和官方 `/client/v4` 路径，并保持 `OC-VECTORIZE-001`、`OC-AI-SEARCH-001` 与
+`OC-AI-MARKDOWN-001` 已声明的单机 deviation。当前 `/operator/api/v1` 路由和按内部 resource ID 的项目配置
+只是实施输入，不是 v4/Wrangler 已经完成的证据。
+
 Workers Logs、固定 Wrangler 的 realtime tail 和 Observability Telemetry 子集由
-[`Day 1 Workers Logs 与 realtime tail 兼容设计`](day1-workers-logs-realtime-tail.md) 细化。该专项是本文 official
-subset 的组成部分，不是 vendor logs API；其中未完成的实现与 Gate 也属于本文最终验收条件。
+[`P7 Workers Logs 与 realtime tail 兼容设计`](p7-workers-logs-realtime-tail.md) 独立实施。P6 建立它复用的
+v4 protocol core，但 P6 完成不冒充 P7 已完成；P7 也不另建 vendor logs API。
 
 Workers Standard 的 structural/runtime limits 由
-[`Day 1 Workers Standard limits 设计`](day1-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
+[`P8 Workers Standard limits 设计`](p8-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
 `WorkerLoader.load/get` 和 nested stock-workerd Gate 由
-[`Day 1 Dynamic Workers / Worker Loader 设计`](day1-dynamic-workers-worker-loader.md) 细化。后者只覆盖
-Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。
+[`P9 Dynamic Workers / Worker Loader 设计`](p9-dynamic-workers-worker-loader.md) 细化。后者只覆盖
+Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。P6 必须识别这些固定 Wrangler 字段，
+但在 P8/P9 分别通过前保持 fail closed；四个阶段各自具有独立的 Definition of Done。
 
 ## 1. 结论与边界
 
@@ -362,6 +370,10 @@ CF-style validation error 失败。不能为了兼容而在内存中无界 buffe
 | `kv_namespaces` | `kv_namespace` + `namespace_id` |
 | `r2_buckets` | `r2_bucket` + `bucket_name` |
 | `d1_databases` | `d1` + `id` |
+| `vectorize` | `vectorize` + `index_name` |
+| `ai_search_namespaces` | `ai_search_namespace` + `namespace` |
+| `ai_search` | `ai_search` + `instance_name` |
+| `ai` | `ai`；只注入已声明的 Markdown Conversion 子集 |
 | `durable_objects.bindings` | `durable_object_namespace` + class/script |
 | `queues.producers` | `queue` + `queue_name`/`delivery_delay` |
 | `workflows` | `workflow` + workflow/class/script |
@@ -479,6 +491,75 @@ R2 jurisdiction、custom domain、managed domain、Sippy、event notification、
 子集。bucket/object 请求如果出现这些字段或子路径必须明确失败。Worker binding 内已经实现的 R2 multipart
 upload 不等于控制面必须新增私有 multipart endpoint。
 
+**Vectorize。**
+
+P6 把现有 per-index SQLite/exact engine 接到当前官方 V2 路径；外部主键是 `index_name`，不能把内部
+`ResourceId` 暴露为 URL 主键：
+
+```text
+GET/POST  /accounts/{account_id}/vectorize/v2/indexes
+GET/DELETE
+          /accounts/{account_id}/vectorize/v2/indexes/{index_name}
+POST      /accounts/{account_id}/vectorize/v2/indexes/{index_name}/insert
+POST      /accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert
+POST      /accounts/{account_id}/vectorize/v2/indexes/{index_name}/query
+POST      /accounts/{account_id}/vectorize/v2/indexes/{index_name}/get_by_ids
+POST      /accounts/{account_id}/vectorize/v2/indexes/{index_name}/delete_by_ids
+GET       /accounts/{account_id}/vectorize/v2/indexes/{index_name}/info
+GET       /accounts/{account_id}/vectorize/v2/indexes/{index_name}/list
+POST      /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/create
+GET       /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/list
+POST      /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/delete
+```
+
+固定 Wrangler 的 `vectorize create/list/get/delete/insert/upsert/query/get-vectors/delete-vectors/info` 与 metadata
+index 子命令都必须复用这些端点和现有唯一 domain authority。V1/`--deprecated-v1` 路径、旧
+`VectorizeIndex` binding、托管 ANN/placement/billing 不支持。upload metadata 中的 `index_name` 在创建 Version
+前解析为同 account 的 live resource，并把内部 ID、spec generation 与权限冻结进 immutable descriptor；runtime
+仍只看到经过验证的 capability。
+
+**AI Search 与 `ai`。**
+
+P6 只暴露 P5 已实现的 built-in storage 子集，不借 v4 adapter 扩张到 website/R2 connector、crawler、public
+endpoint、MCP、token、AI Gateway 或完整 Workers AI inference：
+
+```text
+GET/POST  /accounts/{account_id}/ai-search/namespaces
+GET/PUT/DELETE
+          /accounts/{account_id}/ai-search/namespaces/{namespace_name}
+POST      /accounts/{account_id}/ai-search/namespaces/{namespace_name}/search
+POST      /accounts/{account_id}/ai-search/namespaces/{namespace_name}/chat/completions
+
+GET/POST  /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances
+GET/PUT/DELETE
+          /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}
+GET       /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/stats
+POST      /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/search
+POST      /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/chat/completions
+
+GET/POST  /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/jobs
+GET/PATCH /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/jobs/{job_id}
+GET       /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/jobs/{job_id}/logs
+
+GET/POST/PUT
+          /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/items
+GET/PATCH/DELETE
+          /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/items/{item_id}
+GET       /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/items/{item_id}/download
+GET       /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/items/{item_id}/logs
+GET       /accounts/{account_id}/ai-search/namespaces/{namespace_name}/instances/{instance_id}/items/{item_id}/chunks
+```
+
+method、multipart item upload、pagination、cancel/sync body 和 response shape 以固定 OpenAPI/SDK/Wrangler trace
+为准，不能从现有 private binding frame 直接推导。`ai_search_namespaces` 使用 namespace name；固定 Wrangler
+部署时若 namespace 不存在，会先 GET 再 POST 官方 namespace endpoint。`ai_search` 只绑定 `default` namespace
+中已经存在的 `instance_name`，不得隐式创建 instance。两种 binding 都在 Version 创建前解析并冻结当前 live
+resource generation；namespace runtime CRUD 仍受该 namespace capability 和现有 read/write permissions 约束。
+
+`ai: {binding}` 只生成 `{name,type:"ai"}` multipart binding，并注入 P5 已验证的
+`aiGatewayLogId`、`toMarkdown()` 与 `supported()` 子集。其它 Workers AI 方法继续按 capability matrix 明确拒绝；
+支持 `ai` 配置字段不等于宣称完整 Workers AI。
+
 **Queues。**
 
 ```text
@@ -586,7 +667,10 @@ Wrangler schema validation
 
 任一层不支持都必须失败，不允许 warning 后继续部署一个语义不同的 Worker。
 
-### 10.2 支持字段
+### 10.2 P6 支持字段与显式后续阶段
+
+下表未标阶段的行属于 P6 目标；标记 P7/P8/P9 的行只冻结固定 Wrangler 语法和 fail-closed handoff，不能在
+对应阶段完成前出现在成功 upload/settings response 或 capabilities 的 `supported` 集合中。
 
 | 类别 | Day 1 字段 | 说明 |
 | --- | --- | --- |
@@ -598,6 +682,10 @@ Wrangler schema validation
 | KV | `kv_namespaces[].binding`, `id` | `preview_id`/`remote` 只属于 Wrangler local dev，不构成 remote dev 承诺 |
 | R2 | `r2_buckets[].binding`, `bucket_name` | `jurisdiction`、`local_dev` 不进入 server 子集 |
 | D1 | `d1_databases[].binding`, `database_name`, `database_id`, `migrations_dir`, `migrations_table`, `migrations_pattern` | migration path/table 由 Wrangler 本地命令消费 |
+| Vectorize | `vectorize[].binding`, `index_name` | index 必须已存在；`remote` 只属于 Wrangler local dev；V1 不支持 |
+| AI Search namespace | `ai_search_namespaces[].binding`, `namespace` | 固定 Wrangler 可在 deploy 前通过官方 API 创建缺失 namespace；`remote` 不进入 server binding |
+| AI Search instance | `ai_search[].binding`, `instance_name` | 只解析 `default` namespace 中已存在的 instance；不隐式创建 |
+| Workers AI | `ai.binding` | 只开放 P5 Markdown Conversion 子集；完整 inference、AutoRAG 与 AI Gateway 不支持 |
 | Durable Objects | `durable_objects.bindings[].name`, `class_name`, 可选 `script_name` | 同 account；`environment` Day 1 不支持 |
 | DO lifecycle | `migrations` 的 `tag`, `new_sqlite_classes`, `renamed_classes`, `deleted_classes` | `new_classes` 非 SQLite storage 不支持 |
 | Declarative exports | `exports` 的 Worker entrypoint 和 SQLite DO `created`/`renamed`/`deleted` | container、cross-script transfer 不支持；与 `migrations` 的互斥沿用 Wrangler schema |
@@ -610,9 +698,9 @@ Wrangler schema validation
 | Cache | `cache.enabled`, `cache.cross_version_cache` 和受支持的 Worker export cache override | 映射现有 Cache authority |
 | Images | `images.binding` | `remote` 只是 local dev 字段，不改变 server binding |
 | Version Metadata | `version_metadata.binding` | 不保留 `open-compute.json` 曾有的非标准 `tag` 字段 |
-| Standard limits | `usage_model: "standard"`, `limits.cpu_ms`, `limits.subrequests` | immutable Version state；只有 stock workerd 真实执行后才能开放，完整矩阵与 fail-closed Gate 见 [limits 专项](day1-workers-standard-limits.md) |
-| Worker Loader | `worker_loaders[].binding` | Day 1 Dynamic Workers 目标；当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](day1-dynamic-workers-worker-loader.md) |
-| Observability logs | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | Script-level non-Version setting；Workers Logs 与 realtime tail 的独立语义见专项设计；`destinations` 只接受空数组 |
+| Standard limits（P8） | `usage_model: "standard"`, `limits.cpu_ms`, `limits.subrequests` | P6 识别字段但 fail closed；P8 完成后才成为 supported immutable Version state，见 [limits 专项](p8-workers-standard-limits.md) |
+| Worker Loader（P9） | `worker_loaders[].binding` | P6 识别字段但 fail closed；P9 当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](p9-dynamic-workers-worker-loader.md) |
+| Observability logs（P7） | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | P6 只提供共用 v4 core；P7 完成前 settings mutation fail closed；`destinations` 只接受空数组 |
 | Secrets declaration | `secrets.required` | 只影响本地 type/dev validation；值由 `wrangler secret` 管理，不写入配置 |
 
 `wrangler dev` 的纯本地模式由上游 Wrangler/Miniflare 提供，不是 open-compute server conformance 的证据。
@@ -635,8 +723,8 @@ observability.traces
 observability.logs.destinations（非空）/ observability.traces.destinations（非空）
 logpush / tail_consumers / streaming_tail_consumers
 placement
-ai / ai_search / ai_search_namespaces / websearch / agent_memory
-vectorize / hyperdrive / browser
+websearch / agent_memory
+hyperdrive / browser
 analytics_engine_datasets
 dispatch_namespaces
 containers / cloudchamber
@@ -682,6 +770,22 @@ inventory，每个字段都有 capability 状态。升级新增字段默认 unsu
   "r2_buckets": [
     { "binding": "FILES", "bucket_name": "invoice-files" }
   ],
+
+  "vectorize": [
+    { "binding": "EMBEDDINGS", "index_name": "invoice-embeddings" }
+  ],
+
+  "ai_search_namespaces": [
+    { "binding": "TEAM_SEARCH", "namespace": "team" }
+  ],
+
+  "ai_search": [
+    { "binding": "INVOICE_SEARCH", "instance_name": "invoices" }
+  ],
+
+  "ai": {
+    "binding": "AI"
+  },
 
   "services": [
     { "binding": "TEAM_FILES", "service": "lynx-files" }
@@ -886,6 +990,8 @@ Operator router。
 | D1 migrations | Wrangler migration ledger + standard D1 query/import |
 | D1 backup/restore | 标准 export/import/time-travel；本地额外快照进入 extension |
 | R2 bucket/object | `/client/v4/accounts/{id}/r2...` |
+| Vectorize index/metadata/vector operations | `/client/v4/accounts/{id}/vectorize/v2/indexes...` |
+| AI Search namespace/instance/items/jobs/search/chat | `/client/v4/accounts/{id}/ai-search/namespaces...` |
 | DO namespace 手工 CRUD | 删除；由 Worker exports/migrations 管理 |
 | DO object registry | read-only `open-compute/durable-objects...` extension |
 | Queues | `/client/v4/accounts/{id}/queues...` |
@@ -905,8 +1011,8 @@ package imports，并在同一变更删除旧 router、旧 SDK、`open-compute.j
 
 - 把 `wrangler@4.127.1` 变成直接、精确 pin，而不是偶然的 transitive dependency；
 - 保存 config schema SHA-256、Wrangler package integrity、官方 OpenAPI snapshot revision/hash；
-- 用一个最小支持项目记录 `whoami`、deploy、Versions、Deployments、Secrets、Assets、`tail`、Observability
-  Telemetry 和资源命令的 HTTP/WebSocket trace；
+- 用一个最小支持项目记录 `whoami`、deploy、Versions、Deployments、Secrets、Assets、Vectorize、AI Search 和
+  其它 P6 资源命令的 HTTP trace；P7 独立冻结 `tail`、Telemetry 与 WebSocket trace；
 - 扩展 capability manifest 与 conformance catalog，给每个 route、field、binding 和 command 一个状态。
 
 **M1：v4 protocol core。**
@@ -932,8 +1038,10 @@ package imports，并在同一变更删除旧 router、旧 SDK、`open-compute.j
 
 **M4：资源 API。**
 
-- 按 KV、D1、R2、Queues、Workflows 顺序增加 official adapters；
+- 按 KV、D1、R2、Vectorize、AI Search、Queues、Workflows 顺序增加 official adapters；
 - adapter 只负责 wire validation/translation，domain service 保持唯一 authority；
+- Vectorize/AI Search adapter 复用 P5 已实现的 engine、catalog、coordinator 和 binding backend，不复制第二套
+  resource state machine；
 - 把备份、scheduler、capacity 等非官方能力迁入 vendor namespace；
 - DO lifecycle 改由 exports/migrations 驱动，移除手工 namespace CRUD。
 
@@ -985,18 +1093,25 @@ wrangler kv key put/get/list/delete
 wrangler d1 create/list/info/execute/migrations apply/delete
 wrangler r2 bucket create/list/delete
 wrangler r2 object put/get/delete
+wrangler vectorize create/list/get/delete/insert/upsert/query/get-vectors/delete-vectors/info
+wrangler vectorize create-metadata-index/list-metadata-index/delete-metadata-index
+wrangler ai-search namespace create/list/get/update/delete
+wrangler ai-search create/list/get/update/delete/stats/search
+wrangler ai-search jobs ...（P5 已实现的 jobs 子集）
 wrangler queues create/list/delete
 wrangler workflows ...（本文声明的子命令）
-wrangler tail <script> --format=json|pretty（含本文声明的 filter flags）
 ```
+
+`wrangler tail` 及其 filter/WebSocket 合同由 P7 验收，不作为 P6 伪完成条件。
 
 测试不能 mock Wrangler 的 HTTP transport。每条命令记录 method/path、query、关键 headers、request content type、
 response schema 和退出码；secret、token、signed upload token 和对象内容必须清洗。
 
 **官方 SDK Gate。**
 
-- 使用精确 pin 的 `cloudflare` package 和真实 `ocd`，覆盖 account discovery、Workers、KV、D1、R2、Queues、
-  Workflows、Observability Telemetry 的 logs 子集、分页、raw value/object、multipart upload 与错误类型；
+- 使用精确 pin 的 `cloudflare` package 和真实 `ocd`，覆盖 account discovery、Workers、KV、D1、R2、Vectorize、
+  AI Search、Queues、Workflows、分页、raw value/object、multipart upload 与错误类型；P7 再增加 Observability
+  Telemetry 的 logs 子集；
 - 同一组无破坏 fixture 分别指向 Cloudflare 和 open-compute，只替换 `baseURL`、token 与资源 ID；
 - extension binding 必须接收同一个官方 client，并通过它公开的 HTTP verb methods 发出请求；测试禁止替换成第二个
   fetch mock；
@@ -1073,13 +1188,9 @@ response schema 和退出码；secret、token、signed upload token 和对象内
 - 旧 URL 在 public、admin、merged listener 上均为中性 HTTP 404，未被 Dashboard SPA 或 tenant ingress 接管；
 - multipart Worker upload 和 Static Assets 三段协议通过 success、failure、restart、crash 和 security tests；
 - Worker compatibility date/flags 已成为 immutable Version authority；
-- Standard structural/runtime limits 达到
-  [`Workers Standard limits 专项设计`](day1-workers-standard-limits.md) 的 Definition of Done；
-- `worker_loaders` 达到
-  [`Dynamic Workers / Worker Loader 专项设计`](day1-dynamic-workers-worker-loader.md) 的 Definition of Done；
-- KV、D1、R2、Queues、Workflows 和 Cron 的声明子集通过 API/runtime Gate；
-- `wrangler tail`、Workers Logs、Telemetry query 与 Dashboard Live Tail 达到
-  [`Workers Logs 专项设计`](day1-workers-logs-realtime-tail.md) 的 Definition of Done；
+- P7/P8/P9 字段在对应阶段完成前由 route/field/binding inventory 明确标为 `planned` 或 `unsupported`，且 upload、
+  settings mutation 和 command 均 fail closed；P6 不冒充后续阶段完成；
+- KV、D1、R2、Vectorize、AI Search、Queues、Workflows 和 Cron 的声明子集通过 API/runtime Gate；
 - Cloudflare differential 已完成，或剩余 credential 限制被拆成独立 active acceptance 文档；
 - `docs/references/cloudflare-compatibility.md` 和 machine-readable capability authority 已同步；
 - 最终 coverage、static checks 和单轮 workspace Gate 符合仓库 policy。
@@ -1105,6 +1216,9 @@ response schema 和退出码；secret、token、signed upload token 和对象内
 - [Static Assets direct uploads](https://developers.cloudflare.com/workers/static-assets/direct-upload/)
 - [KV Namespaces API](https://developers.cloudflare.com/api/resources/kv/subresources/namespaces/)
 - [D1 API](https://developers.cloudflare.com/api/resources/d1/)
+- [Vectorize API](https://developers.cloudflare.com/api/resources/vectorize/)
+- [AI Search API](https://developers.cloudflare.com/api/resources/ai_search/)
+- [AI Search Workers binding](https://developers.cloudflare.com/ai-search/api/search/workers-binding/)
 - [Cloudflare workers-sdk](https://github.com/cloudflare/workers-sdk)
 
 这些链接用于发现当前官方合同；实施和验收必须另外固定具体 schema/repository revision 与 SHA-256，不能把会变化

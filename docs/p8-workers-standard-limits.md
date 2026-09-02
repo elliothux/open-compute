@@ -1,8 +1,8 @@
-# Day 1 Workers Standard limits 设计
+# P8：Workers Standard limits 设计
 
 状态：设计完成，待实施与验收。
 
-本文细化 [Day 1 Cloudflare v4 API 与 Wrangler 子集兼容设计](day1-cloudflare-v4-wrangler-compatibility.md)
+本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](p6-cloudflare-v4-wrangler-compatibility.md)
 中的 limits 合同。它只定义 open-compute 平台本身，不包含 LynxOS 的团队规模、单机容量默认值、部署拓扑
 或运维策略。
 
@@ -37,7 +37,11 @@
 - Cloudflare [Workers Scripts API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/)；
 - Cloudflare [Dynamic Workers limits](https://developers.cloudflare.com/dynamic-workers/platform/limits/)；
 - Cloudflare [Dynamic Workers custom resource limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/)；
-- [Workers Logs 与 realtime tail 专项设计](day1-workers-logs-realtime-tail.md)。
+- Cloudflare [Vectorize limits](https://developers.cloudflare.com/vectorize/platform/limits/)；
+- Cloudflare [AI Search limits](https://developers.cloudflare.com/ai-search/platform/limits-pricing/)；
+- 已归档的 [P5 Vectorize 与 AI Search 实现合同](implemented/p5-vectorize-ai-search.md)及
+  [完成记录](implemented/p5-vectorize-ai-search-results.md)；
+- [Workers Logs 与 realtime tail 专项设计](p7-workers-logs-realtime-tail.md)。
 
 网页只用于发现最新合同。release qualification 使用固定的 schema、types、workerd source snapshot 和
 Cloudflare differential fixture；网页变化不能在未 review 时自动改变运行参数。
@@ -65,13 +69,20 @@ Cloudflare differential fixture；网页变化不能在未 review 时自动改�
 
 ### 3.3 `product`
 
-KV、D1、R2、Queues、Workflows、Cache、Images 等产品自己的限制继续由各产品 authority 管理。本文只规定
-request-scoped subrequest 计数应覆盖对这些 binding 的调用；不复制各产品 limit matrix。
+KV、D1、R2、Vectorize、AI Search、Workers AI Markdown Conversion、Queues、Workflows、Cache、Images 等产品
+自己的限制继续由各产品 authority 管理。本文只规定 request-scoped subrequest 计数如何覆盖这些 binding 的
+调用；不复制各产品 limit matrix，也不把 P5 的模型、文件、向量或索引额度改名为 Workers Standard limits。
+
+计数边界位于 tenant 可观察的 binding 调用，而不是产品内部 fan-out：一次 facade 到 authenticated binding backend
+的逻辑请求按一个 internal-service subrequest 资格化；redirect/retry/poll 等由调用方实际再次发起的请求分别计数。
+AI Search backend 内部的 embedding、rewrite、rerank、generation、S3 和 indexing coordinator 操作，以及 Vectorize
+异步 mutation coordinator，不额外消耗原 Worker invocation 的 subrequest budget。这个单位必须由固定 stock
+workerd/source fixture 和 Cloudflare differential 冻结；在证据完成前不能仅按方法名猜测 supported。
 
 ### 3.4 `operator_capacity`
 
-全局并发、admission queue、数据库连接、磁盘水位、WorkerLoader cache 回收和 child process restart 属于
-部署方容量保护。它们：
+全局并发、admission queue、数据库连接、磁盘水位、WorkerLoader cache 回收、AI provider request pool、
+indexing/parser child 并发和 child process restart 属于部署方容量保护。它们：
 
 - 没有 Day 1 固定人数或单机默认值；
 - 不进入 Cloudflare settings/multipart；
@@ -312,7 +323,7 @@ Worker 的多个并发 request 只计一个。Durable Object context 的 10 个�
 blocked，不得用平台全局并发阈值替代。
 
 详细 Worker Loader 合同、stock workerd nesting blocker 与 cache identity 见
-[Dynamic Workers / Worker Loader 专项设计](day1-dynamic-workers-worker-loader.md)。
+[Dynamic Workers / Worker Loader 专项设计](p9-dynamic-workers-worker-loader.md)。
 
 ## 8. Errors 与 observability
 
@@ -362,6 +373,8 @@ vendor capability authority 至少报告：
 
 - 从固定 Wrangler schema 提取 `usage_model`、`limits.cpu_ms`、`limits.subrequests`；
 - 固定 Scripts settings、multipart、Workers limits 与 Dynamic Workers fixtures；
+- 枚举当前全部 tenant-visible internal-service bindings，包括 Vectorize、AI Search namespace/instance 与
+  Markdown Conversion，并冻结每个方法产生的 logical backend request 数；
 - 为每个 limits 项标记 `management`、`ingress`、`runtime`、`product` 或 `operator`；
 - 将当前 implementation evidence 与 target 分列。
 
@@ -408,7 +421,9 @@ Exit：source inspection、fault injection、black-box case 与 Cloudflare diffe
 | `subrequests` 9,999 / 10,000 / explicit 10M / 10M+1 | 精确计数；越界配置失败 |
 | redirect chain | 每一跳计 subrequest |
 | Service Binding chain | 与 top-level request scope 共享连接计数；各 invocation CPU 独立 |
-| KV/D1/R2 + global fetch 混合 | 同一 subrequest budget，无漏计/双计 |
+| KV/D1/R2/Vectorize/AI Search/`env.AI` + global fetch 混合 | 每个 tenant-visible logical call 进入同一 subrequest budget，无漏计/双计；产品内部 provider/S3/coordinator fan-out 不重复计数 |
+| AI Search `uploadAndPoll()` | upload 和每次显式 poll 分别计数；后台 parse/embed/index 不继续占用原 invocation budget |
+| Vectorize async mutation | submit 调用计数；后台 durable apply 不产生伪 subrequest |
 | six pending headers + seventh | 第七个按 CF 行为排队，不提前发出 |
 | 128 MB isolate pressure | outcome 为 `exceededMemory`，新 request 不复用失效 isolate |
 | 1 second startup | upload/Version validation 失败，未创建可部署 Version |
@@ -426,6 +441,8 @@ Exit：source inspection、fault injection、black-box case 与 Cloudflare diffe
 - `usage_model: standard` 与 `limits` 通过固定 Wrangler upload/settings round trip；
 - 64 MB raw、10 MB gzip、variables、URL、headers、body、log 边界有真实实现和测试；
 - CPU、subrequest、memory、startup、connections 由固定 stock workerd 真实执行，不是 wrapper 或外层近似；
+- subrequest Gate 覆盖 KV、D1、R2、Vectorize、AI Search、`env.AI`、Service Binding 与 global `fetch()`，并证明
+  产品内部 provider/S3/coordinator fan-out 不被重复记到 tenant invocation；
 - Dynamic Worker 的 inherited/code/entrypoint limits 和 distinct-in-flight limit 通过 Gate；
 - 所有运行时超限产生真实、可追溯的 outcome，并进入 Workers Logs/realtime tail；
 - capabilities 把 Standard contract、product limits 与 operator capacity 分开；

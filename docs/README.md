@@ -8,12 +8,12 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [Day 1 Cloudflare v4 API 与 Wrangler 子集兼容](day1-cloudflare-v4-wrangler-compatibility.md) | 设计完成；唯一 `/client/v4` 管理面、Wrangler/multipart/Assets/resource API 与 vendor namespace 尚未实施 |
-| [Day 1 Workers Standard limits](day1-workers-standard-limits.md) | 设计完成；structural limits、Version settings 与 stock workerd runtime enforcer 尚未实施，CPU/subrequest/memory/startup/connection 当前受 `OC-WKR-LIMIT-001` 阻断 |
-| [Day 1 Dynamic Workers / Worker Loader](day1-dynamic-workers-worker-loader.md) | 合同与架构完成；`worker_loaders` v4/Version 支持受 upstream stock workerd nested-loader、limits 与 bounded-cache G0 阻断；Workers for Platforms 不在范围内 |
-| [Day 1 Workers Logs 与 realtime tail](day1-workers-logs-realtime-tail.md) | 设计完成；stock workerd Tail 采集、`wrangler tail`、Workers Logs persistence/Telemetry query 与 Dashboard Live Tail 尚未实施 |
+| [P6 Cloudflare v4 API 与 Wrangler 子集兼容](p6-cloudflare-v4-wrangler-compatibility.md) | 设计完成；唯一 `/client/v4` 管理面、Wrangler/multipart/Assets/resource API 与 vendor namespace 尚未实施；已纳入现有 Vectorize、AI Search 与 Markdown Conversion authority |
+| [P7 Workers Logs 与 realtime tail](p7-workers-logs-realtime-tail.md) | 设计完成；stock workerd Tail 采集、`wrangler tail`、Workers Logs persistence/Telemetry query 与 Dashboard Live Tail 尚未实施 |
+| [P8 Workers Standard limits](p8-workers-standard-limits.md) | 设计完成；structural limits、Version settings 与 stock workerd runtime enforcer 尚未实施，CPU/subrequest/memory/startup/connection 当前受 `OC-WKR-LIMIT-001` 阻断 |
+| [P9 Dynamic Workers / Worker Loader](p9-dynamic-workers-worker-loader.md) | 合同与架构完成；`worker_loaders` v4/Version 支持受 upstream stock workerd nested-loader、limits 与 bounded-cache G0 阻断；Workers for Platforms 不在范围内 |
 
-新的管理面与项目配置目标由 [Day 1 Cloudflare v4 API 与 Wrangler 子集兼容设计](day1-cloudflare-v4-wrangler-compatibility.md)
+新的管理面与项目配置目标由 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](p6-cloudflare-v4-wrangler-compatibility.md)
 定义。Operator API 与 Dashboard 已完成并归档：见[设计文档](implemented/operator-api-dashboard.md)、
 [完成记录](implemented/operator-api-dashboard-results.md)与 **Implementation GO** 复审（[`CR.md`](../CR.md)）。
 当前证据包括真实 Cloudflare Dashboard 对比、Playwright **31/31**、live SDK **12/12**、Rust 行覆盖率

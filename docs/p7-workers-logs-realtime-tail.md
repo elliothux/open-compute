@@ -1,10 +1,10 @@
-# Day 1 Workers Logs 与 realtime tail 兼容设计
+# P7：Workers Logs 与 realtime tail 兼容设计
 
 状态：设计完成，尚未实施与验收
 
 日期：2026-09-03
 
-本文是 [`Day 1 Cloudflare v4 API 与 Wrangler 子集兼容设计`](day1-cloudflare-v4-wrangler-compatibility.md)
+本文是 [`P6 Cloudflare v4 API 与 Wrangler 子集兼容设计`](p6-cloudflare-v4-wrangler-compatibility.md)
 的 observability 专项设计，细化以下能力：
 
 - 固定版 Wrangler 的 `wrangler tail`；
@@ -338,7 +338,9 @@ Cloudflare TailRequest 已默认 redaction，平台仍需在 system collector �
   value 固定为 `REDACTED`；
 - URL 按官方 Tail Handler 的长 hex/base64-like identifier 规则 redaction；
 - internal generation token、binding token、tail ticket、upload token 和 `x-open-compute-*` internal headers 永不进入 event；
-- request/response body、secret binding value、D1/KV/R2 value、Queue body不采集；
+- request/response body、secret binding value、D1/KV/R2 value、Queue body不采集；Vectorize vector/metadata、
+  AI Search query/messages/item 原文/parsed text/chunks/results、Markdown Conversion 输入输出、provider
+  request/response/endpoint/credential 也不进入 canonical invocation；
 - collector 永不调用 `getUnredacted()`；
 - auth/tail tickets 不进入 access log、metrics label、SQLite、error 或 support bundle。
 
@@ -690,6 +692,12 @@ open_compute_observability_query_total{view,result}
 open_compute_observability_query_duration_seconds
 ```
 
+P5 已有的 `vectorize_*`、`ai_search_*`、`ai_provider_*` 和 indexing stage metrics 继续属于 operator product
+metrics，不转换为 `cf-worker-log`、exception 或 synthetic Worker invocation。同步 Vectorize/AI Search/Markdown
+Conversion binding 调用只影响真实 caller invocation 的 wall time、subrequest outcome 和未捕获异常；后台 mutation、
+parse/embed/index/GC 没有 tenant Worker invocation，不写入 Workers Logs。产品 metrics 只保留 operation/stage/outcome
+等现有低基数 label，不能增加 query、model endpoint、instance、item、document、vector 或 tenant identity label。
+
 `/client/v4/open-compute/system/status` 和 capabilities 只返回 health、容量、retention、oldest event、session count 和
 drop counters，不返回 log contents 或 tail URLs。
 
@@ -816,6 +824,8 @@ reconnect。JSON output 与 Cloudflare golden fixture 做字段级 differential�
 
 - collector/backend/DB 不可用时 tenant response、Queue ack、DO transaction 结果不变；
 - generation token、API token、tail ticket、secret header、secret binding 和 URL identifier 不出现在 event/DB/error/metrics；
+- AI Search 文档/query/messages/chunks/results、Vectorize values/metadata、Markdown Conversion 内容和 provider
+  payload/endpoint/credential 不出现在 event、tail frame、SQLite、error、metrics 或 support bundle；
 - forged account/script/version props、旧 generation、oversize/deep object、invalid timestamp 和 invalid JSON 被拒绝；
 - 10-client race 只成功 10 个，delete/expiry/restart 后 slot 可回收；
 - slow client 不阻塞 fast client，tail backpressure 不进入 tenant invocation；
