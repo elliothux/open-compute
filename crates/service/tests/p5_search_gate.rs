@@ -339,10 +339,10 @@ async fn p5_real_vectorize_ai_search_and_markdown_matrix() {
         Ok(url) if !url.is_empty() => None,
         _ => Some(spawn_embedding_fixture().await),
     };
-    let embedding_base_url = embedding_fixture
-        .as_ref()
-        .map(|(url, _, _)| url.clone())
-        .unwrap_or_else(|| std::env::var(EMBEDDING_BASE_URL_ENV).unwrap());
+    let embedding_base_url = embedding_fixture.as_ref().map_or_else(
+        || std::env::var(EMBEDDING_BASE_URL_ENV).unwrap(),
+        |(url, _, _)| url.clone(),
+    );
     let ai = ai_config(&chat_base_url, &embedding_base_url, temporary.path());
     let (artifacts, s3_client) = artifact_store(&mock);
     let artifact_cache = Arc::new(
