@@ -1,28 +1,36 @@
-# 概述
+# open-compute
 
-open-compute 给你一台机器上的 Workers 平台：一个 `ocd` 进程，带着一份已 pin 的 `workerd`，对外提供控制面和数据面。
+单机 Workers 平台。`ocd` 启动锁定版本的 `workerd`，Worker API 与 Cloudflare 文档一致。不提供全球边缘网络、计费或 Cloudflare 控制台。
 
-它兼容的是 Workers 编程模型里已经声明的那部分（Worker、KV、R2、D1、Durable Objects、Queues、Cron、Workflows、Static Assets、Service Binding、Cache、Images）。兼容不是「名字一样就一样」。全球边缘、跨地域复制、多副本高可用、计费和完整 Cloudflare 管理面都不在范围内。具体开了什么、故意做成什么样，以这台机器上的 `ocd capabilities --json` 为准。
+使用 `oc` 部署 Worker，使用 `ocd` 运行平台。项目配置为 `open-compute.json`。
 
-## 你拿到的东西
+[开始](/get-started) · [产品目录](/directory)
 
-发行物只有一个文件：匹配 OS/CPU 的 `ocd`。workerd、系统 Worker、默认配置和运维手册都打在里面。运行时不会再下载 runtime，也不要在旁边再放一份 workerd。
+## 计算
 
-进程边界是固定的：一个 `ocd` 管一个 data-dir，再管一个 workerd 子进程。不要在同一 data-dir 上起第二个 `ocd`。
+- [Workers](/workers/) — 在本机 `workerd` 中运行模块 Worker
+- [Durable Objects](/durable-objects/) — 有状态对象，存储强一致
+- [Workflows](/workflows/) — 可从中断处恢复的多步工作流
+- [Queues](/queues/) — Worker 间消息队列（at-least-once）
 
-## 你还要自己准备
+## 存储
 
-- 一份绝对路径的配置文件
-- 一块本机可写的 data-dir（SQLite、身份、master key、运行时解压都在这）
-- 一个 S3 兼容存储，用来放 R2、Worker bundle、Static Assets 和大对象
+- [KV](/kv/) — 键值存储
+- [D1](/d1/) — SQL
+- [R2](/r2/) — 对象存储（数据位于配置的 S3）
 
-密钥只走配置里的 `env:` / `file:` 引用，不要写进 unit、镜像或仓库。
+## 媒体
 
-## 不要假定的事
+- [Cache](/workers/cache/) — Workers Cache 与 Cache API
+- [Images](/images/) — 本地图像变换（受尺寸与并发限制）
 
-- 单文件不等于「磁盘上永远只有这一个文件」。首次运行会在 data-dir 里解压并校验内嵌 runtime。
-- 备份能覆盖本机 SQLite 权威数据；R2 仍绑在你配置的那个 bucket 上，不是对象存储的 PITR。
-- `/health/live` 只表示进程活着。`/health/ready` 是准入，失败时不要拿它当重启依据。
-- 租户只能碰到部署里声明过的 binding，拿不到 SQLite 路径、S3 凭据或别人的资源。
+## 平台
 
-下一步：把这一个文件装上并完成第一次启动。出事时不要先翻源码，去[故障手册](/incidents/)。
+- [平台](/platform/) — 兼容性、限制与行为差异
+- [限制](/platform/limits) — 以运行中的 `ocd capabilities --json` 为准
+- [兼容性](/platform/compatibility) — 产品、Worker API 与数据位置
+- [行为差异](/platform/deviations) — 相对 Cloudflare 托管环境的差异
+
+## 运维
+
+安装 `ocd`、编写配置、作为服务运行，以及故障手册：[ocd](/ocd/)。

@@ -1,0 +1,62 @@
+# Durable Objects
+
+Durable Object 将计算与强一致存储绑定在同一对象上。在 open-compute 上，所有对象运行在本机的单个 `workerd` 进程中。
+
+例如：
+
+- 在多个客户端之间协调状态
+- 每个对象独立的强一致存储
+- Alarms 与 WebSocket hibernation
+
+```ts
+export class Counter {
+  constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {}
+  async fetch(request: Request): Promise<Response> {
+    const n = ((await this.ctx.storage.get<number>("n")) ?? 0) + 1;
+    await this.ctx.storage.put("n", n);
+    return Response.json({ n });
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const id = env.COUNTER.idFromName("global");
+    return env.COUNTER.get(id).fetch(request);
+  },
+} satisfies ExportedHandler<{ COUNTER: DurableObjectNamespace }>;
+```
+
+在 `open-compute.json` 中绑定。Durable Object 必须指定 `className`：
+
+```json
+{
+  "name": "do-app",
+  "main": "src/index.ts",
+  "bindings": {
+    "COUNTER": { "type": "do_namespace", "id": "<do-namespace-id>", "className": "Counter" }
+  }
+}
+```
+
+`className` 仅用于核对 class，不会作为资源 ID 提交给平台。语法见 [绑定](/workers/configuration/bindings)。CLI：`oc` / `oc run` / `oc types`。
+
+## 兼容性
+
+| 主题 | Cloudflare | open-compute |
+| --- | --- | --- |
+| Worker / class API | [Durable Objects API](https://developers.cloudflare.com/durable-objects/api/) | 相同：namespace `idFromName` / `newUniqueId` / `idFromString` / `get` / `getByName`、stub `fetch` / RPC、`state.storage` 的 KV 与 SQL、transaction、output gate |
+| 对象位置 | 按地区调度，`locationHint` / jurisdiction / migration | 全部位于本机单个 workerd；`locationHint` / jurisdiction / migration 不产生地理效果 |
+| Alarms | 提供 | 提供：`getAlarm` / `setAlarm` / `deleteAlarm` 与 `alarm()` |
+| Hibernation | 提供 | 提供 |
+| 绑定 | wrangler `durable_objects` | `{ type, id, className }`，必须指定 `className` |
+| `Fetcher.connect()` | 通用出站 | 使用绑定声明的连接，而非第二条通用出站通道 |
+
+## 本节
+
+- [上手](/durable-objects/get-started/)
+- [概念](/durable-objects/concepts/)
+- [指南](/durable-objects/guides/)
+- [示例](/durable-objects/examples/)
+- [Alarms](/durable-objects/alarms)
+- [限制](/durable-objects/platform/limits)
+- [行为差异](/durable-objects/platform/deviations)

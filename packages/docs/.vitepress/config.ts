@@ -1,91 +1,278 @@
-import { defineConfig } from "vitepress";
+import { defineConfig, type DefaultTheme } from "vitepress";
 
-const zhSidebar = [
-  {
-    text: "了解",
-    items: [
-      { text: "概述", link: "/" },
-      { text: "能力与限制", link: "/capabilities" },
-    ],
-  },
-  {
-    text: "上手",
-    items: [
-      { text: "安装与首次启动", link: "/install" },
-      { text: "配置", link: "/configuration" },
-      { text: "部署", link: "/deploy" },
-    ],
-  },
-  {
-    text: "日常",
-    items: [
-      { text: "健康检查", link: "/health" },
-      { text: "备份与保留", link: "/backup" },
-      { text: "常用命令", link: "/cli" },
-    ],
-  },
-  {
-    text: "故障手册",
-    items: [
-      { text: "怎么用", link: "/incidents/" },
-      { text: "当前 release 恢复", link: "/incidents/current-release" },
-      { text: "全新主机恢复", link: "/incidents/fresh-host" },
-      { text: "磁盘压力", link: "/incidents/disk" },
-      { text: "SQLite 损坏", link: "/incidents/sqlite" },
-      { text: "S3 故障", link: "/incidents/s3" },
-      { text: "workerd 崩溃循环", link: "/incidents/workerd" },
-      { text: "Master key 丢失", link: "/incidents/master-key" },
-      { text: "Scheduler 恢复", link: "/incidents/scheduler" },
-      { text: "收集 support bundle", link: "/incidents/support-bundle" },
-    ],
-  },
-];
+type Copy = {
+  start: string;
+  overview: string;
+  getStarted: string;
+  directory: string;
+  concepts: string;
+  guides: string;
+  examples: string;
+  configuration: string;
+  bindings: string;
+  compatibilityDates: string;
+  compatibilityFlags: string;
+  cronTriggers: string;
+  envVars: string;
+  secrets: string;
+  routing: string;
+  versions: string;
+  staticAssets: string;
+  cache: string;
+  runtimeApis: string;
+  handlers: string;
+  websockets: string;
+  tcpSockets: string;
+  nodejs: string;
+  platform: string;
+  limits: string;
+  knownIssues: string;
+  changelog: string;
+  storage: string;
+  compute: string;
+  media: string;
+  compatibility: string;
+  deviations: string;
+  unsupported: string;
+  apiRef: string;
+  operate: string;
+  install: string;
+  config: string;
+  deploy: string;
+  health: string;
+  backup: string;
+  cli: string;
+  incidents: string;
+  alarms: string;
+};
 
-const enSidebar = [
-  {
-    text: "Understand",
+const zhCopy: Copy = {
+  start: "开始",
+  overview: "概述",
+  getStarted: "上手",
+  directory: "产品目录",
+  concepts: "概念",
+  guides: "指南",
+  examples: "示例",
+  configuration: "配置",
+  bindings: "绑定",
+  compatibilityDates: "兼容日期",
+  compatibilityFlags: "兼容标志",
+  cronTriggers: "Cron 触发器",
+  envVars: "环境变量",
+  secrets: "密钥",
+  routing: "路由",
+  versions: "版本与部署",
+  staticAssets: "静态资源",
+  cache: "缓存",
+  runtimeApis: "运行时 API",
+  handlers: "Handlers",
+  websockets: "WebSockets",
+  tcpSockets: "TCP sockets",
+  nodejs: "Node.js 兼容",
+  platform: "平台",
+  limits: "限制",
+  knownIssues: "已知问题",
+  changelog: "更新日志",
+  storage: "存储",
+  compute: "计算",
+  media: "媒体",
+  compatibility: "兼容性",
+  deviations: "行为差异",
+  unsupported: "不支持",
+  apiRef: "API 参考",
+  operate: "运维 ocd",
+  install: "安装与首次启动",
+  config: "配置",
+  deploy: "部署",
+  health: "健康检查",
+  backup: "备份与保留",
+  cli: "常用命令",
+  incidents: "故障手册",
+  alarms: "Alarms",
+};
+
+const enCopy: Copy = {
+  start: "Start",
+  overview: "Overview",
+  getStarted: "Get started",
+  directory: "Directory",
+  concepts: "Concepts",
+  guides: "Guides",
+  examples: "Examples",
+  configuration: "Configuration",
+  bindings: "Bindings",
+  compatibilityDates: "Compatibility dates",
+  compatibilityFlags: "Compatibility flags",
+  cronTriggers: "Cron Triggers",
+  envVars: "Environment variables",
+  secrets: "Secrets",
+  routing: "Routing",
+  versions: "Versions and deployments",
+  staticAssets: "Static Assets",
+  cache: "Cache",
+  runtimeApis: "Runtime APIs",
+  handlers: "Handlers",
+  websockets: "WebSockets",
+  tcpSockets: "TCP sockets",
+  nodejs: "Node.js compatibility",
+  platform: "Platform",
+  limits: "Limits",
+  knownIssues: "Known issues",
+  changelog: "Changelog",
+  storage: "Storage",
+  compute: "Compute",
+  media: "Media",
+  compatibility: "Compatibility",
+  deviations: "Behavior differences",
+  unsupported: "Unsupported",
+  apiRef: "API reference",
+  operate: "Operate ocd",
+  install: "Install and first start",
+  config: "Configuration",
+  deploy: "Deploy",
+  health: "Health checks",
+  backup: "Backup and retention",
+  cli: "CLI reference",
+  incidents: "Incident handbook",
+  alarms: "Alarms",
+};
+
+function productTree(
+  prefix: string,
+  t: Copy,
+  slug: string,
+  name: string,
+  extra?: DefaultTheme.SidebarItem[],
+): DefaultTheme.SidebarItem {
+  return {
+    text: name,
+    collapsed: true,
     items: [
-      { text: "Overview", link: "/en/" },
-      { text: "Capabilities and limits", link: "/en/capabilities" },
+      { text: t.overview, link: `${prefix}/${slug}/` },
+      { text: t.getStarted, link: `${prefix}/${slug}/get-started/` },
+      { text: t.concepts, link: `${prefix}/${slug}/concepts/` },
+      { text: t.guides, link: `${prefix}/${slug}/guides/` },
+      { text: t.examples, link: `${prefix}/${slug}/examples/` },
+      ...(extra ?? []),
+      { text: t.limits, link: `${prefix}/${slug}/platform/limits` },
+      { text: t.deviations, link: `${prefix}/${slug}/platform/deviations` },
     ],
-  },
-  {
-    text: "Get started",
-    items: [
-      { text: "Install and first start", link: "/en/install" },
-      { text: "Configuration", link: "/en/configuration" },
-      { text: "Deploy", link: "/en/deploy" },
-    ],
-  },
-  {
-    text: "Operations",
-    items: [
-      { text: "Health checks", link: "/en/health" },
-      { text: "Backup and retention", link: "/en/backup" },
-      { text: "CLI reference", link: "/en/cli" },
-    ],
-  },
-  {
-    text: "Incident handbook",
-    items: [
-      { text: "How to use", link: "/en/incidents/" },
-      { text: "Current-release restore", link: "/en/incidents/current-release" },
-      { text: "Fresh-host restore", link: "/en/incidents/fresh-host" },
-      { text: "Disk pressure", link: "/en/incidents/disk" },
-      { text: "SQLite corruption", link: "/en/incidents/sqlite" },
-      { text: "S3 outage", link: "/en/incidents/s3" },
-      { text: "workerd crash loop", link: "/en/incidents/workerd" },
-      { text: "Master-key loss", link: "/en/incidents/master-key" },
-      { text: "Scheduler recovery", link: "/en/incidents/scheduler" },
-      { text: "Collect a support bundle", link: "/en/incidents/support-bundle" },
-    ],
-  },
-];
+  };
+}
+
+function sidebar(prefix: string, t: Copy): DefaultTheme.SidebarItem[] {
+  return [
+    {
+      text: t.start,
+      items: [
+        { text: t.overview, link: `${prefix}/` },
+        { text: t.getStarted, link: `${prefix}/get-started` },
+        { text: t.directory, link: `${prefix}/directory` },
+      ],
+    },
+    {
+      text: "Workers",
+      items: [
+        { text: t.overview, link: `${prefix}/workers/` },
+        { text: t.getStarted, link: `${prefix}/workers/get-started/` },
+        { text: t.concepts, link: `${prefix}/workers/concepts/` },
+        { text: t.examples, link: `${prefix}/workers/examples/` },
+        {
+          text: t.configuration,
+          collapsed: true,
+          items: [
+            { text: t.overview, link: `${prefix}/workers/configuration/` },
+            { text: t.bindings, link: `${prefix}/workers/configuration/bindings` },
+            { text: t.compatibilityDates, link: `${prefix}/workers/configuration/compatibility-dates` },
+            { text: t.compatibilityFlags, link: `${prefix}/workers/configuration/compatibility-flags` },
+            { text: t.cronTriggers, link: `${prefix}/workers/configuration/cron-triggers` },
+            { text: t.envVars, link: `${prefix}/workers/configuration/environment-variables` },
+            { text: t.secrets, link: `${prefix}/workers/configuration/secrets` },
+            { text: t.routing, link: `${prefix}/workers/configuration/routing` },
+          ],
+        },
+        { text: t.versions, link: `${prefix}/workers/versions-and-deployments/` },
+        { text: t.staticAssets, link: `${prefix}/workers/static-assets/` },
+        { text: t.cache, link: `${prefix}/workers/cache/` },
+        {
+          text: t.runtimeApis,
+          collapsed: true,
+          items: [
+            { text: t.overview, link: `${prefix}/workers/runtime-apis/` },
+            { text: t.handlers, link: `${prefix}/workers/runtime-apis/handlers` },
+            { text: t.bindings, link: `${prefix}/workers/runtime-apis/bindings` },
+            { text: t.cache, link: `${prefix}/workers/runtime-apis/cache` },
+            { text: t.websockets, link: `${prefix}/workers/runtime-apis/websockets` },
+            { text: t.tcpSockets, link: `${prefix}/workers/runtime-apis/tcp-sockets` },
+            { text: t.nodejs, link: `${prefix}/workers/runtime-apis/nodejs` },
+          ],
+        },
+        {
+          text: t.platform,
+          collapsed: true,
+          items: [
+            { text: t.limits, link: `${prefix}/workers/platform/limits` },
+            { text: t.knownIssues, link: `${prefix}/workers/platform/known-issues` },
+            { text: t.changelog, link: `${prefix}/workers/platform/changelog` },
+          ],
+        },
+      ],
+    },
+    {
+      text: t.storage,
+      items: [
+        productTree(prefix, t, "kv", "KV"),
+        productTree(prefix, t, "d1", "D1"),
+        productTree(prefix, t, "r2", "R2"),
+      ],
+    },
+    {
+      text: t.compute,
+      items: [
+        productTree(prefix, t, "durable-objects", "Durable Objects", [
+          { text: t.alarms, link: `${prefix}/durable-objects/alarms` },
+        ]),
+        productTree(prefix, t, "queues", "Queues"),
+        productTree(prefix, t, "workflows", "Workflows"),
+      ],
+    },
+    {
+      text: t.media,
+      items: [productTree(prefix, t, "images", "Images")],
+    },
+    {
+      text: t.platform,
+      items: [
+        { text: t.overview, link: `${prefix}/platform/` },
+        { text: t.compatibility, link: `${prefix}/platform/compatibility` },
+        { text: t.deviations, link: `${prefix}/platform/deviations` },
+        { text: t.limits, link: `${prefix}/platform/limits` },
+        { text: t.unsupported, link: `${prefix}/platform/unsupported` },
+        { text: t.apiRef, link: `${prefix}/platform/reference/api/` },
+      ],
+    },
+    {
+      text: t.operate,
+      items: [
+        { text: t.overview, link: `${prefix}/ocd/` },
+        { text: t.install, link: `${prefix}/ocd/get-started` },
+        { text: t.config, link: `${prefix}/ocd/configuration` },
+        { text: t.deploy, link: `${prefix}/ocd/deploy` },
+        { text: t.health, link: `${prefix}/ocd/health` },
+        { text: t.backup, link: `${prefix}/ocd/backup` },
+        { text: t.cli, link: `${prefix}/ocd/cli` },
+        { text: t.incidents, link: `${prefix}/ocd/incidents/` },
+      ],
+    },
+  ];
+}
 
 export default defineConfig({
   title: "open-compute",
   sitemap: { hostname: "https://open-compute.dev" },
   lastUpdated: false,
+  ignoreDeadLinks: false,
   srcExclude: ["README.md"],
   vite: {
     server: {
@@ -98,10 +285,14 @@ export default defineConfig({
     root: {
       label: "简体中文",
       lang: "zh-CN",
-      description: "open-compute.dev 的 ocd 运维文档",
+      description: "open-compute 开发者文档",
       themeConfig: {
-        nav: [{ text: "概述", link: "/" }, { text: "故障手册", link: "/incidents/" }],
-        sidebar: zhSidebar,
+        nav: [
+          { text: "开始", link: "/get-started" },
+          { text: "产品目录", link: "/directory" },
+          { text: "ocd", link: "/ocd/" },
+        ],
+        sidebar: sidebar("", zhCopy),
         outline: { label: "本页", level: [2, 3] },
         docFooter: { prev: "上一页", next: "下一页" },
         darkModeSwitchLabel: "外观",
@@ -113,10 +304,14 @@ export default defineConfig({
     en: {
       label: "English",
       lang: "en-US",
-      description: "ocd operator documentation for open-compute.dev",
+      description: "open-compute developer documentation",
       themeConfig: {
-        nav: [{ text: "Overview", link: "/en/" }, { text: "Incident handbook", link: "/en/incidents/" }],
-        sidebar: enSidebar,
+        nav: [
+          { text: "Get started", link: "/en/get-started" },
+          { text: "Directory", link: "/en/directory" },
+          { text: "ocd", link: "/en/ocd/" },
+        ],
+        sidebar: sidebar("/en", enCopy),
         outline: { label: "On this page", level: [2, 3] },
         langMenuLabel: "Change language",
       },

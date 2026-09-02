@@ -1,0 +1,45 @@
+# Open Compute
+
+> Developer documentation for open-compute: a serverless platform that runs the declared Cloudflare Workers programming model on a single node (`ocd` + pinned `workerd`). No global edge, billing, or Cloudflare dashboard.
+
+Origin: https://open-compute.dev
+
+Each product below is a top-level docs URL. Live limits come from `ocd capabilities --json` on the running binary.
+
+## Start
+
+- [Overview](https://open-compute.dev/): Single-node Workers platform
+- [Get started](https://open-compute.dev/get-started): Hello Worker on a ready ocd
+- [Directory](https://open-compute.dev/directory): Product catalog
+
+## Top-level (zh, default `/`)
+
+- [Workers](https://open-compute.dev/workers/)
+- [KV](https://open-compute.dev/kv/)
+- [D1](https://open-compute.dev/d1/)
+- [R2](https://open-compute.dev/r2/)
+- [Durable Objects](https://open-compute.dev/durable-objects/)
+- [Queues](https://open-compute.dev/queues/)
+- [Workflows](https://open-compute.dev/workflows/)
+- [Images](https://open-compute.dev/images/)
+- [Platform](https://open-compute.dev/platform/)
+- [ocd](https://open-compute.dev/ocd/)
+
+## Top-level (en, `/en/`)
+
+- [Workers](https://open-compute.dev/en/workers/)
+- [KV](https://open-compute.dev/en/kv/)
+- [D1](https://open-compute.dev/en/d1/)
+- [R2](https://open-compute.dev/en/r2/)
+- [Durable Objects](https://open-compute.dev/en/durable-objects/)
+- [Queues](https://open-compute.dev/en/queues/)
+- [Workflows](https://open-compute.dev/en/workflows/)
+- [Images](https://open-compute.dev/en/images/)
+- [Platform](https://open-compute.dev/en/platform/)
+- [ocd](https://open-compute.dev/en/ocd/)
+
+## English start
+
+- [Overview](https://open-compute.dev/en/)
+- [Get started](https://open-compute.dev/en/get-started)
+- [Directory](https://open-compute.dev/en/directory)

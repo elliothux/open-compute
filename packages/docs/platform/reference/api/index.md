@@ -1,0 +1,22 @@
+# API 参考
+
+Worker 签名以 [Workers runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) 为准。本页列出已提供产品及其文档入口。与托管环境的差异见[行为差异](/platform/deviations)。
+
+| 产品 | 文档 |
+| --- | --- |
+| Workers | [Workers](/workers/)、[运行时 API](/workers/runtime-apis/) |
+| KV | [KV](/kv/) |
+| R2 | [R2](/r2/) |
+| D1 | [D1](/d1/) |
+| Durable Objects | [Durable Objects](/durable-objects/) |
+| Alarms | [Alarms](/durable-objects/alarms) |
+| Queues | [Queues](/queues/) |
+| Cron | [Cron 触发器](/workers/configuration/cron-triggers) |
+| Workflows | [Workflows](/workflows/) |
+| Cache API | [Cache API](/workers/runtime-apis/cache) |
+| Workers Cache | [Workers Cache](/workers/cache/) |
+| Images | [Images](/images/) |
+| Version Metadata | [Bindings](/workers/runtime-apis/bindings) |
+| WebSocket hibernation | [WebSockets](/workers/runtime-apis/websockets) |
+
+运行中的发行身份以 `ocd capabilities --json` 为准。
