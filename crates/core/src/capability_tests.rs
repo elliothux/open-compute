@@ -86,6 +86,7 @@ fn capability_status_serialization_and_contract_are_strict() {
         workerd_version: "workerd test".to_owned(),
         workerd_lock_sha256: "a".repeat(64),
         runtime_assets_sha256: "b".repeat(64),
+        dashboard_assets_sha256: "c".repeat(64),
         facade_capability_version: 1,
         control_schema_version: 8,
         scheduler_schema_version: 1,

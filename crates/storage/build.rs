@@ -22,6 +22,7 @@ fn main() {
         ("012_static_assets", "MIGRATION_012_SHA256"),
         ("013_service_bindings", "MIGRATION_013_SHA256"),
         ("014_cache_images", "MIGRATION_014_SHA256"),
+        ("015_system_owned_workers", "MIGRATION_015_SHA256"),
     ];
     let mut generated = String::new();
     for (file, constant) in migrations {

@@ -1,6 +1,6 @@
 //! Authenticated bounded operator surface for the P0.8 scheduler.
 
-use crate::http::{HttpState, authorize};
+use crate::http::{HttpState, authorize, operator_error_response};
 use axum::Router;
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
@@ -20,67 +20,67 @@ pub fn control_router() -> Router<HttpState> {
         .route("/v1/scheduler/pause", post(pause))
         .route("/v1/scheduler/resume", post(resume))
         .route("/v1/scheduler/repair", post(repair))
-        .route("/v1/operator/scheduler", get(inspect))
-        .route("/v1/operator/scheduler/pause", post(pause))
-        .route("/v1/operator/scheduler/resume", post(resume))
-        .route("/v1/operator/scheduler/repair", post(repair))
-        .route("/v1/operator/queue-consumers", get(inspect))
+        .route("/v1/queue-consumers", get(inspect))
         .route(
-            "/v1/operator/queue-consumers/{consumer_id}/pause",
+            "/v1/queue-consumers/{consumer_id}/pause",
             post(pause_queue_consumer),
         )
         .route(
-            "/v1/operator/queue-consumers/{consumer_id}/resume",
+            "/v1/queue-consumers/{consumer_id}/resume",
             post(resume_queue_consumer),
         )
-        .route("/v1/operator/cron-activations", get(inspect))
+        .route("/v1/cron-activations", get(inspect))
 }
 
 async fn inspect(State(state): State<HttpState>, request: Request) -> Response {
+    let request_id = request_id(&request);
     let Some(scheduler) = authorized_scheduler(&state, &request) else {
         return unavailable(&state, &request);
     };
     match scheduler.inspect() {
         Ok(summary) => axum::Json(summary).into_response(),
-        Err(error) => scheduler_error(&error),
+        Err(error) => scheduler_error(&error, request_id),
     }
 }
 
 async fn pause(State(state): State<HttpState>, request: Request) -> Response {
+    let request_id = request_id(&request);
     let Some(scheduler) = authorized_scheduler(&state, &request) else {
         return unavailable(&state, &request);
     };
     match requested_kind(&request) {
         Ok(Some(kind)) => match scheduler.pause_kind(kind) {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(error) => scheduler_error(&error),
+            Err(error) => scheduler_error(&error, request_id),
         },
         Ok(None) => {
             scheduler.pause();
             StatusCode::NO_CONTENT.into_response()
         }
-        Err(error) => scheduler_error(&error),
+        Err(error) => scheduler_error(&error, request_id),
     }
 }
 
 async fn resume(State(state): State<HttpState>, request: Request) -> Response {
+    let request_id = request_id(&request);
     let Some(scheduler) = authorized_scheduler(&state, &request) else {
         return unavailable(&state, &request);
     };
     match requested_kind(&request) {
         Ok(Some(kind)) => match scheduler.resume_kind(kind) {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(error) => scheduler_error(&error),
+            Err(error) => scheduler_error(&error, request_id),
         },
         Ok(None) => {
             scheduler.resume();
             StatusCode::NO_CONTENT.into_response()
         }
-        Err(error) => scheduler_error(&error),
+        Err(error) => scheduler_error(&error, request_id),
     }
 }
 
 async fn repair(State(state): State<HttpState>, request: Request) -> Response {
+    let request_id = request_id(&request);
     let Some(scheduler) = authorized_scheduler(&state, &request) else {
         return unavailable(&state, &request);
     };
@@ -92,9 +92,9 @@ async fn repair(State(state): State<HttpState>, request: Request) -> Response {
                 "productRepaired": product_repaired,
             }))
             .into_response(),
-            Err(error) => scheduler_error(&error),
+            Err(error) => scheduler_error(&error, request_id),
         },
-        Err(error) => scheduler_error(&error),
+        Err(error) => scheduler_error(&error, request_id),
     }
 }
 
@@ -129,13 +129,13 @@ async fn mutate_queue_consumer(
     let Some(scheduler) = authorized_scheduler(&state, &request).cloned() else {
         return unavailable(&state, &request);
     };
-    let Ok(consumer_id) = QueueConsumerId::from_str(&consumer_id) else {
-        return scheduler_error(&invalid_operator_request());
-    };
     let request_id = request_id(&request);
+    let Ok(consumer_id) = QueueConsumerId::from_str(&consumer_id) else {
+        return scheduler_error(&invalid_operator_request(), request_id);
+    };
     let body = match read_generation(request).await {
         Ok(body) if body.consumer_generation > 0 => body,
-        Ok(_) | Err(_) => return scheduler_error(&invalid_operator_request()),
+        Ok(_) | Err(_) => return scheduler_error(&invalid_operator_request(), request_id),
     };
     let result = if pause {
         scheduler.pause_queue_consumer_operator(consumer_id, body.consumer_generation, request_id)
@@ -144,7 +144,7 @@ async fn mutate_queue_consumer(
     };
     match result {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => scheduler_error(&error),
+        Err(error) => scheduler_error(&error, request_id),
     }
 }
 
@@ -173,24 +173,22 @@ fn authorized_scheduler<'a>(
 }
 
 fn unavailable(state: &HttpState, request: &Request) -> Response {
-    if authorize(state, request) {
-        StatusCode::SERVICE_UNAVAILABLE.into_response()
+    let error = if authorize(state, request) {
+        PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "scheduler operator authority is unavailable",
+        )
     } else {
-        StatusCode::UNAUTHORIZED.into_response()
-    }
+        PlatformError::new(
+            ErrorCode::AdminAuthRequired,
+            "admin authentication is required",
+        )
+    };
+    operator_error_response(&error, request_id(request))
 }
 
-fn scheduler_error(error: &PlatformError) -> Response {
-    let status = match error.code() {
-        ErrorCode::SchedulerKindNotEnabled | ErrorCode::ConfigInvalid => StatusCode::BAD_REQUEST,
-        ErrorCode::QueueConsumerGenerationStale => StatusCode::CONFLICT,
-        _ => StatusCode::SERVICE_UNAVAILABLE,
-    };
-    (
-        status,
-        axum::Json(serde_json::json!({ "code": error.code().as_str() })),
-    )
-        .into_response()
+fn scheduler_error(error: &PlatformError, request_id: RequestId) -> Response {
+    operator_error_response(error, request_id)
 }
 
 fn requested_kind(

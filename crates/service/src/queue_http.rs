@@ -10,19 +10,29 @@ use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use open_compute_core::{AccountId, ErrorCode, PlatformError, QueueId, RequestId};
 use open_compute_storage::{
-    IdempotencyReservation, PlatformStorage, QUEUE_DEFAULT_MAX_BACKLOG_BYTES, QueueAvailability,
-    QueueConfig, QueueRepository, QueueState, RunningQueueMutation, SchedulerStore,
-    WorkerRepository,
+    CatalogCursor, CatalogDirection, CatalogSort, IdempotencyReservation, PlatformStorage,
+    QUEUE_DEFAULT_MAX_BACKLOG_BYTES, QueueAvailability, QueueConfig, QueueRepository, QueueState,
+    RunningQueueMutation, SchedulerStore, WorkerRepository, decode_catalog_cursor,
 };
+#[cfg(test)]
+use open_compute_storage::{CatalogCursorValue, encode_catalog_cursor};
 use open_compute_workers::{CreateQueueOutcome, CreateQueueRequest, QueueController};
 use queue_reconcile::{reconcile_running_mutations, resume_running_mutation};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::sync::Arc;
+
+#[derive(Debug)]
+struct QueueListQuery {
+    search: Option<String>,
+    cursor: Option<CatalogCursor>,
+    status: Option<QueueState>,
+    sort: CatalogSort,
+    direction: CatalogDirection,
+    limit: u16,
+}
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MAX_JSON_BODY: usize = 16 * 1024;
@@ -194,25 +204,28 @@ async fn list_queues(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
-    let (after, limit) = match parse_list_query(request.uri().query()) {
+    let query = match parse_list_query(request.uri().query()) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
     let storage = api.storage.clone();
     match tokio::task::spawn_blocking(move || {
-        QueueRepository::new(storage.db()).list(account_id, after, limit)
+        QueueRepository::new(storage.db()).list(
+            account_id,
+            query.search.as_deref(),
+            query.status,
+            query.sort,
+            query.direction,
+            query.cursor,
+            query.limit,
+        )
     })
     .await
     {
-        Ok(Ok(queues)) => {
-            let next_cursor = (u32::try_from(queues.len()).ok() == Some(limit))
-                .then(|| queues.last().map(queue_cursor))
-                .flatten();
-            json_response(
-                &serde_json::json!({ "queues": queues, "nextCursor": next_cursor }),
-                StatusCode::OK,
-            )
-        }
+        Ok(Ok(page)) => json_response(
+            &serde_json::json!({ "queues": page.items, "nextCursor": page.next_cursor }),
+            StatusCode::OK,
+        ),
         Ok(Err(error)) => error_response(error, request_id),
         Err(_) => error_response(internal(), request_id),
     }
@@ -556,11 +569,19 @@ fn mutation_response(
     }
 }
 
-fn parse_list_query(query: Option<&str>) -> Result<(Option<(i64, QueueId)>, u32), PlatformError> {
+fn parse_list_query(query: Option<&str>) -> Result<QueueListQuery, PlatformError> {
     let mut cursor = None;
-    let mut limit = 100_u32;
+    let mut search = None;
+    let mut status = None;
+    let mut sort = CatalogSort::UpdatedAt;
+    let mut direction = CatalogDirection::Desc;
+    let mut limit = 100_u16;
     let mut limit_seen = false;
     let mut cursor_seen = false;
+    let mut search_seen = false;
+    let mut status_seen = false;
+    let mut sort_seen = false;
+    let mut direction_seen = false;
     for pair in query
         .unwrap_or("")
         .split('&')
@@ -575,8 +596,24 @@ fn parse_list_query(query: Option<&str>) -> Result<(Option<(i64, QueueId)>, u32)
                 limit_seen = true;
             }
             "cursor" if !cursor_seen => {
-                cursor = Some(parse_cursor(value)?);
+                cursor = Some(decode_catalog_cursor(value).map_err(|_| invalid_query())?);
                 cursor_seen = true;
+            }
+            "search" if !search_seen => {
+                search = Some(value.to_string());
+                search_seen = true;
+            }
+            "status" if !status_seen => {
+                status = Some(QueueState::from_str(value).map_err(|_| invalid_query())?);
+                status_seen = true;
+            }
+            "sort" if !sort_seen => {
+                sort = CatalogSort::from_str(value).map_err(|_| invalid_query())?;
+                sort_seen = true;
+            }
+            "direction" if !direction_seen => {
+                direction = CatalogDirection::from_str(value).map_err(|_| invalid_query())?;
+                direction_seen = true;
             }
             _ => return Err(invalid_query()),
         }
@@ -584,20 +621,38 @@ fn parse_list_query(query: Option<&str>) -> Result<(Option<(i64, QueueId)>, u32)
     if limit == 0 || limit > 1000 {
         return Err(invalid_query());
     }
-    Ok((cursor, limit))
+    let search = search
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    Ok(QueueListQuery {
+        search,
+        cursor,
+        status,
+        sort,
+        direction,
+        limit,
+    })
 }
 
+#[cfg(test)]
 fn queue_cursor(queue: &open_compute_storage::QueueRecord) -> String {
-    URL_SAFE_NO_PAD.encode(format!("{}:{}", queue.created_at_ms, queue.id))
+    encode_catalog_cursor(&CatalogCursor {
+        sort: CatalogSort::CreatedAt,
+        direction: CatalogDirection::Asc,
+        value: CatalogCursorValue::Integer(queue.created_at_ms),
+        id: queue.id.to_string(),
+    })
 }
 
+#[cfg(test)]
 fn parse_cursor(value: &str) -> Result<(i64, QueueId), PlatformError> {
-    let decoded = URL_SAFE_NO_PAD.decode(value).map_err(|_| invalid_query())?;
-    let decoded = std::str::from_utf8(&decoded).map_err(|_| invalid_query())?;
-    let (created, id) = decoded.split_once(':').ok_or_else(invalid_query)?;
+    let cursor = decode_catalog_cursor(value).map_err(|_| invalid_query())?;
+    let CatalogCursorValue::Integer(created_at_ms) = cursor.value else {
+        return Err(invalid_query());
+    };
     Ok((
-        created.parse().map_err(|_| invalid_query())?,
-        QueueId::from_str(id).map_err(|_| invalid_query())?,
+        created_at_ms,
+        QueueId::from_str(&cursor.id).map_err(|_| invalid_query())?,
     ))
 }
 

@@ -3,6 +3,7 @@ use crate::health::HealthCoordinator;
 use crate::http;
 use crate::metrics::MetricsRegistry;
 use axum::body::to_bytes;
+use open_compute_core::SecretString;
 use open_compute_core::SystemClock;
 use open_compute_core::config::{MetricsConfig, StorageConfig};
 use open_compute_runtime::GenerationAuthRegistry;
@@ -84,8 +85,13 @@ pub(super) fn fixture() -> Fixture {
     .with_metrics(metrics.clone());
     let deletes = Arc::new(FakeDeleteTransport::default());
     api.transport = deletes.clone();
-    let state = HttpState::for_test(HealthCoordinator::new(), metrics, false, None)
-        .with_do_api(api.clone());
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics,
+        false,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_do_api(api.clone());
     Fixture {
         _temp: temp,
         router: http::admin_router(state),
@@ -103,6 +109,16 @@ pub(super) fn request(
     body: impl Into<Value>,
     key: Option<&str>,
 ) -> Request {
+    request_auth(method, uri, body, key, Some("admin-secret"))
+}
+
+pub(super) fn request_auth(
+    method: &str,
+    uri: &str,
+    body: impl Into<Value>,
+    key: Option<&str>,
+    token: Option<&str>,
+) -> Request {
     let body = body.into();
     let mut builder = Request::builder()
         .method(method)
@@ -110,6 +126,9 @@ pub(super) fn request(
         .header("content-type", "application/json");
     if let Some(key) = key {
         builder = builder.header(IDEMPOTENCY_HEADER, key);
+    }
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
     }
     builder.body(Body::from(body.to_string())).unwrap()
 }
@@ -126,7 +145,7 @@ pub(super) async fn create_namespace_fixture(
     class_name: &str,
 ) -> ResourceId {
     let collection = format!(
-        "/v1/accounts/{}/durable-objects/namespaces",
+        "/operator/api/v1/accounts/{}/durable-objects/namespaces",
         fixture.account
     );
     let (status, body) = json_response(

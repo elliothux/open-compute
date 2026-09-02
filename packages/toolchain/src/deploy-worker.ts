@@ -2,8 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { readAssetObject } from "./assets/scan.ts";
 import type { ScannedAssets } from "./assets/types.ts";
 import type { WorkerArtifact } from "./bundle-worker.ts";
-import { record } from "./project.ts";
 import type { WorkerProject } from "./project.ts";
+import {
+  createOperatorClient,
+  parseAccountId,
+  parseDeploymentUploadId,
+  parseSha256Digest,
+  parseWorkerId,
+} from "@open-compute/operator-sdk";
 
 /** Explicit destination and process-local credentials for one deployment. */
 export interface DeployOptions {
@@ -42,24 +48,6 @@ function identifier(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 }
 
-async function readJson(response: Response): Promise<unknown> {
-  if (!response.body) throw new Error("platform response has no JSON body");
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  try {
-    for (;;) {
-      const part = await reader.read();
-      if (part.done) break;
-      length += part.value.byteLength;
-      if (length > 1024 * 1024) throw new Error("platform response exceeds 1 MiB");
-      chunks.push(part.value);
-    }
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));
-  } catch { throw new Error("platform response JSON is invalid or exceeds 1 MiB"); }
-  finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-}
-
 /** Compile output enters the ordinary immutable deployment and promotion API. */
 export async function deployWorker(project: WorkerProject, artifact: WorkerArtifact, options: DeployOptions): Promise<WorkerDeployment> {
   return deployProject(project, artifact, undefined, options);
@@ -88,57 +76,52 @@ export async function deployProject(
     if (value === undefined || value.length === 0) throw new Error(`missing secret environment reference: ${reference.env}`);
     Object.defineProperty(secrets, name, { value, enumerable: true });
   }
-  const request = async (path: string, method = "GET", body?: RequestInit["body"],
-    extraHeaders?: Record<string, string>, mutationKey?: string): Promise<unknown> => {
-    const headers = new Headers(extraHeaders);
-    if (options.token !== undefined) headers.set("authorization", `Bearer ${options.token}`);
-    if (method === "POST") headers.set("idempotency-key", mutationKey ?? randomUUID());
-    let response: Response;
-    try {
-      response = await fetch(new URL(path, endpoint), {
-        method, headers, ...(body === undefined ? {} : { body }),
-        redirect: "error", signal: AbortSignal.timeout(120_000),
-      });
-    } catch { throw new Error("platform request failed; inspect platform state before retrying a mutation"); }
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => {});
-      throw new Error(`platform request failed (HTTP ${response.status})`);
-    }
-    return readJson(response);
-  };
+  const platformFetch: typeof fetch = (input, init) => fetch(input, {
+    ...init,
+    redirect: "error",
+    signal: init?.signal ?? AbortSignal.timeout(120_000),
+  });
+  const client = createOperatorClient({
+    baseUrl: new URL("/operator/api/v1/", endpoint),
+    getAccessToken: () => options.token ?? "",
+    fetch: platformFetch,
+  });
 
-  let account = options.accountId ?? project.accountId;
+  let account = options.accountId;
   if (account === undefined) {
-    const identity = await request("/v1/account");
-    if (!record(identity) || !identifier(identity.accountId)) throw new Error("invalid platform account response");
+    const identity = await client.system.account();
     account = identity.accountId;
   }
   if (!identifier(account)) throw new Error("invalid account ID");
-  const collection = `/v1/accounts/${account}/workers`;
-  const listed = await request(collection);
-  if (!record(listed) || !Array.isArray(listed.workers)) throw new Error("invalid Worker list response");
-  const workers: readonly unknown[] = listed.workers;
+  const parsedAccount = parseAccountId(account);
+  const listed = await client.workers.list({ accountId: parsedAccount });
+  const workers = listed.workers;
   const workersByName = new Map<string, string[]>();
   let workerId: string | undefined;
   for (const item of workers) {
-    if (!record(item) || !identifier(item.id) || item.accountId !== account || typeof item.name !== "string") throw new Error("invalid Worker list entry");
-    if (item.deletedAtMs === null) {
-      const named = workersByName.get(item.name) ?? [];
-      named.push(item.id);
-      workersByName.set(item.name, named);
-    }
-    if (item.name === project.name && item.deletedAtMs === null) {
+    if (item.deletedAtMs !== null && item.deletedAtMs !== undefined) continue;
+    const named = workersByName.get(item.name) ?? [];
+    named.push(item.id);
+    workersByName.set(item.name, named);
+    if (item.name === project.name) {
       if (workerId !== undefined) throw new Error("ambiguous Worker name");
       workerId = item.id;
     }
   }
   if (workerId === undefined) {
-    const created = await request(collection, "POST", JSON.stringify({ name: project.name }), { "content-type": "application/json" });
-    if (!record(created) || !record(created.worker) || !identifier(created.worker.id)
-        || created.worker.accountId !== account || created.worker.name !== project.name) throw new Error("invalid Worker creation response");
+    const created = await client.workers.create({
+      accountId: parsedAccount,
+      name: project.name,
+      idempotencyKey: randomUUID(),
+    });
     workerId = created.worker.id;
     workersByName.set(project.name, [workerId]);
   }
+  if (workerId === undefined) {
+    throw new Error("Worker resolution failed");
+  }
+  const resolvedWorkerId = workerId;
+  const parsedWorkerId = parseWorkerId(resolvedWorkerId);
   const services: Record<string, ResolvedService> = {};
   for (const [binding, declaration] of Object.entries(project.services)) {
     const targets = workersByName.get(declaration.service) ?? [];
@@ -169,33 +152,37 @@ export async function deployProject(
     promote: true,
   }).replace(/[^\x20-\x7e]/g, value => `\\u${value.charCodeAt(0).toString(16).padStart(4, "0")}`);
   if (metadata.length > 1024 * 1024) throw new Error("deployment metadata exceeds 1 MiB");
-  let result: unknown;
+  let result;
   if (assets === undefined) {
     if (artifact === undefined) throw new Error("Worker deployment is missing its bundle");
-    result = await request(`${collection}/${workerId}/deployments`, "POST", Buffer.from(artifact.bytes), {
-      "content-type": "application/octet-stream", "x-open-compute-deployment-metadata": metadata,
+    result = await client.workers.createDeployment({
+      accountId: parsedAccount,
+      workerId: parsedWorkerId,
+      bundle: Buffer.from(artifact.bytes),
+      metadata,
+      idempotencyKey: randomUUID(),
     });
   } else {
-    result = await deployAssets(request, collection, workerId, project, artifact, assets, secrets, services);
+    result = await deployAssets(client, parsedAccount, parsedWorkerId, project, artifact, assets, secrets, services);
   }
-  if (!record(result) || result.promoted !== true || !record(result.deployment)
-      || !identifier(result.deployment.id) || result.deployment.state !== "ready"
-      || result.deployment.workerId !== workerId) {
+  if (!result.promoted || result.deployment.state !== "ready" || result.deployment.workerId !== resolvedWorkerId) {
     throw new Error("platform did not confirm a ready, promoted deployment");
   }
-  const routeList = await request(`${collection}/${workerId}/routes`);
-  if (!record(routeList) || !Array.isArray(routeList.routes)) throw new Error("invalid Worker routes response");
-  const routes: readonly unknown[] = routeList.routes;
-  const defaults = routes.filter(route => record(route) && route.kind === "platform_path");
+  const routeList = await client.workers.listRoutes({
+    accountId: parsedAccount,
+    workerId: parsedWorkerId,
+  });
+  const defaults = routeList.routes.filter(route => route.kind === "platform_path");
   const route = defaults[0];
-  if (defaults.length !== 1 || !record(route) || route.workerId !== workerId || route.accountId !== account
-      || typeof route.pathPrefix !== "string" || !route.pathPrefix.startsWith("/") || route.pathPrefix.startsWith("//")) {
+  if (defaults.length !== 1 || route === undefined || route.workerId !== resolvedWorkerId
+      || route.accountId !== parsedAccount
+      || !route.pathPrefix.startsWith("/") || route.pathPrefix.startsWith("//")) {
     throw new Error("default Worker route is unavailable");
   }
   const url = new URL(route.pathPrefix, endpoint);
   if (url.origin !== endpoint.origin || url.search || url.hash) throw new Error("invalid default Worker route");
   return {
-    workerId,
+    workerId: resolvedWorkerId,
     deploymentId: result.deployment.id,
     url: url.href,
     ...(artifact === undefined ? {} : { sha256: artifact.sha256 }),
@@ -203,67 +190,60 @@ export async function deployProject(
 }
 
 async function deployAssets(
-  request: (path: string, method?: string, body?: RequestInit["body"],
-    headers?: Record<string, string>, mutationKey?: string) => Promise<unknown>,
-  collection: string,
-  workerId: string,
+  client: ReturnType<typeof createOperatorClient>,
+  accountId: ReturnType<typeof parseAccountId>,
+  workerId: ReturnType<typeof parseWorkerId>,
   project: WorkerProject,
   artifact: WorkerArtifact | undefined,
   assets: ScannedAssets,
   secrets: Record<string, string>,
   services: Record<string, ResolvedService>,
-): Promise<unknown> {
-  const createBody = JSON.stringify({
-    contentKind: artifact === undefined ? "assets_only" : "worker",
-    ...(artifact === undefined ? {} : { bundle: { sha256: artifact.sha256, size: artifact.bytes.byteLength } }),
+) {
+  const createBody = {
+    contentKind: artifact === undefined ? "assets_only" as const : "worker" as const,
+    ...(artifact === undefined ? {} : { bundle: { sha256: parseSha256Digest(artifact.sha256), size: artifact.bytes.byteLength } }),
     manifest: assets.manifest,
     routing: assets.routing,
+  };
+  const createKey = `oc-assets-${createHash("sha256").update(JSON.stringify(createBody)).digest("hex")}`;
+  const created = await client.workers.createDeploymentUpload({
+    accountId,
+    workerId,
+    body: createBody,
+    idempotencyKey: createKey,
   });
-  // This input-derived key survives a CLI process restart without storing credentials.
-  // The server scopes it to the account and Worker and rejects any fingerprint drift.
-  const createKey = `oc-assets-${createHash("sha256").update(createBody).digest("hex")}`;
-  const created = await request(
-    `${collection}/${workerId}/deployment-uploads`,
-    "POST",
-    createBody,
-    { "content-type": "application/json" },
-    createKey,
-  );
-  if (!record(created) || !identifier(created.id) || created.workerId !== workerId
-      || !Array.isArray(created.objects)) throw new Error("invalid deployment upload response");
-  const uploadId = created.id;
-  for (const raw of created.objects as readonly unknown[]) {
-    if (!record(raw) || typeof raw.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(raw.sha256)
-        || typeof raw.size !== "number" || !Number.isSafeInteger(raw.size) || raw.size < 0
-        || typeof raw.verified !== "boolean" || typeof raw.kind !== "string") {
-      throw new Error("invalid deployment upload inventory");
-    }
-    if (raw.verified) continue;
+  const uploadId = parseDeploymentUploadId(created.id);
+  for (const object of created.objects) {
+    if (object.verified) continue;
     let bytes: Uint8Array;
-    if (raw.kind === "bundle") {
-      if (!artifact || raw.sha256 !== artifact.sha256 || raw.size !== artifact.bytes.byteLength) {
+    if (object.kind === "bundle") {
+      if (!artifact || object.sha256 !== artifact.sha256 || object.size !== artifact.bytes.byteLength) {
         throw new Error("deployment upload bundle inventory changed");
       }
       bytes = artifact.bytes;
-    } else if (raw.kind === "asset_blob") {
-      const source = assets.objects.get(raw.sha256);
-      if (!source || source.size !== raw.size) throw new Error("deployment upload asset inventory changed");
+    } else if (object.kind === "asset_blob") {
+      const source = assets.objects.get(object.sha256);
+      if (!source || source.size !== object.size) throw new Error("deployment upload asset inventory changed");
       bytes = await readAssetObject(source);
-    } else if (raw.kind === "asset_manifest") {
-      // The server verifies and confirms the canonical manifest submitted at session creation.
+    } else if (object.kind === "asset_manifest") {
       throw new Error("platform did not confirm the submitted asset manifest");
-    } else throw new Error("invalid deployment upload object kind");
-    await request(
-      `${collection}/${workerId}/deployment-uploads/${uploadId}/objects/${raw.sha256}`,
-      "PUT",
-      Buffer.from(bytes),
-      { "content-type": "application/octet-stream", "content-length": String(bytes.byteLength) },
-    );
+    } else {
+      throw new Error("invalid deployment upload object kind");
+    }
+    await client.workers.putDeploymentUploadObject({
+      accountId,
+      workerId,
+      uploadId,
+      sha256: object.sha256,
+      body: Buffer.from(bytes),
+    });
   }
-  return request(
-    `${collection}/${workerId}/deployment-uploads/${uploadId}/finalize`,
-    "POST",
-    JSON.stringify({
+  return client.workers.finalizeDeploymentUpload({
+    accountId,
+    workerId,
+    uploadId,
+    idempotencyKey: `oc-assets-finalize-${created.id}`,
+    body: {
       ...(artifact === undefined ? {} : { mainModule: artifact.mainModule }),
       vars: project.vars,
       secrets,
@@ -275,8 +255,6 @@ async function deployAssets(
         versionMetadata: project.runtimeFeatures.versionMetadata,
       }),
       promote: true,
-    }),
-    { "content-type": "application/json" },
-    `oc-assets-finalize-${uploadId}`,
-  );
+    },
+  });
 }

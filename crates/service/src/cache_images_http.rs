@@ -1,17 +1,18 @@
 //! Authenticated operator controls for response-cache lifecycle and Images capacity.
 
-use crate::http::{HttpState, authorize};
+use crate::http::{HttpState, authorize, operator_error_response};
 use crate::images_backend::ImageBindingService;
 use crate::metrics::{CacheMetricOperation, MetricsRegistry};
 use crate::run::gc_worker_artifacts;
 use crate::snapshot_pins::SnapshotPins;
 use axum::extract::{Path, Request, State};
+#[cfg(test)]
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use open_compute_artifacts::ArtifactStore;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, WorkerId, WorkersConfig};
+use open_compute_core::{AccountId, ErrorCode, PlatformError, RequestId, WorkerId, WorkersConfig};
 use open_compute_storage::{CacheManager, PlatformStorage, WorkerRepository};
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -65,15 +66,36 @@ impl CacheImagesApiState {
 pub(crate) fn control_router() -> Router<HttpState> {
     Router::new()
         .route(
-            "/v1/operator/accounts/{account_id}/workers/{worker_id}/cache",
+            "/v1/accounts/{account_id}/workers/{worker_id}/cache",
             get(inspect_worker_cache),
         )
         .route(
-            "/v1/operator/accounts/{account_id}/workers/{worker_id}/cache/purge",
+            "/v1/accounts/{account_id}/workers/{worker_id}/cache/purge",
             post(purge_worker_cache),
         )
-        .route("/v1/operator/cache/gc", post(run_cache_gc))
-        .route("/v1/operator/images/capacity", get(inspect_images))
+        .route("/v1/cache", get(inspect_platform_cache))
+        .route("/v1/cache/gc", post(run_cache_gc))
+        .route("/v1/images/capacity", get(inspect_images))
+}
+
+async fn inspect_platform_cache(State(state): State<HttpState>, request: Request) -> Response {
+    let Some(api) = authorized_api(&state, &request) else {
+        return unavailable(&state, &request);
+    };
+    match api.cache.stats(now_ms()) {
+        Ok(stats) => {
+            api.metrics.set_response_cache_stats(stats);
+            Json(serde_json::json!({
+                "entries": stats.entries,
+                "bodyBytes": stats.body_bytes,
+                "metadataBytes": stats.metadata_bytes,
+                "activeRefreshes": stats.active_refreshes,
+                "openDatabases": stats.open_databases,
+            }))
+            .into_response()
+        }
+        Err(error) => operator_error_response(&error, request_id(&request)),
+    }
 }
 
 async fn inspect_worker_cache(
@@ -100,7 +122,7 @@ async fn inspect_worker_cache(
             }))
             .into_response()
         }
-        Err(error) => operator_error(&error),
+        Err(error) => operator_error_response(&error, request_id(&request)),
     }
 }
 
@@ -120,7 +142,7 @@ async fn purge_worker_cache(
         Ok(deleted) => {
             Json(serde_json::json!({ "success": true, "deleted": deleted })).into_response()
         }
-        Err(error) => operator_error(&error),
+        Err(error) => operator_error_response(&error, request_id(&request)),
     }
 }
 
@@ -138,7 +160,7 @@ async fn run_cache_gc(State(state): State<HttpState>, request: Request) -> Respo
     .await
     {
         Ok(deleted) => Json(serde_json::json!({ "deleted": deleted })).into_response(),
-        Err(error) => operator_error(&error),
+        Err(error) => operator_error_response(&error, request_id(&request)),
     }
 }
 
@@ -148,7 +170,7 @@ async fn inspect_images(State(state): State<HttpState>, request: Request) -> Res
     };
     match api.images.capacity() {
         Ok(capacity) => Json(capacity).into_response(),
-        Err(error) => operator_error(&error),
+        Err(error) => operator_error_response(&error, request_id(&request)),
     }
 }
 
@@ -173,28 +195,26 @@ fn authorized_api<'a>(
 }
 
 fn unavailable(state: &HttpState, request: &Request) -> Response {
-    if authorize(state, request) {
-        StatusCode::SERVICE_UNAVAILABLE.into_response()
+    let error = if authorize(state, request) {
+        PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "cache and Images operator authority is unavailable",
+        )
     } else {
-        StatusCode::UNAUTHORIZED.into_response()
-    }
+        PlatformError::new(
+            ErrorCode::AdminAuthRequired,
+            "admin authentication is required",
+        )
+    };
+    operator_error_response(&error, request_id(request))
 }
 
-fn operator_error(error: &PlatformError) -> Response {
-    let status = match error.code() {
-        ErrorCode::AccountNotFound | ErrorCode::WorkerNotFound => StatusCode::NOT_FOUND,
-        ErrorCode::WorkerDeleted => StatusCode::GONE,
-        ErrorCode::CacheCorrupt => StatusCode::INTERNAL_SERVER_ERROR,
-        ErrorCode::CacheUnavailable | ErrorCode::ArtifactUnavailable => {
-            StatusCode::SERVICE_UNAVAILABLE
-        }
-        _ => StatusCode::BAD_REQUEST,
-    };
-    (
-        status,
-        Json(serde_json::json!({ "code": error.code().as_str() })),
-    )
-        .into_response()
+fn request_id(request: &Request) -> RequestId {
+    request
+        .extensions()
+        .get::<RequestId>()
+        .copied()
+        .unwrap_or_else(RequestId::generate)
 }
 
 fn invalid() -> PlatformError {

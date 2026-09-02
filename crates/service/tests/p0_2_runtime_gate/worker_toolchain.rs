@@ -9,7 +9,12 @@ use open_compute_core::{AccountId, DeploymentId, WorkerId};
 use std::panic::AssertUnwindSafe;
 use std::process::Output;
 
-pub(super) async fn exercise(app: axum::Router, storage: Arc<PlatformStorage>, account: AccountId) {
+pub(super) async fn exercise(
+    app: axum::Router,
+    storage: Arc<PlatformStorage>,
+    account: AccountId,
+    admin_token: &str,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
@@ -21,7 +26,7 @@ pub(super) async fn exercise(app: axum::Router, storage: Arc<PlatformStorage>, a
             .await
             .unwrap();
     });
-    let outcome = AssertUnwindSafe(verify_project(&origin, storage, account))
+    let outcome = AssertUnwindSafe(verify_project(&origin, storage, account, admin_token))
         .catch_unwind()
         .await;
     let _ = stop_tx.send(());
@@ -31,7 +36,12 @@ pub(super) async fn exercise(app: axum::Router, storage: Arc<PlatformStorage>, a
     }
 }
 
-async fn verify_project(origin: &str, storage: Arc<PlatformStorage>, account: AccountId) {
+async fn verify_project(
+    origin: &str,
+    storage: Arc<PlatformStorage>,
+    account: AccountId,
+    admin_token: &str,
+) {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path();
     std::fs::write(project.join("package.json"), r#"{"type":"module"}"#).unwrap();
@@ -74,6 +84,7 @@ async fn verify_project(origin: &str, storage: Arc<PlatformStorage>, account: Ac
         project,
         &["build", "--out", "worker.bundle", "--json"],
         false,
+        admin_token,
     )
     .await;
     assert_success(&output);
@@ -85,11 +96,17 @@ async fn verify_project(origin: &str, storage: Arc<PlatformStorage>, account: Ac
         "lazy imports remain valid modules"
     );
     assert!(!String::from_utf8_lossy(&bytes).contains("typescript-fixture-secret"));
-    let duplicate = cli(project, &["build", "--out", "worker.bundle"], false).await;
+    let duplicate = cli(
+        project,
+        &["build", "--out", "worker.bundle"],
+        false,
+        admin_token,
+    )
+    .await;
     assert!(!duplicate.status.success());
     assert_eq!(std::fs::read(project.join("worker.bundle")).unwrap(), bytes);
 
-    let output = cli(project, &["run", "--json"], true).await;
+    let output = cli(project, &["run", "--json"], true, admin_token).await;
     assert_success(&output);
     let deployed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let worker: WorkerId = deployed["workerId"].as_str().unwrap().parse().unwrap();
@@ -116,7 +133,7 @@ async fn verify_project(origin: &str, storage: Arc<PlatformStorage>, account: Ac
         "export const answer: number = 'wrong';",
     )
     .unwrap();
-    let rejected = cli(project, &["run", "--json"], true).await;
+    let rejected = cli(project, &["run", "--json"], true, admin_token).await;
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("TypeScript validation failed"));
     assert_eq!(
@@ -136,7 +153,7 @@ async fn verify_project(origin: &str, storage: Arc<PlatformStorage>, account: Ac
         "export const answer: number = 43;",
     )
     .unwrap();
-    let output = cli(project, &["run", "--json"], true).await;
+    let output = cli(project, &["run", "--json"], true, admin_token).await;
     assert_success(&output);
     let replacement: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(replacement["workerId"], deployed["workerId"]);
@@ -150,7 +167,7 @@ async fn verify_project(origin: &str, storage: Arc<PlatformStorage>, account: Ac
     );
 }
 
-async fn cli(project: &Path, args: &[&str], with_secret: bool) -> Output {
+async fn cli(project: &Path, args: &[&str], with_secret: bool, admin_token: &str) -> Output {
     let bun = std::env::var_os("OPEN_COMPUTE_TEST_BUN").unwrap_or_else(|| "bun".into());
     let mut command = tokio::process::Command::new(bun);
     command
@@ -166,6 +183,7 @@ async fn cli(project: &Path, args: &[&str], with_secret: bool) -> Output {
             "OPEN_COMPUTE_TS_FIXTURE_SECRET",
             "typescript-fixture-secret",
         );
+        command.env("OPEN_COMPUTE_ADMIN_TOKEN", admin_token);
     }
     tokio::time::timeout(Duration::from_secs(120), command.output())
         .await

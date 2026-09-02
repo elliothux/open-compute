@@ -94,7 +94,7 @@ async fn operator_auth_stats_purge_gc_and_images_capacity_are_bounded() {
     .with_cache_images_api(api);
     let app = crate::http::admin_router(state);
     let base = format!(
-        "/v1/operator/accounts/{}/workers/{}/cache",
+        "/operator/api/v1/accounts/{}/workers/{}/cache",
         fixture.account, fixture.worker,
     );
 
@@ -108,7 +108,7 @@ async fn operator_auth_stats_purge_gc_and_images_capacity_are_bounded() {
         .clone()
         .oneshot(authorized(
             "GET",
-            "/v1/operator/accounts/not-an-account/workers/not-a-worker/cache",
+            "/operator/api/v1/accounts/not-an-account/workers/not-a-worker/cache",
         ))
         .await
         .unwrap();
@@ -118,7 +118,7 @@ async fn operator_auth_stats_purge_gc_and_images_capacity_are_bounded() {
         .oneshot(authorized(
             "GET",
             &format!(
-                "/v1/operator/accounts/{}/workers/{}/cache",
+                "/operator/api/v1/accounts/{}/workers/{}/cache",
                 AccountId::generate(),
                 WorkerId::generate(),
             ),
@@ -140,12 +140,12 @@ async fn operator_auth_stats_purge_gc_and_images_capacity_are_bounded() {
     assert_eq!(purged.status(), StatusCode::OK);
     let capacity = app
         .clone()
-        .oneshot(authorized("GET", "/v1/operator/images/capacity"))
+        .oneshot(authorized("GET", "/operator/api/v1/images/capacity"))
         .await
         .unwrap();
     assert_eq!(capacity.status(), StatusCode::OK);
     let gc = app
-        .oneshot(authorized("POST", "/v1/operator/cache/gc"))
+        .oneshot(authorized("POST", "/operator/api/v1/cache/gc"))
         .await
         .unwrap();
     assert_eq!(gc.status(), StatusCode::OK);
@@ -165,14 +165,14 @@ async fn operator_routes_are_unavailable_without_the_composed_p3_authority() {
     for (method, path) in [
         (
             "GET",
-            "/v1/operator/accounts/not-an-account/workers/not-a-worker/cache",
+            "/operator/api/v1/accounts/not-an-account/workers/not-a-worker/cache",
         ),
         (
             "POST",
-            "/v1/operator/accounts/not-an-account/workers/not-a-worker/cache/purge",
+            "/operator/api/v1/accounts/not-an-account/workers/not-a-worker/cache/purge",
         ),
-        ("POST", "/v1/operator/cache/gc"),
-        ("GET", "/v1/operator/images/capacity"),
+        ("POST", "/operator/api/v1/cache/gc"),
+        ("GET", "/operator/api/v1/images/capacity"),
     ] {
         let response = app.clone().oneshot(authorized(method, path)).await.unwrap();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
@@ -193,7 +193,10 @@ fn operator_error_mapping_is_stable_and_sanitized() {
         ),
         (ErrorCode::CacheProtocolError, StatusCode::BAD_REQUEST),
     ] {
-        let response = operator_error(&PlatformError::new(code, "secret detail"));
+        let response = operator_error_response(
+            &PlatformError::new(code, "sanitized detail"),
+            RequestId::generate(),
+        );
         assert_eq!(response.status(), status);
     }
     assert_eq!(invalid().code(), ErrorCode::CacheProtocolError);

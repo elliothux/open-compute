@@ -70,13 +70,14 @@ async fn operator_protocol_parsing_and_error_mapping_are_exact() {
             StatusCode::SERVICE_UNAVAILABLE,
         ),
     ] {
-        let response = scheduler_error(&PlatformError::new(code, "unsafe detail"));
+        let request_id = RequestId::generate();
+        let response = scheduler_error(&PlatformError::new(code, "unsafe detail"), request_id);
         assert_eq!(response.status(), status);
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["code"],
-            code.as_str()
-        );
+        let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+        assert_eq!(body["ok"], false);
+        assert_eq!(body["error"]["code"], code.as_str());
+        assert_eq!(body["error"]["requestId"], request_id.to_string());
     }
     assert_eq!(
         kind_not_enabled().code(),

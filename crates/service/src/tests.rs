@@ -78,7 +78,9 @@ async fn fake_cron_custom_event(
 fn write_config(dir: &Path, extra: &str) -> PathBuf {
     let data = dir.join("data");
     let key = dir.join("master.key");
+    let admin_auth = dir.join("admin-auth");
     fs::create_dir_all(&data).unwrap();
+    write_mode(&admin_auth, "test-admin-secret", 0o600);
     let s3 = if extra.contains("[s3]") {
         String::new()
     } else {
@@ -99,10 +101,11 @@ prefix = "system/"
 [server]
 public_bind = "127.0.0.1:0"
 admin_bind = "127.0.0.1:0"
+admin_auth = {{ file = "{admin_auth}" }}
 
 [storage]
-data_dir = "{}"
-master_key_file = "{}"
+data_dir = "{data_dir}"
+master_key_file = "{master_key_file}"
 {s3}
 [cache]
 max_bytes = 1048576
@@ -116,8 +119,9 @@ max_label_value_bytes = 64
 max_series = 1024
 {extra}
 "#,
-        data.display(),
-        key.display(),
+        data_dir = data.display(),
+        master_key_file = key.display(),
+        admin_auth = admin_auth.display(),
     );
     let path = dir.join("config.toml");
     fs::write(&path, toml).unwrap();
@@ -272,7 +276,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
         assert!(text.contains(if json { "config_check" } else { "CONFIG_OK" }));
     }
 
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let storage = open_compute_storage::PlatformStorage::bootstrap(
         &loaded.config.storage,
         &open_compute_core::SystemClock,
@@ -486,7 +490,7 @@ async fn config_check_has_no_side_effects() {
     let dir = TempDir::new().unwrap();
     let path = write_config(dir.path(), "");
     let before = snapshot(dir.path());
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     MetricsRegistry::validate_limits(&loaded.config.metrics).unwrap();
     let after = snapshot(dir.path());
     assert_eq!(before, after);
@@ -858,7 +862,7 @@ async fn liveness_ready_status_and_bounds() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let deployment_path = "/v1/accounts/acct_test/workers/wrk_test/deployments";
+    let deployment_path = "/operator/api/v1/accounts/acct_test/workers/wrk_test/deployments";
     let res = app
         .clone()
         .oneshot(
@@ -891,8 +895,7 @@ async fn liveness_ready_status_and_bounds() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let staged_upload_path =
-        "/v1/accounts/acct_test/workers/wrk_test/deployment-uploads/upload_test/objects/digest";
+    let staged_upload_path = "/operator/api/v1/accounts/acct_test/workers/wrk_test/deployment-uploads/upload_test/objects/digest";
     let res = app
         .clone()
         .oneshot(
@@ -926,7 +929,7 @@ async fn liveness_ready_status_and_bounds() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/accounts/acct_test/workers/wrk_test/deployment-uploads")
+                .uri("/operator/api/v1/accounts/acct_test/workers/wrk_test/deployment-uploads")
                 .header("content-length", 16 * 1024)
                 .body(Body::empty())
                 .unwrap(),
@@ -940,7 +943,9 @@ async fn liveness_ready_status_and_bounds() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/accounts/acct_test/workers/wrk_test/deployment-uploads-extra")
+                .uri(
+                    "/operator/api/v1/accounts/acct_test/workers/wrk_test/deployment-uploads-extra",
+                )
                 .header("content-length", 16 * 1024)
                 .body(Body::empty())
                 .unwrap(),
@@ -1003,7 +1008,7 @@ async fn liveness_ready_status_and_bounds() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/metrics")
+                .uri("/operator/metrics")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1044,7 +1049,7 @@ async fn admin_auth_and_separate_routers() {
     let res = public
         .oneshot(
             Request::builder()
-                .uri("/health/status")
+                .uri("/operator/api/v1/system/status")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1056,7 +1061,7 @@ async fn admin_auth_and_separate_routers() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/health/status")
+                .uri("/operator/api/v1/system/status")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1068,7 +1073,7 @@ async fn admin_auth_and_separate_routers() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/health/status")
+                .uri("/operator/api/v1/system/status")
                 .header("Authorization", "Bearer s3cret-token")
                 .header("x-forwarded-for", "1.1.1.1")
                 .body(Body::empty())
@@ -1086,7 +1091,7 @@ async fn admin_auth_and_separate_routers() {
     let res = admin
         .oneshot(
             Request::builder()
-                .uri("/health/status")
+                .uri("/operator/api/v1/system/status")
                 .header("Authorization", "Bearer wrong-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -1099,7 +1104,7 @@ async fn admin_auth_and_separate_routers() {
 #[tokio::test]
 async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     let (_dir, path, _mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
             &loaded.config.storage,
@@ -1127,7 +1132,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/v1/scheduler")
+                .uri("/operator/api/v1/scheduler")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1145,7 +1150,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     };
     let inspect = app
         .clone()
-        .oneshot(request("GET", "/v1/scheduler"))
+        .oneshot(request("GET", "/operator/api/v1/scheduler"))
         .await
         .unwrap();
     assert_eq!(inspect.status(), StatusCode::OK);
@@ -1170,7 +1175,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
 
     let operator_inspect = app
         .clone()
-        .oneshot(request("GET", "/v1/operator/queue-consumers"))
+        .oneshot(request("GET", "/operator/api/v1/queue-consumers"))
         .await
         .unwrap();
     assert_eq!(operator_inspect.status(), StatusCode::OK);
@@ -1179,7 +1184,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/operator/queue-consumers/not-an-id/pause")
+                .uri("/operator/api/v1/queue-consumers/not-an-id/pause")
                 .header("authorization", "Bearer scheduler-admin")
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"consumerGeneration":1}"#))
@@ -1227,7 +1232,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
 
     assert_eq!(
         app.clone()
-            .oneshot(request("POST", "/v1/scheduler/pause"))
+            .oneshot(request("POST", "/operator/api/v1/scheduler/pause"))
             .await
             .unwrap()
             .status(),
@@ -1236,7 +1241,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     assert!(scheduler.is_paused());
     assert_eq!(
         app.clone()
-            .oneshot(request("POST", "/v1/scheduler/resume"))
+            .oneshot(request("POST", "/operator/api/v1/scheduler/resume"))
             .await
             .unwrap()
             .status(),
@@ -1247,7 +1252,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         app.clone()
             .oneshot(request(
                 "POST",
-                "/v1/operator/scheduler/pause?kind=do_alarm"
+                "/operator/api/v1/scheduler/pause?kind=do_alarm"
             ))
             .await
             .unwrap()
@@ -1259,7 +1264,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
         app.clone()
             .oneshot(request(
                 "POST",
-                "/v1/operator/scheduler/resume?kind=do_alarm"
+                "/operator/api/v1/scheduler/resume?kind=do_alarm"
             ))
             .await
             .unwrap()
@@ -1268,7 +1273,10 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     );
     assert_eq!(
         app.clone()
-            .oneshot(request("POST", "/v1/operator/scheduler/pause?kind=queue"))
+            .oneshot(request(
+                "POST",
+                "/operator/api/v1/scheduler/pause?kind=queue"
+            ))
             .await
             .unwrap()
             .status(),
@@ -1277,7 +1285,10 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     assert!(scheduler.is_kind_paused(SchedulerKind::Queue).unwrap());
     assert_eq!(
         app.clone()
-            .oneshot(request("POST", "/v1/operator/scheduler/resume?kind=queue"))
+            .oneshot(request(
+                "POST",
+                "/operator/api/v1/scheduler/resume?kind=queue"
+            ))
             .await
             .unwrap()
             .status(),
@@ -1285,7 +1296,7 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     );
     let repair = app
         .clone()
-        .oneshot(request("POST", "/v1/scheduler/repair"))
+        .oneshot(request("POST", "/operator/api/v1/scheduler/repair"))
         .await
         .unwrap();
     assert_eq!(repair.status(), StatusCode::OK);
@@ -1300,13 +1311,13 @@ async fn scheduler_operator_routes_are_authenticated_bounded_and_stateful() {
     let unavailable = http::admin_router(test_state(HealthCoordinator::new(), None))
         .oneshot(
             Request::builder()
-                .uri("/v1/scheduler")
+                .uri("/operator/api/v1/scheduler")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(unavailable.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[test]
@@ -1545,7 +1556,7 @@ async fn default_doctor_does_not_mutate() {
     let wal = data.join("control.sqlite-wal");
     let shm = data.join("control.sqlite-shm");
     assert!(!wal.exists());
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert!(!wal.exists());
     assert!(!shm.exists());
@@ -1998,13 +2009,32 @@ fn content_snapshot(root: &Path) -> Vec<(String, u64, Option<SystemTime>, String
     out
 }
 
+const FIXTURE_S3_ACCESS_KEY_ID: &str = "AKIAEXAMPLEKEYID01";
+const FIXTURE_S3_SECRET_ACCESS_KEY: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+
+fn clear_fixture_s3_env_defaults(config: &mut open_compute_core::PlatformConfig) {
+    config.s3.normalize_implicit_env_defaults();
+}
+
+fn load_fixture_platform_config(path: &Path) -> crate::config_load::LoadedConfig {
+    let mut loaded = load_platform_config(path).unwrap();
+    clear_fixture_s3_env_defaults(&mut loaded.config);
+    loaded
+}
+
+fn resolve_fixture_s3_credentials(
+    config: &open_compute_core::S3Config,
+) -> open_compute_artifacts::S3Credentials {
+    open_compute_artifacts::resolve_s3_credentials(config).unwrap()
+}
+
 async fn initialized_doctor_fixture() -> (TempDir, PathBuf, open_compute_artifacts::MockS3) {
     let dir = TempDir::new().unwrap();
     let mock = open_compute_artifacts::MockS3::spawn("open-compute").await;
     let ak = dir.path().join("ak");
     let sk = dir.path().join("sk");
-    write_mode(&ak, "AKIAEXAMPLEKEYID01", 0o600);
-    write_mode(&sk, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", 0o600);
+    write_mode(&ak, FIXTURE_S3_ACCESS_KEY_ID, 0o600);
+    write_mode(&sk, FIXTURE_S3_SECRET_ACCESS_KEY, 0o600);
     let extra = format!(
         r#"
 [s3]
@@ -2026,7 +2056,7 @@ request_timeout_ms = 2000
         sk = sk.display(),
     );
     let path = write_config(dir.path(), &extra);
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let storage = open_compute_storage::PlatformStorage::bootstrap(
         &loaded.config.storage,
         &open_compute_core::SystemClock,
@@ -2048,7 +2078,7 @@ request_timeout_ms = 2000
 #[tokio::test]
 async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority() {
     let (dir, path, _mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let fresh_root = dir.path().join("fresh-schema-root");
     fs::create_dir(&fresh_root).unwrap();
     let mut fresh = loaded.clone();
@@ -2161,7 +2191,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         ErrorCode::ResourceReferenced
     );
     let (dir, path, _mock) = initialized_doctor_fixture().await;
-    let mut loaded = load_platform_config(&path).unwrap();
+    let mut loaded = load_fixture_platform_config(&path);
     let capabilities = crate::capabilities::platform_capabilities(&loaded.config).unwrap();
     assert!(capabilities.validate());
     assert!(
@@ -2325,10 +2355,10 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
 
     let admin_secret = dir.path().join("admin-auth-secret");
     write_mode(&admin_secret, "p1-support-admin-secret", 0o600);
-    loaded.config.server.admin_auth = Some(SecretReference {
+    loaded.config.server.admin_auth = SecretReference {
         env: None,
         file: Some(admin_secret),
-    });
+    };
     let admin_output = fs::canonicalize(dir.path())
         .unwrap()
         .join("admin-support.tar");
@@ -2455,7 +2485,7 @@ async fn initialized_worker_http_fixture() -> (
     open_compute_core::AccountId,
 ) {
     let (dir, path, mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
             &loaded.config.storage,
@@ -2464,7 +2494,7 @@ async fn initialized_worker_http_fixture() -> (
         .unwrap(),
     );
     let account = storage.identity().default_account_id;
-    let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
+    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
     let client = open_compute_artifacts::S3ArtifactClient::connect(
         &loaded.config.s3,
         &credentials,
@@ -2498,7 +2528,7 @@ async fn initialized_worker_http_fixture() -> (
 #[tokio::test]
 async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted_update() {
     let (_dir, path, _mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
             &loaded.config.storage,
@@ -2538,7 +2568,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             1_000_000,
         )
         .unwrap();
-    let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
+    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
     let client = open_compute_artifacts::S3ArtifactClient::connect(
         &loaded.config.s3,
         &credentials,
@@ -3319,82 +3349,110 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
     let worker = open_compute_core::WorkerId::generate();
     let deployment = open_compute_core::DeploymentId::generate();
     let malformed = [
-        ("POST", "/v1/accounts/bad/workers".to_owned()),
-        ("GET", "/v1/accounts/bad/workers".to_owned()),
-        ("GET", format!("/v1/accounts/{account}/workers/bad")),
-        ("DELETE", format!("/v1/accounts/{account}/workers/bad")),
-        (
-            "POST",
-            format!("/v1/accounts/{account}/workers/bad/deployments"),
-        ),
+        ("POST", "/operator/api/v1/accounts/bad/workers".to_owned()),
+        ("GET", "/operator/api/v1/accounts/bad/workers".to_owned()),
         (
             "GET",
-            format!("/v1/accounts/{account}/workers/bad/deployments"),
-        ),
-        (
-            "GET",
-            format!("/v1/accounts/{account}/workers/{worker}/deployments/bad"),
+            format!("/operator/api/v1/accounts/{account}/workers/bad"),
         ),
         (
             "DELETE",
-            format!("/v1/accounts/{account}/workers/{worker}/deployments/bad"),
+            format!("/operator/api/v1/accounts/{account}/workers/bad"),
         ),
         (
             "POST",
-            format!("/v1/accounts/{account}/workers/bad/promotions"),
+            format!("/operator/api/v1/accounts/{account}/workers/bad/deployments"),
         ),
         (
-            "POST",
-            format!("/v1/accounts/{account}/workers/bad/rollbacks"),
+            "GET",
+            format!("/operator/api/v1/accounts/{account}/workers/bad/deployments"),
         ),
-        ("POST", format!("/v1/accounts/{account}/workers/bad/routes")),
-        ("GET", format!("/v1/accounts/{account}/workers/bad/routes")),
+        (
+            "GET",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments/bad"),
+        ),
         (
             "DELETE",
-            format!("/v1/accounts/{account}/workers/bad/routes/route"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments/bad"),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/bad/promotions"),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/bad/rollbacks"),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/bad/routes"),
+        ),
+        (
+            "GET",
+            format!("/operator/api/v1/accounts/{account}/workers/bad/routes"),
+        ),
+        (
+            "DELETE",
+            format!("/operator/api/v1/accounts/{account}/workers/bad/routes/route"),
         ),
     ];
 
     let unauthorized = [
-        ("POST", format!("/v1/accounts/{account}/workers")),
-        ("GET", format!("/v1/accounts/{account}/workers")),
-        ("GET", format!("/v1/accounts/{account}/workers/{worker}")),
-        ("DELETE", format!("/v1/accounts/{account}/workers/{worker}")),
         (
             "POST",
-            format!("/v1/accounts/{account}/workers/{worker}/deployments"),
+            format!("/operator/api/v1/accounts/{account}/workers"),
         ),
         (
             "GET",
-            format!("/v1/accounts/{account}/workers/{worker}/deployments"),
+            format!("/operator/api/v1/accounts/{account}/workers"),
         ),
         (
             "GET",
-            format!("/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}"),
         ),
         (
             "DELETE",
-            format!("/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}"),
         ),
         (
             "POST",
-            format!("/v1/accounts/{account}/workers/{worker}/promotions"),
-        ),
-        (
-            "POST",
-            format!("/v1/accounts/{account}/workers/{worker}/rollbacks"),
-        ),
-        (
-            "POST",
-            format!("/v1/accounts/{account}/workers/{worker}/routes"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments"),
         ),
         (
             "GET",
-            format!("/v1/accounts/{account}/workers/{worker}/routes"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments"),
+        ),
+        (
+            "GET",
+            format!(
+                "/operator/api/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"
+            ),
         ),
         (
             "DELETE",
-            format!("/v1/accounts/{account}/workers/{worker}/routes/route"),
+            format!(
+                "/operator/api/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"
+            ),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/promotions"),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/rollbacks"),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/routes"),
+        ),
+        (
+            "GET",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/routes"),
+        ),
+        (
+            "DELETE",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/routes/route"),
         ),
     ];
     for (method, path) in unauthorized {
@@ -3428,31 +3486,39 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
     }
 
     let missing_key = [
-        ("POST", format!("/v1/accounts/{account}/workers")),
-        ("DELETE", format!("/v1/accounts/{account}/workers/{worker}")),
         (
             "POST",
-            format!("/v1/accounts/{account}/workers/{worker}/deployments"),
+            format!("/operator/api/v1/accounts/{account}/workers"),
         ),
         (
             "DELETE",
-            format!("/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}"),
         ),
         (
             "POST",
-            format!("/v1/accounts/{account}/workers/{worker}/promotions"),
-        ),
-        (
-            "POST",
-            format!("/v1/accounts/{account}/workers/{worker}/rollbacks"),
-        ),
-        (
-            "POST",
-            format!("/v1/accounts/{account}/workers/{worker}/routes"),
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/deployments"),
         ),
         (
             "DELETE",
-            format!("/v1/accounts/{account}/workers/{worker}/routes/route"),
+            format!(
+                "/operator/api/v1/accounts/{account}/workers/{worker}/deployments/{deployment}"
+            ),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/promotions"),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/rollbacks"),
+        ),
+        (
+            "POST",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/routes"),
+        ),
+        (
+            "DELETE",
+            format!("/operator/api/v1/accounts/{account}/workers/{worker}/routes/route"),
         ),
     ];
     for (method, path) in missing_key {
@@ -3472,10 +3538,10 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
     }
 
     for path in [
-        format!("/v1/accounts/{account}/workers"),
-        format!("/v1/accounts/{account}/workers/{worker}/promotions"),
-        format!("/v1/accounts/{account}/workers/{worker}/rollbacks"),
-        format!("/v1/accounts/{account}/workers/{worker}/routes"),
+        format!("/operator/api/v1/accounts/{account}/workers"),
+        format!("/operator/api/v1/accounts/{account}/workers/{worker}/promotions"),
+        format!("/operator/api/v1/accounts/{account}/workers/{worker}/rollbacks"),
+        format!("/operator/api/v1/accounts/{account}/workers/{worker}/routes"),
     ] {
         let response = app
             .clone()
@@ -3499,7 +3565,7 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker}/deployments"
+                    "/operator/api/v1/accounts/{account}/workers/{worker}/deployments"
                 ))
                 .header("authorization", "Bearer admin-token")
                 .header("idempotency-key", "test-key")
@@ -3515,7 +3581,7 @@ async fn worker_http_boundaries_reject_malformed_ids_keys_and_bodies() {
             Request::builder()
                 .method("POST")
                 .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker}/deployments"
+                    "/operator/api/v1/accounts/{account}/workers/{worker}/deployments"
                 ))
                 .header("authorization", "Bearer admin-token")
                 .header("idempotency-key", "too-large")
@@ -3563,7 +3629,7 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
     let (_dir, mock, state, account) = initialized_worker_http_fixture().await;
     let app = http::admin_router(state.clone());
     let auth = "Bearer admin-token";
-    let workers_path = format!("/v1/accounts/{account}/workers");
+    let workers_path = format!("/operator/api/v1/accounts/{account}/workers");
 
     let create = || {
         Request::builder()
@@ -3706,7 +3772,9 @@ async fn worker_http_crud_replay_and_runtime_failure_paths() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/v1/accounts/{missing_account}/workers"))
+                .uri(format!(
+                    "/operator/api/v1/accounts/{missing_account}/workers"
+                ))
                 .header("authorization", auth)
                 .header("idempotency-key", "worker-missing-account")
                 .body(Body::from(r#"{"name":"missing-account"}"#))
@@ -3888,7 +3956,7 @@ async fn initialized_basic_doctor_is_read_only_and_head_only() {
     let wal = data.join("control.sqlite-wal");
     let shm = data.join("control.sqlite-shm");
     assert!(!wal.exists());
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert_eq!(content_snapshot(&data), before);
     assert!(!wal.exists());
@@ -3903,7 +3971,7 @@ async fn initialized_basic_doctor_is_read_only_and_head_only() {
 #[tokio::test]
 async fn doctor_reports_key_mismatch_and_env_only_key() {
     let (dir, path, _mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let other = encode_master_key(&[7u8; 32]);
     write_mode(&loaded.config.storage.master_key_file, &other, 0o600);
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
@@ -3930,7 +3998,7 @@ async fn doctor_rejects_future_schema_and_sha256_symlink_and_corrupt_cache() {
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.pragma_update(None, "user_version", 99).unwrap();
     }
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert_eq!(check(&report, "sqlite").status, CheckStatus::Failed);
 
@@ -3939,7 +4007,7 @@ async fn doctor_rejects_future_schema_and_sha256_symlink_and_corrupt_cache() {
     let sha = cache.join("sha256");
     let _ = fs::remove_dir_all(&sha);
     std::os::unix::fs::symlink("/tmp", &sha).unwrap();
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert_eq!(
         check(&report, "cache_integrity").status,
@@ -3957,7 +4025,7 @@ async fn doctor_rejects_future_schema_and_sha256_symlink_and_corrupt_cache() {
     fs::write(&entry, b"corrupt-bytes").unwrap();
     let before_meta = fs::symlink_metadata(&entry).unwrap();
     let before_bytes = fs::read(&entry).unwrap();
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
     assert_eq!(
         check(&report, "cache_integrity").status,
@@ -3975,8 +4043,8 @@ async fn fail_after_stages_release_lock_and_ports() {
     let dir = TempDir::new().unwrap();
     let ak = dir.path().join("ak");
     let sk = dir.path().join("sk");
-    write_mode(&ak, "AKIAEXAMPLEKEYID01", 0o600);
-    write_mode(&sk, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", 0o600);
+    write_mode(&ak, FIXTURE_S3_ACCESS_KEY_ID, 0o600);
+    write_mode(&sk, FIXTURE_S3_SECRET_ACCESS_KEY, 0o600);
     let extra = format!(
         r#"
 [s3]
@@ -3998,7 +4066,7 @@ request_timeout_ms = 2000
         sk.display()
     );
     let path = write_config(dir.path(), &extra);
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     for stage in [
         FailAfter::Config,
         FailAfter::Storage,
@@ -4067,8 +4135,8 @@ kill_timeout_ms = 2000
 "#;
     let ak = dir.path().join("ak");
     let sk = dir.path().join("sk");
-    write_mode(&ak, "AKIAEXAMPLEKEYID01", 0o600);
-    write_mode(&sk, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", 0o600);
+    write_mode(&ak, FIXTURE_S3_ACCESS_KEY_ID, 0o600);
+    write_mode(&sk, FIXTURE_S3_SECRET_ACCESS_KEY, 0o600);
     let s3 = format!(
         r#"
 [s3]
@@ -4090,7 +4158,7 @@ request_timeout_ms = 5000
         sk.display()
     );
     let path = write_config(dir.path(), &format!("{s3}\n{extra}"));
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     assert!(
         loaded
             .config
@@ -4113,7 +4181,7 @@ request_timeout_ms = 5000
 #[tokio::test]
 async fn doctor_skips_db_when_platform_lock_is_held() {
     let (dir, path, mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let _storage = open_compute_storage::PlatformStorage::bootstrap(
         &loaded.config.storage,
         &open_compute_core::SystemClock,
@@ -4140,7 +4208,7 @@ async fn doctor_skips_db_when_platform_lock_is_held() {
 #[tokio::test]
 async fn doctor_reports_limits_space_and_full_prerequisite_failures() {
     let (dir, path, _mock) = initialized_doctor_fixture().await;
-    let mut loaded = load_platform_config(&path).unwrap();
+    let mut loaded = load_fixture_platform_config(&path);
     loaded.config.metrics.max_series = 1;
     loaded.config.storage.free_space_hard_bytes = u64::MAX;
     loaded.config.storage.free_space_soft_bytes = u64::MAX;
@@ -4148,7 +4216,7 @@ async fn doctor_reports_limits_space_and_full_prerequisite_failures() {
     assert_eq!(check(&report, "config").status, CheckStatus::Failed);
     assert_eq!(check(&report, "free_space").status, CheckStatus::Failed);
 
-    let mut loaded = load_platform_config(&path).unwrap();
+    let mut loaded = load_fixture_platform_config(&path);
     loaded.config.storage.free_space_hard_bytes = 0;
     loaded.config.storage.free_space_soft_bytes = u64::MAX;
     let report = doctor_report(&loaded, DoctorMode::Basic).await;
@@ -4170,7 +4238,7 @@ async fn doctor_reports_limits_space_and_full_prerequisite_failures() {
 #[tokio::test]
 async fn full_doctor_reports_s3_canary_failure_without_leaking_objects() {
     let (dir, path, mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     mock.set_fault(open_compute_artifacts::Fault::Permission);
     let report = doctor_report(&loaded, DoctorMode::Full).await;
     assert_eq!(
@@ -4185,7 +4253,7 @@ async fn full_doctor_reports_s3_canary_failure_without_leaking_objects() {
 #[tokio::test]
 async fn run_startup_failure_matrix_releases_owned_resources() {
     let (dir, path, mock) = initialized_doctor_fixture().await;
-    let base = load_platform_config(&path).unwrap();
+    let base = load_fixture_platform_config(&path);
 
     let mut loaded = base.clone();
     loaded.config.metrics.max_series = 1;
@@ -4285,7 +4353,7 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
     );
 
     open_compute_storage::PlatformStorage::bootstrap(
-        &load_platform_config(&path).unwrap().config.storage,
+        &load_fixture_platform_config(&path).config.storage,
         &open_compute_core::SystemClock,
     )
     .expect("all startup failures released the data-dir lock");
@@ -4294,7 +4362,7 @@ async fn run_startup_failure_matrix_releases_owned_resources() {
 #[tokio::test]
 async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
     let (_dir, path, mock) = initialized_doctor_fixture().await;
-    let mut loaded = load_platform_config(&path).unwrap();
+    let mut loaded = load_fixture_platform_config(&path);
     loaded.config.runtime.startup_timeout_ms = 60_000;
     loaded.config.runtime.shutdown_grace_ms = 1_000;
     loaded.config.runtime.kill_timeout_ms = 2_000;
@@ -4386,7 +4454,7 @@ async fn run_real_workerd_with_separate_admin_listener_and_maintenance_tick() {
 #[tokio::test]
 async fn worker_artifact_gc_skips_when_final_reference_snapshot_fails() {
     let (_dir, path, mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
             &loaded.config.storage,
@@ -4394,7 +4462,7 @@ async fn worker_artifact_gc_skips_when_final_reference_snapshot_fails() {
         )
         .unwrap(),
     );
-    let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
+    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
     let client = open_compute_artifacts::S3ArtifactClient::connect(
         &loaded.config.s3,
         &credentials,
@@ -4431,7 +4499,7 @@ async fn worker_artifact_gc_skips_when_final_reference_snapshot_fails() {
 #[tokio::test]
 async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
     let (_dir, path, mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
             &loaded.config.storage,
@@ -4439,7 +4507,7 @@ async fn reused_old_artifact_commit_precedes_gc_reference_snapshot() {
         )
         .unwrap(),
     );
-    let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
+    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
     let client = open_compute_artifacts::S3ArtifactClient::connect(
         &loaded.config.s3,
         &credentials,
@@ -4629,7 +4697,7 @@ async fn kv_maintenance_gc_skip_checkpoint_and_corruption_isolation() {
 #[tokio::test]
 async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
     let (_dir, path, mock) = initialized_doctor_fixture().await;
-    let mut loaded = load_platform_config(&path).unwrap();
+    let mut loaded = load_fixture_platform_config(&path);
     loaded.config.runtime.startup_timeout_ms = 60_000;
     loaded.config.runtime.shutdown_grace_ms = 1_000;
     loaded.config.runtime.kill_timeout_ms = 2_000;
@@ -4647,7 +4715,7 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
                 Ok(mut stream) => {
                     stream
                         .write_all(
-                            b"GET /health/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                            b"GET /operator/api/v1/system/status HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer test-admin-secret\r\nConnection: close\r\n\r\n",
                         )
                         .await
                         .unwrap();

@@ -9,11 +9,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use open_compute_core::{
-    AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, SchedulerClock as _,
-    SystemSchedulerClock, WorkflowId, WorkflowInstanceId,
+    AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, ResourceState,
+    SchedulerClock as _, SystemSchedulerClock, WorkflowId, WorkflowInstanceId,
 };
 use open_compute_storage::{
-    DeploymentState, PlatformStorage, SchedulerStore, WorkflowRepository, WorkflowVersion,
+    CatalogCursor, CatalogDirection, CatalogSort, DeploymentState, PlatformStorage, SchedulerStore,
+    WorkflowRepository, WorkflowVersion, decode_catalog_cursor,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -131,8 +132,8 @@ pub fn control_router() -> Router<HttpState> {
             "/v1/accounts/{account}/workflows/{definition}/instances/{instance}/steps",
             get(list_steps),
         )
-        .route("/v1/operator/workflows", get(inspect_pool))
-        .route("/v1/operator/workflows/reconcile", post(reconcile))
+        .route("/v1/workflows", get(inspect_pool))
+        .route("/v1/workflows/reconcile", post(reconcile))
 }
 
 #[derive(Deserialize)]
@@ -188,18 +189,35 @@ async fn list_definitions(
         Ok(value) => value,
         Err(error) => return failure(&error, id),
     };
-    let (after, limit) = match page::<WorkflowId>(&request) {
+    let query = match parse_definitions_query(request.uri().query()) {
         Ok(value) => value,
         Err(error) => return failure(&error, id),
     };
-    response(
-        tokio::task::spawn_blocking(move || {
-            WorkflowRepository::new(api.storage.db()).definitions(account, after, limit)
-        })
-        .await,
-        id,
-        StatusCode::OK,
-    )
+    let storage = api.storage.clone();
+    match tokio::task::spawn_blocking(move || {
+        WorkflowRepository::new(storage.db()).definitions(
+            account,
+            query.search.as_deref(),
+            query.status,
+            query.sort,
+            query.direction,
+            query.cursor,
+            query.limit,
+        )
+    })
+    .await
+    {
+        Ok(Ok(page)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "workflows": page.items,
+                "nextCursor": page.next_cursor,
+            })),
+        )
+            .into_response(),
+        Ok(Err(error)) => failure(&error, id),
+        Err(_) => failure(&unavailable(), id),
+    }
 }
 
 async fn inspect_definition(
@@ -476,6 +494,82 @@ fn ids(account: &str, definition: &str) -> Result<(AccountId, WorkflowId), Platf
     Ok((parse(account)?, parse(definition)?))
 }
 
+struct DefinitionsQuery {
+    search: Option<String>,
+    cursor: Option<CatalogCursor>,
+    status: Option<ResourceState>,
+    sort: CatalogSort,
+    direction: CatalogDirection,
+    limit: u16,
+}
+
+fn parse_definitions_query(query: Option<&str>) -> Result<DefinitionsQuery, PlatformError> {
+    let mut cursor = None;
+    let mut search = None;
+    let mut status = None;
+    let mut sort = CatalogSort::UpdatedAt;
+    let mut direction = CatalogDirection::Desc;
+    let mut limit = 100_u16;
+    let mut cursor_seen = false;
+    let mut search_seen = false;
+    let mut limit_seen = false;
+    let mut status_seen = false;
+    let mut sort_seen = false;
+    let mut direction_seen = false;
+    for pair in query
+        .unwrap_or("")
+        .split('&')
+        .filter(|part| !part.is_empty())
+    {
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| error(ErrorCode::ConfigInvalid))?;
+        match key {
+            "cursor" if !cursor_seen => {
+                cursor = Some(
+                    decode_catalog_cursor(value).map_err(|_| error(ErrorCode::ConfigInvalid))?,
+                );
+                cursor_seen = true;
+            }
+            "search" if !search_seen => {
+                search = Some(value.to_string());
+                search_seen = true;
+            }
+            "limit" if !limit_seen => {
+                limit = value.parse().map_err(|_| error(ErrorCode::ConfigInvalid))?;
+                limit_seen = true;
+            }
+            "status" if !status_seen => {
+                status = Some(value.parse().map_err(|_| error(ErrorCode::ConfigInvalid))?);
+                status_seen = true;
+            }
+            "sort" if !sort_seen => {
+                sort = value.parse().map_err(|_| error(ErrorCode::ConfigInvalid))?;
+                sort_seen = true;
+            }
+            "direction" if !direction_seen => {
+                direction = value.parse().map_err(|_| error(ErrorCode::ConfigInvalid))?;
+                direction_seen = true;
+            }
+            _ => return Err(error(ErrorCode::ConfigInvalid)),
+        }
+    }
+    if limit == 0 || limit > 1000 {
+        return Err(error(ErrorCode::LimitInvalid));
+    }
+    let search = search
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    Ok(DefinitionsQuery {
+        search,
+        cursor,
+        status,
+        sort,
+        direction,
+        limit,
+    })
+}
+
 fn page<T: std::str::FromStr>(request: &Request) -> Result<(Option<T>, u32), PlatformError> {
     let mut after = None;
     let mut limit = None;
@@ -571,7 +665,14 @@ fn failure(error: &PlatformError, id: RequestId) -> Response {
     };
     let mut response = (
         status,
-        Json(serde_json::json!({"code":error.code().as_str(),"requestId":id})),
+        Json(serde_json::json!({
+            "ok": false,
+            "error": {
+                "code": error.code().as_str(),
+                "message": "Workflow control request failed",
+                "requestId": id,
+            }
+        })),
     )
         .into_response();
     response

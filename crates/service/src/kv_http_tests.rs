@@ -1,6 +1,7 @@
 use super::*;
 use crate::health::HealthCoordinator;
 use crate::http;
+use crate::kv_backend::SqliteKvBindingExecutor;
 use crate::metrics::MetricsRegistry;
 use axum::body::to_bytes;
 use axum::http::Request;
@@ -74,10 +75,15 @@ request_timeout_ms = 500
     let credentials = resolve_s3_credentials_with(&s3, &env).unwrap();
     let client = S3ArtifactClient::connect(&s3, &credentials, 512 * 1024).unwrap();
     let pins = ResourcePins::new();
+    let executor = Arc::new(SqliteKvBindingExecutor::new(
+        storage.clone(),
+        Arc::new(SystemClock),
+    ));
     let api = KvApiState::new(
         storage.clone(),
         ArtifactStore::new(client),
         pins.clone(),
+        executor,
         KvConfig {
             namespace_quota_bytes: 256 * 1024 * 1024,
             ..KvConfig::default()
@@ -88,8 +94,13 @@ request_timeout_ms = 500
     assert!(format!("{api:?}").contains("KvApiState"));
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
-    let state =
-        HttpState::for_test(HealthCoordinator::new(), metrics, false, None).with_kv_api(api);
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics,
+        false,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_kv_api(api);
     Fixture {
         _temp: temp,
         _mock: mock,
@@ -102,12 +113,25 @@ request_timeout_ms = 500
 
 #[allow(clippy::needless_pass_by_value)]
 fn request(method: &str, uri: &str, body: Value, key: Option<&str>) -> Request<Body> {
+    request_auth(method, uri, &body, key, Some("admin-secret"))
+}
+
+fn request_auth(
+    method: &str,
+    uri: &str,
+    body: &Value,
+    key: Option<&str>,
+    token: Option<&str>,
+) -> Request<Body> {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json");
     if let Some(key) = key {
         builder = builder.header(IDEMPOTENCY_HEADER, key);
+    }
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
     }
     builder
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
@@ -121,7 +145,10 @@ async fn response_json(response: Response) -> (StatusCode, Value) {
 }
 
 async fn create_namespace(fixture: &Fixture, name: &str, key: &str) -> ResourceId {
-    let uri = format!("/v1/accounts/{}/kv/namespaces", fixture.account);
+    let uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces",
+        fixture.account
+    );
     let (status, body) = response_json(
         fixture
             .router
@@ -138,7 +165,10 @@ async fn create_namespace(fixture: &Fixture, name: &str, key: &str) -> ResourceI
 #[tokio::test]
 async fn namespace_control_crud_replays_and_fences_pinned_delete() {
     let fixture = fixture().await;
-    let uri = format!("/v1/accounts/{}/kv/namespaces", fixture.account);
+    let uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces",
+        fixture.account
+    );
     let resource = create_namespace(&fixture, "cache", "create-cache").await;
 
     let replay = fixture
@@ -254,7 +284,7 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
         .unwrap();
 
     let backup_uri = format!(
-        "/v1/accounts/{}/kv/namespaces/{source}/backups",
+        "/operator/api/v1/accounts/{}/kv/namespaces/{source}/backups",
         fixture.account
     );
     let (status, backup_body) = response_json(
@@ -290,7 +320,7 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(replayed_backup["backup"]["id"], backup_id);
 
-    let list_uri = format!("/v1/accounts/{}/kv/backups", fixture.account);
+    let list_uri = format!("/operator/api/v1/accounts/{}/kv/backups", fixture.account);
     let (status, backups) = response_json(
         fixture
             .router
@@ -304,7 +334,10 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
     assert_eq!(backups["backups"].as_array().unwrap().len(), 1);
     assert!(!backups.to_string().contains("objectKey"));
 
-    let source_uri = format!("/v1/accounts/{}/kv/namespaces/{source}", fixture.account);
+    let source_uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces/{source}",
+        fixture.account
+    );
     assert_eq!(
         fixture
             .router
@@ -321,7 +354,10 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
         StatusCode::ACCEPTED
     );
 
-    let restore_uri = format!("/v1/accounts/{}/kv/namespaces:restore", fixture.account);
+    let restore_uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces:restore",
+        fixture.account
+    );
     let first = fixture.router.clone().oneshot(request(
         "POST",
         &restore_uri,
@@ -438,13 +474,16 @@ async fn online_backup_restore_and_retention_round_trip_namespace_data() {
 #[tokio::test]
 async fn control_validation_and_s3_failure_are_sanitized() {
     let fixture = fixture().await;
-    let uri = format!("/v1/accounts/{}/kv/namespaces", fixture.account);
+    let uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces",
+        fixture.account
+    );
     for request in [
         request("POST", &uri, json!({"name": "missing-key"}), None),
         request("POST", &uri, json!({"unknown": true}), Some("invalid-body")),
         request(
             "POST",
-            "/v1/accounts/invalid/kv/namespaces",
+            "/operator/api/v1/accounts/invalid/kv/namespaces",
             json!({"name": "x"}),
             Some("x"),
         ),
@@ -464,7 +503,7 @@ async fn control_validation_and_s3_failure_are_sanitized() {
     let source = create_namespace(&fixture, "s3-failure", "create-s3-failure").await;
     fixture._mock.set_fault(Fault::ServerError);
     let backup_uri = format!(
-        "/v1/accounts/{}/kv/namespaces/{source}/backups",
+        "/operator/api/v1/accounts/{}/kv/namespaces/{source}/backups",
         fixture.account
     );
     let (status, body) = response_json(
@@ -527,14 +566,17 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
         false,
         None,
     ));
-    let valid_uri = format!("/v1/accounts/{}/kv/namespaces", fixture.account);
+    let valid_uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces",
+        fixture.account
+    );
     assert_eq!(
         no_api
-            .oneshot(request("GET", &valid_uri, Value::Null, None))
+            .oneshot(request_auth("GET", &valid_uri, &Value::Null, None, None))
             .await
             .unwrap()
             .status(),
-        StatusCode::NOT_FOUND
+        StatusCode::UNAUTHORIZED
     );
     let protected = http::admin_router(HttpState::for_test(
         HealthCoordinator::new(),
@@ -544,7 +586,7 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
     ));
     assert_eq!(
         protected
-            .oneshot(request("GET", &valid_uri, Value::Null, None))
+            .oneshot(request_auth("GET", &valid_uri, &Value::Null, None, None))
             .await
             .unwrap()
             .status(),
@@ -558,11 +600,12 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
     ));
     assert_eq!(
         protected_create
-            .oneshot(request(
+            .oneshot(request_auth(
                 "POST",
                 &valid_uri,
-                json!({"name": "x"}),
+                &json!({"name": "x"}),
                 Some("unauthorized-create"),
+                None,
             ))
             .await
             .unwrap()
@@ -589,59 +632,82 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
     let invalid_requests = [
         request(
             "GET",
-            "/v1/accounts/invalid/kv/namespaces",
+            "/operator/api/v1/accounts/invalid/kv/namespaces",
             Value::Null,
             None,
         ),
         request(
             "GET",
-            &format!("/v1/accounts/{}/kv/namespaces/invalid", fixture.account),
+            &format!(
+                "/operator/api/v1/accounts/{}/kv/namespaces/invalid",
+                fixture.account
+            ),
             Value::Null,
             None,
         ),
         request(
             "GET",
-            &format!("/v1/accounts/{}/kv/namespaces/{missing}", fixture.account),
+            &format!(
+                "/operator/api/v1/accounts/{}/kv/namespaces/{missing}",
+                fixture.account
+            ),
             Value::Null,
             None,
         ),
         request(
             "PATCH",
-            &format!("/v1/accounts/{}/kv/namespaces/invalid", fixture.account),
+            &format!(
+                "/operator/api/v1/accounts/{}/kv/namespaces/invalid",
+                fixture.account
+            ),
             json!({"name": "x"}),
             None,
         ),
         request(
             "DELETE",
-            &format!("/v1/accounts/{}/kv/namespaces/{missing}", fixture.account),
+            &format!(
+                "/operator/api/v1/accounts/{}/kv/namespaces/{missing}",
+                fixture.account
+            ),
             Value::Null,
             None,
         ),
         request(
             "POST",
             &format!(
-                "/v1/accounts/{}/kv/namespaces/invalid/backups",
+                "/operator/api/v1/accounts/{}/kv/namespaces/invalid/backups",
                 fixture.account
             ),
             Value::Null,
             Some("bad-resource"),
         ),
-        request("GET", "/v1/accounts/invalid/kv/backups", Value::Null, None),
+        request(
+            "GET",
+            "/operator/api/v1/accounts/invalid/kv/backups",
+            Value::Null,
+            None,
+        ),
         request(
             "POST",
-            "/v1/accounts/invalid/kv/namespaces:restore",
+            "/operator/api/v1/accounts/invalid/kv/namespaces:restore",
             json!({"backupId": "missing", "newName": "x"}),
             Some("bad-account"),
         ),
         request(
             "POST",
-            &format!("/v1/accounts/{}/kv/namespaces:restore", fixture.account),
+            &format!(
+                "/operator/api/v1/accounts/{}/kv/namespaces:restore",
+                fixture.account
+            ),
             json!({"unknown": true}),
             Some("bad-restore-body"),
         ),
         request(
             "DELETE",
-            &format!("/v1/accounts/{}/kv/backups/missing", fixture.account),
+            &format!(
+                "/operator/api/v1/accounts/{}/kv/backups/missing",
+                fixture.account
+            ),
             Value::Null,
             None,
         ),
@@ -660,7 +726,10 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
         ));
     }
 
-    let restore_uri = format!("/v1/accounts/{}/kv/namespaces:restore", fixture.account);
+    let restore_uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces:restore",
+        fixture.account
+    );
     assert_eq!(
         fixture
             .router
@@ -699,7 +768,7 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
     );
 
     let backup_uri = format!(
-        "/v1/accounts/{}/kv/namespaces/{source}/backups",
+        "/operator/api/v1/accounts/{}/kv/namespaces/{source}/backups",
         fixture.account
     );
     let (_, backup) = response_json(
@@ -757,4 +826,189 @@ async fn control_auth_not_found_restore_and_error_mapping_boundaries() {
         hash_file(fixture._temp.path()).unwrap_err().code(),
         ErrorCode::Internal
     );
+}
+
+#[tokio::test]
+async fn operator_value_put_get_and_delete_round_trip() {
+    let fixture = fixture().await;
+    let resource = create_namespace(&fixture, "values", "create-values").await;
+    let value_uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces/{resource}/values/hello",
+        fixture.account
+    );
+
+    assert_eq!(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "PUT",
+                &value_uri,
+                json!({"value": "world", "metadata": {"source": "operator"}, "expirationTtl": 60}),
+                Some("put-hello"),
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    let (status, body) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &value_uri, Value::Null, None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["value"], "world");
+
+    let keys_uri = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces/{resource}/keys?prefix=h&limit=1",
+        fixture.account
+    );
+    let (status, keys) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &keys_uri, Value::Null, None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(keys["keys"][0]["name"], "hello");
+    assert_eq!(keys["keys"][0]["metadata"]["source"], "operator");
+
+    assert_eq!(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "DELETE",
+                &value_uri,
+                Value::Null,
+                Some("delete-hello")
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    let (status, body) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &value_uri, Value::Null, None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["value"], Value::Null);
+
+    assert!(operator_kv_value_put_path(&value_uri));
+    assert!(!operator_kv_value_put_path(
+        "/operator/api/v1/accounts/x/kv/namespaces/y/values/"
+    ));
+}
+
+#[tokio::test]
+async fn operator_namespace_catalog_filters_sorts_and_paginates_deterministically() {
+    let fixture = fixture().await;
+    for (name, key) in [
+        ("alpha", "catalog-alpha"),
+        ("beta", "catalog-beta"),
+        ("gamma", "catalog-gamma"),
+    ] {
+        create_namespace(&fixture, name, key).await;
+    }
+    let base = format!(
+        "/operator/api/v1/accounts/{}/kv/namespaces",
+        fixture.account
+    );
+    let (status, first) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{base}?sort=name&direction=asc&limit=1"),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["namespaces"][0]["resource"]["name"], "alpha");
+    assert_eq!(first["listComplete"], false);
+    let cursor = first["cursor"].as_str().unwrap();
+
+    let (status, second) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{base}?sort=name&direction=asc&limit=1&cursor={cursor}"),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["namespaces"][0]["resource"]["name"], "beta");
+
+    for query in [
+        "search=alpha&status=ready&sort=createdAt&direction=desc&limit=2",
+        "search=%20%20&sort=updatedAt&direction=asc",
+    ] {
+        assert_eq!(
+            fixture
+                .router
+                .clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("{base}?{query}"),
+                    Value::Null,
+                    None,
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK,
+            "query={query}"
+        );
+    }
+    for query in [
+        "unknown=1".to_owned(),
+        "sort=invalid".to_owned(),
+        "direction=invalid".to_owned(),
+        "cursor=not-base64".to_owned(),
+        format!("sort=createdAt&direction=asc&cursor={cursor}"),
+    ] {
+        assert_eq!(
+            fixture
+                .router
+                .clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("{base}?{query}"),
+                    Value::Null,
+                    None,
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "query={query}"
+        );
+    }
 }

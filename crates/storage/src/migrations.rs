@@ -85,6 +85,11 @@ const MIGRATIONS: &[ControlMigration] = &[
         sql: include_str!("../migrations/014_cache_images.sql"),
         checksum: &MIGRATION_014_SHA256,
     },
+    ControlMigration {
+        name: "015_system_owned_workers",
+        sql: include_str!("../migrations/015_system_owned_workers.sql"),
+        checksum: &MIGRATION_015_SHA256,
+    },
 ];
 const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -420,6 +425,9 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
     }
     if version >= 14 {
         tables.extend(["deployment_cache_policies", "deployment_builtin_bindings"]);
+    }
+    if version >= 15 {
+        tables.push("system_owned_deployments");
     }
     for table in tables {
         let sql: String = tx

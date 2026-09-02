@@ -426,9 +426,11 @@ async fn complete_reserved_finalize(
         .await;
     drop(staged_bundle);
     match outcome? {
-        CreateDeploymentOutcome::Applied(result) => {
-            serde_json::to_vec(&result).map_err(|_| internal())
-        }
+        CreateDeploymentOutcome::Applied(result) => serde_json::to_vec(&serde_json::json!({
+            "deployment": result.deployment.to_api_json(),
+            "promoted": result.promoted,
+        }))
+        .map_err(|_| internal()),
         CreateDeploymentOutcome::Replay(bytes) => Ok(bytes),
     }
 }

@@ -1779,7 +1779,7 @@ P5.0 不保留 disposable production POC；通过的纯算法/contract fixture �
 - quotas/admission/fairness/deadline；
 - health/metrics/doctor/support bundle/operator endpoints；
 - full snapshot/restore/S3 pin/retention；
-- fuzz、crash matrix、coverage、timing-three、cross-platform release qualification；
+- fuzz、crash matrix、coverage、最终单轮 Gate、cross-platform release qualification；
 - 更新 capabilities、deviations、README 和总架构文档。
 
 ### P5.7：Xberg 文档解析
@@ -1887,7 +1887,7 @@ P5 只有在以下全部完成后才能归档：
 - P5.7 advertised rich format 均有固定公开 fixture、parser child 隔离和多语言 retrieval 证据；
 - Cloudflare differential 验证 API shape、限制、mutation/filter/retrieval 高风险行为；
 - exact search benchmark 支撑公开单机 quota，或条件式 ANN 已单独 Go；
-- no-default-features、Rust 1.98、dependency boundaries、coverage 和最终 timing-three Gate 通过；
+- no-default-features、Rust 1.98、dependency boundaries、coverage 和最终单轮 Gate 通过；
 - capability catalog、deviation reference、operator docs、single-binary/snapshot docs 和总架构同步；
 - 文档移入 `docs/implemented/` 并附实际 revision、输入、case count、coverage、Gate report 和已接受限制。
 

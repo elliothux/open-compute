@@ -151,7 +151,7 @@ impl Fixture {
         )
     }
     fn collection(&self) -> String {
-        format!("/v1/accounts/{}/workflows", self.account)
+        format!("/operator/api/v1/accounts/{}/workflows", self.account)
     }
 }
 
@@ -165,16 +165,17 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
     assert_eq!(status, StatusCode::CREATED);
     let definition: WorkflowId = created["id"].as_str().unwrap().parse().unwrap();
     let detail = format!("{collection}/{definition}");
-    assert_eq!(
-        f.request("POST", &collection, serde_json::json!({"name":"orders"}))
-            .await
-            .0,
-        StatusCode::CONFLICT
-    );
+    let (conflict_status, conflict) = f
+        .request("POST", &collection, serde_json::json!({"name":"orders"}))
+        .await;
+    assert_eq!(conflict_status, StatusCode::CONFLICT);
+    assert_eq!(conflict["ok"], false);
+    assert_eq!(conflict["error"]["code"], "WORKFLOW_NAME_CONFLICT");
+    assert!(conflict["error"]["requestId"].is_string());
     assert_eq!(
         f.request("GET", &collection, serde_json::Value::Null)
             .await
-            .1
+            .1["workflows"]
             .as_array()
             .unwrap()
             .len(),
@@ -210,7 +211,7 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
     assert_eq!(
         f.request(
             "POST",
-            "/v1/operator/workflows/reconcile",
+            "/operator/api/v1/workflows/reconcile",
             serde_json::Value::Null
         )
         .await
@@ -266,7 +267,7 @@ async fn workflow_control_catalog_validation_recovery_and_inspection() {
         serde_json::json!([])
     );
     assert_eq!(
-        f.request("GET", "/v1/operator/workflows", serde_json::Value::Null)
+        f.request("GET", "/operator/api/v1/workflows", serde_json::Value::Null)
             .await
             .1["queued"],
         1
@@ -366,16 +367,20 @@ async fn workflow_operator_rejects_untrusted_scope_pagination_and_bodies() {
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
-        f.request("GET", "/v1/accounts/bad/workflows", serde_json::Value::Null)
-            .await
-            .0,
+        f.request(
+            "GET",
+            "/operator/api/v1/accounts/bad/workflows",
+            serde_json::Value::Null
+        )
+        .await
+        .0,
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
         f.request(
             "GET",
             &format!(
-                "/v1/accounts/{}/workflows/{}",
+                "/operator/api/v1/accounts/{}/workflows/{}",
                 AccountId::generate(),
                 definition.id
             ),
@@ -400,7 +405,7 @@ async fn workflow_operator_rejects_untrusted_scope_pagination_and_bodies() {
         .clone()
         .oneshot(
             axum::http::Request::builder()
-                .uri("/v1/operator/workflows")
+                .uri("/operator/api/v1/workflows")
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )
@@ -411,13 +416,13 @@ async fn workflow_operator_rejects_untrusted_scope_pagination_and_bodies() {
     let unavailable = crate::http::admin_router(state)
         .oneshot(
             axum::http::Request::builder()
-                .uri("/v1/operator/workflows")
+                .uri("/operator/api/v1/workflows")
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(unavailable.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
         failure(
             &error(ErrorCode::WorkflowStateQuotaExceeded),

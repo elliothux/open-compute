@@ -1,8 +1,12 @@
 //! Durable KV product rows in `control.sqlite`.
 
-use crate::{ControlDb, ResourceRecord};
+use crate::catalog_page::{CatalogColumns, build_catalog_sql, record_catalog_cursor};
+use crate::{
+    CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, ResourceRecord,
+    normalize_catalog_limit, search_as_resource_id,
+};
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId, ResourceState};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, params, params_from_iter};
 use serde::Serialize;
 use std::str::FromStr;
 
@@ -231,6 +235,80 @@ impl<'a> KvNamespaceRepository<'a> {
                 records.push(row.map_err(|_| invariant())?);
             }
             Ok(records)
+        })
+    }
+
+    /// List one bounded, filtered, and sorted page of live namespaces.
+    #[allow(clippy::too_many_arguments)]
+    pub fn list_page(
+        &self,
+        account_id: AccountId,
+        search: Option<&str>,
+        status: Option<ResourceState>,
+        sort: CatalogSort,
+        direction: CatalogDirection,
+        after: Option<CatalogCursor>,
+        limit: u16,
+    ) -> Result<CatalogListPage<KvNamespaceRecord>, PlatformError> {
+        let limit = normalize_catalog_limit(limit);
+        let fetch = u32::from(limit).saturating_add(1);
+        let search = search.map(str::trim).filter(|value| !value.is_empty());
+        let exact_id = search.and_then(search_as_resource_id);
+        let search_needle = if exact_id.is_some() {
+            None
+        } else {
+            search.map(str::to_lowercase)
+        };
+        let query = build_catalog_sql(
+            "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+                    r.availability_code, r.spec_generation, r.driver_schema_version,
+                    r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
+                    k.storage_key, k.schema_version, k.quota_bytes,
+                    k.last_opened_at_ms, k.last_quick_check_ms, k.last_backup_at_ms,
+                    k.restore_backup_id
+             FROM resources r JOIN kv_namespaces k ON k.resource_id = r.id
+             WHERE r.account_id = ? AND r.kind = 'kv_namespace' AND r.state != 'tombstoned'",
+            CatalogColumns {
+                id: "r.id",
+                name: "r.name",
+                state: "r.state",
+                created_at: "r.created_at_ms",
+                updated_at: "r.updated_at_ms",
+            },
+            account_id.to_string(),
+            search_needle,
+            exact_id.map(|id| id.to_string()),
+            status.map(|value| value.as_str().to_string()),
+            sort,
+            direction,
+            after,
+            fetch,
+        )?;
+        self.db.with_read(|conn| {
+            let mut statement = conn.prepare(&query.text).map_err(|_| invariant())?;
+            let rows = statement
+                .query_map(params_from_iter(query.values), map_namespace)
+                .map_err(|_| invariant())?;
+            let mut records = collect_namespace_rows(rows)?;
+            let next_cursor = if records.len() > usize::from(limit) {
+                records.pop();
+                records.last().map(|record| {
+                    record_catalog_cursor(
+                        sort,
+                        direction,
+                        &record.resource.name,
+                        record.resource.created_at_ms,
+                        record.resource.updated_at_ms,
+                        &record.resource.id.to_string(),
+                    )
+                })
+            } else {
+                None
+            };
+            Ok(CatalogListPage {
+                items: records,
+                next_cursor,
+            })
         })
     }
 
@@ -570,6 +648,19 @@ fn map_backup(row: &rusqlite::Row<'_>) -> rusqlite::Result<KvBackupRecord> {
         completed_at_ms: row.get(8)?,
         error_code: row.get(9)?,
     })
+}
+
+fn collect_namespace_rows(
+    rows: rusqlite::MappedRows<
+        '_,
+        impl FnMut(&rusqlite::Row<'_>) -> Result<KvNamespaceRecord, rusqlite::Error>,
+    >,
+) -> Result<Vec<KvNamespaceRecord>, PlatformError> {
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row.map_err(|_| invariant())?);
+    }
+    Ok(records)
 }
 
 fn invariant() -> PlatformError {

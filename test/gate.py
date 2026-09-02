@@ -58,6 +58,8 @@ CARGO_TARGETS = {
     'workflow-recovery': ('open-compute-service', 'workflow_recovery_gate', False),
     'p2-exit': ('open-compute-service', 'p2_exit_gate', False),
     'p3-assets': ('open-compute-service', 'p3_assets_gate', False),
+    'dashboard': ('open-compute-service', 'dashboard_gate', False),
+    'operator-sdk': ('open-compute-service', 'operator_sdk_gate', False),
     'p3-services-hard': ('open-compute-service', 'p3_services_hard', False),
     'p3-services-product': ('open-compute-service', 'p3_services_product', False),
     'p3-services-events': ('open-compute-service', 'p3_services_events', False),
@@ -75,7 +77,7 @@ TYPED_TARGETS = {
 TARGETS = {**CARGO_TARGETS, **TYPED_TARGETS}
 P3_PRODUCT_TARGETS = [
     'p3-assets', 'p3-services-hard', 'p3-services-product', 'p3-services-events',
-    'p3-services-recovery', 'p3-cache-images',
+    'p3-services-recovery', 'p3-cache-images', 'dashboard', 'operator-sdk',
 ]
 GROUPS = {
     'p0': [name for name in CARGO_TARGETS if name.startswith('p0-')],
@@ -399,6 +401,7 @@ def build_targets(targets, directory, workspace):
         result = subprocess.run(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=errors, text=True)
     expected = {(target.package_id, target.name, target.kind): name
                 for name, target in cargo_targets.items()}
+    coverage_executables = []
     with (directory / 'build.jsonl').open('x') as output:
         output.write(result.stdout)
     if result.returncode:
@@ -407,6 +410,9 @@ def build_targets(targets, directory, workspace):
         raise RuntimeError(f'build failed; see {errors_path}')
     for line in result.stdout.splitlines():
         item = json.loads(line)
+        if (item.get('reason') == 'compiler-artifact' and item.get('executable')
+                and item.get('package_id', '').startswith(f'path+file://{ROOT}/crates/')):
+            coverage_executables.append(Path(item['executable']))
         if item.get('reason') == 'compiler-artifact' and item.get('executable') and item['profile']['test']:
             # `cargo test --all-targets` still emits ordinary binaries in the test
             # profile even when their Cargo target explicitly has `test = false`.
@@ -420,6 +426,19 @@ def build_targets(targets, directory, workspace):
     missing = cargo_targets.keys() - artifacts.keys()
     if missing:
         raise RuntimeError(f'Cargo did not produce selected Gate executables: {missing}')
+    if os.environ.get('CARGO_LLVM_COV'):
+        target_dir = Path(os.environ['CARGO_LLVM_COV_TARGET_DIR']).resolve()
+        object_dir = target_dir / 'current-objects'
+        if object_dir.is_symlink() or object_dir.exists() and not object_dir.is_dir():
+            raise RuntimeError(f'coverage object path is not an owned directory: {object_dir}')
+        object_dir.mkdir(mode=0o700, exist_ok=True)
+        for entry in object_dir.iterdir():
+            if entry.is_symlink() or not entry.is_file():
+                raise RuntimeError(f'unexpected coverage object entry: {entry}')
+            entry.unlink()
+        for index, executable in enumerate(sorted(set(coverage_executables))):
+            destination = object_dir / f'{index:03d}-{executable.name}'
+            os.link(executable, destination)
     return artifacts, {'invocations': 1, 'seconds': time.monotonic() - start,
                        'executables': {name: digest(Path(artifacts[name])) for name in cargo_targets},
                        'typed_targets': typed_inputs}

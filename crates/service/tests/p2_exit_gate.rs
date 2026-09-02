@@ -215,7 +215,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         &client,
         admin,
         &format!(
-            "/v1/accounts/{}/workflows/{}/versions",
+            "/operator/api/v1/accounts/{}/workflows/{}/versions",
             fixture.account, fixture.definition
         ),
         json!({"deploymentId":fixture.future,"className":"Flow"}),
@@ -419,13 +419,18 @@ fn grant(database: &Connection) -> Option<(WorkflowFence, WorkflowStepAttempt)> 
 }
 
 async fn request(client: &Client, address: SocketAddr, path: &str, body: Value) -> Value {
-    let request = Request::builder()
+    let mut builder = Request::builder()
         .method("POST")
         .uri(format!("http://{address}{path}"))
         .header("host", "workflow.example")
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
+        .header("content-type", "application/json");
+    if path.starts_with("/operator/api/") {
+        builder = builder.header(
+            "authorization",
+            format!("Bearer {}", platform_process::ADMIN_TOKEN),
+        );
+    }
+    let request = builder.body(Body::from(body.to_string())).unwrap();
     let response = tokio::time::timeout(Duration::from_secs(10), client.request(request))
         .await
         .unwrap()

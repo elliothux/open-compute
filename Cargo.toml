@@ -44,7 +44,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["raw_value"] }
 sha2 = "0.10.9"
 thiserror = "2.0.17"
-axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "tokio"] }
+axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "query", "tokio"] }
 hyper = { version = "1.7.0", features = ["client", "http1"] }
 hyper-util = { version = "0.1.16", features = ["client", "client-legacy", "http1", "tokio"] }
 http-body-util = "0.1.3"

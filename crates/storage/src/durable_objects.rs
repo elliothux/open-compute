@@ -3,12 +3,17 @@
 //! Namespace and object transactions remain together because they share one SQLite authority
 //! boundary and must be audited as a single generation-fencing protocol.
 
-use crate::{BindingRepository, PlatformStorage, ResourceRecord, ResourceRepository};
+use crate::catalog_page::{CatalogColumns, build_catalog_sql, record_catalog_cursor};
+use crate::{
+    BindingRepository, CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort,
+    PlatformStorage, ResourceRecord, ResourceRepository, normalize_catalog_limit,
+    search_as_resource_id,
+};
 use open_compute_core::{
     AccountId, BindingId, BindingKind, DeploymentId, DurableObjectId, DurableObjectState,
     ErrorCode, PlatformError, ResourceId, ResourceState, WorkerId, durable_object_namespace_prefix,
 };
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, params, params_from_iter};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
@@ -54,6 +59,37 @@ pub struct DurableObjectRecord {
     pub updated_at_ms: i64,
     /// Tombstone time.
     pub deleted_at_ms: Option<i64>,
+}
+
+/// One bounded page of object registry rows.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurableObjectListPage {
+    /// Rows selected for this page in deterministic order.
+    pub objects: Vec<DurableObjectRecord>,
+    /// Opaque cursor for the next page when more rows remain.
+    pub next_cursor: Option<String>,
+}
+
+/// Encode one list cursor from the last row returned on a page.
+#[must_use]
+pub fn encode_object_list_cursor(record: &DurableObjectRecord) -> String {
+    format!("{}:{}", record.object_id, record.generation)
+}
+
+/// Decode an opaque object-list cursor into its SQL sort key.
+pub fn decode_object_list_cursor(cursor: &str) -> Result<(DurableObjectId, u64), PlatformError> {
+    let (object, generation) = cursor.rsplit_once(':').ok_or_else(invalid_list_cursor)?;
+    if object.is_empty() || generation.is_empty() {
+        return Err(invalid_list_cursor());
+    }
+    let object_id = DurableObjectId::from_str(object).map_err(|_| invalid_list_cursor())?;
+    let generation = generation
+        .parse::<u64>()
+        .map_err(|_| invalid_list_cursor())?;
+    if generation == 0 {
+        return Err(invalid_list_cursor());
+    }
+    Ok((object_id, generation))
 }
 
 /// Trusted metadata returned only to the private system-Worker router.
@@ -266,6 +302,79 @@ impl<'a> DurableObjectRepository<'a> {
                 Ok(namespace_record(resource, product))
             })
             .collect()
+    }
+
+    /// List one bounded, filtered, and sorted page of namespace resources.
+    #[allow(clippy::too_many_arguments)]
+    pub fn list_namespaces_page(
+        &self,
+        account_id: AccountId,
+        search: Option<&str>,
+        status: Option<ResourceState>,
+        sort: CatalogSort,
+        direction: CatalogDirection,
+        after: Option<CatalogCursor>,
+        limit: u16,
+    ) -> Result<CatalogListPage<DurableObjectNamespaceRecord>, PlatformError> {
+        let limit = normalize_catalog_limit(limit);
+        let fetch = u32::from(limit).saturating_add(1);
+        let search = search.map(str::trim).filter(|value| !value.is_empty());
+        let exact_id = search.and_then(search_as_resource_id);
+        let search_needle = if exact_id.is_some() {
+            None
+        } else {
+            search.map(str::to_lowercase)
+        };
+        let query = build_catalog_sql(
+            "SELECT r.id, r.account_id, r.kind, r.name, r.state, r.availability,
+                    r.availability_code, r.spec_generation, r.driver_schema_version,
+                    r.created_at_ms, r.updated_at_ms, r.deleted_at_ms,
+                    n.owner_worker_id, n.class_name, n.do_storage_id,
+                    n.namespace_storage_key, n.schema_version, n.created_at_ms
+             FROM resources r JOIN do_namespaces n ON n.resource_id = r.id
+             WHERE r.account_id = ? AND r.kind = 'do_namespace' AND r.state != 'tombstoned'",
+            CatalogColumns {
+                id: "r.id",
+                name: "r.name",
+                state: "r.state",
+                created_at: "r.created_at_ms",
+                updated_at: "r.updated_at_ms",
+            },
+            account_id.to_string(),
+            search_needle,
+            exact_id.map(|id| id.to_string()),
+            status.map(|value| value.as_str().to_string()),
+            sort,
+            direction,
+            after,
+            fetch,
+        )?;
+        self.storage.db().with_read(|conn| {
+            let mut statement = conn.prepare(&query.text).map_err(|_| db_error())?;
+            let rows = statement
+                .query_map(params_from_iter(query.values), map_namespace_list_row)
+                .map_err(|_| db_error())?;
+            let mut records = collect_namespace_list_rows(rows)?;
+            let next_cursor = if records.len() > usize::from(limit) {
+                records.pop();
+                records.last().map(|record| {
+                    record_catalog_cursor(
+                        sort,
+                        direction,
+                        &record.resource.name,
+                        record.resource.created_at_ms,
+                        record.resource.updated_at_ms,
+                        &record.resource.id.to_string(),
+                    )
+                })
+            } else {
+                None
+            };
+            Ok(CatalogListPage {
+                items: records,
+                next_cursor,
+            })
+        })
     }
 
     /// Return the namespace-local facade prefix and secret key.
@@ -544,6 +653,106 @@ impl<'a> DurableObjectRepository<'a> {
         })
     }
 
+    /// List one bounded page of object generations in deterministic order.
+    pub fn list_objects_page(
+        &self,
+        account_id: AccountId,
+        namespace_id: ResourceId,
+        after: Option<(DurableObjectId, u64)>,
+        limit: u16,
+    ) -> Result<DurableObjectListPage, PlatformError> {
+        if limit == 0 {
+            return Err(invariant());
+        }
+        self.get_namespace(account_id, namespace_id)?;
+        let fetch = u32::from(limit).saturating_add(1);
+        self.storage.db().with_read(|conn| {
+            let mut objects = if let Some((after_id, after_generation)) = after {
+                let mut statement = conn
+                    .prepare(
+                        "SELECT namespace_resource_id, object_id, generation, state,
+                                created_at_ms, updated_at_ms, deleted_at_ms
+                         FROM do_objects
+                         WHERE namespace_resource_id = ?1
+                           AND (object_id > ?2 OR (object_id = ?2 AND generation > ?3))
+                         ORDER BY object_id, generation
+                         LIMIT ?4",
+                    )
+                    .map_err(|_| db_error())?;
+                let rows = statement
+                    .query_map(
+                        params![
+                            namespace_id.to_string(),
+                            after_id.to_string(),
+                            i64::try_from(after_generation).map_err(|_| invariant())?,
+                            fetch,
+                        ],
+                        map_object,
+                    )
+                    .map_err(|_| db_error())?;
+                collect_rows(rows)?
+            } else {
+                let mut statement = conn
+                    .prepare(
+                        "SELECT namespace_resource_id, object_id, generation, state,
+                                created_at_ms, updated_at_ms, deleted_at_ms
+                         FROM do_objects
+                         WHERE namespace_resource_id = ?1
+                         ORDER BY object_id, generation
+                         LIMIT ?2",
+                    )
+                    .map_err(|_| db_error())?;
+                let rows = statement
+                    .query_map(params![namespace_id.to_string(), fetch], map_object)
+                    .map_err(|_| db_error())?;
+                collect_rows(rows)?
+            };
+            let next_cursor = if objects.len() > usize::from(limit) {
+                objects.pop();
+                objects.last().map(encode_object_list_cursor)
+            } else {
+                None
+            };
+            Ok(DurableObjectListPage {
+                objects,
+                next_cursor,
+            })
+        })
+    }
+
+    /// Read the latest registry generation for one exact object identity.
+    pub fn get_latest_object(
+        &self,
+        account_id: AccountId,
+        namespace_id: ResourceId,
+        object_id: DurableObjectId,
+    ) -> Result<DurableObjectRecord, PlatformError> {
+        self.get_namespace(account_id, namespace_id)?;
+        if !object_id.belongs_to(namespace_id) {
+            return Err(PlatformError::new(
+                ErrorCode::DoIdInvalid,
+                "object identity is invalid",
+            ));
+        }
+        self.storage.db().with_read(|conn| {
+            conn.query_row(
+                "SELECT namespace_resource_id, object_id, generation, state,
+                        created_at_ms, updated_at_ms, deleted_at_ms
+                 FROM do_objects
+                 WHERE namespace_resource_id = ?1 AND object_id = ?2
+                 ORDER BY generation DESC
+                 LIMIT 1",
+                params![namespace_id.to_string(), object_id.to_string()],
+                map_object,
+            )
+            .optional()
+            .map_err(|_| db_error())?
+            .ok_or_else(|| {
+                PlatformError::new(ErrorCode::ResourceNotFound, "Durable Object was not found")
+            })
+        })
+    }
+
     /// Fence one live object before the native facet is deleted.
     pub fn begin_object_delete(
         &self,
@@ -754,6 +963,35 @@ impl<'a> DurableObjectRepository<'a> {
 
 type NamespaceProduct = (WorkerId, String, String, String, u32, i64);
 
+fn collect_namespace_list_rows(
+    rows: rusqlite::MappedRows<
+        '_,
+        impl FnMut(&rusqlite::Row<'_>) -> Result<DurableObjectNamespaceRecord, rusqlite::Error>,
+    >,
+) -> Result<Vec<DurableObjectNamespaceRecord>, PlatformError> {
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row.map_err(|_| db_error())?);
+    }
+    Ok(records)
+}
+
+fn map_namespace_list_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<DurableObjectNamespaceRecord> {
+    let worker: String = row.get(12)?;
+    let schema: i64 = row.get(16)?;
+    Ok(DurableObjectNamespaceRecord {
+        resource: crate::resources::map_resource_offset(row, 0)?,
+        owner_worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        class_name: row.get(13)?,
+        do_storage_id: row.get(14)?,
+        namespace_storage_key: row.get(15)?,
+        schema_version: u32::try_from(schema).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        created_at_ms: row.get(17)?,
+    })
+}
+
 fn namespace_record(
     resource: ResourceRecord,
     product: NamespaceProduct,
@@ -962,6 +1200,10 @@ fn invariant() -> PlatformError {
         ErrorCode::ResourceInvariantViolation,
         "Durable Object authority invariant failed",
     )
+}
+
+fn invalid_list_cursor() -> PlatformError {
+    PlatformError::new(ErrorCode::ConfigInvalid, "object list cursor is invalid")
 }
 
 fn db_error() -> PlatformError {

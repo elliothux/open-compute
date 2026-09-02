@@ -361,7 +361,7 @@ pub(super) fn seal_object_ssec(
     ))
 }
 
-pub(super) fn open_object_ssec(
+pub(crate) fn open_object_ssec(
     storage: &PlatformStorage,
     record: &R2ObjectRecord,
 ) -> Result<Option<R2SsecKey>, PlatformError> {
@@ -394,7 +394,7 @@ fn open_mutation_ssec(
 
 fn open_sealed_ssec(
     storage: &PlatformStorage,
-    account_id: open_compute_core::AccountId,
+    account_id: AccountId,
     resource_id: ResourceId,
     version: &str,
     expected_md5: Option<&str>,

@@ -2,6 +2,10 @@
 
 use super::*;
 
+fn with_admin_auth(builder: axum::http::request::Builder) -> axum::http::request::Builder {
+    builder.header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+}
+
 pub(super) async fn api_matrix(
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
@@ -28,34 +32,38 @@ pub(super) async fn api_matrix(
     }
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "gate", "gate").unwrap());
-    let state = HttpState::new(
-        health,
-        metrics,
-        false,
-        &ServerConfig::default(),
-        Arc::new(|| None),
-    )
-    .unwrap()
-    .with_worker_api(WorkerApiState::new(
-        storage.clone(),
-        artifacts,
-        transport,
-        DeploymentPins::new(),
-        BundleLimits::default(),
-        Duration::from_secs(5),
-    ));
+    let admin_token = write_admin_secret(&storage.data_dir().root().join("admin.token"));
+    let server = ServerConfig {
+        admin_auth: SecretReference {
+            env: None,
+            file: Some(admin_token),
+        },
+        ..ServerConfig::default()
+    };
+    let state = HttpState::new(health, metrics, false, false, &server, Arc::new(|| None))
+        .unwrap()
+        .with_worker_api(WorkerApiState::new(
+            storage.clone(),
+            artifacts,
+            transport,
+            DeploymentPins::new(),
+            BundleLimits::default(),
+            Duration::from_secs(5),
+        ));
     let app = merged_router(state);
-    worker_toolchain::exercise(app.clone(), storage.clone(), account).await;
+    worker_toolchain::exercise(app.clone(), storage.clone(), account, ADMIN_TOKEN).await;
     let create = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/accounts/{account}/workers"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("idempotency-key", "api-worker-create")
-                .body(Body::from(r#"{"name":"api-gate"}"#))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/operator/api/v1/accounts/{account}/workers"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", "api-worker-create"),
+            )
+            .body(Body::from(r#"{"name":"api-gate"}"#))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -67,13 +75,15 @@ pub(super) async fn api_matrix(
     let replay_create = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/accounts/{account}/workers"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("idempotency-key", "api-worker-create")
-                .body(Body::from(r#"{"name":"api-gate"}"#))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/operator/api/v1/accounts/{account}/workers"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", "api-worker-create"),
+            )
+            .body(Body::from(r#"{"name":"api-gate"}"#))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -81,10 +91,11 @@ pub(super) async fn api_matrix(
     let list_workers = app
         .clone()
         .oneshot(
-            Request::builder()
-                .uri(format!("/v1/accounts/{account}/workers"))
-                .body(Body::empty())
-                .unwrap(),
+            with_admin_auth(
+                Request::builder().uri(format!("/operator/api/v1/accounts/{account}/workers")),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -92,10 +103,11 @@ pub(super) async fn api_matrix(
     let get_worker = app
         .clone()
         .oneshot(
-            Request::builder()
-                .uri(format!("/v1/accounts/{account}/workers/{worker_id}"))
-                .body(Body::empty())
-                .unwrap(),
+            with_admin_auth(Request::builder().uri(format!(
+                "/operator/api/v1/accounts/{account}/workers/{worker_id}"
+            )))
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -103,12 +115,14 @@ pub(super) async fn api_matrix(
     let missing_key = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/accounts/{account}/workers"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"name":"missing-key"}"#))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/operator/api/v1/accounts/{account}/workers"))
+                    .header(header::CONTENT_TYPE, "application/json"),
+            )
+            .body(Body::from(r#"{"name":"missing-key"}"#))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -144,16 +158,18 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let deployment = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/deployments"
-                ))
-                .header(header::CONTENT_TYPE, "application/octet-stream")
-                .header("idempotency-key", "api-deploy-create")
-                .header("x-open-compute-deployment-metadata", metadata)
-                .body(Body::from_stream(futures::stream::iter(bundle_chunks)))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments"
+                    ))
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    .header("idempotency-key", "api-deploy-create")
+                    .header("x-open-compute-deployment-metadata", metadata),
+            )
+            .body(Body::from_stream(futures::stream::iter(bundle_chunks)))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -170,12 +186,11 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let get_deployment = app
         .clone()
         .oneshot(
-            Request::builder()
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/deployments/{deployment_id}"
-                ))
-                .body(Body::empty())
-                .unwrap(),
+            with_admin_auth(Request::builder().uri(format!(
+                "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments/{deployment_id}"
+            )))
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -184,17 +199,19 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let named_route = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/routes"
-                ))
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("idempotency-key", "api-route-named")
-                .body(Body::from(
-                    r#"{"hostname":"named.example.test","pathPrefix":"/named","entrypoint":"Named"}"#,
-                ))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/routes"
+                    ))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", "api-route-named"),
+            )
+            .body(Body::from(
+                r#"{"hostname":"named.example.test","pathPrefix":"/named","entrypoint":"Named"}"#,
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -211,13 +228,15 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let missing_route = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/routes"
-                ))
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("idempotency-key", "api-route-missing")
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/routes"
+                    ))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", "api-route-missing"),
+            )
                 .body(Body::from(
                     r#"{"hostname":"named.example.test","pathPrefix":"/missing","entrypoint":"Missing"}"#,
                 ))
@@ -248,10 +267,11 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let list_routes = app
         .clone()
         .oneshot(
-            Request::builder()
-                .uri(format!("/v1/accounts/{account}/workers/{worker_id}/routes"))
-                .body(Body::empty())
-                .unwrap(),
+            with_admin_auth(Request::builder().uri(format!(
+                "/operator/api/v1/accounts/{account}/workers/{worker_id}/routes"
+            )))
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -259,14 +279,16 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let delete_named_route = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/routes/{named_route_id}"
-                ))
-                .header("idempotency-key", "api-route-delete")
-                .body(Body::empty())
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/routes/{named_route_id}"
+                    ))
+                    .header("idempotency-key", "api-route-delete"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -311,16 +333,18 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let disposable = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/deployments"
-                ))
-                .header(header::CONTENT_TYPE, "application/octet-stream")
-                .header("idempotency-key", "api-deploy-disposable")
-                .header("x-open-compute-deployment-metadata", disposable_metadata)
-                .body(Body::from(disposable_bundle.into_bytes()))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments"
+                    ))
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    .header("idempotency-key", "api-deploy-disposable")
+                    .header("x-open-compute-deployment-metadata", disposable_metadata),
+            )
+            .body(Body::from(disposable_bundle.into_bytes()))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -332,21 +356,23 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let promoted = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/promotions"
-                ))
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("idempotency-key", "api-promote-disposable")
-                .body(Body::from(
-                    serde_json::json!({
-                        "targetDeploymentId": disposable_id,
-                        "expectedActiveDeploymentId": deployment_id,
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/promotions"
+                    ))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", "api-promote-disposable"),
+            )
+            .body(Body::from(
+                serde_json::json!({
+                    "targetDeploymentId": disposable_id,
+                    "expectedActiveDeploymentId": deployment_id,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -354,21 +380,23 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let rolled_back = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/rollbacks"
-                ))
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("idempotency-key", "api-rollback-original")
-                .body(Body::from(
-                    serde_json::json!({
-                        "targetDeploymentId": deployment_id,
-                        "expectedActiveDeploymentId": disposable_id,
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/rollbacks"
+                    ))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", "api-rollback-original"),
+            )
+            .body(Body::from(
+                serde_json::json!({
+                    "targetDeploymentId": deployment_id,
+                    "expectedActiveDeploymentId": disposable_id,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -376,14 +404,16 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let referenced_delete = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/deployments/{disposable_id}"
-                ))
-                .header("idempotency-key", "api-delete-referenced")
-                .body(Body::empty())
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments/{disposable_id}"
+                    ))
+                    .header("idempotency-key", "api-delete-referenced"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -392,14 +422,16 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
         .prune_expired_idempotency(i64::MAX, 1_000)
         .unwrap();
     let delete_request = || {
-        Request::builder()
-            .method("DELETE")
-            .uri(format!(
-                "/v1/accounts/{account}/workers/{worker_id}/deployments/{disposable_id}"
-            ))
-            .header("idempotency-key", "api-delete-complete")
-            .body(Body::empty())
-            .unwrap()
+        with_admin_auth(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments/{disposable_id}"
+                ))
+                .header("idempotency-key", "api-delete-complete"),
+        )
+        .body(Body::empty())
+        .unwrap()
     };
     let deleted = app.clone().oneshot(delete_request()).await.unwrap();
     assert_eq!(deleted.status(), 202);
@@ -414,13 +446,11 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let list = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{worker_id}/deployments"
-                ))
-                .body(Body::empty())
-                .unwrap(),
+            with_admin_auth(Request::builder().method("GET").uri(format!(
+                "/operator/api/v1/accounts/{account}/workers/{worker_id}/deployments"
+            )))
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -429,13 +459,15 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let disposable_worker = app
         .clone()
         .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/accounts/{account}/workers"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("idempotency-key", "api-disposable-worker")
-                .body(Body::from(r#"{"name":"api-disposable"}"#))
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/operator/api/v1/accounts/{account}/workers"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("idempotency-key", "api-disposable-worker"),
+            )
+            .body(Body::from(r#"{"name":"api-disposable"}"#))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -449,14 +481,16 @@ export default { fetch(request, env) { return new Response('api:' + env.MODE); }
     let disposable_worker_id = disposable_worker_json["worker"]["id"].as_str().unwrap();
     let deleted_worker = app
         .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(format!(
-                    "/v1/accounts/{account}/workers/{disposable_worker_id}"
-                ))
-                .header("idempotency-key", "api-disposable-worker-delete")
-                .body(Body::empty())
-                .unwrap(),
+            with_admin_auth(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/operator/api/v1/accounts/{account}/workers/{disposable_worker_id}"
+                    ))
+                    .header("idempotency-key", "api-disposable-worker-delete"),
+            )
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();

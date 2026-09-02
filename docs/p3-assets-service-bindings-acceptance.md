@@ -8,7 +8,7 @@ Cloudflare 托管端 direct differential。两项 Day1 核心实现和本地最�
 ## 已完成前提
 
 - P3.1 已实现 Worker-only、Worker + Assets、Assets-only、上传恢复、不可变 deployment、默认资源路由、
-  显式 Assets binding、S3 对象生命周期和 crash/restart 边界；本地最终三轮策略 Gate 已通过，Rust
+  显式 Assets binding、S3 对象生命周期和 crash/restart 边界；按当时策略执行的本地最终 Gate 已通过，Rust
   行覆盖率为 90.11%。
 - P3.2 已实现默认/命名 fetch 与原生 RPC、同账户目标解析、调用预算、deployment pin、事件源调用、
   generation 回收和 SIGKILL 恢复；本地最终验收共 834/834 case 通过，Rust 行覆盖率为 90.11%。

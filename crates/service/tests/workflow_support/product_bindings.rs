@@ -97,7 +97,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         let (status, value) = admin_json(
             &api,
             "POST",
-            &format!("/v1/accounts/{account}/{path}"),
+            &format!("/operator/api/v1/accounts/{account}/{path}"),
             body,
             Some(binding),
         )

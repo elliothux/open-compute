@@ -2,6 +2,7 @@ use super::*;
 use crate::health::HealthCoordinator;
 use crate::http;
 use crate::metrics::MetricsRegistry;
+use crate::r2_backend::R2BindingService;
 use axum::body::to_bytes;
 use axum::http::Request;
 use open_compute_artifacts::{
@@ -9,7 +10,7 @@ use open_compute_artifacts::{
     resolve_s3_credentials_with,
 };
 use open_compute_core::config::{MetricsConfig, StorageConfig};
-use open_compute_core::{PlatformConfig, SystemClock};
+use open_compute_core::{PlatformConfig, SecretString, SystemClock};
 use tempfile::TempDir;
 use tower::ServiceExt as _;
 
@@ -65,10 +66,24 @@ request_timeout_ms = 1000
         R2ObjectStore::new(S3ArtifactClient::connect(&s3, &credentials, 1024 * 1024).unwrap());
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
+    let pins = ResourcePins::new();
+    let binding = Arc::new(
+        R2BindingService::new(
+            storage.clone(),
+            pins.clone(),
+            objects.clone(),
+            R2Config {
+                max_object_bytes: 1024 * 1024,
+                max_staging_bytes: 2 * 1024 * 1024,
+                ..R2Config::default()
+            },
+        )
+        .unwrap(),
+    );
     let api = R2ApiState::new(
         storage.clone(),
         objects.clone(),
-        ResourcePins::new(),
+        pins,
         R2Config {
             max_object_bytes: 1024 * 1024,
             max_staging_bytes: 2 * 1024 * 1024,
@@ -76,9 +91,15 @@ request_timeout_ms = 1000
         },
         Duration::from_secs(1),
     )
-    .with_metrics(metrics.clone());
-    let state = HttpState::for_test(HealthCoordinator::new(), metrics.clone(), false, None)
-        .with_r2_api(api.clone());
+    .with_metrics(metrics.clone())
+    .with_binding(binding);
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics.clone(),
+        false,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_r2_api(api.clone());
     Fixture {
         _temp: temp,
         _mock: mock,
@@ -92,12 +113,25 @@ request_timeout_ms = 1000
 }
 
 fn request(method: &str, uri: &str, body: impl Serialize, key: Option<&str>) -> Request<Body> {
+    request_auth(method, uri, body, key, Some("admin-secret"))
+}
+
+fn request_auth(
+    method: &str,
+    uri: &str,
+    body: impl Serialize,
+    key: Option<&str>,
+    token: Option<&str>,
+) -> Request<Body> {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json");
     if let Some(key) = key {
         builder = builder.header(IDEMPOTENCY_HEADER, key);
+    }
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
     }
     builder
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
@@ -115,7 +149,7 @@ async fn json(response: Response) -> (StatusCode, serde_json::Value, Vec<u8>) {
 }
 
 async fn create_bucket(fixture: &Fixture, name: &str, key: &str) -> (ResourceId, Vec<u8>) {
-    let uri = format!("/v1/accounts/{}/r2/buckets", fixture.account);
+    let uri = format!("/operator/api/v1/accounts/{}/r2/buckets", fixture.account);
     let (status, body, bytes) = json(
         fixture
             .router
@@ -155,7 +189,7 @@ fn delete_query_is_strict() {
 #[tokio::test]
 async fn control_boundary_and_helper_failures_are_stable_and_bounded() {
     let fixture = fixture().await;
-    let collection = format!("/v1/accounts/{}/r2/buckets", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/r2/buckets", fixture.account);
     let (resource, _) = create_bucket(&fixture, "errors", "create-errors").await;
     let item = format!("{collection}/{resource}");
 
@@ -174,7 +208,7 @@ async fn control_boundary_and_helper_failures_are_stable_and_bounded() {
     for (method, uri, body, key, expected) in [
         (
             "GET",
-            "/v1/accounts/bad/r2/buckets".to_owned(),
+            "/operator/api/v1/accounts/bad/r2/buckets".to_owned(),
             serde_json::json!({}),
             None,
             StatusCode::BAD_REQUEST,
@@ -228,6 +262,7 @@ async fn control_boundary_and_helper_failures_are_stable_and_bounded() {
         .method("PATCH")
         .uri(&item)
         .header("content-type", "application/json")
+        .header("authorization", "Bearer admin-secret")
         .body(Body::from("{"))
         .unwrap();
     assert_eq!(
@@ -284,12 +319,18 @@ async fn control_boundary_and_helper_failures_are_stable_and_bounded() {
         HealthCoordinator::new(),
         metrics.clone(),
         false,
-        Some(open_compute_core::SecretString::new("secret")),
+        Some(SecretString::new("admin-secret")),
     ));
     assert_eq!(
         locked
             .clone()
-            .oneshot(request("GET", &collection, serde_json::json!({}), None))
+            .oneshot(request_auth(
+                "GET",
+                &collection,
+                serde_json::json!({}),
+                None,
+                None
+            ))
             .await
             .unwrap()
             .status(),
@@ -298,7 +339,7 @@ async fn control_boundary_and_helper_failures_are_stable_and_bounded() {
     let authorized_missing = Request::builder()
         .method("GET")
         .uri(&collection)
-        .header("authorization", "Bearer secret")
+        .header("authorization", "Bearer admin-secret")
         .body(Body::empty())
         .unwrap();
     assert_eq!(
@@ -339,7 +380,7 @@ async fn control_boundary_and_helper_failures_are_stable_and_bounded() {
 #[tokio::test]
 async fn control_api_replays_create_hides_locator_and_recovers_force_delete() {
     let fixture = fixture().await;
-    let collection = format!("/v1/accounts/{}/r2/buckets", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/r2/buckets", fixture.account);
     let (resource, first_bytes) = create_bucket(&fixture, "images", "create-images").await;
     let replay = fixture
         .router
@@ -637,4 +678,203 @@ fn reserve_bucket(
         panic!("unexpected reservation")
     };
     resource
+}
+
+#[tokio::test]
+async fn operator_object_put_get_metadata_and_delete_round_trip() {
+    let fixture = fixture().await;
+    let (resource, _) =
+        create_bucket(&fixture, "operator-objects", "create-operator-objects").await;
+    let object_uri = format!(
+        "/operator/api/v1/accounts/{}/r2/buckets/{resource}/objects/hello.txt",
+        fixture.account
+    );
+    let put_request = Request::builder()
+        .method("PUT")
+        .uri(&object_uri)
+        .header("authorization", "Bearer admin-secret")
+        .header("idempotency-key", "put-hello")
+        .header("content-type", "application/octet-stream")
+        .body(Body::from(b"operator-body".as_slice()))
+        .unwrap();
+    assert_eq!(
+        fixture
+            .router
+            .clone()
+            .oneshot(put_request)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    let meta_uri = format!("{object_uri}?metadata=true");
+    let (status, body, _) = json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &meta_uri, serde_json::json!(null), None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["key"], "hello.txt");
+    assert_eq!(body["size"], 13);
+
+    let get_response = fixture
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&object_uri)
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let bytes = to_bytes(get_response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), b"operator-body");
+
+    let list_uri = format!(
+        "/operator/api/v1/accounts/{}/r2/buckets/{resource}/objects?prefix=hello&limit=1",
+        fixture.account
+    );
+    let (status, listed, _) = json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &list_uri, serde_json::json!(null), None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["objects"][0]["key"], "hello.txt");
+    assert_eq!(listed["truncated"], false);
+
+    assert_eq!(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "DELETE",
+                &object_uri,
+                serde_json::json!(null),
+                Some("delete-hello")
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &meta_uri, serde_json::json!(null), None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn operator_bucket_catalog_filters_sorts_and_paginates_deterministically() {
+    let fixture = fixture().await;
+    for (name, key) in [
+        ("alpha", "catalog-alpha"),
+        ("beta", "catalog-beta"),
+        ("gamma", "catalog-gamma"),
+    ] {
+        create_bucket(&fixture, name, key).await;
+    }
+    let base = format!("/operator/api/v1/accounts/{}/r2/buckets", fixture.account);
+    let (status, first, _) = json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{base}?sort=name&direction=asc&limit=1"),
+                serde_json::json!(null),
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["buckets"][0]["name"], "alpha");
+    assert_eq!(first["listComplete"], false);
+    let cursor = first["cursor"].as_str().unwrap();
+
+    let (status, second, _) = json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{base}?sort=name&direction=asc&limit=1&cursor={cursor}"),
+                serde_json::json!(null),
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["buckets"][0]["name"], "beta");
+
+    for query in [
+        "search=alpha&status=ready&sort=createdAt&direction=desc&limit=2",
+        "search=%20%20&sort=updatedAt&direction=asc",
+    ] {
+        assert_eq!(
+            fixture
+                .router
+                .clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("{base}?{query}"),
+                    serde_json::json!(null),
+                    None,
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK,
+            "query={query}"
+        );
+    }
+    for query in [
+        "unknown=1".to_owned(),
+        "sort=invalid".to_owned(),
+        "direction=invalid".to_owned(),
+        "cursor=not-base64".to_owned(),
+        format!("sort=createdAt&direction=asc&cursor={cursor}"),
+    ] {
+        assert_eq!(
+            fixture
+                .router
+                .clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("{base}?{query}"),
+                    serde_json::json!(null),
+                    None,
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "query={query}"
+        );
+    }
 }

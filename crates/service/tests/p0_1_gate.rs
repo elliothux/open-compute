@@ -23,6 +23,7 @@ use tempfile::TempDir;
 
 const GATE_RESTART_BUDGET: usize = 2;
 const PLATFORM_READY_TIMEOUT_SECS: u64 = 90;
+const ADMIN_TOKEN: &str = "p0-1-admin";
 
 struct Round {
     _dir: TempDir,
@@ -208,11 +209,11 @@ async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
     let port = public_port.expect("public port");
     assert_eq!(http_status(port, "/health/live"), Some(200));
     assert_eq!(http_status(port, "/health/ready"), Some(200));
-    let status = http_get(port, "/health/status").expect("status");
+    let status = http_get(port, "/operator/api/v1/system/status").expect("status");
     assert_eq!(status.0, 200);
     assert!(!status.1.contains("gate-secret-value"));
     assert!(!status.1.contains("gate-access"));
-    let metrics = http_get(port, "/metrics").expect("metrics");
+    let metrics = http_get(port, "/operator/metrics").expect("metrics");
     assert!(!metrics.1.contains("gate-secret-value"));
 
     let workerd_pid = child_pids(pid as i32)
@@ -344,12 +345,19 @@ fn setup_round(n: u32, s3: &MockS3, lock: &RuntimeLock) -> Round {
     let bind = "127.0.0.1:0".to_string();
     let env_id = format!("OC_S3_ID_{n}");
     let env_secret = format!("OC_S3_SECRET_{n}");
+    let admin_token = dir.path().join("admin.token");
+    fs::write(&admin_token, b"p0-1-admin\n").unwrap();
+    fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
     fs::write(
         &cfg,
         format!(
             r#"
 [server]
 public_bind = "{bind}"
+
+[server.admin_auth]
+file = "{admin_token}"
+
 [storage]
 data_dir = "{data}"
 master_key_file = "{key}"
@@ -381,6 +389,7 @@ max_artifact_bytes = 65536
             data = data.display(),
             key = key.display(),
             endpoint = s3.endpoint,
+            admin_token = admin_token.display(),
             restart_budget = GATE_RESTART_BUDGET,
         ),
     )
@@ -440,7 +449,7 @@ fn wait_ready(round: &mut Round, secs: u64) {
     panic!(
         "timeout waiting ready; listeners={:?}; health={:?}: {}",
         listen_ports(pid),
-        public_health_port(pid).and_then(|port| http_get(port, "/health/status")),
+        public_health_port(pid).and_then(|port| http_get(port, "/operator/api/v1/system/status")),
         read_lossy(&round.stderr)
     );
 }
@@ -495,7 +504,7 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
                 panic!(
                     "budget crash {i}: no new RUNNING workerd generation; ready={:?} status={:?}",
                     http_get(port, "/health/ready"),
-                    http_get(port, "/health/status")
+                    http_get(port, "/operator/api/v1/system/status")
                 );
             }
             std::thread::sleep(Duration::from_millis(30));
@@ -513,7 +522,7 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
     while Instant::now() < deadline {
         let live = http_status(port, "/health/live");
         let ready = http_get(port, "/health/ready");
-        let status = http_get(port, "/health/status");
+        let status = http_get(port, "/operator/api/v1/system/status");
         last_live = live;
         last_ready = ready.clone();
         last_status = status.clone();
@@ -812,7 +821,12 @@ fn http_status(port: u16, path: &str) -> Option<u16> {
 fn http_get(port: u16, path: &str) -> Option<(u16, String)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    let auth = if path.starts_with("/operator/") {
+        format!("Authorization: Bearer {ADMIN_TOKEN}\r\n")
+    } else {
+        String::new()
+    };
+    let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth}Connection: close\r\n\r\n");
     stream.write_all(req.as_bytes()).ok()?;
     let mut buf = Vec::new();
     let _ = stream.read_to_end(&mut buf);

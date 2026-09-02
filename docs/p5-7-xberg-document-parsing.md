@@ -826,7 +826,7 @@ TypeScript compile fixture 必须包含 Cloudflare 官方示例的调用形式�
 ### P5.7.4：hardening 与验收
 
 - 四平台 release qualification 与 binary size evidence；
-- 全 corpus、hostile/fuzz、crash/recovery、fairness、soak、coverage 和 timing-three；
+- 全 corpus、hostile/fuzz、crash/recovery、fairness、soak、coverage 和最终单轮 Gate；
 - 更新 capabilities/deviations、operator metrics/runbook、single-binary、snapshot 和总架构文档；
 - 记录 exact Xberg pin、feature tree、fixture manifest digest、case count 和 Gate report。
 

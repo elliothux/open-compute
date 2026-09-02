@@ -119,7 +119,7 @@ impl AssetBindingService {
         {
             return Err(invariant());
         }
-        let deployment = WorkerRepository::new(self.storage.db()).get_deployment(
+        let deployment = WorkerRepository::new(self.storage.db()).get_worker_deployment(
             account_id,
             worker_id,
             deployment_id,

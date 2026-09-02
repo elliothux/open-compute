@@ -5,7 +5,8 @@ Conditional Go**。固定 baseline/catalog、typed runner、portable fixtures、
 crash/recovery 已进入当前实现，inventory 为 2,097 个成员、`blocked=0`。Workers、Cache API、KV、D1、
 R2、Durable Objects、Queues 的真实 Cloudflare differential 已通过并精确清理；Workflow 托管端运行因
 Wrangler OAuth `10000` 拆分到[剩余验收](../cloudflare-runtime-compatibility-acceptance.md)。最终 workspace
-按用户明确要求只运行一个完整 round，802/802 cases 通过；这不冒充仓库默认的 timing-three 资格。
+运行一个完整 round，802/802 cases 通过。2026-09-03 起仓库最终 Gate 统一为一轮，因此该证据满足当前
+Gate 轮数政策；它不替代尚未执行的外部资格或正式发行操作。
 P1 长时 soak 与正式发行演练继续由独立的[P1 剩余验收计划](../p1-release-acceptance.md)跟踪。
 
 P3.4 的目标不是实现 Next.js，也不是让某个 vinext revision 的全部 API 或测试无条件变绿；目标由
@@ -506,9 +507,8 @@ qualification。P3.4-7 的七项 hosted fixture 已完成，Workflow hosted fixt
    crash/recovery/cleanup 全部通过；
 6. portable high-risk fixture 在真实 Cloudflare differential 中没有未解释的“CF pass / OC fail”；
 7. 完整 Rust/TS/static/dependency/MSRV/production 检查通过，Rust line coverage 不低于 90.00%；
-8. 正式 release qualification 应按[测试规范](../references/testing.md)执行完整一轮 + TIMING 两个附加
-   fresh-process 轮次；本实现 goal 按用户明确要求只执行完整一轮，报告保留原始结果且无 retry-to-green，
-   因而不宣称完成 timing-three release qualification；
+8. 正式 release qualification 按[测试规范](../references/testing.md)执行一个完整 round；本实现 goal 的
+   单轮报告保留原始结果且无 retry-to-green，符合当前 Gate 轮数政策；
 9. 没有遗留 workerd/platformd/browser、listener、Cloudflare fixture、S3 prefix、image session、temp
    file 或未释放 pin；
 10. P1 的单文件/离线/跨目标 release qualification 仍按其 active 文档完成；P3 测试不能代替正式

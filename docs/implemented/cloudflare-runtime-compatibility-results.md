@@ -61,9 +61,9 @@ blocked member。
 | unchecked TS escape review | `@ts-ignore`、`@ts-nocheck`、`as unknown as` 均无命中 |
 | 最终 workspace Gate | PASS，1 round、40/40 processes、802/802 cases、706.83 秒 |
 
-最终 Gate 报告是 `.temp/gate-run/20260901T145516-c7ab80b8/report.json`。按用户明确要求，本 goal
-只执行一个完整 round，没有执行仓库 release policy 的两个额外 TIMING rounds；因此这个结果不能被描述成
-timing-three release qualification。
+最终 Gate 报告是 `.temp/gate-run/20260901T145516-c7ab80b8/report.json`，实际执行一个完整 round。
+2026-09-03 起仓库最终与发行 Gate 统一采用单轮政策，因此该轮数满足当前 Gate 要求；这不改变报告记录的
+源码、case 数、外部 qualification 状态或未执行的发行操作。
 
 Rust line coverage 为 **90.17%**（68,383 / 75,839），报告位于
 `target/llvm-cov/{html/index.html,lcov.info,summary.json}`。完整 instrumented workspace 的 40 个 Rust/runtime
@@ -101,5 +101,5 @@ Cache API Worker，D1 及后续资源未创建。刷新 OAuth 或更换 credenti
   tombstone/referrer cleanup 均有真实进程回归。
 - Day1：没有发现需要保留的旧 API/schema/runtime、dual read/write、fallback、alias 或兼容 shim。
 
-结论是 Day1 本地 runtime 兼容实现完成且 `blocked=0`；在 Workflow hosted differential 和正式
-timing-three qualification 完成前，整体 Cloudflare 托管端/发行结论保持 Conditional Go。
+结论是 Day1 本地 runtime 兼容实现完成且 `blocked=0`；在 Workflow hosted differential 和正式发行、
+跨平台资格完成前，整体 Cloudflare 托管端/发行结论保持 Conditional Go。

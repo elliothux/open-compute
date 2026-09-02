@@ -17,7 +17,7 @@ Workflow 远端资格记录在[Workflow 验收计划](../cloudflare-runtime-comp
 
 | 文档 | 用途 |
 | --- | --- |
-| [测试节奏](testing.md) | 默认完整一轮；最终完整一轮 + 时序补两轮，用例清单校验、并行/独占与覆盖率；[原布局实测](../implemented/runtime-and-test-layout-results.md) |
+| [测试节奏](testing.md) | 开发与最终验收均为完整一轮，用例清单校验、并行/独占与覆盖率；[原布局实测](../implemented/runtime-and-test-layout-results.md) |
 | [Cloudflare 兼容矩阵](cloudflare-compatibility.md) | 当前实现 capability、方法、目标缺口、非目标产品、deviation 与 conformance verdict |
 | [能力偏差](p1-deviations.md) | 当前 capability deviation ID 与实际支持边界 |
 | [Fuzz 所有权](p1-fuzz-ownership.md) | 各类输入的测试归属和回归要求 |

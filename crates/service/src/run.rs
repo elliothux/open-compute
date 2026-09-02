@@ -8,6 +8,7 @@ use crate::capabilities::{platform_capabilities, platform_release_metadata};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
 use crate::d1_http::D1ApiState;
+use crate::dashboard::bootstrap_dashboard;
 use crate::do_http::DoApiState;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState, SanitizedSupervisor};
@@ -43,7 +44,8 @@ use open_compute_core::{
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions,
+    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
+    WorkerdSupervisorOptions,
 };
 use open_compute_storage::{
     CacheManager, DurableObjectRepository, PlatformStorage, WorkerRepository,
@@ -58,7 +60,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::watch;
+use tokio::sync::{RwLock, watch};
 
 /// Injected failure after a named stage.
 #[cfg(any(test, feature = "test-support"))]
@@ -465,15 +467,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         ..BundleLimits::default()
     };
     let resource_pins = ResourcePins::new();
-    let r2_api = R2ApiState::new(
-        storage.clone(),
-        r2_objects.clone(),
-        resource_pins.clone(),
-        loaded.config.r2.clone(),
-        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-    )
-    .with_metrics(metrics.clone());
-    r2_api.reconcile_pending().await?;
     let r2_backend = Arc::new(
         R2BindingService::new(
             storage.clone(),
@@ -483,6 +476,16 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         )?
         .with_metrics(metrics.clone()),
     );
+    let r2_api = R2ApiState::new(
+        storage.clone(),
+        r2_objects.clone(),
+        resource_pins.clone(),
+        loaded.config.r2.clone(),
+        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
+    )
+    .with_metrics(metrics.clone())
+    .with_binding(r2_backend.clone());
+    r2_api.reconcile_pending().await?;
     let d1_backend = Arc::new(
         D1BindingService::new(
             storage.clone(),
@@ -522,6 +525,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     metrics.set_do_storage_watermark(0);
     let maintenance_do_api = do_api.clone();
     let supervisor_for_http = supervisor_handle.clone();
+    let binding_executor = Arc::new(
+        SqliteKvBindingExecutor::with_config(
+            storage.clone(),
+            Arc::new(SystemClock),
+            &loaded.config.kv,
+        )
+        .with_metrics(metrics.clone()),
+    );
     let worker_api = WorkerApiState::new(
         storage.clone(),
         store.clone(),
@@ -538,10 +549,12 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         scheduler_store.clone(),
         Duration::from_millis(loaded.config.scheduler.shutdown_drain_ms),
     )));
+    let dashboard_dispatch = Arc::new(RwLock::new(None));
     let state = HttpState::new(
         health.clone(),
         metrics.clone(),
         loaded.config.metrics.enabled,
+        loaded.config.dashboard.enabled,
         &loaded.config.server,
         Arc::new(move || {
             supervisor_for_http
@@ -550,12 +563,14 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                 .and_then(|g| g.as_ref().map(|s| SanitizedSupervisor::from(&s.snapshot())))
         }),
     )?
+    .with_dashboard_dispatch(dashboard_dispatch.clone())
     .with_worker_api(worker_api)
     .with_kv_api(
         KvApiState::new(
             storage.clone(),
             store.clone(),
             resource_pins.clone(),
+            binding_executor.clone(),
             loaded.config.kv.clone(),
             loaded.config.hardening.max_resources_per_kind_per_account,
             Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
@@ -724,14 +739,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     });
     let mut shutdown_binding = shutdown_rx.clone();
     let binding_storage = storage.clone();
-    let binding_executor = Arc::new(
-        SqliteKvBindingExecutor::with_config(
-            storage.clone(),
-            Arc::new(SystemClock),
-            &loaded.config.kv,
-        )
-        .with_metrics(metrics.clone()),
-    );
     let binding_auth = binding_generation_auth.clone();
     let binding_metrics = metrics.clone();
     let binding_do_config = loaded.config.durable_objects.clone();
@@ -824,6 +831,37 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     supervisor.start();
     record(&opts, "supervisor");
     metrics.inc_start(StartResult::Success, StartStage::Supervisor);
+    if loaded.config.dashboard.enabled {
+        let bootstrap_storage = storage.clone();
+        let bootstrap_store = store.clone();
+        let bootstrap_transport = transport.clone();
+        let bootstrap_account = storage.identity().default_account_id;
+        let bootstrap_limits = bundle_limits;
+        let bootstrap_supervisor = supervisor.clone();
+        let bootstrap_slot = dashboard_dispatch.clone();
+        tokio::spawn(async move {
+            if !wait_for_supervisor_running(&bootstrap_supervisor, Duration::from_secs(120)).await {
+                tracing::error!("dashboard bootstrap timed out waiting for workerd readiness");
+                return;
+            }
+            match bootstrap_dashboard(
+                bootstrap_storage,
+                bootstrap_store,
+                bootstrap_transport,
+                bootstrap_account,
+                bootstrap_limits,
+            )
+            .await
+            {
+                Ok(dispatch) => {
+                    *bootstrap_slot.write().await = Some(dispatch);
+                }
+                Err(error) => {
+                    tracing::error!(code = error.code().as_str(), "dashboard bootstrap failed");
+                }
+            }
+        });
+    }
     let scheduler_task = Some(tokio::spawn(async move {
         scheduler_service.run(scheduler_shutdown_rx).await
     }));
@@ -844,7 +882,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             let snap = watch_rx.borrow().clone();
             metrics_watch.observe_supervisor(&snap);
             let generation_update = generation_resources.observe(&snap);
-            if snap.state == open_compute_runtime::SupervisorState::Running
+            if snap.state == SupervisorState::Running
                 && generation_update.child_changed
                 && DurableObjectRepository::new(&storage_watch)
                     .count_live_objects()
@@ -1407,6 +1445,30 @@ enum FailAfterDummy {
     Cache,
     Compile,
     Listen,
+}
+
+async fn wait_for_supervisor_running(supervisor: &WorkerdSupervisor, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    let mut watch_rx = supervisor.subscribe();
+    loop {
+        if watch_rx.borrow().state == SupervisorState::Running {
+            return true;
+        }
+        if watch_rx.borrow().state == SupervisorState::Failed {
+            return false;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        let wait = remaining.min(Duration::from_millis(250));
+        if tokio::time::timeout(wait, watch_rx.changed())
+            .await
+            .is_err()
+        {
+            continue;
+        }
+    }
 }
 
 /// Bind addresses used after config validation.

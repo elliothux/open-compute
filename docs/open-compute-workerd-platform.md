@@ -3,7 +3,7 @@
 > 状态：核心 Day1 实现完成、外部资格 Conditional Go，2026-09-01。全量 inventory 的 2,097 个 stable
 > members 已有 evidence，`blocked=0`；Workers、Cache API、KV、D1、R2、Durable Objects、Queues 的
 > portable differential 已通过并精确清理。Workflow hosted differential 仍受 Wrangler OAuth `10000`
-> 阻塞；Assets/Service direct differential、release timing-three 与跨平台资格仍在各自 active acceptance 中，
+> 阻塞；Assets/Service direct differential、正式发行与跨平台资格仍在各自 active acceptance 中，
 > 不能据此声明完整托管端/发行 Go。固定 vinext workload 已取得 Application Go，但不替代这些平台资格。
 >
 > 当前目标是让 open-compute 对齐最新 stable Cloudflare Worker runtime，以及 Workers、Durable
@@ -107,13 +107,13 @@ stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平
 
 | 范围 | 当前实现 | 剩余资格 |
 | --- | --- | --- |
-| Worker 执行 | pinned workerd/WorkerLoader、完整 Workers stable surface、latest Node、raw TCP、handlers/RPC 与产品 bindings；1,580 个成员全部有 evidence | 正式发行的 timing-three/跨平台资格仍独立执行 |
+| Worker 执行 | pinned workerd/WorkerLoader、完整 Workers stable surface、latest Node、raw TCP、handlers/RPC 与产品 bindings；1,580 个成员全部有 evidence | 正式发行打包与跨平台资格仍独立执行 |
 | TS 工具链 | TS7/Rolldown、pinned upstream types、generated Env、single-latest contract 与 inventory/catalog 双射 | coordinated upstream update 时整体重验 |
 | 资源与绑定 | KV/R2/D1/DO、Queues/Cron/Workflows 完整 stable surface；目标总计 2,097 个成员、`blocked=0` | Workflow hosted differential 等账号条件解除 |
 | Static Assets | manifest/上传/路由、`ASSETS.fetch()`、不可变发布、catalog 与维护 Gate | Assets routing/binding 直接 Cloudflare differential qualification |
 | Service Binding | 跨 Worker/自绑定、默认/命名 fetch/RPC、事件源调用、预算/pin、真实 crash handle 回收与恢复 | Service fetch/RPC/lifecycle 直接 Cloudflare differential qualification |
 | Cache 与 Images | Workers Cache、Cache API、Images、Version Metadata 的声明单节点支持面已实现；Cache API hosted differential 通过 | Images 等相邻 capability 的独立 hosted/application qualification 可选 |
-| 验收 | 193/193 JS、90.17% Rust 行覆盖率、单轮 workspace 802/802；七项 hosted differential 通过并清理；固定 vinext workload 为 Application Go | Workflow hosted、Assets/Service direct differential、timing-three 与跨平台 release qualification |
+| 验收 | 193/193 JS、90.17% Rust 行覆盖率、单轮 workspace 802/802；七项 hosted differential 通过并清理；固定 vinext workload 为 Application Go | Workflow hosted、Assets/Service direct differential、跨平台 release qualification |
 
 实现依据包括 [工具链](../packages/toolchain/src/build-worker.ts)、
 [绑定类型](../crates/core/src/resource.rs)、[RuntimeSource](../crates/workers/src/runtime_source.rs)
@@ -1714,12 +1714,10 @@ artifacts/service/runtime 的所有权组织，禁止框架分支、test-only �
 
 ### P3 Exit Gate
 
-按 [测试节奏](./references/testing.md)，开发期间每次迭代只跑相关单轮。源码冻结后才执行固定平台
-基线、全量 contract/product 矩阵与相关真实运行时 Gate：确定性用例完整一轮，审查登记的时序用例
-补两轮；
-重复轮使用新进程和隔离数据目录，保留场景内正常运行与重启恢复。P3.1 至 P3.3 的目标及其用例
-分类已经实现；P3.3 的最终本地验收见归档方案。P3.4 全量类型/runtime contract 与产品高风险矩阵已
-完成；本实现 goal 按用户明确要求只跑一个完整最终 round，不把它冒充 timing-three release qualification。
+按 [测试节奏](./references/testing.md)，开发期间和源码冻结后的最终验收都只跑相关目标一个完整 round。
+固定平台基线、全量 contract/product 矩阵与相关真实运行时 Gate 均在该轮执行；场景内部定义的正常运行、
+重启、崩溃与恢复步骤不减少。P3.1 至 P3.3 的目标及其用例分类已经实现；P3.3 的最终本地验收见归档
+方案。P3.4 全量类型/runtime contract 与产品高风险矩阵已完成，其单轮 workspace 结果满足当前仓库政策。
 Workflow hosted differential 仍未完成；Static Assets / Service Binding 的 direct differential 由
 [独立验收计划](p3-assets-service-bindings-acceptance.md)追踪；固定 vinext workload 已取得
 [Application Go](implemented/p4-nextjs-vinext-results.md)，不再标为未评估，也不替代上述 platform fixture。

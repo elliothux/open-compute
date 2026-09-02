@@ -24,9 +24,10 @@ use open_compute_service::runtime_bridge::{
     DispatchTarget, LoaderOutcome, WorkerdTransport, WorkflowOutcome, WorkflowRunRequest,
     bind_runtime_source, serve_runtime_source,
 };
+use open_compute_service::scheduler::SchedulerService;
 use open_compute_service::service_invocations::ServiceInvocationRegistry;
 use open_compute_service::{
-    SchedulerService, SqliteKvBindingExecutor, bind_binding_backend, product_promotion_for_test,
+    SqliteKvBindingExecutor, bind_binding_backend, product_promotion_for_test,
     serve_binding_backend_with_assets,
 };
 use open_compute_storage::{
@@ -295,7 +296,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &deployment,
         generation,
         None,
-        "/metrics",
+        "/operator/metrics",
     )
     .await;
     assert_eq!(empty.status, 200, "{}", empty.body);
@@ -399,7 +400,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &deployment,
         generation,
         None,
-        "/metrics",
+        "/operator/metrics",
     )
     .await;
     let live_metrics: serde_json::Value = serde_json::from_str(&live.body).unwrap();
@@ -720,7 +721,7 @@ async fn p2_2_real_queue_scheduler_matrix() {
         &deployment,
         generation,
         None,
-        "/metrics",
+        "/operator/metrics",
     )
     .await;
     let drained_metrics: serde_json::Value = serde_json::from_str(&drained.body).unwrap();
@@ -770,7 +771,7 @@ export class Flow extends WorkflowEntrypoint {
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
-    if (path === "/metrics") return Response.json(await env.EVENTS.metrics());
+    if (path === "/operator/metrics") return Response.json(await env.EVENTS.metrics());
     if (path === "/worker") {
       const result = await env.EVENTS.send("from-worker", { contentType: "text", delaySeconds: 0 });
       return Response.json({ backlogCount: result.metadata.metrics.backlogCount });

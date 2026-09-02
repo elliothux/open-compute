@@ -186,13 +186,32 @@ fn workflow_definition_validation_scope_version_freeze_and_retirement() {
         repo.definition(account, definition.id).unwrap().state,
         ResourceState::Tombstoned
     );
-    assert_eq!(repo.definitions(account, None, 10).unwrap().len(), 1);
     assert!(
-        repo.definitions(account, Some(definition.id), 10)
-            .unwrap()
-            .is_empty()
+        repo.definitions(
+            account,
+            None,
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            10,
+        )
+        .unwrap()
+        .items
+        .is_empty()
     );
-    assert!(repo.definitions(account, None, 0).is_err());
+    assert!(
+        repo.definitions(
+            account,
+            None,
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            0,
+        )
+        .is_err()
+    );
 }
 
 #[test]

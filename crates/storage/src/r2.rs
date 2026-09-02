@@ -1,8 +1,14 @@
 //! Logical R2 bucket locator authority in `control.sqlite`.
 
-use crate::{ControlDb, ResourceRecord};
-use open_compute_core::{AccountId, BindingKind, ErrorCode, PlatformError, ResourceId};
-use rusqlite::{OptionalExtension, params};
+use crate::catalog_page::{CatalogColumns, build_catalog_sql, record_catalog_cursor};
+use crate::{
+    CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, ResourceRecord,
+    normalize_catalog_limit, search_as_resource_id,
+};
+use open_compute_core::{
+    AccountId, BindingKind, ErrorCode, PlatformError, ResourceId, ResourceState,
+};
+use rusqlite::{OptionalExtension, params, params_from_iter};
 use serde::Serialize;
 use std::str::FromStr as _;
 
@@ -116,6 +122,73 @@ impl<'a> R2BucketRepository<'a> {
         })
     }
 
+    /// List one bounded, filtered, and sorted page of buckets.
+    #[allow(clippy::too_many_arguments)]
+    pub fn list_page(
+        &self,
+        account_id: AccountId,
+        search: Option<&str>,
+        status: Option<ResourceState>,
+        sort: CatalogSort,
+        direction: CatalogDirection,
+        after: Option<CatalogCursor>,
+        limit: u16,
+    ) -> Result<CatalogListPage<R2BucketRecord>, PlatformError> {
+        let limit = normalize_catalog_limit(limit);
+        let fetch = u32::from(limit).saturating_add(1);
+        let search = search.map(str::trim).filter(|value| !value.is_empty());
+        let exact_id = search.and_then(search_as_resource_id);
+        let search_needle = if exact_id.is_some() {
+            None
+        } else {
+            search.map(str::to_lowercase)
+        };
+        let query = build_catalog_sql(
+            SELECT_BUCKETS,
+            CatalogColumns {
+                id: "r.id",
+                name: "r.name",
+                state: "r.state",
+                created_at: "r.created_at_ms",
+                updated_at: "r.updated_at_ms",
+            },
+            account_id.to_string(),
+            search_needle,
+            exact_id.map(|id| id.to_string()),
+            status.map(|value| value.as_str().to_string()),
+            sort,
+            direction,
+            after,
+            fetch,
+        )?;
+        self.db.with_read(|conn| {
+            let mut statement = conn.prepare(&query.text).map_err(|_| db_error())?;
+            let rows = statement
+                .query_map(params_from_iter(query.values), map_bucket)
+                .map_err(|_| db_error())?;
+            let mut buckets = collect_bucket_rows(rows)?;
+            let next_cursor = if buckets.len() > usize::from(limit) {
+                buckets.pop();
+                buckets.last().map(|bucket| {
+                    record_catalog_cursor(
+                        sort,
+                        direction,
+                        &bucket.resource.name,
+                        bucket.resource.created_at_ms,
+                        bucket.resource.updated_at_ms,
+                        &bucket.resource.id.to_string(),
+                    )
+                })
+            } else {
+                None
+            };
+            Ok(CatalogListPage {
+                items: buckets,
+                next_cursor,
+            })
+        })
+    }
+
     /// List every live and transitional bucket for host maintenance.
     pub fn list_all(&self) -> Result<Vec<R2BucketRecord>, PlatformError> {
         self.db.with_read(|conn| {
@@ -211,6 +284,19 @@ fn read_bucket(
     .ok_or_else(not_found)
 }
 
+fn collect_bucket_rows(
+    rows: rusqlite::MappedRows<
+        '_,
+        impl FnMut(&rusqlite::Row<'_>) -> Result<R2BucketRecord, rusqlite::Error>,
+    >,
+) -> Result<Vec<R2BucketRecord>, PlatformError> {
+    let mut buckets = Vec::new();
+    for row in rows {
+        buckets.push(row.map_err(|_| invariant())?);
+    }
+    Ok(buckets)
+}
+
 fn map_bucket(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2BucketRecord> {
     let resource_id: String = row.get(0)?;
     let account_id: String = row.get(1)?;
@@ -229,8 +315,7 @@ fn map_bucket(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2BucketRecord> {
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
             kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
             name: row.get(3)?,
-            state: open_compute_core::ResourceState::from_str(&state)
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            state: ResourceState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
             availability: open_compute_core::ResourceAvailability::from_str(&availability)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
             availability_code: row.get(6)?,
@@ -261,7 +346,7 @@ fn validate_locator(
     provider_config_sha256: &[u8; 32],
 ) -> Result<(), PlatformError> {
     if resource.kind != BindingKind::R2Bucket
-        || resource.state != open_compute_core::ResourceState::Creating
+        || resource.state != ResourceState::Creating
         || resource.driver_schema_version != R2_SCHEMA_VERSION
         || max_object_bytes == 0
         || provider_config_sha256.iter().all(|byte| *byte == 0)

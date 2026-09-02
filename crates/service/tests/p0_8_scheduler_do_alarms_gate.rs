@@ -24,9 +24,10 @@ use open_compute_service::runtime_bridge::{
     AlarmDispatchOutcome, DispatchTarget, WorkerdTransport, bind_runtime_source,
     serve_runtime_source,
 };
+use open_compute_service::scheduler::SchedulerService;
 use open_compute_service::{
-    HealthCoordinator, MetricsRegistry, SchedulerService, SqliteKvBindingExecutor,
-    bind_binding_backend, serve_binding_backend,
+    HealthCoordinator, MetricsRegistry, SqliteKvBindingExecutor, bind_binding_backend,
+    serve_binding_backend,
 };
 use open_compute_storage::{
     AlarmProjection, ClaimResult, DO_NAMESPACE_SCHEMA_VERSION, DeploymentRecord,

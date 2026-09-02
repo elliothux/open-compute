@@ -5,7 +5,7 @@ use crate::http::{HttpState, ProductErrorCode, authorize};
 use crate::metrics::DoFacetReloadReason;
 use crate::runtime_bridge::{DispatchTarget, WorkerdTransport};
 use axum::body::{Body, to_bytes};
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use http_body_util::BodyExt as _;
@@ -15,7 +15,8 @@ use open_compute_core::{
     WorkerId,
 };
 use open_compute_storage::{
-    BindingRepository, DeploymentRecord, PlatformStorage, WorkerRepository,
+    BindingRepository, CatalogDirection, CatalogSort, DEFAULT_CATALOG_LIST_LIMIT, DeploymentRecord,
+    PlatformStorage, WorkerRepository, decode_catalog_cursor, normalize_catalog_limit,
 };
 use open_compute_workers::{
     BundleLimits, CreateDeploymentOutcome, CreateDeploymentRequest, DeploymentBindingInput,
@@ -23,15 +24,17 @@ use open_compute_workers::{
     DeploymentRuntimeFeatures, DeploymentServiceInput, ProductPromotionCoordinator,
     ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, StagedBundle,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::future::Future;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
@@ -65,6 +68,7 @@ pub struct WorkerApiState {
     max_queue_consumer_concurrency: u32,
     product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
     finalize_locks: Arc<[tokio::sync::Mutex<()>; 16]>,
+    traffic: Arc<WorkerTrafficRegistry>,
 }
 
 impl std::fmt::Debug for WorkerApiState {
@@ -99,6 +103,7 @@ impl WorkerApiState {
             max_queue_consumer_concurrency: 32,
             product_promoter: None,
             finalize_locks: Arc::new(std::array::from_fn(|_| tokio::sync::Mutex::new(()))),
+            traffic: Arc::new(WorkerTrafficRegistry::default()),
         }
     }
 
@@ -140,10 +145,97 @@ impl WorkerApiState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct WorkerTrafficAccumulator {
+    requests: u64,
+    errors: u64,
+    total_latency_micros: u64,
+    last_status: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerTrafficSummary {
+    requests: u64,
+    errors: u64,
+    average_latency_ms: f64,
+    last_status: Option<u16>,
+}
+
+#[derive(Debug, Default)]
+struct WorkerTrafficRegistry {
+    entries: Mutex<HashMap<WorkerId, WorkerTrafficAccumulator>>,
+}
+
+impl WorkerTrafficRegistry {
+    fn observe(&self, worker_id: WorkerId, status: u16, elapsed: Duration) {
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = entries.entry(worker_id).or_default();
+        entry.requests = entry.requests.saturating_add(1);
+        if status >= 500 {
+            entry.errors = entry.errors.saturating_add(1);
+        }
+        entry.total_latency_micros = entry
+            .total_latency_micros
+            .saturating_add(u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX));
+        entry.last_status = Some(status);
+    }
+
+    fn summary(&self, worker_id: WorkerId) -> WorkerTrafficSummary {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let value = entries.get(&worker_id).copied().unwrap_or_default();
+        WorkerTrafficSummary {
+            requests: value.requests,
+            errors: value.errors,
+            average_latency_ms: if value.requests == 0 {
+                0.0
+            } else {
+                value.total_latency_micros as f64 / value.requests as f64 / 1_000.0
+            },
+            last_status: value.last_status,
+        }
+    }
+
+    fn remove(&self, worker_id: WorkerId) {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&worker_id);
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerCatalogEntry {
+    #[serde(flatten)]
+    worker: open_compute_storage::WorkerRecord,
+    route_count: usize,
+    primary_route: Option<open_compute_storage::RouteRecord>,
+    deployment_source: Option<&'static str>,
+    traffic: WorkerTrafficSummary,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateWorkerBody {
     name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListWorkersQuery {
+    search: Option<String>,
+    deployed: Option<bool>,
+    sort: Option<CatalogSort>,
+    direction: Option<CatalogDirection>,
+    cursor: Option<String>,
+    limit: Option<u16>,
 }
 
 async fn create_worker(
@@ -196,18 +288,81 @@ async fn create_worker(
 async fn list_workers(
     State(state): State<HttpState>,
     Path(account): Path<String>,
+    query: Result<Query<ListWorkersQuery>, axum::extract::rejection::QueryRejection>,
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
     let Some(api) = authorized_api(&state, &request, request_id) else {
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
-    let result = parse_account(&account)
-        .and_then(|account_id| WorkerRepository::new(api.storage.db()).list_workers(account_id));
-    result_response(
-        result.map(|workers| serde_json::json!({ "workers": workers })),
-        request_id,
-    )
+    let Ok(Query(query)) = query else {
+        return error_response(
+            PlatformError::new(ErrorCode::ConfigInvalid, "Worker list query is invalid"),
+            request_id,
+        );
+    };
+    let account_id = match parse_account(&account) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let after = match query.cursor.as_deref() {
+        None => None,
+        Some(cursor) => match decode_catalog_cursor(cursor) {
+            Ok(value) => Some(value),
+            Err(error) => return error_response(error, request_id),
+        },
+    };
+    let limit = normalize_catalog_limit(query.limit.unwrap_or(DEFAULT_CATALOG_LIST_LIMIT));
+    let sort = query.sort.unwrap_or(CatalogSort::UpdatedAt);
+    let direction = query.direction.unwrap_or(CatalogDirection::Desc);
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let storage = api.storage.clone();
+    let traffic = api.traffic.clone();
+    match tokio::task::spawn_blocking(move || {
+        let repo = WorkerRepository::new(storage.db());
+        let page = repo.list_workers_page(
+            account_id,
+            search.as_deref(),
+            query.deployed,
+            sort,
+            direction,
+            after,
+            limit,
+        )?;
+        let mut workers = Vec::with_capacity(page.items.len());
+        for worker in page.items {
+            let routes = repo.list_routes(account_id, worker.id)?;
+            workers.push(WorkerCatalogEntry {
+                route_count: routes.len(),
+                primary_route: routes.into_iter().next(),
+                deployment_source: worker.active_deployment_id.map(|_| "operator_api"),
+                traffic: traffic.summary(worker.id),
+                worker,
+            });
+        }
+        Ok::<_, PlatformError>((workers, page.next_cursor))
+    })
+    .await
+    {
+        Ok(Ok((workers, next_cursor))) => {
+            let list_complete = next_cursor.is_none();
+            result_response(
+                Ok(serde_json::json!({
+                    "workers": workers,
+                    "cursor": next_cursor,
+                    "listComplete": list_complete,
+                })),
+                request_id,
+            )
+        }
+        Ok(Err(error)) => error_response(error, request_id),
+        Err(_) => error_response(internal(), request_id),
+    }
 }
 
 async fn get_worker(
@@ -220,7 +375,7 @@ async fn get_worker(
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
     let result = parse_ids(&account, &worker).and_then(|(account_id, worker_id)| {
-        WorkerRepository::new(api.storage.db()).get_worker(account_id, worker_id)
+        WorkerRepository::new(api.storage.db()).get_tenant_worker(account_id, worker_id)
     });
     result_response(
         result.map(|worker| serde_json::json!({ "worker": worker })),
@@ -291,6 +446,7 @@ async fn delete_worker(
                 }
                 return Err(error);
             }
+            api.traffic.remove(worker_id);
             for deployment in deployments {
                 api.pins.retire_fence(deployment);
             }
@@ -422,7 +578,11 @@ async fn create_deployment(
         .await;
     match result {
         Ok(CreateDeploymentOutcome::Applied(result)) => json_bytes(
-            serde_json::to_vec(&result).unwrap_or_else(|_| b"{}".to_vec()),
+            serde_json::to_vec(&serde_json::json!({
+                "deployment": result.deployment.to_api_json(),
+                "promoted": result.promoted,
+            }))
+            .unwrap_or_else(|_| b"{}".to_vec()),
             StatusCode::CREATED,
         ),
         Ok(CreateDeploymentOutcome::Replay(bytes)) => json_bytes(bytes, StatusCode::CREATED),
@@ -568,7 +728,7 @@ async fn promotion_impl(
         || async {
             let _admission = api.storage.reserve_mutation(64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
-            let worker_before = repo.get_worker(account_id, worker_id)?;
+            let worker_before = repo.get_tenant_worker(account_id, worker_id)?;
             if body.expected_active_deployment_id.is_some()
                 && body.expected_active_deployment_id != worker_before.active_deployment_id
             {
@@ -620,7 +780,7 @@ async fn promotion_impl(
                     promoted_at_ms,
                 )?;
             }
-            let worker = repo.get_worker(account_id, worker_id)?;
+            let worker = repo.get_tenant_worker(account_id, worker_id)?;
             if reloads_durable_objects {
                 metrics.inc_do_facet_reload(DoFacetReloadReason::Promotion);
             }
@@ -687,7 +847,7 @@ async fn create_route(
             let _admission = api.storage.reserve_mutation(64 * 1024)?;
             let repo = WorkerRepository::new(api.storage.db());
             let expected_active = if let Some(entrypoint) = body.entrypoint.as_ref() {
-                let worker = repo.get_worker(account_id, worker_id)?;
+                let worker = repo.get_tenant_worker(account_id, worker_id)?;
                 let deployment_id = worker.active_deployment_id.ok_or_else(|| {
                     PlatformError::new(
                         ErrorCode::DeploymentNotReady,
@@ -826,10 +986,15 @@ pub async fn public_ingress(State(state): State<HttpState>, request: Request) ->
         route_generation: i64::try_from(snapshot.worker.route_generation).unwrap_or(i64::MAX),
         request_id,
     };
-    match api.transport.dispatch(target, request).await {
+    let worker_id = snapshot.route.worker_id;
+    let started = std::time::Instant::now();
+    let response = match api.transport.dispatch(target, request).await {
         Ok(response) => pin_response(response, pin),
         Err(error) => error_response(error, request_id),
-    }
+    };
+    api.traffic
+        .observe(worker_id, response.status().as_u16(), started.elapsed());
+    response
 }
 
 fn authorized_api<'a>(
@@ -858,7 +1023,10 @@ fn unauthorized_or_unavailable(
             request_id,
         )
     } else {
-        StatusCode::NOT_FOUND.into_response()
+        error_response(
+            PlatformError::new(ErrorCode::RuntimeUnavailable, "control plane is not ready"),
+            request_id,
+        )
     }
 }
 
@@ -1309,24 +1477,7 @@ fn validate_route_parts(path: &str, entrypoint: Option<&str>) -> Result<(), Plat
 }
 
 fn deployment_json(deployment: &DeploymentRecord) -> serde_json::Value {
-    serde_json::json!({
-        "id": deployment.id,
-        "workerId": deployment.worker_id,
-        "versionNumber": deployment.version_number,
-        "contentKind": deployment.content_kind,
-        "state": deployment.state,
-        "artifactSha256": deployment.artifact_sha256.map(hex::encode),
-        "artifactSize": deployment.artifact_size,
-        "artifactSchemaVersion": deployment.artifact_schema_version,
-        "mainModule": deployment.main_module,
-        "workerCodeSha256": hex::encode(deployment.worker_code_sha256),
-        "loaderSchemaVersion": deployment.loader_schema_version,
-        "createdAtMs": deployment.created_at_ms,
-        "readyAtMs": deployment.ready_at_ms,
-        "rejectedAtMs": deployment.rejected_at_ms,
-        "rejectionCode": deployment.rejection_code,
-        "deletedAtMs": deployment.deleted_at_ms,
-    })
+    deployment.to_api_json()
 }
 
 fn request_id(request: &Request) -> RequestId {

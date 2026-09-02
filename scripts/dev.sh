@@ -47,6 +47,8 @@ chmod 700 "$data_root" "$s3_root" "$s3_root/open-compute" "$platform_data"
 export TMPDIR="$platform_data"
 export S3_ACCESS_KEY_ID=open-compute-dev
 export S3_SECRET_ACCESS_KEY=open-compute-dev-secret
+: "${OPEN_COMPUTE_ADMIN_TOKEN:=dev-admin-token}"
+export OPEN_COMPUTE_ADMIN_TOKEN
 
 config_tmp="$config.tmp.$$"
 trap 'rm -f "$config_tmp"; exit 129' HUP
@@ -56,6 +58,7 @@ trap 'rm -f "$config_tmp"; exit 143' TERM
 cat >"$config_tmp" <<EOF
 [server]
 public_bind = "127.0.0.1:8787"
+admin_auth = { env = "OPEN_COMPUTE_ADMIN_TOKEN" }
 
 [storage]
 data_dir = "$platform_data"
@@ -73,6 +76,9 @@ prefix = "system/"
 [runtime]
 startup_timeout_ms = 20000
 shutdown_grace_ms = 10000
+
+[dashboard]
+enabled = true
 EOF
 mv "$config_tmp" "$config"
 
@@ -105,6 +111,8 @@ fi
 echo "open-compute dev: S3 data      $s3_root"
 echo "open-compute dev: platform data $platform_data"
 echo "open-compute dev: config        $config"
+echo "open-compute dev: dashboard     http://127.0.0.1:8787/operator/"
+echo "open-compute dev: admin token   OPEN_COMPUTE_ADMIN_TOKEN"
 
 cd "$root"
 cargo run -p open-compute-service --bin ocd -- --config "$config" "$@"

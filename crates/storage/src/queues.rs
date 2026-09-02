@@ -1,10 +1,14 @@
 //! Independent Queue catalog and immutable producer-binding authority.
 
-use crate::{ControlDb, DeploymentState, IdempotencyReservation};
+use crate::catalog_page::{CatalogColumns, build_catalog_sql, record_catalog_cursor};
+use crate::{
+    CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, DeploymentState,
+    IdempotencyReservation,
+};
 use open_compute_core::{
     AccountId, BindingId, DeploymentId, ErrorCode, PlatformError, QueueId, RequestId,
 };
-use rusqlite::{OptionalExtension as _, Transaction, params};
+use rusqlite::{OptionalExtension as _, Transaction, params, params_from_iter};
 use std::str::FromStr;
 
 #[path = "queues/model.rs"]
@@ -133,41 +137,80 @@ impl<'a> QueueRepository<'a> {
             .with_read(|conn| read_queue_conn(conn, account_id, queue_id)?.ok_or_else(not_found))
     }
 
-    /// List a bounded stable page after an optional `(created_at_ms,id)` cursor.
+    /// List one bounded, filtered, and sorted Queue catalog page.
+    #[allow(clippy::too_many_arguments)]
     pub fn list(
         &self,
         account_id: AccountId,
-        after: Option<(i64, QueueId)>,
-        limit: u32,
-    ) -> Result<Vec<QueueRecord>, PlatformError> {
+        search: Option<&str>,
+        status: Option<QueueState>,
+        sort: CatalogSort,
+        direction: CatalogDirection,
+        after: Option<CatalogCursor>,
+        limit: u16,
+    ) -> Result<CatalogListPage<QueueRecord>, PlatformError> {
         if limit == 0 || limit > 1000 {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
                 "Queue list limit is invalid",
             ));
         }
+        let search = search.map(str::trim).filter(|value| !value.is_empty());
+        let exact_id = search.and_then(crate::search_as_queue_id);
+        let search_needle = if exact_id.is_some() {
+            None
+        } else {
+            search.map(str::to_lowercase)
+        };
+        let fetch = u32::from(limit).saturating_add(1);
+        let query = build_catalog_sql(
+            "SELECT id, account_id, name, state, availability, availability_code,
+                    lifecycle_generation, config_generation, delivery_delay_seconds,
+                    retention_seconds, max_message_bytes, max_batch_messages,
+                    max_batch_bytes, max_backlog_bytes, created_at_ms, updated_at_ms,
+                    deleted_at_ms
+             FROM queues WHERE account_id = ? AND state != 'tombstoned'",
+            CatalogColumns {
+                id: "id",
+                name: "name",
+                state: "state",
+                created_at: "created_at_ms",
+                updated_at: "updated_at_ms",
+            },
+            account_id.to_string(),
+            search_needle,
+            exact_id.map(|id| id.to_string()),
+            status.map(|value| value.as_str().to_string()),
+            sort,
+            direction,
+            after,
+            fetch,
+        )?;
         self.db.with_read(|conn| {
-            let (after_ms, after_id) =
-                after.map_or((i64::MIN, String::new()), |(ms, id)| (ms, id.to_string()));
-            let mut statement = conn
-                .prepare(
-                    "SELECT id, account_id, name, state, availability, availability_code,
-                            lifecycle_generation, config_generation, delivery_delay_seconds,
-                            retention_seconds, max_message_bytes, max_batch_messages,
-                            max_batch_bytes, max_backlog_bytes, created_at_ms, updated_at_ms,
-                            deleted_at_ms
-                     FROM queues WHERE account_id = ?1
-                       AND (created_at_ms > ?2 OR (created_at_ms = ?2 AND id > ?3))
-                     ORDER BY created_at_ms, id LIMIT ?4",
-                )
-                .map_err(|_| db_error())?;
+            let mut statement = conn.prepare(&query.text).map_err(|_| db_error())?;
             let rows = statement
-                .query_map(
-                    params![account_id.to_string(), after_ms, after_id, i64::from(limit)],
-                    map_queue,
-                )
+                .query_map(params_from_iter(query.values), map_queue)
                 .map_err(|_| db_error())?;
-            collect(rows)
+            let mut queues = collect(rows)?;
+            let next_cursor = if queues.len() > usize::from(limit) {
+                queues.pop();
+                queues.last().map(|queue| {
+                    record_catalog_cursor(
+                        sort,
+                        direction,
+                        &queue.name,
+                        queue.created_at_ms,
+                        queue.updated_at_ms,
+                        &queue.id.to_string(),
+                    )
+                })
+            } else {
+                None
+            };
+            Ok(CatalogListPage {
+                items: queues,
+                next_cursor,
+            })
         })
     }
 

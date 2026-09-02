@@ -117,7 +117,7 @@ fn redacted_policy(loaded: &LoadedConfig) -> serde_json::Value {
         "server": {
             "public_bind": config.server.public_bind,
             "admin_bind": config.server.admin_bind,
-            "admin_auth_configured": config.server.admin_auth.is_some(),
+            "admin_auth_configured": true,
         },
         "storage": {
             "data_dir": config.storage.data_dir,
@@ -245,9 +245,12 @@ fn secret_needles(loaded: &LoadedConfig) -> Result<Vec<Vec<u8>>, PlatformError> 
         credentials.access_key_id().expose().as_bytes().to_vec(),
         credentials.secret_access_key().expose().as_bytes().to_vec(),
     ];
-    if let Some(reference) = &loaded.config.server.admin_auth {
-        values.push(resolve_admin_auth(reference)?.expose().as_bytes().to_vec());
-    }
+    values.push(
+        resolve_admin_auth(&loaded.config.server.admin_auth)?
+            .expose()
+            .as_bytes()
+            .to_vec(),
+    );
     values.retain(|value| value.len() >= 4);
     Ok(values)
 }

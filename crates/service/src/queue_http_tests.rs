@@ -46,8 +46,13 @@ async fn fixture() -> Fixture {
         .with_metrics(metrics.clone())
         .with_default_max_backlog_bytes(4096);
     assert_eq!(api.reconcile_pending().await.unwrap(), 0);
-    let state = HttpState::for_test(HealthCoordinator::new(), metrics, false, None)
-        .with_queue_api(Some(api.clone()));
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics,
+        false,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_queue_api(Some(api.clone()));
     Fixture {
         _temp: temp,
         router: http::admin_router(state),
@@ -59,7 +64,7 @@ async fn fixture() -> Fixture {
 #[tokio::test]
 async fn queue_running_config_and_delete_intents_reconcile_after_transaction_crashes() {
     let fixture = fixture().await;
-    let collection = format!("/v1/accounts/{}/queues", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/queues", fixture.account);
     let (_, created) = response_json(
         fixture
             .router
@@ -247,7 +252,8 @@ fn request(
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header("content-type", "application/json");
+        .header("content-type", "application/json")
+        .header("authorization", "Bearer admin-secret");
     if let Some(key) = key {
         builder = builder.header(IDEMPOTENCY_HEADER, key);
     }
@@ -268,7 +274,7 @@ async fn response_json(response: Response) -> (StatusCode, Value) {
 #[tokio::test]
 async fn queue_control_crud_replay_config_list_metrics_and_delete_round_trip() {
     let fixture = fixture().await;
-    let collection = format!("/v1/accounts/{}/queues", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/queues", fixture.account);
     let create = json!({
         "name": "events",
         "deliveryDelaySeconds": 2,
@@ -356,7 +362,7 @@ async fn queue_control_crud_replay_config_list_metrics_and_delete_round_trip() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(listed["queues"].as_array().unwrap().len(), 1);
-    assert!(listed["nextCursor"].is_string());
+    assert!(listed["nextCursor"].is_null());
 
     let (status, deleted) = response_json(
         fixture
@@ -380,7 +386,7 @@ async fn queue_control_crud_replay_config_list_metrics_and_delete_round_trip() {
 #[tokio::test]
 async fn queue_control_rejects_missing_idempotency_ambiguous_patch_and_bad_query() {
     let fixture = fixture().await;
-    let collection = format!("/v1/accounts/{}/queues", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/queues", fixture.account);
     let (status, body) = response_json(
         fixture
             .router
@@ -418,7 +424,7 @@ async fn queue_control_rejects_missing_idempotency_ambiguous_patch_and_bad_query
 #[tokio::test]
 async fn queue_control_rename_failure_replay_and_force_delete_are_restart_safe() {
     let fixture = fixture().await;
-    let collection = format!("/v1/accounts/{}/queues", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/queues", fixture.account);
     let (status, created) = response_json(
         fixture
             .router
@@ -568,17 +574,35 @@ async fn queue_control_helpers_cover_protocol_and_error_boundaries() {
         .unwrap();
     let cursor = queue_cursor(&queue);
     assert_eq!(parse_cursor(&cursor).unwrap(), (42, queue.id));
-    assert_eq!(parse_list_query(None).unwrap(), (None, 100));
+    let default_query = parse_list_query(None).unwrap();
+    assert_eq!(default_query.search, None);
+    assert_eq!(default_query.cursor, None);
+    assert_eq!(default_query.status, None);
+    assert_eq!(default_query.sort, CatalogSort::UpdatedAt);
+    assert_eq!(default_query.direction, CatalogDirection::Desc);
+    assert_eq!(default_query.limit, 100);
     assert_eq!(
         parse_list_query(Some("limit=1&cursor="))
             .unwrap_err()
             .code(),
         ErrorCode::ConfigInvalid
     );
+    let cursor_query = parse_list_query(Some(&format!("cursor={cursor}&limit=1"))).unwrap();
+    assert_eq!(cursor_query.search, None);
     assert_eq!(
-        parse_list_query(Some(&format!("cursor={cursor}&limit=1"))).unwrap(),
-        (Some((42, queue.id)), 1)
+        cursor_query.cursor.as_ref().map(|value| value.id.clone()),
+        Some(queue.id.to_string())
     );
+    assert_eq!(cursor_query.limit, 1);
+    let search_query = parse_list_query(Some(
+        "search=alpha&status=ready&sort=name&direction=asc&limit=10",
+    ))
+    .unwrap();
+    assert_eq!(search_query.search.as_deref(), Some("alpha"));
+    assert_eq!(search_query.status, Some(QueueState::Ready));
+    assert_eq!(search_query.sort, CatalogSort::Name);
+    assert_eq!(search_query.direction, CatalogDirection::Asc);
+    assert_eq!(search_query.limit, 10);
     for invalid in ["limit", "unknown=1", "cursor=x&cursor=x", "limit=1001"] {
         assert!(parse_list_query(Some(invalid)).is_err());
     }
@@ -721,7 +745,7 @@ async fn queue_control_helpers_cover_protocol_and_error_boundaries() {
     let unavailable = HttpState::for_test(HealthCoordinator::new(), metrics.clone(), false, None);
     assert_eq!(
         unauthorized_or_unavailable(&unavailable, &missing, fixed).status(),
-        StatusCode::SERVICE_UNAVAILABLE
+        StatusCode::UNAUTHORIZED
     );
     let protected = HttpState::for_test(
         HealthCoordinator::new(),

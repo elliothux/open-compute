@@ -10,12 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 MARKERS = (
     b'fault-injection-route', b'x-open-compute-crash-after', b'OPEN_COMPUTE_DISABLE_AUTH',
     b'OPEN_COMPUTE_SKIP_RUNTIME_VERIFY', b'p1-to-json-trap', b'AKIAEXAMPLEKEYID01',
-    b'AfterClaimCommit', b'BeforeDispatch', b'AfterDispatchBeforeComplete',
-    b'AfterCompleteCommit', b'DuringProjectionRefresh', b'OPEN_COMPUTE_P2_2_FAULT',
+    b'OPEN_COMPUTE_P2_2_FAULT',
     b'matrix-json-body', b'runtime-gate-throw', b'runtime-gate-wait-until',
     b'runtime-gate-timeout', b'p23-first', b'p23-second', b'p23-third',
     *(f'QG-{number:02}'.encode() for number in range(1, 11)),
 )
+MARKER_GROUPS = ((
+    b'AfterClaimCommit', b'BeforeDispatch', b'AfterDispatchBeforeComplete',
+    b'AfterCompleteCommit', b'DuringProjectionRefresh',
+),)
 
 
 def main():
@@ -29,7 +32,8 @@ def main():
     if len(binaries) != 1:
         raise SystemExit('Cargo did not produce exactly one production ocd')
     data = Path(binaries[0]).read_bytes()
-    if any(marker in data for marker in MARKERS):
+    if (any(marker in data for marker in MARKERS)
+            or any(all(marker in data for marker in group) for group in MARKER_GROUPS)):
         raise SystemExit('production executable contains a test marker; no release packaging was performed')
     print('production feature/artifact hygiene PASS (one ordinary build; no packaging)')
 

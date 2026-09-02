@@ -260,7 +260,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &deployment,
         generation,
         None,
-        "/metrics",
+        "/operator/metrics",
     )
     .await;
     assert_eq!(warm.loader_outcome, Some(LoaderOutcome::Warm));
@@ -357,7 +357,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &deployment,
         generation,
         None,
-        "/metrics",
+        "/operator/metrics",
     )
     .await;
     assert_eq!(restored.status, 200, "{}", restored.body);
@@ -435,7 +435,7 @@ async fn p2_2_real_queue_producer_matrix() {
         &deployment,
         generation,
         None,
-        "/metrics",
+        "/operator/metrics",
     )
     .await;
     assert_eq!(empty.status, 200, "{}", empty.body);

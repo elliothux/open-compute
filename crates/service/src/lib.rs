@@ -17,8 +17,12 @@ pub mod d1_backend;
 pub mod d1_http;
 mod d1_protocol;
 mod d1_session;
+pub mod dashboard;
+#[cfg(test)]
+mod dashboard_tests;
 pub mod do_http;
 pub mod doctor;
+pub mod embedded_dashboard;
 pub mod exit;
 pub mod health;
 pub mod http;
@@ -26,6 +30,7 @@ pub mod images_backend;
 pub mod kv_backend;
 pub mod kv_http;
 pub mod metrics;
+mod operator_binding;
 mod p2_3_promotion;
 #[cfg(test)]
 mod p3_3_test_support;
@@ -74,7 +79,9 @@ pub use binding_backend::{
 pub use cli::{Cli, Command, execute};
 pub use d1_backend::D1BindingService;
 pub use d1_http::D1ApiState;
+pub use dashboard::{DashboardDispatch, bootstrap_dashboard};
 pub use do_http::DoApiState;
+pub use embedded_dashboard::embedded_dashboard_files;
 pub use exit::{ExitClass, emit_failure, exit_code};
 pub use health::{HealthCoordinator, map_supervisor};
 pub use kv_backend::{KvCommand, KvCommandResult, KvStreamPart, SqliteKvBindingExecutor};
@@ -85,7 +92,6 @@ pub use r2_http::R2ApiState;
 pub use run::run_platform;
 #[cfg(any(test, feature = "test-support"))]
 pub use run::{FailAfter, RunOptions, run_platform_with};
-pub use scheduler::SchedulerService;
 
 #[cfg(test)]
 mod tests;

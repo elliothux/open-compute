@@ -5,7 +5,7 @@
 
 use crate::error::{ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use url::Url;
 
@@ -60,14 +60,17 @@ pub struct PlatformConfig {
     pub durable_objects: DurableObjectsConfig,
     /// Durable Object alarm scheduler policy.
     pub scheduler: SchedulerConfig,
+    /// Optional operator dashboard settings.
+    pub dashboard: DashboardConfig,
 }
 
 impl PlatformConfig {
     /// Parse TOML without resolving secrets or reading the environment.
     pub fn from_toml_str(toml: &str) -> Result<Self, PlatformError> {
-        let config: Self = toml::from_str(toml).map_err(|_| {
+        let mut config: Self = toml::from_str(toml).map_err(|_| {
             PlatformError::new(ErrorCode::ConfigParseFailed, "invalid platform config TOML")
         })?;
+        config.s3.normalize_implicit_env_defaults();
         config.validate()?;
         Ok(config)
     }
@@ -97,6 +100,7 @@ impl PlatformConfig {
         self.workflows.validate()?;
         self.durable_objects.validate()?;
         self.scheduler.validate()?;
+        self.dashboard.validate();
         Ok(())
     }
 }
@@ -203,7 +207,19 @@ pub fn validate_bootstrap_config_path(path: &Path) -> Result<(), PlatformError> 
     Ok(())
 }
 
-/// Public/admin bind addresses and optional admin authentication.
+/// Operator dashboard settings.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct DashboardConfig {
+    /// Whether the static dashboard is served at `/operator/`.
+    pub enabled: bool,
+}
+
+impl DashboardConfig {
+    fn validate(&self) {}
+}
+
+/// Public/admin bind addresses and admin authentication.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct ServerConfig {
@@ -211,8 +227,8 @@ pub struct ServerConfig {
     pub public_bind: String,
     /// Optional dedicated admin bind. Empty means the public listener.
     pub admin_bind: Option<String>,
-    /// Optional admin auth secret reference. Required when admin bind is non-loopback.
-    pub admin_auth: Option<SecretReference>,
+    /// Required admin auth secret reference.
+    pub admin_auth: SecretReference,
 }
 
 impl Default for ServerConfig {
@@ -220,7 +236,10 @@ impl Default for ServerConfig {
         Self {
             public_bind: DEFAULT_PUBLIC_BIND.to_string(),
             admin_bind: None,
-            admin_auth: None,
+            admin_auth: SecretReference {
+                env: Some("OPEN_COMPUTE_ADMIN_TOKEN".to_string()),
+                file: None,
+            },
         }
     }
 }
@@ -232,20 +251,8 @@ impl ServerConfig {
             Some(bind) if !bind.is_empty() => Some(parse_bind(bind, "server.admin_bind")?),
             _ => None,
         };
-        let admin_addr = admin.unwrap_or(public);
-        if !is_loopback(admin_addr.ip()) {
-            match &self.admin_auth {
-                Some(reference) => reference.validate("server.admin_auth")?,
-                None => {
-                    return Err(PlatformError::new(
-                        ErrorCode::AdminAuthRequired,
-                        "non-loopback server.admin_bind requires explicit server.admin_auth",
-                    ));
-                }
-            }
-        } else if let Some(reference) = &self.admin_auth {
-            reference.validate("server.admin_auth")?;
-        }
+        let _admin_addr = admin.unwrap_or(public);
+        self.admin_auth.validate("server.admin_auth")?;
         Ok(())
     }
 
@@ -382,6 +389,25 @@ impl Default for S3Config {
 }
 
 impl S3Config {
+    /// Drop serde-injected default env names when file references are configured.
+    pub fn normalize_implicit_env_defaults(&mut self) {
+        // Partial `[s3]` tables inherit serde defaults for env var names even when the
+        // operator only configured file references. Drop those implicit defaults so
+        // file-only configs do not also require matching process environment values.
+        const DEFAULT_ACCESS_ENV: &str = "S3_ACCESS_KEY_ID";
+        const DEFAULT_SECRET_ENV: &str = "S3_SECRET_ACCESS_KEY";
+        if self.access_key_id_file.is_some()
+            && self.access_key_id_env.as_deref() == Some(DEFAULT_ACCESS_ENV)
+        {
+            self.access_key_id_env = None;
+        }
+        if self.secret_access_key_file.is_some()
+            && self.secret_access_key_env.as_deref() == Some(DEFAULT_SECRET_ENV)
+        {
+            self.secret_access_key_env = None;
+        }
+    }
+
     fn validate(&self) -> Result<(), PlatformError> {
         validate_s3_endpoint(&self.endpoint)?;
         if !self.verify_tls {
@@ -1293,13 +1319,6 @@ fn parse_bind(value: &str, _field: &'static str) -> Result<SocketAddr, PlatformE
             "bind address is not a valid socket address",
         )
     })
-}
-
-fn is_loopback(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(addr) => addr.is_loopback(),
-        IpAddr::V6(addr) => addr.is_loopback(),
-    }
 }
 
 fn validate_s3_endpoint(endpoint: &str) -> Result<(), PlatformError> {

@@ -12,7 +12,7 @@ use open_compute_artifacts::{
     ArtifactRef, ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
 use open_compute_core::clock::SystemClock;
-use open_compute_core::config::{PlatformConfig, RuntimeConfig, StorageConfig};
+use open_compute_core::config::{PlatformConfig, RuntimeConfig, SecretReference, StorageConfig};
 use open_compute_core::{
     ComponentName, ComponentState, ErrorCode, MetricsConfig, QueueMessageId, ReadinessReason,
     Redactor, RequestId, SecretString, ServerConfig,
@@ -42,6 +42,7 @@ use open_compute_workers::{
 };
 use std::collections::BTreeMap;
 use std::convert::Infallible;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1398,6 +1399,18 @@ request_timeout_ms = 3000
         );
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
     ArtifactStore::new(S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap())
+}
+
+pub(crate) const ADMIN_TOKEN: &str = "p0-2-admin-secret";
+
+pub(crate) fn write_admin_secret(path: &Path) -> PathBuf {
+    std::fs::write(path, format!("{ADMIN_TOKEN}\n")).expect("write admin token");
+    let mut permissions = std::fs::metadata(path)
+        .expect("admin token metadata")
+        .permissions();
+    permissions.set_mode(0o600);
+    std::fs::set_permissions(path, permissions).expect("admin token permissions");
+    path.to_owned()
 }
 
 fn repo_root() -> PathBuf {

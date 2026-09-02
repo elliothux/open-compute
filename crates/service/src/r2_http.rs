@@ -1,21 +1,23 @@
 //! P0.5 logical R2 bucket control API and lifecycle recovery.
 
 use crate::http::{HttpState, ProductErrorCode, authorize};
+use crate::r2_backend::R2BindingService;
 use axum::Router;
 use axum::body::{Body, to_bytes};
-use axum::extract::{Path, Request, State};
-use axum::http::StatusCode;
+use axum::extract::{Path, Query, Request, State};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
-use open_compute_artifacts::R2ObjectStore;
+use axum::routing::{get, post};
+use open_compute_artifacts::{R2_MAX_LIST_LIMIT, R2ObjectStore, UserObjectKey};
 use open_compute_core::{
     AccountId, BindingKind, ErrorCode, PlatformError, R2Config, RequestId, ResourceId,
     ResourceState,
 };
 use open_compute_storage::{
-    PlatformStorage, R2_SCHEMA_VERSION, R2BucketRecord, R2BucketRepository, ReserveResourceCreate,
-    ReserveResourceDelete, ResourceCreateReservation, ResourceDeleteReservation,
-    ResourceRepository,
+    CatalogDirection, CatalogSort, DEFAULT_CATALOG_LIST_LIMIT, PlatformStorage, R2_SCHEMA_VERSION,
+    R2BucketRecord, R2BucketRepository, R2ObjectListEntry, R2ObjectRepository,
+    ReserveResourceCreate, ReserveResourceDelete, ResourceCreateReservation,
+    ResourceDeleteReservation, ResourceRepository, decode_catalog_cursor, normalize_catalog_limit,
 };
 use open_compute_workers::{R2ResourceDriver, ResourcePins};
 use serde::{Deserialize, Serialize};
@@ -28,8 +30,11 @@ const MAX_JSON_BODY: usize = 4096;
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Maximum raw body size for operator R2 object PUT requests.
+pub(crate) const R2_OPERATOR_PUT_MAX_BODY: usize = 26 * 1024 * 1024;
+
 /// Shared logical-bucket control-plane composition state.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct R2ApiState {
     storage: Arc<PlatformStorage>,
     objects: R2ObjectStore,
@@ -38,6 +43,16 @@ pub struct R2ApiState {
     delete_drain_timeout: Duration,
     force_deletes: Arc<Semaphore>,
     metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
+    binding: Option<Arc<R2BindingService>>,
+}
+
+impl std::fmt::Debug for R2ApiState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("R2ApiState")
+            .field("config", &self.config)
+            .field("binding", &self.binding.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl R2ApiState {
@@ -58,7 +73,24 @@ impl R2ApiState {
             delete_drain_timeout,
             force_deletes: Arc::new(Semaphore::new(1)),
             metrics: None,
+            binding: None,
         }
+    }
+
+    /// Attach the authoritative R2 binding executor used for item-level operator APIs.
+    #[must_use]
+    pub fn with_binding(mut self, binding: Arc<R2BindingService>) -> Self {
+        self.binding = Some(binding);
+        self
+    }
+
+    fn binding(&self) -> Result<&Arc<R2BindingService>, PlatformError> {
+        self.binding.as_ref().ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::PlatformUnavailable,
+                "R2 operator binding is unavailable",
+            )
+        })
     }
 
     /// Attach fixed-series observability for force-delete progress.
@@ -176,7 +208,7 @@ impl Drop for ForceDeleteGuard {
     }
 }
 
-/// Router for logical R2 bucket management. Object bytes are not exposed here.
+/// Router for logical R2 bucket management and bounded operator object APIs.
 pub fn control_router() -> Router<HttpState> {
     Router::new()
         .route(
@@ -185,10 +217,47 @@ pub fn control_router() -> Router<HttpState> {
         )
         .route(
             "/v1/accounts/{account_id}/r2/buckets/{resource_id}",
-            axum::routing::get(get_bucket)
-                .patch(rename_bucket)
-                .delete(delete_bucket),
+            get(get_bucket).patch(rename_bucket).delete(delete_bucket),
         )
+        .route(
+            "/v1/accounts/{account_id}/r2/buckets/{resource_id}/objects",
+            get(list_objects),
+        )
+        .route(
+            "/v1/accounts/{account_id}/r2/buckets/{resource_id}/objects/{key}",
+            get(get_object).put(put_object).delete(delete_object),
+        )
+}
+
+/// Returns true when `path` targets an operator R2 object PUT with a concrete key segment.
+pub(crate) fn operator_r2_object_put_path(path: &str) -> bool {
+    const PREFIX: &str = "/operator/api/v1/accounts/";
+    if !path.starts_with(PREFIX) {
+        return false;
+    }
+    let Some(objects_index) = path.find("/objects/") else {
+        return false;
+    };
+    path.contains("/r2/buckets/") && objects_index + "/objects/".len() < path.len()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListBucketsQuery {
+    search: Option<String>,
+    status: Option<ResourceState>,
+    sort: Option<CatalogSort>,
+    direction: Option<CatalogDirection>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListObjectsQuery {
+    prefix: Option<String>,
+    cursor: Option<String>,
+    limit: Option<u16>,
 }
 
 #[derive(Deserialize)]
@@ -300,24 +369,63 @@ async fn create(
 async fn list_buckets(
     State(state): State<HttpState>,
     Path(account): Path<String>,
+    query: Result<Query<ListBucketsQuery>, axum::extract::rejection::QueryRejection>,
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
     let Some(api) = authorized_api(&state, &request) else {
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
+    let Ok(Query(query)) = query else {
+        return error_response(
+            PlatformError::new(ErrorCode::ConfigInvalid, "R2 bucket list query is invalid"),
+            request_id,
+        );
+    };
     let account_id = match parse_account(&account) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
-    match R2BucketRepository::new(api.storage.db()).list(account_id) {
-        Ok(buckets) => json_response(
+    let after = match query.cursor.as_deref() {
+        None => None,
+        Some(cursor) => match decode_catalog_cursor(cursor) {
+            Ok(value) => Some(value),
+            Err(error) => return error_response(error, request_id),
+        },
+    };
+    let limit = normalize_catalog_limit(query.limit.unwrap_or(DEFAULT_CATALOG_LIST_LIMIT));
+    let sort = query.sort.unwrap_or(CatalogSort::Name);
+    let direction = query.direction.unwrap_or(CatalogDirection::Asc);
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let storage = api.storage.clone();
+    match tokio::task::spawn_blocking(move || {
+        R2BucketRepository::new(storage.db()).list_page(
+            account_id,
+            search.as_deref(),
+            query.status,
+            sort,
+            direction,
+            after,
+            limit,
+        )
+    })
+    .await
+    {
+        Ok(Ok(page)) => json_response(
             &serde_json::json!({
-                "buckets": buckets.iter().map(BucketView::from).collect::<Vec<_>>()
+                "buckets": page.items.iter().map(BucketView::from).collect::<Vec<_>>(),
+                "cursor": page.next_cursor,
+                "listComplete": page.next_cursor.is_none(),
             }),
             StatusCode::OK,
         ),
-        Err(error) => error_response(error, request_id),
+        Ok(Err(error)) => error_response(error, request_id),
+        Err(_) => error_response(internal(), request_id),
     }
 }
 
@@ -554,6 +662,305 @@ impl<'a> From<&'a R2BucketRecord> for BucketView<'a> {
     }
 }
 
+async fn get_object(
+    State(state): State<HttpState>,
+    Path((account, resource, key)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let authorized = authorize(&state, &request);
+    let metadata = request
+        .uri()
+        .query()
+        .is_some_and(|query| query.split('&').any(|part| part == "metadata=true"));
+    if metadata {
+        return object_metadata_response(
+            &state,
+            request_id,
+            authorized,
+            account.as_str(),
+            resource.as_str(),
+            key.as_str(),
+        )
+        .await;
+    }
+    if !authorized {
+        return unauthorized_or_unavailable_authed(&state, request_id, false);
+    }
+    let (account_id, resource_id) = match parse_ids(account.as_str(), resource.as_str()) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let object_key = match parse_object_key(key.as_str()) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let Some(api) = state.r2_api() else {
+        return error_response(
+            PlatformError::new(
+                ErrorCode::PlatformUnavailable,
+                "R2 operator API is unavailable",
+            ),
+            request_id,
+        );
+    };
+    let binding = match api.binding() {
+        Ok(value) => value.clone(),
+        Err(error) => return error_response(error, request_id),
+    };
+    match binding
+        .operator_object_get(account_id, resource_id, &object_key)
+        .await
+    {
+        Ok(Some((metadata, body))) => {
+            let mut response = Response::new(Body::from(body));
+            *response.status_mut() = StatusCode::OK;
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/octet-stream"),
+            );
+            if let Ok(value) = HeaderValue::from_str(&metadata.etag) {
+                response.headers_mut().insert(header::ETAG, value);
+            }
+            response
+        }
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => error_response(error, request_id),
+    }
+}
+
+async fn put_object(
+    State(state): State<HttpState>,
+    Path((account, resource, key)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let object_key = match parse_object_key(&key) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    if let Err(error) = idempotency_key(&request) {
+        return error_response(error, request_id);
+    }
+    let binding = match api.binding() {
+        Ok(value) => value.clone(),
+        Err(error) => return error_response(error, request_id),
+    };
+    let body = request.into_body();
+    match binding
+        .operator_object_put(account_id, resource_id, &object_key, request_id, body)
+        .await
+    {
+        Ok(Some(metadata)) => json_response(
+            &serde_json::json!({
+                "key": metadata.key,
+                "size": metadata.size,
+                "etag": metadata.etag,
+                "uploaded": metadata.uploaded,
+            }),
+            StatusCode::OK,
+        ),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => error_response(error, request_id),
+    }
+}
+
+async fn delete_object(
+    State(state): State<HttpState>,
+    Path((account, resource, key)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let object_key = match parse_object_key(&key) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    if let Err(error) = idempotency_key(&request) {
+        return error_response(error, request_id);
+    }
+    let binding = match api.binding() {
+        Ok(value) => value.clone(),
+        Err(error) => return error_response(error, request_id),
+    };
+    match binding
+        .operator_object_delete(account_id, resource_id, &object_key)
+        .await
+    {
+        Ok(true) => json_response(
+            &serde_json::json!({ "key": object_key.as_str() }),
+            StatusCode::OK,
+        ),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => error_response(error, request_id),
+    }
+}
+
+async fn object_metadata_response(
+    state: &HttpState,
+    request_id: RequestId,
+    authorized: bool,
+    account: &str,
+    resource: &str,
+    key: &str,
+) -> Response {
+    if !authorized {
+        return unauthorized_or_unavailable_authed(state, request_id, false);
+    }
+    let Some(api) = state.r2_api() else {
+        return unauthorized_or_unavailable_authed(state, request_id, true);
+    };
+    let (account_id, resource_id) = match parse_ids(account, resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let object_key = match parse_object_key(key) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let binding = match api.binding() {
+        Ok(value) => value.clone(),
+        Err(error) => return error_response(error, request_id),
+    };
+    match binding
+        .operator_object_head(account_id, resource_id, &object_key)
+        .await
+    {
+        Ok(Some(metadata)) => json_response(
+            &serde_json::json!({
+                "key": metadata.key,
+                "size": metadata.size,
+                "etag": metadata.etag,
+                "uploaded": metadata.uploaded,
+            }),
+            StatusCode::OK,
+        ),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => error_response(error, request_id),
+    }
+}
+
+fn unauthorized_or_unavailable_authed(
+    _state: &HttpState,
+    request_id: RequestId,
+    authorized: bool,
+) -> Response {
+    if !authorized {
+        error_response(
+            PlatformError::new(
+                ErrorCode::AdminAuthRequired,
+                "admin authentication is required",
+            ),
+            request_id,
+        )
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+fn parse_object_key(value: &str) -> Result<UserObjectKey, PlatformError> {
+    if value.is_empty() {
+        return Err(PlatformError::new(
+            ErrorCode::ConfigInvalid,
+            "R2 object key is invalid",
+        ));
+    }
+    UserObjectKey::parse(value)
+}
+
+async fn list_objects(
+    State(state): State<HttpState>,
+    Path((account, resource)): Path<(String, String)>,
+    query: Result<Query<ListObjectsQuery>, axum::extract::rejection::QueryRejection>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let Ok(Query(query)) = query else {
+        return error_response(
+            PlatformError::new(ErrorCode::ConfigInvalid, "R2 object list query is invalid"),
+            request_id,
+        );
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let prefix = query.prefix.unwrap_or_default();
+    let limit = query.limit.unwrap_or(100).clamp(1, R2_MAX_LIST_LIMIT);
+    let after = query.cursor;
+    let storage = api.storage.clone();
+    let objects = api.objects.clone();
+    let page = match tokio::task::spawn_blocking(move || {
+        let bucket = R2BucketRepository::new(storage.db()).get(account_id, resource_id)?;
+        let locator = objects.locator(bucket.resource.id, &bucket.physical_prefix)?;
+        let page = R2ObjectRepository::new(storage.db()).list(
+            account_id,
+            resource_id,
+            &prefix,
+            None,
+            after.as_deref(),
+            limit,
+        )?;
+        Ok::<_, PlatformError>((bucket, locator, page))
+    })
+    .await
+    {
+        Ok(Ok(value)) => value,
+        Ok(Err(error)) => return error_response(error, request_id),
+        Err(_) => return error_response(internal(), request_id),
+    };
+    let (bucket, locator, page) = page;
+    let _ = bucket;
+    let mut listed = Vec::new();
+    for entry in page.entries {
+        let R2ObjectListEntry::Object(record) = entry else {
+            continue;
+        };
+        let key = match UserObjectKey::parse(&record.object_key) {
+            Ok(value) => value,
+            Err(error) => return error_response(error, request_id),
+        };
+        let ssec = match crate::r2_backend::objects::open_object_ssec(&api.storage, &record) {
+            Ok(value) => value,
+            Err(error) => return error_response(error, request_id),
+        };
+        match api.objects.head(&locator, &key, ssec.as_ref()).await {
+            Ok(Some(metadata)) => listed.push(serde_json::json!({
+                "key": metadata.key,
+                "size": metadata.size,
+                "etag": metadata.etag,
+                "uploaded": metadata.uploaded,
+            })),
+            Ok(None) => {}
+            Err(error) => return error_response(error, request_id),
+        }
+    }
+    json_response(
+        &serde_json::json!({
+            "objects": listed,
+            "cursor": page.next_after,
+            "truncated": page.next_after.is_some(),
+        }),
+        StatusCode::OK,
+    )
+}
+
 fn authorized_api<'a>(state: &'a HttpState, request: &Request) -> Option<&'a Arc<R2ApiState>> {
     authorize(state, request).then(|| state.r2_api()).flatten()
 }
@@ -660,7 +1067,7 @@ fn json_response(value: &impl Serialize, status: StatusCode) -> Response {
 fn json_bytes(bytes: Vec<u8>, status: StatusCode) -> Response {
     (
         status,
-        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        [(header::CONTENT_TYPE, "application/json")],
         Body::from(bytes),
     )
         .into_response()

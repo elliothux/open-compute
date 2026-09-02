@@ -629,7 +629,11 @@ impl<'a> DeploymentController<'a> {
         };
         match operation {
             Ok(result) => {
-                let response = serde_json::to_vec(&result).map_err(|_| invariant())?;
+                let response = serde_json::to_vec(&serde_json::json!({
+                    "deployment": result.deployment.to_api_json(),
+                    "promoted": result.promoted,
+                }))
+                .map_err(|_| invariant())?;
                 repo.complete_idempotency_with_deployment_ref(
                     request.account_id,
                     "deployment.create",
@@ -805,22 +809,19 @@ impl<'a> DeploymentController<'a> {
         deployment_id: DeploymentId,
     ) -> Result<CreateDeploymentResult, PlatformError> {
         let repo = WorkerRepository::new(self.storage.db());
-        let deployment =
-            match repo.get_deployment(request.account_id, request.worker_id, deployment_id) {
-                Ok(deployment) => deployment,
-                Err(error) if error.code() == ErrorCode::DeploymentNotFound => {
-                    return self
-                        .create_reserved(
-                            request,
-                            content,
-                            canonical_vars,
-                            stored_vars,
-                            deployment_id,
-                        )
-                        .await;
-                }
-                Err(error) => return Err(error),
-            };
+        let deployment = match repo.get_worker_deployment(
+            request.account_id,
+            request.worker_id,
+            deployment_id,
+        ) {
+            Ok(deployment) => deployment,
+            Err(error) if error.code() == ErrorCode::DeploymentNotFound => {
+                return self
+                    .create_reserved(request, content, canonical_vars, stored_vars, deployment_id)
+                    .await;
+            }
+            Err(error) => return Err(error),
+        };
         if deployment.content_kind != content.kind() || deployment.deleted_at_ms.is_some() {
             return Err(invariant());
         }
@@ -975,7 +976,7 @@ impl<'a> DeploymentController<'a> {
                     promoted: true,
                 });
             }
-            for route in repo.list_routes(request.account_id, request.worker_id)? {
+            for route in repo.list_worker_routes(request.account_id, request.worker_id)? {
                 if let Some(entrypoint) = route.entrypoint {
                     self.validator
                         .validate_entrypoint(candidate.clone(), entrypoint)
@@ -998,7 +999,7 @@ impl<'a> DeploymentController<'a> {
                     "Queue/Cron promotion coordinator is unavailable",
                 ));
             } else {
-                repo.promote_checked(
+                repo.promote_worker_checked(
                     request.account_id,
                     request.worker_id,
                     deployment.id,

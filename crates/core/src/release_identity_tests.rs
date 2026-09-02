@@ -9,6 +9,7 @@ fn release() -> PlatformReleaseIdentityV1 {
         workerd_version: "workerd test".to_owned(),
         workerd_lock_sha256: "a".repeat(64),
         runtime_assets_sha256: "b".repeat(64),
+        dashboard_assets_sha256: "c".repeat(64),
         facade_capability_version: 1,
         control_schema_version: 2,
         scheduler_schema_version: 1,

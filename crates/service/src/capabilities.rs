@@ -1,6 +1,7 @@
 //! P1 release identity and queryable capability output.
 
 use crate::config_load::LoadedConfig;
+use crate::embedded_dashboard::embedded_dashboard_assets_sha256;
 use open_compute_core::{
     CacheConfig, CapabilityInventoryV1, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig,
     KvConfig, PlatformCapabilitiesV1, PlatformConfig, PlatformError, PlatformReleaseIdentityV1,
@@ -57,6 +58,7 @@ pub fn platform_capabilities(
         workerd_version: runtime_lock.expected_version_output.clone(),
         workerd_lock_sha256: lock_sha256.clone(),
         runtime_assets_sha256: assets_sha256,
+        dashboard_assets_sha256: embedded_dashboard_assets_sha256().to_owned(),
         facade_capability_version: FACADE_CAPABILITY_VERSION,
         control_schema_version: u32::try_from(migrations::current_schema_version())
             .map_err(|_| capability_invalid())?,

@@ -1,8 +1,13 @@
 //! Typed P0.2 control-plane repository.
 
-use crate::{ControlDb, SecretEnvelope};
+use crate::{
+    CatalogCursor, CatalogCursorValue, CatalogDirection, CatalogListPage, CatalogSort, ControlDb,
+    SecretEnvelope, encode_catalog_cursor, invalid_catalog_cursor, normalize_catalog_limit,
+    search_as_worker_id,
+};
 use open_compute_core::{AccountId, DeploymentId, ErrorCode, PlatformError, RequestId, WorkerId};
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::types::Value;
+use rusqlite::{OptionalExtension, Transaction, params, params_from_iter};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -14,6 +19,38 @@ pub use deployment_create::NewDeploymentProducts;
 
 /// Current immutable loader descriptor schema.
 pub const LOADER_SCHEMA_VERSION: i64 = 1;
+
+/// Stable system Worker name for the operator dashboard.
+pub const SYSTEM_DASHBOARD_WORKER_NAME: &str = "open-compute-dashboard";
+
+/// Worker ownership boundary between tenant-managed and platform-owned Workers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerOwnership {
+    /// Tenant-managed Worker visible through the control API.
+    Tenant,
+    /// Platform-owned Worker excluded from tenant catalog and mutation APIs.
+    System,
+}
+
+impl WorkerOwnership {
+    /// Stable database token.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tenant => "tenant",
+            Self::System => "system",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, PlatformError> {
+        match value {
+            "tenant" => Ok(Self::Tenant),
+            "system" => Ok(Self::System),
+            _ => Err(invariant()),
+        }
+    }
+}
 
 /// Persisted Worker lifecycle row.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -37,6 +74,47 @@ pub struct WorkerRecord {
     pub updated_at_ms: i64,
     /// Tombstone timestamp.
     pub deleted_at_ms: Option<i64>,
+    /// Tenant or platform ownership boundary.
+    pub ownership: WorkerOwnership,
+}
+
+/// System-owned deployment slot tracked outside tenant Worker catalog.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SystemOwnedDeploymentKind {
+    /// Release-owned operator dashboard assets deployment.
+    Dashboard,
+}
+
+impl SystemOwnedDeploymentKind {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dashboard => "dashboard",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, PlatformError> {
+        match value {
+            "dashboard" => Ok(Self::Dashboard),
+            _ => Err(invariant()),
+        }
+    }
+}
+
+/// Persisted system-owned deployment pin.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SystemOwnedDeploymentRecord {
+    /// Deployment slot identity.
+    pub kind: SystemOwnedDeploymentKind,
+    /// Owning account.
+    pub account_id: AccountId,
+    /// Reserved system Worker identity.
+    pub worker_id: WorkerId,
+    /// Current active immutable deployment, when installed.
+    pub active_deployment_id: Option<DeploymentId>,
+    /// Embedded dashboard asset tree digest pinned by this slot.
+    pub assets_sha256: [u8; 32],
+    /// Last pin update timestamp.
+    pub updated_at_ms: i64,
 }
 
 /// Deployment lifecycle state.
@@ -149,6 +227,31 @@ pub struct DeploymentRecord {
     pub rejection_code: Option<String>,
     /// Tombstone time.
     pub deleted_at_ms: Option<i64>,
+}
+
+impl DeploymentRecord {
+    /// Operator API JSON projection with hex digests.
+    #[must_use]
+    pub fn to_api_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "workerId": self.worker_id,
+            "versionNumber": self.version_number,
+            "contentKind": self.content_kind,
+            "state": self.state,
+            "artifactSha256": self.artifact_sha256.map(hex::encode),
+            "artifactSize": self.artifact_size,
+            "artifactSchemaVersion": self.artifact_schema_version,
+            "mainModule": self.main_module,
+            "workerCodeSha256": hex::encode(self.worker_code_sha256),
+            "loaderSchemaVersion": self.loader_schema_version,
+            "createdAtMs": self.created_at_ms,
+            "readyAtMs": self.ready_at_ms,
+            "rejectedAtMs": self.rejected_at_ms,
+            "rejectionCode": self.rejection_code,
+            "deletedAtMs": self.deleted_at_ms,
+        })
+    }
 }
 
 /// Secret ciphertext stored for one immutable deployment.
@@ -338,6 +441,12 @@ impl<'a> WorkerRepository<'a> {
         max_live: u32,
     ) -> Result<(WorkerRecord, RouteRecord), PlatformError> {
         validate_worker_name(name)?;
+        if is_system_reserved_worker_name(name) {
+            return Err(PlatformError::new(
+                ErrorCode::WorkerNameConflict,
+                "Worker name is reserved for platform-owned deployments",
+            ));
+        }
         if max_live == 0 {
             return Err(PlatformError::new(
                 ErrorCode::LimitInvalid,
@@ -353,7 +462,7 @@ impl<'a> WorkerRepository<'a> {
             let live_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM workers
-                     WHERE account_id = ?1 AND deleted_at_ms IS NULL",
+                     WHERE account_id = ?1 AND deleted_at_ms IS NULL AND ownership = 'tenant'",
                     [account_id.to_string()],
                     |row| row.get(0),
                 )
@@ -368,8 +477,8 @@ impl<'a> WorkerRepository<'a> {
                 .execute(
                     "INSERT OR IGNORE INTO workers
                  (id, account_id, name, active_deployment_id, do_storage_id,
-                  route_generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?2, ?3, NULL, ?4, 1, ?5, ?5, NULL)",
+                  route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership)
+                 VALUES (?1, ?2, ?3, NULL, ?4, 1, ?5, ?5, NULL, 'tenant')",
                     params![
                         worker_id.to_string(),
                         account_id.to_string(),
@@ -420,6 +529,7 @@ impl<'a> WorkerRepository<'a> {
                 created_at_ms: now_ms,
                 updated_at_ms: now_ms,
                 deleted_at_ms: None,
+                ownership: WorkerOwnership::Tenant,
             };
             let route = RouteRecord {
                 id: route_id.clone(),
@@ -441,8 +551,9 @@ impl<'a> WorkerRepository<'a> {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms
+                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
                  FROM workers WHERE account_id = ?1 AND deleted_at_ms IS NULL
+                   AND ownership = 'tenant'
                  ORDER BY created_at_ms, id",
                 )
                 .map_err(|_| db_error())?;
@@ -450,6 +561,253 @@ impl<'a> WorkerRepository<'a> {
                 .query_map([account_id.to_string()], map_worker)
                 .map_err(|_| db_error())?;
             collect_rows(rows)
+        })
+    }
+
+    /// List one bounded, filtered, and sorted page of tenant Workers.
+    #[allow(clippy::too_many_arguments)]
+    pub fn list_workers_page(
+        &self,
+        account_id: AccountId,
+        search: Option<&str>,
+        deployed: Option<bool>,
+        sort: CatalogSort,
+        direction: CatalogDirection,
+        after: Option<CatalogCursor>,
+        limit: u16,
+    ) -> Result<CatalogListPage<WorkerRecord>, PlatformError> {
+        let limit = normalize_catalog_limit(limit);
+        let fetch = u32::from(limit).saturating_add(1);
+        let search = search.map(str::trim).filter(|value| !value.is_empty());
+        let exact_id = search.and_then(search_as_worker_id);
+        let search_needle = if exact_id.is_some() {
+            None
+        } else {
+            search.map(str::to_lowercase)
+        };
+        let sort_expression = match sort {
+            CatalogSort::Name => "name",
+            CatalogSort::CreatedAt => "created_at_ms",
+            CatalogSort::UpdatedAt => "updated_at_ms",
+        };
+        self.db.with_read(|conn| {
+            let mut sql = String::from(
+                "SELECT id, account_id, name, active_deployment_id, do_storage_id,
+                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
+                 FROM workers
+                 WHERE account_id = ? AND deleted_at_ms IS NULL AND ownership = 'tenant'",
+            );
+            let mut values = vec![Value::Text(account_id.to_string())];
+            if let Some(worker_id) = exact_id {
+                sql.push_str(" AND id = ?");
+                values.push(Value::Text(worker_id.to_string()));
+            } else if let Some(needle) = search_needle {
+                sql.push_str(" AND INSTR(LOWER(name), ?) > 0");
+                values.push(Value::Text(needle));
+            }
+            if let Some(deployed) = deployed {
+                sql.push_str(if deployed {
+                    " AND active_deployment_id IS NOT NULL"
+                } else {
+                    " AND active_deployment_id IS NULL"
+                });
+            }
+            if let Some(cursor) = after {
+                if cursor.sort != sort || cursor.direction != direction {
+                    return Err(invalid_catalog_cursor());
+                }
+                let cursor_value = match (sort, cursor.value) {
+                    (CatalogSort::Name, CatalogCursorValue::Text(value)) => Value::Text(value),
+                    (CatalogSort::CreatedAt | CatalogSort::UpdatedAt, CatalogCursorValue::Integer(value)) => {
+                        Value::Integer(value)
+                    }
+                    _ => return Err(invalid_catalog_cursor()),
+                };
+                let comparison = direction.comparison();
+                sql.push_str(&format!(
+                    " AND ({sort_expression} {comparison} ? OR ({sort_expression} = ? AND id {comparison} ?))"
+                ));
+                values.push(cursor_value.clone());
+                values.push(cursor_value);
+                values.push(Value::Text(cursor.id));
+            }
+            sql.push_str(&format!(
+                " ORDER BY {sort_expression} {}, id {} LIMIT ?",
+                direction.sql(),
+                direction.sql(),
+            ));
+            values.push(Value::Integer(i64::from(fetch)));
+            let mut stmt = conn.prepare(&sql).map_err(|_| db_error())?;
+            let rows = stmt
+                .query_map(params_from_iter(values), map_worker)
+                .map_err(|_| db_error())?;
+            let mut workers = collect_rows(rows)?;
+            let next_cursor = if workers.len() > usize::from(limit) {
+                workers.pop();
+                workers.last().map(|worker| {
+                    let value = match sort {
+                        CatalogSort::Name => CatalogCursorValue::Text(worker.name.clone()),
+                        CatalogSort::CreatedAt => CatalogCursorValue::Integer(worker.created_at_ms),
+                        CatalogSort::UpdatedAt => CatalogCursorValue::Integer(worker.updated_at_ms),
+                    };
+                    encode_catalog_cursor(&CatalogCursor {
+                        sort,
+                        direction,
+                        value,
+                        id: worker.id.to_string(),
+                    })
+                })
+            } else {
+                None
+            };
+            Ok(CatalogListPage {
+                items: workers,
+                next_cursor,
+            })
+        })
+    }
+
+    /// Read one tenant Worker and enforce its account boundary.
+    pub fn get_tenant_worker(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+    ) -> Result<WorkerRecord, PlatformError> {
+        let worker = self.get_worker(account_id, worker_id)?;
+        require_tenant_worker(&worker)?;
+        Ok(worker)
+    }
+
+    /// Ensure the release-owned dashboard Worker exists as a system-owned deployment slot.
+    pub fn ensure_system_dashboard_worker(
+        &self,
+        account_id: AccountId,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<WorkerRecord, PlatformError> {
+        if let Some(record) =
+            self.get_system_owned_deployment(SystemOwnedDeploymentKind::Dashboard)?
+        {
+            if record.account_id != account_id {
+                return Err(invariant());
+            }
+            return self.get_worker(account_id, record.worker_id);
+        }
+        self.create_system_dashboard_worker(account_id, request_id, now_ms)
+    }
+
+    /// Read one persisted system-owned deployment pin.
+    pub fn get_system_owned_deployment(
+        &self,
+        kind: SystemOwnedDeploymentKind,
+    ) -> Result<Option<SystemOwnedDeploymentRecord>, PlatformError> {
+        self.db.with_read(|conn| {
+            conn.query_row(
+                "SELECT kind, account_id, worker_id, active_deployment_id, assets_sha256,
+                        updated_at_ms
+                 FROM system_owned_deployments WHERE kind = ?1",
+                [kind.as_str()],
+                map_system_owned_deployment,
+            )
+            .optional()
+            .map_err(|_| db_error())
+        })
+    }
+
+    /// Persist the active dashboard deployment pin after bootstrap or promotion.
+    pub fn pin_system_owned_deployment(
+        &self,
+        record: &SystemOwnedDeploymentRecord,
+    ) -> Result<(), PlatformError> {
+        self.db.with_immediate(|tx| {
+            let changed = tx
+                .execute(
+                    "INSERT INTO system_owned_deployments
+                     (kind, account_id, worker_id, active_deployment_id, assets_sha256, updated_at_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(kind) DO UPDATE SET
+                       account_id = excluded.account_id,
+                       worker_id = excluded.worker_id,
+                       active_deployment_id = excluded.active_deployment_id,
+                       assets_sha256 = excluded.assets_sha256,
+                       updated_at_ms = excluded.updated_at_ms",
+                    params![
+                        record.kind.as_str(),
+                        record.account_id.to_string(),
+                        record.worker_id.to_string(),
+                        record
+                            .active_deployment_id
+                            .as_ref()
+                            .map(ToString::to_string),
+                        record.assets_sha256.as_slice(),
+                        record.updated_at_ms,
+                    ],
+                )
+                .map_err(|_| db_error())?;
+            if changed != 1 {
+                return Err(invariant());
+            }
+            Ok(())
+        })
+    }
+
+    fn create_system_dashboard_worker(
+        self,
+        account_id: AccountId,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<WorkerRecord, PlatformError> {
+        let worker_id = WorkerId::generate();
+        let do_storage_id = Uuid::now_v7().to_string();
+        self.db.with_immediate(|tx| {
+            require_account(tx, account_id)?;
+            let inserted = tx
+                .execute(
+                    "INSERT INTO workers
+                     (id, account_id, name, active_deployment_id, do_storage_id,
+                      route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership)
+                     VALUES (?1, ?2, ?3, NULL, ?4, 1, ?5, ?5, NULL, 'system')",
+                    params![
+                        worker_id.to_string(),
+                        account_id.to_string(),
+                        SYSTEM_DASHBOARD_WORKER_NAME,
+                        do_storage_id,
+                        now_ms
+                    ],
+                )
+                .map_err(|_| db_error())?;
+            if inserted != 1 {
+                return Err(invariant());
+            }
+            tx.execute(
+                "INSERT INTO system_owned_deployments
+                 (kind, account_id, worker_id, active_deployment_id, assets_sha256, updated_at_ms)
+                 VALUES ('dashboard', ?1, ?2, NULL, zeroblob(32), ?3)",
+                params![account_id.to_string(), worker_id.to_string(), now_ms],
+            )
+            .map_err(|_| db_error())?;
+            audit(
+                tx,
+                account_id,
+                "worker.create.system",
+                "worker",
+                &worker_id.to_string(),
+                request_id,
+                br#"{"state":"system","name":"open-compute-dashboard"}"#,
+                now_ms,
+            )?;
+            Ok(WorkerRecord {
+                id: worker_id,
+                account_id,
+                name: SYSTEM_DASHBOARD_WORKER_NAME.to_owned(),
+                active_deployment_id: None,
+                do_storage_id,
+                route_generation: 1,
+                created_at_ms: now_ms,
+                updated_at_ms: now_ms,
+                deleted_at_ms: None,
+                ownership: WorkerOwnership::System,
+            })
         })
     }
 
@@ -462,7 +820,7 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             conn.query_row(
                 "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms
+                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
                  FROM workers WHERE id = ?1 AND account_id = ?2",
                 params![worker_id.to_string(), account_id.to_string()],
                 map_worker,
@@ -591,6 +949,30 @@ impl<'a> WorkerRepository<'a> {
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<WorkerRecord, PlatformError> {
+        self.get_tenant_worker(account_id, worker_id)?;
+        self.promote_worker_checked(
+            account_id,
+            worker_id,
+            target,
+            expected_active,
+            expected_route_generation,
+            request_id,
+            now_ms,
+        )
+    }
+
+    /// Promote a deployment for any live Worker in the account, including system-owned Workers.
+    #[allow(clippy::too_many_arguments)]
+    pub fn promote_worker_checked(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        target: DeploymentId,
+        expected_active: Option<DeploymentId>,
+        expected_route_generation: Option<u64>,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<WorkerRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             let current = require_live_worker(tx, account_id, worker_id)?;
             let state: Option<String> = tx
@@ -667,7 +1049,7 @@ impl<'a> WorkerRepository<'a> {
             let worker = conn
                 .query_row(
                     "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms
+                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
                  FROM workers WHERE id = ?1 AND account_id = ?2",
                     params![worker_id.to_string(), account_id.to_string()],
                     map_worker,
@@ -738,7 +1120,7 @@ impl<'a> WorkerRepository<'a> {
         account_id: AccountId,
         worker_id: WorkerId,
     ) -> Result<Vec<DeploymentRecord>, PlatformError> {
-        self.get_worker(account_id, worker_id)?;
+        self.get_tenant_worker(account_id, worker_id)?;
         self.db.with_read(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -759,6 +1141,17 @@ impl<'a> WorkerRepository<'a> {
 
     /// Read one deployment while enforcing the account and Worker boundary.
     pub fn get_deployment(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        deployment_id: DeploymentId,
+    ) -> Result<DeploymentRecord, PlatformError> {
+        self.get_tenant_worker(account_id, worker_id)?;
+        self.get_worker_deployment(account_id, worker_id, deployment_id)
+    }
+
+    /// Read one deployment for any Worker in the account, including system-owned Workers.
+    pub fn get_worker_deployment(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
@@ -811,7 +1204,7 @@ impl<'a> WorkerRepository<'a> {
             let worker = conn
                 .query_row(
                     "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms
+                        route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
                  FROM workers WHERE id = ?1 AND account_id = ?2 AND deleted_at_ms IS NULL",
                     params![route.worker_id.to_string(), route.account_id.to_string()],
                     map_worker,
@@ -866,6 +1259,7 @@ impl<'a> WorkerRepository<'a> {
         let route_id = Uuid::now_v7().to_string();
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
+            require_tenant_worker(&worker)?;
             let live_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM worker_routes
@@ -948,8 +1342,18 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// List active routes owned by one live Worker.
+    /// List active routes owned by one live Worker visible to tenant APIs.
     pub fn list_routes(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+    ) -> Result<Vec<RouteRecord>, PlatformError> {
+        self.get_tenant_worker(account_id, worker_id)?;
+        self.list_worker_routes(account_id, worker_id)
+    }
+
+    /// List active routes for any live Worker in the account, including system-owned Workers.
+    pub fn list_worker_routes(
         &self,
         account_id: AccountId,
         worker_id: WorkerId,
@@ -986,6 +1390,7 @@ impl<'a> WorkerRepository<'a> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
+            require_tenant_worker(&worker)?;
             let generation = worker
                 .route_generation
                 .checked_add(1)
@@ -1042,6 +1447,7 @@ impl<'a> WorkerRepository<'a> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
+            require_tenant_worker(&worker)?;
             let actual_deployments = {
                 let mut statement = tx
                     .prepare(
@@ -1478,6 +1884,7 @@ impl<'a> WorkerRepository<'a> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let worker = require_live_worker(tx, account_id, worker_id)?;
+            require_tenant_worker(&worker)?;
             if worker.active_deployment_id == Some(deployment_id) {
                 return Err(PlatformError::new(
                     ErrorCode::DeploymentActive,
@@ -2067,7 +2474,7 @@ fn read_worker_tx(
 ) -> Result<WorkerRecord, PlatformError> {
     tx.query_row(
         "SELECT id, account_id, name, active_deployment_id, do_storage_id,
-                route_generation, created_at_ms, updated_at_ms, deleted_at_ms
+                route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership
          FROM workers WHERE id = ?1 AND account_id = ?2",
         params![worker_id.to_string(), account_id.to_string()],
         map_worker,
@@ -2141,6 +2548,7 @@ fn map_worker(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRecord> {
     let account: String = row.get(1)?;
     let active: Option<String> = row.get(3)?;
     let generation: i64 = row.get(5)?;
+    let ownership: String = row.get(9)?;
     Ok(WorkerRecord {
         id: WorkerId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
         account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -2153,7 +2561,39 @@ fn map_worker(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRecord> {
         created_at_ms: row.get(6)?,
         updated_at_ms: row.get(7)?,
         deleted_at_ms: row.get(8)?,
+        ownership: WorkerOwnership::parse(&ownership).map_err(|_| rusqlite::Error::InvalidQuery)?,
     })
+}
+
+fn map_system_owned_deployment(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<SystemOwnedDeploymentRecord> {
+    let kind: String = row.get(0)?;
+    let account: String = row.get(1)?;
+    let worker: String = row.get(2)?;
+    let active: Option<String> = row.get(3)?;
+    let assets: Vec<u8> = row.get(4)?;
+    Ok(SystemOwnedDeploymentRecord {
+        kind: SystemOwnedDeploymentKind::parse(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        active_deployment_id: active
+            .map(|value| DeploymentId::from_str(&value).map_err(|_| rusqlite::Error::InvalidQuery))
+            .transpose()?,
+        assets_sha256: array32(&assets)?,
+        updated_at_ms: row.get(5)?,
+    })
+}
+
+fn is_system_reserved_worker_name(name: &str) -> bool {
+    name == SYSTEM_DASHBOARD_WORKER_NAME
+}
+
+fn require_tenant_worker(worker: &WorkerRecord) -> Result<(), PlatformError> {
+    if worker.ownership != WorkerOwnership::Tenant {
+        return Err(worker_not_found());
+    }
+    Ok(())
 }
 
 fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord> {

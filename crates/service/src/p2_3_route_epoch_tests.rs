@@ -5,7 +5,7 @@ use super::*;
 #[tokio::test]
 async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_restart_reconcile() {
     let (_dir, path, _mock) = initialized_doctor_fixture().await;
-    let loaded = load_platform_config(&path).unwrap();
+    let loaded = load_fixture_platform_config(&path);
     let storage = Arc::new(
         open_compute_storage::PlatformStorage::bootstrap(
             &loaded.config.storage,
@@ -41,7 +41,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
         )
         .unwrap()
         .0;
-    let credentials = open_compute_artifacts::resolve_s3_credentials(&loaded.config.s3).unwrap();
+    let credentials = resolve_fixture_s3_credentials(&loaded.config.s3);
     let client = open_compute_artifacts::S3ArtifactClient::connect(
         &loaded.config.s3,
         &credentials,

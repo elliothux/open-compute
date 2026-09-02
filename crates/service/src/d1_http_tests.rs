@@ -6,7 +6,7 @@ use axum::body::to_bytes;
 use axum::http::Request;
 use open_compute_artifacts::{MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with};
 use open_compute_core::config::{MetricsConfig, StorageConfig};
-use open_compute_core::{D1Config, PlatformConfig, SystemClock};
+use open_compute_core::{D1Config, PlatformConfig, SecretString, SystemClock};
 use open_compute_storage::{D1QueryLimits, D1Statement, D1Value};
 use serde_json::{Value, json};
 use sha2::Digest as _;
@@ -95,8 +95,13 @@ request_timeout_ms = 500
     assert!(format!("{api:?}").contains("D1ApiState"));
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
-    let state = HttpState::for_test(HealthCoordinator::new(), metrics.clone(), false, None)
-        .with_d1_api(api);
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics.clone(),
+        false,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_d1_api(api);
     Fixture {
         _temp: temp,
         _mock: mock,
@@ -110,12 +115,25 @@ request_timeout_ms = 500
 
 #[allow(clippy::needless_pass_by_value)]
 fn request(method: &str, uri: &str, body: Value, key: Option<&str>) -> Request<Body> {
+    request_auth(method, uri, &body, key, Some("admin-secret"))
+}
+
+fn request_auth(
+    method: &str,
+    uri: &str,
+    body: &Value,
+    key: Option<&str>,
+    token: Option<&str>,
+) -> Request<Body> {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json");
     if let Some(key) = key {
         builder = builder.header(IDEMPOTENCY_HEADER, key);
+    }
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
     }
     builder
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
@@ -129,7 +147,7 @@ async fn response_json(response: Response) -> (StatusCode, Value) {
 }
 
 async fn create_database(fixture: &Fixture, name: &str, key: &str) -> ResourceId {
-    let uri = format!("/v1/accounts/{}/d1/databases", fixture.account);
+    let uri = format!("/operator/api/v1/accounts/{}/d1/databases", fixture.account);
     let (status, body) = response_json(
         fixture
             .router
@@ -157,7 +175,7 @@ fn engine(fixture: &Fixture, resource: ResourceId) -> D1Engine {
 #[tokio::test]
 async fn database_migration_backup_restore_and_delete_round_trip() {
     let fixture = fixture_with_resource_limit(2).await;
-    let collection = format!("/v1/accounts/{}/d1/databases", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/d1/databases", fixture.account);
     let source = create_database(&fixture, "primary", "create-primary").await;
     assert_eq!(
         fixture
@@ -466,7 +484,7 @@ async fn database_migration_backup_restore_and_delete_round_trip() {
 #[tokio::test]
 async fn control_validation_is_bounded_and_sanitized() {
     let fixture = fixture().await;
-    let collection = format!("/v1/accounts/{}/d1/databases", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/d1/databases", fixture.account);
     for input in [
         request("POST", &collection, json!({"name": "missing-key"}), None),
         request(
@@ -477,7 +495,7 @@ async fn control_validation_is_bounded_and_sanitized() {
         ),
         request(
             "POST",
-            "/v1/accounts/invalid/d1/databases",
+            "/operator/api/v1/accounts/invalid/d1/databases",
             json!({"name": "x"}),
             Some("bad-account"),
         ),
@@ -515,7 +533,7 @@ async fn control_validation_is_bounded_and_sanitized() {
         ),
         request(
             "GET",
-            "/v1/accounts/invalid/d1/databases/not-an-id",
+            "/operator/api/v1/accounts/invalid/d1/databases/not-an-id",
             Value::Null,
             None,
         ),
@@ -539,7 +557,7 @@ async fn control_validation_is_bounded_and_sanitized() {
         ),
         request(
             "POST",
-            "/v1/accounts/invalid/d1/databases:restore",
+            "/operator/api/v1/accounts/invalid/d1/databases:restore",
             Value::Null,
             Some("invalid-account-restore"),
         ),
@@ -563,11 +581,11 @@ async fn control_validation_is_bounded_and_sanitized() {
         false,
         None,
     );
-    let unavailable = request("GET", &collection, Value::Null, None);
+    let unavailable = request_auth("GET", &collection, &Value::Null, None, Some("admin-secret"));
     assert!(authorized_api(&no_api, &unavailable).is_none());
     assert_eq!(
         unauthorized_or_unavailable(&no_api, &unavailable, RequestId::generate()).status(),
-        StatusCode::NOT_FOUND
+        StatusCode::UNAUTHORIZED
     );
 
     let oversized = Request::builder()
@@ -595,7 +613,7 @@ async fn control_validation_is_bounded_and_sanitized() {
 #[tokio::test]
 async fn migration_idempotency_failure_matrix_is_stable() {
     let fixture = fixture().await;
-    let collection = format!("/v1/accounts/{}/d1/databases", fixture.account);
+    let collection = format!("/operator/api/v1/accounts/{}/d1/databases", fixture.account);
     let resource = create_database(&fixture, "migration-failures", "migration-failures").await;
     let uri = format!("{collection}/{resource}/migrations/apply");
 
@@ -685,7 +703,7 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
         )
         .unwrap();
     let backup_uri = format!(
-        "/v1/accounts/{}/d1/databases/{source}/backups",
+        "/operator/api/v1/accounts/{}/d1/databases/{source}/backups",
         fixture.account
     );
 
@@ -715,7 +733,10 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
         .unwrap();
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].state, D1BackupState::Failed);
-    let restore_uri = format!("/v1/accounts/{}/d1/databases:restore", fixture.account);
+    let restore_uri = format!(
+        "/operator/api/v1/accounts/{}/d1/databases:restore",
+        fixture.account
+    );
     assert_eq!(
         fixture
             .router
@@ -776,4 +797,164 @@ async fn backup_failure_replay_and_corrupt_restore_fail_closed() {
         .render(&open_compute_core::PlatformStatus::starting());
     assert!(rendered.contains("d1_backup_total{outcome=\"failure\"} 2"));
     assert!(rendered.contains("d1_backup_total{outcome=\"success\"} 1"));
+}
+
+#[tokio::test]
+async fn operator_tables_and_query_preserve_every_d1_value_kind() {
+    let fixture = fixture().await;
+    let resource = create_database(&fixture, "operator-query", "operator-query").await;
+    let base = format!(
+        "/operator/api/v1/accounts/{}/d1/databases/{resource}",
+        fixture.account
+    );
+
+    let (status, _) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("{base}/query"),
+                json!({"sql": "CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT)"}),
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, tables) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &format!("{base}/tables"), Value::Null, None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        tables["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|table| table["name"] == "entries")
+    );
+
+    let (status, result) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "POST",
+                &format!("{base}/query"),
+                json!({"sql": "SELECT NULL AS n, 7 AS i, 1.5 AS r, 'text' AS t, x'0102' AS b"}),
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result["results"][0]["n"], Value::Null);
+    assert_eq!(result["results"][0]["i"], 7);
+    assert_eq!(result["results"][0]["r"], 1.5);
+    assert_eq!(result["results"][0]["t"], "text");
+    assert_eq!(result["results"][0]["b"], "AQI=");
+    assert!(result["meta"]["durationMs"].is_number());
+}
+
+#[tokio::test]
+async fn operator_database_catalog_filters_sorts_and_paginates_deterministically() {
+    let fixture = fixture().await;
+    for (name, key) in [
+        ("alpha", "catalog-alpha"),
+        ("beta", "catalog-beta"),
+        ("gamma", "catalog-gamma"),
+    ] {
+        create_database(&fixture, name, key).await;
+    }
+    let base = format!("/operator/api/v1/accounts/{}/d1/databases", fixture.account);
+    let (status, first) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{base}?sort=name&direction=asc&limit=1"),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["databases"][0]["resource"]["name"], "alpha");
+    assert_eq!(first["listComplete"], false);
+    let cursor = first["cursor"].as_str().unwrap();
+
+    let (status, second) = response_json(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{base}?sort=name&direction=asc&limit=1&cursor={cursor}"),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["databases"][0]["resource"]["name"], "beta");
+
+    for query in [
+        "search=alpha&status=ready&sort=createdAt&direction=desc&limit=2",
+        "search=%20%20&sort=updatedAt&direction=asc",
+    ] {
+        assert_eq!(
+            fixture
+                .router
+                .clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("{base}?{query}"),
+                    Value::Null,
+                    None,
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK,
+            "query={query}"
+        );
+    }
+    for query in [
+        "unknown=1".to_owned(),
+        "sort=invalid".to_owned(),
+        "direction=invalid".to_owned(),
+        "cursor=not-base64".to_owned(),
+        format!("sort=createdAt&direction=asc&cursor={cursor}"),
+    ] {
+        assert_eq!(
+            fixture
+                .router
+                .clone()
+                .oneshot(request(
+                    "GET",
+                    &format!("{base}?{query}"),
+                    Value::Null,
+                    None,
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "query={query}"
+        );
+    }
 }

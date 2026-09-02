@@ -5,19 +5,22 @@ use crate::http::{HttpState, ProductErrorCode, authorize};
 use crate::metrics::{D1Lifecycle, D1LifecycleGuard};
 use axum::Router;
 use axum::body::{Body, to_bytes};
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
     AccountId, BindingKind, D1Config, ErrorCode, PlatformError, RequestId, ResourceId,
     ResourceState,
 };
 use open_compute_storage::{
-    D1_DATABASE_SCHEMA_VERSION, D1BackupState, D1DatabaseRepository, D1Engine, D1Migration,
-    D1Paths, IdempotencyReservation, PlatformStorage, ReserveResourceCreate,
-    ResourceCreateReservation, ResourceRepository, WorkerRepository,
+    CatalogDirection, CatalogSort, D1_DATABASE_SCHEMA_VERSION, D1BackupState, D1DatabaseRepository,
+    D1Engine, D1Migration, D1Paths, DEFAULT_CATALOG_LIST_LIMIT, IdempotencyReservation,
+    PlatformStorage, ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
+    WorkerRepository, decode_catalog_cursor, normalize_catalog_limit,
 };
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, CreateResourceResult, D1ResourceDriver,
@@ -109,12 +112,37 @@ pub fn control_router() -> Router<HttpState> {
                 .patch(rename_database)
                 .delete(delete_database),
         )
+        .route(
+            "/v1/accounts/{account_id}/d1/databases/{resource_id}/tables",
+            get(list_tables),
+        )
+        .route(
+            "/v1/accounts/{account_id}/d1/databases/{resource_id}/query",
+            post(run_query),
+        )
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryDatabaseBody {
+    sql: String,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateDatabaseBody {
     name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListDatabasesQuery {
+    search: Option<String>,
+    status: Option<ResourceState>,
+    sort: Option<CatalogSort>,
+    direction: Option<CatalogDirection>,
+    cursor: Option<String>,
+    limit: Option<u16>,
 }
 
 async fn create_database(
@@ -165,24 +193,62 @@ async fn create_database(
 async fn list_databases(
     State(state): State<HttpState>,
     Path(account): Path<String>,
+    query: Result<Query<ListDatabasesQuery>, axum::extract::rejection::QueryRejection>,
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
     let Some(api) = authorized_api(&state, &request) else {
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
+    let Ok(Query(query)) = query else {
+        return error_response(
+            PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "D1 database list query is invalid",
+            ),
+            request_id,
+        );
+    };
     let account_id = match parse_account(&account) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
+    let after = match query.cursor.as_deref() {
+        None => None,
+        Some(cursor) => match decode_catalog_cursor(cursor) {
+            Ok(value) => Some(value),
+            Err(error) => return error_response(error, request_id),
+        },
+    };
+    let limit = normalize_catalog_limit(query.limit.unwrap_or(DEFAULT_CATALOG_LIST_LIMIT));
+    let sort = query.sort.unwrap_or(CatalogSort::Name);
+    let direction = query.direction.unwrap_or(CatalogDirection::Asc);
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let storage = api.storage.clone();
     match tokio::task::spawn_blocking(move || {
-        D1DatabaseRepository::new(storage.db()).list(account_id)
+        D1DatabaseRepository::new(storage.db()).list_page(
+            account_id,
+            search.as_deref(),
+            query.status,
+            sort,
+            direction,
+            after,
+            limit,
+        )
     })
     .await
     {
-        Ok(Ok(databases)) => json_response(
-            &serde_json::json!({ "databases": databases }),
+        Ok(Ok(page)) => json_response(
+            &serde_json::json!({
+                "databases": page.items,
+                "cursor": page.next_cursor,
+                "listComplete": page.next_cursor.is_none(),
+            }),
             StatusCode::OK,
         ),
         Ok(Err(error)) => error_response(error, request_id),
@@ -690,6 +756,94 @@ async fn fail_idempotency(
 
 fn not_found() -> PlatformError {
     PlatformError::new(ErrorCode::ResourceNotFound, "D1 database was not found")
+}
+
+async fn list_tables(
+    State(state): State<HttpState>,
+    Path((account, resource)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    match api
+        .backend
+        .operator_list_tables(account_id, resource_id)
+        .await
+    {
+        Ok(tables) => json_response(
+            &serde_json::json!({
+                "tables": tables.into_iter().map(|name| serde_json::json!({ "name": name })).collect::<Vec<_>>(),
+            }),
+            StatusCode::OK,
+        ),
+        Err(error) => error_response(error, request_id),
+    }
+}
+
+async fn run_query(
+    State(state): State<HttpState>,
+    Path((account, resource)): Path<(String, String)>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let body = match read_json::<QueryDatabaseBody>(request).await {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    match api
+        .backend
+        .operator_query(account_id, resource_id, body.sql)
+        .await
+    {
+        Ok(result) => json_response(&d1_query_response(&result), StatusCode::OK),
+        Err(error) => error_response(error, request_id),
+    }
+}
+
+fn d1_query_response(result: &open_compute_storage::D1StatementResult) -> serde_json::Value {
+    let results = result
+        .rows
+        .iter()
+        .map(|row| {
+            let mut record = serde_json::Map::new();
+            for (column, value) in result.columns.iter().zip(row.iter()) {
+                record.insert(column.clone(), d1_value_json(value));
+            }
+            serde_json::Value::Object(record)
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "results": results,
+        "meta": {
+            "durationMs": result.meta.duration,
+            "rowsRead": result.meta.rows_read,
+            "rowsWritten": result.meta.rows_written,
+        },
+    })
+}
+
+fn d1_value_json(value: &open_compute_storage::D1Value) -> serde_json::Value {
+    use open_compute_storage::D1Value;
+    match value {
+        D1Value::Null => serde_json::Value::Null,
+        D1Value::Integer(value) => serde_json::json!(value),
+        D1Value::Real(value) => serde_json::json!(value),
+        D1Value::Text(value) => serde_json::json!(value),
+        D1Value::Blob(value) => serde_json::json!(STANDARD.encode(value)),
+    }
 }
 
 fn internal() -> PlatformError {

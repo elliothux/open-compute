@@ -10,6 +10,7 @@
 # Bun workspace dependencies and developer-tool build output.
 node_modules/
 /packages/*/dist/
+/packages/*/test-results/
 /test/applications/*/.next/
 /test/applications/*/.wrangler/
 /test/applications/*/dist/
@@ -25,3 +26,5 @@ node_modules/
 # VitePress generated site output.
 /packages/docs/.vitepress/cache/
 /packages/docs/.vitepress/dist/
+
+/CR.md

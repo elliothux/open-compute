@@ -19,7 +19,8 @@ use open_compute_artifacts::{
     R2GetResult, R2ObjectMetadata, R2ObjectStore, R2UploadSource, UserObjectKey, hash_file,
 };
 use open_compute_core::{
-    DeploymentId, ErrorCode, OperationClass, PlatformError, R2Config, ResourceId,
+    AccountId, BindingKind, DeploymentId, ErrorCode, OperationClass, PlatformError, R2Config,
+    RequestId, ResourceId,
 };
 use open_compute_storage::{
     AuthorizedBinding, BindingRepository, PlatformStorage, R2BucketRepository, R2ObjectListEntry,
@@ -418,6 +419,269 @@ impl R2BindingService {
         };
         drop(pin);
         Ok(result)
+    }
+
+    /// Operator API: read committed object metadata when present.
+    pub(crate) async fn operator_object_head(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+        key: &UserObjectKey,
+    ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
+        let binding = crate::operator_binding::operator_binding(
+            &self.storage,
+            account_id,
+            resource_id,
+            BindingKind::R2Bucket,
+        )?;
+        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let locator = self
+            .objects
+            .locator(bucket.resource.id, &bucket.physical_prefix)?;
+        let timeout = Duration::from_millis(self.config.operation_timeout_ms);
+        self.authoritative_head(&binding, &locator, key, timeout)
+            .await
+    }
+
+    /// Operator API: download one committed object body when present.
+    pub(crate) async fn operator_object_get(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+        key: &UserObjectKey,
+    ) -> Result<Option<(R2ObjectMetadata, Vec<u8>)>, PlatformError> {
+        let binding = crate::operator_binding::operator_binding(
+            &self.storage,
+            account_id,
+            resource_id,
+            BindingKind::R2Bucket,
+        )?;
+        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let locator = self
+            .objects
+            .locator(bucket.resource.id, &bucket.physical_prefix)?;
+        let timeout = Duration::from_millis(self.config.operation_timeout_ms);
+        let Some((authority, ssec)) = self
+            .committed_object(&binding, &locator, key, timeout)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let _pin = self.pins.try_pin(binding.resource.id)?;
+        let lease = self.downloads.acquire(bucket.resource.id, timeout).await?;
+        let result = timeout_result(
+            timeout,
+            self.objects.get(&locator, key, None, None, ssec.as_ref()),
+        )
+        .await?;
+        drop(lease);
+        match result {
+            R2GetResult::Missing => Ok(None),
+            R2GetResult::Precondition(metadata) => {
+                objects::validate_object_record(&authority, &metadata)?;
+                Ok(Some((metadata, Vec::new())))
+            }
+            R2GetResult::Body(download) => {
+                objects::validate_object_record(&authority, &download.metadata)?;
+                let bytes =
+                    read_object_bytes(download.body, download.metadata.size, timeout).await?;
+                Ok(Some((download.metadata, bytes)))
+            }
+        }
+    }
+
+    /// Operator API: replace one object from a bounded raw request body.
+    pub(crate) async fn operator_object_put(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+        key: &UserObjectKey,
+        request_id: RequestId,
+        body: Body,
+    ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
+        let binding = crate::operator_binding::operator_binding(
+            &self.storage,
+            account_id,
+            resource_id,
+            BindingKind::R2Bucket,
+        )?;
+        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let locator = self
+            .objects
+            .locator(bucket.resource.id, &bucket.physical_prefix)?;
+        let timeout = Duration::from_millis(self.config.operation_timeout_ms);
+        let admission = self
+            .storage
+            .reserve_mutation(bucket.max_object_bytes.saturating_add(64 * 1024))?;
+        let _admission = admission;
+        let _stream = self
+            .metrics
+            .as_ref()
+            .map(|metrics| R2StreamGuard::new(metrics, R2StreamDirection::Upload));
+        let lease = self.uploads.acquire(bucket.resource.id, timeout).await?;
+        let staged = timeout_result(
+            timeout,
+            self.stage_operator_put(
+                bucket.resource.id,
+                &request_id.to_string(),
+                key.as_str(),
+                bucket.max_object_bytes,
+                body,
+            ),
+        )
+        .await?;
+        let source = R2UploadSource {
+            path: staged.guard.path.clone(),
+            length: staged.length,
+            checksums: staged.checksums,
+            version: uuid::Uuid::now_v7().hyphenated().to_string(),
+        };
+        let options: open_compute_artifacts::R2PutOptions = staged.header.options.try_into()?;
+        let current = self
+            .committed_object(&binding, &locator, key, timeout)
+            .await?;
+        self.begin_object_put(&binding, key, &source.version, options.ssec.as_ref())?;
+        let response = mutation_timeout_result(
+            timeout,
+            self.objects.put_file(
+                &locator,
+                key,
+                &source,
+                &options,
+                current.as_ref().and_then(|(_, ssec)| ssec.as_ref()),
+            ),
+        )
+        .await;
+        drop(lease);
+        match response {
+            Ok(Some(metadata)) => {
+                self.finish_object_put(&binding, key, &metadata)?;
+                Ok(Some(metadata))
+            }
+            Ok(None) => {
+                R2ObjectRepository::new(self.storage.db()).cancel_put(
+                    binding.account_id,
+                    binding.resource.id,
+                    key.as_str(),
+                )?;
+                Ok(None)
+            }
+            Err(error) if error.code() == ErrorCode::R2ResultUnknown => {
+                self.reconcile_object_key(&binding, &locator, key, timeout)
+                    .await?;
+                Ok(self
+                    .authoritative_head(&binding, &locator, key, timeout)
+                    .await?
+                    .filter(|metadata| metadata.version == source.version))
+            }
+            Err(error) => {
+                R2ObjectRepository::new(self.storage.db()).cancel_put(
+                    binding.account_id,
+                    binding.resource.id,
+                    key.as_str(),
+                )?;
+                Err(error)
+            }
+        }
+    }
+
+    /// Operator API: delete one committed object when present.
+    pub(crate) async fn operator_object_delete(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+        key: &UserObjectKey,
+    ) -> Result<bool, PlatformError> {
+        let binding = crate::operator_binding::operator_binding(
+            &self.storage,
+            account_id,
+            resource_id,
+            BindingKind::R2Bucket,
+        )?;
+        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
+        let locator = self
+            .objects
+            .locator(bucket.resource.id, &bucket.physical_prefix)?;
+        let timeout = Duration::from_millis(self.config.operation_timeout_ms);
+        let repo = R2ObjectRepository::new(self.storage.db());
+        self.ensure_no_object_mutation(&binding, key)?;
+        if repo.get(account_id, resource_id, key.as_str())?.is_none() {
+            return Ok(false);
+        }
+        let names = vec![key.as_str().to_owned()];
+        repo.begin_delete(
+            account_id,
+            resource_id,
+            &names,
+            i64::try_from(unix_ms()?).map_err(|_| protocol_error())?,
+        )?;
+        match mutation_timeout_result(
+            timeout,
+            self.objects.delete(&locator, std::slice::from_ref(key)),
+        )
+        .await
+        {
+            Ok(()) => {
+                repo.finish_delete(account_id, resource_id, &names)?;
+                Ok(true)
+            }
+            Err(error) if error.code() == ErrorCode::R2ResultUnknown => {
+                self.reconcile_object_key(&binding, &locator, key, timeout)
+                    .await?;
+                if repo.get(account_id, resource_id, key.as_str())?.is_some() {
+                    return Err(error);
+                }
+                Ok(true)
+            }
+            Err(error) => {
+                repo.cancel_delete(account_id, resource_id, key.as_str())?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn stage_operator_put(
+        &self,
+        resource: ResourceId,
+        request_id: &str,
+        key: &str,
+        max_object_bytes: u64,
+        body: Body,
+    ) -> Result<StagedPut, PlatformError> {
+        use futures::TryStreamExt as _;
+        let mut stream = body.into_data_stream();
+        let (path, file) = self.staging.create(resource, request_id)?;
+        let mut file = tokio::fs::File::from_std(file);
+        let guard = StagingFile::new(path);
+        let mut length = 0_u64;
+        let mut reservation = StagingReservation::new(
+            self.staging_bytes.clone(),
+            self.config.max_staging_bytes,
+            self.metrics.clone(),
+        );
+        while let Some(chunk) = stream.try_next().await.map_err(|_| protocol_error())? {
+            let added = u64::try_from(chunk.len()).map_err(|_| object_too_large())?;
+            length = length.checked_add(added).ok_or_else(object_too_large)?;
+            if length > max_object_bytes {
+                return Err(object_too_large());
+            }
+            reservation.add(added)?;
+            ensure_storage_headroom(&self.storage, added)?;
+            file.write_all(&chunk).await.map_err(|_| overloaded())?;
+        }
+        file.sync_all().await.map_err(|_| overloaded())?;
+        drop(file);
+        let checksums = hash_file(&guard.path, length)?;
+        Ok(StagedPut {
+            header: PutHeader {
+                key: key.to_owned(),
+                options: PutWireOptions::default(),
+            },
+            length,
+            checksums,
+            guard,
+            _reservation: reservation,
+        })
     }
 
     async fn stage_put(
@@ -895,6 +1159,23 @@ fn framed_metadata(
         HeaderValue::from_static(FRAME_CONTENT_TYPE),
     );
     Ok(response)
+}
+
+async fn read_object_bytes(
+    body: aws_sdk_s3::primitives::ByteStream,
+    expected_size: u64,
+    timeout: Duration,
+) -> Result<Vec<u8>, PlatformError> {
+    use aws_sdk_s3::primitives::AggregatedBytes;
+    let collected: AggregatedBytes = tokio::time::timeout(timeout, body.collect())
+        .await
+        .map_err(|_| protocol_error())?
+        .map_err(|_| protocol_error())?;
+    let bytes = collected.into_bytes().to_vec();
+    if u64::try_from(bytes.len()).map_err(|_| object_too_large())? != expected_size {
+        return Err(metadata_invalid());
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]

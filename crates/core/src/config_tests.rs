@@ -110,9 +110,23 @@ fn external_runtime_configuration_is_not_supported() {
 }
 
 #[test]
-fn admin_non_loopback_requires_auth() {
-    let err = parse_err("[server]\nadmin_bind = \"0.0.0.0:8788\"\n");
-    assert_eq!(err.code(), ErrorCode::AdminAuthRequired);
+fn admin_auth_is_required_for_loopback_and_non_loopback_bind() {
+    for bind in ["127.0.0.1:8788", "0.0.0.0:8788"] {
+        let err = parse_err(&format!(
+            r#"
+[server]
+public_bind = "127.0.0.1:8787"
+admin_bind = "{bind}"
+
+[server.admin_auth]
+"#
+        ));
+        assert_eq!(
+            err.code(),
+            ErrorCode::SecretRefInvalid,
+            "missing admin_auth must fail closed for bind={bind}"
+        );
+    }
 
     let ok = parse_ok(
         r#"
@@ -125,7 +139,10 @@ env = "ADMIN_TOKEN"
     assert_eq!(ok.server.admin_bind.as_deref(), Some("0.0.0.0:8788"));
 
     let loopback = parse_ok("[server]\nadmin_bind = \"127.0.0.1:9\"\n");
-    assert!(loopback.server.admin_auth.is_none());
+    assert_eq!(
+        loopback.server.admin_auth.env.as_deref(),
+        Some("OPEN_COMPUTE_ADMIN_TOKEN")
+    );
 }
 
 #[test]
@@ -340,6 +357,19 @@ secret_access_key_env = "S3_SECRET_ACCESS_KEY"
 }
 
 #[test]
+fn file_only_s3_credentials_drop_implicit_default_env_names() {
+    let config = parse_ok(
+        r#"
+[s3]
+access_key_id_file = "/var/lib/open-compute/keys/s3-access.key"
+secret_access_key_file = "/var/lib/open-compute/keys/s3-secret.key"
+"#,
+    );
+    assert!(config.s3.access_key_id_env.is_none());
+    assert!(config.s3.secret_access_key_env.is_none());
+}
+
+#[test]
 fn injected_credentials_never_appear_in_debug_display_json_or_redaction() {
     let credential = SecretString::new("AKIAEXAMPLESECRET");
     let master = SecretString::new("ocmk1:dGhpcy1pcy1hLW1hc3Rlci1rZXk");
@@ -435,7 +465,6 @@ fn private_config_helpers_cover_single_source_boundaries() {
     assert!(
         validate_secret_pair(Some("TEST_SECRET"), Some(Path::new("/tmp/secret")), "test").is_ok()
     );
-    assert!(is_loopback("::1".parse().unwrap()));
 }
 
 #[test]

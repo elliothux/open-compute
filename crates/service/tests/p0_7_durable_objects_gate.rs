@@ -5,32 +5,38 @@
 
 #![cfg(feature = "test-support")]
 
+use axum::Router;
 use axum::body::{Body, to_bytes};
-use axum::http::{Request, header};
+use axum::http::{Request, StatusCode, header};
+use axum::response::Response;
 use hmac::{Hmac, Mac};
 use open_compute_artifacts::{
     ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{
-    DurableObjectsConfig, PlatformConfig, RuntimeConfig, StorageConfig,
+    DurableObjectsConfig, MetricsConfig, PlatformConfig, RuntimeConfig, StorageConfig,
 };
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DurableObjectId,
-    Redactor, RequestId, ResourceId, WorkerId,
+    Redactor, RequestId, ResourceId, SecretString, WorkerId,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
     PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
     WorkerdSupervisorOptions, verify_runtime_binary,
 };
+use open_compute_service::do_http::DoApiState;
+use open_compute_service::health::HealthCoordinator;
+use open_compute_service::http::{HttpState, admin_router};
+use open_compute_service::metrics::MetricsRegistry;
 use open_compute_service::runtime_bridge::{
     DispatchTarget, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
 use open_compute_service::{SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend};
 use open_compute_storage::{
     DO_NAMESPACE_SCHEMA_VERSION, DeploymentRecord, DurableObjectRepository, PlatformStorage,
-    WorkerRepository,
+    SchedulerStore, WorkerRepository,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateDeploymentOutcome, CreateDeploymentRequest,
@@ -44,6 +50,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tower::ServiceExt as _;
 
 #[path = "../../../test/runtime/durable-objects/hibernation.rs"]
 mod hibernation;
@@ -282,6 +289,15 @@ async fn p0_7_real_durable_objects_matrix() {
         );
     }
     assert_eq!(first.body, "A:1");
+    assert_operator_api_hides_tenant_do_storage(
+        storage.clone(),
+        resource_pins.clone(),
+        transport.clone(),
+        scheduler.clone(),
+        account,
+        counter,
+    )
+    .await;
     let second = dispatch(
         &transport,
         account,
@@ -1112,6 +1128,128 @@ fn assert_rpc_capability(response: &DispatchResponse, release: &str) {
     assert_eq!(value["property"], format!("{release}:capability"));
     assert_eq!(value["nested"], format!("{release}:nested:ok"));
     assert_eq!(value["envelope"], format!("{release}:ok"));
+}
+
+async fn assert_operator_api_hides_tenant_do_storage(
+    storage: Arc<PlatformStorage>,
+    pins: ResourcePins,
+    transport: WorkerdTransport,
+    scheduler: Arc<SchedulerStore>,
+    account: AccountId,
+    namespace: ResourceId,
+) {
+    let metrics = Arc::new(
+        MetricsRegistry::new(&MetricsConfig::default(), "p0-7-do-canary", "workerd").unwrap(),
+    );
+    let do_api = DoApiState::new(
+        storage,
+        pins,
+        transport,
+        durable_objects_config(),
+        Duration::from_secs(5),
+    )
+    .with_metrics(metrics.clone())
+    .with_scheduler(Some(scheduler));
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics,
+        false,
+        Some(SecretString::new("p0-7-admin")),
+    )
+    .with_do_api(do_api);
+    let router: Router = admin_router(state);
+    let objects_path = format!(
+        "/operator/api/v1/accounts/{account}/durable-objects/namespaces/{namespace}/objects"
+    );
+    let (status, listed) = operator_json_response(
+        router
+            .clone()
+            .oneshot(operator_request(
+                "GET",
+                &objects_path,
+                &serde_json::Value::Null,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let objects = listed["objects"]
+        .as_array()
+        .expect("operator list must return objects array");
+    assert!(
+        !objects.is_empty(),
+        "tenant DO dispatch must register at least one object before operator canary"
+    );
+    for object in objects {
+        assert_operator_object_metadata_only(object);
+        let object_id = object["id"].as_str().expect("object id");
+        let object_path = format!("{objects_path}/{object_id}");
+        let (status, fetched) = operator_json_response(
+            router
+                .clone()
+                .oneshot(operator_request(
+                    "GET",
+                    &object_path,
+                    &serde_json::Value::Null,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_operator_object_metadata_only(&fetched);
+    }
+}
+
+fn operator_request(method: &str, uri: &str, body: &serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("authorization", "Bearer p0-7-admin")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+async fn operator_json_response(response: Response) -> (StatusCode, serde_json::Value) {
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+fn assert_operator_object_metadata_only(value: &serde_json::Value) {
+    let object = value.as_object().expect("object payload must be an object");
+    let mut keys: Vec<_> = object.keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "createdAtMs".to_owned(),
+            "generation".to_owned(),
+            "id".to_owned(),
+            "lifecycle".to_owned(),
+            "updatedAtMs".to_owned(),
+        ]
+    );
+    let rendered = value.to_string().to_ascii_lowercase();
+    for forbidden in [
+        "namespace",
+        "storage",
+        "sqlite",
+        "alarm",
+        "websocket",
+        "sql",
+        "kv",
+        "memory",
+        "deletedat",
+        "objectid",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "forbidden operator field leaked into tenant canary response: {forbidden}"
+        );
+    }
 }
 
 async fn dispatch(

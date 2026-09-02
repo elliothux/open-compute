@@ -6,11 +6,27 @@ import { deployWorker } from "../src/deploy-worker.ts";
 const account = "01900000-0000-7000-8000-000000000001";
 const worker = "01900000-0000-7000-8000-000000000002";
 const deployment = "01900000-0000-7000-8000-000000000003";
-const collection = `/v1/accounts/${account}/workers`;
+const routeId = "01900000-0000-7000-8000-000000000004";
+const collection = `/operator/api/v1/accounts/${account}/workers`;
 const artifact = { mainModule: "worker.js", bytes: Buffer.from("canonical-test-artifact"), sha256: "a".repeat(64) };
-const workerRecord = { id: worker, accountId: account, name: "hello", deletedAtMs: null };
-const route = { kind: "platform_path", workerId: worker, accountId: account, pathPrefix: "/worker/hello/" };
-const ready = { promoted: true, deployment: { id: deployment, state: "ready", workerId: worker } };
+const workerRecord = {
+  id: worker,
+  accountId: account,
+  name: "hello",
+  createdAtMs: 1_000,
+  deletedAtMs: null,
+};
+const route = {
+  id: routeId,
+  kind: "platform_path",
+  workerId: worker,
+  accountId: account,
+  pathPrefix: "/worker/hello/",
+};
+const ready = {
+  promoted: true,
+  deployment: { id: deployment, state: "ready", workerId: worker, createdAtMs: 1_000 },
+};
 const project = {
   project: "/unused", main: "index.ts", tsconfig: "tsconfig.json", name: "hello",
   vars: { GREETING: "你好 🌍" },
@@ -38,7 +54,7 @@ async function platform(t, handler) {
 }
 
 function responses(request, existing = []) {
-  if (request.path === "/v1/account") return { body: { accountId: account } };
+  if (request.path === "/operator/api/v1/account") return { body: { accountId: account } };
   if (request.path === collection) return { body: request.method === "GET" ? { workers: existing } : { worker: workerRecord } };
   if (request.path.endsWith("/deployments")) return { body: ready };
   if (request.path.endsWith("/routes")) return { body: { routes: [route] } };
@@ -59,7 +75,8 @@ test("uses the authoritative account and route and sends secrets only in authent
     assert.doesNotMatch(request.path, /secret/);
     assert.doesNotMatch(request.body.toString(), /secret/);
   }
-  const sent = posts[1];
+  const sent = posts.find(item => item.path.endsWith("/deployments"));
+  assert.ok(sent);
   assert.deepEqual(sent.body, artifact.bytes);
   assert.match(sent.headers["x-open-compute-deployment-metadata"], /^[\x20-\x7e]+$/);
   const metadata = JSON.parse(sent.headers["x-open-compute-deployment-metadata"]);
@@ -111,6 +128,6 @@ test("does not report success for unpromoted deployments or untrusted default ro
     request => request.path.endsWith("/routes") ? { body: { routes: [{ ...route, workerId: deployment }] } } : undefined,
   ]) {
     const server = await platform(t, request => override(request) ?? responses(request));
-    await assert.rejects(deployWorker(project, artifact, { ...options, endpoint: server.endpoint }), /promoted|route/);
+    await assert.rejects(deployWorker(project, artifact, { ...options, endpoint: server.endpoint }), /promoted|route|ready/);
   }
 });

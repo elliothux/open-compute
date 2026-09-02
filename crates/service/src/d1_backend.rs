@@ -15,7 +15,7 @@ use open_compute_core::{
 };
 use open_compute_storage::{
     BindingRepository, D1DatabaseRepository, D1Engine, D1Migration, D1MigrationRecord, D1Paths,
-    D1QueryLimits, PlatformStorage, ResourceRepository,
+    D1QueryLimits, D1Statement, D1StatementResult, D1Value, PlatformStorage, ResourceRepository,
 };
 use open_compute_workers::{ResourcePin, ResourcePins};
 use std::collections::HashMap;
@@ -175,6 +175,59 @@ impl D1BindingService {
     ) -> Result<u32, PlatformError> {
         self.run_control(account_id, resource_id, false, |engine, _| {
             engine.user_version()
+        })
+        .await
+    }
+
+    /// List user-visible tables for the operator dashboard.
+    pub async fn operator_list_tables(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+    ) -> Result<Vec<String>, PlatformError> {
+        self.run_control(account_id, resource_id, false, |engine, limits| {
+            let statement = D1Statement {
+                sql: "SELECT name FROM sqlite_master WHERE type = 'table' \
+                      AND name NOT LIKE 'sqlite_%' \
+                      AND name NOT LIKE '__open_compute_%' \
+                      ORDER BY name"
+                    .to_owned(),
+                params: vec![],
+            };
+            let result = engine.query(&statement, limits)?;
+            Ok(result
+                .rows
+                .into_iter()
+                .filter_map(|row| match row.into_iter().next()? {
+                    D1Value::Text(name) => Some(name),
+                    _ => None,
+                })
+                .collect())
+        })
+        .await
+    }
+
+    /// Execute one bounded SQL statement for the operator dashboard.
+    pub async fn operator_query(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+        sql: String,
+    ) -> Result<D1StatementResult, PlatformError> {
+        if sql.trim().is_empty() {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "D1 SQL must not be empty",
+            ));
+        }
+        self.run_control(account_id, resource_id, false, move |engine, limits| {
+            engine.query(
+                &D1Statement {
+                    sql,
+                    params: vec![],
+                },
+                limits,
+            )
         })
         .await
     }

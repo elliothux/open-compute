@@ -1,12 +1,15 @@
 //! Workflow catalog, version, binding, and live-deployment authority.
 
-use crate::{ControlDb, DeploymentState};
+use crate::catalog_page::{CatalogColumns, build_catalog_sql, record_catalog_cursor};
+use crate::{
+    CatalogCursor, CatalogDirection, CatalogListPage, CatalogSort, ControlDb, DeploymentState,
+};
 use open_compute_core::{
     AccountId, BindingId, DeploymentId, ErrorCode, PlatformError, ResourceAvailability,
     ResourceState, WorkflowId, WorkflowInstanceId, WorkflowOperationId, WorkflowToken,
     WorkflowVersionId,
 };
-use rusqlite::{OptionalExtension as _, params};
+use rusqlite::{OptionalExtension as _, params, params_from_iter};
 use sha2::{Digest as _, Sha256};
 
 pub(crate) mod bindings;
@@ -83,27 +86,72 @@ impl<'a> WorkflowRepository<'a> {
         })
     }
 
-    /// Bounded account-scoped catalog listing for authenticated operators.
+    /// Bounded, filtered, and sorted account-scoped catalog listing.
+    #[allow(clippy::too_many_arguments)]
     pub fn definitions(
         &self,
         account: AccountId,
-        after: Option<WorkflowId>,
-        limit: u32,
-    ) -> Result<Vec<WorkflowDefinition>, PlatformError> {
+        search: Option<&str>,
+        status: Option<ResourceState>,
+        sort: CatalogSort,
+        direction: CatalogDirection,
+        after: Option<CatalogCursor>,
+        limit: u16,
+    ) -> Result<CatalogListPage<WorkflowDefinition>, PlatformError> {
         if limit == 0 || limit > 1000 {
             return Err(error(ErrorCode::LimitInvalid));
         }
+        let search = search.map(str::trim).filter(|value| !value.is_empty());
+        let exact_id = search.and_then(crate::search_as_workflow_id);
+        let search_needle = if exact_id.is_some() {
+            None
+        } else {
+            search.map(str::to_lowercase)
+        };
+        let fetch = u32::from(limit).saturating_add(1);
+        let query = build_catalog_sql(
+            &format!("{DEFINITION_SELECT} WHERE account_id = ? AND state != 'tombstoned'"),
+            CatalogColumns {
+                id: "id",
+                name: "name",
+                state: "state",
+                created_at: "created_at_ms",
+                updated_at: "updated_at_ms",
+            },
+            account.to_string(),
+            search_needle,
+            exact_id.map(|id| id.to_string()),
+            status.map(|value| value.as_str().to_string()),
+            sort,
+            direction,
+            after,
+            fetch,
+        )?;
         self.db.with_read(|conn| {
-            let mut statement = conn
-                .prepare(&format!(
-                    "{DEFINITION_SELECT} WHERE account_id=?1 AND (?2 IS NULL OR id>?2) ORDER BY id LIMIT ?3"
-                ))
+            let mut statement = conn.prepare(&query.text).map_err(sql_error)?;
+            let rows = statement
+                .query_map(params_from_iter(query.values), definition_row)
                 .map_err(sql_error)?;
-            statement
-                .query_map(params![account.to_string(), after.map(|id|id.to_string()), limit], definition_row)
-                .map_err(sql_error)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(sql_error)
+            let mut definitions = rows.collect::<Result<Vec<_>, _>>().map_err(sql_error)?;
+            let next_cursor = if definitions.len() > usize::from(limit) {
+                definitions.pop();
+                definitions.last().map(|definition| {
+                    record_catalog_cursor(
+                        sort,
+                        direction,
+                        &definition.name,
+                        definition.created_at_ms,
+                        definition.updated_at_ms,
+                        &definition.id.to_string(),
+                    )
+                })
+            } else {
+                None
+            };
+            Ok(CatalogListPage {
+                items: definitions,
+                next_cursor,
+            })
         })
     }
 
@@ -114,7 +162,7 @@ impl<'a> WorkflowRepository<'a> {
         id: WorkflowId,
         name: &str,
         now_ms: i64,
-    ) -> Result<(), PlatformError> {
+    ) -> Result<WorkflowDefinition, PlatformError> {
         open_compute_core::workflow::validate_workflow_name(name)?;
         self.db.with_immediate(|tx| {
             if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_definitions WHERE account_id=?1 AND name=?2 AND id!=?3 AND state!='tombstoned')",
@@ -124,7 +172,12 @@ impl<'a> WorkflowRepository<'a> {
             let changed = tx.execute("UPDATE workflow_definitions SET name=?3,updated_at_ms=?4 WHERE account_id=?1 AND id=?2 AND state IN ('creating','ready')",
                 params![account.to_string(),id.to_string(),name,now_ms]).map_err(sql_error)?;
             if changed != 1 { return Err(error(ErrorCode::WorkflowNotReady)); }
-            Ok(())
+            tx.query_row(
+                &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
+                params![account.to_string(), id.to_string()],
+                definition_row,
+            )
+            .map_err(sql_error)
         })
     }
 
@@ -134,12 +187,14 @@ impl<'a> WorkflowRepository<'a> {
         account: AccountId,
         id: WorkflowId,
         now_ms: i64,
-    ) -> Result<(), PlatformError> {
+    ) -> Result<WorkflowDefinition, PlatformError> {
         self.db.with_immediate(|tx| {
             let definition = tx.query_row(&format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
                 params![account.to_string(),id.to_string()],definition_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotFound))?;
-            if definition.state == ResourceState::Tombstoned { return Ok(()); }
+            if definition.state == ResourceState::Tombstoned {
+                return Ok(definition);
+            }
             if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_referrers WHERE definition_id=?1)
                 OR EXISTS(SELECT 1 FROM workflow_versions WHERE definition_id=?1 AND state IN ('staging','validating'))",
                 [id.to_string()],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
@@ -153,7 +208,12 @@ impl<'a> WorkflowRepository<'a> {
                 params![id.to_string(),now_ms]).map_err(sql_error)?;
             tx.execute("UPDATE workflow_definitions SET state='tombstoned',deleted_at_ms=?2,updated_at_ms=?2 WHERE id=?1",
                 params![id.to_string(),now_ms]).map_err(sql_error)?;
-            Ok(())
+            tx.query_row(
+                &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
+                params![account.to_string(), id.to_string()],
+                definition_row,
+            )
+            .map_err(sql_error)
         })
     }
 

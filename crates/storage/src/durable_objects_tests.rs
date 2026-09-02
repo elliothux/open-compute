@@ -670,3 +670,65 @@ fn namespace_owner_kind_and_existing_product_fail_closed() {
         ErrorCode::DoNamespaceNotFound
     );
 }
+
+#[test]
+fn object_list_page_is_bounded_and_cursor_is_stable() {
+    let (_temp, storage) = storage();
+    let fixture = ready_fixture(&storage);
+    let repo = DurableObjectRepository::new(&storage);
+    let ids = [7u8, 8, 9, 10];
+    for fill in ids {
+        let object = public_id(fixture.namespace, fill);
+        repo.authorize_dispatch(
+            fixture.binding,
+            fixture.deployment,
+            &fixture.descriptor,
+            fixture.route_generation,
+            object,
+            i64::from(fill),
+            true,
+        )
+        .unwrap();
+        repo.finish_object_create(fixture.namespace, object, 1, i64::from(fill) + 100)
+            .unwrap();
+    }
+
+    let first = repo
+        .list_objects_page(fixture.account, fixture.namespace, None, 2)
+        .unwrap();
+    assert_eq!(first.objects.len(), 2);
+    assert!(first.next_cursor.is_some());
+    let cursor = decode_object_list_cursor(first.next_cursor.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        cursor,
+        (first.objects[1].object_id, first.objects[1].generation)
+    );
+
+    let second = repo
+        .list_objects_page(fixture.account, fixture.namespace, Some(cursor), 2)
+        .unwrap();
+    assert_eq!(second.objects.len(), 2);
+    assert!(second.next_cursor.is_none());
+
+    let latest = repo
+        .get_latest_object(
+            fixture.account,
+            fixture.namespace,
+            public_id(fixture.namespace, 10),
+        )
+        .unwrap();
+    assert_eq!(latest.state, DurableObjectState::Ready);
+
+    assert_eq!(
+        decode_object_list_cursor("not-a-cursor")
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
+    );
+    assert_eq!(
+        decode_object_list_cursor(&format!("{}:0", public_id(fixture.namespace, 7)))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
+    );
+}

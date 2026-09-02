@@ -98,21 +98,29 @@ async function serviceControl<T>(env: BindingEnv, path: string, body: unknown): 
   return value as T;
 }
 
-async function finalizeServiceConnect(env: BindingEnv, admission: ServiceAdmission): Promise<void> {
+/** Retry one idempotent lifecycle mutation across a transient private-hop failure. */
+export async function retryServiceControl<T>(
+  env: BindingEnv,
+  path: string,
+  body: unknown,
+): Promise<T> {
   let lastFailure: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await serviceControl(env, "/internal/services/v1/connect/finalize", {
-        handle: admission.handle,
-        callerFrame: admission.callerFrame,
-      });
-      return;
+      return await serviceControl(env, path, body);
     } catch (error) {
       lastFailure = error;
       if (attempt < 2) await scheduler.wait(10 * (attempt + 1));
     }
   }
   throw lastFailure;
+}
+
+async function finalizeServiceConnect(env: BindingEnv, admission: ServiceAdmission): Promise<void> {
+  await retryServiceControl(env, "/internal/services/v1/connect/finalize", {
+    handle: admission.handle,
+    callerFrame: admission.callerFrame,
+  });
 }
 
 class ServiceDrain {
@@ -146,7 +154,11 @@ class ServiceDrain {
   async #complete(): Promise<void> {
     if (this.#completed || !this.#background || !this.#result) return;
     this.#completed = true;
-    await serviceControl(this.#env, "/internal/services/v1/complete", { handle: this.#handle });
+    await retryServiceControl(
+      this.#env,
+      "/internal/services/v1/complete",
+      { handle: this.#handle },
+    );
   }
 }
 

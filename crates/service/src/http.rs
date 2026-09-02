@@ -3,7 +3,9 @@
 use crate::auth::{bearer_matches, resolve_admin_auth};
 use crate::cache_images_http::{self, CacheImagesApiState};
 use crate::d1_http::{self, D1ApiState};
+use crate::dashboard::DashboardDispatch;
 use crate::do_http::{self, DoApiState};
+use crate::embedded_dashboard::embedded_dashboard_assets_sha256;
 use crate::health::HealthCoordinator;
 use crate::kv_http::{self, KvApiState};
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
@@ -15,18 +17,22 @@ use crate::workers_http::{self, WorkerApiState};
 use crate::workflow_http::{self, WorkflowApiState};
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{any, get};
 use axum::{Json, Router};
 use open_compute_core::config::ServerConfig;
-use open_compute_core::{ErrorCode, OperationClass, ReadinessReason, RequestId, SecretString};
+use open_compute_core::{
+    ErrorCode, OperationClass, PlatformError, ReadinessReason, RequestId, SecretString,
+};
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
 use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
+use tokio::sync::RwLock;
 
 /// Response header carrying the generated request ID.
 pub const REQUEST_ID_HEADER: &str = "x-open-compute-request-id";
@@ -46,6 +52,7 @@ pub struct HttpState {
     health: HealthCoordinator,
     metrics: Arc<MetricsRegistry>,
     metrics_enabled: bool,
+    dashboard_enabled: bool,
     admin_secret: Option<Arc<SecretString>>,
     supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
     #[cfg(any(test, feature = "test-support"))]
@@ -59,12 +66,14 @@ pub struct HttpState {
     workflow_api: Option<Arc<WorkflowApiState>>,
     scheduler: Option<Arc<SchedulerService>>,
     cache_images_api: Option<Arc<CacheImagesApiState>>,
+    dashboard_dispatch: Arc<RwLock<Option<DashboardDispatch>>>,
 }
 
 impl std::fmt::Debug for HttpState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HttpState")
             .field("metrics_enabled", &self.metrics_enabled)
+            .field("dashboard_enabled", &self.dashboard_enabled)
             .field("admin_auth", &self.admin_secret.is_some())
             .field(
                 "test_runtime_restart",
@@ -79,6 +88,7 @@ impl std::fmt::Debug for HttpState {
             .field("workflow_api", &self.workflow_api.is_some())
             .field("scheduler", &self.scheduler.is_some())
             .field("cache_images_api", &self.cache_images_api.is_some())
+            .field("dashboard_dispatch", &"<async>")
             .finish_non_exhaustive()
     }
 }
@@ -110,18 +120,17 @@ impl HttpState {
         health: HealthCoordinator,
         metrics: Arc<MetricsRegistry>,
         metrics_enabled: bool,
+        dashboard_enabled: bool,
         server: &ServerConfig,
         supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
-    ) -> Result<Self, open_compute_core::PlatformError> {
-        let admin_secret = match &server.admin_auth {
-            Some(reference) => Some(Arc::new(resolve_admin_auth(reference)?)),
-            None => None,
-        };
+    ) -> Result<Self, PlatformError> {
+        let admin_secret = Arc::new(resolve_admin_auth(&server.admin_auth)?);
         Ok(Self {
             health,
             metrics,
             metrics_enabled,
-            admin_secret,
+            dashboard_enabled,
+            admin_secret: Some(admin_secret),
             supervisor,
             #[cfg(any(test, feature = "test-support"))]
             test_runtime_restart: None,
@@ -134,7 +143,18 @@ impl HttpState {
             workflow_api: None,
             scheduler: None,
             cache_images_api: None,
+            dashboard_dispatch: Arc::new(RwLock::new(None)),
         })
+    }
+
+    /// Share the dashboard dispatch slot populated after runtime bootstrap.
+    #[must_use]
+    pub fn with_dashboard_dispatch(
+        mut self,
+        dispatch: Arc<RwLock<Option<DashboardDispatch>>>,
+    ) -> Self {
+        self.dashboard_dispatch = dispatch;
+        self
     }
 
     /// Test helper with no admin auth.
@@ -149,6 +169,7 @@ impl HttpState {
             health,
             metrics,
             metrics_enabled,
+            dashboard_enabled: false,
             admin_secret: admin_secret.map(Arc::new),
             supervisor: Arc::new(|| None),
             test_runtime_restart: None,
@@ -161,7 +182,27 @@ impl HttpState {
             workflow_api: None,
             scheduler: None,
             cache_images_api: None,
+            dashboard_dispatch: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Enable dashboard surface responses in tests without runtime bootstrap.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn with_dashboard_enabled(mut self, enabled: bool) -> Self {
+        self.dashboard_enabled = enabled;
+        self
+    }
+
+    /// Override supervisor snapshot reporting for operator status tests.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn with_supervisor(
+        mut self,
+        supervisor: Arc<dyn Fn() -> Option<SanitizedSupervisor> + Send + Sync>,
+    ) -> Self {
+        self.supervisor = supervisor;
+        self
     }
 
     /// Attach the P0.2 control/data plane to this listener state.
@@ -304,38 +345,56 @@ pub fn public_router(state: HttpState) -> Router {
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .fallback(workers_http::public_ingress)
-        .layer(axum::middleware::from_fn_with_state(
+        .layer(middleware::from_fn_with_state(
             middleware_state,
             bounds_middleware,
         ))
         .with_state(state)
 }
 
-/// Admin routes, including public health plus status/metrics.
+fn operator_api_router(state: HttpState) -> Router<HttpState> {
+    let auth_state = state.clone();
+    Router::new()
+        .route("/v1/meta", get(operator_meta))
+        .route("/v1/system/status", get(status))
+        .merge(workers_http::control_router())
+        .merge(kv_http::control_router())
+        .merge(d1_http::control_router())
+        .merge(do_http::control_router())
+        .merge(r2_http::control_router())
+        .merge(scheduler_http::control_router())
+        .merge(queue_http::control_router())
+        .merge(workflow_http::control_router())
+        .merge(cache_images_http::control_router())
+        .merge(test_control_router())
+        .route("/v1/{*rest}", any(operator_api_not_found))
+        .layer(middleware::from_fn_with_state(
+            auth_state,
+            operator_auth_middleware,
+        ))
+        .with_state(state)
+}
+
+/// Admin routes, including public health plus operator API and metrics.
 pub fn admin_router(state: HttpState) -> Router {
     let metrics_enabled = state.metrics_enabled;
     let middleware_state = state.clone();
+    let api_state = state.clone();
     let mut router = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
-        .route("/health/status", get(status));
+        .nest("/operator/api", operator_api_router(api_state));
     if metrics_enabled {
-        router = router.route("/metrics", get(metrics_handler));
+        router = router.route("/operator/metrics", get(metrics_handler));
     }
     router = router
-        .merge(workers_http::control_router())
-        .merge(kv_http::control_router())
-        .merge(d1_http::control_router());
-    router = router.merge(do_http::control_router());
-    router = router.merge(r2_http::control_router());
-    router = router.merge(scheduler_http::control_router());
-    router = router.merge(queue_http::control_router());
-    router = router.merge(workflow_http::control_router());
-    router = router.merge(cache_images_http::control_router());
-    router = router.merge(test_control_router());
+        .route("/operator", any(operator_surface))
+        .route("/operator/", any(operator_surface))
+        .route("/operator/{*rest}", any(operator_surface))
+        .merge(test_control_router());
     router
         .fallback(fallback)
-        .layer(axum::middleware::from_fn_with_state(
+        .layer(middleware::from_fn_with_state(
             middleware_state,
             bounds_middleware,
         ))
@@ -346,30 +405,46 @@ pub fn admin_router(state: HttpState) -> Router {
 pub fn merged_router(state: HttpState) -> Router {
     let metrics_enabled = state.metrics_enabled;
     let middleware_state = state.clone();
+    let api_state = state.clone();
     let mut router = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
-        .route("/health/status", get(status));
+        .nest("/operator/api", operator_api_router(api_state));
     if metrics_enabled {
-        router = router.route("/metrics", get(metrics_handler));
+        router = router.route("/operator/metrics", get(metrics_handler));
     }
     router
-        .merge(workers_http::control_router())
-        .merge(kv_http::control_router())
-        .merge(r2_http::control_router())
-        .merge(d1_http::control_router())
-        .merge(do_http::control_router())
-        .merge(scheduler_http::control_router())
-        .merge(queue_http::control_router())
-        .merge(workflow_http::control_router())
-        .merge(cache_images_http::control_router())
+        .route("/operator", any(operator_surface))
+        .route("/operator/", any(operator_surface))
+        .route("/operator/{*rest}", any(operator_surface))
         .merge(test_control_router())
         .fallback(workers_http::public_ingress)
-        .layer(axum::middleware::from_fn_with_state(
+        .layer(middleware::from_fn_with_state(
             middleware_state,
             bounds_middleware,
         ))
         .with_state(state)
+}
+
+async fn operator_meta() -> Response {
+    Json(serde_json::json!({
+        "release": env!("CARGO_PKG_VERSION"),
+        "apiVersion": "v1",
+        "dashboardAssetsSha256": embedded_dashboard_assets_sha256(),
+        "capabilities": [
+            "workers",
+            "kv",
+            "d1",
+            "r2",
+            "durable-objects",
+            "queues",
+            "workflows",
+            "scheduler",
+            "cache",
+            "images",
+        ],
+    }))
+    .into_response()
 }
 
 async fn live() -> StatusCode {
@@ -389,10 +464,7 @@ async fn ready(State(state): State<HttpState>) -> Response {
     }
 }
 
-async fn status(State(state): State<HttpState>, request: Request) -> Response {
-    if !authorize(&state, &request) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
+async fn status(State(state): State<HttpState>) -> Response {
     let snap = state.health.snapshot();
     let supervisor = (state.supervisor)();
     Json(serde_json::json!({
@@ -405,7 +477,12 @@ async fn status(State(state): State<HttpState>, request: Request) -> Response {
 
 async fn metrics_handler(State(state): State<HttpState>, request: Request) -> Response {
     if !authorize(&state, &request) {
-        return StatusCode::UNAUTHORIZED.into_response();
+        let request_id = operator_request_id(&request);
+        let error = PlatformError::new(
+            ErrorCode::AdminAuthRequired,
+            "admin authentication is required",
+        );
+        return operator_error_response(&error, request_id);
     }
     let body = state.metrics.render(&state.health.snapshot());
     (
@@ -413,6 +490,93 @@ async fn metrics_handler(State(state): State<HttpState>, request: Request) -> Re
         body,
     )
         .into_response()
+}
+
+async fn operator_surface(State(state): State<HttpState>, request: Request) -> Response {
+    if !state.dashboard_enabled {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let dispatch = state.dashboard_dispatch.read().await.clone();
+    let Some(dispatch) = dispatch else {
+        return dashboard_not_ready().into_response();
+    };
+    let (mut parts, body) = request.into_parts();
+    let host = parts
+        .headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("localhost")
+        .to_owned();
+    let asset_path = dashboard_asset_path(parts.uri.path());
+    let query = parts
+        .uri
+        .query()
+        .map(|value| format!("?{value}"))
+        .unwrap_or_default();
+    let Ok(uri) = Uri::builder()
+        .path_and_query(format!("{asset_path}{query}"))
+        .build()
+    else {
+        return dashboard_not_ready().into_response();
+    };
+    parts.uri = uri;
+    if !parts.headers.contains_key(header::HOST) {
+        parts.headers.insert(
+            header::HOST,
+            HeaderValue::from_str(&host).unwrap_or(HeaderValue::from_static("localhost")),
+        );
+    }
+    let request = Request::from_parts(parts, body);
+    match dispatch.dispatch(request).await {
+        Ok(response) => apply_dashboard_security_headers(response),
+        Err(_) => dashboard_not_ready().into_response(),
+    }
+}
+
+fn apply_dashboard_security_headers(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
+        ),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    response
+}
+
+pub(crate) fn dashboard_asset_path(request_path: &str) -> String {
+    let stripped = request_path
+        .strip_prefix("/operator")
+        .unwrap_or(request_path);
+    if stripped.is_empty() || stripped == "/" {
+        "/".to_owned()
+    } else if stripped.starts_with('/') {
+        stripped.to_owned()
+    } else {
+        format!("/{stripped}")
+    }
+}
+
+fn dashboard_not_ready() -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({
+            "ok": false,
+            "error": {
+                "code": "platform_unavailable",
+                "message": "dashboard is not ready",
+            }
+        })),
+    )
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -448,13 +612,103 @@ async fn test_runtime_restart(State(state): State<HttpState>, request: Request) 
 
 pub(crate) fn authorize(state: &HttpState, request: &Request) -> bool {
     let Some(secret) = &state.admin_secret else {
-        return true;
+        return false;
     };
     let header = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok());
     bearer_matches(header, secret)
+}
+
+async fn operator_api_not_found(request: Request) -> Response {
+    let error = PlatformError::new(ErrorCode::ResourceNotFound, "operator API route not found");
+    operator_error_response(&error, operator_request_id(&request))
+}
+
+fn operator_request_id(request: &Request) -> RequestId {
+    request
+        .extensions()
+        .get::<RequestId>()
+        .copied()
+        .unwrap_or_else(RequestId::generate)
+}
+
+async fn operator_auth_middleware(
+    State(state): State<HttpState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !authorize(&state, &request) {
+        let error = PlatformError::new(
+            ErrorCode::AdminAuthRequired,
+            "admin authentication is required",
+        );
+        return operator_error_response(&error, operator_request_id(&request));
+    }
+    next.run(request).await
+}
+
+pub(crate) fn operator_error_response(error: &PlatformError, request_id: RequestId) -> Response {
+    let code = error.code();
+    let status = match code {
+        ErrorCode::AdminAuthRequired => StatusCode::UNAUTHORIZED,
+        ErrorCode::AccountNotFound
+        | ErrorCode::WorkerNotFound
+        | ErrorCode::DeploymentNotFound
+        | ErrorCode::RouteNotFound
+        | ErrorCode::EntrypointNotFound
+        | ErrorCode::ResourceNotFound => StatusCode::NOT_FOUND,
+        ErrorCode::WorkerDeleted => StatusCode::GONE,
+        ErrorCode::WorkerNameConflict | ErrorCode::RouteConflict => StatusCode::CONFLICT,
+        ErrorCode::DeploymentNotReady
+        | ErrorCode::DeploymentActive
+        | ErrorCode::DeploymentReferenced
+        | ErrorCode::ServiceTargetReferenced
+        | ErrorCode::QueueConsumerGenerationStale
+        | ErrorCode::IdempotencyConflict
+        | ErrorCode::AssetUploadIncomplete
+        | ErrorCode::AssetUploadConflict => StatusCode::CONFLICT,
+        ErrorCode::BundleTooLarge | ErrorCode::LimitInvalid | ErrorCode::AssetLimitExceeded => {
+            StatusCode::PAYLOAD_TOO_LARGE
+        }
+        ErrorCode::BundleRuntimeInvalid
+        | ErrorCode::CompatibilityUnsupported
+        | ErrorCode::AssetConfigUnsupported => StatusCode::UNPROCESSABLE_ENTITY,
+        ErrorCode::RuntimeUnavailable
+        | ErrorCode::ArtifactUnavailable
+        | ErrorCode::CacheUnavailable
+        | ErrorCode::AssetStorageUnavailable
+        | ErrorCode::SchedulerUnavailable
+        | ErrorCode::SchedulerCorrupt
+        | ErrorCode::SchedulerBusy
+        | ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::ResourceLimitExceeded | ErrorCode::QuotaExceeded | ErrorCode::AdmissionBusy => {
+            StatusCode::TOO_MANY_REQUESTS
+        }
+        ErrorCode::StoragePressure | ErrorCode::DiskHardLimit => StatusCode::INSUFFICIENT_STORAGE,
+        ErrorCode::Internal
+        | ErrorCode::CacheCorrupt
+        | ErrorCode::RuntimeResultUnknown
+        | ErrorCode::DeploymentInvariantViolation
+        | ErrorCode::ArtifactIntegrityError
+        | ErrorCode::AssetIntegrityError => StatusCode::INTERNAL_SERVER_ERROR,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    let mut response = (
+        status,
+        Json(serde_json::json!({
+            "ok": false,
+            "error": {
+                "code": code.as_str(),
+                "message": error.message(),
+                "requestId": request_id,
+            }
+        })),
+    )
+        .into_response();
+    response.extensions_mut().insert(ProductErrorCode(code));
+    response
 }
 
 async fn fallback(method: Method) -> StatusCode {
@@ -471,19 +725,25 @@ async fn fallback(method: Method) -> StatusCode {
 async fn bounds_middleware(
     State(state): State<HttpState>,
     mut request: Request,
-    next: axum::middleware::Next,
+    next: Next,
 ) -> Result<Response, StatusCode> {
     let start = Instant::now();
     if request.method() != Method::GET
         && request.method() != Method::HEAD
         && matches!(
             request.uri().path(),
-            "/health/live" | "/health/ready" | "/health/status" | "/metrics"
+            "/health/live"
+                | "/health/ready"
+                | "/operator/api/v1/system/status"
+                | "/operator/metrics"
         )
     {
         return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
     }
-    let direct_deployment_upload = request.uri().path().starts_with("/v1/accounts/")
+    let direct_deployment_upload = request
+        .uri()
+        .path()
+        .starts_with("/operator/api/v1/accounts/")
         && request.uri().path().ends_with("/deployments");
     let staged_deployment_upload = is_staged_deployment_upload(request.uri().path());
     let mut header_total = 0_usize;
@@ -510,8 +770,16 @@ async fn bounds_middleware(
             return Err(StatusCode::PAYLOAD_TOO_LARGE);
         }
     }
+    let kv_value_put = request.method() == Method::PUT
+        && kv_http::operator_kv_value_put_path(request.uri().path());
+    let r2_object_put = request.method() == Method::PUT
+        && r2_http::operator_r2_object_put_path(request.uri().path());
     let body_limit = if direct_deployment_upload || staged_deployment_upload {
         workers_http::HARD_MAX_BUNDLE_BODY
+    } else if kv_value_put {
+        kv_http::KV_OPERATOR_PUT_MAX_BODY
+    } else if r2_object_put {
+        r2_http::R2_OPERATOR_PUT_MAX_BODY
     } else {
         MAX_BODY
     };
@@ -572,18 +840,20 @@ fn is_staged_deployment_upload(path: &str) -> bool {
         .unwrap_or(path)
         .split('/')
         .collect::<Vec<_>>();
-    parts.len() >= 6
-        && parts[0] == "v1"
-        && parts[1] == "accounts"
-        && !parts[2].is_empty()
-        && parts[3] == "workers"
+    parts.len() >= 8
+        && parts[0] == "operator"
+        && parts[1] == "api"
+        && parts[2] == "v1"
+        && parts[3] == "accounts"
         && !parts[4].is_empty()
-        && parts[5] == "deployment-uploads"
-        && (parts.len() == 6 || !parts[6].is_empty())
-        && (parts.len() == 6
-            || parts.len() == 7
-            || (parts.len() == 8 && parts[7] == "finalize")
-            || (parts.len() == 9 && parts[7] == "objects" && !parts[8].is_empty()))
+        && parts[5] == "workers"
+        && !parts[6].is_empty()
+        && parts[7] == "deployment-uploads"
+        && (parts.len() == 8 || !parts[8].is_empty())
+        && (parts.len() == 8
+            || parts.len() == 9
+            || (parts.len() == 10 && parts[9] == "finalize")
+            || (parts.len() == 11 && parts[9] == "objects" && !parts[10].is_empty()))
 }
 
 fn product_operation(path: &str) -> Option<OperationClass> {
@@ -608,9 +878,11 @@ fn bound_route(path: &str) -> &'static str {
     match path {
         "/health/live" => "/health/live",
         "/health/ready" => "/health/ready",
-        "/health/status" => "/health/status",
-        "/metrics" => "/metrics",
-        _ if path.starts_with("/v1/accounts/") => "/v1/accounts/:account/workers/*",
+        "/operator/api/v1/system/status" => "/operator/api/v1/system/status",
+        "/operator/metrics" => "/operator/metrics",
+        _ if path.starts_with("/operator/api/v1/accounts/") => {
+            "/operator/api/v1/accounts/:account/workers/*"
+        }
         _ if path.starts_with("/__workers/") => "/__workers/:account/:worker/*",
         _ => "/other",
     }
@@ -625,15 +897,10 @@ fn bound_method(method: &Method) -> &'static str {
 }
 
 /// Bind a TCP listener on `addr`.
-pub async fn bind(
-    addr: std::net::SocketAddr,
-) -> Result<TcpListener, open_compute_core::PlatformError> {
-    TcpListener::bind(addr).await.map_err(|_| {
-        open_compute_core::PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "failed to bind health listener",
-        )
-    })
+pub async fn bind(addr: std::net::SocketAddr) -> Result<TcpListener, PlatformError> {
+    TcpListener::bind(addr)
+        .await
+        .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "failed to bind health listener"))
 }
 
 /// Serve a router until `shutdown` resolves.
@@ -641,16 +908,11 @@ pub async fn serve_until(
     listener: TcpListener,
     router: Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
-) -> Result<(), open_compute_core::PlatformError> {
+) -> Result<(), PlatformError> {
     axum::serve(listener, router.into_make_service())
         .with_graceful_shutdown(shutdown)
         .await
-        .map_err(|_| {
-            open_compute_core::PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "health listener failed",
-            )
-        })
+        .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "health listener failed"))
 }
 
 impl HttpState {

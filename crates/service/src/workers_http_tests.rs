@@ -9,6 +9,7 @@ use open_compute_core::{MetricsConfig, PlatformConfig, StorageConfig, SystemCloc
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
     DeploymentAssetsRepository, DeploymentContentKind, NewDeployment, PlatformStorage,
+    WorkerRepository,
 };
 use open_compute_workers::{CanonicalBundle, ModuleInput, ModuleType};
 use std::collections::BTreeMap;
@@ -1025,4 +1026,134 @@ async fn worker_and_route_failures_replay_after_storage_restart_without_mutation
         );
     }
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn operator_sqlite_reads_remain_available_when_supervisor_is_stopped() {
+    use crate::http::{SanitizedSupervisor, admin_router};
+    use open_compute_core::ReadinessReason;
+    use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
+    use open_compute_storage::WorkerRepository;
+    use std::time::SystemTime;
+    use tower::ServiceExt;
+
+    let (_temp, _mock, api, account) = worker_api_fixture().await;
+    WorkerRepository::new(api.storage.db())
+        .create_worker(account, "listed", RequestId::generate(), 1, 100)
+        .unwrap();
+    let snapshot = SupervisorSnapshot {
+        state: SupervisorState::Stopped,
+        reason: ReadinessReason::RuntimeStarting,
+        last_transition_at: SystemTime::UNIX_EPOCH,
+        attempt: 1,
+        last_exit: None,
+        next_retry_at: None,
+        pid: None,
+        pgid: None,
+        binary_digest: "digest".to_owned(),
+        config_digest: "config".to_owned(),
+        startup_id: None,
+        token_fingerprint: None,
+        listen_port: None,
+    };
+    let supervisor = Arc::new(move || Some(SanitizedSupervisor::from(&snapshot)));
+    let router = admin_router(authorized_http_state(api).with_supervisor(supervisor));
+    for path in [
+        "/operator/api/v1/account".to_owned(),
+        format!("/operator/api/v1/accounts/{account}/workers"),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(&path)
+                    .header(header::AUTHORIZATION, "Bearer account-admin")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "path={path}");
+    }
+}
+
+#[tokio::test]
+async fn operator_worker_catalog_filters_sorts_and_paginates_deterministically() {
+    use crate::http::admin_router;
+    use tower::ServiceExt;
+
+    let (_temp, _mock, api, account) = worker_api_fixture().await;
+    let repo = WorkerRepository::new(api.storage.db());
+    let alpha = repo
+        .create_worker(account, "alpha", RequestId::generate(), 10, 100)
+        .unwrap()
+        .0;
+    repo.create_worker(account, "beta", RequestId::generate(), 20, 100)
+        .unwrap();
+    repo.create_worker(account, "gamma", RequestId::generate(), 30, 100)
+        .unwrap();
+    let router = admin_router(authorized_http_state(api));
+    let base = format!("/operator/api/v1/accounts/{account}/workers");
+
+    let get = |uri: String| {
+        Request::builder()
+            .uri(uri)
+            .header(header::AUTHORIZATION, "Bearer account-admin")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let first = router
+        .clone()
+        .oneshot(get(format!("{base}?sort=name&direction=asc&limit=1")))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first: serde_json::Value =
+        serde_json::from_slice(&to_bytes(first.into_body(), 64 * 1024).await.unwrap()).unwrap();
+    assert_eq!(first["workers"][0]["id"], alpha.id.to_string());
+    assert_eq!(first["listComplete"], false);
+    let cursor = first["cursor"].as_str().unwrap();
+
+    let second = router
+        .clone()
+        .oneshot(get(format!(
+            "{base}?sort=name&direction=asc&limit=1&cursor={cursor}"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+
+    for query in [
+        "search=alpha&deployed=false&sort=createdAt&direction=desc&limit=2",
+        "search=%20%20&sort=updatedAt&direction=asc",
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(get(format!("{base}?{query}")))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK,
+            "query={query}"
+        );
+    }
+    for query in [
+        "unknown=1".to_owned(),
+        "sort=invalid".to_owned(),
+        "direction=invalid".to_owned(),
+        "cursor=not-base64".to_owned(),
+        format!("sort=createdAt&direction=asc&cursor={cursor}"),
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(get(format!("{base}?{query}")))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "query={query}"
+        );
+    }
 }

@@ -1,7 +1,11 @@
 //! P1.2/P1.3 full snapshot and fresh-host restore integration Gate.
 
+mod common;
+
 #[path = "p1_snapshot_restore/staged_validation.rs"]
 mod staged_validation;
+
+use common::load_file_only_platform_config;
 
 use base64::Engine as _;
 use open_compute_artifacts::{
@@ -16,7 +20,6 @@ use open_compute_service::backup_cli::{
     backup_restore, backup_retention_plan,
 };
 use open_compute_service::cli::{execute, parse_from};
-use open_compute_service::config_load::load_platform_config;
 use open_compute_storage::{
     PlatformStorage, QueueConfig, QueueContentType, QueueEnqueueRequest, QueueMessageInput,
     QueueRepository, RestoreTarget, SchedulerStore, inspect_control_db, inspect_master_key,
@@ -46,6 +49,8 @@ struct ConfigInputs<'a> {
 }
 
 fn write_config(input: &ConfigInputs<'_>) -> PathBuf {
+    let admin_token = input.root.join(format!("{}-admin.token", input.name));
+    write_mode(&admin_token, b"p1-snapshot-admin\n", 0o600);
     let path = input.root.join(format!("{}.toml", input.name));
     fs::write(
         &path,
@@ -54,6 +59,9 @@ fn write_config(input: &ConfigInputs<'_>) -> PathBuf {
 [server]
 public_bind = "127.0.0.1:0"
 admin_bind = "127.0.0.1:0"
+
+[server.admin_auth]
+file = "{admin_token}"
 
 [storage]
 data_dir = "{data}"
@@ -90,6 +98,7 @@ max_series = 1024
             endpoint = input.endpoint,
             access_key = input.access_key.display(),
             secret_key = input.secret_key.display(),
+            admin_token = admin_token.display(),
             prefix = input.prefix,
         ),
     )
@@ -181,7 +190,7 @@ async fn snapshot_restore_gate() {
         endpoint: &mock.endpoint,
         prefix: "system/",
     });
-    let source_loaded = load_platform_config(&source_config).expect("source config");
+    let source_loaded = load_file_only_platform_config(&source_config);
     let storage = PlatformStorage::bootstrap(&source_loaded.config.storage, &SystemClock)
         .expect("source bootstrap");
     let scheduler_path = storage
@@ -562,7 +571,7 @@ async fn snapshot_restore_gate() {
         endpoint: &mock.endpoint,
         prefix: "system/",
     });
-    let wrong_loaded = load_platform_config(&wrong_config).expect("wrong-key config");
+    let wrong_loaded = load_file_only_platform_config(&wrong_config);
     assert!(
         backup_restore(&wrong_loaded, &first.snapshot_id)
             .await
@@ -590,7 +599,7 @@ async fn snapshot_restore_gate() {
         endpoint: &mock.endpoint,
         prefix: "system/",
     });
-    let restore_loaded = load_platform_config(&restore_config).expect("restore config");
+    let restore_loaded = load_file_only_platform_config(&restore_config);
     assert!(
         backup_inspect(&restore_loaded, &first.snapshot_id, true)
             .await

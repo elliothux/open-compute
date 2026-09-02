@@ -820,7 +820,7 @@ async function createOpenComputeRoute(
     "idempotency-key": `p3-cf-diff-route-${randomBytes(8).toString("hex")}`,
   };
   if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/workers/${workerId}/routes`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workers/${workerId}/routes`, endpoint), {
     method: "POST",
     headers,
     body: JSON.stringify({ hostname, pathPrefix: "/" }),
@@ -846,7 +846,7 @@ async function verifyOpenComputeAccount(
   accountId: string,
   token: string | undefined,
 ): Promise<void> {
-  const response = await fetch(new URL("/v1/account", endpoint), {
+  const response = await fetch(new URL("/operator/api/v1/account", endpoint), {
     headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(30_000),
   });
@@ -901,7 +901,7 @@ async function ensureOpenComputeAbsent(
   token: string | undefined,
 ): Promise<void> {
   const headers = token === undefined ? {} : { authorization: `Bearer ${token}` };
-  const listed = await fetch(new URL(`/v1/accounts/${accountId}/workers`, endpoint), {
+  const listed = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workers`, endpoint), {
     headers,
     signal: AbortSignal.timeout(30_000),
   });
@@ -984,7 +984,7 @@ async function listOpenComputeKv(
   accountId: string,
   token: string | undefined,
 ): Promise<OpenComputeKvNamespace[]> {
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/kv/namespaces`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/kv/namespaces`, endpoint), {
     headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(30_000),
   });
@@ -1033,7 +1033,7 @@ async function createOpenComputeKv(
     "idempotency-key": `p3-cf-diff-kv-${randomBytes(8).toString("hex")}`,
   };
   if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/kv/namespaces`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/kv/namespaces`, endpoint), {
     method: "POST", headers, body: JSON.stringify({ name }), signal: AbortSignal.timeout(60_000),
   });
   if (response.status !== 200 && response.status !== 201) {
@@ -1118,7 +1118,7 @@ async function listOpenComputeD1(
   accountId: string,
   token: string | undefined,
 ): Promise<OpenComputeD1Database[]> {
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/d1/databases`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/d1/databases`, endpoint), {
     headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(30_000),
   });
@@ -1167,7 +1167,7 @@ async function createOpenComputeD1(
     "idempotency-key": `p3-cf-diff-d1-${randomBytes(8).toString("hex")}`,
   };
   if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/d1/databases`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/d1/databases`, endpoint), {
     method: "POST", headers, body: JSON.stringify({ name }), signal: AbortSignal.timeout(60_000),
   });
   if (response.status !== 200 && response.status !== 201) {
@@ -1238,7 +1238,7 @@ async function listOpenComputeR2(
   accountId: string,
   token: string | undefined,
 ): Promise<OpenComputeR2Bucket[]> {
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/r2/buckets`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/r2/buckets`, endpoint), {
     headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(30_000),
   });
@@ -1286,7 +1286,7 @@ async function createOpenComputeR2(
     "idempotency-key": `p3-cf-diff-r2-${randomBytes(8).toString("hex")}`,
   };
   if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/r2/buckets`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/r2/buckets`, endpoint), {
     method: "POST", headers, body: JSON.stringify({ name }), signal: AbortSignal.timeout(60_000),
   });
   if (response.status !== 200 && response.status !== 201) {
@@ -1448,7 +1448,7 @@ async function cleanupOpenCompute(
     const headers: Record<string, string> = token === undefined ? {} : { authorization: `Bearer ${token}` };
     let workerId = knownWorkerId;
     if (workerId === undefined) {
-      const listed = await fetch(new URL(`/v1/accounts/${accountId}/workers`, endpoint), { headers, signal: AbortSignal.timeout(30_000) });
+      const listed = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workers`, endpoint), { headers, signal: AbortSignal.timeout(30_000) });
       if (!listed.ok) {
         await listed.body?.cancel();
         return { deleted: false, status: listed.status };
@@ -1468,7 +1468,7 @@ async function cleanupOpenCompute(
     if (workerId === undefined) return { deleted: true, status: 404 };
     const route = await cleanupOpenComputeRoute(endpoint, accountId, workerId, knownRouteId, `${name}.p3-diff.invalid`, headers);
     if (!route.deleted) return { deleted: false, status: "route-cleanup-failed", route };
-    const url = new URL(`/v1/accounts/${accountId}/workers/${workerId}`, endpoint);
+    const url = new URL(`/operator/api/v1/accounts/${accountId}/workers/${workerId}`, endpoint);
     let restarted = false;
     let removed = false;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -1490,7 +1490,7 @@ async function cleanupOpenCompute(
       return { deleted: false, status: response.status, errorCode: platformErrorCode(responseText), route, restarted };
     }
     if (!removed) return { deleted: false, status: "delete-failed", route, restarted };
-    const verify = await fetch(new URL(`/v1/accounts/${accountId}/workers`, endpoint), {
+    const verify = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workers`, endpoint), {
       headers,
       signal: AbortSignal.timeout(30_000),
     });
@@ -1532,7 +1532,7 @@ async function cleanupOpenComputeKv(
       "idempotency-key": `p3-cf-diff-kv-delete-${randomBytes(8).toString("hex")}`,
     };
     if (token !== undefined) headers.authorization = `Bearer ${token}`;
-    const response = await fetch(new URL(`/v1/accounts/${accountId}/kv/namespaces/${id}`, endpoint), {
+    const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/kv/namespaces/${id}`, endpoint), {
       method: "DELETE", headers, signal: AbortSignal.timeout(60_000),
     });
     await response.body?.cancel();
@@ -1567,7 +1567,7 @@ async function cleanupOpenComputeD1(
       "idempotency-key": `p3-cf-diff-d1-delete-${randomBytes(8).toString("hex")}`,
     };
     if (token !== undefined) headers.authorization = `Bearer ${token}`;
-    const response = await fetch(new URL(`/v1/accounts/${accountId}/d1/databases/${id}`, endpoint), {
+    const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/d1/databases/${id}`, endpoint), {
       method: "DELETE", headers, signal: AbortSignal.timeout(60_000),
     });
     await response.body?.cancel();
@@ -1602,7 +1602,7 @@ async function cleanupOpenComputeR2(
       "idempotency-key": `p3-cf-diff-r2-delete-${randomBytes(8).toString("hex")}`,
     };
     if (token !== undefined) headers.authorization = `Bearer ${token}`;
-    const response = await fetch(new URL(`/v1/accounts/${accountId}/r2/buckets/${id}?force=true`, endpoint), {
+    const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/r2/buckets/${id}?force=true`, endpoint), {
       method: "DELETE", headers, signal: AbortSignal.timeout(120_000),
     });
     await response.body?.cancel();
@@ -1625,7 +1625,7 @@ async function cleanupOpenComputeRoute(
   hostname: string,
   headers: Readonly<Record<string, string>>,
 ): Promise<JsonRecord> {
-  const routesUrl = new URL(`/v1/accounts/${accountId}/workers/${workerId}/routes`, endpoint);
+  const routesUrl = new URL(`/operator/api/v1/accounts/${accountId}/workers/${workerId}/routes`, endpoint);
   const listed = await fetch(routesUrl, {
     headers,
     signal: AbortSignal.timeout(30_000),
@@ -1711,7 +1711,7 @@ async function openComputeRuntimeStatus(
   endpoint: URL,
   headers: Readonly<Record<string, string>>,
 ): Promise<{ readonly state: string; readonly attempt: number }> {
-  const response = await fetch(new URL("/health/status", endpoint), {
+  const response = await fetch(new URL("/operator/api/v1/system/status", endpoint), {
     headers,
     signal: AbortSignal.timeout(10_000),
   });

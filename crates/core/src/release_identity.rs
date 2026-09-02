@@ -21,6 +21,8 @@ pub struct PlatformReleaseIdentityV1 {
     pub workerd_lock_sha256: String,
     /// SHA-256 of packaged runtime assets.
     pub runtime_assets_sha256: String,
+    /// SHA-256 of embedded operator dashboard static assets.
+    pub dashboard_assets_sha256: String,
     /// Version of the checked-in system Worker facade registry.
     pub facade_capability_version: u32,
     /// Current control database schema version.
@@ -45,6 +47,7 @@ impl PlatformReleaseIdentityV1 {
             && !self.workerd_version.is_empty()
             && is_sha256(&self.workerd_lock_sha256)
             && is_sha256(&self.runtime_assets_sha256)
+            && is_sha256(&self.dashboard_assets_sha256)
             && self.facade_capability_version > 0
             && self.control_schema_version > 0
             && self.scheduler_schema_version > 0

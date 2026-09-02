@@ -1,0 +1,36 @@
+{
+  "name": "@open-compute/dashboard",
+  "homepage": "https://open-compute.dev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && bun run typecheck",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "preview": "vite preview",
+    "test:e2e": "sh scripts/run-e2e.sh"
+  },
+  "dependencies": {
+    "@cloudflare/kumo": "catalog:",
+    "@open-compute/operator-sdk": "workspace:*",
+    "@phosphor-icons/react": "catalog:",
+    "@tanstack/react-query": "catalog:",
+    "@tanstack/react-router": "catalog:",
+    "date-fns": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/vite": "catalog:",
+    "@tanstack/router-plugin": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

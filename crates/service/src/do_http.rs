@@ -5,17 +5,19 @@ use crate::metrics::{DoFacetReloadReason, DoReconcileState, MetricsRegistry};
 use crate::runtime_bridge::WorkerdTransport;
 use axum::Router;
 use axum::body::{Body, to_bytes};
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use open_compute_core::{
     AccountId, BindingKind, DurableObjectId, DurableObjectState, DurableObjectsConfig, ErrorCode,
-    PlatformError, RequestId, ResourceId, WorkerId,
+    PlatformError, RequestId, ResourceId, ResourceState, WorkerId,
 };
 use open_compute_storage::{
-    AuthorizedDurableObjectDelete, DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRecord,
-    DurableObjectRepository, PlatformStorage, ResourceRepository, SchedulerStore,
+    AuthorizedDurableObjectDelete, CatalogDirection, CatalogSort, DEFAULT_CATALOG_LIST_LIMIT,
+    DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRecord, DurableObjectRepository, PlatformStorage,
+    ResourceRepository, SchedulerStore, decode_catalog_cursor, decode_object_list_cursor,
+    normalize_catalog_limit,
 };
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, DurableObjectResourceDriver, ResourceController,
@@ -203,12 +205,23 @@ struct CreateNamespaceBody {
     class_name: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListDoNamespacesQuery {
+    search: Option<String>,
+    status: Option<ResourceState>,
+    sort: Option<CatalogSort>,
+    direction: Option<CatalogDirection>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NamespaceView {
     resource_id: ResourceId,
     name: String,
-    state: open_compute_core::ResourceState,
+    state: ResourceState,
     owner_worker_id: WorkerId,
     class_name: String,
     schema_version: u32,
@@ -276,23 +289,65 @@ async fn create_namespace(
 async fn list_namespaces(
     State(state): State<HttpState>,
     Path(account): Path<String>,
+    query: Result<Query<ListDoNamespacesQuery>, axum::extract::rejection::QueryRejection>,
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
     let Some(api) = authorized_api(&state, &request) else {
         return unavailable(&state, &request);
     };
+    let Ok(Query(query)) = query else {
+        return error_response(
+            PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "Durable Object namespace list query is invalid",
+            ),
+            request_id,
+        );
+    };
     let Ok(account_id) = AccountId::from_str(&account) else {
         return error_response(invalid(), request_id);
     };
-    match DurableObjectRepository::new(&api.storage).list_namespaces(account_id) {
-        Ok(value) => json(
+    let after = match query.cursor.as_deref() {
+        None => None,
+        Some(cursor) => match decode_catalog_cursor(cursor) {
+            Ok(value) => Some(value),
+            Err(error) => return error_response(error, request_id),
+        },
+    };
+    let limit = normalize_catalog_limit(query.limit.unwrap_or(DEFAULT_CATALOG_LIST_LIMIT));
+    let sort = query.sort.unwrap_or(CatalogSort::Name);
+    let direction = query.direction.unwrap_or(CatalogDirection::Asc);
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let storage = api.storage.clone();
+    match tokio::task::spawn_blocking(move || {
+        DurableObjectRepository::new(&storage).list_namespaces_page(
+            account_id,
+            search.as_deref(),
+            query.status,
+            sort,
+            direction,
+            after,
+            limit,
+        )
+    })
+    .await
+    {
+        Ok(Ok(page)) => json(
             &serde_json::json!({
-                "namespaces": value.into_iter().map(namespace_view).collect::<Vec<_>>()
+                "namespaces": page.items.into_iter().map(namespace_view).collect::<Vec<_>>(),
+                "cursor": page.next_cursor,
+                "listComplete": page.next_cursor.is_none(),
             }),
             StatusCode::OK,
         ),
-        Err(error) => error_response(error, request_id),
+        Ok(Err(error)) => error_response(error, request_id),
+        Err(_) => error_response(internal(), request_id),
     }
 }
 
@@ -373,20 +428,89 @@ async fn rename_namespace(
 async fn list_objects(
     State(state): State<HttpState>,
     Path((account, namespace)): Path<(String, String)>,
+    query: Result<Query<ListObjectsQuery>, axum::extract::rejection::QueryRejection>,
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
     let Some(api) = authorized_api(&state, &request) else {
         return unavailable(&state, &request);
     };
+    let Ok(Query(query)) = query else {
+        return error_response(
+            PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "Durable Object inventory query is invalid",
+            ),
+            request_id,
+        );
+    };
     let (account_id, namespace_id) = match ids(&account, &namespace) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
-    match DurableObjectRepository::new(&api.storage).list_objects(account_id, namespace_id) {
-        Ok(value) => json(&serde_json::json!({ "objects": value }), StatusCode::OK),
+    let limit = query.limit.unwrap_or(100).clamp(1, 1_000);
+    let repo = DurableObjectRepository::new(&api.storage);
+    if let Some(search) = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let object_id = match DurableObjectId::from_str(search) {
+            Ok(value) if value.belongs_to(namespace_id) => value,
+            _ => return error_response(do_id_invalid(), request_id),
+        };
+        let objects = match repo.get_latest_object(account_id, namespace_id, object_id) {
+            Ok(record) => vec![object_view(&record)],
+            Err(error) if error.code() == ErrorCode::ResourceNotFound => Vec::new(),
+            Err(error) => return error_response(error, request_id),
+        };
+        return json(
+            &serde_json::json!({
+                "objects": objects,
+                "cursor": null,
+            }),
+            StatusCode::OK,
+        );
+    }
+    let after = match query.cursor.as_deref() {
+        None => None,
+        Some(cursor) => match decode_object_list_cursor(cursor) {
+            Ok(value) => Some(value),
+            Err(error) => return error_response(error, request_id),
+        },
+    };
+    match repo.list_objects_page(account_id, namespace_id, after, limit) {
+        Ok(page) => {
+            let objects: Vec<_> = page.objects.iter().map(object_view).collect();
+            json(
+                &serde_json::json!({
+                    "objects": objects,
+                    "cursor": page.next_cursor,
+                }),
+                StatusCode::OK,
+            )
+        }
         Err(error) => error_response(error, request_id),
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListObjectsQuery {
+    cursor: Option<String>,
+    limit: Option<u16>,
+    search: Option<String>,
+}
+
+pub(crate) fn object_view(object: &DurableObjectRecord) -> serde_json::Value {
+    serde_json::json!({
+        "id": object.object_id.to_string(),
+        "generation": object.generation,
+        "lifecycle": object.state.as_str(),
+        "createdAtMs": object.created_at_ms,
+        "updatedAtMs": object.updated_at_ms,
+    })
 }
 
 async fn get_object(
@@ -405,15 +529,12 @@ async fn get_object(
     let Ok(object_id) = DurableObjectId::from_str(&object) else {
         return error_response(do_id_invalid(), request_id);
     };
-    match DurableObjectRepository::new(&api.storage).list_objects(account_id, namespace_id) {
-        Ok(objects) => match objects
-            .into_iter()
-            .rev()
-            .find(|row| row.object_id == object_id)
-        {
-            Some(value) => json(&value, StatusCode::OK),
-            None => error_response(not_found(), request_id),
-        },
+    match DurableObjectRepository::new(&api.storage).get_latest_object(
+        account_id,
+        namespace_id,
+        object_id,
+    ) {
+        Ok(value) => json(&object_view(&value), StatusCode::OK),
         Err(error) => error_response(error, request_id),
     }
 }
@@ -617,7 +738,9 @@ fn error_response(error: impl Into<PlatformError>, request_id: RequestId) -> Res
     let code = error.code();
     let status = match code {
         ErrorCode::DoNamespaceNotFound | ErrorCode::ResourceNotFound => StatusCode::NOT_FOUND,
-        ErrorCode::DoIdInvalid | ErrorCode::DoInternalProtocolError => StatusCode::BAD_REQUEST,
+        ErrorCode::DoIdInvalid | ErrorCode::DoInternalProtocolError | ErrorCode::ConfigInvalid => {
+            StatusCode::BAD_REQUEST
+        }
         ErrorCode::DoNamespaceNotEmpty
         | ErrorCode::ResourceReferenced
         | ErrorCode::DoObjectDeleting
@@ -658,9 +781,6 @@ fn internal() -> PlatformError {
 }
 fn do_id_invalid() -> PlatformError {
     PlatformError::new(ErrorCode::DoIdInvalid, "Durable Object identity is invalid")
-}
-fn not_found() -> PlatformError {
-    PlatformError::new(ErrorCode::ResourceNotFound, "Durable Object was not found")
 }
 
 #[cfg(test)]

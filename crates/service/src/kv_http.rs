@@ -1,22 +1,29 @@
 //! P0.4 KV namespace control API.
 
+use crate::binding_backend::KvBindingExecutor;
 use crate::http::{HttpState, ProductErrorCode, authorize};
+use crate::kv_backend::{KvCommand, KvCommandResult, SqliteKvBindingExecutor};
 use crate::metrics::{KvLifecycle, KvLifecycleGuard};
+use crate::operator_binding::operator_binding;
 use crate::snapshot_pins::SnapshotPins;
 use axum::Router;
 use axum::body::{Body, to_bytes};
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{
     AccountId, BindingKind, ErrorCode, KvConfig, PlatformError, RequestId, ResourceId,
     ResourceState,
 };
 use open_compute_storage::{
-    KvBackupState, KvEngine, KvNamespaceRepository, KvPaths, PlatformStorage,
-    ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
+    CatalogDirection, CatalogSort, DEFAULT_CATALOG_LIST_LIMIT, KV_MAX_LIST_LIMIT,
+    KV_MAX_VALUE_BYTES, KvBackupState, KvEngine, KvNamespaceRepository, KvPaths, PlatformStorage,
+    ReserveResourceCreate, ResourceCreateReservation, ResourceRepository, decode_catalog_cursor,
+    normalize_catalog_limit,
 };
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, CreateResourceResult, KvResourceDriver,
@@ -31,6 +38,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MAX_JSON_BODY: usize = 4096;
+/// Maximum JSON body size for operator KV value PUT requests.
+pub(crate) const KV_OPERATOR_PUT_MAX_BODY: usize = KV_MAX_VALUE_BYTES + 128 * 1024;
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 const KV_BACKUP_MANIFEST_SCHEMA: u32 = 1;
 
@@ -52,6 +61,7 @@ pub struct KvApiState {
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     pins: ResourcePins,
+    executor: Arc<SqliteKvBindingExecutor>,
     config: KvConfig,
     max_resources_per_account: u32,
     delete_drain_timeout: Duration,
@@ -75,6 +85,7 @@ impl KvApiState {
         storage: Arc<PlatformStorage>,
         artifacts: ArtifactStore,
         pins: ResourcePins,
+        executor: Arc<SqliteKvBindingExecutor>,
         config: KvConfig,
         max_resources_per_account: u32,
         delete_drain_timeout: Duration,
@@ -83,6 +94,7 @@ impl KvApiState {
             storage,
             artifacts,
             pins,
+            executor,
             config,
             max_resources_per_account,
             delete_drain_timeout,
@@ -124,6 +136,45 @@ pub fn control_router() -> Router<HttpState> {
                 .patch(rename_namespace)
                 .delete(delete_namespace),
         )
+        .route(
+            "/v1/accounts/{account_id}/kv/namespaces/{resource_id}/keys",
+            get(list_keys),
+        )
+        .route(
+            "/v1/accounts/{account_id}/kv/namespaces/{resource_id}/values/{key}",
+            get(get_value).put(put_value).delete(delete_value),
+        )
+}
+
+/// Returns true when `path` targets an operator KV value mutation with a concrete key segment.
+pub(crate) fn operator_kv_value_put_path(path: &str) -> bool {
+    const PREFIX: &str = "/operator/api/v1/accounts/";
+    if !path.starts_with(PREFIX) {
+        return false;
+    }
+    let Some(values_index) = path.find("/values/") else {
+        return false;
+    };
+    path.contains("/kv/namespaces/") && values_index + "/values/".len() < path.len()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListNamespacesQuery {
+    search: Option<String>,
+    status: Option<ResourceState>,
+    sort: Option<CatalogSort>,
+    direction: Option<CatalogDirection>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListKeysQuery {
+    prefix: Option<String>,
+    cursor: Option<String>,
+    limit: Option<u16>,
 }
 
 #[derive(Deserialize)]
@@ -180,24 +231,62 @@ async fn create_namespace(
 async fn list_namespaces(
     State(state): State<HttpState>,
     Path(account): Path<String>,
+    query: Result<Query<ListNamespacesQuery>, axum::extract::rejection::QueryRejection>,
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
     let Some(api) = authorized_api(&state, &request) else {
         return unauthorized_or_unavailable(&state, &request, request_id);
     };
+    let Ok(Query(query)) = query else {
+        return error_response(
+            PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "KV namespace list query is invalid",
+            ),
+            request_id,
+        );
+    };
     let account_id = match parse_account(&account) {
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
+    let after = match query.cursor.as_deref() {
+        None => None,
+        Some(cursor) => match decode_catalog_cursor(cursor) {
+            Ok(value) => Some(value),
+            Err(error) => return error_response(error, request_id),
+        },
+    };
+    let limit = normalize_catalog_limit(query.limit.unwrap_or(DEFAULT_CATALOG_LIST_LIMIT));
+    let sort = query.sort.unwrap_or(CatalogSort::Name);
+    let direction = query.direction.unwrap_or(CatalogDirection::Asc);
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let storage = api.storage.clone();
     match tokio::task::spawn_blocking(move || {
-        KvNamespaceRepository::new(storage.db()).list(account_id)
+        KvNamespaceRepository::new(storage.db()).list_page(
+            account_id,
+            search.as_deref(),
+            query.status,
+            sort,
+            direction,
+            after,
+            limit,
+        )
     })
     .await
     {
-        Ok(Ok(namespaces)) => json_response(
-            &serde_json::json!({ "namespaces": namespaces }),
+        Ok(Ok(page)) => json_response(
+            &serde_json::json!({
+                "namespaces": page.items,
+                "cursor": page.next_cursor,
+                "listComplete": page.next_cursor.is_none(),
+            }),
             StatusCode::OK,
         ),
         Ok(Err(error)) => error_response(error, request_id),
@@ -935,6 +1024,268 @@ async fn delete_backup(
     }
 }
 
+async fn list_keys(
+    State(state): State<HttpState>,
+    Path((account, resource)): Path<(String, String)>,
+    query: Result<Query<ListKeysQuery>, axum::extract::rejection::QueryRejection>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let Ok(Query(query)) = query else {
+        return error_response(
+            PlatformError::new(ErrorCode::ConfigInvalid, "KV key list query is invalid"),
+            request_id,
+        );
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let prefix = query.prefix.unwrap_or_default();
+    let limit = query.limit.unwrap_or(100).clamp(1, KV_MAX_LIST_LIMIT);
+    let storage = api.storage.clone();
+    let executor = api.executor.clone();
+    let cursor = query.cursor;
+    match tokio::task::spawn_blocking(move || {
+        let binding =
+            operator_binding(&storage, account_id, resource_id, BindingKind::KvNamespace)?;
+        let result = executor.execute(
+            &binding,
+            KvCommand::List {
+                prefix,
+                limit,
+                cursor,
+            },
+        )?;
+        Ok::<_, PlatformError>(result)
+    })
+    .await
+    {
+        Ok(Ok(KvCommandResult::List {
+            rows,
+            complete,
+            cursor,
+        })) => {
+            let keys: Vec<serde_json::Value> = rows
+                .into_iter()
+                .filter_map(|row| {
+                    let name = String::from_utf8(row.key).ok()?;
+                    let expiration = row.expires_at_ms.map(|ms| ms / 1000);
+                    let metadata: Option<serde_json::Value> = row
+                        .metadata_json
+                        .as_deref()
+                        .and_then(|bytes| serde_json::from_slice(bytes).ok());
+                    Some(serde_json::json!({
+                        "name": name,
+                        "expiration": expiration,
+                        "metadata": metadata,
+                    }))
+                })
+                .collect();
+            json_response(
+                &serde_json::json!({
+                    "keys": keys,
+                    "cursor": cursor,
+                    "listComplete": complete,
+                }),
+                StatusCode::OK,
+            )
+        }
+        Ok(Ok(_)) => error_response(internal(), request_id),
+        Ok(Err(error)) => error_response(error, request_id),
+        Err(_) => error_response(internal(), request_id),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PutValueBody {
+    value: String,
+    metadata: Option<serde_json::Value>,
+    expiration: Option<u64>,
+    expiration_ttl: Option<u64>,
+}
+
+async fn put_value(
+    State(state): State<HttpState>,
+    Path((account, resource, key)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    if key.is_empty() {
+        return error_response(
+            PlatformError::new(ErrorCode::ConfigInvalid, "KV key is invalid"),
+            request_id,
+        );
+    }
+    if let Err(error) = idempotency_key(&request) {
+        return error_response(error, request_id);
+    }
+    let body = match read_json_with_limit::<PutValueBody>(request, KV_OPERATOR_PUT_MAX_BODY).await {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let value = body.value.into_bytes();
+    if value.len() > KV_MAX_VALUE_BYTES {
+        return error_response(
+            PlatformError::new(ErrorCode::LimitInvalid, "KV value exceeds limit"),
+            request_id,
+        );
+    }
+    let admission = match api.storage.reserve_mutation(value.len() as u64 + 64 * 1024) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let metadata_present = body.metadata.is_some();
+    let storage = api.storage.clone();
+    let executor = api.executor.clone();
+    let response_key = key.clone();
+    let command_key = key;
+    match tokio::task::spawn_blocking(move || {
+        let _admission = admission;
+        let binding =
+            operator_binding(&storage, account_id, resource_id, BindingKind::KvNamespace)?;
+        let result = executor.execute(
+            &binding,
+            KvCommand::Put {
+                key: command_key,
+                value,
+                expiration: body.expiration,
+                expiration_ttl: body.expiration_ttl,
+                metadata: body.metadata,
+                metadata_present,
+            },
+        )?;
+        Ok::<_, PlatformError>(result)
+    })
+    .await
+    {
+        Ok(Ok(KvCommandResult::Mutation)) => {
+            json_response(&serde_json::json!({ "key": response_key }), StatusCode::OK)
+        }
+        Ok(Ok(_)) => error_response(internal(), request_id),
+        Ok(Err(error)) => error_response(error, request_id),
+        Err(_) => error_response(internal(), request_id),
+    }
+}
+
+async fn delete_value(
+    State(state): State<HttpState>,
+    Path((account, resource, key)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    if key.is_empty() {
+        return error_response(
+            PlatformError::new(ErrorCode::ConfigInvalid, "KV key is invalid"),
+            request_id,
+        );
+    }
+    if let Err(error) = idempotency_key(&request) {
+        return error_response(error, request_id);
+    }
+    let admission = match api.storage.reserve_mutation(64 * 1024) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let storage = api.storage.clone();
+    let executor = api.executor.clone();
+    let response_key = key.clone();
+    let command_key = key;
+    match tokio::task::spawn_blocking(move || {
+        let _admission = admission;
+        let binding =
+            operator_binding(&storage, account_id, resource_id, BindingKind::KvNamespace)?;
+        let result = executor.execute(&binding, KvCommand::Delete { key: command_key })?;
+        Ok::<_, PlatformError>(result)
+    })
+    .await
+    {
+        Ok(Ok(KvCommandResult::Mutation)) => {
+            json_response(&serde_json::json!({ "key": response_key }), StatusCode::OK)
+        }
+        Ok(Ok(_)) => error_response(internal(), request_id),
+        Ok(Err(error)) => error_response(error, request_id),
+        Err(_) => error_response(internal(), request_id),
+    }
+}
+
+async fn get_value(
+    State(state): State<HttpState>,
+    Path((account, resource, key)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    let request_id = request_id(&request);
+    let Some(api) = authorized_api(&state, &request) else {
+        return unauthorized_or_unavailable(&state, &request, request_id);
+    };
+    let (account_id, resource_id) = match parse_ids(&account, &resource) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    if key.is_empty() {
+        return error_response(
+            PlatformError::new(ErrorCode::ConfigInvalid, "KV key is invalid"),
+            request_id,
+        );
+    }
+    let storage = api.storage.clone();
+    let executor = api.executor.clone();
+    match tokio::task::spawn_blocking(move || {
+        let binding =
+            operator_binding(&storage, account_id, resource_id, BindingKind::KvNamespace)?;
+        let result = executor.execute(
+            &binding,
+            KvCommand::Get {
+                keys: vec![key],
+                cache_ttl: None,
+            },
+        )?;
+        Ok::<_, PlatformError>(result)
+    })
+    .await
+    {
+        Ok(Ok(KvCommandResult::Entries(mut entries))) => {
+            let entry = entries.pop().flatten();
+            let (value, metadata) = entry.map_or((None, None), |entry| {
+                let metadata: Option<serde_json::Value> = entry
+                    .metadata_json
+                    .as_deref()
+                    .and_then(|bytes| serde_json::from_slice(bytes).ok());
+                let value = match String::from_utf8(entry.value.clone()) {
+                    Ok(text) => Some(text),
+                    Err(raw) => Some(STANDARD.encode(raw.into_bytes())),
+                };
+                (value, metadata)
+            });
+            json_response(
+                &serde_json::json!({ "value": value, "metadata": metadata }),
+                StatusCode::OK,
+            )
+        }
+        Ok(Ok(_)) => error_response(internal(), request_id),
+        Ok(Err(error)) => error_response(error, request_id),
+        Err(_) => error_response(internal(), request_id),
+    }
+}
+
 fn authorized_api<'a>(state: &'a HttpState, request: &Request) -> Option<&'a Arc<KvApiState>> {
     if authorize(state, request) {
         state.kv_api()
@@ -962,14 +1313,19 @@ fn unauthorized_or_unavailable(
 }
 
 async fn read_json<T: for<'de> Deserialize<'de>>(request: Request) -> Result<T, PlatformError> {
-    let bytes = to_bytes(request.into_body(), MAX_JSON_BODY)
-        .await
-        .map_err(|_| {
-            PlatformError::new(
-                ErrorCode::LimitInvalid,
-                "control request body exceeds limit",
-            )
-        })?;
+    read_json_with_limit(request, MAX_JSON_BODY).await
+}
+
+async fn read_json_with_limit<T: for<'de> Deserialize<'de>>(
+    request: Request,
+    limit: usize,
+) -> Result<T, PlatformError> {
+    let bytes = to_bytes(request.into_body(), limit).await.map_err(|_| {
+        PlatformError::new(
+            ErrorCode::LimitInvalid,
+            "control request body exceeds limit",
+        )
+    })?;
     serde_json::from_slice(&bytes).map_err(|_| {
         PlatformError::new(ErrorCode::ConfigInvalid, "control request JSON is invalid")
     })

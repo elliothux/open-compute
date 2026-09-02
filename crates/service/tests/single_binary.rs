@@ -2,6 +2,7 @@
 
 use open_compute_artifacts::MockS3;
 use open_compute_core::PlatformConfig;
+use open_compute_core::config::SecretReference;
 use open_compute_runtime::{
     embedded_payload_sha256, embedded_runtime_lock, recover_orphan_for_test,
 };
@@ -271,8 +272,15 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
     for path in [&key, &secret] {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
+    let admin_token = root.path().join("admin.token");
+    fs::write(&admin_token, b"single-binary-admin\n").unwrap();
+    fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
     let mut config = PlatformConfig::default();
     config.server.public_bind = address.to_string();
+    config.server.admin_auth = SecretReference {
+        env: None,
+        file: Some(admin_token),
+    };
     config.storage.data_dir = data.clone();
     config.storage.master_key_file = data.join("keys/master.key");
     config.s3.endpoint = mock.endpoint.clone();

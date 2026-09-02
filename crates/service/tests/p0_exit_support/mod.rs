@@ -11,8 +11,8 @@ use open_compute_core::config::{
 };
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, Redactor, RequestId,
-    ResourceId, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SystemSchedulerClock,
-    WorkerId,
+    ResourceId, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretString,
+    SystemSchedulerClock, WorkerId,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
@@ -23,9 +23,10 @@ use open_compute_service::http::{self, HttpState};
 use open_compute_service::runtime_bridge::{
     DispatchTarget, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
+use open_compute_service::scheduler::SchedulerService;
 use open_compute_service::{
     D1ApiState, D1BindingService, DoApiState, HealthCoordinator, KvApiState, MetricsRegistry,
-    R2ApiState, R2BindingService, SchedulerService, SqliteKvBindingExecutor, bind_binding_backend,
+    R2ApiState, R2BindingService, SqliteKvBindingExecutor, bind_binding_backend,
     serve_binding_backend,
 };
 use open_compute_storage::{
@@ -326,6 +327,8 @@ impl GateStack {
     }
 }
 
+pub(super) const ADMIN_TOKEN: &str = "p0-exit-admin";
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn admin_router(
     storage: Arc<PlatformStorage>,
@@ -338,42 +341,52 @@ pub(super) fn admin_router(
     let metrics = Arc::new(
         MetricsRegistry::new(&MetricsConfig::default(), "p0-exit-gate", "pinned-workerd").unwrap(),
     );
-    let state = HttpState::for_test(HealthCoordinator::new(), metrics, false, None)
-        .with_kv_api(KvApiState::new(
-            storage.clone(),
-            artifacts.clone(),
-            pins.clone(),
-            kv_config(),
-            1_000,
+    let kv_executor = Arc::new(SqliteKvBindingExecutor::new(
+        storage.clone(),
+        Arc::new(SystemClock),
+    ));
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics,
+        false,
+        Some(SecretString::new(ADMIN_TOKEN)),
+    )
+    .with_kv_api(KvApiState::new(
+        storage.clone(),
+        artifacts.clone(),
+        pins.clone(),
+        kv_executor,
+        kv_config(),
+        1_000,
+        Duration::from_secs(2),
+    ))
+    .with_r2_api(R2ApiState::new(
+        storage.clone(),
+        objects,
+        pins.clone(),
+        r2_config(),
+        Duration::from_secs(2),
+    ))
+    .with_d1_api(D1ApiState::new(
+        storage.clone(),
+        artifacts,
+        pins.clone(),
+        stack.d1.clone(),
+        d1_config(),
+        1_000,
+        Duration::from_secs(2),
+    ))
+    .with_do_api(
+        DoApiState::new(
+            storage,
+            pins,
+            stack.transport.clone(),
+            durable_objects_config(),
             Duration::from_secs(2),
-        ))
-        .with_r2_api(R2ApiState::new(
-            storage.clone(),
-            objects,
-            pins.clone(),
-            r2_config(),
-            Duration::from_secs(2),
-        ))
-        .with_d1_api(D1ApiState::new(
-            storage.clone(),
-            artifacts,
-            pins.clone(),
-            stack.d1.clone(),
-            d1_config(),
-            1_000,
-            Duration::from_secs(2),
-        ))
-        .with_do_api(
-            DoApiState::new(
-                storage,
-                pins,
-                stack.transport.clone(),
-                durable_objects_config(),
-                Duration::from_secs(2),
-            )
-            .with_scheduler(Some(scheduler_store)),
         )
-        .with_scheduler(Some(stack.scheduler.clone()));
+        .with_scheduler(Some(scheduler_store)),
+    )
+    .with_scheduler(Some(stack.scheduler.clone()));
     http::admin_router(state)
 }
 
@@ -389,7 +402,8 @@ pub(super) async fn admin_json(
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header(header::CONTENT_TYPE, "application/json");
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"));
     if let Some(key) = idempotency_key {
         builder = builder.header("idempotency-key", key);
     }

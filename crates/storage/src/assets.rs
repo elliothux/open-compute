@@ -174,6 +174,38 @@ impl<'a> DeploymentAssetsRepository<'a> {
             found.map(|_| ()).ok_or_else(not_found)
         })
     }
+
+    /// List immutable asset blob digests retained by one deployment.
+    pub fn list_asset_blobs(
+        &self,
+        deployment_id: DeploymentId,
+    ) -> Result<Vec<([u8; 32], u64)>, PlatformError> {
+        self.db.with_read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT sha256, size FROM deployment_object_refs
+                     WHERE deployment_id = ?1 AND object_kind = 'asset_blob'
+                     ORDER BY sha256",
+                )
+                .map_err(|_| db_error())?;
+            let rows = stmt
+                .query_map([deployment_id.to_string()], |row| {
+                    let digest: Vec<u8> = row.get(0)?;
+                    let size: i64 = row.get(1)?;
+                    Ok((digest, size))
+                })
+                .map_err(|_| db_error())?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (digest, size) = row.map_err(|_| db_error())?;
+                out.push((
+                    digest.try_into().map_err(|_| invariant())?,
+                    u64::try_from(size).map_err(|_| db_error())?,
+                ));
+            }
+            Ok(out)
+        })
+    }
 }
 
 pub(crate) fn insert_deployment_assets(

@@ -53,7 +53,7 @@ Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不
 `main`、`frameworkOutput`、assets directory 与 `tsconfig`（默认 `tsconfig.json`）相对配置文件目录
 解析，不能逃逸到允许的项目/产物边界之外。
 默认平台地址为 `http://127.0.0.1:8787`；支持 `endpoint` / `--endpoint` 覆盖。
-默认账户由经过身份验证的 `GET /v1/account` 返回，也可用 `accountId` / `--account` 明确指定。
+默认账户由经过身份验证的 `GET /operator/api/v1/account` 返回，也可用 `accountId` / `--account` 明确指定。
 
 其他字段是 `vars`、`secrets`、`bindings`、`services`、`assets`、`cache`、
 `exports`、`images` 和 `version_metadata`。普通产品

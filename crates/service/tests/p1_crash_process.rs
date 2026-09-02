@@ -1,5 +1,9 @@
 //! P1 real-process SIGKILL/orphan recovery Gate.
 
+mod common;
+
+use common::scrub_shell_s3_env;
+
 use open_compute_artifacts::MockS3;
 use open_compute_core::{
     BindingKind, PlatformConfig, RequestId, ResourceId, ResourceState, SystemClock,
@@ -60,12 +64,14 @@ fn write_config(
 ) -> PathBuf {
     let access_key = root.join("access-key");
     let secret_key = root.join("secret-key");
+    let admin_token = root.join("admin-token");
     write_mode(&access_key, b"AKIAP1CRASHPROCESS1", 0o600);
     write_mode(
         &secret_key,
         b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         0o600,
     );
+    write_mode(&admin_token, b"p1-crash-admin\n", 0o600);
     let config = root.join("platform.toml");
     fs::write(
         &config,
@@ -74,6 +80,9 @@ fn write_config(
 [server]
 public_bind = "{public}"
 admin_bind = "{admin}"
+
+[server.admin_auth]
+file = "{admin_token}"
 
 [storage]
 data_dir = "{data_dir}"
@@ -112,6 +121,7 @@ max_series = 1024
             endpoint = mock.endpoint,
             access_key = access_key.display(),
             secret_key = secret_key.display(),
+            admin_token = admin_token.display(),
         ),
     )
     .expect("config");
@@ -125,14 +135,15 @@ fn spawn_ocd(config: &Path, log: &Path) -> Child {
         .mode(0o600)
         .open(log)
         .expect("open bounded process log");
-    Command::new(env!("CARGO_BIN_EXE_ocd"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ocd"));
+    command
         .args(["run", "--config"])
         .arg(config)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .expect("spawn ocd")
+        .stderr(Stdio::from(stderr));
+    scrub_shell_s3_env(&mut command);
+    command.spawn().expect("spawn ocd")
 }
 
 fn signal(child: &Child, name: &str) {

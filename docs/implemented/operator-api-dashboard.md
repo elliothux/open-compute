@@ -1,8 +1,10 @@
 # Operator API 与可选 Dashboard Day1 方案
 
-状态：方案完成，尚未实施
+状态：**Implementation GO**。本文是已完成实现的权威需求基线；当前复审见根目录
+[`CR.md`](../../CR.md)，frozen-source 证据与接受边界见
+[`operator-api-dashboard-results.md`](operator-api-dashboard-results.md)。
 
-日期：2026-09-01
+日期：2026-09-01；2026-09-02 根据 Chrome 实测修订；2026-09-03 完成实现与验收
 
 实施目标：把在线管理能力收敛为一个始终可用、强制管理员鉴权的 `/operator` surface，提供可被普通
 JavaScript 程序直接调用的 Operator SDK，并提供一个默认关闭、以普通静态 Worker 项目构建和运行的
@@ -33,19 +35,104 @@ alias、redirect、双注册和旧客户端兼容分支。项目仍处于 Day1 �
 
 **当前基础与需要补齐的边界。**
 
-当前 [HTTP composition](../crates/service/src/http.rs) 已经区分 public、admin 和 merged listener；Workers、
+当前 [HTTP composition](../../crates/service/src/http.rs) 已经区分 public、admin 和 merged listener；Workers、
 KV、D1、R2、Durable Objects、Queues、Workflows、scheduler、Cache 与 Images 也已有 authenticated control
 handler。问题在于路径分散在 `/v1/accounts/**`、`/v1/operator/**`、`/v1/scheduler/**`、`/health/status`
 和 `/metrics`，且 loopback 模式允许不配置管理员凭据。
 
-现有 [project parser](../packages/toolchain/src/project.ts) 和 [Static Assets](implemented/p3-1-static-assets.md)
+现有 [project parser](../../packages/toolchain/src/project.ts) 和 [Static Assets](p3-1-static-assets.md)
 已经支持 assets-only deployment 与 `single-page-application` fallback。Dashboard 不需要新的 Web 托管模型，
 只需要把普通 Worker 产物作为 release-owned system deployment 挂到 admin listener 的保留路径。
 
 Operator API 是 open-compute 自有的单机管理协议，不模拟 Cloudflare `/client/v4` response envelope，也不改变
-[Cloudflare runtime compatibility](implemented/cloudflare-runtime-compatibility.md) 的 tenant API 范围。
+[Cloudflare runtime compatibility](cloudflare-runtime-compatibility.md) 的 tenant API 范围。
 
-## 2. Listener 与路由拓扑
+<a id="cloudflare-parity-baseline"></a>
+
+## 2. Cloudflare 对比与完整管理基线
+
+本节定义 Dashboard 的 UI/UX 与功能完整性目标。它不是视觉参考附录，而是与 Operator API、SDK contract、
+system ownership 同等级的实现和验收要求。代码审查结论见仓库根目录的 [`CR.md`](../../CR.md)。
+
+### 2.1 2026-09-02 Chrome 实测基线（整改前）
+
+本节保留整改前的实测差距，用来说明后续功能矩阵的来源；当前完成后的对比见
+[`operator-api-dashboard-results.md`](operator-api-dashboard-results.md)。对比对象为同一桌面 Chrome 会话中的
+本地 `http://127.0.0.1:8787/operator/` 与 Cloudflare 账号 Dashboard。
+本次只读取现有资源并打开后取消 KV 创建表单，没有在 Cloudflare 创建、修改或删除资源。
+
+Cloudflare 的可复用产品模式包括：
+
+- 全局 shell 持续展示账号上下文、快速搜索（`⌘K`）、最近访问/固定项、按“构建/存储和数据库”等领域分组的
+  可折叠导航，以及 Ask AI、支持和用户菜单；账号首页把资源计数、最近资源、最近访问与可配置分析指标放在
+  同一信息层级；
+- Workers 列表有创建入口、搜索、筛选、排序、刷新、分页和行级菜单，并直接展示 route、部署来源、更新时间、
+  请求量和延迟；
+- KV 列表有文档、`Create Instance`、搜索、刷新、表格行菜单、分页和使用量；创建采用聚焦的 Dialog；详情使用
+  “指标 / KV 对 / 设置”tabs，KV 对页提供前缀搜索、刷新、添加条目、查看和行级 actions；
+- D1、R2、Queues 与 Workflows 在页面标题区域提供显著的主操作；空状态同时提供可执行 CTA 和 CLI/文档引导，
+  而不是只有说明文字；D1 表格还支持排序和列定制，R2/D1/DO 页面展示使用量或运行指标；
+- Durable Objects 列表提供搜索、筛选、列定制、刷新、分页、行级菜单和运行指标；这不改变 open-compute 对
+  Object 内部状态不可见的安全边界。
+
+当前本地实现只达到了页面路由和基础读视图：左栏是九个固定平铺链接，顶部是所有页面共用的
+“Cloudflare-style operator console”；没有全局搜索、分组/折叠导航、最近访问、breadcrumb、文档/帮助入口、
+资源计数、使用量、表格筛选/排序/分页、行级菜单或详情 tabs。实测 KV 空状态提示“Create a KV namespace”，
+但页面没有创建按钮；源码中的 KV、D1、R2、Durable Objects、Queues 和 Workflows catalog 页也只有 list query。
+KV/R2 item 页的少量 put/delete 和 Worker 的 promote/rollback 不能代替完整资源生命周期管理。
+
+### 2.2 “接近 Cloudflare”的明确含义
+
+目标是复用 Cloudflare Dashboard 的信息架构、层级密度、交互语法和可访问状态，不是逐像素复制品牌，也不是
+引入 Cloudflare 账号、billing、plan 或 `/client/v4` API：
+
+| 维度 | 必须达到的行为 |
+| --- | --- |
+| 全局 shell | 可折叠侧栏；Overview、Compute、Storage、Platform 分组；当前账号/实例上下文；全局搜索/命令面板；breadcrumb；帮助/文档、主题和退出入口；桌面与窄屏均可用 |
+| 页面标题 | 标题、短说明、相关文档、唯一主 CTA；次要操作进入按钮组或 overflow menu，不能把操作埋在说明文字中 |
+| Catalog | 服务端有界搜索/筛选/排序/cursor pagination、刷新、可读列、状态/时间/用量摘要、行级详情与 actions；loading skeleton、空状态、错误和无权限状态分别呈现 |
+| 详情页 | breadcrumb + 资源名/ID copy；按 Overview、Data/Objects/Instances、Metrics/Usage、Settings 等产品语义分 tab；URL 保存当前 tab、filter 和 cursor |
+| Mutation | Kumo Dialog/表单、字段级验证、稳定 idempotency key、pending/成功/失败反馈、精确 query invalidation；mutation 不自动重试、不做破坏性 optimistic update |
+| 危险操作 | 行级菜单进入；Dialog 明确影响和不可逆性；删除要求输入资源名或 ID；force、generation fence 与依赖冲突由服务端展示，不以浏览器确认替代服务端约束 |
+| 可访问性 | 完整键盘路径、可见 focus、语义 heading/table/dialog、Dialog focus trap/return、非颜色状态、屏幕阅读器可读 toast；亮/暗主题使用同一 semantic token |
+
+页面应使用 Kumo 的 navigation、Button、Dialog、Table、Tabs、Toast、input 和 semantic token，补充样式只负责
+布局。禁止用一组自制 `<table>`、`window.confirm`、裸 JSON `<pre>` 或不一致的 inline form 冒充管理体验。
+Cloudflare 当前文案和布局可以变化；验收针对上述稳定交互模式，不以像素快照绑定第三方实现细节。
+
+### 2.3 完整功能矩阵
+
+“页面存在”或“能列出资源”不算完成。下表列出当前 Day1 后端 authority 已支持、必须由 canonical Operator SDK
+operation 和 Dashboard 暴露的管理闭环；如 wire contract 尚未补齐，先修 API/SDK，再接 UI，禁止 Dashboard
+直接调用旧路径或 raw `fetch`。
+
+| 页面 | 必须完成的 catalog 与详情 | 必须完成的 mutation/运维 | 保持禁止 |
+| --- | --- | --- | --- |
+| Overview | readiness、release/capability、各产品计数、最近资源、component/runtime 状态、关键容量/趋势 | 只提供跳转与安全 quick action；平台维护进入 Platform 页确认 | 自动修复、secret/internal token、伪造健康状态 |
+| Workers | 搜索/筛选/排序/分页；详情含 deployments、routes、cache 与状态 | create/delete Worker；deployment upload/finalize/abort、promote/rollback/delete；create/delete route；cache purge | 浏览器安装依赖、编译源码或替代 `oc` 构建 |
+| KV | namespace catalog；详情含 prefix/cursor key list、value/metadata/expiration、backup history | create/rename/delete namespace；put/delete key；create/list/delete backup 与 restore | private binding protocol、无界 export |
+| D1 | database catalog；tables/schema、bounded query、migration 与 backup history | create/rename/delete database；apply migration；create backup 与 restore | 直接打开 SQLite/WAL、无界 SQL/结果 |
+| R2 | bucket catalog；prefix/cursor object list、head/metadata、受限 preview/download | create/rename/delete bucket；streaming upload/download；delete object；force-delete 必须显示范围和进度 | S3 credential、internal signed URL、完整对象内存聚合 |
+| Durable Objects | namespace catalog；Object ID 精确查找、cursor inventory、generation/lifecycle/时间元数据 | create/rename/delete namespace；删除已登记 Object 仅走现有 fenced lifecycle API | Object 内存、SQL/KV、alarm、WebSocket、arbitrary fetch/RPC |
+| Queues | queue catalog/detail；配置、consumer 状态、backlog/失败聚合 | create/update/delete queue；pause/resume consumer | message body、control-plane publish、伪造 delivery |
+| Workflows | definition、version、instance、step/status/event 与 bounded history | create/rename/delete definition；create version；现有 reconcile 只在 Platform 中作为受控维护操作 | 未授权 payload、直接修改 scheduler SQLite |
+| Platform | scheduler、queue consumers、cron activations、cache、Images capacity 的结构化卡片/表格 | scheduler pause/resume/repair；consumer pause/resume；cache GC、Worker cache purge；workflow reconcile | 任意 shell、文件浏览器、裸 JSON 作为最终 UI、未审计数据库控制台 |
+
+所有 catalog 必须提供服务端边界的 `limit`/opaque cursor；搜索不得先无界加载后前端过滤。资源名称、ID、状态、
+generation、created/updated time 和 request ID 使用统一呈现。Overview 的聚合数据可以由并行 bounded queries
+组成，但不能为首屏引入新的 host-memory authority。
+
+### 2.4 实施顺序与完成定义
+
+1. 先修复 `CR.md` 中的 canonical wire DTO、SDK input/error schema、统一 auth/error、R2 streaming、DO SQL
+   pagination 和 Dashboard system ownership；协议未通过真实 `ocd` contract 时不得继续堆 UI；
+2. 补齐上述所有后端既有 operation 的 SDK methods 与真实成功/失败 contract cases，移除 public raw transport；
+3. 实现 Cloudflare-like shell、可复用 catalog toolbar/table/pagination、detail tabs、Dialog/Toast、危险操作确认；
+4. 按产品完成矩阵，每完成一个产品就覆盖 empty/non-empty、创建、编辑、删除、分页、错误、`401` 和恢复后刷新；
+5. 冻结源码后再执行文档第 8 节的最终验收。未完成任一产品管理闭环时，状态保持 No-Go，不能以“后端接口
+   已存在”或“页面可打开”标记 Dashboard 完成。
+
+## 3. Listener 与路由拓扑
 
 ```text
 browser / TanStack Query --\
@@ -77,7 +164,7 @@ public listener
 workerd、S3 或其他当前不可用组件时，API 返回稳定、脱敏的 `503`，不能用缓存结果伪装成功。Dashboard
 本身运行在 workerd 中，workerd 不可用时页面可能无法加载；CLI/curl 仍可通过 Operator API 诊断和恢复。
 
-## 3. Operator API
+## 4. Operator API
 
 **权威路径。**
 
@@ -236,7 +323,7 @@ Cloudflare 的公开 Object inventory API 同样以 Object ID 和 `hasStoredData
 <https://developers.cloudflare.com/api/resources/durable_objects/>。open-compute 不需要为了 Dashboard 读取
 workerd private localDisk。
 
-## 4. 管理员鉴权
+## 5. 管理员鉴权
 
 **服务端契约。**
 
@@ -268,7 +355,7 @@ referrer policy，release 不发布 source map。
 Dashboard 与 API 固定同源，因此 Day1 不开启 credentialed CORS。需要远程访问时由 operator 在同一 origin
 前配置 TLS/reverse proxy，而不是允许任意网站读取管理 API。
 
-## 5. Dashboard Worker、前端技术栈与配置
+## 6. Dashboard Worker、前端技术栈与配置
 
 新增 `packages/dashboard/`，与任何用户 Worker 一样使用 TypeScript strict mode、根 Bun workspace、现有
 toolchain 和 Static Assets contract。Worker 项目配置保持最小：
@@ -390,7 +477,7 @@ enabled = false
 URL、CDN origin、任意本地目录或开发代理配置。修改后通过受控重启生效。即使 `enabled = false`，
 `server.admin_auth` 仍然必填，因为 Operator API 始终存在。
 
-## 6. 实施归属
+## 7. 实施归属
 
 - `crates/core`：增加 `DashboardConfig`，把 admin auth 改为无条件必填并完成配置验证；
 - `crates/service`：建立单一 operator router/auth middleware、迁移全部管理路径、保留 health probes、增加
@@ -405,7 +492,7 @@ URL、CDN origin、任意本地目录或开发代理配置。修改后通过受�
   单文件 release identity；
 - package docs：记录配置、认证、反向代理、页面能力和 API 路径。
 
-## 7. 验收
+## 8. 验收
 
 实现期按仓库规则只跑一次相关单轮检查；实现、review 和修复完成后再执行一次最终验收链。至少证明：
 
@@ -430,13 +517,29 @@ URL、CDN origin、任意本地目录或开发代理配置。修改后通过受�
 10. Workers/KV/D1/R2/Queue/Workflow 的管理操作继续经过现有 authority、quota、idempotency 和恢复路径；
 11. DO 页面只列 registry metadata；测试使用 tenant canary 证明 SQL/KV/内存状态不会出现在 API 或页面；
 12. UI disable/enable、SDK、`oc` 与 curl 使用同一 API contract，没有 Dashboard-only mutation。
+13. Chrome 端到端覆盖 Cloudflare 对比基线：全局 shell、搜索、分组导航、breadcrumb、catalog toolbar、
+    pagination、detail tabs、Dialog、Toast、键盘 focus 与 responsive layout；
+14. Workers、KV、D1、R2、DO、Queues、Workflows 和 Platform 分别覆盖非空与空状态，以及第 2.3 节列出的每个
+    mutation 的成功、validation error、stable API error、pending 防重复提交和 authority 刷新；
+15. KV 空状态可直接创建 namespace；创建后无整页刷新地出现在 catalog，能够进入详情写入/读取/删除 key，
+    rename、backup/restore 与删除均经过 canonical SDK operation；
+16. 所有 catalog 的 search/filter/cursor 由服务端有界执行；测试以超过一页的数据证明不会遗漏、重复或先全量
+    读取，错误 cursor 被稳定拒绝；
+17. Dashboard browser test 禁止 mock 掉全部 Operator SDK；组件测试可用 fixtures，但至少一套 stock workerd +
+    真实 `ocd` 场景完成登录、资源生命周期和 `401` 清空状态，并证明没有 Cloudflare/外部网络依赖。
 
-文档-only 阶段只运行 `git diff --check` 和链接/路径核对。实现完成后按 `AGENTS.md` 执行格式、静态检查、
-coverage 与最终三轮策略 Gate，不提前重复完整 Gate。
+**2026-09-03 验收状态：Implementation GO。** 真实 `./scripts/dev-test.sh run`、Chrome Cloudflare 对比、
+live contract **12/12**、Playwright e2e **31/31**、服务端 catalog/filter/sort/usage/metrics、90.14% Rust 行
+覆盖率和 frozen-source workspace Gate 均已完成。最终 Gate 运行一轮：**42/42 targets、835/835
+cases**，符合当前仓库最终验收政策。完整证据见
+[`CR.md`](../../CR.md) 与[完成记录](operator-api-dashboard-results.md)。
 
-## 8. 非目标
+格式、静态检查、coverage 与用户指定的最终单轮 Gate 已执行；命令、报告路径和 source identity 见完成记录。
 
-- Cloudflare Dashboard、`/client/v4`、账号组织、billing、plan、RBAC 或 Wrangler remote API parity；
+## 9. 非目标
+
+- 不复制 Cloudflare 品牌、账号组织、billing、plan、RBAC、完整产品集合、`/client/v4` 或 Wrangler remote API；
+  但第 2 节定义的 Cloudflare-like 信息架构、交互质量和 open-compute 支持产品的管理闭环是明确目标；
 - Localflare 的 hosted dashboard、sidecar、浏览器连接任意本地端口或自动读取 Wrangler 配置；
 - DO Data Studio、任意对象状态 introspection、远程方法调用或 debug injection；
 - Queue message body inspector、control-plane producer、Worker 在线源码编辑器和生产时依赖安装；

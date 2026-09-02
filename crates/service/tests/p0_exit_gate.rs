@@ -6,8 +6,12 @@
 
 #![cfg(feature = "test-support")]
 
+mod common;
+
 #[path = "p0_exit_support/mod.rs"]
 mod support;
+
+use common::load_file_only_platform_config;
 
 use axum::http::StatusCode;
 use open_compute_artifacts::{Fault, MockS3};
@@ -16,7 +20,6 @@ use open_compute_core::{RequestId, ResourceAvailability, ResourceId};
 use open_compute_service::backup_cli::{
     backup_attest_restore_smoke, backup_create, backup_inspect, backup_restore,
 };
-use open_compute_service::config_load::load_platform_config;
 use open_compute_service::doctor::{DoctorMode, doctor_report};
 use open_compute_storage::{PlatformStorage, ResourceRepository, WorkerRepository};
 use open_compute_workers::{BundleLimits, DeploymentController, ResourcePins, RuntimeValidator};
@@ -48,6 +51,12 @@ fn write_platform_config(input: &PlatformConfigInput<'_>) -> PathBuf {
     fs::write(&secret_key, b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY").unwrap();
     fs::set_permissions(&access_key, fs::Permissions::from_mode(0o600)).unwrap();
     fs::set_permissions(&secret_key, fs::Permissions::from_mode(0o600)).unwrap();
+    let admin_token = input
+        .temp
+        .path()
+        .join(format!("{}-admin.token", input.name));
+    fs::write(&admin_token, b"p0-exit-admin\n").unwrap();
+    fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
     let path = input.temp.path().join(format!("{}.toml", input.name));
     fs::write(
         &path,
@@ -56,6 +65,9 @@ fn write_platform_config(input: &PlatformConfigInput<'_>) -> PathBuf {
 [server]
 public_bind = "127.0.0.1:0"
 admin_bind = "127.0.0.1:0"
+
+[server.admin_auth]
+file = "{admin_token}"
 
 [storage]
 data_dir = "{data_dir}"
@@ -93,6 +105,7 @@ max_series = 1024
             endpoint = input.mock.endpoint,
             access_key = access_key.display(),
             secret_key = secret_key.display(),
+            admin_token = admin_token.display(),
         ),
     )
     .unwrap();
@@ -236,7 +249,7 @@ async fn p0_real_combined_exit_matrix_inner() {
     let kv_backup = create_backup(
         &router,
         &format!(
-            "/v1/accounts/{account}/kv/namespaces/{}/backups",
+            "/operator/api/v1/accounts/{account}/kv/namespaces/{}/backups",
             bindings.kv
         ),
         "p0-exit-kv-backup",
@@ -245,7 +258,7 @@ async fn p0_real_combined_exit_matrix_inner() {
     let d1_backup = create_backup(
         &router,
         &format!(
-            "/v1/accounts/{account}/d1/databases/{}/backups",
+            "/operator/api/v1/accounts/{account}/d1/databases/{}/backups",
             bindings.d1
         ),
         "p0-exit-d1-backup",
@@ -275,7 +288,7 @@ async fn p0_real_combined_exit_matrix_inner() {
     );
     let restored_kv = restore_resource(
         &router,
-        &format!("/v1/accounts/{account}/kv/namespaces:restore"),
+        &format!("/operator/api/v1/accounts/{account}/kv/namespaces:restore"),
         &kv_backup,
         "restored-kv",
         "p0-exit-kv-restore",
@@ -283,7 +296,7 @@ async fn p0_real_combined_exit_matrix_inner() {
     .await;
     let restored_d1 = restore_resource(
         &router,
-        &format!("/v1/accounts/{account}/d1/databases:restore"),
+        &format!("/operator/api/v1/accounts/{account}/d1/databases:restore"),
         &d1_backup,
         "restored-d1",
         "p0-exit-d1-restore",
@@ -507,7 +520,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         master_key: &recovery_key,
         mock: &mock,
     });
-    let source_loaded = load_platform_config(&source_platform_config).unwrap();
+    let source_loaded = load_file_only_platform_config(&source_platform_config);
     let full_snapshot = backup_create(&source_loaded, "p0-combined-fixture")
         .await
         .unwrap();
@@ -530,7 +543,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         master_key: &recovery_key,
         mock: &mock,
     });
-    let restored_loaded = load_platform_config(&restore_platform_config).unwrap();
+    let restored_loaded = load_file_only_platform_config(&restore_platform_config);
     let restored = backup_restore(&restored_loaded, &full_snapshot.snapshot_id)
         .await
         .unwrap();
@@ -612,7 +625,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         &router,
         "POST",
         &format!(
-            "/v1/accounts/{account}/kv/namespaces/{}/backups",
+            "/operator/api/v1/accounts/{account}/kv/namespaces/{}/backups",
             bindings.kv_other
         ),
         Value::Null,
@@ -697,7 +710,7 @@ async fn create_product_set(
 ) -> ProductBindings {
     let kv = create_resource(
         router,
-        &format!("/v1/accounts/{account}/kv/namespaces"),
+        &format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
         json!({"name": "combined-kv"}),
         "p0-exit-create-kv",
         &["resourceId"],
@@ -705,7 +718,7 @@ async fn create_product_set(
     .await;
     let replay = create_resource(
         router,
-        &format!("/v1/accounts/{account}/kv/namespaces"),
+        &format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
         json!({"name": "combined-kv"}),
         "p0-exit-create-kv",
         &["resourceId"],
@@ -714,7 +727,7 @@ async fn create_product_set(
     assert_eq!(replay, kv);
     let kv_other = create_resource(
         router,
-        &format!("/v1/accounts/{account}/kv/namespaces"),
+        &format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
         json!({"name": "combined-kv-other"}),
         "p0-exit-create-kv-other",
         &["resourceId"],
@@ -722,7 +735,7 @@ async fn create_product_set(
     .await;
     let r2 = create_resource(
         router,
-        &format!("/v1/accounts/{account}/r2/buckets"),
+        &format!("/operator/api/v1/accounts/{account}/r2/buckets"),
         json!({"name": "combined-r2"}),
         "p0-exit-create-r2",
         &["bucket", "resourceId"],
@@ -730,7 +743,7 @@ async fn create_product_set(
     .await;
     let r2_other = create_resource(
         router,
-        &format!("/v1/accounts/{account}/r2/buckets"),
+        &format!("/operator/api/v1/accounts/{account}/r2/buckets"),
         json!({"name": "combined-r2-other"}),
         "p0-exit-create-r2-other",
         &["bucket", "resourceId"],
@@ -738,7 +751,7 @@ async fn create_product_set(
     .await;
     let d1 = create_resource(
         router,
-        &format!("/v1/accounts/{account}/d1/databases"),
+        &format!("/operator/api/v1/accounts/{account}/d1/databases"),
         json!({"name": "combined-d1"}),
         "p0-exit-create-d1",
         &["resourceId"],
@@ -746,7 +759,7 @@ async fn create_product_set(
     .await;
     let d1_other = create_resource(
         router,
-        &format!("/v1/accounts/{account}/d1/databases"),
+        &format!("/operator/api/v1/accounts/{account}/d1/databases"),
         json!({"name": "combined-d1-other"}),
         "p0-exit-create-d1-other",
         &["resourceId"],
@@ -754,7 +767,7 @@ async fn create_product_set(
     .await;
     let d1_corrupt = create_resource(
         router,
-        &format!("/v1/accounts/{account}/d1/databases"),
+        &format!("/operator/api/v1/accounts/{account}/d1/databases"),
         json!({"name": "combined-d1-corrupt"}),
         "p0-exit-create-d1-corrupt",
         &["resourceId"],
@@ -762,7 +775,7 @@ async fn create_product_set(
     .await;
     let objects = create_resource(
         router,
-        &format!("/v1/accounts/{account}/durable-objects/namespaces"),
+        &format!("/operator/api/v1/accounts/{account}/durable-objects/namespaces"),
         json!({"name": "combined-do", "workerId": worker, "className": "AppObject"}),
         "p0-exit-create-do",
         &["resourceId"],
@@ -770,7 +783,7 @@ async fn create_product_set(
     .await;
     let objects_other = create_resource(
         router,
-        &format!("/v1/accounts/{account}/durable-objects/namespaces"),
+        &format!("/operator/api/v1/accounts/{account}/durable-objects/namespaces"),
         json!({"name": "combined-do-other", "workerId": worker, "className": "OtherObject"}),
         "p0-exit-create-do-other",
         &["resourceId"],
@@ -811,18 +824,22 @@ async fn create_resource(
 async fn assert_control_catalogs(router: &axum::Router, account: open_compute_core::AccountId) {
     for (uri, key, minimum) in [
         (
-            format!("/v1/accounts/{account}/kv/namespaces"),
+            format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
             "namespaces",
             2,
         ),
-        (format!("/v1/accounts/{account}/r2/buckets"), "buckets", 2),
         (
-            format!("/v1/accounts/{account}/d1/databases"),
+            format!("/operator/api/v1/accounts/{account}/r2/buckets"),
+            "buckets",
+            2,
+        ),
+        (
+            format!("/operator/api/v1/accounts/{account}/d1/databases"),
             "databases",
             3,
         ),
         (
-            format!("/v1/accounts/{account}/durable-objects/namespaces"),
+            format!("/operator/api/v1/accounts/{account}/durable-objects/namespaces"),
             "namespaces",
             2,
         ),
@@ -840,7 +857,8 @@ async fn apply_primary_d1_migration(
 ) {
     let sql = "CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL)";
     let digest = hex::encode(Sha256::digest(sql.as_bytes()));
-    let uri = format!("/v1/accounts/{account}/d1/databases/{database}/migrations/apply");
+    let uri =
+        format!("/operator/api/v1/accounts/{account}/d1/databases/{database}/migrations/apply");
     let body = json!({"migrations": [{
         "id": 1,
         "name": "0001_notes.sql",

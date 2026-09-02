@@ -113,7 +113,7 @@ pub(super) async fn prepare() -> Fixture {
         let (status, result) = admin_json(
             &api,
             "POST",
-            &format!("/v1/accounts/{account}/{path}"),
+            &format!("/operator/api/v1/accounts/{account}/{path}"),
             body,
             Some(name),
         )

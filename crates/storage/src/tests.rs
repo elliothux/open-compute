@@ -7,8 +7,9 @@ use crate::migrations::MigrationFault;
 use crate::{
     DataDir, DeploymentState, IdempotencyReservation, NewDeployment, NewQueueConsumerDeclaration,
     PlatformStorage, QueueConsumerConfig, QueueConsumerRepository, ReserveResourceCreate,
-    ResourceCreateReservation, ResourceRepository, SecretCrypto, StoredDeploymentSecret,
-    WorkerRepository, atomic_write, inspect_durable_object_storage,
+    ResourceCreateReservation, ResourceRepository, SYSTEM_DASHBOARD_WORKER_NAME, SecretCrypto,
+    StoredDeploymentSecret, SystemOwnedDeploymentKind, WorkerRepository, atomic_write,
+    inspect_durable_object_storage,
 };
 use open_compute_core::clock::{DeterministicClock, SystemClock};
 use open_compute_core::config::StorageConfig;
@@ -2023,7 +2024,7 @@ fn inspection_layout_migration_and_repository_helpers_are_covered() {
         ErrorCode::PathInvalid
     );
 
-    assert_eq!(crate::migrations::current_schema_version(), 14);
+    assert_eq!(crate::migrations::current_schema_version(), 15);
     assert_eq!(crate::migrations::migration_001_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_002_checksum().len(), 32);
     assert_eq!(crate::migrations::migration_003_checksum().len(), 32);
@@ -2960,6 +2961,7 @@ fn p1_release_identity() -> PlatformReleaseIdentityV1 {
         workerd_version: "workerd test".to_owned(),
         workerd_lock_sha256: "a".repeat(64),
         runtime_assets_sha256: "b".repeat(64),
+        dashboard_assets_sha256: "c".repeat(64),
         facade_capability_version: 1,
         control_schema_version: u32::try_from(crate::migrations::current_schema_version()).unwrap(),
         scheduler_schema_version: u32::try_from(crate::current_scheduler_schema_version()).unwrap(),
@@ -3614,7 +3616,18 @@ fn p2_2_queue_catalog_idempotency_and_failure_boundaries_are_complete() {
         );
     }
     assert_eq!(
-        repository.list(account, None, 0).unwrap_err().code(),
+        repository
+            .list(
+                account,
+                None,
+                None,
+                crate::CatalogSort::UpdatedAt,
+                crate::CatalogDirection::Desc,
+                None,
+                0,
+            )
+            .unwrap_err()
+            .code(),
         ErrorCode::LimitInvalid
     );
     assert_eq!(
@@ -4128,5 +4141,55 @@ fn p1_concurrent_resource_creates_never_exceed_the_account_kind_limit() {
             .unwrap()
             .len(),
         3
+    );
+}
+
+#[test]
+fn system_dashboard_worker_is_excluded_from_tenant_catalog_and_mutations() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let repo = WorkerRepository::new(storage.db());
+    let request = open_compute_core::RequestId::generate();
+
+    assert_eq!(
+        repo.create_worker(
+            account,
+            SYSTEM_DASHBOARD_WORKER_NAME,
+            request,
+            1,
+            storage.hardening().max_workers_per_account,
+        )
+        .expect_err("reserved dashboard name")
+        .code(),
+        ErrorCode::WorkerNameConflict
+    );
+
+    let system_worker = repo
+        .ensure_system_dashboard_worker(account, request, 1)
+        .expect("system dashboard worker");
+    assert_eq!(system_worker.name, SYSTEM_DASHBOARD_WORKER_NAME);
+    assert!(
+        repo.list_workers(account)
+            .unwrap()
+            .iter()
+            .all(|worker| worker.id != system_worker.id)
+    );
+    assert_eq!(
+        repo.get_tenant_worker(account, system_worker.id)
+            .expect_err("tenant lookup")
+            .code(),
+        ErrorCode::WorkerNotFound
+    );
+    assert!(
+        repo.get_system_owned_deployment(SystemOwnedDeploymentKind::Dashboard)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        repo.get_deployment(account, system_worker.id, DeploymentId::generate())
+            .expect_err("tenant deployment lookup")
+            .code(),
+        ErrorCode::WorkerNotFound
     );
 }

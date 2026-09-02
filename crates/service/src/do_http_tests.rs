@@ -9,7 +9,8 @@ use crate::metrics::MetricsRegistry;
 use open_compute_core::config::MetricsConfig;
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::{
-    AlarmProjection, AuthorizedDurableObjectDelete, SchedulerStore, SchedulerSummary,
+    AlarmProjection, AuthorizedDurableObjectDelete, DurableObjectRecord, SchedulerStore,
+    SchedulerSummary,
 };
 use serde_json::{Value, json};
 use std::sync::Mutex;
@@ -20,7 +21,7 @@ use tower::ServiceExt as _;
 async fn namespace_crud_is_idempotent_bounded_and_hides_storage_identity() {
     let fixture = fixture();
     let collection = format!(
-        "/v1/accounts/{}/durable-objects/namespaces",
+        "/operator/api/v1/accounts/{}/durable-objects/namespaces",
         fixture.account
     );
     let create_body = json!({
@@ -147,7 +148,7 @@ async fn namespace_crud_is_idempotent_bounded_and_hides_storage_identity() {
 async fn namespace_create_rejects_duplicate_class_and_invalid_boundaries() {
     let fixture = fixture();
     let collection = format!(
-        "/v1/accounts/{}/durable-objects/namespaces",
+        "/operator/api/v1/accounts/{}/durable-objects/namespaces",
         fixture.account
     );
     let body =
@@ -225,13 +226,13 @@ async fn object_reconcile_get_delete_and_force_namespace_delete_converge() {
             HealthCoordinator::new(),
             Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap()),
             false,
-            None,
+            Some(open_compute_core::SecretString::new("admin-secret")),
         )
         .with_do_api(fixture.api.clone()),
     );
     let namespace = create_namespace_fixture(&fixture, "objects", "Counter").await;
     let item = format!(
-        "/v1/accounts/{}/durable-objects/namespaces/{namespace}",
+        "/operator/api/v1/accounts/{}/durable-objects/namespaces/{namespace}",
         fixture.account
     );
     let (status, fetched) = json_response(
@@ -267,7 +268,7 @@ async fn object_reconcile_get_delete_and_force_namespace_delete_converge() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(listed["objects"][0]["state"], "ready");
+    assert_eq!(listed["objects"][0]["lifecycle"], "ready");
 
     let object_item = format!("{objects}/{object}");
     let (status, fetched) = json_response(
@@ -280,7 +281,7 @@ async fn object_reconcile_get_delete_and_force_namespace_delete_converge() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(fetched["objectId"], object.to_string());
+    assert_eq!(fetched["id"], object.to_string());
     scheduler
         .upsert_alarm(
             &AlarmProjection {
@@ -340,7 +341,7 @@ async fn object_reconcile_get_delete_and_force_namespace_delete_converge() {
         );
     }
     let forced_item = format!(
-        "/v1/accounts/{}/durable-objects/namespaces/{forced}?force=true",
+        "/operator/api/v1/accounts/{}/durable-objects/namespaces/{forced}?force=true",
         fixture.account
     );
     assert_eq!(
@@ -361,7 +362,7 @@ async fn control_errors_and_deleting_reconciliation_are_stable() {
     let fixture = fixture();
     assert!(format!("{:?}", fixture.api).contains("DoApiState"));
     let collection = format!(
-        "/v1/accounts/{}/durable-objects/namespaces",
+        "/operator/api/v1/accounts/{}/durable-objects/namespaces",
         fixture.account
     );
     assert_eq!(
@@ -370,7 +371,7 @@ async fn control_errors_and_deleting_reconciliation_are_stable() {
             .clone()
             .oneshot(request(
                 "POST",
-                "/v1/accounts/invalid/durable-objects/namespaces",
+                "/operator/api/v1/accounts/invalid/durable-objects/namespaces",
                 json!({"name":"bad","workerId":fixture.worker,"className":"Counter"}),
                 Some("bad-account"),
             ))
@@ -385,7 +386,7 @@ async fn control_errors_and_deleting_reconciliation_are_stable() {
             .clone()
             .oneshot(request(
                 "GET",
-                "/v1/accounts/invalid/durable-objects/namespaces",
+                "/operator/api/v1/accounts/invalid/durable-objects/namespaces",
                 Value::Null,
                 None,
             ))
@@ -398,6 +399,7 @@ async fn control_errors_and_deleting_reconciliation_are_stable() {
         .method("POST")
         .uri(&collection)
         .header(IDEMPOTENCY_HEADER, "wrong-content-type")
+        .header("authorization", "Bearer admin-secret")
         .body(Body::from("{}"))
         .unwrap();
     assert_eq!(
@@ -719,7 +721,12 @@ async fn control_errors_and_deleting_reconciliation_are_stable() {
 
     let no_api_metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
-    let no_api = HttpState::for_test(HealthCoordinator::new(), no_api_metrics, false, None);
+    let no_api = HttpState::for_test(
+        HealthCoordinator::new(),
+        no_api_metrics,
+        false,
+        Some(open_compute_core::SecretString::new("admin-secret")),
+    );
     let no_api_router = http::admin_router(no_api);
     for (method, uri) in [
         ("GET", collection.clone()),
@@ -749,13 +756,13 @@ async fn control_errors_and_deleting_reconciliation_are_stable() {
             HealthCoordinator::new(),
             protected_metrics,
             false,
-            Some(open_compute_core::SecretString::new("secret")),
+            Some(open_compute_core::SecretString::new("admin-secret")),
         )
         .with_do_api(fixture.api.clone()),
     );
     assert_eq!(
         protected
-            .oneshot(request("GET", &collection, Value::Null, None))
+            .oneshot(request_auth("GET", &collection, Value::Null, None, None,))
             .await
             .unwrap()
             .status(),
@@ -805,5 +812,253 @@ async fn control_errors_and_deleting_reconciliation_are_stable() {
         DurableObjectDeleteTransport::delete(&workerd, &authority)
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+async fn operator_object_list_and_get_responses_are_registry_metadata_only() {
+    let fixture = fixture();
+    let namespace = create_namespace_fixture(&fixture, "canary", "CanaryCounter").await;
+    let object = object_id(namespace, 42);
+    insert_object(
+        &fixture.storage,
+        namespace,
+        object,
+        DurableObjectState::Ready,
+        100,
+    );
+    let objects_path = format!(
+        "/operator/api/v1/accounts/{}/durable-objects/namespaces/{namespace}/objects",
+        fixture.account
+    );
+    let (status, listed) = json_response(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &objects_path, Value::Null, None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let object_item = format!("{objects_path}/{object}");
+    let (status, fetched) = json_response(
+        fixture
+            .router
+            .clone()
+            .oneshot(request("GET", &object_item, Value::Null, None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for value in [listed["objects"][0].clone(), fetched] {
+        let object = value.as_object().expect("object payload must be an object");
+        let mut keys: Vec<_> = object.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "createdAtMs".to_owned(),
+                "generation".to_owned(),
+                "id".to_owned(),
+                "lifecycle".to_owned(),
+                "updatedAtMs".to_owned(),
+            ]
+        );
+        let rendered = value.to_string().to_ascii_lowercase();
+        for forbidden in [
+            "namespace",
+            "storage",
+            "sqlite",
+            "alarm",
+            "websocket",
+            "sql",
+            "kv",
+            "memory",
+            "deletedat",
+            "objectid",
+        ] {
+            assert!(
+                !rendered.contains(forbidden),
+                "forbidden operator field leaked into response: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn object_view_exposes_registry_metadata_only() {
+    let namespace = ResourceId::generate();
+    let object = object_id(namespace, 1);
+    let record = DurableObjectRecord {
+        namespace_resource_id: namespace,
+        object_id: object,
+        generation: 1,
+        state: DurableObjectState::Ready,
+        created_at_ms: 10,
+        updated_at_ms: 20,
+        deleted_at_ms: None,
+    };
+    let value = object_view(&record);
+    let object = value.as_object().expect("object view must be an object");
+    let mut keys: Vec<_> = object.keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "createdAtMs".to_owned(),
+            "generation".to_owned(),
+            "id".to_owned(),
+            "lifecycle".to_owned(),
+            "updatedAtMs".to_owned(),
+        ]
+    );
+    let rendered = value.to_string().to_ascii_lowercase();
+    for forbidden in [
+        "storage",
+        "sqlite",
+        "alarm",
+        "websocket",
+        "sql",
+        "kv",
+        "memory",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "forbidden field leaked into operator view: {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn object_inventory_pagination_search_and_invalid_cursor_are_bounded() {
+    let fixture = fixture();
+    let namespace = create_namespace_fixture(&fixture, "inventory", "InventoryCounter").await;
+    let objects = [
+        object_id(namespace, 1),
+        object_id(namespace, 2),
+        object_id(namespace, 3),
+    ];
+    for (index, object) in objects.iter().enumerate() {
+        insert_object(
+            &fixture.storage,
+            namespace,
+            *object,
+            DurableObjectState::Ready,
+            100 + i64::try_from(index).unwrap(),
+        );
+    }
+    let objects_path = format!(
+        "/operator/api/v1/accounts/{}/durable-objects/namespaces/{namespace}/objects",
+        fixture.account
+    );
+
+    let (status, first_page) = json_response(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{objects_path}?limit=2"),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first_page["objects"].as_array().unwrap().len(), 2);
+    let cursor = first_page["cursor"].as_str().expect("page cursor");
+    assert!(cursor.contains(':'));
+
+    let (status, second_page) = json_response(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{objects_path}?limit=2&cursor={cursor}"),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second_page["objects"].as_array().unwrap().len(), 1);
+    assert!(second_page["cursor"].is_null());
+
+    let (status, searched) = json_response(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{objects_path}?search={}", objects[2]),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(searched["objects"].as_array().unwrap().len(), 1);
+    assert_eq!(searched["objects"][0]["id"], objects[2].to_string());
+
+    assert_eq!(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{objects_path}?search={}", &objects[2].to_string()[..8]),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let (status, missing_search) = json_response(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{objects_path}?search={}", object_id(namespace, 99)),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(missing_search["objects"].as_array().unwrap().is_empty());
+
+    let (status, invalid_cursor) = json_response(
+        fixture
+            .router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{objects_path}?cursor=not-a-cursor"),
+                Value::Null,
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        invalid_cursor["error"]["code"].as_str().unwrap(),
+        ErrorCode::ConfigInvalid.as_str()
     );
 }

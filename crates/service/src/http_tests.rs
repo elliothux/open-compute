@@ -1,5 +1,6 @@
 use super::*;
 use axum::body::to_bytes;
+use axum::middleware;
 use open_compute_core::config::{MetricsConfig, SecretReference};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -36,26 +37,38 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
     for (path, expected) in [
         ("/health/live", "/health/live"),
         ("/health/ready", "/health/ready"),
-        ("/health/status", "/health/status"),
-        ("/metrics", "/metrics"),
-        ("/v1/accounts/a/workers", "/v1/accounts/:account/workers/*"),
+        (
+            "/operator/api/v1/system/status",
+            "/operator/api/v1/system/status",
+        ),
+        ("/operator/metrics", "/operator/metrics"),
+        (
+            "/operator/api/v1/accounts/a/workers",
+            "/operator/api/v1/accounts/:account/workers/*",
+        ),
         ("/__workers/a/w", "/__workers/:account/:worker/*"),
         ("/tenant-controlled", "/other"),
     ] {
         assert_eq!(bound_route(path), expected);
     }
     assert_eq!(
-        product_operation("/v1/accounts/a/kv/namespaces"),
+        product_operation("/operator/api/v1/accounts/a/kv/namespaces"),
         Some(OperationClass::Kv)
     );
     assert_eq!(product_operation("/__workers/a/w"), None);
 
     let health = HealthCoordinator::new();
-    let open_state = HttpState::for_test(health.clone(), metrics(), true, None);
-    let response = admin_router(open_state)
+    let authenticated = HttpState::for_test(
+        health.clone(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    );
+    let response = admin_router(authenticated)
         .oneshot(
             Request::builder()
-                .uri("/metrics")
+                .uri("/operator/metrics")
+                .header(header::AUTHORIZATION, "Bearer admin-secret")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -82,7 +95,7 @@ async fn metrics_auth_state_conversion_and_bounded_route_labels_are_covered() {
     let response = admin_router(protected)
         .oneshot(
             Request::builder()
-                .uri("/metrics")
+                .uri("/operator/metrics")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -98,7 +111,7 @@ async fn product_error_extension_updates_admission_metrics_without_tenant_labels
     let middleware_state = state.clone();
     let router = Router::new()
         .route(
-            "/v1/accounts/a/kv/namespaces",
+            "/operator/api/v1/accounts/a/kv/namespaces",
             axum::routing::post(|| async {
                 let mut response = StatusCode::TOO_MANY_REQUESTS.into_response();
                 response
@@ -107,7 +120,7 @@ async fn product_error_extension_updates_admission_metrics_without_tenant_labels
                 response
             }),
         )
-        .layer(axum::middleware::from_fn_with_state(
+        .layer(middleware::from_fn_with_state(
             middleware_state,
             bounds_middleware,
         ))
@@ -116,7 +129,7 @@ async fn product_error_extension_updates_admission_metrics_without_tenant_labels
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/v1/accounts/a/kv/namespaces")
+                .uri("/operator/api/v1/accounts/a/kv/namespaces")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -187,16 +200,17 @@ fn state_constructor_resolves_file_auth_and_debug_is_redacted() {
     fs::write(&secret, b"admin-secret").unwrap();
     fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).unwrap();
     let server = ServerConfig {
-        admin_auth: Some(SecretReference {
+        admin_auth: SecretReference {
             env: None,
             file: Some(secret),
-        }),
+        },
         ..ServerConfig::default()
     };
     let state = HttpState::new(
         HealthCoordinator::new(),
         metrics(),
         true,
+        false,
         &server,
         Arc::new(|| None),
     )
@@ -204,4 +218,337 @@ fn state_constructor_resolves_file_auth_and_debug_is_redacted() {
     let debug = format!("{state:?}");
     assert!(debug.contains("admin_auth: true"));
     assert!(!debug.contains("admin-secret"));
+}
+
+#[tokio::test]
+async fn dashboard_surface_is_disabled_by_default() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    );
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn dashboard_surface_returns_not_ready_when_enabled_without_bootstrap() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_dashboard_enabled(true);
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "platform_unavailable");
+}
+
+#[tokio::test]
+async fn dashboard_surface_trailing_slash_hits_handler_when_enabled_without_bootstrap() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_dashboard_enabled(true);
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "/operator/ must reach operator_surface, not the 404 fallback"
+    );
+}
+
+#[test]
+fn dashboard_asset_path_strips_operator_prefix() {
+    assert_eq!(dashboard_asset_path("/operator/"), "/");
+    assert_eq!(dashboard_asset_path("/operator"), "/");
+    assert_eq!(
+        dashboard_asset_path("/operator/assets/index.js"),
+        "/assets/index.js"
+    );
+    assert_eq!(dashboard_asset_path("/operator/login"), "/login");
+}
+
+#[tokio::test]
+async fn legacy_operator_paths_return_not_found() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    );
+    for path in [
+        "/v1/account",
+        "/v1/accounts/a/workers",
+        "/health/status",
+        "/metrics",
+    ] {
+        let response = admin_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::AUTHORIZATION, "Bearer admin-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "path={path}");
+    }
+}
+
+#[tokio::test]
+async fn unknown_operator_api_path_returns_json_not_found() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    );
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/api/v1/not-a-route")
+                .header(header::AUTHORIZATION, "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
+    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "RESOURCE_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn unknown_operator_api_path_requires_auth_before_not_found() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    );
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/api/v1/not-a-route")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "ADMIN_AUTH_REQUIRED");
+}
+
+#[tokio::test]
+async fn operator_api_requires_admin_auth() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    );
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/api/v1/account")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
+    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "ADMIN_AUTH_REQUIRED");
+}
+
+#[tokio::test]
+async fn operator_metrics_requires_canonical_unauthorized_envelope() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        true,
+        Some(SecretString::new("admin-secret")),
+    );
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "ADMIN_AUTH_REQUIRED");
+}
+
+#[tokio::test]
+async fn system_status_remains_available_when_supervisor_is_stopped() {
+    let snapshot = SupervisorSnapshot {
+        state: SupervisorState::Stopped,
+        reason: ReadinessReason::RuntimeStarting,
+        last_transition_at: SystemTime::UNIX_EPOCH,
+        attempt: 2,
+        last_exit: None,
+        next_retry_at: None,
+        pid: None,
+        pgid: None,
+        binary_digest: "digest".to_owned(),
+        config_digest: "config".to_owned(),
+        startup_id: None,
+        token_fingerprint: None,
+        listen_port: None,
+    };
+    let supervisor = Arc::new(move || Some(SanitizedSupervisor::from(&snapshot)));
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        false,
+        Some(SecretString::new("admin-secret")),
+    )
+    .with_supervisor(supervisor);
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/api/v1/system/status")
+                .header(header::AUTHORIZATION, "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["supervisor"]["state"], "STOPPED");
+}
+
+#[tokio::test]
+async fn runtime_operator_control_returns_unavailable_without_supervisor() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        false,
+        Some(SecretString::new("admin-secret")),
+    );
+    let response = admin_router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/operator/api/__test/runtime/restart")
+                .header(header::AUTHORIZATION, "Bearer admin-secret")
+                .header("x-open-compute-test-ack", "restart-generation")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn public_listener_does_not_expose_operator_api() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        false,
+        Some(SecretString::new("admin-secret")),
+    );
+    for path in ["/operator/", "/operator/api/v1/meta", "/operator/metrics"] {
+        let response = public_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::AUTHORIZATION, "Bearer admin-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "public listener must not serve operator path {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn merged_listener_serves_operator_api_before_tenant_fallback() {
+    let state = HttpState::for_test(
+        HealthCoordinator::new(),
+        metrics(),
+        false,
+        Some(SecretString::new("admin-secret")),
+    );
+    let response = merged_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/operator/api/v1/meta")
+                .header(header::AUTHORIZATION, "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["apiVersion"], "v1");
 }

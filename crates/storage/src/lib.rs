@@ -5,6 +5,7 @@
 pub mod assets;
 pub mod bindings;
 pub mod cache;
+pub mod catalog_page;
 pub mod control_db;
 pub mod cron;
 pub mod crypto;
@@ -59,6 +60,14 @@ pub use cache::{
     CacheLookup, CacheLookupStatus, CacheManager, CacheMethod, CachePaths, CachePurge, CachePut,
     CacheStats, CacheStoredResponse, CacheSurface,
 };
+pub use catalog_page::{
+    CatalogCursor, CatalogCursorValue, CatalogDirection, CatalogListPage, CatalogSort,
+    CreatedIdCursor, DEFAULT_CATALOG_LIST_LIMIT, MAX_CATALOG_LIST_LIMIT, NameIdCursor,
+    decode_catalog_cursor, decode_created_id_cursor, decode_name_id_cursor, encode_catalog_cursor,
+    encode_created_id_cursor, encode_name_id_cursor, invalid_catalog_cursor, invalid_catalog_query,
+    normalize_catalog_limit, search_as_queue_id, search_as_resource_id, search_as_worker_id,
+    search_as_workflow_id,
+};
 pub use control_db::ControlDb;
 pub use cron::{
     CRON_PARSER_VERSION, CronActivationRecord, CronActivationState, CronDeclaration,
@@ -81,7 +90,8 @@ pub use data_dir::{expected_directories, future_resource_paths};
 pub use disk_admission::DiskAdmission;
 pub use durable_objects::{
     AuthorizedDurableObjectDelete, AuthorizedDurableObjectDispatch, DO_NAMESPACE_SCHEMA_VERSION,
-    DurableObjectNamespaceRecord, DurableObjectRecord, DurableObjectRepository,
+    DurableObjectListPage, DurableObjectNamespaceRecord, DurableObjectRecord,
+    DurableObjectRepository, decode_object_list_cursor, encode_object_list_cursor,
 };
 pub use fs::atomic_write;
 pub use identity::{ARTIFACT_SCHEMA_VERSION, StableIdentity};
@@ -165,7 +175,8 @@ pub use workers::{
     DeploymentContentKind, DeploymentRecord, DeploymentReferrer, DeploymentSnapshot,
     DeploymentState, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment,
     NewDeploymentProducts, RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot,
-    StoredDeploymentSecret, WorkerRecord, WorkerRepository,
+    SYSTEM_DASHBOARD_WORKER_NAME, StoredDeploymentSecret, SystemOwnedDeploymentKind,
+    SystemOwnedDeploymentRecord, WorkerOwnership, WorkerRecord, WorkerRepository,
 };
 
 use open_compute_core::clock::Clock;
@@ -327,5 +338,7 @@ impl PlatformStorage {
     }
 }
 
+#[cfg(test)]
+mod catalog_page_tests;
 #[cfg(test)]
 mod tests;

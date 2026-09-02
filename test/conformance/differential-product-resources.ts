@@ -124,7 +124,7 @@ async function listOpenComputeQueues(
   accountId: string,
   token: string | undefined,
 ): Promise<OpenComputeQueue[]> {
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/queues`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/queues`, endpoint), {
     headers: headers(token),
     signal: AbortSignal.timeout(30_000),
   });
@@ -174,7 +174,7 @@ export async function createOpenComputeQueue(
   accountId: string,
   token: string | undefined,
 ): Promise<string> {
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/queues`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/queues`, endpoint), {
     method: "POST",
     headers: {
       ...headers(token, true),
@@ -216,7 +216,7 @@ export async function cleanupOpenComputeQueue(
       return { deleted: false, status: "ambiguous-owned-queue" };
     }
     const queue = matches[0]!;
-    const url = new URL(`/v1/accounts/${accountId}/queues/${queue.id}`, endpoint);
+    const url = new URL(`/operator/api/v1/accounts/${accountId}/queues/${queue.id}`, endpoint);
     url.searchParams.set("force", "true");
     const response = await fetch(url, {
       method: "DELETE",
@@ -244,7 +244,7 @@ async function listOpenComputeDurableObjectNamespaces(
   accountId: string,
   token: string | undefined,
 ): Promise<OpenComputeDurableObjectNamespace[]> {
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/durable-objects/namespaces`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/durable-objects/namespaces`, endpoint), {
     headers: headers(token),
     signal: AbortSignal.timeout(30_000),
   });
@@ -297,7 +297,7 @@ export async function createOpenComputeDurableObjectNamespace(
   token: string | undefined,
 ): Promise<string> {
   uuid(workerId, "open-compute Durable Object owner Worker");
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/durable-objects/namespaces`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/durable-objects/namespaces`, endpoint), {
     method: "POST",
     headers: {
       ...headers(token, true),
@@ -339,7 +339,7 @@ export async function cleanupOpenComputeDurableObjectNamespace(
       return { deleted: false, status: "ambiguous-owned-namespace" };
     }
     const namespace = matches[0]!;
-    const url = new URL(`/v1/accounts/${accountId}/durable-objects/namespaces/${namespace.id}`, endpoint);
+    const url = new URL(`/operator/api/v1/accounts/${accountId}/durable-objects/namespaces/${namespace.id}`, endpoint);
     url.searchParams.set("force", "true");
     const response = await fetch(url, {
       method: "DELETE",
@@ -439,7 +439,7 @@ async function listOpenComputeWorkflows(
   accountId: string,
   token: string | undefined,
 ): Promise<OpenComputeWorkflowDefinition[]> {
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/workflows?limit=1000`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workflows?limit=1000`, endpoint), {
     headers: headers(token),
     signal: AbortSignal.timeout(30_000),
   });
@@ -485,7 +485,7 @@ export async function createOpenComputeWorkflow(
   accountId: string,
   token: string | undefined,
 ): Promise<string> {
-  const response = await fetch(new URL(`/v1/accounts/${accountId}/workflows`, endpoint), {
+  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workflows`, endpoint), {
     method: "POST",
     headers: headers(token, true),
     body: JSON.stringify({ name }),
@@ -517,7 +517,7 @@ export async function activateOpenComputeWorkflowVersion(
 ): Promise<void> {
   uuid(workflowId, "open-compute Workflow");
   uuid(deploymentId, "open-compute Workflow deployment");
-  const versions = new URL(`/v1/accounts/${accountId}/workflows/${workflowId}/versions`, endpoint);
+  const versions = new URL(`/operator/api/v1/accounts/${accountId}/workflows/${workflowId}/versions`, endpoint);
   const response = await fetch(versions, {
     method: "POST",
     headers: headers(token, true),
@@ -530,7 +530,7 @@ export async function activateOpenComputeWorkflowVersion(
   }
   await response.body?.cancel();
   for (let attempt = 0; attempt < 60; attempt++) {
-    const reconcile = await fetch(new URL("/v1/operator/workflows/reconcile", endpoint), {
+    const reconcile = await fetch(new URL("/operator/api/v1/workflows/reconcile", endpoint), {
       method: "POST",
       headers: headers(token),
       signal: AbortSignal.timeout(60_000),
@@ -577,7 +577,7 @@ export async function cleanupOpenComputeWorkflow(
       return { deleted: false, status: "ambiguous-owned-workflow" };
     }
     const workflow = matches[0]!;
-    const response = await fetch(new URL(`/v1/accounts/${accountId}/workflows/${workflow.id}`, endpoint), {
+    const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workflows/${workflow.id}`, endpoint), {
       method: "DELETE",
       headers: headers(token),
       signal: AbortSignal.timeout(60_000),

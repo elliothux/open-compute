@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[allow(dead_code)] // consumed by p2_exit_gate; other test binaries share this module
+pub(crate) const ADMIN_TOKEN: &str = "workflow-admin";
+
 pub(crate) type Client =
     hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>;
 
@@ -122,7 +125,7 @@ pub(crate) async fn ready(client: &Client, admin: SocketAddr, child: &mut Proces
             return;
         }
         if Instant::now() >= deadline {
-            let status = response(client, admin, "/health/status", "GET")
+            let status = response(client, admin, "/operator/api/v1/system/status", "GET")
                 .await
                 .unwrap();
             let bytes = to_bytes(Body::new(status.into_body()), 65536)
@@ -151,6 +154,9 @@ pub(crate) fn config(
     for path in [&key, &secret] {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
+    let admin_token = root.join("admin.token");
+    fs::write(&admin_token, b"workflow-admin\n").unwrap();
+    fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
     let config = root.join("process.toml");
     fs::write(
         &config,
@@ -159,17 +165,21 @@ pub(crate) fn config(
 [server]
 public_bind = "{public}"
 admin_bind = "{admin}"
+
+[server.admin_auth]
+file = "{admin_token}"
+
 [storage]
-data_dir = "{}"
-master_key_file = "{}"
+data_dir = "{data_dir}"
+master_key_file = "{master_key_file}"
 [s3]
 endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"
 prefix = "system/"
 force_path_style = true
-access_key_id_file = "{}"
-secret_access_key_file = "{}"
+access_key_id_file = "{access_key}"
+secret_access_key_file = "{secret_key}"
 max_retries = 1
 [runtime]
 startup_timeout_ms = 20000
@@ -180,10 +190,14 @@ heartbeat_ms = 1000
 dispatch_timeout_ms = 300000
 recovery_backoff_ms = 100
 "#,
-            data.display(),
-            data.join("keys/master.key").display(),
-            key.display(),
-            secret.display(),
+            public = public,
+            admin = admin,
+            admin_token = admin_token.display(),
+            data_dir = data.display(),
+            master_key_file = data.join("keys/master.key").display(),
+            endpoint = endpoint,
+            access_key = key.display(),
+            secret_key = secret.display(),
         ),
     )
     .unwrap();

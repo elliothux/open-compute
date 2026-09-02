@@ -21,7 +21,7 @@ export class Named extends WorkerEntrypoint {
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
-    if (path === "/metrics") return Response.json(await env.EVENTS.metrics());
+    if (path === "/operator/metrics") return Response.json(await env.EVENTS.metrics());
     if (path === "/send-one") {
       try { return Response.json(await env.EVENTS.send({ after: "reconcile" })); }
       catch (error) { return new Response(codeOf(error), { status: 500 }); }
