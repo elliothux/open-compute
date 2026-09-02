@@ -444,6 +444,44 @@
       ]
     },
     {
+      "id": "ai.markdown-conversion-search",
+      "product": "ai",
+      "surface": "Markdown Conversion plus AI Search namespace, instance, item/job lifecycle, indexing, and hybrid retrieval",
+      "status": "supported_with_deviation",
+      "sources": [
+        {
+          "kind": "workerd",
+          "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
+          "path": "types/defines/to-markdown.d.ts",
+          "sha256": "af6fe9974987bb5df99e1c12251638570fd99887f33301c4bf0a6157a695d111"
+        },
+        {
+          "kind": "workerd",
+          "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
+          "path": "src/cloudflare/internal/to-markdown-api.ts",
+          "sha256": "c68be892226cdee2ee08838a14678ef0195fad9754eaf983380983183d778f3a"
+        },
+        {
+          "kind": "workerd",
+          "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
+          "path": "types/defines/ai-search.d.ts",
+          "sha256": "065bc0894f0ee988b05fd62ae5d363abacc52b1d88a5b2c50fef7488ed7871c7"
+        }
+      ],
+      "positiveCases": [
+        "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix",
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "negativeCases": [
+        "p3-cache-images::p3_cache_images_real_runtime_semantics_and_lifecycle_matrix",
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001",
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
       "id": "version-metadata.binding",
       "product": "version_metadata",
       "surface": "CF_VERSION_METADATA",
@@ -488,12 +526,33 @@
       "deviations": []
     },
     {
+      "id": "vectorize.binding.methods",
+      "product": "vectorize",
+      "surface": "post-beta Vectorize binding, async mutations, exact query, namespace, and indexed metadata filtering",
+      "status": "supported_with_deviation",
+      "sources": [
+        {
+          "kind": "cloudflare-workers-types",
+          "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
+          "path": "index.d.ts",
+          "sha256": "a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd"
+        }
+      ],
+      "positiveCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "negativeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
       "id": "unsupported.bindings.fail-closed",
       "product": "analytics_engine",
       "additionalProducts": [
-        "ai",
         "browser_rendering",
-        "vectorize",
         "hyperdrive",
         "mtls",
         "rate_limiting",
@@ -528,6 +587,708 @@
     }
   ],
   "memberEvidence": [
+    {
+      "id": "ai::Ai::aiGatewayLogId:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::Ai::toMarkdown:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::Ai::toMarkdown:method#1",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::Ai::toMarkdown:method#2",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchInstance::chatCompletions:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchInstance::chatCompletions:method#1",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchInstance::info:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchInstance::items:get#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchInstance::jobs:get#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchInstance::search:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchInstance::stats:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchInstance::update:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItem::chunks:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItem::download:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItem::info:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItem::logs:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItem::sync:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItems::delete:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItems::get:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItems::list:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItems::upload:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchItems::uploadAndPoll:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchJob::cancel:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchJob::info:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchJob::logs:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchJobs::create:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchJobs::get:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchJobs::list:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchNamespace::chatCompletions:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchNamespace::chatCompletions:method#1",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchNamespace::create:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchNamespace::delete:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchNamespace::get:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchNamespace::list:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::AiSearchNamespace::search:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/ai-search-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-SEARCH-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionOutputOptions::format:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::data:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::error:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::format:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::format:property#1",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::id:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::id:property#1",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::mimeType:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::mimeType:property#1",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::name:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::name:property#1",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ConversionResponse::tokens:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::MarkdownDocument::blob:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::MarkdownDocument::name:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::SupportedFileFormat::extension:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::SupportedFileFormat::mimeType:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ToMarkdownService::supported:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ToMarkdownService::transform:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
+    {
+      "id": "ai::ToMarkdownService::transform:method#1",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/markdown-conversion.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001"
+      ]
+    },
     {
       "id": "alarms::DurableObject::alarm:method#0",
       "status": "supported",
@@ -6540,6 +7301,357 @@
       ],
       "deviations": [
         "OC-R2-001"
+      ]
+    },
+    {
+      "id": "vectorize::Vectorize::deleteByIds:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::Vectorize::describe:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::Vectorize::getByIds:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::Vectorize::insert:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::Vectorize::query:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::Vectorize::queryById:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::Vectorize::upsert:method#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeAsyncMutation::mutationId:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeIndexInfo::dimensions:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeIndexInfo::processedUpToDatetime:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeIndexInfo::processedUpToMutation:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeIndexInfo::vectorCount:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeMatch::score:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeMatch::values:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeMatches::count:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeMatches::matches:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeQueryOptions::filter:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeQueryOptions::namespace:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeQueryOptions::returnMetadata:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeQueryOptions::returnValues:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeQueryOptions::topK:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeVector::id:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeVector::metadata:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeVector::namespace:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeVector::values:property#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeVectorMetadata::[]:index#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
+    },
+    {
+      "id": "vectorize::VectorizeVectorMetadataFilter::[]:index#0",
+      "status": "supported_with_deviation",
+      "compileCases": [
+        "ts::test/conformance/fixtures/vectorize-surface.ts"
+      ],
+      "runtimeCases": [
+        "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
       ]
     },
     {

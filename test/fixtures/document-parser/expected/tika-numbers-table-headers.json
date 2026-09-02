@@ -1,0 +1,19 @@
+{
+  "status": "error",
+  "error": "UNSUPPORTED_CONTENT_TYPE",
+  "must_contain": [],
+  "must_not_contain": [],
+  "min_normalized_chars": 0,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 2,
+    "page_count": null,
+    "sheet_names": [
+      "Table 1",
+      "Table 2"
+    ]
+  },
+  "retrieval_queries": [],
+  "review_notes": "The fixed legacy Apple Numbers index.xml corpus returns DOCUMENT_PARSE_FAILED through Xberg 1.0.14; Numbers remains a P5.7 capability deviation and public admission reports unsupported."
+}

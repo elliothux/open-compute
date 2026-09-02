@@ -29,9 +29,14 @@ use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
 mod kv;
+mod search_composition;
 use kv::{
     FRAME_CONTENT_TYPE, StreamBudget, declared_too_large, dispatch, parse_path, permission_allows,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use search_composition::serve_binding_backend_with_ai_search;
+pub(crate) use search_composition::serve_binding_backend_with_ai_search_and_snapshot_pins;
+pub use search_composition::serve_binding_backend_with_document_parser;
 
 const TOKEN_HEADER: &str = "x-open-compute-binding-token";
 const GENERATION_HEADER: &str = "x-open-compute-startup-generation";
@@ -115,6 +120,8 @@ struct BackendState {
     services: Option<Arc<crate::service_invocations::ServiceInvocationRegistry>>,
     cache: Option<Arc<crate::cache_backend::CacheBindingService>>,
     images: Option<Arc<crate::images_backend::ImageBindingService>>,
+    document_parser: Option<Arc<crate::document_parser_backend::DocumentParserBindingService>>,
+    ai_search: Option<Arc<crate::ai_search_backend::AiSearchBindingService>>,
 }
 
 /// Bind the private binding backend to an ephemeral IPv4 loopback port.
@@ -163,6 +170,9 @@ pub async fn serve_binding_backend(
         None,
         None,
         None,
+        None,
+        None,
+        None,
         shutdown,
     )
     .await
@@ -206,6 +216,9 @@ pub async fn serve_binding_backend_with_assets(
         Some(services),
         cache,
         images,
+        None,
+        None,
+        None,
         shutdown,
     )
     .await
@@ -229,6 +242,9 @@ async fn serve_binding_backend_inner(
     services: Option<Arc<crate::service_invocations::ServiceInvocationRegistry>>,
     cache: Option<Arc<crate::cache_backend::CacheBindingService>>,
     images: Option<Arc<crate::images_backend::ImageBindingService>>,
+    document_parser: Option<Arc<crate::document_parser_backend::DocumentParserBindingService>>,
+    ai_search: Option<Arc<crate::ai_search_backend::AiSearchBindingService>>,
+    health: Option<crate::health::HealthCoordinator>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
     let (global_streams, resource_streams) = executor.stream_limits();
@@ -258,7 +274,18 @@ async fn serve_binding_backend_inner(
         })
         .transpose()?
         .map(Arc::new);
+    let vectorize_coordinator =
+        crate::vectorize_coordinator::VectorizeCoordinator::new(storage.clone(), pins.clone());
+    let vectorize_coordinator = match &metrics {
+        Some(metrics) => vectorize_coordinator.with_metrics(metrics.clone()),
+        None => vectorize_coordinator,
+    };
+    let vectorize_coordinator = match &health {
+        Some(health) => vectorize_coordinator.with_health(health.clone()),
+        None => vectorize_coordinator,
+    };
     let service_reaper = services.clone();
+    let ai_search_maintenance = ai_search.clone();
     let state = BackendState {
         storage,
         auth,
@@ -276,8 +303,41 @@ async fn serve_binding_backend_inner(
         services,
         cache,
         images,
+        document_parser,
+        ai_search,
     };
     let router = Router::new().fallback(handle).with_state(state);
+    let (vectorize_shutdown, vectorize_shutdown_rx) = tokio::sync::watch::channel(false);
+    let vectorize_task = tokio::spawn(vectorize_coordinator.run(vectorize_shutdown_rx));
+    let (ai_search_shutdown, mut ai_search_shutdown_rx) = tokio::sync::watch::channel(false);
+    let ai_search_task = tokio::spawn(async move {
+        let Some(service) = ai_search_maintenance else {
+            return;
+        };
+        let publish_health = |healthy| {
+            if let Some(health) = &health {
+                let _ = health.set_search_background(
+                    open_compute_core::ComponentName::AiSearchIndexing,
+                    healthy,
+                );
+            }
+        };
+        publish_health(service.maintenance_once().await.is_ok());
+        let mut interval = tokio::time::interval(Duration::from_millis(500));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                changed = ai_search_shutdown_rx.changed() => {
+                    if changed.is_err() || *ai_search_shutdown_rx.borrow() {
+                        break;
+                    }
+                }
+                _ = interval.tick() => {
+                    publish_health(service.maintenance_once().await.is_ok());
+                }
+            }
+        }
+    });
     let managed_shutdown = async move {
         match service_reaper {
             Some(registry) => {
@@ -290,6 +350,10 @@ async fn serve_binding_backend_inner(
             }
             None => shutdown.await,
         }
+        let _ = vectorize_shutdown.send(true);
+        let _ = ai_search_shutdown.send(true);
+        let _ = vectorize_task.await;
+        let _ = ai_search_task.await;
     };
     axum::serve(listener, router.into_make_service())
         .with_graceful_shutdown(managed_shutdown)
@@ -339,11 +403,38 @@ async fn handle(State(state): State<BackendState>, request: Request) -> Response
     if !state.auth.authorize(&token, &generation) {
         return StatusCode::NOT_FOUND.into_response();
     }
+    if request
+        .uri()
+        .path()
+        .starts_with("/internal/ai/to-markdown/v1/")
+    {
+        return match &state.document_parser {
+            Some(document_parser) => document_parser.handle(request).await,
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
     if request.method() != Method::POST {
         return backend_error(
             ErrorCode::BindingProtocolError,
             StatusCode::METHOD_NOT_ALLOWED,
         );
+    }
+    if request.uri().path().starts_with("/internal/ai-search/v1/") {
+        return match &state.ai_search {
+            Some(ai_search) => ai_search.handle(request).await,
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
+    if request.uri().path().starts_with("/internal/vectorize/v1/") {
+        let vectorize = crate::vectorize_backend::VectorizeBindingService::new(
+            state.storage.clone(),
+            state.pins.clone(),
+        );
+        let vectorize = match &state.metrics {
+            Some(metrics) => vectorize.with_metrics(metrics.clone()),
+            None => vectorize,
+        };
+        return vectorize.handle(request).await;
     }
     if request.uri().path().starts_with("/internal/services/v1/") {
         return match &state.services {

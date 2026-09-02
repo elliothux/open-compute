@@ -14,6 +14,7 @@ async fn fixture(config: ImagesConfig) -> (RuntimeFeatureFixture, ImageBindingSe
         images: Some(DeploymentImagesInput {
             binding: "IMAGES".to_owned(),
         }),
+        ai: None,
         version_metadata: Some(DeploymentVersionMetadataInput {
             binding: "VERSION".to_owned(),
             tag: Some("release-1".to_owned()),

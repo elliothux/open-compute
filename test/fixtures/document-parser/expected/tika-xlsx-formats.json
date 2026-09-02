@@ -1,0 +1,28 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Number",
+    "Currency",
+    "Scientific",
+    "Percentage"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 6,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": [
+      "Format Examples"
+    ]
+  },
+  "retrieval_queries": [
+    {
+      "query": "Number",
+      "expected_fixture_id": "tika-xlsx-formats"
+    }
+  ],
+  "review_notes": "Reviewed directly from OOXML shared strings and workbook XML."
+}

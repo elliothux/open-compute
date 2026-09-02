@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+pub mod ai_search;
 pub mod assets;
 pub mod bindings;
 pub mod cache;
@@ -34,16 +35,17 @@ pub mod scheduler;
 mod schema_inspection;
 pub mod services;
 mod snapshot_staging;
+pub mod vectorize;
 pub mod workers;
 pub mod workflows;
-pub use workflows::{
-    WorkflowAppliedOperation, WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition,
-    WorkflowGcAcknowledgement, WorkflowGcReceipt, WorkflowInstanceIdentity, WorkflowOperation,
-    WorkflowOperationInspection, WorkflowOperationKind, WorkflowOperationResult, WorkflowRefState,
-    WorkflowRejectedOperation, WorkflowRepository, WorkflowReservation, WorkflowTarget,
-    WorkflowVersion,
+pub use ai_search::{
+    AI_SEARCH_SCHEMA_VERSION, AiSearchCatalog, AiSearchChunkRecord, AiSearchInstanceAuthority,
+    AiSearchInstanceInspection, AiSearchInstanceRecord, AiSearchInstanceStorageContract,
+    AiSearchItemRecord, AiSearchJobClaim, AiSearchJobRecord, AiSearchLogRecord,
+    AiSearchNamespaceRecord, AiSearchObjectGcClaim, AiSearchObjectReference, AiSearchPaths,
+    AiSearchStore, ClaimedAiSearchItem, NewAiSearchItemGeneration, StagedAiSearchChunk,
+    inspect_ai_search_instance, inspect_ai_search_object_references,
 };
-
 pub use assets::{
     BeginDeploymentUploadFinalize, DeploymentAssetsRecord, DeploymentAssetsRepository,
     DeploymentObjectKind, DeploymentUploadFinalize, DeploymentUploadFinalizeDisposition,
@@ -161,11 +163,23 @@ pub use services::{
     ServiceRepository,
 };
 pub use snapshot_staging::{LocalSnapshotStagingCleanup, cleanup_stale_snapshot_staging};
+pub use vectorize::{
+    VECTORIZE_SCHEMA_VERSION, VectorMutation, VectorMutationInput, VectorMutationKind,
+    VectorMutationState, VectorRecord, VectorizeDescription, VectorizeEngine, VectorizeIndexRecord,
+    VectorizeIndexRepository, VectorizePaths, VectorizeReadSnapshot,
+};
 pub use workers::{
     DeploymentContentKind, DeploymentRecord, DeploymentReferrer, DeploymentSnapshot,
     DeploymentState, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewDeployment,
     NewDeploymentProducts, RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot,
     StoredDeploymentSecret, WorkerRecord, WorkerRepository,
+};
+pub use workflows::{
+    WorkflowAppliedOperation, WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition,
+    WorkflowGcAcknowledgement, WorkflowGcReceipt, WorkflowInstanceIdentity, WorkflowOperation,
+    WorkflowOperationInspection, WorkflowOperationKind, WorkflowOperationResult, WorkflowRefState,
+    WorkflowRejectedOperation, WorkflowRepository, WorkflowReservation, WorkflowTarget,
+    WorkflowVersion,
 };
 
 use open_compute_core::clock::Clock;
@@ -184,6 +198,7 @@ pub struct PlatformStorage {
     free_space_hard_bytes: u64,
     hardening: HardeningConfig,
     admission: DiskAdmission,
+    sqlite_busy_timeout_ms: u64,
 }
 
 impl PlatformStorage {
@@ -218,6 +233,7 @@ impl PlatformStorage {
             free_space_hard_bytes: config.free_space_hard_bytes,
             hardening: hardening.clone(),
             admission: DiskAdmission::new(config, hardening),
+            sqlite_busy_timeout_ms: config.sqlite_busy_timeout_ms,
         })
     }
 
@@ -248,6 +264,7 @@ impl PlatformStorage {
             free_space_hard_bytes: config.free_space_hard_bytes,
             hardening: hardening.clone(),
             admission: DiskAdmission::new(config, &hardening),
+            sqlite_busy_timeout_ms: config.sqlite_busy_timeout_ms,
         })
     }
 
@@ -285,6 +302,12 @@ impl PlatformStorage {
     #[must_use]
     pub const fn hardening(&self) -> &HardeningConfig {
         &self.hardening
+    }
+
+    /// SQLite busy timeout shared by product databases.
+    #[must_use]
+    pub const fn sqlite_busy_timeout_ms(&self) -> u64 {
+        self.sqlite_busy_timeout_ms
     }
 
     /// Capture the current immutable admission decision input.

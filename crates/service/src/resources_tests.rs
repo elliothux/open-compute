@@ -19,6 +19,11 @@ fn embedded_resources_list_current_runbooks_and_report_output_failures() {
     let names = String::from_utf8(names).unwrap();
     assert!(names.contains("scheduler-recovery"));
     assert!(names.contains("workerd-crash-loop"));
+    let mut licenses = Vec::new();
+    write_licenses(&mut licenses).unwrap();
+    let licenses = String::from_utf8(licenses).unwrap();
+    assert!(licenses.contains("Embedded Xberg document parser"));
+    assert!(licenses.contains("Copyright (c) 2025-2026 Kreuzberg, Inc."));
     assert_eq!(
         write_docs(None, &mut RejectWrites).unwrap_err().code(),
         ErrorCode::ConfigInvalid

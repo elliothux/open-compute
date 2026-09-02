@@ -7,6 +7,7 @@ use std::path::Path;
 const DEFAULT_CONFIG: &str = include_str!("../../../share/default-config.toml");
 const LICENSE: &str = include_str!("../../../LICENSE");
 const WORKERD_LICENSE: &str = include_str!("../../../share/workerd-LICENSE");
+const XBERG_LICENSE: &str = include_str!("../../../share/xberg-LICENSE");
 
 macro_rules! runbooks {
     ($($name:literal),+ $(,)?) => {
@@ -43,7 +44,7 @@ pub(crate) fn write_config(data_dir: &Path, out: &mut impl Write) -> Result<(), 
 pub(crate) fn write_licenses(out: &mut impl Write) -> Result<(), PlatformError> {
     writeln!(
         out,
-        "Open Compute\n{LICENSE}\nEmbedded Cloudflare workerd\n{WORKERD_LICENSE}"
+        "Open Compute\n{LICENSE}\nEmbedded Cloudflare workerd\n{WORKERD_LICENSE}\nEmbedded Xberg document parser\n{XBERG_LICENSE}"
     )
     .map_err(|_| invalid())
 }

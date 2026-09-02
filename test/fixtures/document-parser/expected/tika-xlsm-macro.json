@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "This is a blank worksheet",
+    "macro is about to be created"
+  ],
+  "must_not_contain": [
+    "Sub ",
+    "End Sub"
+  ],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": [
+      "Sheet1",
+      "Sheet2",
+      "Sheet3"
+    ]
+  },
+  "retrieval_queries": [
+    {
+      "query": "This is a blank worksheet",
+      "expected_fixture_id": "tika-xlsm-macro"
+    }
+  ],
+  "review_notes": "Reviewed from OOXML; archive contains xl/vbaProject.bin and parser output must not expose or execute macro source."
+}

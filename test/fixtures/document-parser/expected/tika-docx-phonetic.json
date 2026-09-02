@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "とうきょう",
+    "東京"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 5,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "とうきょう",
+      "expected_fixture_id": "tika-docx-phonetic"
+    }
+  ],
+  "review_notes": "Reviewed with textutil and OOXML phonetic runs."
+}

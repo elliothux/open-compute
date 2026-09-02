@@ -58,7 +58,7 @@ test("requires generated class identity for Durable Object and Workflow reconcil
   }
 });
 
-test("parses cache, entrypoint, Images, and Version Metadata as one strict runtime contract", async t => {
+test("parses cache, entrypoint, Images, AI, and Version Metadata as one strict runtime contract", async t => {
   const result = await loadProject(await fixture(t, {
     ...config,
     cache: { enabled: true, cross_version_cache: true },
@@ -67,6 +67,7 @@ test("parses cache, entrypoint, Images, and Version Metadata as one strict runti
       Admin: { type: "worker", cache: { enabled: true, cross_version_cache: false } },
     },
     images: { binding: "IMAGES" },
+    ai: { binding: "AI" },
     version_metadata: { binding: "VERSION", tag: "release-1" },
   }));
   assert.deepEqual(result.runtimeFeatures, {
@@ -76,13 +77,16 @@ test("parses cache, entrypoint, Images, and Version Metadata as one strict runti
       entrypoints: { Admin: { enabled: true, crossVersionCache: false } },
     },
     images: { binding: "IMAGES" },
+    ai: { binding: "AI" },
     versionMetadata: { binding: "VERSION", tag: "release-1" },
   });
   for (const invalid of [
     { cache: { enabled: true, unknown: true } },
     { exports: { Bad: { type: "durable_object", cache: { enabled: true } } } },
     { images: { binding: "1BAD" } },
+    { ai: { binding: "1BAD" } },
     { images: { binding: "SAME" }, version_metadata: { binding: "SAME" } },
+    { ai: { binding: "SAME" }, images: { binding: "SAME" } },
     { version_metadata: { binding: "VERSION", tag: "" } },
   ]) {
     await assert.rejects(loadProject(await fixture(t, { ...config, ...invalid })));
@@ -151,6 +155,9 @@ test("loads Worker-plus-assets and assets-only project unions", async t => {
   await assert.rejects(loadProject(await fixture(t, {
     name: "static",
     services: [{ binding: "SELF", service: "static" }], assets: { directory: "dist" },
+  })), /assets-only/);
+  await assert.rejects(loadProject(await fixture(t, {
+    name: "static", ai: { binding: "AI" }, assets: { directory: "dist" },
   })), /assets-only/);
   await assert.rejects(loadProject(await fixture(t, {
     ...config, assets: { directory: "dist", runWorkerFirst: true },

@@ -1,0 +1,26 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "test content"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": [
+      "Sheet1",
+      "Sheet2"
+    ]
+  },
+  "retrieval_queries": [
+    {
+      "query": "test content",
+      "expected_fixture_id": "lc4j-xls-equivalent"
+    }
+  ],
+  "review_notes": "Reviewed from BIFF printable records; member of the cross-format equivalence group."
+}

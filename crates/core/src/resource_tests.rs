@@ -7,6 +7,9 @@ fn resource_tokens_and_typed_json_are_strict() {
         BindingKind::R2Bucket,
         BindingKind::D1Database,
         BindingKind::DoNamespace,
+        BindingKind::VectorizeIndex,
+        BindingKind::AiSearchNamespace,
+        BindingKind::AiSearchInstance,
     ] {
         assert_eq!(kind.to_string().parse::<BindingKind>().unwrap(), kind);
     }

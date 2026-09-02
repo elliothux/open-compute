@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "generator": "generate.py",
+  "seed": "seed.json",
+  "cases": [
+    {
+      "path": "frame-invalid-utf8.bin",
+      "size_bytes": 18,
+      "sha256": "545a8eee175ab3cc12abe3e27460149640f7c165128782d7dcb91a0e67457d7d",
+      "expected_error": "INVALID_FRAME"
+    },
+    {
+      "path": "frame-length-overflow.bin",
+      "size_bytes": 16,
+      "sha256": "fb0849dfd44c83b4c1d3adb4596aacce07bf1b4ffc7436b590c85757d72d59a5",
+      "expected_error": "INVALID_FRAME"
+    },
+    {
+      "path": "frame-trailing-bytes.bin",
+      "size_bytes": 26,
+      "sha256": "da814ec82e34b1f14d88fd032db2e51fcd0af5c4521aa0ba4e2bd40ccb4b76b8",
+      "expected_error": "INVALID_FRAME"
+    },
+    {
+      "path": "frame-wrong-digest.bin",
+      "size_bytes": 50,
+      "sha256": "f923f75a70576ac232974786f660c2ebbda3f9ee7222df066725a6d2f7337e2c",
+      "expected_error": "INVALID_FRAME"
+    },
+    {
+      "path": "ole-truncated-sector-chain.xls",
+      "size_bytes": 1024,
+      "sha256": "b43273f5b6accacb72c1c6a511a300929cd39a6ead8242cef57ab9fb9174d83a",
+      "expected_error": "DOCUMENT_INVALID"
+    },
+    {
+      "path": "ooxml-oversized-shared-strings.xlsx",
+      "size_bytes": 1520,
+      "sha256": "3ee437a0c564f3169665f3a0df4690c9f481b8311e3479a014755bdeb968a6d9",
+      "expected_error": "DOCUMENT_LIMIT_EXCEEDED"
+    },
+    {
+      "path": "ooxml-relationship-cycle.docx",
+      "size_bytes": 540,
+      "sha256": "f4eb618efbd135de3f9b133ea045eb80c2092b7556aeb06158f79f12e657ffae",
+      "expected_error": "CONTENT_TYPE_MISMATCH"
+    },
+    {
+      "path": "pdf-huge-dimensions.pdf",
+      "size_bytes": 118,
+      "sha256": "ae4954db12bdc4f09cdbd8df45fd998285498692a6079b943120c3aa367221d0",
+      "expected_error": "DOCUMENT_INVALID"
+    },
+    {
+      "path": "pdf-nested-stream.pdf",
+      "size_bytes": 122,
+      "sha256": "439d3523cd745a1b42812882da5cd6f1ad9ae76b6b29072b8691ec89ad8cd016",
+      "expected_error": "DOCUMENT_INVALID"
+    },
+    {
+      "path": "pdf-object-cycle.pdf",
+      "size_bytes": 118,
+      "sha256": "85f43b069135c85bc1e5a989df69558e31e7aeb8b9ad512eb64da2a0f1581384",
+      "expected_error": "DOCUMENT_INVALID"
+    },
+    {
+      "path": "spreadsheet-limit-overflow.xlsx",
+      "size_bytes": 548,
+      "sha256": "5445050922369019c49d640b03a210d34f03f105742645b220df25841be7bd33",
+      "expected_error": "CONTENT_TYPE_MISMATCH"
+    },
+    {
+      "path": "xml-deep-nesting.odt",
+      "size_bytes": 391,
+      "sha256": "17ea8ede28cd75457953b62590170e967795ff2dd1ac24e908cfc2a1cf020ae3",
+      "expected_error": "DOCUMENT_LIMIT_EXCEEDED"
+    },
+    {
+      "path": "xml-entity.odt",
+      "size_bytes": 328,
+      "sha256": "fe054e2a85c8426e25a3e11005027d03990ea9d3c12ddb5fabc0c76b1f45c7ce",
+      "expected_error": "DOCUMENT_PARSE_FAILED"
+    },
+    {
+      "path": "zip-duplicate-entry.docx",
+      "size_bytes": 253,
+      "sha256": "061db12a7dc82e9f537888d88dac517962eeb063487f97c3f6941c2885b0957e",
+      "expected_error": "CONTENT_TYPE_MISMATCH"
+    },
+    {
+      "path": "zip-extreme-compression.docx",
+      "size_bytes": 1440,
+      "sha256": "ed7bd9dc77d4429dbfa78342585109f33925af649db88b6280855d3b907c4359",
+      "expected_error": "DOCUMENT_LIMIT_EXCEEDED"
+    }
+  ]
+}

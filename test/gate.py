@@ -63,6 +63,7 @@ CARGO_TARGETS = {
     'p3-services-events': ('open-compute-service', 'p3_services_events', False),
     'p3-services-recovery': ('open-compute-service', 'p3_services_recovery', False),
     'p3-cache-images': ('open-compute-service', 'p3_cache_images_gate', False),
+    'p5-search': ('open-compute-service', 'p5_search_gate', False),
     # Finish independent work together before the remaining exclusive barriers.
     'workflow-product': ('open-compute-service', 'workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),
@@ -101,6 +102,7 @@ GROUPS = {
     'p1-8': ['p0-7', 'p1-conformance'],
     'workflow': ['workflow-runtime', 'workflow-recovery', 'workflow-product'],
     'all': [*CARGO_TARGETS, 'p3-contract'],
+    'p5': ['p5-search'],
 }
 
 

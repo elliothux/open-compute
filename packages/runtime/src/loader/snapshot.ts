@@ -29,6 +29,9 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
   if (value.imagesBinding !== undefined
       && (!record(value.imagesBinding) || typeof value.imagesBinding.name !== "string"
         || typeof value.imagesBinding.descriptorSha256 !== "string")) invalid();
+  if (value.aiBinding !== undefined
+      && (!record(value.aiBinding) || typeof value.aiBinding.name !== "string"
+        || typeof value.aiBinding.descriptorSha256 !== "string")) invalid();
   if (value.versionMetadataBinding !== undefined
       && (!record(value.versionMetadataBinding) || typeof value.versionMetadataBinding.name !== "string"
         || typeof value.versionMetadataBinding.id !== "string"
@@ -66,6 +69,7 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
             || !Number.isSafeInteger(binding.queueLifecycleGeneration)) invalid();
         break;
       case "kv_namespace": case "r2_bucket": case "d1_database": case "do_namespace":
+      case "vectorize_index": case "ai_search_namespace": case "ai_search_instance":
         if (typeof binding.resourceId !== "string" || typeof binding.resourceSpecGeneration !== "number"
             || !Number.isSafeInteger(binding.resourceSpecGeneration) || !record(binding.permissions)
             || typeof binding.permissions.read !== "boolean" || typeof binding.permissions.write !== "boolean"

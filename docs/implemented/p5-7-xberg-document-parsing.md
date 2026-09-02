@@ -1,14 +1,27 @@
 # P5.7：基于 Xberg 的 PDF/Office 文档解析
 
-> 状态：**Research / Day1 技术方案，尚未实现或验收**，2026-09-02。本文细化
-> [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md) 的文档解析阶段。P5.7 只在 P5.0–P5.6
-> 的 AI Search authority、indexing coordinator、provider 与 chunk contract 已经稳定后开始；任何格式只有在
-> 固定语料、资源隔离、stock-workerd 产品链和四平台发行 Gate 全部通过后才能标记为 `supported`。
+> 状态：**Local core implementation archived / release acceptance active**，2026-09-02。本文记录
+> [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md) 已落地的文档解析阶段；本机验收数据见
+> [完成记录](p5-vectorize-ai-search-results.md)，四平台发行、timing-three、完整 parser process fault/soak 与
+> 托管 rich-document differential 见仍在维护的[发行验收计划](../p5-release-acceptance.md)。
+
+当前实现已经落地 `crates/document-parser`、`ocd __document-parser-v1` 隐藏 child、OCDP v1 frame、
+标准 `[ai]` builtin、`env.AI.toMarkdown()` direct/handle overload、13 种实际 admission、40-file 固定公开
+corpus 与 15 个 hostile fixtures。正式 pin 是 `xberg = "=1.0.14"`，crate SHA-256
+`68568d75a993709564cb27361409b46988ec585f9fb59c8f91a113ff7f6b4e29`，最小 features 为
+`tokio-runtime,pdf,office,excel,xml`，parser contract 是
+`19decbaa581fb83acd9c35d489da8a1ba0e66a0336aa7dfc5b6b5eb00421a8dd`。固定 40-file corpus manifest
+SHA-256 为 `599efa6fb8d5ae4517c1a62034bf4db69af7c152b77421709be5362882be31c1`；15-case hostile manifest
+SHA-256 为 `c02d5091a29c5e411181593074e7b707ceb2126ae68d304b5bab1a8b9b65d542`。
+
+Items → parse → chunk → embed → FTS/vector activation → retrieval/recovery 已接入 P5 的 durable state machine；
+HTML `hostname`/受限 `cssSelector` 只做离线 normalization。XLSB 在固定 corpus 触发 calamine abort 风险、
+Numbers 在 Xberg 1.0.14 固定样本上解析失败、ET 无合格 fixture，三者明确 No-Go，不出现在 `supported()`。
 
 ## 1. 结论
 
-P5.7 采用 **Xberg 最小 Rust feature 集 + `ocd` 自派生的短生命周期 parser 子进程**，把 Cloudflare
-AI Search 当前公开支持的 PDF、Microsoft Office、OpenDocument 和 Apple Numbers 文件转换成规范化
+P5.7 采用 **Xberg 最小 Rust feature 集 + `ocd` 自派生的短生命周期 parser 子进程**，把本地通过 Gate 的
+PDF、Microsoft Office 与 OpenDocument 文件转换成规范化
 Markdown，再交给平台已有的 chunk、embedding、FTS 与 vector pipeline。
 
 核心决策如下：
@@ -41,20 +54,20 @@ AI Search 对单文件的公开上限为 4 MB，并使用 Markdown Conversion �
 
 P5.7 只扩展 P5.3 已有的文本、Markdown、HTML、XML、JSON 和 CSV parser，目标矩阵为：
 
-| 格式 | 扩展名 | P5.7 目标 | Xberg 路径 | 备注 |
+| 格式 | 扩展名 | P5.7 状态 | Xberg 路径 | 备注 |
 | --- | --- | --- | --- | --- |
 | PDF | `.pdf` | 支持 text-layer PDF | `pdf-native` | 扫描件只检测，不 OCR |
 | Word OOXML | `.docx` | 支持 | `office` | 不支持 legacy `.doc` |
 | Excel OOXML | `.xlsx`、`.xlsm` | 支持 | `excel` | 不执行 VBA，不索引宏源码 |
-| Excel Binary | `.xlsb` | 条件支持 | `excel` | 必须用真实 fixture 证明 |
+| Excel Binary | `.xlsb` | No-Go | `excel` | 固定 fixture 可触发依赖 abort 风险，不进入 admission |
 | Excel legacy | `.xls` | 支持 | `excel` | OLE/BIFF，只读解析 |
-| WPS Spreadsheet | `.et` | 条件支持 | `.et` adapter → Excel parser | 无真实、许可明确 fixture 前不得宣称支持 |
+| WPS Spreadsheet | `.et` | No-Go | 无 | 无真实、许可明确 fixture，不进入 admission |
 | OpenDocument | `.odt`、`.ods` | 支持 | `office` / `excel` | ZIP/XML expansion 必须有界 |
-| Apple Numbers | `.numbers` | 条件支持 | `iwork` | 只启用 Numbers 所需 feature |
+| Apple Numbers | `.numbers` | No-Go | 禁用 `iwork` | Xberg 1.0.14 固定 fixture 解析失败 |
 | 图片/扫描 PDF | 当前 Cloudflare 支持 | P5.7 不支持 | 无 | P5.8 OCR；返回明确错误 |
 
-`条件支持` 不是上线状态。P5.7.0 必须证明该格式在 crates.io 解析依赖、四个平台和固定 corpus 上成立；失败就
-登记为公开 deviation，不能根据扩展名伪装成功。
+本地 `supported()` 的 rich formats 只包含 PDF、DOCX、XLSX/XLSM/XLS 与 ODT/ODS；再加已有
+TXT/Markdown/HTML/XML/JSON/CSV，共 13 个扩展。No-Go 格式稳定 fail closed，不能根据扩展名伪装成功。
 
 Cloudflare 当前没有把 PPT/PPTX、RTF、ODP 或 legacy DOC 列入 AI Search rich formats。即使 Xberg 的
 `office` feature 能解析它们，P5.7 public admission 也必须拒绝，以避免无依据扩大兼容面和攻击面。
@@ -69,15 +82,15 @@ P5.7 不设计新的文档解析产品 API。兼容分母固定为以下两个 W
 合同来源按以下顺序冻结：
 
 1. 本仓库 pinned workerd 的
-   [`ai-search.d.ts`](../references/workerd/types/defines/ai-search.d.ts)、
-   [`to-markdown.d.ts`](../references/workerd/types/defines/to-markdown.d.ts) 和
-   [`to-markdown-api.ts`](../references/workerd/src/cloudflare/internal/to-markdown-api.ts) facade source；
+   [`ai-search.d.ts`](../../references/workerd/types/defines/ai-search.d.ts)、
+   [`to-markdown.d.ts`](../../references/workerd/types/defines/to-markdown.d.ts) 和
+   [`to-markdown-api.ts`](../../references/workerd/src/cloudflare/internal/to-markdown-api.ts) facade source；
 2. Cloudflare 当前的
    [AI Search Items Workers binding](https://developers.cloudflare.com/ai-search/api/items/workers-binding/) 与
    [Markdown Conversion Workers binding](https://developers.cloudflare.com/workers-ai/features/markdown-conversion/usage/binding/) 文档；
 3. 对真实 Cloudflare 的 source-compatible differential。
 
-文档、类型和托管行为出现冲突时，P5.7.0 必须生成逐成员矩阵并冻结唯一结论。例如当前 AI Search 文档把
+文档、类型和托管行为出现冲突时，本轮逐成员矩阵与 differential 冻结唯一结论。例如当前 AI Search 文档把
 `items.upload()` 二进制输入写为 `ArrayBuffer`，pinned 类型写为 `Blob`；本地 runtime 可以接受实测成立的兼容
 并集，但生成的 Env 类型和 capability 不能悄悄改成另一套私有签名。
 
@@ -216,29 +229,29 @@ P5.7 的 compatibility verdict 是 tenant Worker API。Cloudflare 的
 
 Kreuzberg v4 已明确进入 legacy/LTS，新的功能开发迁往 Xberg。Xberg 当前 workspace 使用 Rust 2024、
 声明 Rust 1.92 MSRV、MIT license，并将 `pdf-native`、`pdf-pdfium`、`office`、`excel`、`iwork`、OCR 和模型
-能力拆成 Cargo features；这些事实必须在正式 pin 时从
-[workspace Cargo.toml](https://github.com/xberg-io/xberg/blob/main/Cargo.toml) 与
-[xberg Cargo.toml](https://github.com/xberg-io/xberg/blob/main/crates/xberg/Cargo.toml) 重新确认。
+能力拆成 Cargo features；正式 pin 时已结合 crates.io source 与
+[workspace Cargo.toml](https://github.com/xberg-io/xberg/blob/main/Cargo.toml)、
+[xberg Cargo.toml](https://github.com/xberg-io/xberg/blob/main/crates/xberg/Cargo.toml) 交叉确认。
 
-P5.7.0 的候选依赖是：
+P5.7.0 的 POC 候选原为 `=1.1.0`；crates.io 实际可审计并通过当前 corpus 的正式 Day1 pin 是：
 
 ```toml
 xberg = {
-    version = "=1.1.0",
+    version = "=1.0.14",
     default-features = false,
     features = [
         "tokio-runtime",
-        "pdf-native",
+        "pdf",
         "office",
         "excel",
-        "iwork",
+        "xml",
     ],
 }
 ```
 
-这只是 POC 输入，不是已经接受的 dependency contract。正式采用前必须冻结 crates.io checksum、完整
+该 pin/checksum/feature set 已成为当前 parser contract；任何升级仍必须重新冻结完整
 `cargo tree -e features`、license inventory 和二进制增量。不能依赖 Xberg `main` 的移动 revision，也不能
-因为其 workspace 中存在 path patch 就假定 crates.io 包含同样修复；如果 `=1.1.0` 的发布包未通过 fixture，
+因为其 workspace 中存在 path patch 就假定 crates.io 包含同样修复；如果后续发布包未通过 fixture，
 应等待修复版本或审查后显式 vendor patch，不能在生产构建时临时拉 Git HEAD。
 
 以下 features 明确禁用：
@@ -284,8 +297,8 @@ ocd
 - argv、环境、stdout/stderr 不携带文件正文、S3 credential、provider secret、SQLite path 或 internal token；
 - 父进程拥有 spawn、deadline、stdout/stderr 上限、process-group kill、reap 和残留清理。
 
-这会增加一个瞬时 OS process，但不增加第二个服务或数据 owner。P5.7 实现时必须同步更新平台进程模型文档和
-support bundle inventory，明确区分常驻 workerd child 与瞬时 parser child。
+这会增加一个瞬时 OS process，但不增加第二个服务或数据 owner。平台进程模型、health、metrics、doctor 与
+support bundle 已明确区分常驻 workerd child 和瞬时 parser child。
 
 ### 4.2 为什么不能直接调用 library
 
@@ -303,7 +316,7 @@ Day1 默认每个文件启动一个新 child，不复用进程：
 
 - indexing 本来就是异步流程，优先隔离而不是节省几毫秒 startup；
 - 任意 parser 全局状态、allocator 碎片和前一个文档残留随进程退出清空；
-- 全局 `document_parse_concurrency` semaphore 控制并发，默认值由 4 vCPU/8 GiB benchmark 冻结；
+- 全局 `document_parser.max_concurrency=4` semaphore 控制并发，另有 account=2、deployment=1 的默认上限；
 - 同一 account 和 instance 另有公平队列，不能让一个 tenant 占满全部 parser slot；
 - shutdown 先停止 admission，再等待有界 grace，随后杀死并 reap 全部 parser process group。
 
@@ -333,9 +346,14 @@ header 只允许：
   "filename": "manual.pdf",
   "declared_content_type": "application/pdf",
   "content_sha256": "...",
-  "parser_contract_sha256": "..."
+  "parser_contract_sha256": "...",
+  "html_options": null
 }
 ```
+
+`html_options` 仅允许 HTML 请求携带，字段为可选 `hostname` 与 `css_selector`。`hostname` 只作为 HTTP(S)
+base 解析相对链接，绝不触发网络请求；`css_selector` 经过长度、group 数、语法、遍历节点和输出字节上限后，
+仅保留匹配节点。非 HTML 请求携带该字段、非法 URL/selector、未知 option 均 fail closed。
 
 decoder 必须先校验 magic/version/长度/溢出，再分配 body；拒绝 trailing bytes、重复 JSON fields、无效 UTF-8、
 digest mismatch 和超限 header/body。filename 仅参与诊断和格式交叉验证，不能当作文件路径。
@@ -400,14 +418,14 @@ admission 依次检查：
 5. Xberg 实际检测结果与平台 allowlist 是否一致。
 
 ZIP-based OOXML、ODF、Numbers 不能只看 `PK`：必须有界检查 `[Content_Types].xml`、ODF `mimetype` 或 iWork
-container marker。OLE2 `.xls`/`.et` 需检查 `Workbook`/`Book` stream。扩展、MIME、magic 冲突的具体公开行为在
-P5.7.0 做 Cloudflare differential；在证据冻结前本地默认 fail closed，不自动按另一个格式“猜成功”。
+container marker。OLE2 `.xls` 需检查 `Workbook`/`Book` stream；`.et` 不在公开 admission。扩展、MIME、magic
+冲突统一 fail closed，不自动按另一个格式“猜成功”。
 
 ### 6.2 格式特定规则
 
 - PDF：按 reading order 输出 text layer；页分隔转换为稳定结构边界；脚注、表格和多栏质量由 fixture 衡量。
 - DOCX/ODT：保留 heading、list、table、link、footnote/endnote 的文本语义；图片只保留无模型的 alt text。
-- XLS/XLSX/XLSM/XLSB/ODS/ET/Numbers：按 sheet 顺序输出标题和 Markdown table；使用 cached/display value，
+- XLS/XLSX/XLSM/ODS：按 sheet 顺序输出标题和 Markdown table；使用 cached/display value，
   不计算公式、不执行宏、不访问 external link。
 - embedded object/attachment：P5.7 不递归创建 child items，也不从文档中发起网络或文件请求；只记录有界 warning。
 - password/encryption：不接受密码参数；返回 `DOCUMENT_ENCRYPTED`。
@@ -415,8 +433,8 @@ P5.7.0 做 Cloudflare differential；在证据冻结前本地默认 fail closed�
 - scanned PDF：text layer 为空或低于冻结的 page/text-density 判据时返回 `DOCUMENT_OCR_REQUIRED`；不能把空白
   Markdown 当作成功。
 
-表格宽度、最大 sheet/page、公式/单元格展示、PDF metadata 是否进入 Markdown 等仍需 P5.7.0 differential 和
-fixture 固定。Cloudflare 没公开的内部行为不猜测为兼容合同。
+表格宽度、最大 sheet/page、公式/单元格展示和 PDF metadata 已由 parser contract、fixture 与 output bounds
+固定。Cloudflare 没公开的内部行为不猜测为兼容合同。
 
 ## 7. 资源与安全限制
 
@@ -425,15 +443,15 @@ fixture 固定。Cloudflare 没公开的内部行为不猜测为兼容合同。
 | 资源 | P5.7 要求 |
 | --- | --- |
 | AI Search item bytes | 对齐公开 4 MiB hard limit |
-| `toMarkdown` bytes/batch | 官方未公开独立上限；P5.7.0 远端探测并冻结本地 per-file、batch-count、batch-bytes hard limit |
-| 输出 Markdown | 初始候选 16 MiB；P5.7.0 以 corpus/攻击测试冻结 |
-| wall deadline | 初始候选 30 s；父进程硬杀并 reap |
-| CPU/RSS | 每 child hard budget；四平台证明实际生效后冻结数值 |
+| `toMarkdown` bytes/batch | 4 MiB/file、16 files、32 MiB/batch |
+| 输出 Markdown | 16 MiB/request |
+| wall deadline | 30 s；父进程硬杀并 reap |
+| CPU/RSS | 30 CPU seconds；Linux 以 `RLIMIT_AS` 执行 2 GiB address-space hard limit；Darwin 拒绝设置 `RLIMIT_AS`，macOS RSS hard limit 留在发行验收 |
 | ZIP/XML/OLE | uncompressed bytes、entry/node/depth、ratio、string/shared-string、relationship 数均有界 |
 | PDF | page/object/font/image/stream/decode-work budget 均有界 |
 | spreadsheet | sheet/row/column/cell/formula/shared-string/output cell 数均有界 |
-| stdout/stderr | framed stdout hard cap；stderr ring buffer 只保留去内容摘要 |
-| concurrency | host/account/instance 三层 admission；无界 `spawn_blocking` 禁止 |
+| stdout/stderr | framed stdout 受 16 MiB output envelope 限制；stderr 最多 64 KiB，只保留去内容摘要 |
+| concurrency | host/account/deployment 默认 4/2/1；无界 `spawn_blocking` 禁止 |
 
 如果 Xberg public config 不能表达某个必须的 expansion/work limit，不能只在解析结束后检查输出。P5.7.0 要么在
 adapter/container admission 前补上可证明的 bound，要么把对应格式判为 No-Go。不得 fork 一个“先全量解压到
@@ -500,13 +518,13 @@ P5.7 先保持直接状态机。`toMarkdown` 不读取该 staged state，也不�
 
 ### 9.1 目的与目录
 
-P5.7 不接受只用程序临时生成的空 ZIP/最小 PDF 证明解析质量。实现前必须从公开、许可明确的其他项目中选择并
-提交至少 **30 个真实固定文件**。首批候选为 **38 个**，来自 Apache Tika、LangChain4j、Apache POI 和
+P5.7 不接受只用程序临时生成的空 ZIP/最小 PDF 证明解析质量。仓库已从公开、许可明确的其他项目中提交
+**40 个真实固定文件**，来自 Apache Tika、LangChain4j、Apache POI 和
 Apache PDFBox；其中 LangChain4j 的同内容跨格式文件本来就用于
 [`ApacheTikaDocumentParserTest`](https://github.com/langchain4j/langchain4j/blob/b0b3b21e5f5679e86519ef3d979b7fbea0769f13/document-parsers/langchain4j-document-parser-apache-tika/src/test/java/dev/langchain4j/data/document/parser/apache/tika/ApacheTikaDocumentParserTest.java)，
 可直接验证格式等价性，而不是拿 Xberg 自己的 corpus 给 Xberg 自证。
 
-建议布局：
+实际布局：
 
 ```text
 test/fixtures/document-parser/
@@ -532,9 +550,9 @@ fixture bytes、expected 和 manifest 都提交 Git，不依赖 Git LFS、运行
 允许由显式 maintainer import 工具在新增/升级 corpus 时使用；普通 build、Gate、coverage、发行和 production
 startup 必须完全离线。
 
-### 9.2 首批 38 个候选文件
+### 9.2 最终 40 个固定文件
 
-来源 revision 固定为本次调研快照；真正 import 时仍要重新下载、计算 SHA-256 并逐文件检查 attribution：
+来源 revision、逐文件 URL/size/SHA-256、license、oracle 与预期状态均固定在 `manifest.json`：
 
 ```text
 Apache Tika     1e3d8f888380d8b302ce4787bc7d5fbb513f1867
@@ -574,7 +592,7 @@ Apache PDFBox   44ae1f5a0371c37128b20fac2beecdfd0c93b503
 | 16 | TIKA-MS | `testEXCEL_phonetic.xlsx` | 日文/phonetic cell |
 | 17 | TIKA-MS | `testEXCEL_charts.xlsx` | chart/embedded object warning |
 | 18 | TIKA-MS | `testEXCEL_macro.xlsm` | macro-enabled；绝不执行宏 |
-| 19 | TIKA-MS | `testEXCEL.xlsb` | XLSB 条件支持 |
+| 19 | TIKA-MS | `testEXCEL.xlsb` | XLSB No-Go/abort-risk 证据 |
 | 20 | TIKA-MS | `testEXCEL.xls` | legacy BIFF/XLS |
 | 21 | TIKA-INT | `test-columnar.ods` | ODS 列/表格顺序 |
 | 22 | TIKA-ODF | `testFooter.ods` | ODS footer 边界 |
@@ -594,24 +612,18 @@ Apache PDFBox   44ae1f5a0371c37128b20fac2beecdfd0c93b503
 | 36 | POI | `spreadsheet/unicodeSheetName.xlsx` | Unicode sheet name |
 | 37 | PDFBOX | `org/apache/pdfbox/text/BidiSample.pdf` | RTL/bidirectional text |
 | 38 | PDFBOX | `input/PDFBOX-5747-unicode-surrogate-with-diacritic-reduced.pdf` | supplementary Unicode/diacritic |
+| 39 | POI | `spreadsheet/SimpleMacro.xlsm` | 第二个 XLSM；验证宏不执行 |
+| 40 | TIKA-MS | `test-columnar.xlsb` | 第二个 XLSB；固定 No-Go/abort-risk 证据 |
 
 以上清单有意不使用 Xberg/Kreuzberg 自己的 corpus 作为主验收证据。Xberg 的公开 corpus 可以用于升级前的补充
 回归和故障复现，但不能替代独立项目的固定 fixture。
 
-### 9.3 仍需补齐的格式和语言
+### 9.3 最终格式处置
 
-38 个候选满足“至少 30 个”和主要格式，但 P5.7.0 import Gate 还必须补齐：
-
-- 一个许可明确、可长期 vendor 的真实 `.et`，以及一个仅改扩展名的假 `.et`；
-- 每种计划标记为 supported 的扩展至少 2 个正常文件；
-- 至少覆盖 English、简体中文、Japanese、Latin-extended、RTL（Arabic/Hebrew）和 supplementary Unicode；
-- 每个语言/script 标签由实际内容验证，不能只依据文件名；如果候选文件不满足，就替换或增加公开 fixture；
-- 若要宣称 `.xlsb`、`.numbers` 或 `.et` 支持，必须有包含非 ASCII 文本、公式 cached value 和多 sheet 的用例。
-
-SheetJS 的公开测试清单包含 WPS `artifacts/wps/write.et`，可作为 `.et` 来源候选；但只有在能从固定 release 获取
-原始 bytes、逐文件许可和 provenance 都验证后才能 vendor。拿不到这些证据时，`.et` 保持 deviation，不能从网络
-随机找一个办公文件提交。MORE 等多语言 benchmark 即使技术上合适，只要其数据声明限制商用或再分发，也不能
-放入本仓库的长期 fixture。
+40-file corpus 覆盖 English、简体中文、Japanese、Latin-extended、RTL 与 supplementary Unicode；每个 successful
+fixture 都有 semantic oracle 与 exact normalized Markdown digest。XLSB 与 Numbers fixture 保留为真实 No-Go
+证据，ET 因无固定 revision、逐文件可再分发证据的真实样本而明确 No-Go；不从网络随机找办公文件补数，也不把
+改扩展名的 XLS 当作 ET 支持证据。
 
 ### 9.4 manifest 与许可证
 
@@ -697,7 +709,7 @@ no runtime/build-script model or native-library download
 
 ### 10.2 parser contract Gate
 
-- 38-file seed corpus 全量执行，后续只增不以缩减样本掩盖 regression；
+- 当前 40-file seed corpus 全量执行，后续只增不以缩减样本掩盖 regression；
 - supported extension、MIME、magic、大小写与 mismatch matrix；
 - exact same content 的 PDF/DOCX/XLS/XLSX 等价组保留共同关键文本；
 - 多语言 Unicode 不 mojibake、不丢 surrogate、不错误重排 RTL/LTR token；
@@ -787,33 +799,33 @@ deployment/generation/descriptor authorization and stale facade rejection
 TypeScript compile fixture 必须包含 Cloudflare 官方示例的调用形式。任何为了测试通过而要求 tenant 改成
 `env.XBERG`、`parseDocument()`、平台专用 header 或非 Cloudflare response field 的实现都判为 No-Go。
 
-## 11. 实施顺序
+## 11. 已完成实施阶段
 
-### P5.7.0：合同、dependency 与 corpus Gate
+### P5.7.0：合同、dependency 与 corpus Gate（本地完成）
 
 1. 冻结 pinned `Ai`/`ToMarkdownService`/AI Search Items 逐成员 API、Cloudflare rich-format snapshot 和 deviation matrix；
-2. 对 crates.io `xberg = "=1.1.0"` 跑 feature/MSRV/license/offline/four-target/size POC；
+2. 对 crates.io `xberg = "=1.0.14"` 跑 feature/MSRV/license/offline 本机验证；four-target/size 留在 release acceptance；
 3. 验证每种 Xberg format 的 API、security limits 和 deterministic output；
-4. import、审计并提交至少 30 个公开 fixtures；首批目标为上面的 38 个；
-5. 补 `.et`，或写明 No-Go/deviation；
-6. 对代表文件跑 Cloudflare differential，冻结 overload、response/error、options、limits 和格式 admission；
-7. 输出 Go/No-Go；No-Go 时 P5.7 不进入 production schema 或 capability。
+4. import、审计并提交至少 30 个公开 fixtures；当前实际提交 40 个；
+5. `.et`、XLSB、Numbers 写明 No-Go/deviation；
+6. 冻结 overload、response/error、options、limits 和格式 admission；托管 rich-document differential 留在 release acceptance；
+7. 输出本地核心 Go，No-Go 格式不进入 capability。
 
-### P5.7.1：parser child 与协议
+### P5.7.1：parser child 与协议（完成）
 
 - 新建文档解析 owner module/crate，保持现有依赖方向；
 - 实现隐藏 child mode、binary frame、process supervision 和 limits；
 - 实现 normalization、stable errors、metrics 和 content-free diagnostics；
-- 完成 frame fuzz、panic/abort/timeout/orphan Gate。
+- 完成 frame/hostile corpus 与 process ownership focused Gate；完整 abort/OOM/orphan/soak matrix 留在 release acceptance。
 
-### P5.7.2：格式 adapter
+### P5.7.2：格式 adapter（完成）
 
-- 按 PDF → DOCX/ODT → spreadsheet → Numbers 的依赖顺序启用；
+- 按 PDF → DOCX/ODT → spreadsheet 的依赖顺序启用；
 - 每增加一种格式先过对应 fixture/hostile/process matrix，再进入 allowlist；
-- `.et` 只在真实 OLE fixture 证明后增加 adapter；
+- `.et`、XLSB 与 Numbers 维持明确 No-Go；
 - unsupported Xberg 格式继续在 public admission 层拒绝。
 
-### P5.7.3：Cloudflare API facade 与状态机集成
+### P5.7.3：Cloudflare API facade 与状态机集成（完成）
 
 - toolchain 接受标准 `[ai] binding = "AI"`，以 immutable builtin-binding descriptor 注入 `env.AI`；
 - loader facade 实现 `toMarkdown` direct/handle overload、`transform()`、`supported()` 和 pinned error mapping；
@@ -823,10 +835,10 @@ TypeScript compile fixture 必须包含 Cloudflare 官方示例的调用形式�
 - generation reindex、cancel、delete、snapshot/restore 和 GC；
 - stock-workerd Markdown Conversion + item/job/search 全链路与多语言 retrieval oracle。
 
-### P5.7.4：hardening 与验收
+### P5.7.4：本机 hardening 完成；发行资格分离
 
-- 四平台 release qualification 与 binary size evidence；
-- 全 corpus、hostile/fuzz、crash/recovery、fairness、soak、coverage 和 timing-three；
+- 本轮完成全 corpus、hostile、focused recovery、coverage 与用户要求的一轮本机 Gate；
+- 四平台 release qualification、binary size、完整 crash/OOM/orphan/soak 与 timing-three 留在 active release acceptance；
 - 更新 capabilities/deviations、operator metrics/runbook、single-binary、snapshot 和总架构文档；
 - 记录 exact Xberg pin、feature tree、fixture manifest digest、case count 和 Gate report。
 
@@ -847,23 +859,23 @@ TypeScript compile fixture 必须包含 Cloudflare 官方示例的调用形式�
 这些统一归入 P5.8 条件式扩展。每项都需要独立 Go 条件，当前不实现，也不能预留双实现、空配置或未使用的
 production abstraction。
 
-## 13. 完成标准
+## 13. 完成与后续资格边界
 
-P5.7 只有同时满足以下条件才能归档：
+P5.7 本地核心归档需满足：
 
 - stock workerd 中的 `[ai]` binding、`env.AI.toMarkdown` direct/handle overload 和 AI Search Items API 通过
   pinned types、官方示例及 Cloudflare differential；
 - 没有 tenant-visible Xberg API、parser wire 或自定义 response field；
 - Cloudflare rich-format supported/deviation matrix 固定，所有 advertised extension 都有真实 fixture；
-- Xberg exact version/checksum/feature tree、license、unsafe/native 和四平台供应链证据完整；
+- Xberg exact version/checksum/feature tree、license、unsafe/native 与本机供应链证据完整；
 - 至少 30 个 vendor 固定文件、逐文件 SHA-256/provenance/license/oracle 均已提交；
-- parser child crash、abort、timeout、OOM 和 malformed output 不影响 `ocd`/workerd；
-- PDF/DOCX/XLSX/XLSM/XLSB/XLS/ODS/ODT/Numbers 中通过的格式完成产品链、恢复与多语言检索 Gate；
-- `.et` 要么有真实通过证据，要么登记明确 deviation，不允许模糊状态；
+- parser child malformed input/output、timeout 和失败路径不影响 `ocd`/workerd；
+- PDF/DOCX/XLSX/XLSM/XLS/ODS/ODT 完成产品链、恢复与多语言检索 Gate；
+- XLSB、Numbers、`.et` 登记明确 No-Go/deviation，不允许模糊状态；
 - production build/start/parse 无隐式下载，不依赖 Python、Java、LibreOffice、PDFium 或 OCR 模型；
 - unsupported/P5.8 格式 fail closed；
 - capability、deviation、operator、single-binary、snapshot、testing 和总架构文档同步；
-- `docs/implemented/` 中记录实际 revision、fixture manifest digest、case count、coverage、四平台结果和接受限制。
+- `docs/implemented/` 中记录实际 revision、fixture manifest digest、case count、coverage、本机结果和接受限制。
 
-在此之前只能称为 planned/partial，不能用“Xberg 示例能解析一个 PDF”或“30 个文件没有 panic”替代
-Cloudflare-compatible document parsing Platform Go。
+四平台结果、release binary/size/offline package、完整 crash/abort/OOM/orphan/soak、timing-three 与托管
+rich-document differential 留在 active release acceptance，不冒充本轮本机证据。

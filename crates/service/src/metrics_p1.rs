@@ -39,7 +39,7 @@ pub(super) struct P1Metrics {
     disk_reserved_bytes: u64,
     disk_staging_bytes: u64,
     disk_emergency_headroom_bytes: u64,
-    resource_count: [u64; 8],
+    resource_count: [u64; 11],
     quota_reject_total: [u64; 5],
     snapshot_last_bytes: u64,
     snapshot_last_duration: f64,
@@ -66,7 +66,7 @@ impl Default for P1Metrics {
             disk_reserved_bytes: 0,
             disk_staging_bytes: 0,
             disk_emergency_headroom_bytes: 0,
-            resource_count: [0; 8],
+            resource_count: [0; 11],
             quota_reject_total: [0; 5],
             snapshot_last_bytes: 0,
             snapshot_last_duration: 0.0,
@@ -115,7 +115,7 @@ impl MetricsRegistry {
     }
 
     /// Publish fixed aggregate control-authority counts without tenant labels.
-    pub fn set_resource_counts(&self, values: [u64; 8]) {
+    pub fn set_resource_counts(&self, values: [u64; 11]) {
         self.lock().p1.resource_count = values;
     }
 
@@ -355,6 +355,9 @@ pub(super) fn write_p1_metrics(out: &mut String, metrics: &P1Metrics) {
         "r2_buckets",
         "d1_databases",
         "do_namespaces",
+        "vectorize_indexes",
+        "ai_search_namespaces",
+        "ai_search_instances",
     ]
     .into_iter()
     .enumerate()

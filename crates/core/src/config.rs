@@ -9,7 +9,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use url::Url;
 
+mod ai;
 mod scheduler;
+pub use ai::{
+    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiGenerationCapability,
+    AiGenerationModelConfig, AiProviderConfig, AiTokenizer, AiTokenizerArtifactConfig,
+    ResolvedEmbeddingModelContract, ResolvedTokenizerContract,
+};
 pub use scheduler::{SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig};
 
 const DEFAULT_PUBLIC_BIND: &str = "127.0.0.1:8787";
@@ -40,6 +46,10 @@ pub struct PlatformConfig {
     pub response_cache: ResponseCacheConfig,
     /// Native Images binding execution limits.
     pub images: ImagesConfig,
+    /// Isolated document parser and Markdown Conversion limits.
+    pub document_parser: DocumentParserConfig,
+    /// Operator-owned model providers and immutable AI model catalog.
+    pub ai: AiConfig,
     /// Bounded metrics export.
     pub metrics: MetricsConfig,
     /// P1 platform-wide admission, resource-count, snapshot, and recovery limits.
@@ -81,6 +91,8 @@ impl PlatformConfig {
         self.cache.validate()?;
         self.response_cache.validate()?;
         self.images.validate()?;
+        self.document_parser.validate()?;
+        self.ai.validate()?;
         self.metrics.validate()?;
         self.hardening.validate()?;
         if self.hardening.emergency_reserve_bytes >= self.storage.free_space_hard_bytes {
@@ -776,6 +788,109 @@ impl ImagesConfig {
     }
 }
 
+/// Bounded isolated document parser and Markdown Conversion policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct DocumentParserConfig {
+    /// Maximum encoded bytes accepted for one document.
+    pub max_input_bytes: u64,
+    /// Maximum aggregate input or serialized-result bytes for one conversion call.
+    pub max_batch_bytes: u64,
+    /// Maximum documents accepted in one conversion call.
+    pub max_batch_files: u16,
+    /// Maximum normalized Markdown bytes returned for one document.
+    pub max_output_bytes: u64,
+    /// Maximum concurrent parser children for the process.
+    pub max_concurrency: u16,
+    /// Maximum concurrent parser children for one account.
+    pub max_concurrency_per_account: u16,
+    /// Maximum concurrent parser children for one immutable deployment.
+    pub max_concurrency_per_deployment: u16,
+    /// End-to-end parser child deadline in milliseconds.
+    pub request_timeout_ms: u64,
+    /// Maximum virtual address-space bytes available to one parser child.
+    pub max_address_space_bytes: u64,
+    /// Maximum CPU seconds available to one parser child.
+    pub max_cpu_seconds: u64,
+    /// Maximum bytes retained from child standard error for a content-free diagnostic.
+    pub max_stderr_bytes: u64,
+}
+
+impl Default for DocumentParserConfig {
+    fn default() -> Self {
+        Self {
+            max_input_bytes: 4 * 1024 * 1024,
+            max_batch_bytes: 32 * 1024 * 1024,
+            max_batch_files: 16,
+            max_output_bytes: 16 * 1024 * 1024,
+            max_concurrency: 4,
+            max_concurrency_per_account: 2,
+            max_concurrency_per_deployment: 1,
+            request_timeout_ms: 30_000,
+            max_address_space_bytes: 2 * 1024 * 1024 * 1024,
+            max_cpu_seconds: 30,
+            max_stderr_bytes: 64 * 1024,
+        }
+    }
+}
+
+impl DocumentParserConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        for (value, name) in [
+            (self.max_input_bytes, "document_parser.max_input_bytes"),
+            (self.max_batch_bytes, "document_parser.max_batch_bytes"),
+            (
+                u64::from(self.max_batch_files),
+                "document_parser.max_batch_files",
+            ),
+            (self.max_output_bytes, "document_parser.max_output_bytes"),
+            (
+                u64::from(self.max_concurrency),
+                "document_parser.max_concurrency",
+            ),
+            (
+                u64::from(self.max_concurrency_per_account),
+                "document_parser.max_concurrency_per_account",
+            ),
+            (
+                u64::from(self.max_concurrency_per_deployment),
+                "document_parser.max_concurrency_per_deployment",
+            ),
+            (
+                self.request_timeout_ms,
+                "document_parser.request_timeout_ms",
+            ),
+            (
+                self.max_address_space_bytes,
+                "document_parser.max_address_space_bytes",
+            ),
+            (self.max_cpu_seconds, "document_parser.max_cpu_seconds"),
+            (self.max_stderr_bytes, "document_parser.max_stderr_bytes"),
+        ] {
+            require_nonzero(value, name)?;
+        }
+        if self.max_input_bytes > 4 * 1024 * 1024
+            || self.max_batch_bytes > 32 * 1024 * 1024
+            || self.max_batch_bytes < self.max_input_bytes
+            || self.max_batch_files > 16
+            || self.max_output_bytes > 16 * 1024 * 1024
+            || self.max_concurrency > 256
+            || self.max_concurrency_per_account > self.max_concurrency
+            || self.max_concurrency_per_deployment > self.max_concurrency_per_account
+            || self.request_timeout_ms > 30_000
+            || !(64 * 1024 * 1024..=2 * 1024 * 1024 * 1024).contains(&self.max_address_space_bytes)
+            || self.max_cpu_seconds > 30
+            || self.max_stderr_bytes > 64 * 1024
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "document_parser limits are outside the supported bounds",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Bounded metrics export settings.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
@@ -1210,7 +1325,7 @@ pub struct SecretReference {
 }
 
 impl SecretReference {
-    fn validate(&self, field: &'static str) -> Result<(), PlatformError> {
+    pub(super) fn validate(&self, field: &'static str) -> Result<(), PlatformError> {
         validate_secret_pair(self.env.as_deref(), self.file.as_deref(), field)
     }
 }

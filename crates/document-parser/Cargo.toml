@@ -1,0 +1,25 @@
+[package]
+name = "open-compute-document-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[dependencies]
+astral-tl.workspace = true
+cfb.workspace = true
+lopdf.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+unicode-normalization.workspace = true
+url.workspace = true
+xberg.workspace = true
+zip.workspace = true
+
+[lints]
+workspace = true

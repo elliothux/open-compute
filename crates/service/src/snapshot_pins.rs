@@ -56,6 +56,15 @@ impl SnapshotPins {
             Self::Unavailable => Err(pins_unavailable()),
         }
     }
+
+    /// Return whether an authenticated committed manifest retains this exact
+    /// immutable object. An unavailable inventory fails closed.
+    pub(crate) fn contains_object_key(&self, key: &str) -> Result<bool, PlatformError> {
+        match self {
+            Self::Verified { object_keys, .. } => Ok(object_keys.contains(key)),
+            Self::Unavailable => Err(pins_unavailable()),
+        }
+    }
 }
 
 /// Load and authenticate all committed manifests for the stable daemon ownership window.
@@ -112,6 +121,15 @@ mod tests {
             pins.ensure_unpinned("system/backups/kv/other/data.sqlite")
                 .is_ok()
         );
+        assert!(
+            pins.contains_object_key("system/backups/kv/owned/data.sqlite")
+                .unwrap()
+        );
+        assert!(
+            !pins
+                .contains_object_key("system/backups/kv/other/data.sqlite")
+                .unwrap()
+        );
         assert_eq!(
             pins.ensure_unpinned("system/backups/kv/owned/data.sqlite")
                 .unwrap_err()
@@ -121,6 +139,13 @@ mod tests {
         assert_eq!(
             SnapshotPins::Unavailable
                 .extend_artifacts(&mut retained)
+                .unwrap_err()
+                .code(),
+            ErrorCode::ResourceReferenced
+        );
+        assert_eq!(
+            SnapshotPins::Unavailable
+                .contains_object_key("system/backups/kv/owned/data.sqlite")
                 .unwrap_err()
                 .code(),
             ErrorCode::ResourceReferenced

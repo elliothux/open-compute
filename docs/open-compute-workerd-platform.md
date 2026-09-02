@@ -140,10 +140,13 @@ stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平
 
 ```text
 ocd          唯一发行文件、Rust 主进程
-└── workerd        校验并物化内嵌资源后启动的 upstream 子进程
+├── workerd        校验并物化内嵌资源后启动的常驻 upstream 子进程
+└── ocd __document-parser-v1  Markdown Conversion 每文件一个瞬时自派生 child
 ```
 
 `ocd` 启动并监督 `workerd` 子进程，两者通过仅监听 loopback 的内部 HTTP 通信。
+文档 parser child 只读取一个有界 OCDP frame，不打开 listener、不持有平台 authority，结束后立即回收；它隔离
+Xberg 的 panic/abort 和资源故障，但不虚构成不同 OS 用户或完整 kernel sandbox。
 外部只暴露 `ocd` 的 public/control 端口。具体发行、离线启动与资源校验契约见
 [单二进制分发与部署](./references/single-binary.md)；框架构建器和 Node/Bun 不进入生产请求路径。
 

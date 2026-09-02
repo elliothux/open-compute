@@ -1,0 +1,1146 @@
+{
+  "schema_version": 1,
+  "corpus_policy": {
+    "minimum_fixture_count": 30,
+    "network_required_for_tests": false,
+    "git_lfs_allowed": false
+  },
+  "fixtures": [
+    {
+      "id": "lc4j-docx-blank",
+      "path": "corpus/langchain4j/docx/blank-file.docx",
+      "sha256": "a4f456cdb4e21f1aaf594f69f8fa67eedff2a53fe9c6ed194f666c002f8f8799",
+      "size_bytes": 9752,
+      "format": "docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "languages": [
+        "und"
+      ],
+      "scripts": [
+        "Unknown"
+      ],
+      "expected_status": "DOCUMENT_EMPTY",
+      "oracle": "expected/lc4j-docx-blank.json",
+      "source_repository": "https://github.com/langchain4j/langchain4j",
+      "source_revision": "b0b3b21e5f5679e86519ef3d979b7fbea0769f13",
+      "source_path": "document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/blank-file.docx",
+      "source_git_blob_sha1": "f211f65f95099c8368af67b966dec17d4891216b",
+      "source_url": "https://raw.githubusercontent.com/langchain4j/langchain4j/b0b3b21e5f5679e86519ef3d979b7fbea0769f13/document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/blank-file.docx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/langchain4j-LICENSE.txt",
+      "attribution": "licenses/langchain4j-LICENSE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "lc4j-docx-equivalent",
+      "path": "corpus/langchain4j/docx/test-file.docx",
+      "sha256": "f7fecf3b11d169b5646c4940d4f0d66d685d5df885368f0d2f79085ddb80bd60",
+      "size_bytes": 12166,
+      "format": "docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/lc4j-docx-equivalent.json",
+      "source_repository": "https://github.com/langchain4j/langchain4j",
+      "source_revision": "b0b3b21e5f5679e86519ef3d979b7fbea0769f13",
+      "source_path": "document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/test-file.docx",
+      "source_git_blob_sha1": "57f47fd064da4e4eba31a1def3c5a3cdef41802e",
+      "source_url": "https://raw.githubusercontent.com/langchain4j/langchain4j/b0b3b21e5f5679e86519ef3d979b7fbea0769f13/document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/test-file.docx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/langchain4j-LICENSE.txt",
+      "attribution": "licenses/langchain4j-LICENSE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "lc4j-pdf-equivalent",
+      "path": "corpus/langchain4j/pdf/test-file.pdf",
+      "sha256": "5484d12e72b48dbd60e5c578d2485b74aff996daaa8a8dcebe0af03731f379e7",
+      "size_bytes": 22958,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/lc4j-pdf-equivalent.json",
+      "source_repository": "https://github.com/langchain4j/langchain4j",
+      "source_revision": "b0b3b21e5f5679e86519ef3d979b7fbea0769f13",
+      "source_path": "document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/test-file.pdf",
+      "source_git_blob_sha1": "920f1fceed533d54e2908d0f71f25b79eda5529d",
+      "source_url": "https://raw.githubusercontent.com/langchain4j/langchain4j/b0b3b21e5f5679e86519ef3d979b7fbea0769f13/document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/test-file.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/langchain4j-LICENSE.txt",
+      "attribution": "licenses/langchain4j-LICENSE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "lc4j-xls-equivalent",
+      "path": "corpus/langchain4j/xls/test-file.xls",
+      "sha256": "1700924da5772a99830c009242a87b14e899337bed5724fb387624726ad887da",
+      "size_bytes": 26112,
+      "format": "xls",
+      "mime": "application/vnd.ms-excel",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/lc4j-xls-equivalent.json",
+      "source_repository": "https://github.com/langchain4j/langchain4j",
+      "source_revision": "b0b3b21e5f5679e86519ef3d979b7fbea0769f13",
+      "source_path": "document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/test-file.xls",
+      "source_git_blob_sha1": "49847c0f9ff9cff2432c7b9ee9a6c2495a05add1",
+      "source_url": "https://raw.githubusercontent.com/langchain4j/langchain4j/b0b3b21e5f5679e86519ef3d979b7fbea0769f13/document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/test-file.xls",
+      "license": "Apache-2.0",
+      "license_file": "licenses/langchain4j-LICENSE.txt",
+      "attribution": "licenses/langchain4j-LICENSE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "lc4j-xlsx-blank",
+      "path": "corpus/langchain4j/xlsx/blank-file.xlsx",
+      "sha256": "cdf46ecf064c3ef43a5a19e67682365df82a0a8fe25eb6f24e55dc2905262b86",
+      "size_bytes": 8849,
+      "format": "xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "languages": [
+        "und"
+      ],
+      "scripts": [
+        "Unknown"
+      ],
+      "expected_status": "DOCUMENT_EMPTY",
+      "oracle": "expected/lc4j-xlsx-blank.json",
+      "source_repository": "https://github.com/langchain4j/langchain4j",
+      "source_revision": "b0b3b21e5f5679e86519ef3d979b7fbea0769f13",
+      "source_path": "document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/blank-file.xlsx",
+      "source_git_blob_sha1": "998e5c76477d592ab5fb2f31e6cde6729a3af846",
+      "source_url": "https://raw.githubusercontent.com/langchain4j/langchain4j/b0b3b21e5f5679e86519ef3d979b7fbea0769f13/document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/blank-file.xlsx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/langchain4j-LICENSE.txt",
+      "attribution": "licenses/langchain4j-LICENSE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "lc4j-xlsx-equivalent",
+      "path": "corpus/langchain4j/xlsx/test-file.xlsx",
+      "sha256": "817481d7affabe3e5a98d9409ab608325d6667a605e5290b8be6b876eb04dbf3",
+      "size_bytes": 9524,
+      "format": "xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/lc4j-xlsx-equivalent.json",
+      "source_repository": "https://github.com/langchain4j/langchain4j",
+      "source_revision": "b0b3b21e5f5679e86519ef3d979b7fbea0769f13",
+      "source_path": "document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/test-file.xlsx",
+      "source_git_blob_sha1": "a2ba64ddd1b4cd1e3d8d301eaedc4f1b1e1b1dfe",
+      "source_url": "https://raw.githubusercontent.com/langchain4j/langchain4j/b0b3b21e5f5679e86519ef3d979b7fbea0769f13/document-parsers/langchain4j-document-parser-apache-tika/src/test/resources/test-file.xlsx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/langchain4j-LICENSE.txt",
+      "attribution": "licenses/langchain4j-LICENSE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "pdfbox-pdf-bidi",
+      "path": "corpus/apache-pdfbox/pdf/BidiSample.pdf",
+      "sha256": "dd4947a7b825c2827729065cfff07115f0742d2c7bdcb048628097c62d1acbb3",
+      "size_bytes": 21130,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "ar",
+        "en"
+      ],
+      "scripts": [
+        "Arabic",
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/pdfbox-pdf-bidi.json",
+      "source_repository": "https://github.com/apache/pdfbox",
+      "source_revision": "44ae1f5a0371c37128b20fac2beecdfd0c93b503",
+      "source_path": "pdfbox/src/test/resources/org/apache/pdfbox/text/BidiSample.pdf",
+      "source_git_blob_sha1": "3e56418667f929c25cb28b7e6ee8912631f47198",
+      "source_url": "https://raw.githubusercontent.com/apache/pdfbox/44ae1f5a0371c37128b20fac2beecdfd0c93b503/pdfbox/src/test/resources/org/apache/pdfbox/text/BidiSample.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-pdfbox-LICENSE.txt",
+      "attribution": "licenses/apache-pdfbox-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "pdfbox-pdf-supplementary-diacritic",
+      "path": "corpus/apache-pdfbox/pdf/PDFBOX-5747-unicode-surrogate-with-diacritic-reduced.pdf",
+      "sha256": "4e822ba5255923364baf5fdc14141a6cb6b860a5f4f86261043e7e08c7fce382",
+      "size_bytes": 2019,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "und"
+      ],
+      "scripts": [
+        "Common"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/pdfbox-pdf-supplementary-diacritic.json",
+      "source_repository": "https://github.com/apache/pdfbox",
+      "source_revision": "44ae1f5a0371c37128b20fac2beecdfd0c93b503",
+      "source_path": "pdfbox/src/test/resources/input/PDFBOX-5747-unicode-surrogate-with-diacritic-reduced.pdf",
+      "source_git_blob_sha1": "42012c9e74d33e76b9d47ff505f34a407a822d98",
+      "source_url": "https://raw.githubusercontent.com/apache/pdfbox/44ae1f5a0371c37128b20fac2beecdfd0c93b503/pdfbox/src/test/resources/input/PDFBOX-5747-unicode-surrogate-with-diacritic-reduced.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-pdfbox-LICENSE.txt",
+      "attribution": "licenses/apache-pdfbox-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "poi-docx-header-footer-unicode",
+      "path": "corpus/apache-poi/docx/HeaderFooterUnicode.docx",
+      "sha256": "ec439ac0643294e1e2961b381983304e044444f3a8f0dc465a98adf9ebee0e67",
+      "size_bytes": 15079,
+      "format": "docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "languages": [
+        "en",
+        "fr"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/poi-docx-header-footer-unicode.json",
+      "source_repository": "https://github.com/apache/poi",
+      "source_revision": "6d94ace657249b487959dd654ca9d9b1c6014e4e",
+      "source_path": "test-data/document/HeaderFooterUnicode.docx",
+      "source_git_blob_sha1": "643967c5e5cbbeee83aac70db610cbe0d93c0b75",
+      "source_url": "https://raw.githubusercontent.com/apache/poi/6d94ace657249b487959dd654ca9d9b1c6014e4e/test-data/document/HeaderFooterUnicode.docx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-poi-LICENSE.txt",
+      "attribution": "licenses/apache-poi-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "poi-xls-chinese-provinces",
+      "path": "corpus/apache-poi/xls/chinese-provinces.xls",
+      "sha256": "0c4f1a10e9586ecda6b64a1f435ff8d8cd0a57d7e430e2f264a0d44e4c66d711",
+      "size_bytes": 4096,
+      "format": "xls",
+      "mime": "application/vnd.ms-excel",
+      "languages": [
+        "en",
+        "zh-Hans"
+      ],
+      "scripts": [
+        "Latin",
+        "Han"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/poi-xls-chinese-provinces.json",
+      "source_repository": "https://github.com/apache/poi",
+      "source_revision": "6d94ace657249b487959dd654ca9d9b1c6014e4e",
+      "source_path": "test-data/spreadsheet/chinese-provinces.xls",
+      "source_git_blob_sha1": "59e8094225e5950c0121f4f0d834131b48290e3c",
+      "source_url": "https://raw.githubusercontent.com/apache/poi/6d94ace657249b487959dd654ca9d9b1c6014e4e/test-data/spreadsheet/chinese-provinces.xls",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-poi-LICENSE.txt",
+      "attribution": "licenses/apache-poi-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "poi-xls-unicode-name-record",
+      "path": "corpus/apache-poi/xls/unicodeNameRecord.xls",
+      "sha256": "765b85f757704b89edfc6aa476c202685173a90a2b6a6b0d74519c924b4c5624",
+      "size_bytes": 13824,
+      "format": "xls",
+      "mime": "application/vnd.ms-excel",
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "scripts": [
+        "Latin",
+        "Han",
+        "Hiragana"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/poi-xls-unicode-name-record.json",
+      "source_repository": "https://github.com/apache/poi",
+      "source_revision": "6d94ace657249b487959dd654ca9d9b1c6014e4e",
+      "source_path": "test-data/spreadsheet/unicodeNameRecord.xls",
+      "source_git_blob_sha1": "d1d246062c1475cca49e8682c66a8de630ae9497",
+      "source_url": "https://raw.githubusercontent.com/apache/poi/6d94ace657249b487959dd654ca9d9b1c6014e4e/test-data/spreadsheet/unicodeNameRecord.xls",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-poi-LICENSE.txt",
+      "attribution": "licenses/apache-poi-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "poi-xlsm-simple-macro",
+      "path": "corpus/apache-poi/xlsm/SimpleMacro.xlsm",
+      "format": "xlsm",
+      "mime": "application/vnd.ms-excel.sheet.macroenabled.12",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/poi-xlsm-simple-macro.json",
+      "source_repository": "https://github.com/apache/poi",
+      "source_revision": "6d94ace657249b487959dd654ca9d9b1c6014e4e",
+      "source_path": "test-data/spreadsheet/SimpleMacro.xlsm",
+      "license_file": "licenses/apache-poi-LICENSE.txt",
+      "attribution": "licenses/apache-poi-NOTICE.txt",
+      "sha256": "f76c986f4ebc25c2cc57c088b2511a1269f4bd61d6223a2ab58db351da348ba6",
+      "size_bytes": 13796,
+      "source_url": "https://raw.githubusercontent.com/apache/poi/6d94ace657249b487959dd654ca9d9b1c6014e4e/test-data/spreadsheet/SimpleMacro.xlsm",
+      "source_git_blob_sha1": "ec64525bf8fa45bb56e9b50dce90189590323d1a",
+      "license": "Apache-2.0",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "poi-xlsx-unicode-sheet-name",
+      "path": "corpus/apache-poi/xlsx/unicodeSheetName.xlsx",
+      "sha256": "2d7414dd71e5b3e33602c19ad454f072771ea164d7477a3b3b4cddf6c622dc67",
+      "size_bytes": 8924,
+      "format": "xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "languages": [
+        "und"
+      ],
+      "scripts": [
+        "Latin",
+        "Common"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/poi-xlsx-unicode-sheet-name.json",
+      "source_repository": "https://github.com/apache/poi",
+      "source_revision": "6d94ace657249b487959dd654ca9d9b1c6014e4e",
+      "source_path": "test-data/spreadsheet/unicodeSheetName.xlsx",
+      "source_git_blob_sha1": "8c0fa8c4d15fa1e7b62bbec3c0c402a90c7ac387",
+      "source_url": "https://raw.githubusercontent.com/apache/poi/6d94ace657249b487959dd654ca9d9b1c6014e4e/test-data/spreadsheet/unicodeSheetName.xlsx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-poi-LICENSE.txt",
+      "attribution": "licenses/apache-poi-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-docx-basic",
+      "path": "corpus/apache-tika/docx/testWORD.docx",
+      "sha256": "67797f5691cb5346201f1c40000a959f9f08d05d0b4493b4291e8d5f16e81e65",
+      "size_bytes": 13436,
+      "format": "docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-docx-basic.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD.docx",
+      "source_git_blob_sha1": "5ef040e98817c7e216c1b736e217619348d544d4",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD.docx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-docx-features",
+      "path": "corpus/apache-tika/docx/testWORD_features.docx",
+      "sha256": "b0920ec3e38521c02ca75ef0b1ed1b2b19fabcd701b75366e89b818228094e25",
+      "size_bytes": 8169,
+      "format": "docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "languages": [
+        "la",
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-docx-features.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD_features.docx",
+      "source_git_blob_sha1": "0cc401f9a295f80e070e4248ff4c4345a11cae74",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD_features.docx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-docx-numbered-list",
+      "path": "corpus/apache-tika/docx/testWORD_numbered_list.docx",
+      "sha256": "3e500410c6ce4f56f871bd55beff2476152fc3d0b7049cf5a93781ae7946ff5b",
+      "size_bytes": 24696,
+      "format": "docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-docx-numbered-list.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD_numbered_list.docx",
+      "source_git_blob_sha1": "51d31de55f0b49f430b878e23c804a9812b1b1fc",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD_numbered_list.docx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-docx-phonetic",
+      "path": "corpus/apache-tika/docx/testWORD_phonetic.docx",
+      "sha256": "abda850b3685027eef32a4c583b2b5f7f20f243026d8c453cdb3315348ed6ff0",
+      "size_bytes": 12523,
+      "format": "docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "languages": [
+        "ja"
+      ],
+      "scripts": [
+        "Han",
+        "Hiragana"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-docx-phonetic.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD_phonetic.docx",
+      "source_git_blob_sha1": "6fc1afe45cfc6615874a5b56191a055751954b08",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD_phonetic.docx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-docx-truncated",
+      "path": "corpus/apache-tika/docx/testWORD_truncated.docx",
+      "sha256": "8bb91125cc08ec4a5a771e86ff20cfd0646998b2c1da4361e0241036816a471f",
+      "size_bytes": 763,
+      "format": "docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "languages": [
+        "und"
+      ],
+      "scripts": [
+        "Unknown"
+      ],
+      "expected_status": "DOCUMENT_INVALID",
+      "oracle": "expected/tika-docx-truncated.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD_truncated.docx",
+      "source_git_blob_sha1": "ebe5e1a5ce7485aa415704d3dac1132b05ac5ca8",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testWORD_truncated.docx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-numbers-basic",
+      "path": "corpus/apache-tika/numbers/testNumbers.numbers",
+      "sha256": "6fb57a2fc3cfc532713ac3e58d2b7e9de93342f7d84cf76599901281a26d56cc",
+      "size_bytes": 134571,
+      "format": "numbers",
+      "mime": "application/vnd.apple.numbers",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "UNSUPPORTED_CONTENT_TYPE",
+      "oracle": "expected/tika-numbers-basic.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-apple-module/src/test/resources/test-documents/testNumbers.numbers",
+      "source_git_blob_sha1": "51360e01f0ecc1e5685114f98c51be37d7ab8244",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-apple-module/src/test/resources/test-documents/testNumbers.numbers",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-numbers-table-headers",
+      "path": "corpus/apache-tika/numbers/tableHeaders.numbers",
+      "sha256": "98b7abc1a129c66550c12ff02fcbe9af1058de36b392cceed9fc1989510c5650",
+      "size_bytes": 89554,
+      "format": "numbers",
+      "mime": "application/vnd.apple.numbers",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "UNSUPPORTED_CONTENT_TYPE",
+      "oracle": "expected/tika-numbers-table-headers.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-apple-module/src/test/resources/test-documents/tableHeaders.numbers",
+      "source_git_blob_sha1": "8ed0b9f1bb03ca3340b6bd58d5b9d7e8253706d7",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-apple-module/src/test/resources/test-documents/tableHeaders.numbers",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-ods-columnar",
+      "path": "corpus/apache-tika/ods/test-columnar.ods",
+      "sha256": "12f39e34411b0d760a3e3db962ca669f621309d289cca54c6634cd5b12c1a8b1",
+      "size_bytes": 12854,
+      "format": "ods",
+      "mime": "application/vnd.oasis.opendocument.spreadsheet",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-ods-columnar.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-integration-tests/src/test/resources/test-documents/test-columnar.ods",
+      "source_git_blob_sha1": "067ca18e1d2d2e7040b8bd1faa9f242372571f9d",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-integration-tests/src/test/resources/test-documents/test-columnar.ods",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-ods-footer",
+      "path": "corpus/apache-tika/ods/testFooter.ods",
+      "sha256": "4a145b8d935ca91506a7f8a65c3df4e8ff655261337cedbeb4ae2494ec8fe3c3",
+      "size_bytes": 7207,
+      "format": "ods",
+      "mime": "application/vnd.oasis.opendocument.spreadsheet",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-ods-footer.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-miscoffice-module/src/test/resources/test-documents/testFooter.ods",
+      "source_git_blob_sha1": "fddac2cc625cd20839908d16124c5126803ee040",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-miscoffice-module/src/test/resources/test-documents/testFooter.ods",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-odt-embedded",
+      "path": "corpus/apache-tika/odt/testODTEmbedded.odt",
+      "sha256": "11cc856e16049cf46b5a036cb724c0ec1b397649529ced727fcc5dbd65f401df",
+      "size_bytes": 9936,
+      "format": "odt",
+      "mime": "application/vnd.oasis.opendocument.text",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-odt-embedded.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-miscoffice-module/src/test/resources/test-documents/testODTEmbedded.odt",
+      "source_git_blob_sha1": "b74ad72ef067d4e593c91f7dc10c0e328329475f",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-miscoffice-module/src/test/resources/test-documents/testODTEmbedded.odt",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-odt-footer",
+      "path": "corpus/apache-tika/odt/testFooter.odt",
+      "sha256": "bb7618380607111c7181867aaf6e9568f490ba0a62a2308e78f120a268d96188",
+      "size_bytes": 8381,
+      "format": "odt",
+      "mime": "application/vnd.oasis.opendocument.text",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-odt-footer.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-miscoffice-module/src/test/resources/test-documents/testFooter.odt",
+      "source_git_blob_sha1": "5dd41746306141fe5ee70e65caaca2c91f9f04ff",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-miscoffice-module/src/test/resources/test-documents/testFooter.odt",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-pdf-basic",
+      "path": "corpus/apache-tika/pdf/testPDF.pdf",
+      "sha256": "8035bc3f748d8b97b8a9978bd812197bf40cf2b294a7e9b30e39d7167ddc720e",
+      "size_bytes": 34824,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-pdf-basic.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDF.pdf",
+      "source_git_blob_sha1": "1f1bcff6fe90df04656b43f98640d863a65f8660",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDF.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-pdf-ocr",
+      "path": "corpus/apache-tika/pdf/testOCR.pdf",
+      "sha256": "ca4e1851095ea410a7c5dbbfa064fef7c4b36da3ef0d49bddf29619e88b301de",
+      "size_bytes": 41936,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "DOCUMENT_OCR_REQUIRED",
+      "oracle": "expected/tika-pdf-ocr.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testOCR.pdf",
+      "source_git_blob_sha1": "531e08a06d65f1822af82e3db40ba7ebcdee015c",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testOCR.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-pdf-optional-hyphen",
+      "path": "corpus/apache-tika/pdf/testOptionalHyphen.pdf",
+      "sha256": "336be0fb3c30d93a6f625c120f7e00b9419bccc2cc09a74a222f2c3f5869af7c",
+      "size_bytes": 44954,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-pdf-optional-hyphen.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testOptionalHyphen.pdf",
+      "source_git_blob_sha1": "68c0099ba65096eb696e07b98b402c93e5611471",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testOptionalHyphen.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-pdf-overlapping-text",
+      "path": "corpus/apache-tika/pdf/testOverlappingText.pdf",
+      "sha256": "906bfbc390a95b09417abf33c6ef2bf7c9190cbf9787996bcfa5c0bc17b8bde1",
+      "size_bytes": 899,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-pdf-overlapping-text.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testOverlappingText.pdf",
+      "source_git_blob_sha1": "282a1abfb6310f01e0679cf27d8a29a93bf8431e",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testOverlappingText.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-pdf-protected",
+      "path": "corpus/apache-tika/pdf/testPDF_protected.pdf",
+      "sha256": "ff4f3a11b2ae08e8a38cd026317a4aac84cd489ebc5a4015f51503c99711f729",
+      "size_bytes": 506064,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "DOCUMENT_ENCRYPTED",
+      "oracle": "expected/tika-pdf-protected.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDF_protected.pdf",
+      "source_git_blob_sha1": "371a30712534b3b3216be898c7beffe9c0024e52",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDF_protected.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-pdf-rotated",
+      "path": "corpus/apache-tika/pdf/testPDF_rotated.pdf",
+      "sha256": "24c68daac94b1f935cf1b1c08bb64f66098e596046ac62fea49e904a7551894e",
+      "size_bytes": 38309,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-pdf-rotated.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDF_rotated.pdf",
+      "source_git_blob_sha1": "9ca438c321160c759546b16502f312cf63fabca4",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDF_rotated.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-pdf-triple-lang-title",
+      "path": "corpus/apache-tika/pdf/testPDFTripleLangTitle.pdf",
+      "sha256": "c3c1a90cf6745f1a01f91b329373bb147d766bda43cae32116cea9ff34f6ac97",
+      "size_bytes": 1719,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-pdf-triple-lang-title.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDFTripleLangTitle.pdf",
+      "source_git_blob_sha1": "4b50a73c2861f8675db08b6ea3022c019c6f9499",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDFTripleLangTitle.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-pdf-various",
+      "path": "corpus/apache-tika/pdf/testPDFVarious.pdf",
+      "sha256": "704c9a0c82e239286dff72aab34bab968dd9ba0083e407ec78960a5fb016e833",
+      "size_bytes": 205491,
+      "format": "pdf",
+      "mime": "application/pdf",
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "scripts": [
+        "Latin",
+        "Han",
+        "Katakana"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-pdf-various.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDFVarious.pdf",
+      "source_git_blob_sha1": "b18e2a7d9278fff7051ccf8a5c77064321cf846e",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-pdf-module/src/test/resources/test-documents/testPDFVarious.pdf",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-xls-basic",
+      "path": "corpus/apache-tika/xls/testEXCEL.xls",
+      "sha256": "8f279fb44b131070347d82320c5e7900b0e4d77ead38371b1f26ce95092b211b",
+      "size_bytes": 13824,
+      "format": "xls",
+      "mime": "application/vnd.ms-excel",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-xls-basic.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL.xls",
+      "source_git_blob_sha1": "347d8a662fa8c565a9932531e52df81cf55823e7",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL.xls",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-xlsb-basic",
+      "path": "corpus/apache-tika/xlsb/testEXCEL.xlsb",
+      "sha256": "41b0c82bfa682f968d69e05e23137232d6c89ea4f24439786f0b779be319929b",
+      "size_bytes": 9161,
+      "format": "xlsb",
+      "mime": "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "UNSUPPORTED_CONTENT_TYPE",
+      "oracle": "expected/tika-xlsb-basic.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL.xlsb",
+      "source_git_blob_sha1": "78fdf269f32a81029cd8b9bde816cf155b23858b",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL.xlsb",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-xlsb-columnar",
+      "path": "corpus/apache-tika/xlsb/test-columnar.xlsb",
+      "format": "xlsb",
+      "mime": "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "UNSUPPORTED_CONTENT_TYPE",
+      "oracle": "expected/tika-xlsb-columnar.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/test-columnar.xlsb",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "sha256": "653e17a2a9e77eda56aaeadcd164ed1eae0ae8897dbefecfb8d96d97878af74e",
+      "size_bytes": 9691,
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/test-columnar.xlsb",
+      "source_git_blob_sha1": "0ce5139010b1a22bc7e1406603e7a3276383bbf5",
+      "license": "Apache-2.0",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-xlsm-macro",
+      "path": "corpus/apache-tika/xlsm/testEXCEL_macro.xlsm",
+      "sha256": "4a82d32be9bbe6cbc0e232727668f2344edb249c8c0bcd8d3f3e1e16ffddd859",
+      "size_bytes": 14561,
+      "format": "xlsm",
+      "mime": "application/vnd.ms-excel.sheet.macroenabled.12",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-xlsm-macro.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL_macro.xlsm",
+      "source_git_blob_sha1": "d21452b047644539d15168a1a91ad869d266b940",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL_macro.xlsm",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-xlsx-basic",
+      "path": "corpus/apache-tika/xlsx/testEXCEL.xlsx",
+      "sha256": "960ba8f1cfa5838b563c369d281babe4ac0219100e00cecc93147fad22c549c3",
+      "size_bytes": 9453,
+      "format": "xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-xlsx-basic.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL.xlsx",
+      "source_git_blob_sha1": "8d5169f84108cc4af5dd66e2c0957eb52e6622e6",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL.xlsx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-xlsx-charts",
+      "path": "corpus/apache-tika/xlsx/testEXCEL_charts.xlsx",
+      "sha256": "2c1a8bb222e6f4b03e4a6593c654151143231993d6fcda27d812bcf1a3fb90cd",
+      "size_bytes": 31677,
+      "format": "xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-xlsx-charts.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL_charts.xlsx",
+      "source_git_blob_sha1": "2c5d0df5d6e46418223e4022a22c931df394bbab",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL_charts.xlsx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-xlsx-formats",
+      "path": "corpus/apache-tika/xlsx/testEXCEL-formats.xlsx",
+      "sha256": "c56368f9a09166eabe373042afefb651341b4d2f9e1fe779148218f93190a2d2",
+      "size_bytes": 8303,
+      "format": "xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "languages": [
+        "en"
+      ],
+      "scripts": [
+        "Latin"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-xlsx-formats.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL-formats.xlsx",
+      "source_git_blob_sha1": "d4e7bce8ed58354e322b2166689ee536d8c0325c",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL-formats.xlsx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    },
+    {
+      "id": "tika-xlsx-phonetic",
+      "path": "corpus/apache-tika/xlsx/testEXCEL_phonetic.xlsx",
+      "sha256": "3a68ed7bcd764b4f38ab6a66d5385a644b84de8572b00aefb4316b43a274882b",
+      "size_bytes": 10210,
+      "format": "xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "languages": [
+        "ja"
+      ],
+      "scripts": [
+        "Han",
+        "Hiragana",
+        "Katakana"
+      ],
+      "expected_status": "ok",
+      "oracle": "expected/tika-xlsx-phonetic.json",
+      "source_repository": "https://github.com/apache/tika",
+      "source_revision": "1e3d8f888380d8b302ce4787bc7d5fbb513f1867",
+      "source_path": "tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL_phonetic.xlsx",
+      "source_git_blob_sha1": "ba56dc610e29dd3e189871e5f4e29866a4366bee",
+      "source_url": "https://raw.githubusercontent.com/apache/tika/1e3d8f888380d8b302ce4787bc7d5fbb513f1867/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testEXCEL_phonetic.xlsx",
+      "license": "Apache-2.0",
+      "license_file": "licenses/apache-tika-LICENSE.txt",
+      "attribution": "licenses/apache-tika-NOTICE.txt",
+      "license_audit": {
+        "status": "reviewed",
+        "evidence": "Fixed-revision Git tree contains no fixture-local LICENSE, NOTICE, or README terms for this path; retained project license/notice governs this repository-owned test asset."
+      }
+    }
+  ]
+}

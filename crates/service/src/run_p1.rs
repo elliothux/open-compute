@@ -123,6 +123,9 @@ pub(crate) fn refresh_metrics(
         inventory.r2_buckets,
         inventory.d1_databases,
         inventory.do_namespaces,
+        inventory.vectorize_indexes,
+        inventory.ai_search_namespaces,
+        inventory.ai_search_instances,
     ]);
     Ok(())
 }

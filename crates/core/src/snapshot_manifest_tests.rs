@@ -15,6 +15,8 @@ fn release() -> PlatformReleaseIdentityV1 {
         scheduler_schema_version: 1,
         kv_schema_version: 1,
         d1_schema_version: 1,
+        vectorize_schema_version: 1,
+        ai_search_schema_version: 1,
         snapshot_format_version: 1,
     }
 }
@@ -32,15 +34,19 @@ fn manifest() -> PlatformSnapshotManifestV1 {
             ("d1".to_owned(), 1),
             ("kv".to_owned(), 1),
             ("scheduler".to_owned(), 1),
+            ("vectorize".to_owned(), 1),
+            ("ai_search".to_owned(), 1),
         ]),
         master_key_fingerprint: "4".repeat(64),
         s3_authority_fingerprint: "5".repeat(64),
         r2_prefix_fingerprint: "6".repeat(64),
         config_policy_sha256: "b".repeat(64),
         excluded_local_state: vec![
+            "ann_cache".to_owned(),
             "images_sessions".to_owned(),
             "response_cache".to_owned(),
             "runtime_cache".to_owned(),
+            "vector_search_cache".to_owned(),
         ],
         immutable_references: vec![SnapshotImmutableReferenceV1 {
             role: "deployment_artifact".to_owned(),
@@ -96,6 +102,8 @@ fn manifest_paths_caps_and_uniqueness_are_strict() {
         "scheduler.sqlite",
         "kv/a/b/data.sqlite",
         "d1/a/b/data.sqlite",
+        "vectorize/a/b/data.sqlite",
+        "ai-search/a/b/data.sqlite",
         "do/workerd/x",
     ] {
         assert!(valid_restore_path(path), "rejected {path}");
@@ -108,7 +116,7 @@ fn manifest_paths_caps_and_uniqueness_are_strict() {
         duplicate.validate(10, 100, 100).unwrap_err().code(),
         ErrorCode::SnapshotInvalid
     );
-    for owner in ["control", "scheduler", "kv", "d1"] {
+    for owner in ["control", "scheduler", "kv", "d1", "vectorize", "ai_search"] {
         let mut bad_schema = value.clone();
         *bad_schema.source_schemas.get_mut(owner).unwrap() += 1;
         assert!(bad_schema.validate(10, 100, 100).is_err(), "{owner}");

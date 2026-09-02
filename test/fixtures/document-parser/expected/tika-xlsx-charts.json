@@ -1,0 +1,27 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "January",
+    "August",
+    "is a panda"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 7,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": [
+      "Sheet1"
+    ]
+  },
+  "retrieval_queries": [
+    {
+      "query": "January",
+      "expected_fixture_id": "tika-xlsx-charts"
+    }
+  ],
+  "review_notes": "Reviewed from Xberg table output: August and is a panda occupy adjacent cells/rows rather than one continuous phrase; chart objects remain inert."
+}

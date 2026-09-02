@@ -27,6 +27,9 @@ function makeBinding(ctx: BindingContext, descriptor: RuntimeBinding, deployment
     case "kv_namespace": return ctx.exports.KVNamespace({ props });
     case "r2_bucket": return ctx.exports.R2Transport({ props });
     case "d1_database": return ctx.exports.D1Transport({ props });
+    case "vectorize_index": return ctx.exports.VectorizeTransport({ props });
+    case "ai_search_namespace": case "ai_search_instance":
+      return ctx.exports.AiSearchTransport({ props });
     case "do_namespace": {
       if (typeof descriptor.namespacePrefix !== "string" || !/^[0-9a-f]{16}$/.test(descriptor.namespacePrefix)
           || typeof descriptor.namespaceNameKey !== "string") throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
@@ -97,6 +100,13 @@ export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext, deploy
       const { name, descriptorSha256 } = snapshot.imagesBinding;
       if (Object.prototype.hasOwnProperty.call(env, name)) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
       env[name] = ctx.exports.ImageTransport({ props: Object.freeze({
+        accountId, workerId, deploymentId, descriptorSha256,
+      }) });
+    }
+    if (snapshot.aiBinding) {
+      const { name, descriptorSha256 } = snapshot.aiBinding;
+      if (Object.prototype.hasOwnProperty.call(env, name)) throw bindingError("DEPLOYMENT_INVARIANT_VIOLATION");
+      env[name] = ctx.exports.AiTransport({ props: Object.freeze({
         accountId, workerId, deploymentId, descriptorSha256,
       }) });
     }

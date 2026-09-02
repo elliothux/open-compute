@@ -59,6 +59,12 @@ pub struct ControlInventory {
     pub d1_databases: u64,
     /// Non-tombstoned Durable Object namespaces.
     pub do_namespaces: u64,
+    /// Non-tombstoned Vectorize indexes.
+    pub vectorize_indexes: u64,
+    /// Non-tombstoned AI Search namespaces.
+    pub ai_search_namespaces: u64,
+    /// Non-tombstoned AI Search instances.
+    pub ai_search_instances: u64,
     /// Non-tombstoned Queues.
     pub queues: u64,
     /// Queues still creating their scheduler projection.
@@ -215,6 +221,9 @@ pub fn inspect_control_inventory(db: &ControlDb) -> Result<ControlInventory, Pla
             r2_buckets: query_resource_count(connection, "r2_bucket")?,
             d1_databases: query_resource_count(connection, "d1_database")?,
             do_namespaces: query_resource_count(connection, "do_namespace")?,
+            vectorize_indexes: query_resource_count(connection, "vectorize_index")?,
+            ai_search_namespaces: query_resource_count(connection, "ai_search_namespace")?,
+            ai_search_instances: query_resource_count(connection, "ai_search_instance")?,
             queues: query_count(
                 connection,
                 "SELECT COUNT(*) FROM queues WHERE state != 'tombstoned'",

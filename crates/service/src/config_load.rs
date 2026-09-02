@@ -1,5 +1,6 @@
 //! Secure absolute-path config load with no-follow semantics.
 
+use crate::ai_tokenizer::AiTokenizerRegistry;
 use open_compute_core::config::validate_bootstrap_config_path;
 use open_compute_core::{ErrorCode, PlatformConfig, PlatformError};
 use rustix::fs::{Mode, OFlags};
@@ -56,6 +57,7 @@ pub fn load_platform_config(path: &Path) -> Result<LoadedConfig, PlatformError> 
         )
     })?;
     let config = PlatformConfig::from_toml_str(text)?;
+    let _ = AiTokenizerRegistry::load(&config.ai)?;
     Ok(LoadedConfig {
         path: path.to_path_buf(),
         config,

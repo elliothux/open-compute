@@ -117,6 +117,7 @@ TIMING = {
     'p3-cache-images': (
         'p3_cache_images_real_runtime_semantics_and_lifecycle_matrix',
     ),
+    'p5-search': ('p5_real_vectorize_ai_search_and_markdown_matrix',),
     'runtime': (
         'argv_exact_stdin_fd3_and_auth_probe',
         'compile_failure_does_not_inherit_prior_exit',

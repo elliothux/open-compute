@@ -52246,10 +52246,1257 @@
       "deviations": []
     },
     "ai": {
-      "status": "unsupported",
-      "kind": "non_target",
-      "members": [],
-      "deviations": []
+      "status": "supported_with_deviation",
+      "kind": "target",
+      "capability_version": 1,
+      "members": [
+        {
+          "id": "ai::Ai::aiGatewayLogId:property#0",
+          "product": "ai",
+          "symbol": "Ai",
+          "member": "aiGatewayLogId",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "aiGatewayLogId: string | null;",
+          "signature_sha256": "522807aaf547f771a1cb085236f8297acec79fcc4451b545665e837f5fd8a9eb",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::Ai::toMarkdown:method#0",
+          "product": "ai",
+          "symbol": "Ai",
+          "member": "toMarkdown",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "toMarkdown(): ToMarkdownService;",
+          "signature_sha256": "f97cd695fa998be25a5a876046b85e83ea7e374c9204ca647bce04e22afc4d0e",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::Ai::toMarkdown:method#1",
+          "product": "ai",
+          "symbol": "Ai",
+          "member": "toMarkdown",
+          "kind": "method",
+          "overload": 1,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "toMarkdown( files: MarkdownDocument[], options?: ConversionRequestOptions, ): Promise<ConversionResponse[]>;",
+          "signature_sha256": "b3cd1aa72fd345ba140c7916fb5225429254a799bbac4fb19719498219c88165",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::Ai::toMarkdown:method#2",
+          "product": "ai",
+          "symbol": "Ai",
+          "member": "toMarkdown",
+          "kind": "method",
+          "overload": 2,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "toMarkdown( files: MarkdownDocument, options?: ConversionRequestOptions, ): Promise<ConversionResponse>;",
+          "signature_sha256": "99f359d5410d561f93c4c8a3e5c2d0c31bca1d90625c02109ee630f5bbd33f23",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchInstance::chatCompletions:method#0",
+          "product": "ai",
+          "symbol": "AiSearchInstance",
+          "member": "chatCompletions",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "chatCompletions( params: AiSearchChatCompletionsRequest & { stream: true; }, ): Promise<ReadableStream>;",
+          "signature_sha256": "0a77bdac4cd4298990e8d4fdf7d287c43d5ad82904689e9b4e4fec6107cd2f21",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchInstance::chatCompletions:method#1",
+          "product": "ai",
+          "symbol": "AiSearchInstance",
+          "member": "chatCompletions",
+          "kind": "method",
+          "overload": 1,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "chatCompletions( params: AiSearchChatCompletionsRequest, ): Promise<AiSearchChatCompletionsResponse>;",
+          "signature_sha256": "b8b19f60cbf03769a060997ce8d7d4f8a17b4124afe9c0b87ab9bdb682fd55e2",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchInstance::info:method#0",
+          "product": "ai",
+          "symbol": "AiSearchInstance",
+          "member": "info",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "info(): Promise<AiSearchInstanceInfo>;",
+          "signature_sha256": "07aae7cfcd9c8e3ef1b5b159781b20ca1d26ee086abe96afba155ebdc241ba5a",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchInstance::items:get#0",
+          "product": "ai",
+          "symbol": "AiSearchInstance",
+          "member": "items",
+          "kind": "get",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "get items(): AiSearchItems;",
+          "signature_sha256": "913cc45c1a315fc4085a070ce44f8a2558583bc60735208113102a53395ed787",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchInstance::jobs:get#0",
+          "product": "ai",
+          "symbol": "AiSearchInstance",
+          "member": "jobs",
+          "kind": "get",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "get jobs(): AiSearchJobs;",
+          "signature_sha256": "354422cd1109a4b0b53a2a61f21e980fa3efa6c67c0c231e13fd59bc37b3c3ab",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchInstance::search:method#0",
+          "product": "ai",
+          "symbol": "AiSearchInstance",
+          "member": "search",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "search(params: AiSearchSearchRequest): Promise<AiSearchSearchResponse>;",
+          "signature_sha256": "f2f6bfe00eb047e1628101457e8ff14ed3e5c771cc860ed384a594e9d3797cfc",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchInstance::stats:method#0",
+          "product": "ai",
+          "symbol": "AiSearchInstance",
+          "member": "stats",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "stats(): Promise<AiSearchStatsResponse>;",
+          "signature_sha256": "d14078443edfd5c26e4fb3e10770b60ae4876661364c1aa1c6ad0a4116e621ca",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchInstance::update:method#0",
+          "product": "ai",
+          "symbol": "AiSearchInstance",
+          "member": "update",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "update(config: Partial<AiSearchConfig>): Promise<AiSearchInstanceInfo>;",
+          "signature_sha256": "67649934b67fccd20bd3173e2dc5fcd9d396e148cfb2cf681d35729eedd7d2a6",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItem::chunks:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItem",
+          "member": "chunks",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "chunks( params?: AiSearchItemChunksParams, ): Promise<AiSearchItemChunksResponse>;",
+          "signature_sha256": "d0f381f7540eb58fd83fdbdc892a1783a1a86f1b08c09442812c51ea28ce0407",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItem::download:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItem",
+          "member": "download",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "download(): Promise<AiSearchItemContentResult>;",
+          "signature_sha256": "3d402a3cf38770dfded45dca65f77455a4265d47183b606ef40d94ffca83a3da",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItem::info:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItem",
+          "member": "info",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "info(): Promise<AiSearchItemInfo>;",
+          "signature_sha256": "01e1ce646ca78cc5b7392fa5d7234ae2f28f2ea8a9ff82def3adad1830c5097c",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItem::logs:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItem",
+          "member": "logs",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "logs(params?: AiSearchItemLogsParams): Promise<AiSearchItemLogsResponse>;",
+          "signature_sha256": "e7afd41db6cbb6469f044219ed0a8d716bf8e82fb7a780b9fb0b6476b6353e98",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItem::sync:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItem",
+          "member": "sync",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "sync(): Promise<AiSearchItemInfo>;",
+          "signature_sha256": "8f9961ec88f4f46d2009019e1e620aef2cea880f1cea3d3b8905ed995c49b50b",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItems::delete:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItems",
+          "member": "delete",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "delete(itemId: string): Promise<void>;",
+          "signature_sha256": "5bc882a5f600553ba827e6009bd168c0220c47c03fec43ae78bd395ee4328527",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItems::get:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItems",
+          "member": "get",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "get(itemId: string): AiSearchItem;",
+          "signature_sha256": "f072c13c153ef0e04100774c6830d649ad1b36f1c6d86a6c506c32309c2ac83c",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItems::list:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItems",
+          "member": "list",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "list(params?: AiSearchListItemsParams): Promise<AiSearchListItemsResponse>;",
+          "signature_sha256": "a3f0e2b78f24300ea3f1eae7284a4bd5c1f7e793a737e1c4e4bcc0e2f3a0ec73",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItems::upload:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItems",
+          "member": "upload",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "upload( name: string, content: ReadableStream | Blob | string, options?: AiSearchUploadItemOptions, ): Promise<AiSearchItemInfo>;",
+          "signature_sha256": "6cc2288f2e030c92d19a91f989947c68a0db30b29826b30c67f97407a6c46112",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchItems::uploadAndPoll:method#0",
+          "product": "ai",
+          "symbol": "AiSearchItems",
+          "member": "uploadAndPoll",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "uploadAndPoll( name: string, content: ReadableStream | Blob | string, options?: AiSearchUploadItemOptions & { /** Polling interval in milliseconds (default 1000). */ pollIntervalMs?: number; /** Maximum time to wait in milliseconds (default 30000). */ timeoutMs?: number; }, ): Promise<AiSearchItemInfo>;",
+          "signature_sha256": "47bee429a19ee6d032129ea373262befe564467766bce73c5d0ef9506dc60c5a",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchJob::cancel:method#0",
+          "product": "ai",
+          "symbol": "AiSearchJob",
+          "member": "cancel",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "cancel(): Promise<AiSearchJobInfo>;",
+          "signature_sha256": "1251086440a5d418707cd348e744732397b591b0730df5869d61ff3aa25dbc9f",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchJob::info:method#0",
+          "product": "ai",
+          "symbol": "AiSearchJob",
+          "member": "info",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "info(): Promise<AiSearchJobInfo>;",
+          "signature_sha256": "fe7dfc6f747199b1796cfd6361209c52c8287e3aa7a59bb28a347521f24df377",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchJob::logs:method#0",
+          "product": "ai",
+          "symbol": "AiSearchJob",
+          "member": "logs",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "logs(params?: AiSearchJobLogsParams): Promise<AiSearchJobLogsResponse>;",
+          "signature_sha256": "dfa61be508f977672341639079b11ddefcbc432f269c64af6bb6501f0d3e5782",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchJobs::create:method#0",
+          "product": "ai",
+          "symbol": "AiSearchJobs",
+          "member": "create",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "create(params?: AiSearchCreateJobParams): Promise<AiSearchJobInfo>;",
+          "signature_sha256": "ba1e35d617aa3978a44cf01b9aa982cb5e3472486ef78eba4806010286693853",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchJobs::get:method#0",
+          "product": "ai",
+          "symbol": "AiSearchJobs",
+          "member": "get",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "get(jobId: string): AiSearchJob;",
+          "signature_sha256": "3ec42ef76d9aaf86ca8cc804829ae15a007c3197edf10c04c8aee4c8c56c5c82",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchJobs::list:method#0",
+          "product": "ai",
+          "symbol": "AiSearchJobs",
+          "member": "list",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "list(params?: AiSearchListJobsParams): Promise<AiSearchListJobsResponse>;",
+          "signature_sha256": "6177238a15b3756286893388846922ee2f8002eb78fcc4f72546fe676cbf20e7",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchNamespace::chatCompletions:method#0",
+          "product": "ai",
+          "symbol": "AiSearchNamespace",
+          "member": "chatCompletions",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "chatCompletions( params: AiSearchMultiChatCompletionsRequest & { stream: true; }, ): Promise<ReadableStream>;",
+          "signature_sha256": "7ffae292080155799b94a953f6d4125d7d4f25acd5242977fa9e615891ad92d0",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchNamespace::chatCompletions:method#1",
+          "product": "ai",
+          "symbol": "AiSearchNamespace",
+          "member": "chatCompletions",
+          "kind": "method",
+          "overload": 1,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "chatCompletions( params: AiSearchMultiChatCompletionsRequest, ): Promise<AiSearchMultiChatCompletionsResponse>;",
+          "signature_sha256": "1ba497549b3f4710c5527069e4bcb5eb1c75d60aa702a081b9c51ef2159eb1d8",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchNamespace::create:method#0",
+          "product": "ai",
+          "symbol": "AiSearchNamespace",
+          "member": "create",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "create(config: AiSearchConfig): Promise<AiSearchInstance>;",
+          "signature_sha256": "86f81c0b97904bbf50cfb4826f87842df1ab9993d765c07de44d11029d429745",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchNamespace::delete:method#0",
+          "product": "ai",
+          "symbol": "AiSearchNamespace",
+          "member": "delete",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "delete(name: string): Promise<void>;",
+          "signature_sha256": "dce2008359dbee31d0c8e3888f862de7e3fbf4e176480757778cb0f37bee75dc",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchNamespace::get:method#0",
+          "product": "ai",
+          "symbol": "AiSearchNamespace",
+          "member": "get",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "get(name: string): AiSearchInstance;",
+          "signature_sha256": "fc7ce23a3e408d5316cd3b82b8a085891f62be9ebb8882dc07cf6971d91f4664",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchNamespace::list:method#0",
+          "product": "ai",
+          "symbol": "AiSearchNamespace",
+          "member": "list",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "list(params?: AiSearchListInstancesParams): Promise<AiSearchListResponse>;",
+          "signature_sha256": "5fe408cff146d856bf0cd7214abbd21117ef6c08ccc62f07d915894a2be1c277",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::AiSearchNamespace::search:method#0",
+          "product": "ai",
+          "symbol": "AiSearchNamespace",
+          "member": "search",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "search( params: AiSearchMultiSearchRequest, ): Promise<AiSearchMultiSearchResponse>;",
+          "signature_sha256": "53502f584ec472caf9d5aeb6f6ffee4ebf515e1e5e33fe74e06b6530d9a74e9d",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/ai-search-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-SEARCH-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionOutputOptions::format:property#0",
+          "product": "ai",
+          "symbol": "ConversionOutputOptions",
+          "member": "format",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "format?: OutputFormat;",
+          "signature_sha256": "277cf65e40112d0ec283be83a3cbca68de2350ebc1b447544d7f2a9fe99ad80a",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::data:property#0",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "data",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "data: string;",
+          "signature_sha256": "db9be4778708dc0be67a186c402d847740861ad66050f08d6aaec64194496217",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::error:property#0",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "error",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "error: string;",
+          "signature_sha256": "eb72c7720ebe09dde6bb18fdd76019095200006c90802f2f9fdaefa2fdbbd8d2",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::format:property#0",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "format",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "format: OutputFormat;",
+          "signature_sha256": "fa7b4d0083daddb8eaf929493d221c234818524e5aa988b5393f551c16b88f97",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::format:property#1",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "format",
+          "kind": "property",
+          "overload": 1,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "format: \"error\";",
+          "signature_sha256": "813188f5b9b4970357260343b7c92960f428eb57846c8b24f49257c7af8dfec7",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::id:property#0",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "id",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "id: string;",
+          "signature_sha256": "7d1c10a675b804345b6bba6ded4b26ae4558652dc77ada0ba92f1c69dd615508",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::id:property#1",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "id",
+          "kind": "property",
+          "overload": 1,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "id: string;",
+          "signature_sha256": "7d1c10a675b804345b6bba6ded4b26ae4558652dc77ada0ba92f1c69dd615508",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::mimeType:property#0",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "mimeType",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "mimeType: string;",
+          "signature_sha256": "45f76779795e6e0bbd4fe068f2820e85d10cf8b2542f057eecb854b2ed75ce79",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::mimeType:property#1",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "mimeType",
+          "kind": "property",
+          "overload": 1,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "mimeType: string;",
+          "signature_sha256": "45f76779795e6e0bbd4fe068f2820e85d10cf8b2542f057eecb854b2ed75ce79",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::name:property#0",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "name",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "name: string;",
+          "signature_sha256": "035b2a55a39a4cdfad69da5318d412883b28b6261b05adfbaadd459d591ed28a",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::name:property#1",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "name",
+          "kind": "property",
+          "overload": 1,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "name: string;",
+          "signature_sha256": "035b2a55a39a4cdfad69da5318d412883b28b6261b05adfbaadd459d591ed28a",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ConversionResponse::tokens:property#0",
+          "product": "ai",
+          "symbol": "ConversionResponse",
+          "member": "tokens",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "tokens: number;",
+          "signature_sha256": "d47f9c73840eaecbf75051a43a036195ce443deae063916dc19601c1f9b446ac",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::MarkdownDocument::blob:property#0",
+          "product": "ai",
+          "symbol": "MarkdownDocument",
+          "member": "blob",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "blob: Blob;",
+          "signature_sha256": "44a4effff549a48311ac28e0e1978f239e95a65950ba77317103a53c642a297e",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::MarkdownDocument::name:property#0",
+          "product": "ai",
+          "symbol": "MarkdownDocument",
+          "member": "name",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "name: string;",
+          "signature_sha256": "035b2a55a39a4cdfad69da5318d412883b28b6261b05adfbaadd459d591ed28a",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::SupportedFileFormat::extension:property#0",
+          "product": "ai",
+          "symbol": "SupportedFileFormat",
+          "member": "extension",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "extension: string;",
+          "signature_sha256": "5c90a4d3d1be30fbe08d0df75964b17e9dc6a3f47f4429a682e53a735c116010",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::SupportedFileFormat::mimeType:property#0",
+          "product": "ai",
+          "symbol": "SupportedFileFormat",
+          "member": "mimeType",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "mimeType: string;",
+          "signature_sha256": "45f76779795e6e0bbd4fe068f2820e85d10cf8b2542f057eecb854b2ed75ce79",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ToMarkdownService::supported:method#0",
+          "product": "ai",
+          "symbol": "ToMarkdownService",
+          "member": "supported",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "supported(): Promise<SupportedFileFormat[]>;",
+          "signature_sha256": "41e111e457a12acd4c7eb77ec00453844e9e95ee26b340424415b3c8b0a7385f",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ToMarkdownService::transform:method#0",
+          "product": "ai",
+          "symbol": "ToMarkdownService",
+          "member": "transform",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "transform( files: MarkdownDocument[], options?: ConversionRequestOptions, ): Promise<ConversionResponse[]>;",
+          "signature_sha256": "8e0889f4fe6323f4c203640c738d32201cd974008fef6845ddc927c77a7d7ccf",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        },
+        {
+          "id": "ai::ToMarkdownService::transform:method#1",
+          "product": "ai",
+          "symbol": "ToMarkdownService",
+          "member": "transform",
+          "kind": "method",
+          "overload": 1,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "transform( files: MarkdownDocument, options?: ConversionRequestOptions, ): Promise<ConversionResponse>;",
+          "signature_sha256": "f022a336538e23297567bb73842d9d843a3920b99cac78e37a542b1fd355b680",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/markdown-conversion.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-AI-MARKDOWN-001"
+          ]
+        }
+      ],
+      "deviations": [
+        "OC-AI-MARKDOWN-001",
+        "OC-AI-SEARCH-001"
+      ]
     },
     "browser_rendering": {
       "status": "unsupported",
@@ -52258,10 +53505,635 @@
       "deviations": []
     },
     "vectorize": {
-      "status": "unsupported",
-      "kind": "non_target",
-      "members": [],
-      "deviations": []
+      "status": "supported_with_deviation",
+      "kind": "target",
+      "capability_version": 1,
+      "members": [
+        {
+          "id": "vectorize::Vectorize::deleteByIds:method#0",
+          "product": "vectorize",
+          "symbol": "Vectorize",
+          "member": "deleteByIds",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "public deleteByIds(ids: string[]): Promise<VectorizeAsyncMutation>;",
+          "signature_sha256": "ca39f505e3a104b675c9e405dfaf8e53419d4d34808e5b92f97ba3c98e1fe09f",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::Vectorize::describe:method#0",
+          "product": "vectorize",
+          "symbol": "Vectorize",
+          "member": "describe",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "public describe(): Promise<VectorizeIndexInfo>;",
+          "signature_sha256": "4465b0cdb59ea60661e871dfd5c104a8b2eef3ca7042fc6cebb7a276c7589569",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::Vectorize::getByIds:method#0",
+          "product": "vectorize",
+          "symbol": "Vectorize",
+          "member": "getByIds",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "public getByIds(ids: string[]): Promise<VectorizeVector[]>;",
+          "signature_sha256": "7704c5e38912c6de90d64c413755f86d5286ce298346097767db5ab72e39f11a",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::Vectorize::insert:method#0",
+          "product": "vectorize",
+          "symbol": "Vectorize",
+          "member": "insert",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "public insert(vectors: VectorizeVector[]): Promise<VectorizeAsyncMutation>;",
+          "signature_sha256": "77c96a666aa7ea8a96ac1eba36b836b7bb12ed153367e35e2675974d7d35f287",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::Vectorize::query:method#0",
+          "product": "vectorize",
+          "symbol": "Vectorize",
+          "member": "query",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "public query( vector: VectorFloatArray | number[], options?: VectorizeQueryOptions, ): Promise<VectorizeMatches>;",
+          "signature_sha256": "d7e2ea1367c876d1eb5ce8737b9a407164a431ee2b571979e9c4761ad4ef7d79",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::Vectorize::queryById:method#0",
+          "product": "vectorize",
+          "symbol": "Vectorize",
+          "member": "queryById",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "public queryById( vectorId: string, options?: VectorizeQueryOptions, ): Promise<VectorizeMatches>;",
+          "signature_sha256": "ba326d3aec2682ca1f234542a2f5fb3712a48cb131accf6548a171e703eff5b6",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::Vectorize::upsert:method#0",
+          "product": "vectorize",
+          "symbol": "Vectorize",
+          "member": "upsert",
+          "kind": "method",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "public upsert(vectors: VectorizeVector[]): Promise<VectorizeAsyncMutation>;",
+          "signature_sha256": "2a27ba3bf9f4ac3875d28580725e84f562239b61c817c9a32fa4105e19d78a7b",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeAsyncMutation::mutationId:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeAsyncMutation",
+          "member": "mutationId",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "mutationId: string;",
+          "signature_sha256": "923a85394b4da1bc53351f6d348f88ecf6a58e3ec84136e49cf1aa57fc2d7ad4",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeIndexInfo::dimensions:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeIndexInfo",
+          "member": "dimensions",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "dimensions: number;",
+          "signature_sha256": "4edccbdfc445a0a39265da91bf8a0f89b8f910dc0532c5c862243766ae995cc6",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeIndexInfo::processedUpToDatetime:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeIndexInfo",
+          "member": "processedUpToDatetime",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "processedUpToDatetime: number;",
+          "signature_sha256": "367b13beb32671b9ddace31df775284f6d6bdf30b65b6808606a783734362561",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeIndexInfo::processedUpToMutation:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeIndexInfo",
+          "member": "processedUpToMutation",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "processedUpToMutation: number;",
+          "signature_sha256": "1f539d4f141f698f26966aa0fc860d6031569bc65b62ff1e3f73463a57533726",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeIndexInfo::vectorCount:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeIndexInfo",
+          "member": "vectorCount",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "vectorCount: number;",
+          "signature_sha256": "801c30b6f7d4fee80a99a7b4c35b16d69126a01a6748bce8dc0115de71d6ed81",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeMatch::score:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeMatch",
+          "member": "score",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "score: number;",
+          "signature_sha256": "fdd9f04a58ce3f30ffed88d8fdfcf0ed6af3ac2fd834245e73b7cc9424f7b0bb",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeMatch::values:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeMatch",
+          "member": "values",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "values: VectorFloatArray | number[];",
+          "signature_sha256": "37e77723c4a610b82623ab57e61ac9eb81b88d8e6a0e0fe89f6e64ca13dce020",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeMatches::count:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeMatches",
+          "member": "count",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "count: number;",
+          "signature_sha256": "f51d7cf1fc58ef3d16b21e5e8b51b112fef3612643dad0801a0b698b2be02b09",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeMatches::matches:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeMatches",
+          "member": "matches",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "matches: VectorizeMatch[];",
+          "signature_sha256": "a0f79288530eb0b76b0c4b10b622e7abfacd7b93b946f59f92a6bd8455934d91",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeQueryOptions::filter:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeQueryOptions",
+          "member": "filter",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "filter?: VectorizeVectorMetadataFilter;",
+          "signature_sha256": "b9b8e4ddf6d513ff0df5aa3905629c6b9c32972c803037d7df3f4b87c9f8161c",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeQueryOptions::namespace:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeQueryOptions",
+          "member": "namespace",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "namespace?: string;",
+          "signature_sha256": "aedde3984418246d67b87c854647d6441c732a03949b3d34dc04b4445e8fccbb",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeQueryOptions::returnMetadata:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeQueryOptions",
+          "member": "returnMetadata",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "returnMetadata?: boolean | VectorizeMetadataRetrievalLevel;",
+          "signature_sha256": "52c1e7c7183f099ff4c029c44a45928c5d9117d71faacf8cc808cf45af5ace4c",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeQueryOptions::returnValues:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeQueryOptions",
+          "member": "returnValues",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "returnValues?: boolean;",
+          "signature_sha256": "dcc3a30b77c8f18039028976dcc434acc8c8e81c9e113ec9e4e625aa58772361",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeQueryOptions::topK:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeQueryOptions",
+          "member": "topK",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "topK?: number;",
+          "signature_sha256": "f9ca86cf1cc70fd6224c2a823b9335c89b83886ff2f2731c20fdc5f31ff6d53e",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeVector::id:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeVector",
+          "member": "id",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "id: string;",
+          "signature_sha256": "7d1c10a675b804345b6bba6ded4b26ae4558652dc77ada0ba92f1c69dd615508",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeVector::metadata:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeVector",
+          "member": "metadata",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "metadata?: Record<string, VectorizeVectorMetadata>;",
+          "signature_sha256": "d5ade04d95dc7fb561234aa42c06d8555b1f8de516940ee64be7df585d6b7c1f",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeVector::namespace:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeVector",
+          "member": "namespace",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": true,
+          "static": false,
+          "signature": "namespace?: string;",
+          "signature_sha256": "aedde3984418246d67b87c854647d6441c732a03949b3d34dc04b4445e8fccbb",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeVector::values:property#0",
+          "product": "vectorize",
+          "symbol": "VectorizeVector",
+          "member": "values",
+          "kind": "property",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "values: VectorFloatArray | number[];",
+          "signature_sha256": "37e77723c4a610b82623ab57e61ac9eb81b88d8e6a0e0fe89f6e64ca13dce020",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeVectorMetadata::[]:index#0",
+          "product": "vectorize",
+          "symbol": "VectorizeVectorMetadata",
+          "member": "[]",
+          "kind": "index",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "Record<string, VectorizeVectorMetadataValue>",
+          "signature_sha256": "9c0dfac818a088c6d0f6865644b2c92a4fa72e350a5b8b64e14a9fc5a29c3e66",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        },
+        {
+          "id": "vectorize::VectorizeVectorMetadataFilter::[]:index#0",
+          "product": "vectorize",
+          "symbol": "VectorizeVectorMetadataFilter",
+          "member": "[]",
+          "kind": "index",
+          "overload": 0,
+          "readonly": false,
+          "optional": false,
+          "static": false,
+          "signature": "[field: string]: | Exclude<VectorizeVectorMetadataValue, string[]> | null | { [Op in VectorizeVectorMetadataFilterOp]?: Exclude< VectorizeVectorMetadataValue, string[] > | null; } | { [Op in VectorizeVectorMetadataFilterCollectionOp]?: Exclude< VectorizeVectorMetadataValue, string[] >[]; };",
+          "signature_sha256": "35a57336978c0122e7a84668c5fc965683d034d33382f0e59a6dc19efd32afce",
+          "status": "supported_with_deviation",
+          "compile_cases": [
+            "ts::test/conformance/fixtures/vectorize-surface.ts"
+          ],
+          "runtime_cases": [
+            "p5-search::p5_real_vectorize_ai_search_and_markdown_matrix"
+          ],
+          "deviations": [
+            "OC-VECTORIZE-001"
+          ]
+        }
+      ],
+      "deviations": [
+        "OC-VECTORIZE-001"
+      ]
     },
     "hyperdrive": {
       "status": "unsupported",

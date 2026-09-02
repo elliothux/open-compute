@@ -122,6 +122,14 @@ pub struct DeploymentImagesInput {
     pub binding: String,
 }
 
+/// One standard Workers AI binding declaration.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeploymentAiInput {
+    /// Tenant environment binding name.
+    pub binding: String,
+}
+
 /// One immutable deployment Version Metadata binding declaration.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -140,6 +148,9 @@ pub struct DeploymentRuntimeFeatures {
     /// Automatic response-cache policy.
     #[serde(default)]
     pub cache: DeploymentCacheInput,
+    /// Optional Workers AI binding exposing the Markdown Conversion subset.
+    #[serde(default)]
+    pub ai: Option<DeploymentAiInput>,
     /// Optional local Images binding.
     #[serde(default)]
     pub images: Option<DeploymentImagesInput>,
@@ -1173,6 +1184,13 @@ fn prepare_runtime_features(
         }
     }));
     let mut descriptors = Vec::new();
+    if let Some(ai) = &input.ai {
+        descriptors.push(BuiltinBindingDescriptorV1::new(
+            ai.binding.clone(),
+            BuiltinBindingDescriptorKindV1::Ai,
+            None,
+        )?);
+    }
     if let Some(images) = &input.images {
         descriptors.push(BuiltinBindingDescriptorV1::new(
             images.binding.clone(),
@@ -1194,6 +1212,7 @@ fn prepare_runtime_features(
             Ok(DeploymentBuiltinBindingRecord {
                 name: descriptor.name.clone(),
                 kind: match descriptor.kind {
+                    BuiltinBindingDescriptorKindV1::Ai => BuiltinBindingKind::Ai,
                     BuiltinBindingDescriptorKindV1::Images => BuiltinBindingKind::Images,
                     BuiltinBindingDescriptorKindV1::VersionMetadata => {
                         BuiltinBindingKind::VersionMetadata

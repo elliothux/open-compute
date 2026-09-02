@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "العربية",
+    "A line with an Arabic"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 7,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": 1,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "العربية",
+      "expected_fixture_id": "pdfbox-pdf-bidi"
+    }
+  ],
+  "review_notes": "Reviewed with PDFKit; Arabic/Latin bidirectional reading-order sample."
+}

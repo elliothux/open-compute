@@ -584,8 +584,26 @@ fn digest_assets_tokens_and_supervisor_auth_are_fail_closed() {
         ErrorCode::ConfigCompileFailed
     );
     fs::write(dir.path().join("dist/worker.js"), b"export default {}").unwrap();
+    fs::create_dir_all(dir.path().join("dist/ai")).unwrap();
+    fs::create_dir_all(dir.path().join("dist/ai-search")).unwrap();
+    fs::write(dir.path().join("dist/ai/index.js"), b"export default {}").unwrap();
+    fs::write(
+        dir.path().join("dist/ai-search/index.js"),
+        b"export default {}",
+    )
+    .unwrap();
     let (_, workers, config_path) = load_assets(dir.path()).unwrap();
-    assert_eq!(workers[0].0, "dist/worker.js");
+    assert_eq!(
+        workers
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "dist/ai-search/index.js",
+            "dist/ai/index.js",
+            "dist/worker.js"
+        ]
+    );
     assert_eq!(config_path, dir.path().join("config.capnp"));
 
     let valid = SecretString::new(TOKEN);

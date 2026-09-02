@@ -1,0 +1,28 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Sample Excel Worksheet",
+    "Numbers and their Squares"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": [
+      "Feuil1",
+      "Feuil2",
+      "Feuil3"
+    ]
+  },
+  "retrieval_queries": [
+    {
+      "query": "Sample Excel Worksheet",
+      "expected_fixture_id": "tika-xls-basic"
+    }
+  ],
+  "review_notes": "Reviewed from BIFF printable strings and file metadata."
+}

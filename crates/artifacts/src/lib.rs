@@ -5,6 +5,7 @@
 
 #![deny(missing_docs)]
 
+mod ai_search;
 mod artifact;
 mod cache;
 mod client;
@@ -20,6 +21,7 @@ mod r2_preflight;
 mod snapshot;
 mod store;
 
+pub use ai_search::{AiSearchObjectDownload, AiSearchObjectRef, AiSearchObjectStore};
 pub use artifact::{ARTIFACT_KEY_VERSION, ArtifactRef};
 pub use cache::{ArtifactCache, PinnedArtifact, PinnedArtifactReader};
 pub use client::S3ArtifactClient;

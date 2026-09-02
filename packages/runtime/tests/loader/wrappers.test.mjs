@@ -490,17 +490,25 @@ test("all binding and entrypoint combinations produce valid import-only bridges"
   const bindings = [
     ["r2_bucket", 1, "BUCKET"], ["d1_database", 1, "DATABASE"], ["do_namespace", 1, "OBJECTS"],
     ["queue_producer", 1, "QUEUE"], ["workflow", 1, "FLOW"],
+    ["vectorize_index", 1, "VECTOR"], ["ai_search_namespace", 1, "SEARCH_NS"],
+    ["ai_search_instance", 1, "SEARCH"],
   ].map(([kind, capabilityVersion, name]) => ({ kind, capabilityVersion, name }));
   for (const options of [{}, { entrypointName: "default" }, { entrypointName: "Named" }, { entrypointName: "Object", durableObject: true }, { entrypointName: "default", durableObject: true },
     { entrypointName: "Flow", workflow: true }]) {
     const code = generator.generateBindingWrapper({
       mainModule: "src/index.js", bindings,
-      services: [{ name: "CATALOG" }], assetBindingName: "ASSETS", durableObject: false, ...options,
+      services: [{ name: "CATALOG" }], assetBindingName: "ASSETS", imagesBindingName: "IMAGES",
+      aiBindingName: "AI", durableObject: false, ...options,
     });
     assert.deepEqual(parseSync("entry.js", code, { sourceType: "module" }).errors, []);
     assert.match(code, /WorkflowBinding/);
     assert.match(code, /AssetsBinding/);
     assert.match(code, /ServiceBinding/);
+    assert.match(code, /ImagesBinding/);
+    assert.match(code, /AiBinding/);
+    assert.match(code, /VectorizeBinding/);
+    assert.match(code, /AiSearchNamespaceBinding/);
+    assert.match(code, /AiSearchInstanceBinding/);
     assert.doesNotMatch(code, /internalExport|DurableObjectStubTransport|__OpenComputeDoStubTransport/);
     assert.doesNotMatch(code, /\b(class|function|for|if)\b/);
   }

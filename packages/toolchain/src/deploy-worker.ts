@@ -163,6 +163,7 @@ export async function deployProject(
     bindings: deploymentBindings(project.bindings), services,
     cache: project.runtimeFeatures.cache,
     ...(project.runtimeFeatures.images === undefined ? {} : { images: project.runtimeFeatures.images }),
+    ...(project.runtimeFeatures.ai === undefined ? {} : { ai: project.runtimeFeatures.ai }),
     ...(project.runtimeFeatures.versionMetadata === undefined ? {} : {
       versionMetadata: project.runtimeFeatures.versionMetadata,
     }),
@@ -271,6 +272,7 @@ async function deployAssets(
       services,
       cache: project.runtimeFeatures.cache,
       ...(project.runtimeFeatures.images === undefined ? {} : { images: project.runtimeFeatures.images }),
+      ...(project.runtimeFeatures.ai === undefined ? {} : { ai: project.runtimeFeatures.ai }),
       ...(project.runtimeFeatures.versionMetadata === undefined ? {} : {
         versionMetadata: project.runtimeFeatures.versionMetadata,
       }),

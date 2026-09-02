@@ -40,3 +40,20 @@ test("tenant env creates a cache transport for the current unconfigured entrypoi
   ]);
   assert.equal(env.PUBLIC, "value");
 });
+
+test("tenant env resolves AI from the immutable deployment descriptor", () => {
+  let received;
+  const configured = {
+    ...snapshot,
+    aiBinding: { name: "AI", descriptorSha256: "cd".repeat(32) },
+  };
+  const env = tenantEnv(configured, { exports: {
+    CacheTransport({ props }) { return props; },
+    AiTransport({ props }) { received = props; return { transform() {}, supported() {} }; },
+  } }, "deployment", {}, false, true);
+  assert.deepEqual(received, {
+    accountId: "account", workerId: "worker", deploymentId: "deployment",
+    descriptorSha256: "cd".repeat(32),
+  });
+  assert.equal(typeof env.AI.transform, "function");
+});

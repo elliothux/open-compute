@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Intervening table",
+    "This is another list"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "Intervening table",
+      "expected_fixture_id": "tika-docx-numbered-list"
+    }
+  ],
+  "review_notes": "Reviewed with textutil; nested and restarted numbered lists."
+}

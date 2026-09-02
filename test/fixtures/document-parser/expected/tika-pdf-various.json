@@ -1,0 +1,23 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "ゾルゲと尾崎"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": 2,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "ゾルゲと尾崎",
+      "expected_fixture_id": "tika-pdf-various"
+    }
+  ],
+  "review_notes": "Reviewed with PDFKit and Xberg: mixed formatting, table data, English body text, and Japanese are retained. Xberg furniture filtering omits the PDF header text, so the header is not a required semantic fragment."
+}

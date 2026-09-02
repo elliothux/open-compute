@@ -17,6 +17,12 @@ pub enum BindingKind {
     D1Database,
     /// Durable Object namespace.
     DoNamespace,
+    /// Vectorize exact-search index.
+    VectorizeIndex,
+    /// AI Search namespace containing account-scoped instances.
+    AiSearchNamespace,
+    /// AI Search built-in-storage instance.
+    AiSearchInstance,
     /// Queue producer runtime binding; never a generic P0 resource driver.
     QueueProducer,
     /// Logical Workflow caller binding; execution state is not a generic resource driver.
@@ -32,6 +38,9 @@ impl BindingKind {
             Self::R2Bucket => "r2_bucket",
             Self::D1Database => "d1_database",
             Self::DoNamespace => "do_namespace",
+            Self::VectorizeIndex => "vectorize_index",
+            Self::AiSearchNamespace => "ai_search_namespace",
+            Self::AiSearchInstance => "ai_search_instance",
             Self::QueueProducer => "queue_producer",
             Self::Workflow => "workflow",
         }
@@ -53,6 +62,9 @@ impl FromStr for BindingKind {
             "r2_bucket" => Ok(Self::R2Bucket),
             "d1_database" => Ok(Self::D1Database),
             "do_namespace" => Ok(Self::DoNamespace),
+            "vectorize_index" => Ok(Self::VectorizeIndex),
+            "ai_search_namespace" => Ok(Self::AiSearchNamespace),
+            "ai_search_instance" => Ok(Self::AiSearchInstance),
             "queue_producer" => Ok(Self::QueueProducer),
             "workflow" => Ok(Self::Workflow),
             _ => Err(resource_type_error()),

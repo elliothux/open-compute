@@ -44,6 +44,7 @@
 | 2026-09-01 | [Cloudflare Runtime 全量兼容改造](cloudflare-runtime-compatibility.md)、[P3.4 conformance](p3-4-cloudflare-conformance.md) | [完成报告](cloudflare-runtime-compatibility-results.md)：2,097 个 stable members、1,585 `supported`、512 `supported_with_deviation`、`blocked=0`；193/193 JS、802/802 单轮 workspace cases、90.17% Rust 行覆盖率；七项 hosted differential 已通过，Workflow hosted qualification 与 timing-three release qualification 仍为明确限制 |
 | 2026-09-01 | [P4 Next.js/vinext 应用资格验证](p4-nextjs-vinext-qualification.md)、[P4.0 build reproducibility 调查](p4-nextjs-vinext-p4-0-results.md)、[结果](p4-nextjs-vinext-results.md) | 原跨 source-build Hard Gate 已按 Cloudflare Worker Version/Deployment 语义撤回；固定 artifact 的 Wrangler/importer inventory 79/79 对齐，20/20 selected mandatory 通过，Cloudflare/open-compute runner 各 15/15，双端精确清理完成；197/197 JS、90.17% Rust 行覆盖率、最终 894/894 case executions 通过；Application Go 不替代 Platform verdict |
 | 2026-09-01 | [`ocd` Day1 命名改造](ocd-day1-rename.md) | [完成记录](ocd-day1-rename-results.md)：唯一 production binary/CLI/daemon 为 `ocd`，project/docs origin 为 `https://open-compute.dev`，launchd identity 为 `dev.open-compute.ocd`；198/198 JS、90.18% Rust 行覆盖率、完整单轮 Gate 40/40 targets 与 802/802 cases 通过；追加时序轮按用户指定不作为完成条件，未执行正式发行或跨平台验证 |
+| 2026-09-02 | [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md)、[P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md) | [完成记录](p5-vectorize-ai-search-results.md)：Vectorize、AI provider/tokenizer、AI Search、Markdown Conversion 与 13-format parser 已进入唯一 production path；90.0526% Rust 行覆盖率、最终 P5 单轮 1/1 与 Cloudflare contract 14/14 通过；timing-three、跨平台、完整 parser process/release matrix 与托管 rich-document differential 见独立[验收计划](../p5-release-acceptance.md) |
 
 ## 仍在维护或尚未完成
 
@@ -56,6 +57,8 @@
 - [Cloudflare Workflow 远端 differential](../cloudflare-runtime-compatibility-acceptance.md)：本地 Day1
   runtime 与七项 hosted fixture 已完成，只追踪因 Wrangler OAuth `10000` 未运行的 Workflow 托管端资格。
 - [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
+- [P5 剩余发行验收](../p5-release-acceptance.md)：只追踪可复现 benchmark report、timing-three、四平台、
+  完整 parser process matrix、托管 rich-document differential 与正式 package，不把 P5 core 重新列为待实现。
 - active 文档的完整分类见 [docs 索引](../README.md)。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 

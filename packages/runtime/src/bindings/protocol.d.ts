@@ -29,6 +29,12 @@ export interface ImageTransportProps {
   deploymentId: string;
   descriptorSha256: string;
 }
+export interface AiTransportProps {
+  accountId: string;
+  workerId: string;
+  deploymentId: string;
+  descriptorSha256: string;
+}
 export interface ServiceBindingProps {
   deploymentId: string;
   bindingName: string;

@@ -1,0 +1,28 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "日本オラクル",
+    "豊田製品戦略事業統括本部"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 6,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": [
+      "Sheet1",
+      "Sheet2",
+      "Sheet3"
+    ]
+  },
+  "retrieval_queries": [
+    {
+      "query": "日本オラクル",
+      "expected_fixture_id": "tika-xlsx-phonetic"
+    }
+  ],
+  "review_notes": "Reviewed directly from OOXML shared strings; Japanese phonetic data."
+}

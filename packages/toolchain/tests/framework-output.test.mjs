@@ -128,6 +128,22 @@ test("reconciles provider identities while preserving local services and binding
   withoutSelectors(imported);
 });
 
+test("imports Wrangler Vectorize and AI Search declarations while retaining local resource IDs", async t => {
+  const lock = await loadFormalRuntimeLock();
+  const project = await fixture(t);
+  project.bindings = {
+    VECTOR: { type: "vectorize_index", id: "local-vector" },
+    SEARCH_NS: { type: "ai_search_namespace", id: "local-search-namespace" },
+    SEARCH: { type: "ai_search_instance", id: "local-search-instance" },
+  };
+  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
+    vectorize: [{ binding: "VECTOR", index_name: "provider-vector" }],
+    ai_search_namespaces: [{ binding: "SEARCH_NS", namespace: "provider-namespace" }],
+    ai_search: [{ binding: "SEARCH", instance_name: "provider-instance" }],
+  })));
+  await importFrameworkOutput(project);
+});
+
 test("rejects binding-shape drift, unsupported generated capabilities, auxiliary Workers, and links", async t => {
   const lock = await loadFormalRuntimeLock();
   const project = await fixture(t);
@@ -139,7 +155,13 @@ test("rejects binding-shape drift, unsupported generated capabilities, auxiliary
   await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
     ai: { binding: "AI" },
   })));
-  await assert.rejects(importFrameworkOutput(project), /unsupported ai/);
+  const withAi = await importFrameworkOutput(project);
+  assert.deepEqual(withAi.runtimeFeatures.ai, { binding: "AI" });
+
+  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
+    browser: { binding: "BROWSER" },
+  })));
+  await assert.rejects(importFrameworkOutput(project), /unsupported browser/);
 
   await writeFile(join(project.project, ".wrangler", "deploy", "config.json"), JSON.stringify({
     configPath: "../../dist/server/wrangler.json",

@@ -1,0 +1,25 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Molière",
+    "L'Avare ou l'École du mensonge",
+    "Les Précieuses ridicules"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 7,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": 3,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "Molière",
+      "expected_fixture_id": "poi-docx-header-footer-unicode"
+    }
+  ],
+  "review_notes": "Reviewed with textutil, OOXML, and Xberg. document.xml has one explicit page break plus one lastRenderedPageBreak, and Xberg reports three pages; Latin-extended body text is retained."
+}

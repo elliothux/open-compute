@@ -747,7 +747,7 @@ impl<'a> ResourceRepository<'a> {
     }
 }
 
-fn read_resource_conn(
+pub(crate) fn read_resource_conn(
     conn: &rusqlite::Connection,
     account_id: AccountId,
     resource_id: ResourceId,

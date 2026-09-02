@@ -17,7 +17,8 @@ interface RuntimeBindingBase {
   capabilityVersion: number;
 }
 export interface RuntimeResourceBinding extends RuntimeBindingBase {
-  kind: "kv_namespace" | "r2_bucket" | "d1_database" | "do_namespace";
+  kind: "kv_namespace" | "r2_bucket" | "d1_database" | "do_namespace" | "vectorize_index"
+    | "ai_search_namespace" | "ai_search_instance";
   resourceId: string;
   resourceSpecGeneration: number;
   permissions: { read: boolean; write: boolean };
@@ -72,6 +73,7 @@ export interface RuntimeSnapshot {
     entrypoints: Record<string, { enabled: boolean; crossVersionCache: boolean }>;
   };
   imagesBinding?: { name: string; descriptorSha256: string };
+  aiBinding?: { name: string; descriptorSha256: string };
   versionMetadataBinding?: {
     name: string; id: string; tag?: string; timestampMs: number; descriptorSha256: string;
   };

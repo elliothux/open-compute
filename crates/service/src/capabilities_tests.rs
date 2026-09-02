@@ -82,6 +82,21 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
     );
     assert_eq!(products["images"].deviations, ["OC-IMAGES-001"]);
     assert_eq!(
+        products["vectorize"].status,
+        CapabilityStatus::SupportedWithDeviation
+    );
+    assert_eq!(products["vectorize"].deviations, ["OC-VECTORIZE-001"]);
+    assert!(
+        products["vectorize"]
+            .members
+            .iter()
+            .any(|member| member.symbol == "Vectorize" && member.member == "queryById")
+    );
+    assert_eq!(
+        products["ai"].deviations,
+        ["OC-AI-MARKDOWN-001", "OC-AI-SEARCH-001"]
+    );
+    assert_eq!(
         products["service_bindings"].status,
         CapabilityStatus::SupportedWithDeviation
     );

@@ -9,11 +9,11 @@
 | 文档 | 当前状态 |
 | --- | --- |
 | [Operator API 与可选 Dashboard](operator-api-dashboard.md) | 方案完成，尚未收敛管理路径、强制管理员鉴权或实现 React SPA |
-| [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md) | Research/Day1 方案完成；Vectorize、AI provider、AI Search、恢复与兼容 Gate 尚未实现 |
-| [P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md) | Research/Day1 方案完成；CF-compatible `env.AI.toMarkdown`/AI Search API、Xberg parser child、38-file corpus 与四平台 Gate 尚未实现 |
 
 已完成的 `ocd` Day1 命名改造见[设计归档](implemented/ocd-day1-rename.md)与
 [完成记录](implemented/ocd-day1-rename-results.md)。
+P5 核心实现见 [Vectorize 与 AI Search](implemented/p5-vectorize-ai-search.md)、
+[Xberg 文档解析](implemented/p5-7-xberg-document-parsing.md)及[完成记录](implemented/p5-vectorize-ai-search-results.md)。
 
 ## 待验收
 
@@ -23,6 +23,7 @@
 | [Runtime 跨平台发行验收](runtime-layout-release-acceptance.md) | CI、跨平台、特权 egress 与正式发行资格尚未执行 |
 | [Cloudflare Workflow 远端 differential](cloudflare-runtime-compatibility-acceptance.md) | 本地实现完成；托管端因 credential 条件尚未运行 |
 | [Static Assets / Service Binding 远端资格](p3-assets-service-bindings-acceptance.md) | 两项核心实现已归档；直接 Cloudflare differential 尚未执行 |
+| [P5 剩余发行验收](p5-release-acceptance.md) | P5 本地核心已归档；可复现 benchmark report、timing-three、四平台、完整 parser process matrix、托管 rich-document differential 与正式 package 尚待完成 |
 
 ## 跨阶段总方案
 

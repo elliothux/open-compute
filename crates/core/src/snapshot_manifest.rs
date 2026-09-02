@@ -20,6 +20,10 @@ pub enum SnapshotFileRole {
     KvSqlite,
     /// One Workers D1 database.
     D1Sqlite,
+    /// One Vectorize index database.
+    VectorizeSqlite,
+    /// One AI Search instance database.
+    AiSearchSqlite,
     /// One opaque regular file from the stopped workerd Durable Object tree.
     DurableObjectFile,
 }
@@ -167,7 +171,14 @@ impl PlatformSnapshotManifestV1 {
             || !is_sha256(&self.s3_authority_fingerprint)
             || !is_sha256(&self.r2_prefix_fingerprint)
             || !is_sha256(&self.config_policy_sha256)
-            || self.excluded_local_state != ["images_sessions", "response_cache", "runtime_cache"]
+            || self.excluded_local_state
+                != [
+                    "ann_cache",
+                    "images_sessions",
+                    "response_cache",
+                    "runtime_cache",
+                    "vector_search_cache",
+                ]
             || !is_sha256(&self.manifest_mac)
             || self.files.is_empty()
             || self.files.len() > max_files as usize
@@ -177,13 +188,17 @@ impl PlatformSnapshotManifestV1 {
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>()
-                != ["control", "d1", "kv", "scheduler"]
+                != ["ai_search", "control", "d1", "kv", "scheduler", "vectorize"]
             || self.source_schemas.get("control").copied()
                 != Some(self.source_release.control_schema_version)
             || self.source_schemas.get("scheduler").copied()
                 != Some(self.source_release.scheduler_schema_version)
             || self.source_schemas.get("kv").copied() != Some(self.source_release.kv_schema_version)
             || self.source_schemas.get("d1").copied() != Some(self.source_release.d1_schema_version)
+            || self.source_schemas.get("vectorize").copied()
+                != Some(self.source_release.vectorize_schema_version)
+            || self.source_schemas.get("ai_search").copied()
+                != Some(self.source_release.ai_search_schema_version)
         {
             return Err(snapshot_invalid());
         }
@@ -213,6 +228,8 @@ impl PlatformSnapshotManifestV1 {
                 }
                 SnapshotFileRole::KvSqlite
                 | SnapshotFileRole::D1Sqlite
+                | SnapshotFileRole::VectorizeSqlite
+                | SnapshotFileRole::AiSearchSqlite
                 | SnapshotFileRole::DurableObjectFile => {}
             }
             total = total.checked_add(file.size).ok_or_else(snapshot_invalid)?;
@@ -232,7 +249,11 @@ impl PlatformSnapshotManifestV1 {
             if reference.role.is_empty()
                 || !matches!(
                     reference.role.as_str(),
-                    "deployment_artifact" | "kv_backup" | "d1_backup" | "r2_bucket_marker"
+                    "deployment_artifact"
+                        | "kv_backup"
+                        | "d1_backup"
+                        | "r2_bucket_marker"
+                        | "ai_search_object"
                 )
                 || !valid_object_key(&reference.object_key)
                 || !is_sha256(&reference.sha256)
@@ -255,11 +276,16 @@ fn valid_file_role(file: &SnapshotFileV1, platform_id: &str) -> bool {
         SnapshotFileRole::SchedulerSqlite => {
             file.logical_id == "scheduler" && segments == ["scheduler.sqlite"]
         }
-        SnapshotFileRole::KvSqlite | SnapshotFileRole::D1Sqlite => {
-            let product = if file.role == SnapshotFileRole::KvSqlite {
-                "kv"
-            } else {
-                "d1"
+        SnapshotFileRole::KvSqlite
+        | SnapshotFileRole::D1Sqlite
+        | SnapshotFileRole::VectorizeSqlite
+        | SnapshotFileRole::AiSearchSqlite => {
+            let product = match file.role {
+                SnapshotFileRole::KvSqlite => "kv",
+                SnapshotFileRole::D1Sqlite => "d1",
+                SnapshotFileRole::VectorizeSqlite => "vectorize",
+                SnapshotFileRole::AiSearchSqlite => "ai-search",
+                _ => return false,
             };
             segments.len() == 4
                 && segments[0] == product
@@ -311,6 +337,8 @@ pub fn valid_restore_path(value: &str) -> bool {
                 || root == "scheduler.sqlite"
                 || root == "kv"
                 || root == "d1"
+                || root == "vectorize"
+                || root == "ai-search"
                 || root == "do"
     )
 }

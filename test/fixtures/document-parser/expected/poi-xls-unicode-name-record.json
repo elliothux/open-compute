@@ -1,0 +1,29 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "あ",
+    "い",
+    "う"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 7,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 1,
+    "page_count": null,
+    "sheet_names": [
+      "Sheet1",
+      "Sheet2",
+      "Sheet3"
+    ]
+  },
+  "retrieval_queries": [
+    {
+      "query": "あ",
+      "expected_fixture_id": "poi-xls-unicode-name-record"
+    }
+  ],
+  "review_notes": "Reviewed from Xberg display-cell output: Sheet1 contains あ/b, あ/a, い/b, and う/c. Workbook defined names such as EngName are metadata and are deliberately not indexed."
+}

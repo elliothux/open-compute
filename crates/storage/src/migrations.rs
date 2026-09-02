@@ -85,6 +85,16 @@ const MIGRATIONS: &[ControlMigration] = &[
         sql: include_str!("../migrations/014_cache_images.sql"),
         checksum: &MIGRATION_014_SHA256,
     },
+    ControlMigration {
+        name: "015_vectorize",
+        sql: include_str!("../migrations/015_vectorize.sql"),
+        checksum: &MIGRATION_015_SHA256,
+    },
+    ControlMigration {
+        name: "016_ai_search",
+        sql: include_str!("../migrations/016_ai_search.sql"),
+        checksum: &MIGRATION_016_SHA256,
+    },
 ];
 const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -25,3 +25,6 @@ declare module "service-scope-source" { const source: string; export default sou
 declare module "socket-tunnel-source" { const source: string; export default source; }
 declare module "cache-facade-source" { const source: string; export default source; }
 declare module "images-facade-source" { const source: string; export default source; }
+declare module "ai-facade-source" { const source: string; export default source; }
+declare module "vectorize-facade-source" { const source: string; export default source; }
+declare module "ai-search-facade-source" { const source: string; export default source; }

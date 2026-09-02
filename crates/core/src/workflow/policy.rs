@@ -175,6 +175,7 @@ impl WorkflowStepConfig {
     pub fn canonical_json(&self) -> Result<String, PlatformError> {
         self.validate()?;
         serde_json::to_value(self)
+            .map(sort_json_value)
             .map(|value| value.to_string())
             .map_err(|_| error(ErrorCode::WorkflowInvariantViolation))
     }
@@ -185,6 +186,23 @@ impl WorkflowStepConfig {
         self.timeout
             .checked_add(WORKFLOW_DRAIN_MARGIN_MS)
             .is_some_and(|required| required <= remaining_ms)
+    }
+}
+
+fn sort_json_value(value: Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(values.into_iter().map(sort_json_value).collect()),
+        Value::Object(fields) => {
+            let mut fields: Vec<_> = fields.into_iter().collect();
+            fields.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+            Value::Object(
+                fields
+                    .into_iter()
+                    .map(|(key, value)| (key, sort_json_value(value)))
+                    .collect(),
+            )
+        }
+        other => other,
     }
 }
 

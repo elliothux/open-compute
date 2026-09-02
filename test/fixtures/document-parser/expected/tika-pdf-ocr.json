@@ -1,0 +1,16 @@
+{
+  "status": "error",
+  "error": "DOCUMENT_OCR_REQUIRED",
+  "must_contain": [],
+  "must_not_contain": [],
+  "min_normalized_chars": 0,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": 1,
+    "sheet_names": []
+  },
+  "retrieval_queries": [],
+  "review_notes": "Reviewed with PDFKit and confirmed no extractable text layer."
+}

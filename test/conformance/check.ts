@@ -444,7 +444,7 @@ function conformanceSelfTests(): void {
 async function unsupportedConfigRejection(): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "open-compute-p3-contract-"));
   try {
-    for (const type of ["analytics_engine", "ai", "browser", "vectorize", "hyperdrive", "mtls_certificate", "rate_limit", "worker_loader"]) {
+    for (const type of ["analytics_engine", "ai", "browser", "hyperdrive", "mtls_certificate", "rate_limit", "worker_loader"]) {
       const path = join(directory, `${type}.json`);
       writeFileSync(path, JSON.stringify({
         main: "worker.ts", name: "unsupported-probe", tsconfig: "tsconfig.json",

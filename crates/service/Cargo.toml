@@ -30,20 +30,26 @@ md-5.workspace = true
 sha1.workspace = true
 http-body-util.workspace = true
 httpdate.workspace = true
+jiff.workspace = true
 hyper.workspace = true
+hyper-rustls.workspace = true
 hyper-util.workspace = true
 open-compute-artifacts = { path = "../artifacts" }
 open-compute-core = { path = "../core" }
+open-compute-document-parser = { path = "../document-parser" }
 open-compute-images = { path = "../images" }
 open-compute-runtime = { path = "../runtime" }
+open-compute-search = { path = "../search" }
 open-compute-storage = { path = "../storage" }
 open-compute-workers = { path = "../workers" }
+rayon.workspace = true
 rustix = { workspace = true, features = ["alloc", "fs", "process"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 tokio.workspace = true
+tokenizers.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -70,6 +76,11 @@ tower = { version = "0.5.2", features = ["util"] }
 [[bin]]
 name = "ocd"
 path = "src/bin/ocd.rs"
+
+[[test]]
+name = "p5_search_gate"
+path = "tests/p5_search_gate.rs"
+required-features = ["test-support"]
 
 [lints]
 workspace = true

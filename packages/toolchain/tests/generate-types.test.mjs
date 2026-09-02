@@ -38,6 +38,9 @@ const config = {
     DO: { type: "do_namespace", id: "do-id", className: "PortableObject" },
     QUEUE: { type: "queue_producer", id: "q-id" },
     FLOW: { type: "workflow", id: "wf-id", className: "PortableWorkflow" },
+    VECTOR: { type: "vectorize_index", id: "vector-id" },
+    SEARCH_NS: { type: "ai_search_namespace", id: "search-namespace-id" },
+    SEARCH: { type: "ai_search_instance", id: "search-instance-id" },
   },
   services: [
     { binding: "SELF", service: "hello" },
@@ -47,6 +50,7 @@ const config = {
   ],
   assets: { directory: "dist", binding: "ASSETS" },
   images: { binding: "IMAGES" },
+  ai: { binding: "AI" },
   version_metadata: { binding: "VERSION", tag: "release-1" },
 };
 
@@ -67,6 +71,7 @@ function expectedTypes() {
 
 interface __BaseEnv_Env {
 	ADMIN: Service<typeof import(${JSON.stringify(specifier)}).Admin>;
+	AI: import("open-compute:ai").OpenComputeAi;
 	ASSETS: Fetcher;
 	BUCKET: R2Bucket;
 	CATALOG: Service /* entrypoint CatalogApi from catalog */;
@@ -81,8 +86,11 @@ interface __BaseEnv_Env {
 	NESTED: { a: 1; b: [null, false] };
 	OTHER: Fetcher /* other */;
 	QUEUE: Queue;
+	SEARCH: AiSearchInstance;
+	SEARCH_NS: AiSearchNamespace;
 	SELF: Service<typeof import(${JSON.stringify(specifier)}).default>;
 	TOKEN: string;
+	VECTOR: Vectorize;
 	VERSION: WorkerVersionMetadata;
 	"empty obj": {};
 	"weird-key": "x";
@@ -103,11 +111,11 @@ test("maps every configured Env binding and omits unconfigured products", async 
   const output = join(directory, "worker-configuration.d.ts");
   const generated = generateEnvTypes(project, output);
   assert.equal(generated, expectedTypes());
-  assert.doesNotMatch(generated, /ABSENT_PROJECT_SECRET|kv-id|r2-id|d1-id|do-id|q-id|wf-id|release-1|\[method: string\]: unknown/);
+  assert.doesNotMatch(generated, /ABSENT_PROJECT_SECRET|kv-id|r2-id|d1-id|do-id|q-id|wf-id|vector-id|search-namespace-id|search-instance-id|release-1|\[method: string\]: unknown/);
   const minimalPath = join(directory, "minimal.json");
   await writeFile(minimalPath, JSON.stringify({ name: "hello", main: "src/index.ts" }));
   const minimal = generateEnvTypes(await loadProject(minimalPath), output);
-  for (const name of ["KVNamespace", "R2Bucket", "D1Database", "DurableObjectNamespace", "Queue", "Workflow", "ImagesBinding", "WorkerVersionMetadata", "Fetcher", "Service"]) {
+  for (const name of ["KVNamespace", "R2Bucket", "D1Database", "DurableObjectNamespace", "Queue", "Workflow", "Vectorize", "AiSearchNamespace", "AiSearchInstance", "ImagesBinding", "OpenComputeAi", "WorkerVersionMetadata", "Fetcher", "Service"]) {
     assert.doesNotMatch(minimal, new RegExp(`: ${name}\\b`));
   }
   assert.match(minimal, /mainModule: typeof import\("\.\/src\/index"\)/);
@@ -184,6 +192,7 @@ test("fails closed on duplicate Env sources including quoted keys", async t => {
     { ...base, vars: { SELF: "x" }, services: { SELF: { service: "hello" } } },
     { ...base, vars: { ASSETS: "x" }, assets },
     { ...base, vars: { IMAGES: true }, runtimeFeatures: { ...base.runtimeFeatures, images: { binding: "IMAGES" } } },
+    { ...base, vars: { AI: true }, runtimeFeatures: { ...base.runtimeFeatures, ai: { binding: "AI" } } },
     { ...base, vars: { VERSION: true }, runtimeFeatures: { ...base.runtimeFeatures, versionMetadata: { binding: "VERSION" } } },
     { ...base, vars: { "weird-key": "x" }, secrets: { "weird-key": { env: "ABSENT_PROJECT_SECRET" } } },
   ];
@@ -314,6 +323,14 @@ export default {
     void env.FLOW.create;
     void env.ASSETS.fetch;
     void env.IMAGES.info;
+    const document = { name: "manual.pdf", blob: new Blob(["pdf"], { type: "application/pdf" }) };
+    void env.AI.toMarkdown(document, { conversionOptions: { output: { format: "markdown" } } });
+    void env.AI.toMarkdown([document]);
+    void env.AI.toMarkdown().transform(document);
+    void env.AI.toMarkdown().transform([document]);
+    void env.AI.toMarkdown().supported();
+    // @ts-expect-error open-compute does not advertise unsupported Workers AI inference.
+    void env.AI.run;
     void env.VERSION.id;
     void env.SELF.fetch;
     void env.ADMIN.fetch;

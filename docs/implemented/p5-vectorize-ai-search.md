@@ -1,9 +1,9 @@
 # P5：Vectorize 与 AI Search 单机兼容方案
 
-> 状态：**Research / Day1 设计完成，尚未实现或验收**，2026-09-02。本文定义 open-compute
-> 下一阶段的 Vectorize 与 AI Search 兼容范围、authority、Rust 模块边界、SQLite schema、S3
-> 对象布局、workerd binding、异步执行、恢复语义和 Gate。任何 `supported` 结论必须等待对应实现、
-> stock-workerd Gate 和 Cloudflare differential 证据。
+> 状态：**Core implementation archived / release acceptance active**，2026-09-02。本文记录已经落地的
+> Vectorize、AI Search 与 Markdown Conversion Day1 设计、实现边界和验收合同。本机验收数据见
+> [完成记录](p5-vectorize-ai-search-results.md)；跨平台发行、timing-three、完整 parser process matrix 与
+> 托管 rich-document differential 见仍在维护的[发行验收计划](../p5-release-acceptance.md)。
 >
 > PDF/Office 等 rich-format 解析的 Cloudflare API、Xberg 进程隔离、格式矩阵、固定公开 corpus 和实施 Gate 见
 > [P5.7 文档解析方案](p5-7-xberg-document-parsing.md)。P5.8 保留其他条件式扩展，当前不实现。
@@ -55,11 +55,34 @@ Day1 的核心选择是：
 | 本地内嵌模型推理 | Day1 不做 | 会破坏轻量单 binary、离线启动和跨平台供应链 |
 | Cloudflare 20M/index 或全球边缘规模 | 非目标 | 需要分布式 ANN、compaction 和多副本 |
 
+### 1.1 当前实现快照
+
+截至 2026-09-02，P5.0–P5.7 的本地核心已经进入唯一 production path：
+
+- `VectorizeIndex`、`AiSearchNamespace`、`AiSearchInstance` resource、descriptor、toolchain import、loader
+  facade、generation-authenticated backend、snapshot/restore、health/metrics/doctor/support bundle 已接通；
+- Vectorize 使用 per-index SQLite、durable ordered mutation、indexed metadata pre-filter、三种 metric、exact
+  top-k、512 MiB host-wide weighted warm LRU 与 bounded cold scan；
+- AI Search 使用 per-instance SQLite 与外接 S3 immutable objects，`items.upload()` durable commit 后立即返回
+  `queued`，maintenance 异步完成 parse/chunk/embed/FTS/vector generation；full reindex、cancel、delete/GC、
+  restart recovery 与 query generation pin 均由持久状态机约束；
+- namespace/direct instance、items/jobs、vector/keyword/hybrid、rewrite/rerank、non-stream/SSE chat 与
+  multi-instance API 已在 pinned stock workerd 的同一个 P5 Gate 中执行；
+- `env.AI` 只声明 `aiGatewayLogId` 与 Markdown Conversion 的 54 个 AI/AI Search stable members/overloads；
+  `run/models/gateway/aiSearch/autorag` 等未声明能力稳定拒绝；
+- Xberg parser child、40-file corpus、15-case hostile corpus 及 rich-document indexing 见同目录的 P5.7 文档。
+
+本轮远端差分使用唯一 `oc-p5-diff-20260902-a7c4e19f*` / `oc-p5-existing-20260902-b19f3d7a`
+前缀，验证后已逐一删除并复查 Worker、Vectorize index 与 AI Search instance 均不存在。已冻结的高风险行为包括：
+Vectorize 32–1536 维、同 batch duplicate ID first-wins、insert-existing no-op 但 frontier 推进、`$ne/$nin`
+包含缺失字段，以及 AI Search 默认配置、typed metadata、embedding/custom-metadata update 的 fenced full reindex
+和 chat SSE framing。
+
 ## 2. 契约基线与参考边界
 
 ### 2.1 唯一 runtime 基线
 
-本阶段绑定合同固定到 [`packages/runtime/workerd.lock.json`](../packages/runtime/workerd.lock.json)：
+本阶段绑定合同固定到 [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json)：
 
 ```text
 workerd release                  v1.20260830.1
@@ -70,14 +93,15 @@ workers-sdk                      f8085545bcaa2c639f171c25e4424685036a0e10
 ```
 
 类型 inventory 以 pinned workerd 中的
-[`vectorize.d.ts`](../references/workerd/types/defines/vectorize.d.ts) 和
-[`ai-search.d.ts`](../references/workerd/types/defines/ai-search.d.ts) 为本地快照。实现前 P5.0 必须再次对比：
+[`vectorize.d.ts`](../../references/workerd/types/defines/vectorize.d.ts) 和
+[`ai-search.d.ts`](../../references/workerd/types/defines/ai-search.d.ts) 为本地快照。本轮已经完成以下交叉校验并冻结
+到 conformance catalog、deviation reference 与 stock-workerd Gate：
 
 - 当前 Cloudflare 文档；
 - pinned workers-types generated snapshot；
 - pinned workerd 内部 facade；
 - Wrangler 对 `vectorize`、`ai_search_namespaces` 和 `ai_search` 的配置 shape；
-- 真实 Cloudflare Workers differential。
+- 真实 Cloudflare Workers differential；所有远端临时 Worker、Vectorize index 与 AI Search instance 已按唯一前缀清除并复查。
 
 若文档、类型和托管行为冲突，以本项目声明的 pinned latest contract 和实测行为形成一份唯一矩阵；不能通过
 兼容历史 Vectorize V1 或旧 AI Search/AutoRAG API 引入双实现。
@@ -366,9 +390,9 @@ Cloudflare 的行为边界是：
 
 - `embedding_model` 是 instance-level 配置，同时用于文档 chunk 和 query；不存在 per-request embedding override；
 - 字段省略时使用 Smart Default，由 Cloudflare 选择并可能随时间更新推荐模型；
-- [Models 文档](https://developers.cloudflare.com/ai-search/configuration/models/)明确说 embedding model 只能在
-  创建 instance 时选择，不能像 generation model 一样日后切换；当前 Instance `update()` 文档/type 又列出
-  `embedding_model`，因此 P5.0 必须对这一冲突做远端 differential，Day1 在证据前按 creation-only fail closed；
+- [Models 文档](https://developers.cloudflare.com/ai-search/configuration/models/)与当前 Instance `update()`
+  文档/type 对 embedding update 的表述不一致；本轮真实托管差分确认 `update({ embedding_model })` 被接受并启动
+  reindex，因此本地以 fenced full-generation rebuild 实现，不原地改写 active vectors；
 - Workers AI alias（`@cf/...`）使用 Cloudflare 托管模型；OpenAI、Google 等第三方 alias 需要先把 provider key
   配到 AI Gateway，再用 `ai_gateway_id` 把 instance 连到该 gateway；
 - Cloudflare 的每个 AI Search instance 都连接一个 AI Gateway，embedding、rewrite、rerank 和 generation call
@@ -397,9 +421,11 @@ Cloudflare alias 到 provider/upstream model 及冻结模型合同的映射：
 ```toml
 [ai]
 default_embedding_model = "@cf/baai/bge-m3"
+default_generation_model = "openai/gpt-5-mini"
 max_provider_in_flight = 16
 max_embedding_inputs_per_batch = 96
 max_embedding_request_bytes = 2097152
+max_embedding_response_bytes = 16777216
 provider_timeout_ms = 30000
 query_timeout_ms = 15000
 
@@ -420,6 +446,7 @@ metric = "cosine"
 max_input_tokens = 512
 tokenizer = "bge_m3"
 tokenizer_revision = "operator-pinned-2026-09"
+tokenizer_artifact = { path = "/opt/open-compute/tokenizers/bge-m3-tokenizer.json", sha256 = "<lowercase-sha256>" }
 
 [ai.embedding_models."openai/text-embedding-3-small"]
 provider = "openai"
@@ -431,12 +458,14 @@ metric = "cosine"
 max_input_tokens = 8192
 tokenizer = "cl100k_base"
 tokenizer_revision = "openai-contract-2026-09"
+tokenizer_artifact = { path = "/opt/open-compute/tokenizers/cl100k-tokenizer.json", sha256 = "<lowercase-sha256>" }
 
 [ai.generation_models."openai/gpt-5-mini"]
 provider = "openai"
 remote_model = "gpt-5-mini"
 model_revision = "operator-pinned"
 max_context_tokens = 400000
+capabilities = ["chat", "rewrite", "rerank"]
 ```
 
 这是明确接受的 self-host operator-config deviation。Cloudflare 托管 endpoint、credential 和 gateway；
@@ -479,9 +508,10 @@ model_revision
 dimensions / metric
 max_input_tokens
 tokenizer / tokenizer_revision
+tokenizer_artifact.path / tokenizer_artifact.sha256
 ```
 
-最终字段和值必须在 P5.3 结合依赖和 fixture 冻结；示例表达的是约束，不是已经实现的配置合同。
+这些字段已经由 `AiConfig` 的 deny-unknown-fields 配置合同、离线 artifact no-follow/hash 校验和 fixture 冻结。
 `request_dimensions` 只对 OpenAI-compatible contract 中声明支持该参数的 endpoint 生效；例如 Cloudflare 把
 `openai/text-embedding-3-large` 也固定为 1536 维，本地必须在请求中显式选择 1536 并验证响应，不能先接收
 OpenAI 默认 3072 维再截断。
@@ -570,10 +600,11 @@ AI Search instance 创建时保存 canonical contract：
 `/embeddings` 后的 canonical full URL。两者都不保存或公开原 URL，credential value 和 secret reference identity
 不进入 contract。canonical JSON 的 SHA-256 写入 control 和 instance DB。规则：
 
-- embedding model 建立后不可原地修改；
+- embedding model 可由 `update()` 请求修改，但必须构造完整新 generation，成功后一次原子切换；旧 generation
+  在切换前继续服务，失败或重启不会让查询混读两套向量；
 - auth secret 内容 rotation 不改变 model contract；provider 映射、auth kind、base URL、adapter version、remote model、dimensions、metric、
   tokenizer 或 revision 发生变化时，旧实例 fail closed，不静默使用新 backend 查询旧向量；
-- operator 必须显式创建新实例或执行受控 full reindex；
+- operator catalog contract drift 不会自动重解释实例；tenant 只有显式 update/full reindex 才能采用新的冻结合同；
 - generation/rewrite/rerank model 可以更新，但缺少对应 model/protocol capability 时 update 直接失败；
 - query embedding 必须与 active index generation 的 model contract 完全相同；
 - multi-instance 只对 model-contract hash 相同的实例共享一次 query embedding。
@@ -680,8 +711,9 @@ CREATE TABLE vector_mutation_items (
 );
 ```
 
-实际 migration 还需增加严格 `CHECK`、状态枚举、长度、foreign-key 和 cross-table inspection；这里固定表的
-职责与事务域，不把示意 SQL 当作已经验收的最终 migration。
+上面的 SQL 只用于说明职责与事务域；实际 Day1 authority 是
+[`015_vectorize.sql`](../../crates/storage/migrations/015_vectorize.sql) 与 `crates/storage/src/vectorize/` 的 schema、
+repository 和 inspection，严格 `CHECK`、状态枚举、长度、foreign key、quota 与 cross-table invariant 以源码为准。
 
 ### 8.3 vector 编码
 
@@ -724,7 +756,8 @@ claim queued/expired mutation with token + lease
 - mutation 顺序按 index-local monotonic sequence apply；
 - 后序 mutation 不能越过未终结的前序 mutation，否则 `describe().processedUpTo*` 无意义；
 - `insert` 对已有 ID 保留旧记录，`upsert` 完整替换 values/namespace/metadata，不能 merge；
-- 同一 batch 内重复 ID 的最终规则由 P5.0 Cloudflare differential 固定；未经观测不能自行选择 first/last；
+- 同一 batch 内重复 ID 按远端 differential 冻结为 first-wins；`insert` 已存在 ID 是成功 no-op，但 mutation
+  frontier 仍按顺序推进；
 - query/get 只看到 applied table，不读 queued payload；
 - apply 已提交但 transport 丢失时，mutation 仍由 ID/sequence 幂等确认；
 - permanent invalid persisted payload 标记 failed 并阻塞 processed frontier，不能跳过伪装成功；
@@ -773,7 +806,7 @@ namespace predicate
 ```
 
 禁止先取全局 topK 再过滤。类型不匹配、未建索引字段、非法 dot path、过多 predicate、过长 list 和
-非 finite number 都返回稳定错误。`$ne/$nin` 对 missing field 的行为必须由 Cloudflare differential 冻结。
+非 finite number 都返回稳定错误。`$ne/$nin` 按远端 differential 包含缺失 indexed field 的记录。
 
 ## 10. Exact vector engine
 
@@ -810,11 +843,11 @@ SQLite authority
                  rowid/id/namespace/norm mapping
 ```
 
-一个 host-wide weighted LRU 管理 snapshot；默认总容量建议 512 MiB，但最终值由 benchmark 和平台配置决定。
+一个 host-wide weighted LRU 管理 snapshot；当前进程级容量冻结为 512 MiB。
 snapshot key 至少包含 resource ID、applied mutation sequence 和 metadata index generation。mutation apply 后
 发布新 generation；旧 Arc 可服务已经开始的查询，不能原地修改。
 
-如果 index 超过 warm budget，必须走有界 cold path或 admission failure，不能让 RSS 无界增长。
+如果单个 index 超过 warm budget，使用最多 100k candidate 的有界 cold scan 或 admission failure，不能让 RSS 无界增长。
 
 ### 10.3 ANN 决策 Gate
 
@@ -822,7 +855,7 @@ Day1 不使用 `sqlite-vec`：它当前仍是 pre-1.0，Rust 注册 SQLite exten
 workspace source 使用 `unsafe`；其当前价值也不足以替代本方案所需的 durable mutation/filter/recovery。
 [sqlite-vec](https://docs.rs/crate/sqlite-vec/latest)
 
-只有 P5.0 benchmark 证明 exact search 无法满足已声明额度时，才评估
+已完成 benchmark 支持默认 100k exact-only 路径，因此 P5 不引入 ANN。只有将来额度或目标主机预算变化时才评估
 [USearch](https://docs.rs/usearch/latest/usearch/struct.Index.html)：
 
 ```text
@@ -1042,8 +1075,10 @@ CREATE TABLE ingest_intents (...);
 CREATE TABLE object_gc (...);
 ```
 
-FTS external-content/contentless 的最终选择必须在 P5.0 做 crash/size benchmark 后冻结；无论选择哪种，FTS row 与
-chunk generation 的一致性都由一个 SQLite 事务检查，不能依赖 trigger 静默修复。
+实现使用同一 instance SQLite 中由平台显式维护的 FTS5 table；FTS row 与 chunk generation 在一个事务中写入并
+由 inspection 检查，不依赖 trigger 静默修复。实际 authority 是
+[`016_ai_search.sql`](../../crates/storage/migrations/016_ai_search.sql) 与 `crates/storage/src/ai_search/`，上面的 SQL
+仅解释 ownership，不替代已落地 schema。
 
 ### 12.3 generation 规则
 
@@ -1055,7 +1090,7 @@ chunk generation 的一致性都由一个 SQLite 事务检查，不能依赖 tri
    一个事务切换 `instance_meta.active_index_generation`，查询期间不能混合两套 tokenizer/chunk/model/index。
 
 query-only 配置如 threshold/max results 可以随 config generation 原子生效；chunk size/overlap、keyword
-tokenizer、index method、custom metadata materialization 必须 full reindex。embedding model Day1 不允许 update。
+tokenizer、index method、custom metadata materialization 和 embedding model update 都必须 fenced full reindex。
 
 ## 13. AI Search S3 对象与上传状态机
 
@@ -1125,7 +1160,7 @@ HTML parser 不执行 script、不请求子资源、不解析外部 entity。
 - `html2text`：HTML 到受限文本；
 - SQLite bundled FTS5：porter/trigram/BM25，[FTS5 文档](https://www.sqlite.org/fts5.html)；
 - JSON 使用已有 `serde_json`；CSV 是否引入 `csv` crate 由 dependency Gate 决定。
-- P5.7 候选 `xberg = "=1.1.0"`，仅启用 `pdf-native/office/excel/iwork/tokio-runtime`，并通过
+- P5.7 当前正式 pin `xberg = "=1.0.14"`，仅启用 `tokio-runtime,pdf,office,excel,xml`，并通过
   [`ocd` 自派生 parser child](p5-7-xberg-document-parsing.md) 隔离 crash 和资源故障。
 
 P5.0–P5.6 不引入 broad parser。P5.7 只在独立 dependency/corpus/process Gate 通过后引入 Xberg 最小 feature；
@@ -1176,8 +1211,8 @@ POST <base_url>/embeddings
 POST <base_url>/chat/completions
 ```
 
-优先复用 workspace 的 Hyper 1.x、hyper-util、rustls/aws-lc 和 webpki roots；新增直接依赖候选为
-`hyper-rustls 0.27`，不再引入一套 Reqwest/TLS stack。最终版本必须经过 Rust 1.98、四平台和 license Gate。
+实现复用 workspace 的 Hyper 1.x、hyper-util、rustls/aws-lc、webpki roots 与 `hyper-rustls 0.27.9`，没有
+引入第二套 Reqwest/TLS stack。本机 Rust 1.98 与 license/build 检查属于本轮验收，四平台留在 release acceptance。
 
 embedding batch 响应必须验证：
 
@@ -1390,7 +1425,7 @@ config generation 和 cancel flag；旧 worker 的结果必须被 fence。
 rrf_score = Σ 1 / (K + rank)
 ```
 
-`K` 初始建议 60，但它不是 Cloudflare 公开合同，必须记录为本地 retrieval parameter，不在 API 中伪称托管内部值。
+`K` 冻结为本地 retrieval parameter `60`；它不是 Cloudflare 公开合同，也不在 API 中伪称托管内部值。
 
 `max` 需要先把两个 branch 归一到 0–1：
 
@@ -1416,7 +1451,8 @@ namespace `search/chatCompletions`：
 
 - `instance_ids` 1–10；
 - 每个 ID 必须属于绑定 namespace/account；
-- duplicate ID、missing/deleting/unavailable instance 的行为由 pinned contract 固定；
+- duplicate ID 在边界稳定拒绝；missing/deleting/unavailable instance 按 `return_on_failure` 合同整体失败或进入
+  实例级脱敏 `errors`；
 - 按 model-contract hash 分组，同组 query embedding 只调用一次；
 - fan-out 受全局/namespace/request concurrency cap；
 - 每个 instance pin 各自 active generation；
@@ -1477,8 +1513,8 @@ custom_metadata
 metadata
 ```
 
-`embedding_model` 省略时解析 operator-pinned `ai.default_embedding_model`；提供时必须命中 catalog。它只在
-instance create 接受，`update({ embedding_model })` 在 P5.0 未证明 Cloudflare 可变语义前稳定拒绝。只启用
+`embedding_model` 省略时解析 operator-pinned `ai.default_embedding_model`；提供时必须命中 catalog。
+`update({ embedding_model })` 走 fenced full-generation reindex，与托管差分中接受 update 的行为一致。只启用
 keyword index 且明确关闭 vector 时可以不解析 embedding contract；默认 vector index 必须在 create 时就验证
 model/provider 配置完整，不能等首次 upload 才失败。
 
@@ -1493,8 +1529,8 @@ semantic cache / cache_threshold
 website/R2 continuous sync
 ```
 
-`boost_by`、custom prompt 的完整托管行为先进入 P5.0/P5.5 differential；如果未实现，必须拒绝该 option，不能
-忽略。由于 upstream AI Search 仍是 beta，所有 `[key: string]: unknown` 扩展字段都按 unsupported 拒绝，
+`boost_by` 与 custom prompt 当前未进入本地支持面，提交时稳定拒绝，不能忽略。由于 upstream AI Search 仍是
+beta，所有 `[key: string]: unknown` 扩展字段都按 unsupported 拒绝，
 不会未经声明透传给 provider。
 
 ### 17.5 Markdown Conversion binding
@@ -1520,7 +1556,7 @@ website/R2 continuous sync
 当前 Cloudflare limits 可作为协议 hard ceiling：
 
 ```text
-dimensions                  <= 1536, float32
+dimensions                  32..1536, float32
 vector ID                   <= 64 UTF-8 bytes
 namespace                   <= 64 UTF-8 bytes
 metadata                    <= 10 KiB/vector
@@ -1531,16 +1567,20 @@ topK                        <= 100
 topK with values/all meta   <= 50
 ```
 
-本地资源 quota 必须更保守并在创建时冻结，例如默认 100k vectors/index 和受 config 限制的 bytes。具体默认值
-由 P5.0 benchmark 决定；不能沿用 Cloudflare 20M 作为本地承诺。
+本地资源 quota 在创建时冻结：默认 100k vectors/index，schema ceiling 200k，并同时执行逻辑 bytes quota；
+不沿用 Cloudflare 20M 作为本地承诺。
 
 ### 18.2 AI Search hard limits
 
 首个 Go：
 
 ```text
-file                         <= 4 MiB
-toMarkdown file/batch        P5.7.0 远端探测并冻结；不把 AI Search 4 MiB 当作未经证实的同一合同
+AI Search item file          <= 4 MiB
+toMarkdown file              <= 4 MiB
+toMarkdown batch             <= 16 files / 32 MiB
+toMarkdown output            <= 16 MiB
+parser deadline/address      30s / 2 GiB
+parser CPU/stderr            30 CPU seconds / 64 KiB
 multi-instance request       <= 10 instances
 custom metadata fields       <= 5
 context expansion            0..3
@@ -1697,12 +1737,12 @@ repair/GC 操作；不能暴露 vector values、document body、prompt、credent
 | 需求 | Day1 选择 | 原因 |
 | --- | --- | --- |
 | SQLite | 现有 `rusqlite` bundled + FTS5 | 已有 authority、backup、limits、FTS5 证据 |
-| vector math | safe Rust loop，LLVM auto-vectorization | 最少供应链；先 benchmark |
+| vector math | safe Rust loop，LLVM auto-vectorization | benchmark 已支持默认 exact-only quota |
 | CPU pool | `rayon` direct dependency | 可构造独立固定线程池，不占 Tokio worker |
-| HTTPS client | `hyper-rustls 0.27` 候选 | 与现有 Hyper 1.x/rustls/aws-lc 对齐 |
-| chunking | `text-splitter` 候选 | recursive boundaries、overlap、tokenizer adapter |
-| HTML | `html2text` 候选 | Day1 足够，避免浏览器/网络 |
-| tokenization | model-specific adapter；候选 `tiktoken-rs` | tokenizer identity 可冻结；不能用字符数冒充 token |
+| HTTPS client | `hyper-rustls 0.27.9` | Hyper 1.x、aws-lc、webpki roots、no redirect |
+| chunking | `crates/search` 自有 token-boundary chunker | 固定 overlap、UTF-8 byte offset 与 tokenizer adapter |
+| HTML | `astral-tl 0.8.0` + Xberg | selector/base normalization，无浏览器或网络 |
+| tokenization | `tokenizers 0.20.4` pure-Rust feature | artifact path/hash/revision 一起冻结，不用字符数冒充 token |
 | BM25 | SQLite FTS5 | porter/trigram/BM25 已随 SQLite authority |
 | ANN | 不进入 Day1；条件式 USearch POC | derived accelerator，不替代 SQLite |
 | sqlite-vec | 不采用 | pre-1.0、FFI/extension、无 durable product engine |
@@ -1710,15 +1750,17 @@ repair/GC 操作；不能暴露 vector values、document body、prompt、credent
 | rich document parsing | P5.7 Xberg 最小 feature + parser child | 对齐 Cloudflare 格式，同时隔离 abort/资源故障 |
 | Kreuzberg v4/full parser | 不采用 | legacy/LTS 或 feature/native/model 面过重 |
 
-所有新 dependency 必须加入 workspace root、默认 feature 为空或最小化，经过 Rust 1.98、license、四平台、binary
-size 和 offline startup 检查。依赖内部使用 unsafe 不自动违反 workspace lint，但任何 native build/runtime loading
-都会进入正式供应链 Gate。
+这些 dependency 已加入 workspace root 并使用最小 feature；Rust 1.98、本机 license/build/offline 行为属于本轮
+验收，四平台与 release binary size 留在 active release acceptance。依赖内部使用 unsafe 不自动违反 workspace
+lint，但新增 native build/runtime loading 仍需独立供应链 Gate。
 
-## 23. 实施顺序
+## 23. 已完成实施阶段
 
-### P5.0：合同与搜索内核 Gate
+P5.0–P5.7 已按以下 ownership 进入唯一 production path；这里保留阶段划分作为实现索引，不再是未来计划。
 
-先于 production schema：
+### P5.0：合同与搜索内核 Gate（完成）
+
+已完成：
 
 1. 冻结 Vectorize/AI Search pinned type inventory 和 supported/deviation matrix；
 2. 对真实 Cloudflare 探测 embedding model omitted/explicit、create/update、`info()` resolved alias、invalid alias，
@@ -1731,7 +1773,7 @@ size 和 offline startup 检查。依赖内部使用 unsafe 不自动违反 work
 
 P5.0 不保留 disposable production POC；通过的纯算法/contract fixture 进入 `crates/search`/`test/conformance`。
 
-### P5.1：Vectorize resource 与 SQLite
+### P5.1：Vectorize resource 与 SQLite（完成）
 
 - `BindingKind`、config、error、resource driver；
 - control product table、paths、create/delete/reconcile；
@@ -1740,7 +1782,7 @@ P5.0 不保留 disposable production POC；通过的纯算法/contract fixture �
 - snapshot/restore schema 扩展；
 - CRUD 和 crash lifecycle Gate。
 
-### P5.2：Vectorize binding、mutation 与 query
+### P5.2：Vectorize binding、mutation 与 query（完成）
 
 - toolchain declaration/reconciliation/generated Env；
 - RuntimeSource descriptor、facade、binary transport；
@@ -1749,7 +1791,7 @@ P5.0 不保留 disposable production POC；通过的纯算法/contract fixture �
 - exact search、metadata pre-filter、warm LRU；
 - stock-workerd Gate 和 Cloudflare differential。
 
-### P5.3：AI provider 与文档内核
+### P5.3：AI provider 与文档内核（完成）
 
 - strict operator provider config/model catalog/secret resolution；
 - CF `embedding_model` → operator catalog → frozen model contract，并实现 operator-pinned default；
@@ -1758,7 +1800,7 @@ P5.0 不保留 disposable production POC；通过的纯算法/contract fixture �
 - fake OpenAI-compatible process fixture；
 - malformed response、timeout、retry、offline startup Gate。
 
-### P5.4：AI Search namespace、instance 与 ingestion
+### P5.4：AI Search namespace、instance 与 ingestion（完成）
 
 - parent/child resource lifecycle；
 - instance SQLite、S3 object/intents/GC；
@@ -1766,7 +1808,7 @@ P5.0 不保留 disposable production POC；通过的纯算法/contract fixture �
 - indexing coordinator/generation activation；
 - restart、cancel、stale result、full reindex Gate。
 
-### P5.5：AI Search retrieval 与 binding
+### P5.5：AI Search retrieval 与 binding（完成）
 
 - vector/keyword/hybrid、filter、fusion、context expansion；
 - rewrite/rerank/chat completion；
@@ -1774,26 +1816,31 @@ P5.0 不保留 disposable production POC；通过的纯算法/contract fixture �
 - multi-instance search/chat；
 - stock-workerd、provider fixture、Cloudflare differential。
 
-### P5.6：平台 hardening 与验收
+### P5.6：平台 hardening 与本机验收（核心完成）
 
 - quotas/admission/fairness/deadline；
 - health/metrics/doctor/support bundle/operator endpoints；
 - full snapshot/restore/S3 pin/retention；
-- fuzz、crash matrix、coverage、timing-three、cross-platform release qualification；
+- focused fault/recovery、coverage 与用户要求的一轮本机 Gate；timing-three、完整 parser crash/soak、cross-platform
+  release qualification 分离到 active release acceptance；
 - 更新 capabilities、deviations、README 和总架构文档。
 
-### P5.7：Xberg 文档解析
+### P5.7：Xberg 文档解析（本地核心完成）
 
 详细设计和顺序见 [P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md)：
 
 - 冻结 Cloudflare rich-format allowlist 与 deviation；
-- Xberg crates.io 最小 feature、MSRV、license、offline build、binary size 与四平台 Gate；
+- 当前正式 pin `xberg = "=1.0.14"`，最小 features `tokio-runtime,pdf,office,excel,xml`；MSRV、offline parser build、固定 corpus 已验证，binary size 与四平台发行 Gate 留在 active release acceptance；
 - `ocd __document-parser-v1` 短生命周期 child、framed protocol、deadline/resource/process ownership；
 - 标准 `[ai]` builtin binding、`env.AI.toMarkdown` direct/handle overload 与 Cloudflare response/error shape；
-- PDF、DOCX、XLSX/XLSM/XLSB/XLS、ODS/ODT、Numbers，`.et` 需真实 fixture 后条件启用；
-- 至少 30 个许可明确的公开固定文件；首批候选 38 个，来自 Tika、LangChain4j、POI 和 PDFBox；
+- 当前 admission 为 TXT/Markdown/HTML/XML/JSON/CSV、PDF、DOCX、XLSX/XLSM/XLS、ODS/ODT；XLSB、Numbers 与 `.et` 已按固定证据判为 No-Go；
+- 已提交 40 个许可与 provenance 固定的公开文件及 15 个 deterministic hostile fixtures；
 - Markdown Conversion 和 AI Search Items 共用 parser service；后者完成 parse → staged chunks → embedding resume →
   generation activation 与 stock-workerd retrieval Gate。
+
+截至 2026-09-02，上述 parser、Markdown Conversion、AI Search ingestion/retrieval/recovery 已接通；公开 rich
+formats 为 TXT/Markdown/HTML/XML/JSON/CSV、PDF、DOCX、XLSX/XLSM/XLS、ODT/ODS，XLSB、Numbers、ET
+按固定证据 No-Go。
 
 ### P5.8：剩余条件式扩展（当前不实现）
 
@@ -1851,22 +1898,28 @@ restore: missing object / digest mismatch / model contract mismatch / derived ca
 - 删除只影响精确 resource/object；
 - support bundle/log/error 不泄露内容或 secret。
 
-## 25. Benchmark 与 Go 标准
+## 25. Benchmark 与 Go 结论
 
-P5.0 必须先给出目标主机 class，例如 4 vCPU/8 GiB 和 8 vCPU/16 GiB。建议初始 Go 条件：
+P5.0 在 Apple M2 Max（12 cores、32 GiB）完成 release-mode exact-search benchmark；数字是本机工程证据，
+不是对所有部署主机承诺的托管 SLA：
 
-| 项目 | Gate 意图 |
-| --- | --- |
-| 100k × 768 exact query | warm p95 在声明交互预算内，RSS 不超过 cache+固定 overhead |
-| 100k × 1536 exact query | deadline/admission 稳定，不拖垮 HTTP/runtime |
-| metadata 1% selectivity | 实际 scored candidates 接近 filter candidate，不做全表后过滤 |
-| concurrency 16 | CPU pool 有界，Tokio/public health 保持可响应 |
-| mutation 1000 × 1536 | private frame/body/RSS 有界，durable enqueue 和 apply 可恢复 |
-| AI upload 4 MiB | streaming staging/S3/parse 不产生无界复制 |
-| embedding retry | 进程 crash/429/timeout 后 deterministic resume |
-| hybrid query | vector 与 FTS 并行，fusion/order 在固定 corpus 可重复 |
+| vectors | 384d p95 | 768d p95 | 1024d p95 | 1536d p95 |
+| ---: | ---: | ---: | ---: | ---: |
+| 10k | 8 ms | 17 ms | 23 ms | 35 ms |
+| 50k | 39 ms | 83 ms | 112 ms | 175 ms |
+| 100k | 81 ms | 175 ms | 256 ms | 367 ms |
+| 250k | 214 ms | 447 ms | 640 ms | 967 ms |
 
-具体毫秒和 RSS 数值必须由 P5.0 环境与产品 quota 冻结，不能在没有 benchmark 时把建议值写成已验证 SLA。
+内存/过滤/并发补充证据：
+
+- snapshot：100k × 768/1024/1536 分别为 308.1/410.5/615.3 MiB；250k × 1536 为 1.538 GiB；
+- 100k × 768 metadata selectivity 1%/10%/100% 分别为 3/18/181 ms，证明 pre-filter 控制 scored candidates；
+- 同一 snapshot concurrency 1/4/16 的 wall time 为 172/178/451 ms，Rayon pool 与 admission 保持有界；
+- 隔离的 100k × 1024 run：p95 227 ms、max RSS 415,809,536 bytes、snapshot 410.5 MiB。
+
+因此 Day1 选择 exact-only，默认 quota 100k vectors/index、512 MiB host-wide warm cache；250k 只保留为
+schema ceiling/扩容证据之外的压力点，不作为默认承诺。mutation、upload、provider retry、hybrid ordering 的有界性
+由 focused lifecycle/fixture Gate 覆盖。
 
 ANN 仅在以下任一成立时进入 P5.8：
 
@@ -1874,9 +1927,9 @@ ANN 仅在以下任一成立时进入 P5.8：
 - exact scan 消耗导致其他产品 readiness/latency 超出 Gate；
 - 目标额度提高到 exact search 明显不可行的数量级。
 
-## 26. 完成标准
+## 26. 完成与后续资格边界
 
-P5 只有在以下全部完成后才能归档：
+本地核心归档需满足：
 
 - supported/deviation matrix 覆盖 pinned Vectorize、AI Search 和 Markdown Conversion type members；
 - control/resource/binding/toolchain/runtime/private backend 全链路实现；
@@ -1887,9 +1940,10 @@ P5 只有在以下全部完成后才能归档：
 - P5.7 advertised rich format 均有固定公开 fixture、parser child 隔离和多语言 retrieval 证据；
 - Cloudflare differential 验证 API shape、限制、mutation/filter/retrieval 高风险行为；
 - exact search benchmark 支撑公开单机 quota，或条件式 ANN 已单独 Go；
-- no-default-features、Rust 1.98、dependency boundaries、coverage 和最终 timing-three Gate 通过；
+- no-default-features、Rust 1.98、dependency boundaries、coverage 和用户要求的一轮最终 Gate 通过；
 - capability catalog、deviation reference、operator docs、single-binary/snapshot docs 和总架构同步；
 - 文档移入 `docs/implemented/` 并附实际 revision、输入、case count、coverage、Gate report 和已接受限制。
 
-在此之前只能称为 planned/partial/conditional，不能把“能调用 embedding provider”或一个 RAG demo 成功当作
-Vectorize/AI Search Platform Go。
+三轮 timing qualification、四平台 release build/size/offline startup、完整 parser crash/abort/OOM/orphan/soak、
+托管 Markdown Conversion rich-document differential 和正式发布签名不冒充本轮本机证据，统一留在 active release
+acceptance。它们不反向创建旧实现兼容路径，也不削弱本地 resource、authority、runtime 和 recovery Gate。

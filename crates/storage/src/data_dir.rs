@@ -75,7 +75,7 @@ pub fn inspect_durable_object_storage(
 }
 
 /// P0.1 layout names that must not be pre-created as tenant resource files.
-pub const FORBIDDEN_PRECREATE: &[&str] = &["do", "kv", "d1"];
+pub const FORBIDDEN_PRECREATE: &[&str] = &["do", "kv", "d1", "vectorize"];
 
 /// RAII owner of a data directory and its exclusive lock.
 #[derive(Debug)]

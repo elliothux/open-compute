@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "Apache Tika",
+    "Content Analysis Toolkit"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 10,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": 1,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "Apache Tika",
+      "expected_fixture_id": "tika-pdf-rotated"
+    }
+  ],
+  "review_notes": "Reviewed with PDFKit; rotated page retains ordinary reading order."
+}

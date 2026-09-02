@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "repeat_bytes": 1048576,
+  "xml_nesting_depth": 4096,
+  "expected_errors": {
+    "zip-extreme-compression.docx": "DOCUMENT_LIMIT_EXCEEDED",
+    "zip-duplicate-entry.docx": "CONTENT_TYPE_MISMATCH",
+    "xml-deep-nesting.odt": "DOCUMENT_LIMIT_EXCEEDED",
+    "xml-entity.odt": "DOCUMENT_PARSE_FAILED",
+    "ooxml-oversized-shared-strings.xlsx": "DOCUMENT_LIMIT_EXCEEDED",
+    "ooxml-relationship-cycle.docx": "CONTENT_TYPE_MISMATCH",
+    "spreadsheet-limit-overflow.xlsx": "CONTENT_TYPE_MISMATCH",
+    "ole-truncated-sector-chain.xls": "DOCUMENT_INVALID",
+    "pdf-object-cycle.pdf": "DOCUMENT_INVALID",
+    "pdf-huge-dimensions.pdf": "DOCUMENT_INVALID",
+    "pdf-nested-stream.pdf": "DOCUMENT_INVALID",
+    "frame-length-overflow.bin": "INVALID_FRAME",
+    "frame-invalid-utf8.bin": "INVALID_FRAME",
+    "frame-trailing-bytes.bin": "INVALID_FRAME",
+    "frame-wrong-digest.bin": "INVALID_FRAME"
+  }
+}

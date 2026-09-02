@@ -56,15 +56,16 @@ Assets-only 项目不能声明 vars、secrets、产品/service bindings，也不
 默认账户由经过身份验证的 `GET /v1/account` 返回，也可用 `accountId` / `--account` 明确指定。
 
 其他字段是 `vars`、`secrets`、`bindings`、`services`、`assets`、`cache`、
-`exports`、`images` 和 `version_metadata`。普通产品
+`exports`、`images`、`ai` 和 `version_metadata`。普通产品
 binding 使用 `{type, id, permissions?}`；Durable Object 与 Workflow 还必须提供
 `className`，它只用于核对生成的 framework config 中 class 语义，不作为资源 ID 发送给平台。Service Binding 使用
 `[{binding, service, entrypoint?}]`，部署时把同账户 Worker 名解析并冻结为目标 ID。Assets 支持
 `directory`、`binding`、`run_worker_first`、`html_handling`、`not_found_handling` 和
 `publish_source_maps`；精确支持值由 parser 与 Static Assets 文档共同约束。
 `cache` 接受 `enabled` 与 `cross_version_cache`；`exports.<name>` 只接受
-`{"type":"worker","cache":{...}}`，用于覆盖具名 Worker entrypoint 的缓存策略。Images 和
-Version Metadata 是平台内建 binding，不引用资源 ID，例如：
+`{"type":"worker","cache":{...}}`，用于覆盖具名 Worker entrypoint 的缓存策略。Images、Workers AI
+Markdown Conversion 和 Version Metadata 是平台内建 binding，不引用资源 ID；AI binding 只实现
+`toMarkdown`，其他 Workers AI 成员 fail closed。例如：
 
 ```json
 {
@@ -73,6 +74,7 @@ Version Metadata 是平台内建 binding，不引用资源 ID，例如：
     "Admin": { "type": "worker", "cache": { "enabled": false } }
   },
   "images": { "binding": "IMAGES" },
+  "ai": { "binding": "AI" },
   "version_metadata": { "binding": "VERSION", "tag": "release-1" }
 }
 ```
@@ -87,8 +89,8 @@ Version Metadata 是平台内建 binding，不引用资源 ID，例如：
 ESM 静态依赖、动态 import 的 chunks 和具名导出会保留；当前 pinned baseline 已提供 Node 兼容，
 因此 `node:` 导入无需额外参数。工具链不提供 Node 运行环境、不填补未实现的产品 API，也不下载远程 import。
 项目 JSON 不得包含 `compatibilityDate` 或 `compatibilityFlags`。
-运行时仍按平台当前的兼容性日期、capability/deviation 与资源限制校验产物。Cache/Images 的精确
-支持面、单节点限制与资源预算见 P3.3 文档和 `ocd capabilities --json`。
+运行时仍按平台当前的兼容性日期、capability/deviation 与资源限制校验产物。Cache/Images/AI 的精确
+支持面、单节点限制与资源预算见对应阶段文档和 `ocd capabilities --json`。
 
 ## 检查
 

@@ -779,6 +779,11 @@ async fn liveness_ready_status_and_bounds() {
         ComponentName::Runtime,
         ComponentName::Scheduler,
         ComponentName::Operations,
+        ComponentName::VectorizeStorage,
+        ComponentName::VectorizeMutations,
+        ComponentName::AiSearchStorage,
+        ComponentName::AiSearchIndexing,
+        ComponentName::AiModels,
     ] {
         health
             .set_component(name, ComponentState::Healthy, Some(ReadinessReason::Ready))
@@ -2253,7 +2258,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     let result = crate::support_bundle::create_support_bundle(&loaded, &output)
         .await
         .unwrap();
-    assert_eq!(result.entries, 8);
+    assert_eq!(result.entries, 9);
     assert_eq!(
         fs::metadata(&output).unwrap().permissions().mode() & 0o777,
         0o600
@@ -2271,8 +2276,30 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
         b"metrics.prom".as_slice(),
         b"receipts/last-snapshot.json".as_slice(),
         b"release.json".as_slice(),
+        b"search.json".as_slice(),
     ] {
         assert!(archive.windows(name.len()).any(|window| window == name));
+    }
+    assert!(archive.windows(64).any(|window| {
+        window
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+    }));
+    let search = crate::support_bundle::search_summary(&loaded).unwrap();
+    assert_eq!(search["schema_version"], 1);
+    assert_eq!(search["resources"]["vectorize_index"]["total"], 0);
+    assert_eq!(search["resources"]["ai_search_namespace"]["total"], 0);
+    assert_eq!(search["resources"]["ai_search_instance"]["total"], 0);
+    assert_eq!(
+        search["contracts"]["ai_provider_contract_sha256"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    let search_json = serde_json::to_string(&search).unwrap();
+    for forbidden in ["metadata", "values", "object_key", "secret"] {
+        assert!(!search_json.contains(forbidden));
     }
     assert_eq!(
         crate::support_bundle::create_support_bundle(&loaded, Path::new("relative.tar"))
@@ -2375,7 +2402,7 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     );
     metrics.set_schema_version(8);
     metrics.set_schema_failed_resources(2);
-    metrics.set_resource_counts([1, 2, 3, 4, 5, 6, 7, 8]);
+    metrics.set_resource_counts([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     metrics.observe_product_error(
         open_compute_core::OperationClass::DurableObjects,
         ErrorCode::QuotaExceeded,
@@ -2436,6 +2463,9 @@ async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() 
     assert!(rendered.contains("platform_schema_current 8"));
     assert!(rendered.contains("platform_schema_failed_resources 2"));
     assert!(rendered.contains("platform_resource_count{resource=\"d1_databases\"} 7"));
+    assert!(rendered.contains("platform_resource_count{resource=\"vectorize_indexes\"} 9"));
+    assert!(rendered.contains("platform_resource_count{resource=\"ai_search_namespaces\"} 10"));
+    assert!(rendered.contains("platform_resource_count{resource=\"ai_search_instances\"} 11"));
     assert!(rendered.contains("platform_quota_reject_total{product=\"durable_objects\"} 1"));
     assert!(rendered.contains("sqlite_busy_total 3"));
     assert!(rendered.contains("sqlite_check_failure_total 1"));

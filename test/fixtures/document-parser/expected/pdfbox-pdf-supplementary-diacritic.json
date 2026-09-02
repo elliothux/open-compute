@@ -1,0 +1,23 @@
+{
+  "status": "ok",
+  "error": null,
+  "must_contain": [
+    "𝑋̂"
+  ],
+  "must_not_contain": [],
+  "min_normalized_chars": 2,
+  "max_normalized_chars": 2000000,
+  "structure": {
+    "min_headings": 0,
+    "min_tables": 0,
+    "page_count": null,
+    "sheet_names": []
+  },
+  "retrieval_queries": [
+    {
+      "query": "𝑋̂",
+      "expected_fixture_id": "pdfbox-pdf-supplementary-diacritic"
+    }
+  ],
+  "review_notes": "Reviewed with PDFKit; supplementary mathematical italic X plus combining circumflex."
+}

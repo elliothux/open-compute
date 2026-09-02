@@ -16,8 +16,8 @@ open-compute schema、descriptor、runtime 或 API 的兼容路径。
 
 ## 当前结论
 
-目标 inventory 共 2,097 个 stable members/overloads：1,585 个 `supported`，512 个
-`supported_with_deviation`，`blocked=0`。catalog 的 2,097 条 `memberEvidence` 与 capability 成员双射，
+目标 inventory 共 2,178 个 stable members/overloads：1,585 个 `supported`，593 个
+`supported_with_deviation`，`blocked=0`。catalog 的 2,178 条 `memberEvidence` 与 capability 成员双射，
 `blockedGaps=[]`。deviation 只描述单机 self-host 无法复制的 edge/全球拓扑、托管 fleet quota 或本地
 authority 差异；它不代表缺方法、占位返回或半截实现。
 
@@ -35,11 +35,15 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | Cache API | `supported_with_deviation` | 14 | `Cache`/`CacheStorage`、vary/range/condition、purge、restart 和自动 cache 协作均闭环 | `OC-CACHE-001`、`OC-CACHE-002` |
 | Version Metadata | `supported` | 3 | `id`、`tag`、`timestamp` 由 immutable deployment authority 注入 | — |
 | WebSocket hibernation | `supported` | 19 | accept/tags/get、auto-response、serialize/deserialize attachment、reconstruction 和 restart 均闭环 | — |
+| Vectorize | `supported_with_deviation` | 27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同 | `OC-VECTORIZE-001` |
+| Workers AI / Markdown Conversion / AI Search | `supported_with_deviation` | 54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；AI Search namespace/instance/items/jobs、durable async 上传索引、keyword/vector/hybrid retrieval、chat/SSE 与配置内 OpenAI-compatible provider 闭环；完整 Workers AI inference 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001` |
 
-Deployments、Static Assets、Service Binding、Workers Cache 和 Images 是平台配套能力；它们没有进入上述
-stable-member denominator，但 capability 中分别按当前本地合同登记为 `supported_with_deviation`。
-Analytics Engine、AI、Browser Rendering、Vectorize、Hyperdrive、mTLS、Rate Limiting 与 Workers for
-Platforms 明确为本轮非目标并在部署 authority 边界拒绝，不能因 upstream types 中存在名称而自动注入。
+Deployments、Static Assets、Service Binding、Workers Cache 与 Images 是平台配套能力，没有进入上述
+stable-member denominator；AI 的 54 个目标 members/overloads 已进入 denominator，并按当前本地合同登记为
+`supported_with_deviation`。
+Analytics Engine、Browser Rendering、Hyperdrive、mTLS、Rate Limiting 与 Workers for
+Platforms 明确为本轮非目标并在部署 authority 边界拒绝。完整 Workers AI inference 仍是非目标；存在标准
+`env.AI` 只表示上表的 Markdown Conversion 与 AI Search 所需配置模型子集，不能因 upstream types 中存在其它 AI 名称而扩张能力声明。
 
 deviation 规范文本、官方来源和边界见 [`p1-deviations.md`](p1-deviations.md)。其中 raw TCP 的 Day1
 实现只有一个 `Network(allow = ["public"])` general-outbound authority；

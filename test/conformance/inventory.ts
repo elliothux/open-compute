@@ -14,6 +14,7 @@ import {
 import { canonicalize, fingerprintDeclarationSourceTwice, parseSourceFile } from "./types-ast.ts";
 import {
   NON_TARGET_PUBLIC_PRODUCTS,
+  PARTIAL_TARGET_SYMBOLS,
   PLATFORM_PRODUCTS,
   PUBLIC_PRODUCTS,
   TARGET_PRODUCT_DEVIATIONS,
@@ -249,10 +250,12 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
     if (isModuleDeclaration(statement) || isEnumDeclaration(statement)) continue;
     const name = isVariableStatement(statement) ? undefined : declarationName(statement);
     const symbolName = name === undefined ? undefined : qualify(prefix, name);
-    const classification = symbolName === undefined
+    let classification = symbolName === undefined
       ? classifySymbol(prefix === "" ? "(global)" : prefix.slice(0, -1))
       : classifySymbol(symbolName);
-    if (classification.class !== "target") continue;
+    const partial = symbolName === undefined ? undefined : PARTIAL_TARGET_SYMBOLS.get(symbolName);
+    if (classification.class !== "target" && partial === undefined) continue;
+    if (partial !== undefined) classification = { product: partial.product, class: "target" };
     if (isVariableStatement(statement)) {
       let anyTarget = false;
       for (const declaration of statement.declarationList.declarations) {
@@ -268,6 +271,7 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
       statement,
       aliasesByPrefix.get(prefix) ?? new Map(),
       index,
+      partial?.members,
     );
     for (const declared of expanded.names) {
       coverage.target_declarations += 1;

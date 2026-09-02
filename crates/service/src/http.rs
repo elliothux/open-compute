@@ -11,6 +11,7 @@ use crate::queue_http::{self, QueueApiState};
 use crate::r2_http::{self, R2ApiState};
 use crate::scheduler::SchedulerService;
 use crate::scheduler_http;
+use crate::search_http::{self, SearchApiState};
 use crate::workers_http::{self, WorkerApiState};
 use crate::workflow_http::{self, WorkflowApiState};
 use axum::body::Body;
@@ -59,6 +60,7 @@ pub struct HttpState {
     workflow_api: Option<Arc<WorkflowApiState>>,
     scheduler: Option<Arc<SchedulerService>>,
     cache_images_api: Option<Arc<CacheImagesApiState>>,
+    search_api: Option<Arc<SearchApiState>>,
 }
 
 impl std::fmt::Debug for HttpState {
@@ -79,6 +81,7 @@ impl std::fmt::Debug for HttpState {
             .field("workflow_api", &self.workflow_api.is_some())
             .field("scheduler", &self.scheduler.is_some())
             .field("cache_images_api", &self.cache_images_api.is_some())
+            .field("search_api", &self.search_api.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -134,6 +137,7 @@ impl HttpState {
             workflow_api: None,
             scheduler: None,
             cache_images_api: None,
+            search_api: None,
         })
     }
 
@@ -161,6 +165,7 @@ impl HttpState {
             workflow_api: None,
             scheduler: None,
             cache_images_api: None,
+            search_api: None,
         }
     }
 
@@ -295,6 +300,19 @@ impl HttpState {
     pub(crate) const fn metrics(&self) -> &Arc<MetricsRegistry> {
         &self.metrics
     }
+
+    /// Attach Vectorize and AI Search operator lifecycle authority.
+    #[must_use]
+    pub fn with_search_api(mut self, api: SearchApiState) -> Self {
+        self.search_api = Some(Arc::new(api));
+        self
+    }
+
+    /// Borrow the optional Vectorize and AI Search operator authority.
+    #[must_use]
+    pub(crate) fn search_api(&self) -> Option<&Arc<SearchApiState>> {
+        self.search_api.as_ref()
+    }
 }
 
 /// Public routes only.
@@ -332,6 +350,7 @@ pub fn admin_router(state: HttpState) -> Router {
     router = router.merge(queue_http::control_router());
     router = router.merge(workflow_http::control_router());
     router = router.merge(cache_images_http::control_router());
+    router = router.merge(search_http::control_router());
     router = router.merge(test_control_router());
     router
         .fallback(fallback)
@@ -363,6 +382,7 @@ pub fn merged_router(state: HttpState) -> Router {
         .merge(queue_http::control_router())
         .merge(workflow_http::control_router())
         .merge(cache_images_http::control_router())
+        .merge(search_http::control_router())
         .merge(test_control_router())
         .fallback(workers_http::public_ingress)
         .layer(axum::middleware::from_fn_with_state(
