@@ -69,6 +69,8 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: default
+      - name: Build untracked runtime and toolchain assets from this checkout
+        run: bun run build
       - name: Final workspace once (Linux, explicit privilege authorization)
         run: OPEN_COMPUTE_GATE_ROUNDS=1 OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh --workspace --jobs 2
       - uses: actions/upload-artifact@v7
