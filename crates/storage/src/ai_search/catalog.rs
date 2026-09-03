@@ -13,6 +13,8 @@ use serde::Serialize;
 pub struct AiSearchNamespaceRecord {
     /// Shared resource lifecycle and account authority.
     pub resource: ResourceRecord,
+    /// Optional Cloudflare-facing description.
+    pub description: Option<String>,
 }
 
 /// Product row for one built-in-storage AI Search instance.
@@ -52,20 +54,64 @@ impl<'a> AiSearchCatalog<'a> {
         self,
         resource: &ResourceRecord,
     ) -> Result<AiSearchNamespaceRecord, PlatformError> {
+        self.ensure_namespace_with_description(resource, None)
+    }
+
+    /// Materialize a namespace with an optional description.
+    pub fn ensure_namespace_with_description(
+        self,
+        resource: &ResourceRecord,
+        description: Option<&str>,
+    ) -> Result<AiSearchNamespaceRecord, PlatformError> {
         if resource.kind != BindingKind::AiSearchNamespace
             || resource.state != ResourceState::Creating
             || resource.driver_schema_version != 1
+            || description.is_some_and(|value| value.chars().count() > 256)
         {
             return Err(invariant());
         }
         self.db.with_immediate(|tx| {
             tx.execute(
-                "INSERT INTO ai_search_namespaces (resource_id, created_at_ms)
-                 VALUES (?1, ?2) ON CONFLICT(resource_id) DO NOTHING",
-                params![resource.id.to_string(), resource.created_at_ms],
+                "INSERT INTO ai_search_namespaces (resource_id, description, created_at_ms)
+                 VALUES (?1, ?2, ?3) ON CONFLICT(resource_id) DO NOTHING",
+                params![resource.id.to_string(), description, resource.created_at_ms],
             )
             .map_err(|_| invariant())?;
-            read_namespace(tx, resource)
+            let stored = read_namespace(tx, resource)?;
+            if stored.description.as_deref() != description {
+                return Err(invariant());
+            }
+            Ok(stored)
+        })
+    }
+
+    /// Replace the optional namespace description.
+    pub fn update_namespace_description(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+        description: Option<&str>,
+    ) -> Result<AiSearchNamespaceRecord, PlatformError> {
+        if description.is_some_and(|value| value.chars().count() > 256) {
+            return Err(invariant());
+        }
+        let resource = ResourceRepository::new(self.db).get(account_id, resource_id)?;
+        if resource.kind != BindingKind::AiSearchNamespace || resource.state != ResourceState::Ready
+        {
+            return Err(not_found());
+        }
+        self.db.with_immediate(|transaction| {
+            if transaction
+                .execute(
+                    "UPDATE ai_search_namespaces SET description=?1 WHERE resource_id=?2",
+                    params![description, resource_id.to_string()],
+                )
+                .map_err(|_| invariant())?
+                != 1
+            {
+                return Err(not_found());
+            }
+            read_namespace(transaction, &resource)
         })
     }
 
@@ -335,11 +381,11 @@ fn read_namespace(
     if resource.kind != BindingKind::AiSearchNamespace {
         return Err(not_found());
     }
-    let created_at_ms = connection
+    let (description, created_at_ms) = connection
         .query_row(
-            "SELECT created_at_ms FROM ai_search_namespaces WHERE resource_id=?1",
+            "SELECT description, created_at_ms FROM ai_search_namespaces WHERE resource_id=?1",
             [resource.id.to_string()],
-            |row| row.get::<_, i64>(0),
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
         )
         .optional()
         .map_err(|_| invariant())?
@@ -349,6 +395,7 @@ fn read_namespace(
     }
     Ok(AiSearchNamespaceRecord {
         resource: resource.clone(),
+        description,
     })
 }
 

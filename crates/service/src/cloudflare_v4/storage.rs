@@ -67,11 +67,7 @@ pub(super) async fn json_with_limit<T: DeserializeOwned>(
     let valid_content_type = content_types.next().is_none()
         && content_type
             .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| {
-                let mut parts = value.split(';').map(str::trim);
-                parts.next() == Some("application/json")
-                    && parts.all(|part| part.eq_ignore_ascii_case("charset=utf-8"))
-            });
+            .is_some_and(json_content_type);
     if !valid_content_type {
         return Err(error_response(V4Error::InvalidRequest, request_id));
     }
@@ -79,6 +75,18 @@ pub(super) async fn json_with_limit<T: DeserializeOwned>(
         .await
         .map_err(|_| error_response(V4Error::InvalidRequest, request_id))?;
     serde_json::from_slice(&bytes).map_err(|_| error_response(V4Error::InvalidRequest, request_id))
+}
+
+fn json_content_type(value: &str) -> bool {
+    let mut parts = value.split(';').map(str::trim);
+    if parts.next() != Some("application/json") {
+        return false;
+    }
+    match (parts.next(), parts.next()) {
+        (None, None) => true,
+        (Some(parameter), None) => parameter.eq_ignore_ascii_case("charset=utf-8"),
+        _ => false,
+    }
 }
 
 pub(super) fn now_ms() -> Result<i64, V4Error> {
@@ -162,5 +170,21 @@ const fn hex_digit(byte: u8) -> Option<u8> {
         b'a'..=b'f' => Some(byte - b'a' + 10),
         b'A'..=b'F' => Some(byte - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::json_content_type;
+
+    #[test]
+    fn json_content_type_accepts_only_the_frozen_parameter_shape() {
+        assert!(json_content_type("application/json"));
+        assert!(json_content_type("application/json; charset=UTF-8"));
+        assert!(!json_content_type(
+            "application/json;charset=utf-8;charset=utf-8"
+        ));
+        assert!(!json_content_type("application/json; profile=custom"));
+        assert!(!json_content_type("application/json; charset=ascii"));
     }
 }

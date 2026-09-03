@@ -50,7 +50,7 @@ fn spec() -> VectorizeIndexSpec {
 }
 
 #[test]
-fn public_resource_admission_rejects_dimensions_below_32() {
+fn public_resource_admission_accepts_one_dimension_and_rejects_zero() {
     let (_temporary, storage) = storage();
     let account = storage.identity().default_account_id;
     let controller = ResourceController::new(
@@ -59,7 +59,7 @@ fn public_resource_admission_rejects_dimensions_below_32() {
         VectorizeResourceDriver::new(
             &storage,
             VectorizeIndexSpec {
-                dimensions: 31,
+                dimensions: 0,
                 metric: "cosine".to_string(),
                 quota_vectors: 100,
                 quota_bytes: 16 * 1024 * 1024,
@@ -72,8 +72,8 @@ fn public_resource_admission_rejects_dimensions_below_32() {
             .create(&CreateResourceRequest {
                 account_id: account,
                 kind: BindingKind::VectorizeIndex,
-                name: "too-small".to_string(),
-                idempotency_key: "too-small".to_string(),
+                name: "zero".to_string(),
+                idempotency_key: "zero".to_string(),
                 driver_schema_version: VECTORIZE_SCHEMA_VERSION,
                 request_id: RequestId::generate(),
                 now_ms: 1,
@@ -82,6 +82,32 @@ fn public_resource_admission_rejects_dimensions_below_32() {
             .code(),
         ErrorCode::ResourceInvariantViolation
     );
+
+    let outcome = ResourceController::new(
+        &storage,
+        ResourcePins::new(),
+        VectorizeResourceDriver::new(
+            &storage,
+            VectorizeIndexSpec {
+                dimensions: 1,
+                metric: "cosine".to_string(),
+                quota_vectors: 100,
+                quota_bytes: 16 * 1024 * 1024,
+            },
+            5_000,
+        ),
+    )
+    .create(&CreateResourceRequest {
+        account_id: account,
+        kind: BindingKind::VectorizeIndex,
+        name: "one".to_string(),
+        idempotency_key: "one".to_string(),
+        driver_schema_version: VECTORIZE_SCHEMA_VERSION,
+        request_id: RequestId::generate(),
+        now_ms: 2,
+    })
+    .unwrap();
+    assert!(matches!(outcome, CreateResourceOutcome::Applied(_)));
 }
 
 #[test]

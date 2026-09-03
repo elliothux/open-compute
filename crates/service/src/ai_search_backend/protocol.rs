@@ -260,16 +260,14 @@ pub(super) fn page_bounds(
 }
 
 pub(super) fn require_namespace(authority: &Authority) -> Result<(), PlatformError> {
-    if authority.binding.binding.kind != BindingKind::AiSearchNamespace {
+    if authority.kind != BindingKind::AiSearchNamespace {
         return Err(unsupported());
     }
     Ok(())
 }
 
 pub(super) fn require_permission(authority: &Authority, write: bool) -> Result<(), PlatformError> {
-    if write && !authority.binding.binding.permissions.write
-        || !write && !authority.binding.binding.permissions.read
-    {
+    if write && !authority.write || !write && !authority.read {
         return Err(PlatformError::new(
             ErrorCode::BindingPermissionDenied,
             "AI Search binding permission denied",

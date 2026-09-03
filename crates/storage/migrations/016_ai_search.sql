@@ -1,5 +1,6 @@
 CREATE TABLE ai_search_namespaces (
   resource_id    TEXT PRIMARY KEY REFERENCES resources(id),
+  description    TEXT CHECK(description IS NULL OR length(description) <= 256),
   created_at_ms  INTEGER NOT NULL
 ) STRICT;
 
@@ -31,7 +32,7 @@ BEGIN
 END;
 
 CREATE TRIGGER ai_search_namespace_identity_immutable_guard
-BEFORE UPDATE ON ai_search_namespaces
+BEFORE UPDATE OF resource_id, created_at_ms ON ai_search_namespaces
 BEGIN
   SELECT RAISE(ABORT, 'immutable AI Search namespace identity');
 END;

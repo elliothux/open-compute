@@ -23,6 +23,8 @@ pub struct VectorizeIndexRecord {
     pub dimensions: u32,
     /// Frozen metric token.
     pub metric: String,
+    /// Optional Cloudflare-facing description.
+    pub description: Option<String>,
     /// Maximum applied vectors.
     pub quota_vectors: u64,
     /// Maximum SQLite bytes admitted for the index.
@@ -54,11 +56,36 @@ impl<'a> VectorizeIndexRepository<'a> {
         quota_vectors: u64,
         quota_bytes: u64,
     ) -> Result<VectorizeIndexRecord, PlatformError> {
+        self.ensure_index_with_description(
+            resource,
+            storage_key,
+            schema_version,
+            dimensions,
+            metric,
+            quota_vectors,
+            quota_bytes,
+            None,
+        )
+    }
+
+    /// Insert the immutable locator and contract with an optional description.
+    #[allow(clippy::too_many_arguments)]
+    pub fn ensure_index_with_description(
+        self,
+        resource: &ResourceRecord,
+        storage_key: &str,
+        schema_version: u32,
+        dimensions: u32,
+        metric: &str,
+        quota_vectors: u64,
+        quota_bytes: u64,
+        description: Option<&str>,
+    ) -> Result<VectorizeIndexRecord, PlatformError> {
         if resource.kind != BindingKind::VectorizeIndex
             || resource.state != ResourceState::Creating
             || schema_version != 1
             || schema_version != resource.driver_schema_version
-            || !(32..=1_536).contains(&dimensions)
+            || !(1..=1_536).contains(&dimensions)
             || !matches!(metric, "cosine" | "euclidean" | "dot-product")
             || quota_vectors == 0
             || quota_vectors > 200_000
@@ -69,9 +96,9 @@ impl<'a> VectorizeIndexRepository<'a> {
         self.db.with_immediate(|tx| {
             tx.execute(
                 "INSERT INTO vectorize_indexes
-                 (resource_id, storage_key, schema_version, dimensions, metric,
+                 (resource_id, storage_key, schema_version, dimensions, metric, description,
                   quota_vectors, quota_bytes, created_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(resource_id) DO NOTHING",
                 params![
                     resource.id.to_string(),
@@ -79,6 +106,7 @@ impl<'a> VectorizeIndexRepository<'a> {
                     i64::from(schema_version),
                     i64::from(dimensions),
                     metric,
+                    description,
                     i64::try_from(quota_vectors).map_err(|_| invariant())?,
                     i64::try_from(quota_bytes).map_err(|_| invariant())?,
                     resource.created_at_ms,
@@ -90,6 +118,7 @@ impl<'a> VectorizeIndexRepository<'a> {
                 || stored.schema_version != schema_version
                 || stored.dimensions != dimensions
                 || stored.metric != metric
+                || stored.description.as_deref() != description
                 || stored.quota_vectors != quota_vectors
                 || stored.quota_bytes != quota_bytes
             {
@@ -184,7 +213,8 @@ fn read_product(
     }
     let row = conn
         .query_row(
-            "SELECT storage_key, schema_version, dimensions, metric, quota_vectors, quota_bytes
+            "SELECT storage_key, schema_version, dimensions, metric, description,
+                    quota_vectors, quota_bytes
              FROM vectorize_indexes WHERE resource_id = ?1",
             [resource.id.to_string()],
             |row| {
@@ -193,8 +223,9 @@ fn read_product(
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<String>>(4)?,
                     row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
                 ))
             },
         )
@@ -207,8 +238,9 @@ fn read_product(
         schema_version: u32::try_from(row.1).map_err(|_| invariant())?,
         dimensions: u32::try_from(row.2).map_err(|_| invariant())?,
         metric: row.3,
-        quota_vectors: u64::try_from(row.4).map_err(|_| invariant())?,
-        quota_bytes: u64::try_from(row.5).map_err(|_| invariant())?,
+        description: row.4,
+        quota_vectors: u64::try_from(row.5).map_err(|_| invariant())?,
+        quota_bytes: u64::try_from(row.6).map_err(|_| invariant())?,
     })
 }
 

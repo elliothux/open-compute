@@ -21,7 +21,7 @@ impl AiSearchBindingService {
             return Err(protocol());
         }
         let mut records = AiSearchCatalog::new(self.storage.db())
-            .list_instances(authority.binding.account_id, authority.binding.resource.id)?;
+            .list_instances(authority.account_id, authority.resource.id)?;
         if let Some(search) = page.search {
             records.retain(|record| record.instance_key.contains(&search));
         }
@@ -69,7 +69,7 @@ impl AiSearchBindingService {
         let driver = AiSearchInstanceResourceDriver::new(
             &self.storage,
             AiSearchInstanceSpec {
-                namespace_resource_id: authority.binding.resource.id,
+                namespace_resource_id: authority.resource.id,
                 instance_key: instance_key.clone(),
                 public_config_json: prepared.public_config_json,
                 model_contract_json: prepared.model_contract_json,
@@ -82,12 +82,12 @@ impl AiSearchBindingService {
         );
         ResourceController::new(&self.storage, self.pins.clone(), driver).create(
             &CreateResourceRequest {
-                account_id: authority.binding.account_id,
+                account_id: authority.account_id,
                 kind: BindingKind::AiSearchInstance,
-                name: format!("{}:{instance_key}", authority.binding.resource.id),
+                name: format!("{}:{instance_key}", authority.resource.id),
                 idempotency_key: format!(
                     "ai-search:{}:{}",
-                    authority.binding.resource.id, authority.request_id
+                    authority.resource.id, authority.request_id
                 ),
                 driver_schema_version: open_compute_storage::AI_SEARCH_SCHEMA_VERSION,
                 request_id: authority.request_id,
@@ -95,8 +95,8 @@ impl AiSearchBindingService {
             },
         )?;
         let record = AiSearchCatalog::new(self.storage.db()).get_instance_by_key(
-            authority.binding.account_id,
-            authority.binding.resource.id,
+            authority.account_id,
+            authority.resource.id,
             &instance_key,
         )?;
         self.instance_info_value(&record)
@@ -113,8 +113,8 @@ impl AiSearchBindingService {
         }
         let input: DeleteInstance = serde_json::from_value(call.payload).map_err(|_| protocol())?;
         let record = AiSearchCatalog::new(self.storage.db()).get_instance_by_key(
-            authority.binding.account_id,
-            authority.binding.resource.id,
+            authority.account_id,
+            authority.resource.id,
             &input.instance,
         )?;
         for reference in self.open_store(&record)?.0.object_references()? {
@@ -134,8 +134,8 @@ impl AiSearchBindingService {
         let repository = ResourceRepository::new(self.storage.db());
         let now_ms = unix_ms()?;
         let deletion = async {
-            repository.begin_delete(authority.binding.account_id, record.resource.id, now_ms)?;
-            let deleting = repository.get(authority.binding.account_id, record.resource.id)?;
+            repository.begin_delete(authority.account_id, record.resource.id, now_ms)?;
+            let deleting = repository.get(authority.account_id, record.resource.id)?;
             if deleting.state != ResourceState::Deleting {
                 return Err(corrupt());
             }
@@ -153,7 +153,7 @@ impl AiSearchBindingService {
             driver.begin_delete(&deleting)?;
             driver.finalize_delete(&deleting)?;
             repository.mark_tombstoned(
-                authority.binding.account_id,
+                authority.account_id,
                 record.resource.id,
                 authority.request_id,
                 unix_ms()?,

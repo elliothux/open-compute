@@ -148,7 +148,7 @@ impl AiSearchBindingService {
             }
             _ => return Err(protocol()),
         };
-        let child_pin = if record.resource.id == authority.binding.resource.id {
+        let child_pin = if record.resource.id == authority.resource.id {
             None
         } else {
             Some(self.pins.try_pin(record.resource.id)?)
@@ -314,8 +314,8 @@ impl AiSearchBindingService {
         let mut models = BTreeSet::new();
         for id in ids {
             let record = match AiSearchCatalog::new(self.storage.db()).get_instance_by_key(
-                authority.binding.account_id,
-                authority.binding.resource.id,
+                authority.account_id,
+                authority.resource.id,
                 id,
             ) {
                 Ok(record) => record,

@@ -268,19 +268,19 @@ struct QueryByIdPayload {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct QueryOptions {
+pub(crate) struct QueryOptions {
     #[serde(default = "default_top_k")]
-    top_k: usize,
-    namespace: Option<String>,
+    pub(crate) top_k: usize,
+    pub(crate) namespace: Option<String>,
     #[serde(default)]
-    return_values: bool,
+    pub(crate) return_values: bool,
     #[serde(default)]
-    return_metadata: ReturnMetadata,
-    filter: Option<Value>,
+    pub(crate) return_metadata: ReturnMetadata,
+    pub(crate) filter: Option<Value>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum ReturnMetadata {
+pub(crate) enum ReturnMetadata {
     #[default]
     None,
     Indexed,
@@ -317,7 +317,7 @@ struct QueryMatch {
     metadata: Option<Value>,
 }
 
-fn execute_query(
+pub(crate) fn execute_query(
     engine: &VectorizeEngine,
     resource_id: &str,
     query: &[f32],
@@ -428,7 +428,7 @@ fn execute_query(
         .map_err(|_| protocol_error())
 }
 
-async fn run_query_cpu<T: Send + 'static>(
+pub(crate) async fn run_query_cpu<T: Send + 'static>(
     operation: impl FnOnce() -> Result<T, PlatformError> + Send + 'static,
 ) -> Result<T, PlatformError> {
     let pool = VECTOR_QUERY_POOL

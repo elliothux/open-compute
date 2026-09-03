@@ -85,7 +85,7 @@ fn vectorize_catalog_round_trips_and_pages_ready_indexes() {
     let first = reserve_index(&storage, "alpha");
     assert_eq!(
         repository
-            .ensure_index(&first, "bad", 1, 31, "cosine", 100, 1_048_576)
+            .ensure_index(&first, "bad", 1, 0, "cosine", 100, 1_048_576)
             .unwrap_err()
             .code(),
         ErrorCode::ResourceInvariantViolation
@@ -202,7 +202,7 @@ fn engine_rejects_invalid_batches_and_mismatched_reopen_contract() {
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("data.sqlite");
     assert_eq!(
-        VectorizeEngine::open(&path, "resource-1", 31, "cosine", 100, 1_048_576, 500)
+        VectorizeEngine::open(&path, "resource-1", 0, "cosine", 100, 1_048_576, 500)
             .unwrap_err()
             .code(),
         ErrorCode::BindingProtocolError

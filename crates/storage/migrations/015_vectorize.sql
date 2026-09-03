@@ -2,8 +2,9 @@ CREATE TABLE vectorize_indexes (
   resource_id     TEXT PRIMARY KEY REFERENCES resources(id),
   storage_key     TEXT NOT NULL UNIQUE,
   schema_version  INTEGER NOT NULL CHECK(schema_version = 1),
-  dimensions      INTEGER NOT NULL CHECK(dimensions BETWEEN 32 AND 1536),
+  dimensions      INTEGER NOT NULL CHECK(dimensions BETWEEN 1 AND 1536),
   metric          TEXT NOT NULL CHECK(metric IN ('cosine', 'euclidean', 'dot-product')),
+  description     TEXT,
   quota_vectors   INTEGER NOT NULL CHECK(quota_vectors BETWEEN 1 AND 200000),
   quota_bytes     INTEGER NOT NULL CHECK(quota_bytes >= 1048576),
   created_at_ms   INTEGER NOT NULL

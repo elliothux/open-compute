@@ -128,6 +128,16 @@ pub struct VectorizeDescription {
     pub metadata_generation: u64,
 }
 
+/// One materialized metadata-index declaration.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VectorMetadataIndex {
+    /// Dot-separated property path.
+    pub property_name: String,
+    /// Frozen scalar index type.
+    pub index_type: String,
+}
+
 /// Thread-safe owner of one per-index SQLite database.
 #[derive(Debug)]
 pub struct VectorizeEngine {
@@ -149,7 +159,7 @@ impl VectorizeEngine {
         quota_bytes: u64,
         busy_timeout_ms: u64,
     ) -> Result<Self, PlatformError> {
-        if !(32..=1_536).contains(&dimensions)
+        if !(1..=1_536).contains(&dimensions)
             || !matches!(metric, "cosine" | "euclidean" | "dot-product")
             || quota_vectors == 0
             || quota_bytes < 1_048_576
@@ -689,6 +699,46 @@ impl VectorizeEngine {
             .map_err(|_| corrupt())?;
         rows.collect::<Result<BTreeSet<_>, _>>()
             .map_err(|_| corrupt())
+    }
+
+    /// Return every metadata-index declaration in property-name order.
+    pub fn metadata_indexes(&self) -> Result<Vec<VectorMetadataIndex>, PlatformError> {
+        let connection = self.lock()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT property_name, property_type FROM metadata_indexes ORDER BY property_name",
+            )
+            .map_err(|_| corrupt())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(VectorMetadataIndex {
+                    property_name: row.get(0)?,
+                    index_type: row.get(1)?,
+                })
+            })
+            .map_err(|_| corrupt())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|_| corrupt())
+    }
+
+    /// Delete one metadata index and its materialized terms atomically.
+    pub fn delete_metadata_index(&self, property_name: &str) -> Result<(), PlatformError> {
+        if !valid_property_path(property_name) {
+            return Err(invalid());
+        }
+        let mut connection = self.lock()?;
+        let tx = connection.transaction().map_err(|_| unavailable())?;
+        let deleted = tx
+            .execute(
+                "DELETE FROM metadata_indexes WHERE property_name=?1",
+                [property_name],
+            )
+            .map_err(|_| corrupt())?;
+        if deleted != 1 {
+            return Err(not_found());
+        }
+        tx.execute("UPDATE index_meta SET metadata_generation = metadata_generation + 1 WHERE singleton = 1", [])
+            .map_err(|_| corrupt())?;
+        tx.commit().map_err(|_| unavailable())
     }
 
     fn validate_batch(

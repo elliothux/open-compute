@@ -31,8 +31,8 @@ use open_compute_search::{FilterExpr, compile_filter, validate_metadata};
 use open_compute_storage::{
     AiSearchCatalog, AiSearchChunkRecord, AiSearchInstanceInspection, AiSearchInstanceRecord,
     AiSearchInstanceStorageContract, AiSearchItemRecord, AiSearchJobRecord, AiSearchPaths,
-    AiSearchStore, AuthorizedBinding, BindingRepository, NewAiSearchItemGeneration,
-    PlatformStorage, ResourceRepository,
+    AiSearchStore, BindingRepository, NewAiSearchItemGeneration, PlatformStorage, ResourceRecord,
+    ResourceRepository,
 };
 use open_compute_workers::{
     AiSearchInstanceResourceDriver, AiSearchInstanceSpec, CreateResourceRequest,
@@ -367,7 +367,11 @@ impl AiSearchBindingService {
         }
         let pin = self.pins.try_pin(binding.resource.id)?;
         Ok(Authority {
-            binding,
+            account_id: binding.account_id,
+            kind: binding.binding.kind,
+            resource: binding.resource,
+            read: binding.binding.permissions.read,
+            write: binding.binding.permissions.write,
             request_id,
             _bound_pin: pin,
         })
@@ -379,17 +383,13 @@ impl AiSearchBindingService {
         requested: Option<&str>,
     ) -> Result<ResolvedInstance, PlatformError> {
         let catalog = AiSearchCatalog::new(self.storage.db());
-        let record = match authority.binding.binding.kind {
+        let record = match authority.kind {
             BindingKind::AiSearchNamespace => {
                 let key = requested.ok_or_else(protocol)?;
-                catalog.get_instance_by_key(
-                    authority.binding.account_id,
-                    authority.binding.resource.id,
-                    key,
-                )?
+                catalog.get_instance_by_key(authority.account_id, authority.resource.id, key)?
             }
             BindingKind::AiSearchInstance if requested.is_none() => {
-                catalog.get_instance(authority.binding.account_id, authority.binding.resource.id)?
+                catalog.get_instance(authority.account_id, authority.resource.id)?
             }
             _ => return Err(protocol()),
         };
@@ -398,7 +398,7 @@ impl AiSearchBindingService {
         {
             return Err(unavailable());
         }
-        let pin = if record.resource.id == authority.binding.resource.id {
+        let pin = if record.resource.id == authority.resource.id {
             None
         } else {
             Some(self.pins.try_pin(record.resource.id)?)
@@ -481,7 +481,11 @@ impl AiSearchBindingService {
 }
 
 struct Authority {
-    binding: AuthorizedBinding,
+    account_id: open_compute_core::AccountId,
+    kind: BindingKind,
+    resource: ResourceRecord,
+    read: bool,
+    write: bool,
     request_id: RequestId,
     _bound_pin: ResourcePin,
 }
@@ -537,6 +541,15 @@ impl AiSearchBindingService {
         authority: Authority,
         call: JsonCall,
     ) -> Result<Response, PlatformError> {
+        let result = self.execute_value(&authority, call).await?;
+        json_response(&json!({"schemaVersion": 1, "result": result}))
+    }
+
+    async fn execute_value(
+        &self,
+        authority: &Authority,
+        call: JsonCall,
+    ) -> Result<Value, PlatformError> {
         let write = matches!(
             call.operation.as_str(),
             "namespace.create"
@@ -547,35 +560,35 @@ impl AiSearchBindingService {
                 | "jobs.create"
                 | "job.cancel"
         );
-        require_permission(&authority, write)?;
+        require_permission(authority, write)?;
         let metric_operation = metric_operation(&call.operation);
         let result = match call.operation.as_str() {
-            "namespace.list" => self.namespace_list(&authority, call)?,
-            "namespace.create" => self.namespace_create(&authority, call)?,
-            "namespace.delete" => self.namespace_delete(&authority, call).await?,
-            "namespace.search" => self.namespace_search(&authority, call).await?,
-            "namespace.chatCompletions" => self.namespace_chat(&authority, call).await?,
-            "instance.search" => self.instance_search(&authority, call).await?,
-            "instance.chatCompletions" => self.instance_chat(&authority, call).await?,
-            "instance.update" => self.instance_update(&authority, call).await?,
-            "instance.info" => self.instance_info_call(&authority, &call)?,
-            "instance.stats" => self.instance_stats(&authority, &call)?,
-            "items.list" => self.items_list(&authority, call)?,
-            "items.delete" => self.items_delete(&authority, call).await?,
-            "item.info" => self.item_info_call(&authority, call)?,
-            "item.sync" => self.item_sync(&authority, call).await?,
-            "item.logs" => self.item_logs(&authority, call)?,
-            "item.chunks" => self.item_chunks(&authority, call)?,
-            "jobs.list" => self.jobs_list(&authority, call)?,
-            "jobs.create" => self.jobs_create(&authority, call).await?,
-            "job.info" => self.job_info_call(&authority, call)?,
-            "job.logs" => self.job_logs(&authority, call)?,
-            "job.cancel" => self.job_cancel(&authority, call)?,
+            "namespace.list" => self.namespace_list(authority, call)?,
+            "namespace.create" => self.namespace_create(authority, call)?,
+            "namespace.delete" => self.namespace_delete(authority, call).await?,
+            "namespace.search" => self.namespace_search(authority, call).await?,
+            "namespace.chatCompletions" => self.namespace_chat(authority, call).await?,
+            "instance.search" => self.instance_search(authority, call).await?,
+            "instance.chatCompletions" => self.instance_chat(authority, call).await?,
+            "instance.update" => self.instance_update(authority, call).await?,
+            "instance.info" => self.instance_info_call(authority, &call)?,
+            "instance.stats" => self.instance_stats(authority, &call)?,
+            "items.list" => self.items_list(authority, call)?,
+            "items.delete" => self.items_delete(authority, call).await?,
+            "item.info" => self.item_info_call(authority, call)?,
+            "item.sync" => self.item_sync(authority, call).await?,
+            "item.logs" => self.item_logs(authority, call)?,
+            "item.chunks" => self.item_chunks(authority, call)?,
+            "jobs.list" => self.jobs_list(authority, call)?,
+            "jobs.create" => self.jobs_create(authority, call).await?,
+            "job.info" => self.job_info_call(authority, call)?,
+            "job.logs" => self.job_logs(authority, call)?,
+            "job.cancel" => self.job_cancel(authority, call)?,
             _ => return Err(protocol()),
         };
         if let Some(metrics) = &self.metrics {
             metrics.observe_ai_search_request(metric_operation, true);
         }
-        json_response(&json!({"schemaVersion": 1, "result": result}))
+        Ok(result)
     }
 }

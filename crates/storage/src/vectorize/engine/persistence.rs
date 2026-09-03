@@ -674,6 +674,13 @@ pub(super) fn invalid() -> PlatformError {
     )
 }
 
+pub(super) fn not_found() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::ResourceNotFound,
+        "Vectorize metadata index was not found",
+    )
+}
+
 pub(super) fn limit() -> PlatformError {
     PlatformError::new(
         ErrorCode::BindingLimitExceeded,

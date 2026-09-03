@@ -9,11 +9,10 @@ use open_compute_artifacts::{
 };
 use open_compute_core::{
     AiAuthConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiProviderConfig, AiTokenizer,
-    AiTokenizerArtifactConfig, CanonicalBindingConfig, CanonicalPermissions, DocumentParserConfig,
-    PlatformConfig,
+    AiTokenizerArtifactConfig, DocumentParserConfig, PlatformConfig,
 };
 use open_compute_storage::AiSearchObjectReference;
-use open_compute_storage::{ResourceRecord, StagedAiSearchChunk, VersionBindingRecord};
+use open_compute_storage::{ResourceRecord, StagedAiSearchChunk};
 use open_compute_workers::{AiSearchNamespaceResourceDriver, CreateResourceOutcome, ResourcePins};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
@@ -489,23 +488,11 @@ impl SearchBehaviorFixture {
     fn authority(&self, resource: ResourceRecord, kind: BindingKind) -> Authority {
         let resource_id = resource.id;
         Authority {
-            binding: AuthorizedBinding {
-                binding: VersionBindingRecord {
-                    id: BindingId::generate(),
-                    version_id: VersionId::generate(),
-                    name: "SEARCH".to_owned(),
-                    kind,
-                    resource_id,
-                    resource_spec_generation: resource.spec_generation,
-                    capability_version: 1,
-                    permissions: CanonicalPermissions::default(),
-                    config: CanonicalBindingConfig::default(),
-                    descriptor_sha256: [3; 32],
-                    created_at_ms: 10,
-                },
-                resource,
-                account_id: self._runtime.account,
-            },
+            account_id: self._runtime.account,
+            kind,
+            resource,
+            read: true,
+            write: true,
             request_id: RequestId::generate(),
             _bound_pin: self.pins.try_pin(resource_id).unwrap(),
         }

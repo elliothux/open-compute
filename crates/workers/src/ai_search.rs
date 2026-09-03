@@ -17,13 +17,24 @@ use open_compute_storage::{PlatformStorage, ResourceRecord};
 #[derive(Debug)]
 pub struct AiSearchNamespaceResourceDriver<'a> {
     storage: &'a PlatformStorage,
+    description: Option<String>,
 }
 
 impl<'a> AiSearchNamespaceResourceDriver<'a> {
     /// Bind platform storage authority.
     #[must_use]
     pub const fn new(storage: &'a PlatformStorage) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            description: None,
+        }
+    }
+
+    /// Attach the optional Cloudflare-facing namespace description.
+    #[must_use]
+    pub fn with_description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
     }
 
     fn catalog(
@@ -39,6 +50,14 @@ impl ResourceDriver for AiSearchNamespaceResourceDriver<'_> {
         BindingKind::AiSearchNamespace
     }
 
+    fn create_fingerprint_material(&self) -> Vec<u8> {
+        self.description
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes()
+            .to_vec()
+    }
+
     fn create(&self, resource: &ResourceRecord) -> Result<(), PlatformError> {
         if resource.kind != BindingKind::AiSearchNamespace
             || resource.state != ResourceState::Creating
@@ -46,7 +65,8 @@ impl ResourceDriver for AiSearchNamespaceResourceDriver<'_> {
         {
             return Err(invariant());
         }
-        AiSearchCatalog::new(self.storage.db()).ensure_namespace(resource)?;
+        AiSearchCatalog::new(self.storage.db())
+            .ensure_namespace_with_description(resource, self.description.as_deref())?;
         Ok(())
     }
 

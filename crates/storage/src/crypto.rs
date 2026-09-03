@@ -44,6 +44,8 @@ pub struct SecretCrypto {
     fingerprint_key_id: String,
     kv_cursor_key: [u8; 32],
     r2_cursor_key: [u8; 32],
+    vectorize_cursor_key: [u8; 32],
+    ai_search_cursor_key: [u8; 32],
     do_name_root_key: [u8; 32],
     do_host_root_key: [u8; 32],
     d1_bookmark_cipher: XChaCha20Poly1305,
@@ -100,6 +102,8 @@ impl SecretCrypto {
             })?;
         r2_cursor_derivation.update(b"open-compute/r2-list-cursor/v1");
         let r2_cursor_key: [u8; 32] = r2_cursor_derivation.finalize().into_bytes().into();
+        let vectorize_cursor_key = derive_key(bytes, b"open-compute/vectorize-list-cursor/v1")?;
+        let ai_search_cursor_key = derive_key(bytes, b"open-compute/ai-search-list-cursor/v1")?;
         let do_name_root_key = derive_key(bytes, b"open-compute/do-name-root/v1")?;
         let do_host_root_key = derive_key(bytes, b"open-compute/do-host-root/v1")?;
         let d1_bookmark_key = derive_key(bytes, b"open-compute/d1-session-bookmark/v1")?;
@@ -117,6 +121,8 @@ impl SecretCrypto {
             fingerprint_key_id,
             kv_cursor_key,
             r2_cursor_key,
+            vectorize_cursor_key,
+            ai_search_cursor_key,
             do_name_root_key,
             do_host_root_key,
             d1_bookmark_cipher,
@@ -202,6 +208,30 @@ impl SecretCrypto {
         };
         mac.update(payload);
         mac.verify_slice(signature).is_ok()
+    }
+
+    /// Sign a canonical Vectorize list-cursor payload with an independent key.
+    #[must_use]
+    pub fn sign_vectorize_cursor(&self, payload: &[u8]) -> [u8; 32] {
+        sign_cursor(&self.vectorize_cursor_key, payload)
+    }
+
+    /// Constant-time verification of a canonical Vectorize list cursor.
+    #[must_use]
+    pub fn verify_vectorize_cursor(&self, payload: &[u8], signature: &[u8]) -> bool {
+        verify_cursor(&self.vectorize_cursor_key, payload, signature)
+    }
+
+    /// Sign a canonical AI Search list-cursor payload with an independent key.
+    #[must_use]
+    pub fn sign_ai_search_cursor(&self, payload: &[u8]) -> [u8; 32] {
+        sign_cursor(&self.ai_search_cursor_key, payload)
+    }
+
+    /// Constant-time verification of a canonical AI Search list cursor.
+    #[must_use]
+    pub fn verify_ai_search_cursor(&self, payload: &[u8], signature: &[u8]) -> bool {
+        verify_cursor(&self.ai_search_cursor_key, payload, signature)
     }
 
     /// Seal an opaque D1 session bookmark bound to one database and state version.
@@ -515,6 +545,21 @@ impl SecretCrypto {
             &format!("object/{object_version}"),
         )
     }
+}
+
+fn sign_cursor(key: &[u8; 32], payload: &[u8]) -> [u8; 32] {
+    let mut mac =
+        <Hmac<Sha256> as Mac>::new_from_slice(key).expect("SHA-256 HMAC accepts a 32-byte key");
+    mac.update(payload);
+    mac.finalize().into_bytes().into()
+}
+
+fn verify_cursor(key: &[u8; 32], payload: &[u8], signature: &[u8]) -> bool {
+    let Ok(mut mac) = <Hmac<Sha256> as Mac>::new_from_slice(key) else {
+        return false;
+    };
+    mac.update(payload);
+    mac.verify_slice(signature).is_ok()
 }
 
 fn r2_ssec_aad(

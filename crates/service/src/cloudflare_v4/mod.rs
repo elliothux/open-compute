@@ -5,6 +5,7 @@ mod d1;
 mod kv;
 mod r2;
 mod storage;
+mod vectorize;
 mod vendor;
 mod wire;
 
@@ -15,7 +16,10 @@ pub(crate) use wire::{
 };
 /// Official Cloudflare storage routes implemented by the local product authorities.
 pub(crate) fn storage_router() -> Router<HttpState> {
-    kv::router().merge(d1::router()).merge(r2::router())
+    kv::router()
+        .merge(d1::router())
+        .merge(r2::router())
+        .merge(vectorize::router())
 }
 
 use crate::http::HttpState;

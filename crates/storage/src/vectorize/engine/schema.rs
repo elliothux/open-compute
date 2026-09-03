@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS index_meta (
   singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
   resource_id TEXT NOT NULL,
   schema_version INTEGER NOT NULL CHECK(schema_version = 1),
-  dimensions INTEGER NOT NULL CHECK(dimensions BETWEEN 32 AND 1536),
+  dimensions INTEGER NOT NULL CHECK(dimensions BETWEEN 1 AND 1536),
   metric TEXT NOT NULL CHECK(metric IN ('cosine', 'euclidean', 'dot-product')),
   quota_vectors INTEGER NOT NULL CHECK(quota_vectors > 0),
   quota_bytes INTEGER NOT NULL CHECK(quota_bytes >= 1048576),

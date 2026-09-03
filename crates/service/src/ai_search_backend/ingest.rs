@@ -79,7 +79,7 @@ impl AiSearchBindingService {
             .as_ref()
             .map_or(1, |item| item.desired_generation.saturating_add(1));
         let reference = AiSearchObjectRef::new(
-            authority.binding.account_id,
+            authority.account_id,
             instance.record.resource.id,
             digest,
             size,
@@ -229,7 +229,7 @@ impl AiSearchBindingService {
         let (store, _) = self.open_store(&record)?;
         let item = store.get_item(&input.item_id)?.ok_or_else(not_found)?;
         let reference = AiSearchObjectRef::new(
-            authority.binding.account_id,
+            authority.account_id,
             record.resource.id,
             item.object.object_sha256,
             item.object.object_size,

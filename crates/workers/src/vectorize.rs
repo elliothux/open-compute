@@ -27,6 +27,7 @@ pub struct VectorizeIndexSpec {
 pub struct VectorizeResourceDriver<'a> {
     storage: &'a PlatformStorage,
     create_spec: Option<VectorizeIndexSpec>,
+    description: Option<String>,
     busy_timeout_ms: u64,
 }
 
@@ -41,6 +42,7 @@ impl<'a> VectorizeResourceDriver<'a> {
         Self {
             storage,
             create_spec: Some(spec),
+            description: None,
             busy_timeout_ms,
         }
     }
@@ -51,8 +53,16 @@ impl<'a> VectorizeResourceDriver<'a> {
         Self {
             storage,
             create_spec: None,
+            description: None,
             busy_timeout_ms,
         }
+    }
+
+    /// Attach the optional immutable Cloudflare-facing description.
+    #[must_use]
+    pub fn with_description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
     }
 
     fn paths(&self) -> Result<VectorizePaths, PlatformError> {
@@ -88,8 +98,12 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
     fn create_fingerprint_material(&self) -> Vec<u8> {
         self.create_spec.as_ref().map_or_else(Vec::new, |spec| {
             format!(
-                "{}\0{}\0{}\0{}",
-                spec.dimensions, spec.metric, spec.quota_vectors, spec.quota_bytes
+                "{}\0{}\0{}\0{}\0{}",
+                spec.dimensions,
+                spec.metric,
+                spec.quota_vectors,
+                spec.quota_bytes,
+                self.description.as_deref().unwrap_or("")
             )
             .into_bytes()
         })
@@ -99,7 +113,7 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
         let spec = self.create_spec.as_ref().ok_or_else(not_ready)?;
         if resource.kind != BindingKind::VectorizeIndex
             || resource.state != ResourceState::Creating
-            || !(32..=1_536).contains(&spec.dimensions)
+            || !(1..=1_536).contains(&spec.dimensions)
             || !matches!(spec.metric.as_str(), "cosine" | "euclidean" | "dot-product")
             || spec.quota_vectors == 0
             || spec.quota_vectors > 200_000
@@ -112,15 +126,17 @@ impl ResourceDriver for VectorizeResourceDriver<'_> {
         let catalog = VectorizeIndexRepository::new(self.storage.db());
         let record = match catalog.get(resource.account_id, resource.id) {
             Ok(record) => record,
-            Err(error) if error.code() == ErrorCode::ResourceNotFound => catalog.ensure_index(
-                resource,
-                &storage_key,
-                VECTORIZE_SCHEMA_VERSION,
-                spec.dimensions,
-                &spec.metric,
-                spec.quota_vectors,
-                spec.quota_bytes,
-            )?,
+            Err(error) if error.code() == ErrorCode::ResourceNotFound => catalog
+                .ensure_index_with_description(
+                    resource,
+                    &storage_key,
+                    VECTORIZE_SCHEMA_VERSION,
+                    spec.dimensions,
+                    &spec.metric,
+                    spec.quota_vectors,
+                    spec.quota_bytes,
+                    self.description.as_deref(),
+                )?,
             Err(error) => return Err(error),
         };
         let live = paths.resolve_storage_key(&storage_key, resource.account_id, resource.id)?;

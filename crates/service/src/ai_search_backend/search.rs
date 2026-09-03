@@ -39,8 +39,8 @@ impl AiSearchBindingService {
         let return_on_failure = payload.ai_search_options.return_on_failure();
         let search_query = payload.query_text()?;
         let payload = Arc::new(payload);
-        let account_id = authority.binding.account_id;
-        let namespace_id = authority.binding.resource.id;
+        let account_id = authority.account_id;
+        let namespace_id = authority.resource.id;
         let shared_embeddings = new_query_embedding_cache();
         let results =
             futures::stream::iter(instance_ids)
