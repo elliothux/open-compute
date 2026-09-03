@@ -421,30 +421,8 @@ impl R2BindingService {
         Ok(result)
     }
 
-    /// Operator API: read committed object metadata when present.
-    pub(crate) async fn operator_object_head(
-        &self,
-        account_id: AccountId,
-        resource_id: ResourceId,
-        key: &UserObjectKey,
-    ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
-        let binding = crate::resource_binding::management_binding(
-            &self.storage,
-            account_id,
-            resource_id,
-            BindingKind::R2Bucket,
-        )?;
-        let bucket = R2BucketRepository::new(self.storage.db()).get(account_id, resource_id)?;
-        let locator = self
-            .objects
-            .locator(bucket.resource.id, &bucket.physical_prefix)?;
-        let timeout = Duration::from_millis(self.config.operation_timeout_ms);
-        self.authoritative_head(&binding, &locator, key, timeout)
-            .await
-    }
-
-    /// Operator API: download one committed object body when present.
-    pub(crate) async fn operator_object_get(
+    /// Download one committed object body for an authenticated management request.
+    pub(crate) async fn management_object_get(
         &self,
         account_id: AccountId,
         resource_id: ResourceId,
@@ -490,8 +468,8 @@ impl R2BindingService {
         }
     }
 
-    /// Operator API: replace one object from a bounded raw request body.
-    pub(crate) async fn operator_object_put(
+    /// Replace one object from a bounded authenticated management request body.
+    pub(crate) async fn management_object_put(
         &self,
         account_id: AccountId,
         resource_id: ResourceId,
@@ -523,7 +501,7 @@ impl R2BindingService {
         let lease = self.uploads.acquire(bucket.resource.id, timeout).await?;
         let staged = timeout_result(
             timeout,
-            self.stage_operator_put(
+            self.stage_management_put(
                 bucket.resource.id,
                 &request_id.to_string(),
                 key.as_str(),
@@ -592,8 +570,8 @@ impl R2BindingService {
         }
     }
 
-    /// Operator API: delete one committed object when present.
-    pub(crate) async fn operator_object_delete(
+    /// Delete one committed object for an authenticated management request.
+    pub(crate) async fn management_object_delete(
         &self,
         account_id: AccountId,
         resource_id: ResourceId,
@@ -647,7 +625,7 @@ impl R2BindingService {
         }
     }
 
-    async fn stage_operator_put(
+    async fn stage_management_put(
         &self,
         resource: ResourceId,
         request_id: &str,

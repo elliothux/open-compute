@@ -267,10 +267,6 @@ impl super::MetricsRegistry {
         guard.r2_result_unknown[index] = guard.r2_result_unknown[index].saturating_add(1);
     }
 
-    pub(crate) fn set_r2_force_delete_remaining_batches(&self, batches: u64) {
-        self.lock().r2_force_delete_remaining_batches = batches;
-    }
-
     fn adjust_r2_stream(&self, direction: R2StreamDirection, increase: bool) {
         let index = match direction {
             R2StreamDirection::Upload => 0,

@@ -24,8 +24,8 @@ use crate::metrics::{
 };
 use crate::p2_3_promotion::P23PromotionCoordinator;
 use crate::queue_http::QueueApiState;
+use crate::r2_api::R2ApiState;
 use crate::r2_backend::R2BindingService;
-use crate::r2_http::R2ApiState;
 use crate::r2_maintenance::R2Maintenance;
 use crate::runtime_bridge::{WorkerdTransport, bind_runtime_source, serve_runtime_source};
 use crate::runtime_generation::RuntimeGenerationResources;
@@ -506,7 +506,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         loaded.config.r2.clone(),
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
-    .with_metrics(metrics.clone())
     .with_binding(r2_backend.clone());
     r2_api.reconcile_pending().await?;
     let d1_backend = Arc::new(

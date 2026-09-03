@@ -54,7 +54,7 @@ pub(super) async fn get(
         Err(error) => return error_response(V4Error::from(&error), context.request_id()),
     };
     let result = binding
-        .operator_object_get(account_id, bucket.resource.id, &key)
+        .management_object_get(account_id, bucket.resource.id, &key)
         .await;
     let Some((metadata, body)) = (match result {
         Ok(value) => value,
@@ -147,7 +147,7 @@ pub(super) async fn put(
     };
     let request_id = context.request_id();
     match binding
-        .operator_object_put(
+        .management_object_put(
             account_id,
             bucket.resource.id,
             &key,
@@ -208,7 +208,7 @@ pub(super) async fn delete(
         Err(error) => return error_response(V4Error::from(&error), context.request_id()),
     };
     match binding
-        .operator_object_delete(account_id, bucket.resource.id, &key)
+        .management_object_delete(account_id, bucket.resource.id, &key)
         .await
     {
         Ok(true) => success_response(context, serde_json::json!({ "key": key.as_str() })),

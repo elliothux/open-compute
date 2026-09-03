@@ -299,7 +299,7 @@ fn persisted_bucket_response(
 }
 
 async fn reconcile_named_bucket(
-    api: &crate::r2_http::R2ApiState,
+    api: &crate::r2_api::R2ApiState,
     account_id: open_compute_core::AccountId,
     name: &str,
     now_ms: i64,
@@ -663,7 +663,7 @@ struct BucketCursor {
 }
 
 fn encode_cursor(
-    api: &crate::r2_http::R2ApiState,
+    api: &crate::r2_api::R2ApiState,
     account_id: open_compute_core::AccountId,
     query: &BucketListQuery,
     last_name: &str,
@@ -691,7 +691,7 @@ fn encode_cursor(
 }
 
 fn decode_cursor(
-    api: &crate::r2_http::R2ApiState,
+    api: &crate::r2_api::R2ApiState,
     account_id: open_compute_core::AccountId,
     query: &BucketListQuery,
     cursor: &str,

@@ -1,7 +1,7 @@
 //! Generation-scoped idempotency for official R2 PUT-by-name.
 
 use crate::cloudflare_v4::V4Error;
-use crate::r2_http::R2ApiState;
+use crate::r2_api::R2ApiState;
 use open_compute_core::{AccountId, BindingKind, ResourceState};
 use open_compute_storage::ResourceRepository;
 

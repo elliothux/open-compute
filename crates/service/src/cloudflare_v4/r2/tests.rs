@@ -6,7 +6,7 @@ use crate::cloudflare_v4::{V4RequestContext, V4Role};
 use crate::health::HealthCoordinator;
 use crate::http::HttpState;
 use crate::metrics::MetricsRegistry;
-use crate::r2_http::R2ApiState;
+use crate::r2_api::R2ApiState;
 use open_compute_artifacts::{
     MapEnv, MockS3, R2ObjectStore, S3ArtifactClient, resolve_s3_credentials_with,
 };
