@@ -7,7 +7,7 @@ Functional gaps are blocked inventory members, never deviation IDs. The current 
 member: Workers, KV, R2, D1, Durable Objects, Alarms, Queues, Cron, Workflows, Cache API, Vectorize, AI Search,
 Markdown Conversion, Version Metadata, and hibernatable WebSockets are qualified against the pinned stable surface. `OC-WKR-TCP-001` and
 `OC-WKR-LIMIT-001` record only the reviewed properties that this self-host contract cannot reproduce from
-Cloudflare's hosted edge. D1 bookmarks, Durable Object hibernation/output gates, Queue `v8`/metadata, and Workflow
+Cloudflare's hosted edge. D1 Session bookmark sequential visibility, Durable Object hibernation/output gates, Queue `v8`/metadata, and Workflow
 batch/rollback/structured-clone/parallel are implemented behavior, not deviations. Conformance inventory audits every
 advertised capability against this registry.
 
@@ -17,11 +17,15 @@ advertised capability against this registry.
 - `OC-DEPLOY-001`: Deployments, routes, promotion, and rollback use one local SQLite authority and one supervised runtime generation. The platform does not claim Cloudflare's global rollout, placement, traffic-splitting, account-management, or billing control planes.
 - `OC-ACCOUNT-SUBDOMAIN-001`: The official Cloudflare v4 account subdomain route returns the account's registered `workers.dev` subdomain. Fixed Wrangler 4.127.1 reads that route before a `workers_dev:false` Workflow deployment and discards the value. open-compute returns an account-stable label beginning with `_` for that read-only prerequisite, so it cannot be mistaken for a DNS label, and does not create DNS, listener, route, registration, update, or deletion authority. This deviation applies only to `GET /accounts/{account_id}/workers/subdomain`; the fixed Wrangler subprocess case covers the exact ordering dependency.
 - `OC-ASSETS-001`: Static Assets are immutable S3-backed deployment content served by the single-node platform. Routing and binding behavior are covered, but Cloudflare's global CDN placement, replication, purge propagation, and product quotas are not provided.
-- `OC-SERVICE-001`: Service Bindings provide default/named fetch and RPC within one platform authority. They do not claim Cloudflare cross-region placement or global service discovery; target admission, deployment pins, capability lifetime, and recovery are local and fail closed.
+- `OC-SERVICE-001`: Service Bindings provide default/named fetch and RPC within one platform authority. Fixed Wrangler 4.127.1 static configuration is supported with `services[].props` as a canonical JSON object limited to 64 KiB and depth 32; arbitrary top-level JSON values accepted by the broader dynamic `ctx.exports` contract and larger/deeper hosted values are not claimed. They do not claim Cloudflare cross-region placement or global service discovery; target admission, deployment pins, capability lifetime, and recovery are local and fail closed.
 - `OC-R2-001`: R2 object bytes are held by the configured S3-compatible provider. The platform does not claim Cloudflare global placement or replication.
 - `OC-D1-001`: D1 is a single local-primary SQLite authority. The platform does not claim read-replica/region routing,
-  hosted `served_by` identity, region/colo metadata, or Cloudflare billing counters. Opaque bookmarks preserve same-database
-  local sequential visibility; `rows_read` and `rows_written` are stable local SQLite execution counters.
+  hosted `served_by` identity, region/colo metadata, Cloudflare billing counters, or Cloudflare's always-on minute-level
+  7/30-day Time Travel history. Opaque Session bookmarks preserve same-database local sequential visibility, but only
+  explicit export/import/time-travel management operations create restore checkpoints. Each database retains at most eight
+  such checkpoints; timestamp lookup resolves only a retained checkpoint at or before the requested time, and restore
+  requires an exact retained checkpoint bookmark. A Session bookmark without a retained checkpoint is not a restore point.
+  `rows_read` and `rows_written` are stable local SQLite execution counters.
 - `OC-DO-001`: Durable Objects are placed on the single local workerd process. Location hints, jurisdiction, and global migration have no geographic scheduling effect.
 - `OC-QUEUE-001`: Queue producers and push consumers are backed by single-node `scheduler.sqlite` durability, not Cloudflare global replication. Delivery is at-least-once without global FIFO. An unknown native dispatch retains its lease and does not consume the tenant retry budget, so a later delivery can repeat the same attempt number.
 - `OC-CRON-001`: Cron is UTC-only with five fields and the documented local Quartz-like extensions. Recovery projects at most the newest slot within the configured misfire grace rather than replaying complete downtime history; known failures use the configured bounded local retry policy unless `noRetry()` is called.
