@@ -546,7 +546,11 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
                 .as_ref()
                 .is_some_and(|(c, b)| *c == 503 && b.contains("RUNTIME_INVALID"))
             && status.as_ref().is_some_and(|(c, b)| {
-                *c == 200 && b.contains("FAILED") && b.contains("RUNTIME_INVALID")
+                // Vendor status uses readiness.as_str() for result.state (RUNTIME_INVALID)
+                // and ComponentState::as_str() for components (failed), not "FAILED".
+                *c == 200
+                    && b.contains(r#""state":"RUNTIME_INVALID""#)
+                    && b.contains(r#""name":"runtime","state":"failed""#)
             })
         {
             failed = true;
@@ -556,7 +560,7 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
     }
     assert!(
         failed,
-        "budget exhaustion must be FAILED/RUNTIME_INVALID ready=503 live=200; live={last_live:?} ready={last_ready:?} status={last_status:?} children={:?}",
+        "budget exhaustion must be RUNTIME_INVALID with failed runtime; ready=503 live=200; live={last_live:?} ready={last_ready:?} status={last_status:?} children={:?}",
         child_pids(pid)
     );
     assert_eq!(http_status(port, "/health/live"), Some(200));
