@@ -57,12 +57,18 @@ test("vendor extension operations have stable typed envelopes and exact request 
 
 test("settings surfaces, asset upload variants, and old routes are classified exactly", () => {
   const routes = new Map(capability.managementApi.routes.map(item => [item.id, item]));
+  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported").length, 149);
+  assert.equal(capability.managementApi.routes.filter(item => item.status === "planned").length, 3);
+  assert.equal(capability.managementApi.routes.filter(item => item.status === "unsupported").length, 1);
   assert.equal(routes.get("PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings")?.requestMediaType, "multipart");
   assert.equal(routes.get("PATCH /accounts/{account_id}/workers/scripts/{script_name}/script-settings")?.requestMediaType, "json");
   assert.equal(routes.get("PATCH /accounts/{account_id}/workers/scripts/{script_name}/secrets-bulk")?.operationId,
     "worker-patch-script-secrets-bulk");
-  assert.equal(routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.source,
-    "wrangler-dist/cli.js:157069");
+  assert.deepEqual(
+    [routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.status,
+      routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.source],
+    ["supported", "wrangler-dist/cli.js:157069"],
+  );
   assert.equal(routes.get("GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects")?.status, "unsupported");
   assert.ok(capability.managementApi.legacyRoutes.every(item => item.status === "unsupported"));
 });

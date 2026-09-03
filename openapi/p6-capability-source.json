@@ -30,7 +30,7 @@
     ]
   },
   "wrangler": {
-    "plannedFields": [
+    "supportedFields": [
       "$schema", "env", "name", "account_id", "compatibility_date", "compatibility_flags", "main",
       "find_additional_modules", "preserve_file_names", "base_dir", "workers_dev", "tsconfig", "jsx_factory",
       "jsx_fragment", "migrations", "exports", "triggers", "rules", "build", "no_bundle", "minify",
@@ -46,7 +46,7 @@
       "limits": "P8",
       "worker_loaders": "P9"
     },
-    "plannedBindings": [
+    "supportedBindings": [
       "plain_text", "json", "secret_text", "kv_namespace", "r2_bucket", "d1", "vectorize",
       "ai_search_namespace", "ai_search", "ai", "durable_object_namespace", "queue", "workflow", "service",
       "images", "version_metadata", "assets"
@@ -55,7 +55,7 @@
       "worker_loader", "browser", "hyperdrive", "analytics_engine", "dispatch_namespace", "mtls_certificate",
       "ratelimit", "pipeline", "secrets_store_secret", "send_email", "service_environment", "unsafe"
     ],
-    "commands": [
+    "supportedCommands": [
       "whoami", "deploy", "versions upload", "versions list", "versions view", "versions deploy",
       "deployments list", "deployments status", "rollback", "secret put", "secret list", "secret delete",
       "secret bulk", "kv namespace create", "kv namespace list", "kv namespace delete", "kv key put",

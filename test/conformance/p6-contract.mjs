@@ -75,7 +75,7 @@ export function buildSubset(openapi, manifest, revision, sourceSha256) {
       method: method.toUpperCase(),
       path,
       operationId: operation.operationId,
-      status: unsupported.has(key) ? "unsupported" : "planned",
+      status: unsupported.has(key) ? "unsupported" : deferred.has(key) ? "planned" : "supported",
       source: "cloudflare-openapi",
       ...(deferred.has(key) ? { stage: deferred.get(key).stage } : {}),
       operationSha256: sha256(`${JSON.stringify(operation)}\n`),
@@ -146,7 +146,7 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
   const topFields = Object.keys(configSchema.definitions?.RawConfig?.properties ?? {});
   if (topFields.length === 0) throw new Error("Wrangler RawConfig field inventory is empty");
   const statusByField = new Map();
-  for (const id of source.wrangler.plannedFields) statusByField.set(id, { status: "planned", source: "wrangler-config-schema" });
+  for (const id of source.wrangler.supportedFields) statusByField.set(id, { status: "supported", source: "wrangler-config-schema" });
   for (const [id, stage] of Object.entries(source.wrangler.deferredFields))
     statusByField.set(id, { status: "planned", source: "wrangler-config-schema", stage });
   for (const [id, stage] of Object.entries(source.wrangler.unsupportedDeferredFields))
@@ -165,12 +165,12 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
     { id: "worker_loaders[].binding", status: "unsupported", source: "wrangler-config-schema", stage: "P9" },
   );
   const bindings = [
-    ...source.wrangler.plannedBindings.map(id => ({ id, status: "planned", source: "wrangler-multipart" })),
+    ...source.wrangler.supportedBindings.map(id => ({ id, status: "supported", source: "wrangler-multipart" })),
     ...source.wrangler.unsupportedBindings.map(id => ({ id, status: "unsupported", source: "wrangler-multipart",
       ...(id === "worker_loader" ? { stage: "P9" } : {}) })),
   ];
   const commands = [
-    ...source.wrangler.commands.map(id => ({ id, status: "planned", source: "wrangler-cli" })),
+    ...source.wrangler.supportedCommands.map(id => ({ id, status: "supported", source: "wrangler-cli" })),
     ...Object.entries(source.wrangler.deferredCommands).map(([id, stage]) =>
       ({ id, status: "planned", source: "wrangler-cli", stage })),
     ...source.wrangler.unsupportedCommands.map(id => ({ id, status: "unsupported", source: "wrangler-cli" })),

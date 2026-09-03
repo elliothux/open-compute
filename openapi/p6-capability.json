@@ -8,7 +8,7 @@
         "method": "GET",
         "path": "/user",
         "operationId": "user-user-details",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5c647aa1317a79dce8b71e6215beca8412b6c79eca0123464c5a6f81552c19cc",
         "requestMediaType": "none"
@@ -18,7 +18,7 @@
         "method": "GET",
         "path": "/user/tokens/verify",
         "operationId": "user-api-tokens-verify-token",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7a5c53439ddaa024c373e95b15a61f7f1693e46d50c001ed6fe15733d4549cdd",
         "requestMediaType": "none"
@@ -28,7 +28,7 @@
         "method": "GET",
         "path": "/accounts",
         "operationId": "accounts-list-accounts",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a909afbc72eebfed1735dd137d8d652fcf991c22dc56bba1b5f341e71ab1e919",
         "requestMediaType": "none"
@@ -38,7 +38,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}",
         "operationId": "accounts-account-details",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3f2b4e7b0673d9ffeca6c62a3407f3f676bd989e7aa6701ad4b7f86f4720f826",
         "requestMediaType": "none"
@@ -48,7 +48,7 @@
         "method": "GET",
         "path": "/memberships",
         "operationId": "user'-s-account-memberships-list-memberships",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2264ac72a581486a06ffd08ff6b493f88bf788e5a0c8fd4aec7d82f3a8acc3b9",
         "requestMediaType": "none"
@@ -58,7 +58,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts",
         "operationId": "worker-script-list-workers",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9325e530fda81386e3ff3ad1a84502e2138e3806221c67c10e2543f41762aeb7",
         "requestMediaType": "none"
@@ -68,7 +68,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}",
         "operationId": "worker-script-download-worker",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7a09761b990d774409f4294073495ef721bc75687f015bf9752e6f1186e95f0b",
         "requestMediaType": "none"
@@ -78,7 +78,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}",
         "operationId": "worker-script-upload-worker-module",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "f468317cc88fe3253f91c01941bd4d4f4e6acb25118e3d2af01bf98da5d7791c",
         "requestMediaType": "none"
@@ -88,7 +88,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}",
         "operationId": "worker-script-delete-worker",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8b1a92fddc4539c0640d07653ca6d2d295ce2c66bdd80c1ba7b5753bddeb83ca",
         "requestMediaType": "none"
@@ -98,7 +98,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/versions",
         "operationId": "worker-versions-upload-version",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2f5a38da25480b42306e8ca850bcc9d090a0b7712b830a80dd18ebe8e888f156",
         "requestMediaType": "none"
@@ -108,7 +108,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/versions",
         "operationId": "worker-versions-list-versions",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "dfd379cdfa47b2c3105f1930072aae51eddcc1e84b50da8fb2b4c9c6119541e9",
         "requestMediaType": "none"
@@ -118,7 +118,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/versions/{version_id}",
         "operationId": "worker-versions-get-version-detail",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "bfbe8e65fc0774fa3e65e7f216dc8fd333f23e922f69131743e68ea96cff7796",
         "requestMediaType": "none"
@@ -128,7 +128,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
         "operationId": "worker-deployments-list-deployments",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "95f970a430736106ea97a93c4e5d4f933f2a2cc80933b549190620e04f7857ed",
         "requestMediaType": "none"
@@ -138,7 +138,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
         "operationId": "worker-deployments-create-deployment",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "86ff1109ce3c9d5e64caedce8f6617c68b41baab135ac2d7c6415224708b90e5",
         "requestMediaType": "json"
@@ -148,7 +148,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}",
         "operationId": "worker-deployments-get-deployment",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "c3098c51a1d4e6e830f6b093544a38a7f5d81bfab2e56e9434ffb7af9bed4875",
         "requestMediaType": "none"
@@ -158,7 +158,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}",
         "operationId": "worker-deployments-delete-deployment",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2846d49c39cd1fb41830c169b6aeded040ce3dc376e215ee3937a535791433bc",
         "requestMediaType": "none"
@@ -168,7 +168,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/script-settings",
         "operationId": "worker-script-settings-get-settings",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5f091260315e004a89b706f44bc92a0368104c7bb9c320b6540812244a8fa12c",
         "requestMediaType": "none"
@@ -178,7 +178,7 @@
         "method": "PATCH",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/script-settings",
         "operationId": "worker-script-settings-patch-settings",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "164d69cad6b2f9b7ede5078d694f1662fa43316cda578bf2939e28242b555751",
         "requestMediaType": "json"
@@ -188,7 +188,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/settings",
         "operationId": "worker-script-get-settings",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "cc8c296fe92cdd4547869f33ea6265ccece5477f82dc46cd76ca3cc6e1cf6fc5",
         "requestMediaType": "none"
@@ -198,7 +198,7 @@
         "method": "PATCH",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/settings",
         "operationId": "worker-script-patch-settings",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "93f315e140ef6650089842d97fcae97f24666edb57f1775836b688aed7ab08b4",
         "requestMediaType": "multipart"
@@ -208,7 +208,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/secrets",
         "operationId": "worker-list-script-secrets",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3759fc603fbfbecf835fdaa7504466d1bec125fab8d2bd9d77c21ddd0fbd78b2",
         "requestMediaType": "none"
@@ -218,7 +218,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/secrets",
         "operationId": "worker-put-script-secret",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5b379c055a93372ccd423b2f75bd8132f14e002e5c92964d30e171d2b9de9374",
         "requestMediaType": "json"
@@ -228,7 +228,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}",
         "operationId": "worker-get-script-secret",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "c3f65d49972c475f6b55edc48aaf6064bb1fd1dabb3f7d609033c6632fa1da33",
         "requestMediaType": "none"
@@ -238,7 +238,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}",
         "operationId": "worker-delete-script-secret",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7d0ee175ad5328689002c4d2ccf78c38b6020a5c6cfca3f561a53150305febf5",
         "requestMediaType": "none"
@@ -248,7 +248,7 @@
         "method": "PATCH",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/secrets-bulk",
         "operationId": "worker-patch-script-secrets-bulk",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "333f3804b1dc3efdb3c326e4a11400369ca68ac38c8863d5ddf955e0cc9e4d2e",
         "requestMediaType": "json"
@@ -258,7 +258,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/schedules",
         "operationId": "worker-cron-trigger-get-cron-triggers",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3a72f99d941590e9f91db8e33a6c4a446af1be38989aebc0584c0991b7052b0c",
         "requestMediaType": "none"
@@ -268,7 +268,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/schedules",
         "operationId": "worker-cron-trigger-update-cron-triggers",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3f76fc7ef230787aa7d68a94efb55bd0c88141f38d48af1e2280bc5825185b34",
         "requestMediaType": "json"
@@ -278,7 +278,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/subdomain",
         "operationId": "worker-script-get-subdomain",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9e0c20a761a387cdd0f9b735ea78bd11a7812c4ee5cca4ff9735c0e6976d18e2",
         "requestMediaType": "none"
@@ -288,7 +288,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/subdomain",
         "operationId": "worker-script-post-subdomain",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3b53afad1bf2ef9aff2185d3ee865dbe9234f8fb87685fad68653f855e9927b1",
         "requestMediaType": "json"
@@ -298,7 +298,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/subdomain",
         "operationId": "worker-script-delete-subdomain",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7237f91effaecdf29aaad0c547e36c3ac9ed9f29d78176404182f47f987a9764",
         "requestMediaType": "none"
@@ -308,7 +308,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/assets-upload-session",
         "operationId": "worker-script-update-create-assets-upload-session",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "18b716d3eb1c2100ab26ff35aeb82ecd2dbb595cbf5ff64b9fc1e5761b2178b8",
         "requestMediaType": "json"
@@ -318,7 +318,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/workers/assets/upload",
         "operationId": "worker-assets-upload",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "aaaba043dba08b2d092e79ed9638adf4e1d5dc647b8153ac3079b42245fad524",
         "requestMediaType": "multipart"
@@ -328,7 +328,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/storage/kv/namespaces",
         "operationId": "workers-kv-namespace-list-namespaces",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "716f832d7af2d46f7e2b606b0547bd80cdb054924c619e1bd69b042df65bc106",
         "requestMediaType": "none"
@@ -338,7 +338,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/storage/kv/namespaces",
         "operationId": "workers-kv-namespace-create-a-namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "39abb6b53c95018aeba5b3b407161be7fe4d768f421c592575587f2a9eb2fa27",
         "requestMediaType": "json"
@@ -348,7 +348,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}",
         "operationId": "workers-kv-namespace-get-a-namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b9620e36b6ec4c72f5158bbf5b7919d4885d6799e76dd6ca00d50d36b67495ce",
         "requestMediaType": "none"
@@ -358,7 +358,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}",
         "operationId": "workers-kv-namespace-rename-a-namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "98cb0eed937e06def236c002ef07fb91302080152bec505bffa310e011cd1390",
         "requestMediaType": "json"
@@ -368,7 +368,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}",
         "operationId": "workers-kv-namespace-remove-a-namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b167db001dc927985bc98498d7c4c607b3cafe1bfde17d67def2f6edec6b5062",
         "requestMediaType": "json"
@@ -378,7 +378,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/keys",
         "operationId": "workers-kv-namespace-list-a-namespace'-s-keys",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9f5b9771456c1f68edf4c7f6418a9074cae47bc18507484dc6f8a5748f9aa818",
         "requestMediaType": "none"
@@ -388,7 +388,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}",
         "operationId": "workers-kv-namespace-read-key-value-pair",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "ba86e9253a70dd6dee1c33c7a46640a9736b7701e7aeb06039908be829cd8b3c",
         "requestMediaType": "none"
@@ -398,7 +398,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}",
         "operationId": "workers-kv-namespace-write-key-value-pair-with-metadata",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "70462b3e92211b6bf5a6881e6ea3a5db3e4838b39a34315e1cbd3c32e5a5fe79",
         "requestMediaType": "multipart"
@@ -408,7 +408,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}",
         "operationId": "workers-kv-namespace-delete-key-value-pair",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "24abc923d052678d7624b9ddc2f474be06e1bcd5dc1b488ab815f895700ed1be",
         "requestMediaType": "json"
@@ -418,7 +418,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/metadata/{key_name}",
         "operationId": "workers-kv-namespace-read-the-metadata-for-a-key",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4340520d713422f7f293c8dd931c539157c6b588dcb0af9abd48983c02d7b32d",
         "requestMediaType": "none"
@@ -428,7 +428,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk",
         "operationId": "workers-kv-namespace-write-multiple-key-value-pairs",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6fe0de6657873df093df5ab7bad76dce637fae20dccce480a6c7ff99ae04feb1",
         "requestMediaType": "json"
@@ -438,7 +438,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/get",
         "operationId": "workers-kv-namespace-get-multiple-key-value-pairs",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "021a486cd2f6c9034cc9b8fa75d2fdd9d6d6ae4a564044ac230e3fdd14d862eb",
         "requestMediaType": "json"
@@ -448,7 +448,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/delete",
         "operationId": "workers-kv-namespace-delete-multiple-key-value-pairs",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d38277c1b8a6a982e64b4dea98e4722f19b1b2d2334d4652eea3244f8cc7a3ba",
         "requestMediaType": "json"
@@ -458,7 +458,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/d1/database",
         "operationId": "d1-list-databases",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b26f0e957cace79d4a425059a8a7ab4b09c2a36b060929858b8c6014283580ac",
         "requestMediaType": "none"
@@ -468,7 +468,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/d1/database",
         "operationId": "d1-create-database",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "652e5439f9ac4165525f44274f67bd3d0d541ceaf1969ce8b591d44d00d11772",
         "requestMediaType": "json"
@@ -478,7 +478,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/d1/database/{database_id}",
         "operationId": "d1-get-database",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "91e3c61c35ba8a9ccd1b535f7e157ff2cf43d1f64e93c67e63daf1c8adf2c0e1",
         "requestMediaType": "none"
@@ -488,7 +488,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/d1/database/{database_id}",
         "operationId": "d1-update-database",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "51b9171bb07f5efdce004a51b9cbc3d5a40df055aba4cc50fe8c516848120622",
         "requestMediaType": "json"
@@ -498,7 +498,7 @@
         "method": "PATCH",
         "path": "/accounts/{account_id}/d1/database/{database_id}",
         "operationId": "d1-update-partial-database",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "438408d829cf781f40b5879827aff18dd9803563a6ff2ee874efb116ab132b61",
         "requestMediaType": "json"
@@ -508,7 +508,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/d1/database/{database_id}",
         "operationId": "d1-delete-database",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9e0de55b13080efac8db4d15b1bcbf540e713ccdd00a16001536f23ae3a2af90",
         "requestMediaType": "none"
@@ -518,7 +518,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/d1/database/{database_id}/query",
         "operationId": "d1-query-database",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9c85be878b121c9016b73b2bab69f261cc1c7265df749d26a84cd10c42c6047a",
         "requestMediaType": "json"
@@ -528,7 +528,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/d1/database/{database_id}/raw",
         "operationId": "d1-raw-database-query",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "0ef1ac9fd2d421ca41e7c0afd2ee546affac91c99d2deea76bdbca833d5e2278",
         "requestMediaType": "json"
@@ -538,7 +538,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/d1/database/{database_id}/export",
         "operationId": "d1-export-database",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "51d0973e821cc9c0cad517c0df00cf5c923c12ae416e5613a2da426c3ef44c85",
         "requestMediaType": "json"
@@ -548,7 +548,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/d1/database/{database_id}/import",
         "operationId": "d1-import-database",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4cf9134336472c3790569b4f1877c0f1f05239d6e9dceee4d85b27e2e73f3237",
         "requestMediaType": "json"
@@ -558,7 +558,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark",
         "operationId": "d1-time-travel-get-bookmark",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "c4df1ceb1430c555a5007ec4117974454508dae08bcc89140e52e4afe24b06c1",
         "requestMediaType": "none"
@@ -568,7 +568,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/d1/database/{database_id}/time_travel/restore",
         "operationId": "d1-time-travel-restore",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "37289525a6133b7dc8ebeee87835508c82cb809e5b6125304233a73dde6d6c67",
         "requestMediaType": "none"
@@ -578,7 +578,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/r2/buckets",
         "operationId": "r2-list-buckets",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "1f2688a9a2f3e8bfba62cd00f952b08d9856f2787056d8d09e199eb73cd8a08e",
         "requestMediaType": "none"
@@ -588,7 +588,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/r2/buckets",
         "operationId": "r2-create-bucket",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3a4a70c183064a00f5ef4e770fbc2cefb19a2d6695f210abf6ce5d5895d54e36",
         "requestMediaType": "json"
@@ -598,7 +598,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/r2/buckets/{bucket_name}",
         "operationId": "r2-get-bucket",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "352a78bf7e4557f53a20a9c888dfd7b2aa9c2d5c745b1025804a743664134df3",
         "requestMediaType": "none"
@@ -608,7 +608,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/r2/buckets/{bucket_name}",
         "operationId": "r2-create-bucket-by-name",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8e88cdf17ea827be3fc90e56e42ac05b4c3b6a5a9ca6df16e7df9a1732a7cfcc",
         "requestMediaType": "none"
@@ -618,7 +618,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/r2/buckets/{bucket_name}",
         "operationId": "r2-delete-bucket",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "47aa091bd05f52db83a142422278da57d666ddce16ff4c4670532e91160ba44e",
         "requestMediaType": "none"
@@ -628,7 +628,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
         "operationId": "r2-get-object",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b407d172569e1c80737ba0e53886d2be1a94dee3d7fc645488338a84fabb5a3a",
         "requestMediaType": "none"
@@ -638,7 +638,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
         "operationId": "r2-put-object",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "fbed33df87e1bb996ddcdd96da58d24267630fcab4d788681bad14347b097693",
         "requestMediaType": "raw"
@@ -648,7 +648,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
         "operationId": "r2-delete-object",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a7e45ae55a7020c194be8907419930c92e8f3c838af39b19db3eb7dedf7624db",
         "requestMediaType": "none"
@@ -658,7 +658,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/vectorize/v2/indexes",
         "operationId": "vectorize-list-vectorize-indexes",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4bac6170648a4ca00761f2026755826e9bff05e55ab384c793111849f70f6623",
         "requestMediaType": "none"
@@ -668,7 +668,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/vectorize/v2/indexes",
         "operationId": "vectorize-create-vectorize-index",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "82151bec60a41d55832b9adf2fdeb468280e28926a71d3fd07b5e9cb68cea6ff",
         "requestMediaType": "json"
@@ -678,7 +678,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}",
         "operationId": "vectorize-get-vectorize-index",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "96e063712bb4f2580c1b64bea2f02bd57d6856335eadeb505f57d2e2a93d9b9d",
         "requestMediaType": "none"
@@ -688,7 +688,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}",
         "operationId": "vectorize-delete-vectorize-index",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8f293c470c973f795cb35daa85e54ed4b817056eeccd075aa45b80529b694f3b",
         "requestMediaType": "none"
@@ -698,7 +698,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/insert",
         "operationId": "vectorize-insert-vector",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d0c9dc7920ba80af456e2b8a77a48c2313536e1c5865799a43a06b89374e6fcd",
         "requestMediaType": "raw"
@@ -708,7 +708,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert",
         "operationId": "vectorize-upsert-vector",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3d5c1ca98be67dca5b0398c127f8022f9b40e7029c5e8340d9ba2d13f56d5135",
         "requestMediaType": "raw"
@@ -718,7 +718,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/query",
         "operationId": "vectorize-query-vector",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3f2c061bef9d923800733c6c73ad4751ce78e5fe19218f81342f5aa07c9ecde3",
         "requestMediaType": "json"
@@ -728,7 +728,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/get_by_ids",
         "operationId": "vectorize-get-vectors-by-id",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "727889cae59307979a4841b2a7d5ab8261b81c15e6eb31baa0bf261c258ede39",
         "requestMediaType": "json"
@@ -738,7 +738,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/delete_by_ids",
         "operationId": "vectorize-delete-vectors-by-id",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5f876e5dc3c7aa8d78d58926bccdd629499558be012e89dd690085d657ed1587",
         "requestMediaType": "json"
@@ -748,7 +748,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/info",
         "operationId": "vectorize-index-info",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4cadafa76bd5bfad97a7da85dbaa3afb77af10371aab2ee8d1cce197b9784acd",
         "requestMediaType": "none"
@@ -758,7 +758,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/list",
         "operationId": "vectorize-list-vectors",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a7c9515fd5fa26b57b4c8bdd18d271fed95d91666a707dfcb2ababec7514caa0",
         "requestMediaType": "none"
@@ -768,7 +768,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/create",
         "operationId": "vectorize-create-metadata-index",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "1ec8100121fd226408eec48f39c256aa40c0739e5b7135a9dbd6dfaa3ed80c22",
         "requestMediaType": "json"
@@ -778,7 +778,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/list",
         "operationId": "vectorize-list-metadata-indexes",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "566f7184435fe45f229ed74e6b9f2242c996b72a6430d1bab487c4ebec33ce92",
         "requestMediaType": "none"
@@ -788,7 +788,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/delete",
         "operationId": "vectorize-delete-metadata-index",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9e3abf18af6e000788c054f701204b5427c5824c14cf2ef936dc0aea41eeaf25",
         "requestMediaType": "json"
@@ -798,7 +798,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces",
         "operationId": "ai-search-list-namespaces",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a891faff56db9b25335efd6de3639df5b85e49f828d9d54e46fa59a98a09ced6",
         "requestMediaType": "none"
@@ -808,7 +808,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/ai-search/namespaces",
         "operationId": "ai-search-create-namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "1058b23d9c1072813e0940047bb1e4d5954aa5a792894d57d0fa3b495bd7e680",
         "requestMediaType": "json"
@@ -818,7 +818,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}",
         "operationId": "ai-search-fetch-namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "fdfadae9d579d9b2079c8b841732b3226e54bfec331aeb41f927ca0ebaeea9c2",
         "requestMediaType": "none"
@@ -828,7 +828,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}",
         "operationId": "ai-search-update-namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8bcf8209163c39334f98e064e6bcebcd26e0a20ea484706167fa934b02a6445b",
         "requestMediaType": "json"
@@ -838,7 +838,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}",
         "operationId": "ai-search-delete-namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "eb127735240ea584dd58eaab26d6c69509b22663b65148c31534d9b34041f4a7",
         "requestMediaType": "none"
@@ -848,7 +848,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/search",
         "operationId": "ai-search-namespace-multi-instance-search",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "03ba017197cea8c1efd510caaedfaa917c9b20dc9fdbc557cd24c3c4d1a10b89",
         "requestMediaType": "json"
@@ -858,7 +858,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/chat/completions",
         "operationId": "ai-search-namespace-multi-instance-chat-completion",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2590b0168b583fc7726ab49dbb0465d0081e75495040cf2f8334e09765347f2d",
         "requestMediaType": "json"
@@ -868,7 +868,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances",
         "operationId": "ai-search-namespace-list-instances",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "793713cc00d6aa0739eb6bbc9c3ed8df896bbfaa99708c617f94191071daed74",
         "requestMediaType": "none"
@@ -878,7 +878,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances",
         "operationId": "ai-search-namespace-create-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b52069c1b319a468c3fd49659eb709ea33e72b1dc28e18bc035bb1395b332846",
         "requestMediaType": "json"
@@ -888,7 +888,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
         "operationId": "ai-search-namespace-fetch-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a82ef4622324265b0668dc7dc4dac094d214c56d5c436ac816542d62a2c7b761",
         "requestMediaType": "none"
@@ -898,7 +898,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
         "operationId": "ai-search-namespace-update-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a4d322858a71b42cac252e297cd6ba2b6986f44ba7422da56286f06f495df9e5",
         "requestMediaType": "json"
@@ -908,7 +908,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
         "operationId": "ai-search-namespace-delete-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8e083d23ddfa9bfb0ff8d3b25c3a60464d15485c2aaf82d010b0146c649b6742",
         "requestMediaType": "none"
@@ -918,7 +918,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/stats",
         "operationId": "ai-search-namespace-stats",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6cd4ca2f1e24eb1e4db0dbb11710cc6f1526f3d7a6d083113b24dd07e61ad980",
         "requestMediaType": "none"
@@ -928,7 +928,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/search",
         "operationId": "ai-search-namespace-instance-search",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e814cdb00ad71c1862274a93421a46ca3e671fe8d59b7601316b801200bef326",
         "requestMediaType": "json"
@@ -938,7 +938,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/chat/completions",
         "operationId": "ai-search-namespace-instance-chat-completion",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b7495fcb12fc5ed415ceed0a59b9bf7bc35ecdf67b82515472733a49aa5da1a1",
         "requestMediaType": "json"
@@ -948,7 +948,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
         "operationId": "ai-search-namespace-instance-list-jobs",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4523d3ac8a8375757c73f11e206c49ea139dba1b38efcdc67994c9626b93d3c9",
         "requestMediaType": "none"
@@ -958,7 +958,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
         "operationId": "ai-search-namespace-instance-create-job",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "126aff5a25bf7193f4a22ed5ff56c4996b7c25765fd7c1018c8357a436c684f6",
         "requestMediaType": "json"
@@ -968,7 +968,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}",
         "operationId": "ai-search-namespace-instance-get-job",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "eb97e1b1bf9e66c2cf16f4b5258c30a3ffc3f676e7b3a12dffee422fc697703a",
         "requestMediaType": "none"
@@ -978,7 +978,7 @@
         "method": "PATCH",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}",
         "operationId": "ai-search-namespace-instance-change-job-status",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "68b53b8e6342982e6eee682f098135a3d60f153e9c7896dd72ed23ffeabd39b2",
         "requestMediaType": "json"
@@ -988,7 +988,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}/logs",
         "operationId": "ai-search-namespace-instance-list-job-logs",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a41411adefafd4d4a436a1ead674dc421a8a95a4c3b72d79eb41c60da6b82022",
         "requestMediaType": "none"
@@ -998,7 +998,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
         "operationId": "ai-search-namespace-instance-list-items",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e9d6b02241355180e0ae3770acd895fc3bd155a042b74e889af97a6193b00df0",
         "requestMediaType": "none"
@@ -1008,7 +1008,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
         "operationId": "ai-search-namespace-instance-upload-item",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "c6549bab2f0eca2ec7beecf0dc90e0cb7bedfe4c1460ac18c8766788deef3b9e",
         "requestMediaType": "multipart"
@@ -1018,7 +1018,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
         "operationId": "ai-search-namespace-instance-create-or-update-item",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a9cee6863a8e36579b94e94416a1e26b67b7cb3d0bf7a0466c521d71adc9cb5a",
         "requestMediaType": "json"
@@ -1028,7 +1028,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
         "operationId": "ai-search-namespace-instance-get-item",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "c25468f0547ac8d659febc0dcb6594ede076ceb404601d2fb8824a3ca08e0648",
         "requestMediaType": "none"
@@ -1038,7 +1038,7 @@
         "method": "PATCH",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
         "operationId": "ai-search-namespace-instance-sync-item",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b94c605a150676a0ce78d1348a54bd6077ceef5a34293177c76749ddd34402fb",
         "requestMediaType": "json"
@@ -1048,7 +1048,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
         "operationId": "ai-search-namespace-instance-delete-item",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9343fb555ea2216d9bd885c3825361d4768266d4bbe15227dc0918586b1c4ca2",
         "requestMediaType": "none"
@@ -1058,7 +1058,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/download",
         "operationId": "ai-search-namespace-instance-get-item-content",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "1fcfff80f92c83a51e1d5a73bf659182c4ed77b4dc00ebef0546382f7f15937f",
         "requestMediaType": "none"
@@ -1068,7 +1068,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/logs",
         "operationId": "ai-search-namespace-instance-logs-item",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2c7702b9411eb55f912528391d61586096c6968b9ed000e294cc46633b16196e",
         "requestMediaType": "none"
@@ -1078,7 +1078,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/chunks",
         "operationId": "ai-search-namespace-instance-list-item-chunks",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6c5513bd6498413219bd61d2099a3bc076cca971807623010c5753bdbfc09525",
         "requestMediaType": "none"
@@ -1088,7 +1088,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/queues",
         "operationId": "queues-list",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "36f4391ecfa48171c89a4fad4a447ec3e953903b840e97a9e52d76aad54924c3",
         "requestMediaType": "none"
@@ -1098,7 +1098,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/queues",
         "operationId": "queues-create",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "94e59fb2f98da0f8ca711c86dee7c2666e508496bfbba1510e98b164da172dcb",
         "requestMediaType": "json"
@@ -1108,7 +1108,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/queues/{queue_id}",
         "operationId": "queues-get",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "afb9c09e5ee9ff5465ffba777c125376289772eac87f560f9860e3a411499ce9",
         "requestMediaType": "none"
@@ -1118,7 +1118,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/queues/{queue_id}",
         "operationId": "queues-update",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d7bd4d71c1b623df30c7ce3e49f462e25516ad1a08d0f98aabab87ded576de2e",
         "requestMediaType": "json"
@@ -1128,7 +1128,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/queues/{queue_id}",
         "operationId": "queues-delete",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "bef8bdcb6c846df9febd361d933616642a4bd0731b7d0bf116719e44d9d28674",
         "requestMediaType": "none"
@@ -1138,7 +1138,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/queues/{queue_id}/consumers",
         "operationId": "queues-list-consumers",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5964e6a55a0eb6d8da7e78435763122d9d1af1c50a74b6c1853c0d4a5f6efc06",
         "requestMediaType": "none"
@@ -1148,7 +1148,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/queues/{queue_id}/consumers",
         "operationId": "queues-create-consumer",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e8f66c57e756660028c418438257536805c410ee822aab575f85ce69fb9c24c0",
         "requestMediaType": "json"
@@ -1158,7 +1158,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
         "operationId": "queues-get-consumer",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "0d47c0dd500acfae7b7d75e6c1595c0f35d09f43d0b87d5b1ce7abc7ba474dfa",
         "requestMediaType": "none"
@@ -1168,7 +1168,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
         "operationId": "queues-update-consumer",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e5a45d43bb2b86184b6a166db61358a9a1e79e71e81670cd699a6318b41cf0bb",
         "requestMediaType": "json"
@@ -1178,7 +1178,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
         "operationId": "queues-delete-consumer",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e772cf0fbfe2d5b98d234fe11beff1ec997ed3f79dc13c2a933e68bcc0929b99",
         "requestMediaType": "none"
@@ -1188,7 +1188,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workflows",
         "operationId": "wor-list-workflows",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5bd9bf6872c95659b5a707c4eb84d5e09f59287052524d7995c6f1c56d0b1bff",
         "requestMediaType": "none"
@@ -1198,7 +1198,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workflows/{workflow_name}",
         "operationId": "wor-get-workflow-details",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6125b9f6220c19f48794e671cc735418b895e2ca322793dafc4d8b04b5331130",
         "requestMediaType": "none"
@@ -1208,7 +1208,7 @@
         "method": "PUT",
         "path": "/accounts/{account_id}/workflows/{workflow_name}",
         "operationId": "wor-create-or-modify-workflow",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "834dfff3d34b49fcd89fb62722b26caae69cf3e97df2f4c306a8e520947c578f",
         "requestMediaType": "json"
@@ -1218,7 +1218,7 @@
         "method": "DELETE",
         "path": "/accounts/{account_id}/workflows/{workflow_name}",
         "operationId": "wor-delete-workflow",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8872f87deffd2022090940226d70f0185d9d7b805d74def98b5b7cbea7a9e07b",
         "requestMediaType": "none"
@@ -1228,7 +1228,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workflows/{workflow_name}/versions",
         "operationId": "wor-list-workflow-versions",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "dad3f83c49d5005a3c547db25c89cdcbc7e2cd7a3d0dc30b749b692406c5fa1b",
         "requestMediaType": "none"
@@ -1238,7 +1238,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workflows/{workflow_name}/versions/{version_id}",
         "operationId": "wor-describe-workflow-versions",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "52f7100779e7655ab7ed77c317c6467cb61185d590fae40248dfd5c9704331b0",
         "requestMediaType": "none"
@@ -1248,7 +1248,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workflows/{workflow_name}/instances",
         "operationId": "wor-list-workflow-instances",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7048c017bf5300709794e16953392ec1f91a02eba21531ec0083e0bdcbdf1b2d",
         "requestMediaType": "none"
@@ -1258,7 +1258,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/workflows/{workflow_name}/instances",
         "operationId": "wor-create-new-workflow-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2925bf9d7d60855f7e7ad29e4258a38df6d8d0cb4ab4ae46e483cd85c8f2f6cc",
         "requestMediaType": "json"
@@ -1268,7 +1268,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/workflows/{workflow_name}/instances/batch",
         "operationId": "wor-batch-create-workflow-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "c58378d379e3ebf896e5ef1cb9ce346454ae07438cad469239551b4f5a264e2e",
         "requestMediaType": "json"
@@ -1278,7 +1278,7 @@
         "method": "GET",
         "path": "/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}",
         "operationId": "wor-describe-workflow-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6fe234d3b46029532a6a78d7cd87f114c1fa43cb1fad82067e91db0e00fa50c6",
         "requestMediaType": "none"
@@ -1288,7 +1288,7 @@
         "method": "PATCH",
         "path": "/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status",
         "operationId": "wor-change-status-workflow-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b03db150f0e92f04cb620a9487edbf50d7f2cec5ff9e4e7ec10655d9e1f81296",
         "requestMediaType": "json"
@@ -1298,7 +1298,7 @@
         "method": "POST",
         "path": "/accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/events/{event_type}",
         "operationId": "wor-send-event-workflow-instance",
-        "status": "planned",
+        "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "26afa53cf88d87e9ced524a2a018c150e1424b9b116472c8724a63fb22fb95a1",
         "requestMediaType": "json"
@@ -1349,7 +1349,7 @@
         "id": "POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}",
         "method": "POST",
         "path": "/accounts/{account_id}/workers/assets/upload/{manifest_hash}",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-dist/cli.js:157069",
         "constraint": "Wrangler per-object asset upload; not present in the pinned official OpenAPI snapshot",
         "requestMediaType": "multipart"
@@ -1517,9 +1517,6 @@
         "requestMediaType": "json"
       }
     ],
-    "deviations": [
-      "OC-MANAGEMENT-COMPATIBILITY-DATE-001"
-    ],
     "legacyRoutes": [
       {
         "id": "/operator/api/**",
@@ -1549,57 +1546,57 @@
     "fields": [
       {
         "id": "$schema",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "env",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "name",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "account_id",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "compatibility_date",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "compatibility_flags",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "main",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "find_additional_modules",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "preserve_file_names",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "base_dir",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "workers_dev",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1619,32 +1616,32 @@
       },
       {
         "id": "tsconfig",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "jsx_factory",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "jsx_fragment",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "migrations",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "exports",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "triggers",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1655,27 +1652,27 @@
       },
       {
         "id": "rules",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "build",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "no_bundle",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "minify",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "keep_names",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1695,7 +1692,7 @@
       },
       {
         "id": "upload_source_maps",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1705,7 +1702,7 @@
       },
       {
         "id": "assets",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1721,7 +1718,7 @@
       },
       {
         "id": "cache",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1741,27 +1738,27 @@
       },
       {
         "id": "define",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "vars",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "secrets",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "durable_objects",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "workflows",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1776,7 +1773,7 @@
       },
       {
         "id": "kv_namespaces",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1786,7 +1783,7 @@
       },
       {
         "id": "queues",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1796,27 +1793,27 @@
       },
       {
         "id": "r2_buckets",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "d1_databases",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "vectorize",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "ai_search_namespaces",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "ai_search",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1836,7 +1833,7 @@
       },
       {
         "id": "services",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1851,12 +1848,12 @@
       },
       {
         "id": "ai",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "images",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1871,7 +1868,7 @@
       },
       {
         "id": "version_metadata",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1952,17 +1949,17 @@
       },
       {
         "id": "send_metrics",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "dependencies_instrumentation",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
         "id": "dev",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -1992,7 +1989,7 @@
       },
       {
         "id": "keep_vars",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-config-schema"
       },
       {
@@ -2041,87 +2038,87 @@
     "bindings": [
       {
         "id": "plain_text",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "json",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "secret_text",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "kv_namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "r2_bucket",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "d1",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "vectorize",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "ai_search_namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "ai_search",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "ai",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "durable_object_namespace",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "queue",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "workflow",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "service",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "images",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "version_metadata",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
         "id": "assets",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-multipart"
       },
       {
@@ -2189,312 +2186,312 @@
     "commands": [
       {
         "id": "whoami",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "deploy",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "versions upload",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "versions list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "versions view",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "versions deploy",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "deployments list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "deployments status",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "rollback",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "secret put",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "secret list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "secret delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "secret bulk",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "kv namespace create",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "kv namespace list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "kv namespace delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "kv key put",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "kv key get",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "kv key list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "kv key delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "d1 create",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "d1 list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "d1 info",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "d1 execute",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "d1 migrations apply",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "d1 delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "r2 bucket create",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "r2 bucket list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "r2 bucket delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "r2 object put",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "r2 object get",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "r2 object delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize create",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize get",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize insert",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize upsert",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize query",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize get-vectors",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize delete-vectors",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize info",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize create-metadata-index",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize list-metadata-index",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "vectorize delete-metadata-index",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search namespace create",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search namespace list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search namespace get",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search namespace update",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search namespace delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search create",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search get",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search update",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search stats",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search search",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "ai-search jobs",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "queues create",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "queues list",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "queues delete",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
         "id": "workflows",
-        "status": "planned",
+        "status": "supported",
         "source": "wrangler-cli"
       },
       {
