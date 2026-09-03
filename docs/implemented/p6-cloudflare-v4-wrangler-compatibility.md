@@ -19,28 +19,28 @@
 这是 greenfield Day 1 replacement，不是兼容迁移。实现不以旧 Operator API 的请求、响应、错误、状态机或客户端
 行为为约束；若它们与本文或固定 Cloudflare 合同冲突，直接删除旧逻辑，以新合同为准。
 
-本文取代 [`Operator API 与可选 Dashboard Day1 方案`](implemented/operator-api-dashboard.md) 中关于 API
+本文取代 [`Operator API 与可选 Dashboard Day1 方案`](operator-api-dashboard.md) 中关于 API
 根路径、Operator SDK 和项目配置的目标设计。旧文档及其结果只保留为历史证据；当前实现已经删除旧 Operator
 API、Operator SDK 和 `open-compute.json` 路径，并以本文合同为准。
-[`Cloudflare Workers 兼容矩阵`](references/cloudflare-compatibility.md) 已同步记录 runtime 事实；tenant 选择的
+[`Cloudflare Workers 兼容矩阵`](../references/cloudflare-compatibility.md) 已同步记录 runtime 事实；tenant 选择的
 compatibility date 与 flags 已成为 immutable Worker Version authority，不再由全局值替代。
 
 P5 已经实现 Vectorize、AI Search namespace/instance/items/jobs/search/chat 和 `env.AI.toMarkdown()` 的本地
-domain/runtime authority，见[完成记录](implemented/p5-vectorize-ai-search-results.md)。因此 P6 不再把
+domain/runtime authority，见[完成记录](p5-vectorize-ai-search-results.md)。因此 P6 不再把
 `vectorize`、`ai_search_namespaces`、`ai_search` 或 `ai` 一概列为 unsupported；P6 的工作是把这些现有能力接到
 固定 Wrangler multipart 和官方 `/client/v4` 路径，并保持 `OC-VECTORIZE-001`、`OC-AI-SEARCH-001` 与
 `OC-AI-MARKDOWN-001` 已声明的单机 deviation。P6 已把这些能力接到固定 Wrangler multipart 和官方
 `/client/v4` 路径，并移除旧 `/operator/api/v1` 与按内部 resource ID 的项目配置。
 
 Workers Logs、固定 Wrangler 的 realtime tail 和 Observability Telemetry 子集由
-[`P7 Workers Logs 与 realtime tail 兼容设计`](p7-workers-logs-realtime-tail.md) 独立实施。P6 建立它复用的
+[`P7 Workers Logs 与 realtime tail 兼容设计`](../p7-workers-logs-realtime-tail.md) 独立实施。P6 建立它复用的
 v4 protocol core；三个 Script Tails operation 在 P6 capability manifest 中保持 `planned`，相关 mutation 在
 P7 完成前 fail closed。P6 完成不冒充 P7 已完成；P7 也不另建 vendor logs API。
 
 Workers Standard 的 structural/runtime limits 由
-[`P8 Workers Standard limits 设计`](p8-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
+[`P8 Workers Standard limits 设计`](../p8-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
 `WorkerLoader.load/get` 和 nested stock-workerd Gate 由
-[`P9 Dynamic Workers / Worker Loader 设计`](p9-dynamic-workers-worker-loader.md) 细化。后者只覆盖
+[`P9 Dynamic Workers / Worker Loader 设计`](../p9-dynamic-workers-worker-loader.md) 细化。后者只覆盖
 Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。P6 必须识别这些固定 Wrangler 字段，
 对固定 schema 中不存在的字段则记录 pinned-schema absence；在 P8/P9 分别通过前保持 fail closed。四个阶段各自
 具有独立的 Definition of Done。
@@ -774,8 +774,8 @@ Wrangler schema validation
 | Cache | `cache.enabled`, `cache.cross_version_cache` 和受支持的 Worker export cache override | 映射现有 Cache authority |
 | Images | `images.binding` | `remote` 只是 local dev 字段，不改变 server binding |
 | Version Metadata | `version_metadata.binding` | 不保留 `open-compute.json` 曾有的非标准 `tag` 字段 |
-| Standard limits（P8） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 P8 完成前同样 fail closed，见 [limits 专项](p8-workers-standard-limits.md) |
-| Worker Loader（P9） | `worker_loaders[].binding` | P6 识别字段但 fail closed；P9 当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](p9-dynamic-workers-worker-loader.md) |
+| Standard limits（P8） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 P8 完成前同样 fail closed，见 [limits 专项](../p8-workers-standard-limits.md) |
+| Worker Loader（P9） | `worker_loaders[].binding` | P6 识别字段但 fail closed；P9 当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](../p9-dynamic-workers-worker-loader.md) |
 | Observability logs（P7） | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | P6 只提供共用 v4 core；P7 完成前 settings mutation fail closed；`destinations` 只接受空数组 |
 | Secrets declaration | `secrets.required` | 只影响本地 type/dev validation；值由 `wrangler secret` 管理，不写入配置 |
 
@@ -1210,7 +1210,7 @@ response schema 和退出码；secret、token、signed upload token 和对象内
 - 没有 credential 或产品权限时记录未验收，不能用本地测试替代远端证据。
 
 当前机器没有 Cloudflare credential，因此 hosted differential 未执行，并由
-[`P6 Cloudflare v4 differential 验收`](p6-cloudflare-v4-differential-acceptance.md) 继续跟踪。这个待验收项不改变
+[`P6 Cloudflare v4 differential 验收`](../p6-cloudflare-v4-differential-acceptance.md) 继续跟踪。这个待验收项不改变
 P6 本地核心实现状态，也不能被记录为 hosted PASS。
 
 **Runtime、恢复与安全 Gate。**
