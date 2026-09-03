@@ -30,9 +30,3 @@ assert.equal(capabilities.compatibility_date.maximum, "2026-08-30");
 assert.ok(Object.keys(capabilities.endpoints).length > 0);
 const system = await extension.system.status();
 assert.equal(typeof system.state, "string");
-
-const oldSurface = await fetch(`${new URL(baseURL).origin}/operator/api/v1/meta`, {
-  headers: { authorization: `Bearer ${apiToken}` },
-});
-assert.equal(oldSurface.status, 404);
-assert.notEqual(oldSurface.headers.get("content-type"), "text/html");

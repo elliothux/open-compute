@@ -150,7 +150,7 @@ pub async fn public_ingress(State(state): State<HttpState>, request: Request) ->
         .and_then(canonical_request_host)
     {
         Ok(hostname) => hostname,
-        Err(error) => return crate::http::operator_error_response(&error, request_id),
+        Err(error) => return crate::http::platform_error_response(&error, request_id),
     };
     let repo = WorkerRepository::new(api.storage.db());
     let snapshot = match repo.resolve_route(Some(&hostname), request.uri().path()) {
@@ -158,19 +158,19 @@ pub async fn public_ingress(State(state): State<HttpState>, request: Request) ->
         Err(error) if error.code() == ErrorCode::RouteNotFound => {
             match repo.resolve_route(None, request.uri().path()) {
                 Ok(snapshot) => snapshot,
-                Err(error) => return crate::http::operator_error_response(&error, request_id),
+                Err(error) => return crate::http::platform_error_response(&error, request_id),
             }
         }
-        Err(error) => return crate::http::operator_error_response(&error, request_id),
+        Err(error) => return crate::http::platform_error_response(&error, request_id),
     };
     let pin = match api.pins.pin(snapshot.version.id) {
         Ok(pin) => pin,
-        Err(error) => return crate::http::operator_error_response(&error, request_id),
+        Err(error) => return crate::http::platform_error_response(&error, request_id),
     };
     let route_generation = match i64::try_from(snapshot.worker.route_generation) {
         Ok(value) => value,
         Err(_) => {
-            return crate::http::operator_error_response(
+            return crate::http::platform_error_response(
                 &PlatformError::new(
                     ErrorCode::VersionInvariantViolation,
                     "route generation exceeds the runtime protocol",
@@ -192,7 +192,7 @@ pub async fn public_ingress(State(state): State<HttpState>, request: Request) ->
     let started = std::time::Instant::now();
     let response = match api.transport.dispatch(target, request).await {
         Ok(response) => pin_response(response, pin),
-        Err(error) => crate::http::operator_error_response(&error, request_id),
+        Err(error) => crate::http::platform_error_response(&error, request_id),
     };
     api.traffic
         .observe(worker_id, response.status().as_u16(), started.elapsed());

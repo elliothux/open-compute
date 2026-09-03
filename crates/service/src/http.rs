@@ -510,12 +510,12 @@ async fn neutral_not_found() -> StatusCode {
 
 async fn metrics_handler(State(state): State<HttpState>, request: Request) -> Response {
     if !authorize(&state, &request) {
-        let request_id = operator_request_id(&request);
+        let request_id = request_id(&request);
         let error = PlatformError::new(
             ErrorCode::AdminAuthRequired,
             "admin authentication is required",
         );
-        return operator_error_response(&error, request_id);
+        return platform_error_response(&error, request_id);
     }
     let body = state.metrics.render(&state.health.snapshot());
     (
@@ -654,7 +654,7 @@ pub(crate) fn authorize(state: &HttpState, request: &Request) -> bool {
     bearer_matches(header, secret)
 }
 
-fn operator_request_id(request: &Request) -> RequestId {
+fn request_id(request: &Request) -> RequestId {
     request
         .extensions()
         .get::<RequestId>()
@@ -662,7 +662,7 @@ fn operator_request_id(request: &Request) -> RequestId {
         .unwrap_or_else(RequestId::generate)
 }
 
-pub(crate) fn operator_error_response(error: &PlatformError, request_id: RequestId) -> Response {
+pub(crate) fn platform_error_response(error: &PlatformError, request_id: RequestId) -> Response {
     let code = error.code();
     let status = match code {
         ErrorCode::AdminAuthRequired => StatusCode::UNAUTHORIZED,
