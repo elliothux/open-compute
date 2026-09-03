@@ -382,7 +382,13 @@ fn run_invariants(tx: &Transaction<'_>, version: i64) -> Result<(), PlatformErro
         tables.extend(["r2_buckets", "r2_multipart_uploads", "r2_multipart_parts"]);
     }
     if version >= 6 {
-        tables.extend(["d1_databases", "d1_backups"]);
+        tables.extend([
+            "d1_databases",
+            "d1_backups",
+            "d1_snapshots",
+            "d1_transfer_sessions",
+            "d1_restore_intents",
+        ]);
     }
     if version >= 7 {
         tables.extend(["do_namespaces", "do_objects"]);
