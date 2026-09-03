@@ -90,7 +90,7 @@ async fn product_error_extension_updates_admission_metrics_without_tenant_labels
     let middleware_state = state.clone();
     let router = Router::new()
         .route(
-            "/operator/api/v1/accounts/a/kv/namespaces",
+            "/client/v4/accounts/a/storage/kv/namespaces",
             axum::routing::post(|| async {
                 let mut response = StatusCode::TOO_MANY_REQUESTS.into_response();
                 response
@@ -108,7 +108,7 @@ async fn product_error_extension_updates_admission_metrics_without_tenant_labels
         .oneshot(
             Request::builder()
                 .method(Method::POST)
-                .uri("/operator/api/v1/accounts/a/kv/namespaces")
+                .uri("/client/v4/accounts/a/storage/kv/namespaces")
                 .body(Body::empty())
                 .unwrap(),
         )
