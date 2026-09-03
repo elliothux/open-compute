@@ -9,7 +9,10 @@ const extension = JSON.parse(readFileSync(new URL("../../openapi/open-compute-ex
 const catalog = JSON.parse(readFileSync(new URL("./catalog.json", import.meta.url)));
 
 test("P6 pinned OpenAPI subset and capability projection are internally reproducible", () => {
-  assert.doesNotThrow(() => validateCommitted());
+  assert.doesNotThrow(() => validateCommitted({
+    wranglerRoot: new URL("../../packages/toolchain/node_modules/wrangler/", import.meta.url).pathname,
+    sdkRoot: new URL("../../packages/cloudflare-extension/node_modules/cloudflare/", import.meta.url).pathname,
+  }));
   assert.equal(catalog.managementApi.routeCount, capability.managementApi.routes.length);
   assert.equal(catalog.wrangler.fieldCount, capability.wrangler.fields.length);
   assert.equal(catalog.wrangler.bindingCount, capability.wrangler.bindings.length);
