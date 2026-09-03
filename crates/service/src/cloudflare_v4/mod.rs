@@ -1,6 +1,10 @@
 //! Cloudflare v4-compatible control-plane boundary.
 
 pub(crate) mod accounts;
+mod d1;
+mod kv;
+mod r2;
+mod storage;
 mod vendor;
 mod wire;
 
@@ -9,6 +13,10 @@ pub(crate) use wire::{
     V4Error, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
     paginated_response, request_context, success_response,
 };
+/// Official Cloudflare storage routes implemented by the local product authorities.
+pub(crate) fn storage_router() -> Router<HttpState> {
+    kv::router().merge(d1::router()).merge(r2::router())
+}
 
 use crate::http::HttpState;
 use axum::Router;

@@ -84,7 +84,7 @@ impl R2ApiState {
         self
     }
 
-    fn binding(&self) -> Result<&Arc<R2BindingService>, PlatformError> {
+    pub(crate) fn binding(&self) -> Result<&Arc<R2BindingService>, PlatformError> {
         self.binding.as_ref().ok_or_else(|| {
             PlatformError::new(
                 ErrorCode::PlatformUnavailable,
@@ -173,6 +173,30 @@ impl R2ApiState {
 
     fn driver(&self) -> R2ResourceDriver<'_> {
         R2ResourceDriver::new(&self.storage, self.objects.clone(), self.config.clone())
+    }
+
+    pub(crate) fn storage(&self) -> &Arc<PlatformStorage> {
+        &self.storage
+    }
+
+    pub(crate) const fn objects(&self) -> &R2ObjectStore {
+        &self.objects
+    }
+
+    pub(crate) fn pins(&self) -> &ResourcePins {
+        &self.pins
+    }
+
+    pub(crate) const fn config(&self) -> &R2Config {
+        &self.config
+    }
+
+    pub(crate) const fn delete_drain_timeout(&self) -> Duration {
+        self.delete_drain_timeout
+    }
+
+    pub(crate) fn resource_driver(&self) -> R2ResourceDriver<'_> {
+        self.driver()
     }
 }
 
@@ -755,7 +779,15 @@ async fn put_object(
     };
     let body = request.into_body();
     match binding
-        .operator_object_put(account_id, resource_id, &object_key, request_id, body)
+        .operator_object_put(
+            account_id,
+            resource_id,
+            &object_key,
+            request_id,
+            open_compute_artifacts::R2PutOptions::default(),
+            None,
+            body,
+        )
         .await
     {
         Ok(Some(metadata)) => json_response(

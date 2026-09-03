@@ -81,6 +81,26 @@ impl D1ApiState {
             delete_drain_timeout,
         }
     }
+
+    pub(crate) fn storage(&self) -> &Arc<PlatformStorage> {
+        &self.storage
+    }
+
+    pub(crate) fn pins(&self) -> &ResourcePins {
+        &self.pins
+    }
+
+    pub(crate) fn backend(&self) -> &Arc<D1BindingService> {
+        &self.backend
+    }
+
+    pub(crate) const fn config(&self) -> &D1Config {
+        &self.config
+    }
+
+    pub(crate) const fn delete_drain_timeout(&self) -> Duration {
+        self.delete_drain_timeout
+    }
 }
 
 /// Router for the D1 management surface.

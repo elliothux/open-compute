@@ -189,28 +189,49 @@ impl From<&PlatformError> for V4Error {
     fn from(error: &PlatformError) -> Self {
         match error.code() {
             ErrorCode::AdminAuthRequired => Self::AuthenticationRequired,
-            ErrorCode::BundleTooLarge | ErrorCode::AssetLimitExceeded => {
-                Self::Official(V4OfficialError::RequestTooLarge)
-            }
-            ErrorCode::QuotaExceeded | ErrorCode::AdmissionBusy => Self::RateLimited,
+            ErrorCode::BundleTooLarge
+            | ErrorCode::AssetLimitExceeded
+            | ErrorCode::KvValueTooLarge
+            | ErrorCode::R2ObjectTooLarge => Self::Official(V4OfficialError::RequestTooLarge),
+            ErrorCode::QuotaExceeded
+            | ErrorCode::AdmissionBusy
+            | ErrorCode::KvBusy
+            | ErrorCode::KvStorageFull
+            | ErrorCode::R2Overloaded => Self::RateLimited,
             ErrorCode::AccountNotFound
             | ErrorCode::WorkerNotFound
             | ErrorCode::ResourceNotFound
             | ErrorCode::DoNamespaceNotFound => Self::NotFound,
             ErrorCode::PlatformUnavailable
             | ErrorCode::ResourceNotReady
-            | ErrorCode::ResourceUnavailable => Self::Unavailable,
+            | ErrorCode::ResourceUnavailable
+            | ErrorCode::KvUnavailable
+            | ErrorCode::R2ProviderUnavailable => Self::Unavailable,
             ErrorCode::IdempotencyConflict
             | ErrorCode::RouteConflict
             | ErrorCode::WorkerNameConflict
-            | ErrorCode::ResourceNameConflict => Self::Conflict,
+            | ErrorCode::ResourceNameConflict
+            | ErrorCode::R2BucketNotEmpty
+            | ErrorCode::R2PreconditionFailed => Self::Conflict,
             ErrorCode::BindingCapabilityUnsupported | ErrorCode::CompatibilityUnsupported => {
                 Self::Unsupported
             }
             ErrorCode::ConfigInvalid
             | ErrorCode::PathInvalid
             | ErrorCode::LimitInvalid
+            | ErrorCode::KvKeyInvalid
+            | ErrorCode::KvKeyTooLarge
+            | ErrorCode::KvMetadataInvalid
+            | ErrorCode::KvMetadataTooLarge
+            | ErrorCode::KvInvalidOptions
+            | ErrorCode::KvTooManyKeys
             | ErrorCode::KvCursorInvalid
+            | ErrorCode::R2KeyTooLarge
+            | ErrorCode::R2InvalidOptions
+            | ErrorCode::R2ChecksumMismatch
+            | ErrorCode::R2SsecInvalid
+            | ErrorCode::R2MultipartInvalid
+            | ErrorCode::R2MetadataTooLarge
             | ErrorCode::R2CursorInvalid => Self::InvalidRequest,
             _ => Self::Internal,
         }

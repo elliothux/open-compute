@@ -497,6 +497,8 @@ impl R2BindingService {
         resource_id: ResourceId,
         key: &UserObjectKey,
         request_id: RequestId,
+        options: open_compute_artifacts::R2PutOptions,
+        expected_length: Option<u64>,
         body: Body,
     ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
         let binding = crate::operator_binding::operator_binding(
@@ -530,13 +532,18 @@ impl R2BindingService {
             ),
         )
         .await?;
+        if expected_length.is_some_and(|length| length != staged.length) {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "R2 object Content-Length does not match the request body",
+            ));
+        }
         let source = R2UploadSource {
             path: staged.guard.path.clone(),
             length: staged.length,
             checksums: staged.checksums,
             version: uuid::Uuid::now_v7().hyphenated().to_string(),
         };
-        let options: open_compute_artifacts::R2PutOptions = staged.header.options.try_into()?;
         let current = self
             .committed_object(&binding, &locator, key, timeout)
             .await?;

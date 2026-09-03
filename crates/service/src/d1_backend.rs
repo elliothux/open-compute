@@ -232,6 +232,46 @@ impl D1BindingService {
         .await
     }
 
+    /// Execute one official D1 query or one atomic batch through the shared database lane.
+    pub(crate) async fn cloudflare_v4_query(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+        statements: Vec<D1Statement>,
+    ) -> Result<Vec<D1StatementResult>, PlatformError> {
+        if statements.is_empty() {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "D1 query batch must not be empty",
+            ));
+        }
+        self.run_control(account_id, resource_id, true, move |engine, limits| {
+            if statements.len() == 1 {
+                return engine
+                    .query(&statements[0], limits)
+                    .map(|result| vec![result]);
+            }
+            engine.batch(&statements, limits)
+        })
+        .await
+    }
+
+    /// Issue the current persisted database session bookmark for official time travel reads.
+    pub(crate) async fn cloudflare_v4_bookmark(
+        &self,
+        account_id: AccountId,
+        resource_id: ResourceId,
+    ) -> Result<String, PlatformError> {
+        let storage = self.storage.clone();
+        self.run_control(account_id, resource_id, false, move |engine, _| {
+            let version = engine.session_version()?;
+            storage
+                .crypto()
+                .seal_d1_bookmark(account_id, resource_id, version)
+        })
+        .await
+    }
+
     async fn run_control<T, F>(
         &self,
         account_id: AccountId,

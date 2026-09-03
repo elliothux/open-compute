@@ -108,6 +108,26 @@ impl KvApiState {
         self.snapshot_pins = pins;
         self
     }
+
+    pub(crate) fn storage(&self) -> &Arc<PlatformStorage> {
+        &self.storage
+    }
+
+    pub(crate) fn pins(&self) -> &ResourcePins {
+        &self.pins
+    }
+
+    pub(crate) fn executor(&self) -> &Arc<SqliteKvBindingExecutor> {
+        &self.executor
+    }
+
+    pub(crate) const fn config(&self) -> &KvConfig {
+        &self.config
+    }
+
+    pub(crate) const fn delete_drain_timeout(&self) -> Duration {
+        self.delete_drain_timeout
+    }
 }
 
 /// Router for the product-specific KV management surface.
