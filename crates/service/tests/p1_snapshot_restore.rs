@@ -51,7 +51,11 @@ struct ConfigInputs<'a> {
 
 fn write_config(input: &ConfigInputs<'_>) -> PathBuf {
     let admin_token = input.root.join(format!("{}-admin.token", input.name));
+    let deployer_token = input.root.join(format!("{}-deployer.token", input.name));
+    let read_only_token = input.root.join(format!("{}-read-only.token", input.name));
     write_mode(&admin_token, b"p1-snapshot-admin\n", 0o600);
+    write_mode(&deployer_token, b"p1-snapshot-deployer\n", 0o600);
+    write_mode(&read_only_token, b"p1-snapshot-read-only\n", 0o600);
     let path = input.root.join(format!("{}.toml", input.name));
     fs::write(
         &path,
@@ -63,6 +67,12 @@ admin_bind = "127.0.0.1:0"
 
 [server.admin_auth]
 file = "{admin_token}"
+
+[server.deployer_auth]
+file = "{deployer_token}"
+
+[server.read_only_auth]
+file = "{read_only_token}"
 
 [storage]
 data_dir = "{data}"
@@ -100,6 +110,8 @@ max_series = 1024
             access_key = input.access_key.display(),
             secret_key = input.secret_key.display(),
             admin_token = admin_token.display(),
+            deployer_token = deployer_token.display(),
+            read_only_token = read_only_token.display(),
             prefix = input.prefix,
         ),
     )

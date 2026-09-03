@@ -346,8 +346,14 @@ fn setup_round(n: u32, s3: &MockS3, lock: &RuntimeLock) -> Round {
     let env_id = format!("OC_S3_ID_{n}");
     let env_secret = format!("OC_S3_SECRET_{n}");
     let admin_token = dir.path().join("admin.token");
+    let deployer_token = dir.path().join("deployer.token");
+    let read_only_token = dir.path().join("read-only.token");
     fs::write(&admin_token, b"p0-1-admin\n").unwrap();
     fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&deployer_token, b"p0-1-deployer\n").unwrap();
+    fs::set_permissions(&deployer_token, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&read_only_token, b"p0-1-read-only\n").unwrap();
+    fs::set_permissions(&read_only_token, fs::Permissions::from_mode(0o600)).unwrap();
     fs::write(
         &cfg,
         format!(
@@ -357,6 +363,12 @@ public_bind = "{bind}"
 
 [server.admin_auth]
 file = "{admin_token}"
+
+[server.deployer_auth]
+file = "{deployer_token}"
+
+[server.read_only_auth]
+file = "{read_only_token}"
 
 [storage]
 data_dir = "{data}"
@@ -390,6 +402,8 @@ max_artifact_bytes = 65536
             key = key.display(),
             endpoint = s3.endpoint,
             admin_token = admin_token.display(),
+            deployer_token = deployer_token.display(),
+            read_only_token = read_only_token.display(),
             restart_budget = GATE_RESTART_BUDGET,
         ),
     )
