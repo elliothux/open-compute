@@ -359,6 +359,7 @@ impl HttpState {
 
     /// Attach the stable one-account Cloudflare v4 identity mapping.
     #[must_use]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn with_cloudflare_v4_account(mut self, authority: AccountAuthority) -> Self {
         self.cloudflare_v4_account = Some(Arc::new(authority));
         self
@@ -370,9 +371,16 @@ impl HttpState {
         self.cloudflare_v4_account.as_deref()
     }
 
-    /// Attach the one platform persistence authority for v4 vendor inspection.
+    /// Attach the one platform persistence authority and derive its public v4 account mapping.
     #[must_use]
-    pub(crate) fn with_platform_storage(mut self, storage: Arc<PlatformStorage>) -> Self {
+    pub fn with_platform_storage(mut self, storage: Arc<PlatformStorage>) -> Self {
+        if self.cloudflare_v4_account.is_none() {
+            self.cloudflare_v4_account = Some(Arc::new(AccountAuthority::new(
+                storage.identity().platform_id,
+                storage.identity().default_account_id,
+                storage.identity().created_at_ms,
+            )));
+        }
         self.platform_storage = Some(storage);
         self
     }

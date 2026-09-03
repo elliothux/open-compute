@@ -576,11 +576,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         loaded.config.dashboard.enabled,
         &loaded.config.server,
     )?
-    .with_cloudflare_v4_account(crate::cloudflare_v4::accounts::AccountAuthority::new(
-        storage.identity().platform_id,
-        storage.identity().default_account_id,
-        storage.identity().created_at_ms,
-    ))
     .with_platform_storage(storage.clone())
     .with_dashboard_dispatch(dashboard_dispatch.clone())
     .with_worker_api(worker_api)

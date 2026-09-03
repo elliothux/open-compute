@@ -909,7 +909,6 @@ async fn operator_value_put_get_and_delete_round_trip() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["value"], Value::Null);
-
 }
 
 #[tokio::test]
