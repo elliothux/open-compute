@@ -64,8 +64,13 @@ async fn kv_backups(
     let Some(storage) = state.platform_storage() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    match KvNamespaceRepository::new(storage.db()).list_backups(account) {
-        Ok(backups) => backup_list_response(
+    let storage = storage.clone();
+    match tokio::task::spawn_blocking(move || {
+        KvNamespaceRepository::new(storage.db()).list_backups(account)
+    })
+    .await
+    {
+        Ok(Ok(backups)) => backup_list_response(
             context,
             backups
                 .into_iter()
@@ -73,7 +78,8 @@ async fn kv_backups(
                 .map(Backup::try_from)
                 .collect(),
         ),
-        Err(error) => backup_platform_error(error, context),
+        Ok(Err(error)) => backup_platform_error(error, context),
+        Err(_) => error_response(V4Error::Internal, context.request_id()),
     }
 }
 
@@ -196,11 +202,17 @@ async fn d1_backups(
     let Some(storage) = state.platform_storage() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    match D1DatabaseRepository::new(storage.db()).list_backups(account, database) {
-        Ok(backups) => {
+    let storage = storage.clone();
+    match tokio::task::spawn_blocking(move || {
+        D1DatabaseRepository::new(storage.db()).list_backups(account, database)
+    })
+    .await
+    {
+        Ok(Ok(backups)) => {
             backup_list_response(context, backups.into_iter().map(Backup::try_from).collect())
         }
-        Err(error) => backup_platform_error(error, context),
+        Ok(Err(error)) => backup_platform_error(error, context),
+        Err(_) => error_response(V4Error::Internal, context.request_id()),
     }
 }
 
@@ -354,12 +366,14 @@ async fn restore_request(
     let context = read_context(&request, V4Permission::Maintenance)?;
     let key = optional_idempotency_key(&request)
         .map_err(|error| error_response(error, context.request_id()))?;
-    let valid_content_type = request
-        .headers()
-        .get(CONTENT_TYPE)
+    let content_types = request.headers().get_all(CONTENT_TYPE);
+    let mut content_types = content_types.iter();
+    let valid_content_type = content_types
+        .next()
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.split(';').next())
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"));
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
+        && content_types.next().is_none();
     if !valid_content_type {
         return Err(error_response(
             V4Error::InvalidRequest,
@@ -375,9 +389,14 @@ async fn restore_request(
 }
 
 fn optional_idempotency_key(request: &Request) -> Result<Option<String>, V4Error> {
-    let Some(value) = request.headers().get(IDEMPOTENCY_HEADER) else {
+    let values = request.headers().get_all(IDEMPOTENCY_HEADER);
+    let mut values = values.iter();
+    let Some(value) = values.next() else {
         return Ok(None);
     };
+    if values.next().is_some() {
+        return Err(V4Error::InvalidRequest);
+    }
     let value = value.to_str().map_err(|_| V4Error::InvalidRequest)?;
     if value.is_empty()
         || value.len() > 128
