@@ -79,8 +79,12 @@ fn write_config(dir: &Path, extra: &str) -> PathBuf {
     let data = dir.join("data");
     let key = dir.join("master.key");
     let admin_auth = dir.join("admin-auth");
+    let deployer_auth = dir.join("deployer-auth");
+    let read_only_auth = dir.join("read-only-auth");
     fs::create_dir_all(&data).unwrap();
     write_mode(&admin_auth, "test-admin-secret", 0o600);
+    write_mode(&deployer_auth, "test-deployer-secret", 0o600);
+    write_mode(&read_only_auth, "test-read-only-secret", 0o600);
     let s3 = if extra.contains("[s3]") {
         String::new()
     } else {
@@ -102,6 +106,8 @@ prefix = "system/"
 public_bind = "127.0.0.1:0"
 admin_bind = "127.0.0.1:0"
 admin_auth = {{ file = "{admin_auth}" }}
+deployer_auth = {{ file = "{deployer_auth}" }}
+read_only_auth = {{ file = "{read_only_auth}" }}
 
 [storage]
 data_dir = "{data_dir}"
@@ -122,6 +128,8 @@ max_series = 1024
         data_dir = data.display(),
         master_key_file = key.display(),
         admin_auth = admin_auth.display(),
+        deployer_auth = deployer_auth.display(),
+        read_only_auth = read_only_auth.display(),
     );
     let path = dir.join("config.toml");
     fs::write(&path, toml).unwrap();
@@ -4273,7 +4281,7 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
         .unwrap();
     let response = String::from_utf8(response).unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-    assert!(response.contains("\"supervisor\""), "{response}");
+    assert!(response.contains("\"process\""), "{response}");
     assert_eq!(mock.object_count(), 0);
 }
 #[path = "p2_3_route_epoch_tests.rs"]

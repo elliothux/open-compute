@@ -102,6 +102,9 @@ pub struct ManagementApiRouteV1 {
     /// Stable support-scope constraint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub constraint: Option<String>,
+    /// Stable documented deviation identifiers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deviations: Vec<String>,
 }
 
 impl ManagementApiRouteV1 {
@@ -112,8 +115,16 @@ impl ManagementApiRouteV1 {
             && !self.source.is_empty()
             && optional_nonempty(&self.stage)
             && optional_nonempty(&self.constraint)
+            && unique_nonempty(&self.deviations)
+            && match self.status {
+                InterfaceCapabilityStatus::SupportedWithDeviation => !self.deviations.is_empty(),
+                _ => self.deviations.is_empty(),
+            }
             && match (&self.operation_id, &self.operation_sha256) {
                 (Some(operation_id), Some(digest)) => !operation_id.is_empty() && is_sha256(digest),
+                (Some(operation_id), None) => {
+                    !operation_id.is_empty() && self.source != "cloudflare-openapi"
+                }
                 (None, None) => true,
                 _ => false,
             }
@@ -148,6 +159,9 @@ pub struct ManagementApiCapabilitiesV1 {
     pub root: String,
     /// Positive and explicit fail-closed route inventory.
     pub routes: Vec<ManagementApiRouteV1>,
+    /// Stable documented management-API deviation identifiers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deviations: Vec<String>,
     /// Retired route prefixes that must not be mounted.
     pub legacy_routes: Vec<LegacyManagementRouteV1>,
 }
@@ -158,6 +172,7 @@ impl ManagementApiCapabilitiesV1 {
         self.root == "/client/v4"
             && !self.routes.is_empty()
             && self.routes.iter().all(ManagementApiRouteV1::validate)
+            && unique_nonempty(&self.deviations)
             && self
                 .legacy_routes
                 .iter()

@@ -121,6 +121,7 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
         }
     }
     insert_deviations(&mut deviations, contract["managementApi"].get("deviations"));
+    deviations.insert("OC-MANAGEMENT-COMPATIBILITY-DATE-001".to_owned());
     success_response(
         context,
         Capabilities {

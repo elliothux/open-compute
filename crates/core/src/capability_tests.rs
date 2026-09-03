@@ -78,12 +78,14 @@ fn management_api() -> ManagementApiCapabilitiesV1 {
             request_media_type: ManagementApiRequestMediaType::None,
             stage: None,
             constraint: None,
+            deviations: Vec::new(),
         }],
         legacy_routes: vec![LegacyManagementRouteV1 {
             id: "/operator/api/**".to_owned(),
             status: InterfaceCapabilityStatus::Unsupported,
             source: "day1-negative-route-inventory".to_owned(),
         }],
+        deviations: Vec::new(),
     }
 }
 

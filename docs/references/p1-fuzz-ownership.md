@@ -12,7 +12,7 @@ P1 的长时 fuzz rehearsal 使用独立的 `test/fuzz/` package、Rust 1.98.0�
 | canonical bundle | `test/fuzz/src/main.rs` + `crates/workers` property tests |
 | binding descriptor | `test/fuzz/src/main.rs` + `crates/workers` descriptor tests |
 | request metadata/header bridge | `runtime_bridge_tests.rs` |
-| resource/deployment/cursor ID codec | `test/fuzz/src/main.rs` + typed-ID tests |
+| resource/version/cursor ID codec | `test/fuzz/src/main.rs` + typed-ID tests |
 | facade RPC frame/structured value | `binding_backend_tests.rs` |
 | KV cursor and metadata | `kv/engine_tests.rs` + `kv_backend_tests.rs` |
 | D1 SQL authorizer and result encoder | `d1/tests.rs` + `d1_protocol_tests.rs` |

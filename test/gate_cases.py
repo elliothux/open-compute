@@ -42,7 +42,7 @@ ONCE = {
     'p1-conformance': ('p1_capabilities_are_complete_and_identical_across_fresh_processes',),
     'p1-security': (
         'p1_path_corpus_and_production_fault_surface_fail_closed',
-        'p1_two_account_resource_and_deployment_matrix_has_no_existence_or_metric_oracle',
+        'p1_two_account_resource_and_version_matrix_has_no_existence_or_metric_oracle',
     ),
     # Current snapshot validation is a fixed input/fault matrix.
     'p1-snapshot': ('p1_full_snapshot_retention_and_fresh_host_restore_are_fail_closed',),

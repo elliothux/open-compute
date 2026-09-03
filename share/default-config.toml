@@ -16,7 +16,7 @@ free_space_hard_bytes = 268435456
 [hardening]
 max_workers_per_account = 1000
 max_routes_per_account = 10000
-max_deployments_per_worker = 1000
+max_versions_per_worker = 1000
 max_resources_per_kind_per_account = 1000
 emergency_reserve_bytes = 67108864
 max_snapshot_files = 1000000
@@ -86,7 +86,7 @@ max_batch_files = 16
 max_output_bytes = 16777216
 max_concurrency = 4
 max_concurrency_per_account = 2
-max_concurrency_per_deployment = 1
+max_concurrency_per_version = 1
 request_timeout_ms = 30000
 max_address_space_bytes = 2147483648
 max_cpu_seconds = 30
@@ -112,9 +112,9 @@ delete_drain_timeout_ms = 5000
 artifact_gc_grace_ms = 86400000
 artifact_gc_interval_ms = 60000
 delete_recovery_batch = 64
-retain_ready_deployments = 10
-retain_rejected_deployments = 10
-deployment_min_retention_ms = 86400000
+retain_ready_versions = 10
+retain_rejected_versions = 10
+version_min_retention_ms = 86400000
 
 [kv]
 namespace_quota_bytes = 1073741824
