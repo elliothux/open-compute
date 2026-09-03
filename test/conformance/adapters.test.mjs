@@ -65,28 +65,29 @@ test("portable fixture schema is strict and its digest covers the whole fixture"
     EVENTS: { type: "queue_producer" },
     FLOW: { type: "workflow", className: "PortableWorkflow" },
   });
-  const productIds = {
-    OBJECTS: "019c0000-0000-7000-8000-000000000010",
-    EVENTS: "019c0000-0000-7000-8000-000000000011",
-    FLOW: "019c0000-0000-7000-8000-000000000012",
-  };
   const ocProduct = openComputeProject(
     loadedProductBound,
     "portable-product",
-    "http://127.0.0.1:8787/",
-    "019c0000-0000-7000-8000-000000000001",
-    productIds,
+    "0123456789abcdef0123456789abcdef",
+    {},
+    { EVENTS: "portable-queue", FLOW: "portable-workflow" },
   );
-  assert.deepEqual(ocProduct.bindings, {
-    OBJECTS: { type: "do_namespace", id: productIds.OBJECTS },
-    EVENTS: { type: "queue_producer", id: productIds.EVENTS },
-    FLOW: { type: "workflow", id: productIds.FLOW },
+  assert.equal(ocProduct.workers_dev, false);
+  assert.deepEqual(ocProduct.durable_objects, {
+    bindings: [{ name: "OBJECTS", class_name: "PortableObject" }],
   });
+  assert.deepEqual(ocProduct.migrations, [{ tag: "v1", new_sqlite_classes: ["PortableObject"] }]);
+  assert.deepEqual(ocProduct.queues, {
+    producers: [{ binding: "EVENTS", queue: "portable-queue" }],
+  });
+  assert.deepEqual(ocProduct.workflows, [{
+    binding: "FLOW", name: "portable-workflow", class_name: "PortableWorkflow",
+  }]);
   const cfProduct = cloudflareProject(
     loadedProductBound,
     "portable-product",
     "0123456789abcdef0123456789abcdef",
-    { OBJECTS: "script-owned", EVENTS: "portable-queue", FLOW: "portable-workflow" },
+    {},
     { EVENTS: "portable-queue", FLOW: "portable-workflow" },
   );
   assert.deepEqual(cfProduct.durable_objects, {
@@ -99,6 +100,7 @@ test("portable fixture schema is strict and its digest covers the whole fixture"
   assert.deepEqual(cfProduct.workflows, [{
     binding: "FLOW", name: "portable-workflow", class_name: "PortableWorkflow",
   }]);
+  assert.equal(cfProduct.workers_dev, true);
   const missingClass = await fixture({
     bindings: { OBJECTS: { type: "do_namespace" } },
     cleanup: { cloudflare: ["worker", "do_namespace"], openCompute: ["worker", "do_namespace"] },

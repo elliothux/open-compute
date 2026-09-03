@@ -3,7 +3,7 @@ import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CompiledModule, CompiledModuleType, CompiledWorker } from "../build-worker.ts";
 import type { JsonValue, RuntimeFeatures, WorkerBinding, WorkerProject, WorkerService } from "../project.ts";
-import { parseRuntimeFeatures, record } from "../project.ts";
+import { assertNoUnsupportedWranglerBindings, parseRuntimeFeatures, record } from "../project.ts";
 import { loadFormalRuntimeLock, type FormalRuntimeLock } from "../runtime-lock.ts";
 import type { AssetsProject } from "../assets/types.ts";
 
@@ -23,13 +23,6 @@ const GENERATED_CONFIG_KEYS = [
   "pipelines", "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship",
   "worker_loaders", "ratelimits", "vpc_services", "vpc_networks", "version_metadata", "logfwdr", "unsafe",
   "cache", "python_modules", "dev", "no_bundle",
-] as const;
-const UNSUPPORTED_GENERATED_BINDING_KEYS = [
-  "define", "dispatch_namespaces", "hyperdrive", "browser",
-  "mtls_certificates", "unsafe", "cloudchamber", "send_email", "connect",
-  "analytics_engine_datasets", "agent_memory", "pipelines",
-  "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship", "worker_loaders",
-  "ratelimits", "vpc_services", "vpc_networks", "logfwdr",
 ] as const;
 
 interface ModuleRule {
@@ -132,13 +125,6 @@ function generatedArray(value: unknown, label: string, limit = 128): Record<stri
   return value;
 }
 
-function emptyGeneratedDeclaration(value: unknown): boolean {
-  if (value === undefined) return true;
-  if (Array.isArray(value)) return value.length === 0;
-  if (record(value)) return Object.values(value).every(emptyGeneratedDeclaration);
-  return false;
-}
-
 function canonicalJson(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(canonicalJson);
   if (!record(value)) return value;
@@ -152,11 +138,7 @@ function generatedBindings(config: Record<string, unknown>, project: WorkerProje
         !== JSON.stringify(canonicalJson(project.vars))) {
     throw new Error("generated framework vars conflict with the project");
   }
-  for (const key of UNSUPPORTED_GENERATED_BINDING_KEYS) {
-    if (!emptyGeneratedDeclaration(config[key])) {
-      throw new Error(`generated framework config declares unsupported ${key}`);
-    }
-  }
+  assertNoUnsupportedWranglerBindings(config, "generated framework config");
   const declarations = new Map<string, GeneratedBinding>();
   const add = (name: string, declaration: GeneratedBinding): void => {
     if (declarations.has(name)) throw new Error("generated framework binding names conflict");
@@ -231,6 +213,13 @@ function generatedBindings(config: Record<string, unknown>, project: WorkerProje
       throw new Error("generated framework bindings differ from the project");
     }
   }
+}
+
+function emptyGeneratedDeclaration(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (record(value)) return Object.values(value).every(emptyGeneratedDeclaration);
+  return false;
 }
 
 function validateGeneratedConfig(config: Record<string, unknown>): void {

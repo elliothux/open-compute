@@ -361,7 +361,10 @@ function exactBindingIds(
   fixture: PortableFixture,
   ids: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
-  const expected = Object.keys(fixture.bindings).sort();
+  const expected = Object.keys(fixture.bindings)
+    .filter(binding => fixture.bindings[binding]?.type === "kv_namespace"
+      || fixture.bindings[binding]?.type === "d1_database")
+    .sort();
   const actual = Object.keys(ids).sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)
       || Object.values(ids).some(id => id.length === 0)) throw new Error("portable fixture binding identities are incomplete");
@@ -371,36 +374,36 @@ function exactBindingIds(
 export function openComputeProject(
   fixture: PortableFixture,
   name: string,
-  endpoint: string,
   accountId: string,
   bindingIds: Readonly<Record<string, string>> = {},
+  bindingNames: Readonly<Record<string, string>> = {},
 ): JsonRecord {
-  const ids = exactBindingIds(fixture, bindingIds);
-  return {
-    main: relative(fixture.root, fixture.source),
-    name,
-    tsconfig: "tsconfig.json", vars: {}, secrets: {},
-    bindings: Object.fromEntries(Object.entries(fixture.bindings).map(([binding, value]) => [
-      binding, {
-        type: value.type,
-        id: ids[binding],
-        ...(value.type === "workflow" && value.schedules !== undefined
-          ? { schedules: value.schedules } : {}),
-      },
-    ])),
-    services: [], accountId, endpoint,
-  };
+  return workerProject(fixture, name, accountId, bindingIds, bindingNames, false);
+}
+
+/** Minimal open-compute Wrangler project used before owned bindings are provisioned. */
+export function openComputeBaseProject(fixture: PortableFixture, name: string, accountId: string): JsonRecord {
+  return baseProject(fixture, name, accountId, false);
 }
 
 /** Minimal Worker project used before any owned binding has been provisioned. */
 export function cloudflareBaseProject(fixture: PortableFixture, name: string, accountId: string): JsonRecord {
+  return baseProject(fixture, name, accountId, true);
+}
+
+function baseProject(
+  fixture: PortableFixture,
+  name: string,
+  accountId: string,
+  workersDev: boolean,
+): JsonRecord {
   return {
     name,
     main: relative(fixture.root, fixture.source),
     account_id: accountId,
     compatibility_date: LOCK.effectiveCompatibilityDate,
     compatibility_flags: [...LOCK.requiredCompatibilityFlags],
-    workers_dev: true,
+    workers_dev: workersDev,
     send_metrics: false,
   };
 }
@@ -411,6 +414,17 @@ export function cloudflareProject(
   accountId: string,
   bindingIds: Readonly<Record<string, string>> = {},
   bindingNames: Readonly<Record<string, string>> = {},
+): JsonRecord {
+  return workerProject(fixture, name, accountId, bindingIds, bindingNames, true);
+}
+
+function workerProject(
+  fixture: PortableFixture,
+  name: string,
+  accountId: string,
+  bindingIds: Readonly<Record<string, string>>,
+  bindingNames: Readonly<Record<string, string>>,
+  workersDev: boolean,
 ): JsonRecord {
   const ids = exactBindingIds(fixture, bindingIds);
   const expectedNames = Object.keys(fixture.bindings)
@@ -441,7 +455,7 @@ export function cloudflareProject(
       ...(value.schedules === undefined ? {} : { schedules: value.schedules }),
     }));
   return {
-    ...cloudflareBaseProject(fixture, name, accountId),
+    ...baseProject(fixture, name, accountId, workersDev),
     kv_namespaces: Object.entries(fixture.bindings)
       .filter(([, value]) => value.type === "kv_namespace")
       .map(([binding]) => ({ binding, id: ids[binding] })),

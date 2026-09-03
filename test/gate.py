@@ -277,9 +277,9 @@ def resolve_targets(selected, workspace):
                 (
                     'PATH', 'HOME', 'OPEN_COMPUTE_CF_MUTATION_ACK',
                     'OPEN_COMPUTE_CF_ACCOUNT_ID', 'OPEN_COMPUTE_CF_ACCOUNT_ALIAS',
-                    'OPEN_COMPUTE_CF_WRANGLER', 'CLOUDFLARE_API_TOKEN', 'OPEN_COMPUTE_OCD',
+                    'OPEN_COMPUTE_CF_WRANGLER', 'CLOUDFLARE_API_TOKEN',
                     'OPEN_COMPUTE_ENDPOINT', 'OPEN_COMPUTE_ACCOUNT_ID',
-                    'OPEN_COMPUTE_ADMIN_TOKEN', 'OPEN_COMPUTE_TEST_RUNTIME_RESTART_ACK',
+                    'OPEN_COMPUTE_ADMIN_TOKEN',
                 ),
                 1800,
                 'external-exclusive',

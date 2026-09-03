@@ -75,14 +75,13 @@ export OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL=http://127.0.0.1:8080/v1
 | `runtime`、`single-binary` | supervisor、单文件离线首启/重启/损坏路径 |
 | `p0`、`p1`、`p2`、`all` | 对应集合；多个选择取并集，每个选定目标与 case 执行一次 |
 
-`p3-cf-diff` 每个 fixture 只使用随机 `oc-p34-*` Worker 名与 workers.dev endpoint；按 fixture 在两个
-provider 创建同前缀且唯一的 KV namespace、D1 database、R2 bucket、Queue、Durable Object namespace 或
-Workflow。runner 在 mutation 前验证目标账号和每个同名资源不存在，只对只读状态做有界重试，绝不重试
-写操作。cleanup 禁止扩大到非本轮资源，按精确 Worker 名、route ID 和 binding resource ID/name 删除并
-再次枚举确认 absent；本地 deployment retention 需要显式
-`OPEN_COMPUTE_TEST_RUNTIME_RESTART_ACK=restart-generation`，且只允许对本次 qualification 的专用测试
-实例轮换 generation。任何清理失败都使 Gate 失败并保留 inventory，不得扩大到账号级批量删除或触碰
-其它服务。
+`p3-cf-diff` 每个 fixture 只使用随机 `oc-p34-*` Worker 名；Cloudflare 使用 workers.dev endpoint，
+open-compute 使用 test-support 数据面。两个 provider 都通过固定 Wrangler 与官方 v4 API 创建同前缀且
+唯一的 KV namespace、D1 database、R2 bucket、Queue、Worker-owned Durable Object namespace 或
+Workflow；open-compute 只通过 `CLOUDFLARE_API_BASE_URL` 选择本地 v4 origin。runner 在 mutation 前验证
+目标账号和每个同名资源不存在，只对只读状态做有界重试，绝不重试写操作。cleanup 禁止扩大到非本轮
+资源，按精确 Worker、binding resource ID/name 删除并再次枚举确认 absent。任何清理失败都使 Gate 失败
+并保留 inventory，不得扩大到账号级批量删除或触碰其它服务。
 
 ## 单轮覆盖原则
 

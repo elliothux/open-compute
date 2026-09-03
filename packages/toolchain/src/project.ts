@@ -103,6 +103,31 @@ export function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const UNSUPPORTED_WRANGLER_BINDING_KEYS = [
+  "define", "dispatch_namespaces", "hyperdrive", "browser",
+  "mtls_certificates", "unsafe", "cloudchamber", "send_email", "connect",
+  "analytics_engine_datasets", "agent_memory", "pipelines",
+  "secrets_store_secrets", "artifacts", "unsafe_hello_world", "flagship", "worker_loaders",
+  "ratelimits", "vpc_services", "vpc_networks", "logfwdr",
+] as const;
+
+function emptyWranglerDeclaration(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (record(value)) return Object.values(value).every(emptyWranglerDeclaration);
+  return false;
+}
+
+/** Reject normalized Wrangler declarations that the local build/runtime path cannot enforce. */
+export function assertNoUnsupportedWranglerBindings(
+  config: Record<string, unknown>,
+  label: string,
+): void {
+  for (const key of UNSUPPORTED_WRANGLER_BINDING_KEYS) {
+    if (!emptyWranglerDeclaration(config[key])) throw new Error(`${label} declares unsupported ${key}`);
+  }
+}
+
 function relativeProjectPath(project: string, value: string, label: string): string {
   const path = relative(project, resolve(project, value));
   if (path === ".." || path.startsWith(`..${sep}`)) throw new Error(`${label} must be inside the project`);
@@ -247,6 +272,7 @@ export async function loadProject(path: string): Promise<WorkerProject> {
       { hideWarnings: true, preserveOriginalMain: true, useRedirectIfAvailable: true },
     )
     : explicitConfig;
+  assertNoUnsupportedWranglerBindings(config, "Wrangler config");
   if (config.configPath === undefined || config.name === undefined) {
     throw new Error("Wrangler config requires a Worker name");
   }

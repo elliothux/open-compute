@@ -85,6 +85,18 @@ test("legacy project fields cannot drive the normalized Wrangler projection", as
   assert.equal(project.main, "src/index.ts");
 });
 
+test("rejects unsupported standard Wrangler bindings after normalization", async t => {
+  const { filename } = await fixture(t, {
+    name: "unsupported",
+    main: "src/index.ts",
+    compatibility_date: "2026-08-30",
+    analytics_engine_datasets: [{ binding: "ANALYTICS", dataset: "events" }],
+  });
+  await assert.rejects(loadProject(filename), {
+    message: "Wrangler config declares unsupported analytics_engine_datasets",
+  });
+});
+
 test("consumes the standard generated deployment redirect", async t => {
   const { directory } = await fixture(t, {}, "placeholder");
   await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({

@@ -6,17 +6,13 @@ import { fileURLToPath } from "node:url";
 import {
   cloudflareBaseProject, cloudflareDeploymentUrl, cloudflareProject, cloudflareTransientFailure, cloudflareWorkerMissing,
   command, commandStatus, fetchObservation,
-  loadPortableFixtures, observe, observationUrl, openComputeProject,
+  loadPortableFixtures, observe, observationUrl, openComputeBaseProject, openComputeProject,
   WRANGLER_VERSION,
   type CommandResult, type JsonRecord, type PortableFixture,
 } from "./adapters.ts";
 import {
-  activateOpenComputeWorkflowVersion, cleanupCloudflareQueue, cleanupCloudflareWorkflow,
-  cleanupOpenComputeQueue, cleanupOpenComputeWorkflow, createCloudflareQueue, createOpenComputeQueue,
-  cleanupOpenComputeDurableObjectNamespace, createOpenComputeDurableObjectNamespace,
-  createOpenComputeWorkflow, ensureCloudflareQueueAbsent, ensureCloudflareWorkflowAbsent,
-  ensureOpenComputeDurableObjectNamespaceAbsent, ensureOpenComputeQueueAbsent, ensureOpenComputeWorkflowAbsent,
-  verifyCloudflareWorkflowCreated,
+  cleanupQueue, cleanupWorkflow, createQueue, ensureQueueAbsent, ensureWorkflowAbsent,
+  verifyWorkflowCreated,
 } from "./differential-product-resources.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -53,7 +49,6 @@ interface OwnedR2Bucket {
   cloudflareOwned: boolean;
   openComputeAbsent: boolean;
   openComputeOwned: boolean;
-  openComputeId?: string;
 }
 
 interface OwnedQueue {
@@ -63,16 +58,12 @@ interface OwnedQueue {
   cloudflareOwned: boolean;
   openComputeAbsent: boolean;
   openComputeOwned: boolean;
-  openComputeId?: string;
 }
 
 interface OwnedDurableObjectNamespace {
   readonly binding: string;
   readonly className: string;
-  readonly name: string;
-  openComputeAbsent: boolean;
   openComputeOwned: boolean;
-  openComputeId?: string;
 }
 
 interface OwnedWorkflow {
@@ -83,7 +74,6 @@ interface OwnedWorkflow {
   cloudflareOwned: boolean;
   openComputeAbsent: boolean;
   openComputeOwned: boolean;
-  openComputeId?: string;
 }
 
 if (args.length === 1 && args[0] === "--list") {
@@ -154,26 +144,31 @@ function sanitizedError(error: unknown, secrets: readonly (string | undefined)[]
 
 async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
   if (required("OPEN_COMPUTE_CF_MUTATION_ACK") !== "p3-cf-diff") throw new Error("Cloudflare mutation acknowledgement is missing");
-  if (required("OPEN_COMPUTE_TEST_RUNTIME_RESTART_ACK") !== "restart-generation") {
-    throw new Error("test runtime restart acknowledgement is missing");
-  }
   const accountId = required("OPEN_COMPUTE_CF_ACCOUNT_ID");
   if (!/^[0-9a-f]{32}$/.test(accountId)) throw new Error("Cloudflare account ID is invalid");
   const accountAlias = safeAlias(required("OPEN_COMPUTE_CF_ACCOUNT_ALIAS"));
   const token = process.env.CLOUDFLARE_API_TOKEN;
   const wrangler = await executable("OPEN_COMPUTE_CF_WRANGLER");
-  const ocd = await executable("OPEN_COMPUTE_OCD");
   const endpoint = new URL(required("OPEN_COMPUTE_ENDPOINT"));
   if (endpoint.pathname !== "/" || endpoint.search || endpoint.hash
       || (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname)))) {
     throw new Error("open-compute endpoint must be HTTPS or loopback HTTP origin");
   }
-  const openComputeAccount = uuid(required("OPEN_COMPUTE_ACCOUNT_ID"), "open-compute account");
-  const adminToken = process.env.OPEN_COMPUTE_ADMIN_TOKEN;
-  await verifyOpenComputeAccount(endpoint, openComputeAccount, adminToken);
+  const openComputeInternalAccount = uuid(
+    required("OPEN_COMPUTE_ACCOUNT_ID"),
+    "open-compute internal data-plane account",
+  );
+  const adminToken = required("OPEN_COMPUTE_ADMIN_TOKEN");
+  const openComputeApiBase = new URL("/client/v4", endpoint);
+  const openComputeAccount = await verifyOpenComputeAccount(openComputeApiBase, adminToken);
   const cloudflareEnv = processEnv({
     CLOUDFLARE_ACCOUNT_ID: accountId,
     ...(token === undefined ? {} : { CLOUDFLARE_API_TOKEN: token }),
+  });
+  const openComputeEnv = processEnv({
+    CLOUDFLARE_ACCOUNT_ID: openComputeAccount,
+    CLOUDFLARE_API_BASE_URL: openComputeApiBase.href,
+    CLOUDFLARE_API_TOKEN: adminToken,
   });
   const version = await command(wrangler, ["--version"], { cwd: ROOT, env: cloudflareEnv, timeout: 20_000 });
   const escapedWranglerVersion = WRANGLER_VERSION.replaceAll(".", "\\.");
@@ -181,6 +176,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
     throw new Error("Wrangler version differs from baseline");
   }
   await verifyWranglerAccount(wrangler, accountId, cloudflareEnv);
+  await verifyWranglerAccount(wrangler, openComputeAccount, openComputeEnv);
   const prefix = `oc-p34-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
   const revision = (await command("git", ["rev-parse", "HEAD"], { cwd: ROOT, env: processEnv({}), timeout: 20_000 })).stdout.trim();
   const workingTreeSha256 = await sourceIdentity();
@@ -204,11 +200,10 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
     accountAlias,
     prefix,
     fixtures: selected.length,
-    mutationScope: `one uniquely named workers.dev Worker per selected fixture, ${kvNamespaceCount} uniquely named KV namespaces, ${d1DatabaseCount} uniquely named D1 databases, ${r2BucketCount} uniquely named R2 buckets, ${queueCount} uniquely named Queues, ${durableObjectNamespaceCount} Worker-owned Durable Object namespaces, and ${workflowCount} uniquely named Workflows per provider`,
+    mutationScope: `one uniquely named Worker per selected fixture and provider, ${kvNamespaceCount} uniquely named KV namespaces, ${d1DatabaseCount} uniquely named D1 databases, ${r2BucketCount} uniquely named R2 buckets, ${queueCount} uniquely named Queues, ${durableObjectNamespaceCount} Worker-owned Durable Object namespaces, and ${workflowCount} uniquely named Workflows per provider`,
     cleanup: [
-      "Wrangler delete --name of the exact Worker with dependency override disabled",
-      "exact open-compute route deletion followed by Worker tombstoning after a test-support runtime-generation restart when safely retained",
-      "exact owned KV namespace, D1 database, R2 bucket, Queue, Worker-owned Durable Object namespace, and Workflow deletion followed by provider inventory absence verification",
+      "fixed Wrangler delete --name of each exact Worker without dependency override",
+      "exact owned KV namespace, D1 database, R2 bucket, Queue, Worker-owned Durable Object namespace, and Workflow deletion through the official v4 API followed by provider inventory absence verification",
     ],
   };
   process.stdout.write(`${JSON.stringify(plan)}\n`);
@@ -227,25 +222,30 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
       const name = `${prefix}-${index}`;
       const projectRoot = join(directory, String(index));
       await cp(fixture.root, projectRoot, { recursive: true });
-      const cfPreflightConfig = join(projectRoot, "wrangler-preflight.json");
-      const cfConfig = join(projectRoot, "wrangler.json");
-      const ocConfig = join(projectRoot, "open-compute.json");
-      const ocBootstrapConfig = join(projectRoot, "open-compute-bootstrap.json");
+      const cfPreflightConfig = join(projectRoot, "wrangler-cloudflare-preflight.jsonc");
+      const cfConfig = join(projectRoot, "wrangler-cloudflare.jsonc");
+      const ocPreflightConfig = join(projectRoot, "wrangler-open-compute-preflight.jsonc");
+      const ocConfig = join(projectRoot, "wrangler-open-compute.jsonc");
       await writeFile(join(projectRoot, "tsconfig.json"), `${JSON.stringify({
         extends: join(ROOT, "tsconfig.json"),
         compilerOptions: { types: ["@open-compute/workers-types"] },
         include: ["src/**/*.ts"],
       }, null, 2)}\n`, { mode: 0o600 });
       await writeFile(cfPreflightConfig, `${JSON.stringify(cloudflareBaseProject(fixture, name, accountId), null, 2)}\n`, { mode: 0o600 });
-      let workerId: string | undefined;
-      let deploymentId: string | undefined;
-      let routeId: string | undefined;
+      await writeFile(ocPreflightConfig, `${JSON.stringify(
+        openComputeBaseProject(fixture, name, openComputeAccount),
+        null,
+        2,
+      )}\n`, { mode: 0o600 });
       let cloudflareWorkerAbsent = false;
       let cloudflareOwned = false;
       let openComputeWorkerAbsent = false;
       let openComputeOwned = false;
       let cloudflareUrl: string | undefined;
-      let openComputeHostname: string | undefined;
+      const openComputeUrl = new URL(
+        `/__workers/${openComputeInternalAccount}/${name}/`,
+        endpoint,
+      ).href;
       const kvNamespaces: OwnedKvNamespace[] = Object.entries(fixture.bindings)
         .filter(([, value]) => value.type === "kv_namespace")
         .map(([binding], bindingIndex) => ({
@@ -287,11 +287,9 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
           openComputeOwned: false,
         }));
       const durableObjectNamespaces: OwnedDurableObjectNamespace[] = Object.entries(fixture.bindings)
-        .flatMap(([binding, value], bindingIndex) => value.type !== "do_namespace" ? [] : [{
+        .flatMap(([binding, value]) => value.type !== "do_namespace" ? [] : [{
           binding,
           className: value.className,
-          name: `${name}-do-${bindingIndex}`,
-          openComputeAbsent: false,
           openComputeOwned: false,
         }]);
       const workflows: OwnedWorkflow[] = Object.entries(fixture.bindings)
@@ -307,65 +305,22 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
       try {
         await ensureCloudflareAbsent(name, cfPreflightConfig, wrangler, cloudflareEnv);
         cloudflareWorkerAbsent = true;
-        await ensureOpenComputeAbsent(name, endpoint, openComputeAccount, adminToken);
+        await ensureCloudflareAbsent(name, ocPreflightConfig, wrangler, openComputeEnv);
         openComputeWorkerAbsent = true;
-        for (const namespace of durableObjectNamespaces) {
-          await ensureOpenComputeDurableObjectNamespaceAbsent(
-            namespace.name, endpoint, openComputeAccount, adminToken,
-          );
-          namespace.openComputeAbsent = true;
-        }
         for (const workflow of workflows) {
-          await ensureCloudflareWorkflowAbsent(
+          await ensureWorkflowAbsent(
             workflow.name, cfPreflightConfig, wrangler, cloudflareEnv,
           );
           workflow.cloudflareAbsent = true;
-          await ensureOpenComputeWorkflowAbsent(
-            workflow.name, endpoint, openComputeAccount, adminToken,
+          await ensureWorkflowAbsent(
+            workflow.name, ocPreflightConfig, wrangler, openComputeEnv,
           );
           workflow.openComputeAbsent = true;
-        }
-        if (durableObjectNamespaces.length > 0 || workflows.length > 0) {
-          const bootstrapFixture: PortableFixture = { ...fixture, bindings: {} };
-          await writeFile(ocBootstrapConfig, `${JSON.stringify(openComputeProject(
-            bootstrapFixture, name, endpoint.href, openComputeAccount,
-          ), null, 2)}\n`, { mode: 0o600 });
-          openComputeOwned = true;
-          const bootstrap = await deployOpenComputeProject(
-            ocBootstrapConfig, ocd, endpoint, openComputeAccount, adminToken,
-          );
-          workerId = bootstrap.workerId;
-          deploymentId = bootstrap.deploymentId;
-          await recordOwnership(journalPath, {
-            target: "open-compute", kind: "worker", name, id: workerId,
-            bootstrapDeploymentId: deploymentId,
-          });
-          for (const namespace of durableObjectNamespaces) {
-            namespace.openComputeOwned = true;
-            namespace.openComputeId = await createOpenComputeDurableObjectNamespace(
-              namespace.name, workerId, namespace.className,
-              endpoint, openComputeAccount, adminToken,
-            );
-            await recordOwnership(journalPath, {
-              target: "open-compute", kind: "do_namespace", name: namespace.name,
-              binding: namespace.binding, id: namespace.openComputeId, parent: workerId,
-            });
-          }
-          for (const workflow of workflows) {
-            workflow.openComputeOwned = true;
-            workflow.openComputeId = await createOpenComputeWorkflow(
-              workflow.name, endpoint, openComputeAccount, adminToken,
-            );
-            await recordOwnership(journalPath, {
-              target: "open-compute", kind: "workflow", name: workflow.name,
-              binding: workflow.binding, id: workflow.openComputeId,
-            });
-          }
         }
         for (const namespace of kvNamespaces) {
           await ensureCloudflareKvAbsent(namespace.name, cfPreflightConfig, wrangler, cloudflareEnv);
           namespace.cloudflareAbsent = true;
-          await ensureOpenComputeKvAbsent(namespace.name, endpoint, openComputeAccount, adminToken);
+          await ensureCloudflareKvAbsent(namespace.name, ocPreflightConfig, wrangler, openComputeEnv);
           namespace.openComputeAbsent = true;
           namespace.cloudflareOwned = true;
           namespace.cloudflareId = await createCloudflareKv(
@@ -376,8 +331,8 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
             binding: namespace.binding, id: namespace.cloudflareId,
           });
           namespace.openComputeOwned = true;
-          namespace.openComputeId = await createOpenComputeKv(
-            namespace.name, endpoint, openComputeAccount, adminToken,
+          namespace.openComputeId = await createCloudflareKv(
+            namespace.name, ocPreflightConfig, wrangler, openComputeEnv,
           );
           await recordOwnership(journalPath, {
             target: "open-compute", kind: "kv_namespace", name: namespace.name,
@@ -387,7 +342,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         for (const database of d1Databases) {
           await ensureCloudflareD1Absent(database.name, cfPreflightConfig, wrangler, cloudflareEnv);
           database.cloudflareAbsent = true;
-          await ensureOpenComputeD1Absent(database.name, endpoint, openComputeAccount, adminToken);
+          await ensureCloudflareD1Absent(database.name, ocPreflightConfig, wrangler, openComputeEnv);
           database.openComputeAbsent = true;
           database.cloudflareOwned = true;
           database.cloudflareId = await createCloudflareD1(
@@ -398,8 +353,8 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
             binding: database.binding, id: database.cloudflareId,
           });
           database.openComputeOwned = true;
-          database.openComputeId = await createOpenComputeD1(
-            database.name, endpoint, openComputeAccount, adminToken,
+          database.openComputeId = await createCloudflareD1(
+            database.name, ocPreflightConfig, wrangler, openComputeEnv,
           );
           await recordOwnership(journalPath, {
             target: "open-compute", kind: "d1_database", name: database.name,
@@ -409,7 +364,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         for (const bucket of r2Buckets) {
           await ensureCloudflareR2Absent(bucket.name, cfPreflightConfig, wrangler, cloudflareEnv);
           bucket.cloudflareAbsent = true;
-          await ensureOpenComputeR2Absent(bucket.name, endpoint, openComputeAccount, adminToken);
+          await ensureCloudflareR2Absent(bucket.name, ocPreflightConfig, wrangler, openComputeEnv);
           bucket.openComputeAbsent = true;
           bucket.cloudflareOwned = true;
           await createCloudflareR2(bucket.name, cfPreflightConfig, wrangler, cloudflareEnv);
@@ -417,50 +372,44 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
             target: "cloudflare", kind: "r2_bucket", name: bucket.name, binding: bucket.binding,
           });
           bucket.openComputeOwned = true;
-          bucket.openComputeId = await createOpenComputeR2(
-            bucket.name, endpoint, openComputeAccount, adminToken,
-          );
+          await createCloudflareR2(bucket.name, ocPreflightConfig, wrangler, openComputeEnv);
           await recordOwnership(journalPath, {
             target: "open-compute", kind: "r2_bucket", name: bucket.name,
-            binding: bucket.binding, id: bucket.openComputeId,
+            binding: bucket.binding,
           });
         }
         for (const queue of queues) {
-          await ensureCloudflareQueueAbsent(queue.name, cfPreflightConfig, wrangler, cloudflareEnv);
+          await ensureQueueAbsent(queue.name, cfPreflightConfig, wrangler, cloudflareEnv);
           queue.cloudflareAbsent = true;
-          await ensureOpenComputeQueueAbsent(queue.name, endpoint, openComputeAccount, adminToken);
+          await ensureQueueAbsent(queue.name, ocPreflightConfig, wrangler, openComputeEnv);
           queue.openComputeAbsent = true;
           queue.cloudflareOwned = true;
-          await createCloudflareQueue(queue.name, cfPreflightConfig, wrangler, cloudflareEnv);
+          await createQueue(queue.name, cfPreflightConfig, wrangler, cloudflareEnv);
           await recordOwnership(journalPath, {
             target: "cloudflare", kind: "queue_producer", name: queue.name, binding: queue.binding,
           });
           queue.openComputeOwned = true;
-          queue.openComputeId = await createOpenComputeQueue(
-            queue.name, endpoint, openComputeAccount, adminToken,
-          );
+          await createQueue(queue.name, ocPreflightConfig, wrangler, openComputeEnv);
           await recordOwnership(journalPath, {
             target: "open-compute", kind: "queue_producer", name: queue.name,
-            binding: queue.binding, id: queue.openComputeId,
+            binding: queue.binding,
           });
         }
         const cloudflareBindingIds = Object.fromEntries([
           ...kvNamespaces.map(item => [item.binding, item.cloudflareId!] as const),
           ...d1Databases.map(item => [item.binding, item.cloudflareId!] as const),
-          ...r2Buckets.map(item => [item.binding, item.name] as const),
-          ...queues.map(item => [item.binding, item.name] as const),
-          ...durableObjectNamespaces.map(item => [item.binding, item.name] as const),
-          ...workflows.map(item => [item.binding, item.name] as const),
         ]);
         const openComputeBindingIds = Object.fromEntries([
           ...kvNamespaces.map(item => [item.binding, item.openComputeId!] as const),
           ...d1Databases.map(item => [item.binding, item.openComputeId!] as const),
-          ...r2Buckets.map(item => [item.binding, item.openComputeId!] as const),
-          ...queues.map(item => [item.binding, item.openComputeId!] as const),
-          ...durableObjectNamespaces.map(item => [item.binding, item.openComputeId!] as const),
-          ...workflows.map(item => [item.binding, item.openComputeId!] as const),
         ]);
         const cloudflareBindingNames = Object.fromEntries([
+          ...d1Databases.map(item => [item.binding, item.name] as const),
+          ...r2Buckets.map(item => [item.binding, item.name] as const),
+          ...queues.map(item => [item.binding, item.name] as const),
+          ...workflows.map(item => [item.binding, item.name] as const),
+        ]);
+        const openComputeBindingNames = Object.fromEntries([
           ...d1Databases.map(item => [item.binding, item.name] as const),
           ...r2Buckets.map(item => [item.binding, item.name] as const),
           ...queues.map(item => [item.binding, item.name] as const),
@@ -470,7 +419,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
           fixture, name, accountId, cloudflareBindingIds, cloudflareBindingNames,
         ), null, 2)}\n`, { mode: 0o600 });
         await writeFile(ocConfig, `${JSON.stringify(openComputeProject(
-          fixture, name, endpoint.href, openComputeAccount, openComputeBindingIds,
+          fixture, name, openComputeAccount, openComputeBindingIds, openComputeBindingNames,
         ), null, 2)}\n`, { mode: 0o600 });
         cloudflareOwned = true;
         for (const workflow of workflows) workflow.cloudflareOwned = true;
@@ -483,7 +432,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         });
         await recordOwnership(journalPath, { target: "cloudflare", kind: "worker", name });
         for (const workflow of workflows) {
-          await verifyCloudflareWorkflowCreated(
+          await verifyWorkflowCreated(
             workflow.name, cfPreflightConfig, wrangler, cloudflareEnv,
           );
           await recordOwnership(journalPath, {
@@ -491,35 +440,34 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
           });
         }
         openComputeOwned = true;
-        const deployedOpenCompute = await deployOpenComputeProject(
-          ocConfig, ocd, endpoint, openComputeAccount, adminToken,
-        );
-        if (workerId !== undefined && deployedOpenCompute.workerId !== workerId) {
-          throw new Error("open-compute bootstrap changed Worker identity");
-        }
-        workerId = deployedOpenCompute.workerId;
-        deploymentId = deployedOpenCompute.deploymentId;
-        await recordOwnership(journalPath, { target: "open-compute", kind: "worker", name, id: workerId });
-        await recordOwnership(journalPath, {
-          target: "open-compute", kind: "deployment", name, id: deploymentId, parent: workerId,
+        for (const namespace of durableObjectNamespaces) namespace.openComputeOwned = true;
+        for (const workflow of workflows) workflow.openComputeOwned = true;
+        await command(wrangler, [
+          "deploy", "--name", name, "--config", ocConfig, "--latest=false", "--strict",
+        ], {
+          cwd: projectRoot,
+          env: openComputeEnv,
+          timeout: 300_000,
         });
+        await recordOwnership(journalPath, { target: "open-compute", kind: "worker", name });
+        for (const namespace of durableObjectNamespaces) {
+          await recordOwnership(journalPath, {
+            target: "open-compute", kind: "durable_object_namespace", name: namespace.binding,
+            binding: namespace.binding, className: namespace.className, parent: name,
+          });
+        }
         for (const workflow of workflows) {
-          await activateOpenComputeWorkflowVersion(
-            workflow.openComputeId!, deploymentId, workflow.className,
-            endpoint, openComputeAccount, adminToken,
+          await verifyWorkflowCreated(
+            workflow.name, ocPreflightConfig, wrangler, openComputeEnv,
           );
+          await recordOwnership(journalPath, {
+            target: "open-compute", kind: "workflow", name: workflow.name,
+            binding: workflow.binding, parent: name,
+          });
         }
-        openComputeHostname = `${name}.p3-diff.invalid`;
-        routeId = await createOpenComputeRoute(endpoint, openComputeAccount, workerId, openComputeHostname, adminToken);
-        await recordOwnership(journalPath, {
-          target: "open-compute", kind: "route", name: openComputeHostname, id: routeId, parent: workerId,
-        });
         cloudflareUrl = cloudflareDeploymentUrl(`${deployedCloudflare.stdout}\n${deployedCloudflare.stderr}`, name);
         const cloudflare = await observe(cloudflareUrl, fixture, "cloudflare");
-        const openCompute = await observe(endpoint.href, fixture, "open-compute", {
-          host: openComputeHostname,
-          connection: "close",
-        });
+        const openCompute = await observe(openComputeUrl, fixture, "open-compute", { connection: "close" });
         if (JSON.stringify(cloudflare) !== JSON.stringify(openCompute)) throw new Error(`${fixture.id}: normalized observations differ`);
         results.push({ id: fixture.id, status: "passed", sourceSha256: fixture.sourceSha256, cloudflare, openCompute });
       } catch (error) {
@@ -530,11 +478,8 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
           if (cloudflareUrl !== undefined) {
             await bestEffortFixtureCleanup(cloudflareUrl, fixture, {});
           }
-          if (openComputeHostname !== undefined) {
-            await bestEffortFixtureCleanup(endpoint.href, fixture, {
-              host: openComputeHostname,
-              connection: "close",
-            });
+          if (openComputeOwned) {
+            await bestEffortFixtureCleanup(openComputeUrl, fixture, { connection: "close" });
           }
         }
         const cfWorker = cloudflareOwned
@@ -576,7 +521,7 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         const cfQueueBindings = [];
         for (const queue of [...queues].reverse()) {
           cfQueueBindings.push(queue.cloudflareOwned
-            ? await cleanupCloudflareQueue(
+            ? await cleanupQueue(
               queue.name, cfPreflightConfig, wrangler, cloudflareEnv,
             )
             : {
@@ -587,12 +532,14 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         const cfDoBindings = durableObjectNamespaces.map(namespace => ({
           deleted: cfWorker.deleted === true,
           status: cfWorker.deleted === true ? "absent-with-owner-worker" : "owner-worker-still-present",
-          name: namespace.name,
+          binding: namespace.binding,
+          className: namespace.className,
+          owner: name,
         }));
         const cfWorkflowBindings = [];
         for (const workflow of [...workflows].reverse()) {
           cfWorkflowBindings.push(workflow.cloudflareOwned
-            ? await cleanupCloudflareWorkflow(
+            ? await cleanupWorkflow(
               workflow.name, cfPreflightConfig, wrangler, cloudflareEnv,
             )
             : {
@@ -601,13 +548,13 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
             });
         }
         const ocWorker = openComputeOwned
-          ? await cleanupOpenCompute(name, workerId, routeId, endpoint, openComputeAccount, adminToken)
+          ? await cleanupCloudflare(name, ocConfig, wrangler, openComputeEnv)
           : { deleted: openComputeWorkerAbsent, status: openComputeWorkerAbsent ? "not-created" : "preflight-did-not-prove-absence" };
         const ocBindings = [];
         for (const namespace of [...kvNamespaces].reverse()) {
           ocBindings.push(namespace.openComputeOwned
-            ? await cleanupOpenComputeKv(
-              namespace.name, namespace.openComputeId, endpoint, openComputeAccount, adminToken,
+            ? await cleanupCloudflareKv(
+              namespace.name, namespace.openComputeId, ocPreflightConfig, wrangler, openComputeEnv,
             )
             : {
               deleted: namespace.openComputeAbsent,
@@ -617,8 +564,8 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         const ocD1Bindings = [];
         for (const database of [...d1Databases].reverse()) {
           ocD1Bindings.push(database.openComputeOwned
-            ? await cleanupOpenComputeD1(
-              database.name, database.openComputeId, endpoint, openComputeAccount, adminToken,
+            ? await cleanupCloudflareD1(
+              database.name, database.openComputeId, ocPreflightConfig, wrangler, openComputeEnv,
             )
             : {
               deleted: database.openComputeAbsent,
@@ -628,8 +575,8 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         const ocR2Bindings = [];
         for (const bucket of [...r2Buckets].reverse()) {
           ocR2Bindings.push(bucket.openComputeOwned
-            ? await cleanupOpenComputeR2(
-              bucket.name, bucket.openComputeId, endpoint, openComputeAccount, adminToken,
+            ? await cleanupCloudflareR2(
+              bucket.name, ocPreflightConfig, wrangler, openComputeEnv,
             )
             : {
               deleted: bucket.openComputeAbsent,
@@ -639,30 +586,28 @@ async function run(selected: readonly PortableFixture[]): Promise<JsonRecord> {
         const ocQueueBindings = [];
         for (const queue of [...queues].reverse()) {
           ocQueueBindings.push(queue.openComputeOwned
-            ? await cleanupOpenComputeQueue(
-              queue.name, queue.openComputeId, endpoint, openComputeAccount, adminToken,
+            ? await cleanupQueue(
+              queue.name, ocPreflightConfig, wrangler, openComputeEnv,
             )
             : {
               deleted: queue.openComputeAbsent,
               status: queue.openComputeAbsent ? "not-created" : "preflight-did-not-prove-absence",
             });
         }
-        const ocDoBindings = [];
-        for (const namespace of [...durableObjectNamespaces].reverse()) {
-          ocDoBindings.push(namespace.openComputeOwned
-            ? await cleanupOpenComputeDurableObjectNamespace(
-              namespace.name, namespace.openComputeId, endpoint, openComputeAccount, adminToken,
-            )
-            : {
-              deleted: namespace.openComputeAbsent,
-              status: namespace.openComputeAbsent ? "not-created" : "preflight-did-not-prove-absence",
-            });
-        }
+        const ocDoBindings = durableObjectNamespaces.map(namespace => ({
+          deleted: namespace.openComputeOwned ? ocWorker.deleted === true : true,
+          status: namespace.openComputeOwned
+            ? (ocWorker.deleted === true ? "absent-with-owner-worker" : "owner-worker-still-present")
+            : "not-created",
+          binding: namespace.binding,
+          className: namespace.className,
+          owner: name,
+        }));
         const ocWorkflowBindings = [];
         for (const workflow of [...workflows].reverse()) {
           ocWorkflowBindings.push(workflow.openComputeOwned
-            ? await cleanupOpenComputeWorkflow(
-              workflow.name, workflow.openComputeId, endpoint, openComputeAccount, adminToken,
+            ? await cleanupWorkflow(
+              workflow.name, ocPreflightConfig, wrangler, openComputeEnv,
             )
             : {
               deleted: workflow.openComputeAbsent,
@@ -753,42 +698,6 @@ async function recordOwnership(path: string, entry: JsonRecord): Promise<void> {
   await appendFile(path, `${JSON.stringify({ ...entry, recordedAtMs: Date.now() })}\n`, { mode: 0o600 });
 }
 
-interface OpenComputeDeploymentResult {
-  readonly workerId: string;
-  readonly deploymentId: string;
-  readonly url: string;
-}
-
-async function deployOpenComputeProject(
-  config: string,
-  ocd: string,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<OpenComputeDeploymentResult> {
-  const deployed = await command(process.execPath, [
-    join(ROOT, "packages/toolchain/src/bin.ts"), "deploy", "--config", config,
-    "--ocd", ocd, "--endpoint", endpoint.href, "--account", accountId,
-    "--token-env", "OPEN_COMPUTE_ADMIN_TOKEN", "--json",
-  ], {
-    cwd: ROOT,
-    env: processEnv(token === undefined ? {} : { OPEN_COMPUTE_ADMIN_TOKEN: token }),
-    timeout: 300_000,
-  });
-  const result: unknown = JSON.parse(deployed.stdout);
-  if (result === null || typeof result !== "object"
-      || typeof Reflect.get(result, "workerId") !== "string"
-      || typeof Reflect.get(result, "deploymentId") !== "string"
-      || typeof Reflect.get(result, "url") !== "string") {
-    throw new Error("open-compute deployment result is invalid");
-  }
-  return {
-    workerId: uuid(Reflect.get(result, "workerId") as string, "open-compute Worker"),
-    deploymentId: uuid(Reflect.get(result, "deploymentId") as string, "open-compute deployment"),
-    url: Reflect.get(result, "url") as string,
-  };
-}
-
 async function bestEffortFixtureCleanup(
   base: string,
   fixture: PortableFixture,
@@ -808,56 +717,35 @@ async function bestEffortFixtureCleanup(
   }
 }
 
-async function createOpenComputeRoute(
-  endpoint: URL,
-  accountId: string,
-  workerId: string,
-  hostname: string,
-  token: string | undefined,
-): Promise<string> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "idempotency-key": `p3-cf-diff-route-${randomBytes(8).toString("hex")}`,
-  };
-  if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workers/${workerId}/routes`, endpoint), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ hostname, pathPrefix: "/" }),
-    signal: AbortSignal.timeout(60_000),
-  });
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error("open-compute differential route creation failed");
-  }
-  const body = await response.json() as unknown;
-  const route = body !== null && typeof body === "object" ? Reflect.get(body, "route") : undefined;
-  if (route === null || typeof route !== "object" || Reflect.get(route, "workerId") !== workerId
-      || Reflect.get(route, "hostnameAscii") !== hostname || Reflect.get(route, "pathPrefix") !== "/") {
-    throw new Error("open-compute differential route response is invalid");
-  }
-  const id = Reflect.get(route, "id");
-  if (typeof id !== "string" || id.length === 0) throw new Error("open-compute differential route identity is invalid");
-  return id;
-}
-
 async function verifyOpenComputeAccount(
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<void> {
-  const response = await fetch(new URL("/operator/api/v1/account", endpoint), {
-    headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
+  apiBase: URL,
+  token: string,
+): Promise<string> {
+  const response = await fetch(new URL(`${apiBase.href.replace(/\/$/, "")}/accounts`), {
+    headers: { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
     await response.body?.cancel();
     throw new Error("open-compute account verification failed");
   }
-  const identity: unknown = await response.json();
-  if (identity === null || typeof identity !== "object" || Reflect.get(identity, "accountId") !== accountId) {
-    throw new Error("open-compute account differs from the explicitly selected account");
+  const envelope: unknown = await response.json();
+  if (envelope === null || typeof envelope !== "object"
+      || Reflect.get(envelope, "success") !== true
+      || !Array.isArray(Reflect.get(envelope, "errors"))
+      || !Array.isArray(Reflect.get(envelope, "messages"))
+      || !Array.isArray(Reflect.get(envelope, "result"))) {
+    throw new Error("open-compute account envelope is invalid");
   }
+  const accounts = Reflect.get(envelope, "result") as unknown[];
+  if (accounts.length !== 1 || accounts[0] === null || typeof accounts[0] !== "object") {
+    throw new Error("open-compute account selection is ambiguous");
+  }
+  const accountId = Reflect.get(accounts[0], "id");
+  if (typeof accountId !== "string" || !/^[0-9a-f]{32}$/.test(accountId)) {
+    throw new Error("open-compute account identity is invalid");
+  }
+  return accountId;
 }
 
 async function verifyWranglerAccount(
@@ -891,30 +779,6 @@ async function ensureCloudflareAbsent(
   if (result.status === 0) throw new Error("refusing to overwrite a pre-existing Cloudflare Worker");
   if (!cloudflareWorkerMissing(`${result.stdout}\n${result.stderr}`)) {
     throw new Error("could not prove the unique Cloudflare Worker name was unused");
-  }
-}
-
-async function ensureOpenComputeAbsent(
-  name: string,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<void> {
-  const headers = token === undefined ? {} : { authorization: `Bearer ${token}` };
-  const listed = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workers`, endpoint), {
-    headers,
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!listed.ok) {
-    await listed.body?.cancel();
-    throw new Error("could not prove the unique open-compute Worker name was unused");
-  }
-  const body = await listed.json() as unknown;
-  const workers = body !== null && typeof body === "object" ? Reflect.get(body, "workers") : undefined;
-  if (!Array.isArray(workers)) throw new Error("open-compute Worker inventory is invalid");
-  if (workers.some(item => item !== null && typeof item === "object"
-      && Reflect.get(item, "name") === name && Reflect.get(item, "deletedAtMs") === null)) {
-    throw new Error("refusing to overwrite a pre-existing open-compute Worker");
   }
 }
 
@@ -977,82 +841,12 @@ async function createCloudflareKv(
   return ids[0]!;
 }
 
-interface OpenComputeKvNamespace { readonly id: string; readonly name: string }
-
-async function listOpenComputeKv(
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<OpenComputeKvNamespace[]> {
-  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/kv/namespaces`, endpoint), {
-    headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error("open-compute KV namespace inventory failed");
-  }
-  const body: unknown = await response.json();
-  const raw = body !== null && typeof body === "object" ? Reflect.get(body, "namespaces") : undefined;
-  if (!Array.isArray(raw)) throw new Error("open-compute KV namespace inventory is invalid");
-  const namespaces = raw.map(item => {
-    const resource = item !== null && typeof item === "object" ? Reflect.get(item, "resource") : undefined;
-    const id = resource !== null && typeof resource === "object" ? Reflect.get(resource, "id") : undefined;
-    const name = resource !== null && typeof resource === "object" ? Reflect.get(resource, "name") : undefined;
-    if (typeof id !== "string" || typeof name !== "string" || name.length === 0) {
-      throw new Error("open-compute KV namespace inventory is invalid");
-    }
-    uuid(id, "open-compute KV namespace");
-    return { id, name };
-  });
-  if (new Set(namespaces.map(item => item.id)).size !== namespaces.length) {
-    throw new Error("open-compute KV namespace inventory contains duplicate identities");
-  }
-  return namespaces;
-}
-
-async function ensureOpenComputeKvAbsent(
-  name: string,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<void> {
-  if ((await listOpenComputeKv(endpoint, accountId, token)).some(item => item.name === name)) {
-    throw new Error("refusing to overwrite a pre-existing open-compute KV namespace");
-  }
-}
-
-async function createOpenComputeKv(
-  name: string,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<string> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "idempotency-key": `p3-cf-diff-kv-${randomBytes(8).toString("hex")}`,
-  };
-  if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/kv/namespaces`, endpoint), {
-    method: "POST", headers, body: JSON.stringify({ name }), signal: AbortSignal.timeout(60_000),
-  });
-  if (response.status !== 200 && response.status !== 201) {
-    await response.body?.cancel();
-    throw new Error("open-compute KV namespace creation failed");
-  }
-  const body: unknown = await response.json();
-  const id = body !== null && typeof body === "object" ? Reflect.get(body, "resourceId") : undefined;
-  if (typeof id !== "string") throw new Error("open-compute KV namespace creation response is invalid");
-  uuid(id, "open-compute KV namespace");
-  const matches = (await listOpenComputeKv(endpoint, accountId, token))
-    .filter(item => item.id === id || item.name === name);
-  if (matches.length !== 1 || matches[0]!.id !== id || matches[0]!.name !== name) {
-    throw new Error("open-compute KV namespace creation could not be verified");
-  }
-  return id;
-}
-
 interface CloudflareD1Database { readonly id: string; readonly name: string }
+
+function validD1Id(value: unknown): value is string {
+  return typeof value === "string"
+    && /^(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(value);
+}
 
 async function listCloudflareD1(
   config: string,
@@ -1067,7 +861,7 @@ async function listCloudflareD1(
     if (item === null || typeof item !== "object") throw new Error("Cloudflare D1 database inventory is invalid");
     const id = Reflect.get(item, "uuid");
     const name = Reflect.get(item, "name");
-    if (typeof id !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id)
+    if (!validD1Id(id)
         || typeof name !== "string" || name.length === 0) {
       throw new Error("Cloudflare D1 database inventory is invalid");
     }
@@ -1100,7 +894,7 @@ async function createCloudflareD1(
     cwd: ROOT, env: environment, timeout: 120_000,
   });
   const ids = [...`${created.stdout}\n${created.stderr}`.matchAll(
-    /"database_id"\s*:\s*"([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})"/g,
+    /"database_id"\s*:\s*"((?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}))"/g,
   )].map(match => match[1]!).filter((id, index, values) => values.indexOf(id) === index);
   if (ids.length !== 1) throw new Error("Wrangler did not report one unambiguous D1 database identity");
   const matches = (await listCloudflareD1(config, wrangler, environment))
@@ -1109,81 +903,6 @@ async function createCloudflareD1(
     throw new Error("Cloudflare D1 database creation could not be verified");
   }
   return ids[0]!;
-}
-
-interface OpenComputeD1Database { readonly id: string; readonly name: string }
-
-async function listOpenComputeD1(
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<OpenComputeD1Database[]> {
-  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/d1/databases`, endpoint), {
-    headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error("open-compute D1 database inventory failed");
-  }
-  const body: unknown = await response.json();
-  const raw = body !== null && typeof body === "object" ? Reflect.get(body, "databases") : undefined;
-  if (!Array.isArray(raw)) throw new Error("open-compute D1 database inventory is invalid");
-  const databases = raw.map(item => {
-    const resource = item !== null && typeof item === "object" ? Reflect.get(item, "resource") : undefined;
-    const id = resource !== null && typeof resource === "object" ? Reflect.get(resource, "id") : undefined;
-    const name = resource !== null && typeof resource === "object" ? Reflect.get(resource, "name") : undefined;
-    if (typeof id !== "string" || typeof name !== "string" || name.length === 0) {
-      throw new Error("open-compute D1 database inventory is invalid");
-    }
-    uuid(id, "open-compute D1 database");
-    return { id, name };
-  });
-  if (new Set(databases.map(item => item.id)).size !== databases.length) {
-    throw new Error("open-compute D1 database inventory contains duplicate identities");
-  }
-  return databases;
-}
-
-async function ensureOpenComputeD1Absent(
-  name: string,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<void> {
-  if ((await listOpenComputeD1(endpoint, accountId, token)).some(item => item.name === name)) {
-    throw new Error("refusing to overwrite a pre-existing open-compute D1 database");
-  }
-}
-
-async function createOpenComputeD1(
-  name: string,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<string> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "idempotency-key": `p3-cf-diff-d1-${randomBytes(8).toString("hex")}`,
-  };
-  if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/d1/databases`, endpoint), {
-    method: "POST", headers, body: JSON.stringify({ name }), signal: AbortSignal.timeout(60_000),
-  });
-  if (response.status !== 200 && response.status !== 201) {
-    await response.body?.cancel();
-    throw new Error("open-compute D1 database creation failed");
-  }
-  const body: unknown = await response.json();
-  const id = body !== null && typeof body === "object" ? Reflect.get(body, "resourceId") : undefined;
-  if (typeof id !== "string") throw new Error("open-compute D1 database creation response is invalid");
-  uuid(id, "open-compute D1 database");
-  const matches = (await listOpenComputeD1(endpoint, accountId, token))
-    .filter(item => item.id === id || item.name === name);
-  if (matches.length !== 1 || matches[0]!.id !== id || matches[0]!.name !== name) {
-    throw new Error("open-compute D1 database creation could not be verified");
-  }
-  return id;
 }
 
 function cloudflareR2Name(value: string): string {
@@ -1229,81 +948,6 @@ async function createCloudflareR2(
   });
   const matches = (await listCloudflareR2(config, wrangler, environment)).filter(item => item === name);
   if (matches.length !== 1) throw new Error("Cloudflare R2 bucket creation could not be verified");
-}
-
-interface OpenComputeR2Bucket { readonly id: string; readonly name: string }
-
-async function listOpenComputeR2(
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<OpenComputeR2Bucket[]> {
-  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/r2/buckets`, endpoint), {
-    headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error("open-compute R2 bucket inventory failed");
-  }
-  const body: unknown = await response.json();
-  const raw = body !== null && typeof body === "object" ? Reflect.get(body, "buckets") : undefined;
-  if (!Array.isArray(raw)) throw new Error("open-compute R2 bucket inventory is invalid");
-  const buckets = raw.map(item => {
-    const id = item !== null && typeof item === "object" ? Reflect.get(item, "resourceId") : undefined;
-    const name = item !== null && typeof item === "object" ? Reflect.get(item, "name") : undefined;
-    if (typeof id !== "string" || typeof name !== "string" || name.length === 0) {
-      throw new Error("open-compute R2 bucket inventory is invalid");
-    }
-    uuid(id, "open-compute R2 bucket");
-    return { id, name };
-  });
-  if (new Set(buckets.map(item => item.id)).size !== buckets.length) {
-    throw new Error("open-compute R2 bucket inventory contains duplicate identities");
-  }
-  return buckets;
-}
-
-async function ensureOpenComputeR2Absent(
-  name: string,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<void> {
-  if ((await listOpenComputeR2(endpoint, accountId, token)).some(item => item.name === name)) {
-    throw new Error("refusing to overwrite a pre-existing open-compute R2 bucket");
-  }
-}
-
-async function createOpenComputeR2(
-  name: string,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<string> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "idempotency-key": `p3-cf-diff-r2-${randomBytes(8).toString("hex")}`,
-  };
-  if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/r2/buckets`, endpoint), {
-    method: "POST", headers, body: JSON.stringify({ name }), signal: AbortSignal.timeout(60_000),
-  });
-  if (response.status !== 200 && response.status !== 201) {
-    await response.body?.cancel();
-    throw new Error("open-compute R2 bucket creation failed");
-  }
-  const body: unknown = await response.json();
-  const bucket = body !== null && typeof body === "object" ? Reflect.get(body, "bucket") : undefined;
-  const id = bucket !== null && typeof bucket === "object" ? Reflect.get(bucket, "resourceId") : undefined;
-  if (typeof id !== "string") throw new Error("open-compute R2 bucket creation response is invalid");
-  uuid(id, "open-compute R2 bucket");
-  const matches = (await listOpenComputeR2(endpoint, accountId, token))
-    .filter(item => item.id === id || item.name === name);
-  if (matches.length !== 1 || matches[0]!.id !== id || matches[0]!.name !== name) {
-    throw new Error("open-compute R2 bucket creation could not be verified");
-  }
-  return id;
 }
 
 async function cleanupCloudflare(
@@ -1434,297 +1078,4 @@ async function readOnlyWrangler(
     if (attempt < 2) await new Promise(resolveDelay => setTimeout(resolveDelay, 250 * (2 ** attempt)));
   }
   return result;
-}
-
-async function cleanupOpenCompute(
-  name: string,
-  knownWorkerId: string | undefined,
-  knownRouteId: string | undefined,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<JsonRecord> {
-  try {
-    const headers: Record<string, string> = token === undefined ? {} : { authorization: `Bearer ${token}` };
-    let workerId = knownWorkerId;
-    if (workerId === undefined) {
-      const listed = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workers`, endpoint), { headers, signal: AbortSignal.timeout(30_000) });
-      if (!listed.ok) {
-        await listed.body?.cancel();
-        return { deleted: false, status: listed.status };
-      }
-      const body = await listed.json() as unknown;
-      if (body === null || typeof body !== "object" || !Array.isArray(Reflect.get(body, "workers"))) {
-        return { deleted: false, status: "invalid-list" };
-      }
-      const match = (Reflect.get(body, "workers") as unknown[]).find(item =>
-        item !== null && typeof item === "object" && Reflect.get(item, "name") === name && Reflect.get(item, "deletedAtMs") === null);
-      if (match !== undefined && match !== null && typeof match === "object") {
-        const id: unknown = Reflect.get(match, "id");
-        if (typeof id !== "string") return { deleted: false, status: "invalid-worker" };
-        workerId = id;
-      }
-    }
-    if (workerId === undefined) return { deleted: true, status: 404 };
-    const route = await cleanupOpenComputeRoute(endpoint, accountId, workerId, knownRouteId, `${name}.p3-diff.invalid`, headers);
-    if (!route.deleted) return { deleted: false, status: "route-cleanup-failed", route };
-    const url = new URL(`/operator/api/v1/accounts/${accountId}/workers/${workerId}`, endpoint);
-    let restarted = false;
-    let removed = false;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const response = await fetch(url, {
-        method: "DELETE",
-        headers: { ...headers, "idempotency-key": `p3-cf-diff-delete-${randomBytes(8).toString("hex")}` },
-        signal: AbortSignal.timeout(60_000),
-      });
-      const responseText = await response.text();
-      if (response.ok || response.status === 410) {
-        removed = true;
-        break;
-      }
-      if (attempt === 0 && response.status === 409 && platformErrorCode(responseText) === "DEPLOYMENT_REFERENCED") {
-        await restartOpenComputeRuntime(endpoint, headers);
-        restarted = true;
-        continue;
-      }
-      return { deleted: false, status: response.status, errorCode: platformErrorCode(responseText), route, restarted };
-    }
-    if (!removed) return { deleted: false, status: "delete-failed", route, restarted };
-    const verify = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/workers`, endpoint), {
-      headers,
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!verify.ok) {
-      await verify.body?.cancel();
-      return { deleted: false, status: verify.status };
-    }
-    const body = await verify.json() as unknown;
-    if (body === null || typeof body !== "object" || !Array.isArray(Reflect.get(body, "workers"))) {
-      return { deleted: false, status: "invalid-list" };
-    }
-    const present = (Reflect.get(body, "workers") as unknown[]).some(item => item !== null
-      && typeof item === "object"
-      && Reflect.get(item, "deletedAtMs") === null
-      && (Reflect.get(item, "id") === workerId || Reflect.get(item, "name") === name));
-    return { deleted: !present, status: present ? "still-present" : "absent", route, restarted };
-  } catch {
-    return { deleted: false, status: "unavailable" };
-  }
-}
-
-async function cleanupOpenComputeKv(
-  name: string,
-  knownId: string | undefined,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<JsonRecord> {
-  try {
-    const matches = (await listOpenComputeKv(endpoint, accountId, token))
-      .filter(item => item.name === name || item.id === knownId);
-    if (matches.length === 0) return { deleted: true, status: "already-absent" };
-    if (matches.length !== 1 || matches[0]!.name !== name
-        || (knownId !== undefined && matches[0]!.id !== knownId)) {
-      return { deleted: false, status: "ambiguous-owned-namespace" };
-    }
-    const id = matches[0]!.id;
-    const headers: Record<string, string> = {
-      "idempotency-key": `p3-cf-diff-kv-delete-${randomBytes(8).toString("hex")}`,
-    };
-    if (token !== undefined) headers.authorization = `Bearer ${token}`;
-    const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/kv/namespaces/${id}`, endpoint), {
-      method: "DELETE", headers, signal: AbortSignal.timeout(60_000),
-    });
-    await response.body?.cancel();
-    if (!response.ok && response.status !== 404 && response.status !== 410) {
-      return { deleted: false, status: response.status };
-    }
-    const remaining = (await listOpenComputeKv(endpoint, accountId, token))
-      .some(item => item.id === id || item.name === name);
-    return { deleted: !remaining, status: remaining ? "still-present" : "absent", id };
-  } catch {
-    return { deleted: false, status: "unavailable" };
-  }
-}
-
-async function cleanupOpenComputeD1(
-  name: string,
-  knownId: string | undefined,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<JsonRecord> {
-  try {
-    const matches = (await listOpenComputeD1(endpoint, accountId, token))
-      .filter(item => item.name === name || item.id === knownId);
-    if (matches.length === 0) return { deleted: true, status: "already-absent" };
-    if (matches.length !== 1 || matches[0]!.name !== name
-        || (knownId !== undefined && matches[0]!.id !== knownId)) {
-      return { deleted: false, status: "ambiguous-owned-database" };
-    }
-    const id = matches[0]!.id;
-    const headers: Record<string, string> = {
-      "idempotency-key": `p3-cf-diff-d1-delete-${randomBytes(8).toString("hex")}`,
-    };
-    if (token !== undefined) headers.authorization = `Bearer ${token}`;
-    const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/d1/databases/${id}`, endpoint), {
-      method: "DELETE", headers, signal: AbortSignal.timeout(60_000),
-    });
-    await response.body?.cancel();
-    if (!response.ok && response.status !== 404 && response.status !== 410) {
-      return { deleted: false, status: response.status };
-    }
-    const remaining = (await listOpenComputeD1(endpoint, accountId, token))
-      .some(item => item.id === id || item.name === name);
-    return { deleted: !remaining, status: remaining ? "still-present" : "absent", id };
-  } catch {
-    return { deleted: false, status: "unavailable" };
-  }
-}
-
-async function cleanupOpenComputeR2(
-  name: string,
-  knownId: string | undefined,
-  endpoint: URL,
-  accountId: string,
-  token: string | undefined,
-): Promise<JsonRecord> {
-  try {
-    const matches = (await listOpenComputeR2(endpoint, accountId, token))
-      .filter(item => item.name === name || item.id === knownId);
-    if (matches.length === 0) return { deleted: true, status: "already-absent" };
-    if (matches.length !== 1 || matches[0]!.name !== name
-        || (knownId !== undefined && matches[0]!.id !== knownId)) {
-      return { deleted: false, status: "ambiguous-owned-bucket" };
-    }
-    const id = matches[0]!.id;
-    const headers: Record<string, string> = {
-      "idempotency-key": `p3-cf-diff-r2-delete-${randomBytes(8).toString("hex")}`,
-    };
-    if (token !== undefined) headers.authorization = `Bearer ${token}`;
-    const response = await fetch(new URL(`/operator/api/v1/accounts/${accountId}/r2/buckets/${id}?force=true`, endpoint), {
-      method: "DELETE", headers, signal: AbortSignal.timeout(120_000),
-    });
-    await response.body?.cancel();
-    if (!response.ok && response.status !== 404 && response.status !== 410) {
-      return { deleted: false, status: response.status };
-    }
-    const remaining = (await listOpenComputeR2(endpoint, accountId, token))
-      .some(item => item.id === id || item.name === name);
-    return { deleted: !remaining, status: remaining ? "still-present" : "absent", id };
-  } catch {
-    return { deleted: false, status: "unavailable" };
-  }
-}
-
-async function cleanupOpenComputeRoute(
-  endpoint: URL,
-  accountId: string,
-  workerId: string,
-  routeId: string | undefined,
-  hostname: string,
-  headers: Readonly<Record<string, string>>,
-): Promise<JsonRecord> {
-  const routesUrl = new URL(`/operator/api/v1/accounts/${accountId}/workers/${workerId}/routes`, endpoint);
-  const listed = await fetch(routesUrl, {
-    headers,
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!listed.ok) {
-    await listed.body?.cancel();
-    return listed.status === 404 || listed.status === 410
-      ? { deleted: true, status: listed.status }
-      : { deleted: false, status: listed.status };
-  }
-  const body = await listed.json() as unknown;
-  const routes = body !== null && typeof body === "object" ? Reflect.get(body, "routes") : undefined;
-  if (!Array.isArray(routes)) return { deleted: false, status: "invalid-list" };
-  const owned = routes.filter(item => item !== null && typeof item === "object"
-    && (Reflect.get(item, "id") === routeId || Reflect.get(item, "hostnameAscii") === hostname));
-  const ids = owned.map(item => Reflect.get(item, "id"));
-  if (ids.some(id => typeof id !== "string" || id.length === 0) || new Set(ids).size !== ids.length) {
-    return { deleted: false, status: "invalid-route-identity" };
-  }
-  for (const id of ids as string[]) {
-    const response = await fetch(new URL(`${routesUrl.pathname}/${id}`, endpoint), {
-      method: "DELETE",
-      headers: { ...headers, "idempotency-key": `p3-cf-diff-route-delete-${randomBytes(8).toString("hex")}` },
-      signal: AbortSignal.timeout(30_000),
-    });
-    await response.body?.cancel();
-    if (!response.ok && response.status !== 404 && response.status !== 410) {
-      return { deleted: false, status: response.status, routeId: id };
-    }
-  }
-  const verify = await fetch(routesUrl, { headers, signal: AbortSignal.timeout(30_000) });
-  if (!verify.ok) {
-    await verify.body?.cancel();
-    return verify.status === 404 || verify.status === 410
-      ? { deleted: true, status: verify.status }
-      : { deleted: false, status: verify.status };
-  }
-  const verified = await verify.json() as unknown;
-  const remaining = verified !== null && typeof verified === "object" ? Reflect.get(verified, "routes") : undefined;
-  if (!Array.isArray(remaining)) return { deleted: false, status: "invalid-verify-list" };
-  const ownedRemaining = remaining.some(item => item !== null && typeof item === "object"
-    && (Reflect.get(item, "id") === routeId || Reflect.get(item, "hostnameAscii") === hostname));
-  return { deleted: !ownedRemaining, status: ownedRemaining ? "still-present" : "absent" };
-}
-
-function platformErrorCode(text: string): string | undefined {
-  try {
-    const body: unknown = JSON.parse(text);
-    const error = body !== null && typeof body === "object" ? Reflect.get(body, "error") : undefined;
-    const code = error !== null && typeof error === "object" ? Reflect.get(error, "code") : undefined;
-    return typeof code === "string" ? code : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function restartOpenComputeRuntime(
-  endpoint: URL,
-  headers: Readonly<Record<string, string>>,
-): Promise<void> {
-  const before = await openComputeRuntimeStatus(endpoint, headers);
-  const restarted = await fetch(new URL("/__test/runtime/restart", endpoint), {
-    method: "POST",
-    headers: { ...headers, "x-open-compute-test-ack": "restart-generation" },
-    signal: AbortSignal.timeout(30_000),
-  });
-  await restarted.body?.cancel();
-  if (restarted.status !== 202) throw new Error("test-support runtime restart was rejected");
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    try {
-      const current = await openComputeRuntimeStatus(endpoint, headers);
-      if (current.state === "RUNNING" && current.attempt > before.attempt) return;
-    } catch {
-      // The loopback listener can be briefly unavailable while the child generation rotates.
-    }
-    await new Promise(resolveDelay => setTimeout(resolveDelay, 100));
-  }
-  throw new Error("test-support runtime restart did not reach a new running generation");
-}
-
-async function openComputeRuntimeStatus(
-  endpoint: URL,
-  headers: Readonly<Record<string, string>>,
-): Promise<{ readonly state: string; readonly attempt: number }> {
-  const response = await fetch(new URL("/operator/api/v1/system/status", endpoint), {
-    headers,
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error("open-compute runtime status is unavailable");
-  }
-  const body: unknown = await response.json();
-  const supervisor = body !== null && typeof body === "object" ? Reflect.get(body, "supervisor") : undefined;
-  const state = supervisor !== null && typeof supervisor === "object" ? Reflect.get(supervisor, "state") : undefined;
-  const attempt = supervisor !== null && typeof supervisor === "object" ? Reflect.get(supervisor, "attempt") : undefined;
-  if (typeof state !== "string" || typeof attempt !== "number" || !Number.isSafeInteger(attempt)) {
-    throw new Error("open-compute runtime status response is invalid");
-  }
-  return { state, attempt };
 }

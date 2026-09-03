@@ -444,18 +444,24 @@ function conformanceSelfTests(): void {
 async function unsupportedConfigRejection(): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "open-compute-p3-contract-"));
   try {
-    for (const type of ["analytics_engine", "ai", "browser", "hyperdrive", "mtls_certificate", "rate_limit", "worker_loader"]) {
-      const path = join(directory, `${type}.json`);
+    const unsupported = [
+      ["analytics_engine_datasets", { analytics_engine_datasets: [{ binding: "BAD", dataset: "unsupported" }] }],
+      ["browser", { browser: { binding: "BAD" } }],
+      ["hyperdrive", { hyperdrive: [{ binding: "BAD", id: "0123456789abcdef0123456789abcdef" }] }],
+      ["mtls_certificates", { mtls_certificates: [{ binding: "BAD", certificate_id: "11111111-1111-4111-8111-111111111111" }] }],
+      ["ratelimits", { ratelimits: [{ name: "BAD", namespace_id: "1001", simple: { limit: 1, period: 60 } }] }],
+      ["worker_loaders", { worker_loaders: [{ binding: "BAD" }] }],
+    ] as const;
+    for (const [field, declaration] of unsupported) {
+      const path = join(directory, `${field}.jsonc`);
       writeFileSync(path, JSON.stringify({
-        main: "worker.ts", name: "unsupported-probe", tsconfig: "tsconfig.json",
-        vars: {}, secrets: {},
-        bindings: { BAD: { type, id: "019c0000-0000-7000-8000-000000000001" } }, services: [],
+        main: "worker.ts", name: "unsupported-probe", ...declaration,
       }));
       let rejected = false;
       try { await loadProject(path); } catch (error) {
-        rejected = error instanceof Error && error.message === "unsupported Worker binding type";
+        rejected = error instanceof Error && error.message === `Wrangler config declares unsupported ${field}`;
       }
-      if (!rejected) throw new Error(`unsupported binding was accepted: ${type}`);
+      if (!rejected) throw new Error(`unsupported Wrangler field was accepted: ${field}`);
     }
   } finally { rmSync(directory, { recursive: true }); }
 }
@@ -506,36 +512,36 @@ async function cloudflareRunnerSafety(): Promise<void> {
     readFileSync(join(ROOT, "test/conformance/differential.ts"), "utf8"),
     readFileSync(join(ROOT, "test/conformance/differential-product-resources.ts"), "utf8"),
   ].join("\n");
-  if (source.includes("--force") || source.includes("/client/v4/")) {
-    throw new Error("Cloudflare cleanup may force-delete or bypass the pinned Wrangler boundary");
+  if (source.includes("--force")) {
+    throw new Error("differential cleanup may force-delete resources");
+  }
+  for (const obsoleteTransport of ["/operator/api", '"open-compute.json"', '"--ocd"']) {
+    if (source.includes(obsoleteTransport)) {
+      throw new Error(`differential runner retains obsolete transport: ${obsoleteTransport}`);
+    }
+  }
+  if (!source.includes("CLOUDFLARE_API_BASE_URL")
+      || !source.includes('new URL("/client/v4", endpoint)')
+      || !source.includes("wrangler-open-compute.jsonc")) {
+    throw new Error("open-compute differential runner does not use the official Wrangler v4 boundary");
   }
   if (!source.includes('WRANGLER_HIDE_BANNER: "true"')) {
     throw new Error("Wrangler's non-essential update check can escape differential-run cleanup");
   }
   for (const requiredOperation of [
     "ensureCloudflareAbsent", "deployments", "delete", "verifyWranglerAccount",
-    "verifyOpenComputeAccount", "ensureOpenComputeAbsent", "createOpenComputeRoute",
-    "cleanupOpenComputeRoute", "recordOwnership", "readOnlyWrangler", "idempotency-key",
+    "verifyOpenComputeAccount", "recordOwnership", "readOnlyWrangler",
     "ensureCloudflareKvAbsent", "createCloudflareKv", "cleanupCloudflareKv",
-    "ensureOpenComputeKvAbsent", "createOpenComputeKv", "cleanupOpenComputeKv",
     "ensureCloudflareD1Absent", "createCloudflareD1", "cleanupCloudflareD1",
-    "ensureOpenComputeD1Absent", "createOpenComputeD1", "cleanupOpenComputeD1",
     "ensureCloudflareR2Absent", "createCloudflareR2", "cleanupCloudflareR2",
-    "ensureOpenComputeR2Absent", "createOpenComputeR2", "cleanupOpenComputeR2",
-    "ensureCloudflareQueueAbsent", "createCloudflareQueue", "cleanupCloudflareQueue",
-    "ensureOpenComputeQueueAbsent", "createOpenComputeQueue", "cleanupOpenComputeQueue",
-    "ensureOpenComputeDurableObjectNamespaceAbsent", "createOpenComputeDurableObjectNamespace",
-    "cleanupOpenComputeDurableObjectNamespace", "ensureCloudflareWorkflowAbsent",
-    "verifyCloudflareWorkflowCreated", "cleanupCloudflareWorkflow", "ensureOpenComputeWorkflowAbsent",
-    "createOpenComputeWorkflow", "activateOpenComputeWorkflowVersion", "cleanupOpenComputeWorkflow",
+    "ensureQueueAbsent", "createQueue", "cleanupQueue",
+    "ensureWorkflowAbsent", "verifyWorkflowCreated", "cleanupWorkflow",
     "--skip-confirmation",
   ]) {
     if (!source.includes(requiredOperation)) throw new Error(`Cloudflare runner safety operation is missing: ${requiredOperation}`);
   }
-  if (!source.includes('["delete", "--name", name, "--config", config]')
-      || !source.includes("restartOpenComputeRuntime") || !source.includes("/__test/runtime/restart")
-      || !source.includes("OPEN_COMPUTE_TEST_RUNTIME_RESTART_ACK")) {
-    throw new Error("differential cleanup is not exact or lacks the guarded test-runtime restart required by deployment retention");
+  if (!source.includes('["delete", "--name", name, "--config", config]')) {
+    throw new Error("differential Worker cleanup is not scoped to the exact run-owned name");
   }
   if (!readFileSync(join(ROOT, "test/conformance/adapters.ts"), "utf8").includes("activationDeadline")) {
     throw new Error("Cloudflare activation wait is missing");
@@ -545,14 +551,11 @@ async function cloudflareRunnerSafety(): Promise<void> {
   const project = openComputeProject(
     fixture,
     name,
-    "http://127.0.0.1:8787/",
-    "019c0000-0000-7000-8000-000000000001",
+    "0123456789abcdef0123456789abcdef",
   );
-  if (!Array.isArray(project.services) || project.services.length !== 0) {
-    throw new Error("open-compute differential project does not use the current service declaration schema");
-  }
-  if (project.main !== "src/index.ts" || project.tsconfig !== "tsconfig.json") {
-    throw new Error("open-compute differential project is not self-contained");
+  if (project.main !== "src/index.ts" || project.account_id !== "0123456789abcdef0123456789abcdef"
+      || project.workers_dev !== false) {
+    throw new Error("open-compute differential project is not a standard local Wrangler config");
   }
   const kvFixture = (await loadPortableFixtures(join(ROOT, "test/conformance/fixtures")))
     .find(item => item.id === "kv/portable/namespace");
@@ -560,13 +563,12 @@ async function cloudflareRunnerSafety(): Promise<void> {
   const kvProject = openComputeProject(
     kvFixture,
     name,
-    "http://127.0.0.1:8787/",
-    "019c0000-0000-7000-8000-000000000001",
+    "0123456789abcdef0123456789abcdef",
     { KV: "019c0000-0000-7000-8000-000000000002" },
   );
-  if (JSON.stringify(kvProject.bindings) !== JSON.stringify({
-    KV: { type: "kv_namespace", id: "019c0000-0000-7000-8000-000000000002" },
-  })) throw new Error("portable KV binding does not use an exact owned resource identity");
+  if (JSON.stringify(kvProject.kv_namespaces) !== JSON.stringify([{
+    binding: "KV", id: "019c0000-0000-7000-8000-000000000002",
+  }])) throw new Error("portable KV binding does not use standard Wrangler syntax");
   const d1Fixture = (await loadPortableFixtures(join(ROOT, "test/conformance/fixtures")))
     .find(item => item.id === "d1/portable/database");
   if (d1Fixture === undefined) throw new Error("portable D1 differential fixture is missing");
@@ -577,14 +579,13 @@ async function cloudflareRunnerSafety(): Promise<void> {
   const d1Project = openComputeProject(
     d1Fixture,
     name,
-    "http://127.0.0.1:8787/",
-    "019c0000-0000-7000-8000-000000000001",
+    "0123456789abcdef0123456789abcdef",
     d1Ids,
+    { DB: `${name}-d1-0`, OTHER: `${name}-d1-1` },
   );
-  if (JSON.stringify(d1Project.bindings) !== JSON.stringify({
-    DB: { type: "d1_database", id: d1Ids.DB },
-    OTHER: { type: "d1_database", id: d1Ids.OTHER },
-  })) throw new Error("portable D1 binding does not use exact owned resource identities");
+  if (!Array.isArray(d1Project.d1_databases) || d1Project.d1_databases.length !== 2) {
+    throw new Error("portable D1 binding does not use standard Wrangler syntax");
+  }
   const cfD1 = cloudflareProject(
     d1Fixture,
     name,
