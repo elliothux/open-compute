@@ -46,7 +46,7 @@
 | 2026-09-01 | [`ocd` Day1 命名改造](ocd-day1-rename.md) | [完成记录](ocd-day1-rename-results.md)：唯一 production binary/CLI/daemon 为 `ocd`，project/docs origin 为 `https://open-compute.dev`，launchd identity 为 `dev.open-compute.ocd`；198/198 JS、90.18% Rust 行覆盖率、完整单轮 Gate 40/40 targets 与 802/802 cases 通过；追加时序轮按用户指定不作为完成条件，未执行正式发行或跨平台验证 |
 | 2026-09-03 | [Operator API 与可选 Dashboard](operator-api-dashboard.md) | **Implementation GO**（[`CR.md`](../../CR.md)）：真实 `dev-test.sh`/`ocd` 与 Cloudflare Dashboard 对比完成；服务端 catalog filter/sort、全产品管理闭环、Kumo/响应式、Playwright **31/31**、live SDK **12/12**、Rust 行覆盖率 **90.14%**；用户指定的最终单轮 Gate **42/42 targets、835/835 cases**，详见[完成记录](operator-api-dashboard-results.md) |
 | 2026-09-02 | [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md)、[P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md) | [完成记录](p5-vectorize-ai-search-results.md)：Vectorize、AI provider/tokenizer、AI Search、Markdown Conversion 与 13-format parser 已进入唯一 production path；90.0526% Rust 行覆盖率、最终 P5 单轮 1/1 与 Cloudflare contract 14/14 通过；跨平台、完整 parser process/release matrix 与托管 rich-document differential 见独立[验收计划](../p5-release-acceptance.md) |
-| 2026-09-03 | [Operator API 与可选 Dashboard](operator-api-dashboard.md) | **Implementation GO**（[`CR.md`](../../CR.md)）：真实 `dev-test.sh`/`ocd` 与 Cloudflare Dashboard 对比完成；服务端 catalog filter/sort、全产品管理闭环、Kumo/响应式、Playwright **31/31**、live SDK **12/12**、Rust 行覆盖率 **90.14%**；最终单轮 Gate **42/42 targets、835/835 cases**，详见[完成记录](operator-api-dashboard-results.md) |
+| 2026-09-03 | [P6 Cloudflare v4 API 与固定客户端兼容](p6-cloudflare-v4-wrangler-compatibility.md) | [完成记录](p6-cloudflare-v4-wrangler-compatibility-results.md)：唯一 `/client/v4` 管理面、固定 Wrangler/官方 SDK upload、资源命令、Service `props` 与既有产品 authority 已接入当前 Day1 production path；实际本地检查和限制以完成记录为准。托管端因无 credentials 保留在独立[差分验收](../p6-cloudflare-v4-differential-acceptance.md)，workspace/coverage 总验收按阶段约定延后到 P9，不在 P6 记录中虚构 PASS |
 
 ## 仍在维护或尚未完成
 
@@ -61,6 +61,8 @@
 - [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
 - [P5 剩余发行验收](../p5-release-acceptance.md)：只追踪可复现 benchmark report、timing-three、四平台、
   完整 parser process matrix、托管 rich-document differential 与正式 package，不把 P5 core 重新列为待实现。
+- [P6 远端差分验收](../p6-cloudflare-v4-differential-acceptance.md)：P6 本地核心已经归档；当前没有
+  Cloudflare credentials，新管理资源、官方 SDK 与 Assets 的托管端证据仍未取得。
 - active 文档的完整分类见 [docs 索引](../README.md)。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 

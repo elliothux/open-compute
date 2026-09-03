@@ -5,8 +5,11 @@
 能力真值。`ocd capabilities --json`、类型 inventory、contract catalog 和 Gate 共同定义当前
 支持面。完成设计和 conformance 方案见
 [Cloudflare Runtime 全量兼容改造](../implemented/cloudflare-runtime-compatibility.md)与
-[P3.4 Cloudflare conformance](../implemented/p3-4-cloudflare-conformance.md)；尚待外部账号条件解除的
-验收只记录在[剩余验收计划](../cloudflare-runtime-compatibility-acceptance.md)。
+[P3.4 Cloudflare conformance](../implemented/p3-4-cloudflare-conformance.md)。P6 当前管理合同及本地证据见
+[归档设计](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)与
+[完成记录](../implemented/p6-cloudflare-v4-wrangler-compatibility-results.md)；尚待外部账号条件解除的 runtime
+Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](../cloudflare-runtime-compatibility-acceptance.md)
+和 [P6 远端差分验收](../p6-cloudflare-v4-differential-acceptance.md)。
 
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
 `workerd v1.20260830.1`，revision `e9dda5963aba7ee4323960db795690ec78fec118`，唯一
@@ -45,8 +48,10 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | Workers AI / Markdown Conversion / AI Search | `supported_with_deviation` | 54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；AI Search namespace/instance/items/jobs、durable async 上传索引、keyword/vector/hybrid retrieval、chat/SSE 与配置内 OpenAI-compatible provider 闭环；完整 Workers AI inference 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001` |
 
 Deployments、Static Assets、Service Binding、Workers Cache 与 Images 是平台配套能力，没有进入上述
-stable-member denominator；AI 的 54 个目标 members/overloads 已进入 denominator，并按当前本地合同登记为
-`supported_with_deviation`。
+stable-member denominator。Service Binding 的固定 P6 upload 已支持可选、受界、canonical JSON object
+`props`；它是 immutable Version identity 的一部分，并只向目标 entrypoint 投影为 `ctx.props`。`remote` 仍不在
+server 子集，单机 placement/discovery 边界继续由 `OC-SERVICE-001` 描述。AI 的 54 个目标
+members/overloads 已进入 denominator，并按当前本地合同登记为 `supported_with_deviation`。
 Analytics Engine、Browser Rendering、Hyperdrive、mTLS、Rate Limiting 与 Workers for
 Platforms 明确为本轮非目标并在部署 authority 边界拒绝。完整 Workers AI inference 仍是非目标；存在标准
 `env.AI` 只表示上表的 Markdown Conversion 与 AI Search 所需配置模型子集，不能因 upstream types 中存在其它 AI 名称而扩张能力声明。
@@ -69,6 +74,24 @@ backend 和 workerd 内部 listener 仍仅监听 loopback。
 登记 runtime deviation ID；固定 SDK 真实 `ocd` Gate 同时验证 D1 binding 的持久投影和上传源码下载。
 该 SDK Gate 的回读发生在同一个 ready `ocd` 进程内，本次只证明写入 authority 后的立即持久投影，不单独
 声称 official SDK wrapper 已完成重启后回读资格；Version authority 的通用重启/恢复仍由独立真实进程 Gate 所有。
+
+### Service Binding `props`
+
+固定 Wrangler 4.127.1 的 schema 把 `services[].props` 定义为传给目标 Worker `ctx.props` 的可选 object。
+open-compute 在项目导入与 v4 multipart 边界要求 JSON object，执行 64 KiB、32 层深度上限和 canonical key
+ordering；canonical bytes/digest 随 immutable Version 一起持久化。runtime admission 会重新验证 canonical bytes
+与 descriptor digest，任何损坏都 fail closed；成功路径通过 stock workerd 的
+`stub.getEntrypoint(name, { props })` 交付，`constructor`、`__proto__` 等普通 JSON key 不获得特殊含义。
+这项本地实现不宣称 Cloudflare 的跨区域 placement，也不扩大 `remote` 支持范围。
+
+### Queue producer `delivery_delay`
+
+Cloudflare 当前 Queues/Wrangler 配置文档仍展示 producer binding 的 `delivery_delay`，但固定
+Wrangler 4.127.1 的实际 validator 明确警告该字段已弃用且无效果，并要求通过 `wrangler queues update`
+管理 Queue-level setting。P6 按固定客户端的可观察行为接受并忽略 upload metadata 中的该字段，不让它改写
+Queue authority 或 immutable descriptor；`/queues/{queue_id}` 的 settings API 才是队列默认 delay 的
+authority。官方文档与固定 CLI 的冲突在取得同版本 hosted management trace 前保持显式记录，不能用旧的
+producer 文档文字推翻 pinned CLI，也不能把本地无效果行为写成已经完成的托管端一致性证据。
 
 ### Durable Object nested facets
 
@@ -111,7 +134,10 @@ installation-managed metadata；不暴露 bearer token、provider credential 或
 API、KV、D1、R2、Durable Objects 和 Queues。公开 status/JSON 经合同允许的归一化后逐字段一致；每次只
 创建唯一 `oc-p34-*` Worker 及 fixture 自有 binding，按精确 name/ID 删除并复查 absent，没有修改账号中
 已有服务。DO fixture 包含递归 nested facet clone/delete；Queue fixture 包含 metrics、五类 producer 错误
-和消费响应。
+和消费响应。这批证据属于 portable runtime/product differential，不是新的 P6 management qualification；它
+没有证明 P6 `/client/v4` 资源命令、固定官方 SDK wire、multipart/Assets 上传或两个只读 prerequisite route
+已经与 Cloudflare 托管管理面实测一致。后者仅由独立的
+[P6 远端差分验收](../p6-cloudflare-v4-differential-acceptance.md)关闭。
 
 Workflow portable fixture 已实现并通过 open-compute 本地真实进程路径，但当前 Wrangler OAuth 对
 Cloudflare Workflow inventory API 返回 `Authentication error [code: 10000]`，在 preflight 阶段即停止，

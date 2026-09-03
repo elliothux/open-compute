@@ -4,7 +4,7 @@
 
 日期：2026-09-03
 
-本文是 [`P6 Cloudflare v4 API 与 Wrangler 子集兼容设计`](p6-cloudflare-v4-wrangler-compatibility.md)
+本文是 [`P6 Cloudflare v4 API 与 Wrangler 子集兼容设计`](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 的 observability 专项设计，细化以下能力：
 
 - 固定版 Wrangler 的 `wrangler tail`；

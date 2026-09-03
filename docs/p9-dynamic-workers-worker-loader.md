@@ -2,7 +2,7 @@
 
 状态：合同与架构设计完成；存在 stock workerd G0 blocker，待 upstream 能力、实施与验收。
 
-本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](p6-cloudflare-v4-wrangler-compatibility.md)
+本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 `worker_loaders` binding，以及 open-compute 已有的内部 WorkerLoader 调度。limits 的统一定义见
 [Workers Standard limits 专项设计](p8-workers-standard-limits.md)，日志与 tails 见
 [Workers Logs / realtime tail 专项设计](p7-workers-logs-realtime-tail.md)。

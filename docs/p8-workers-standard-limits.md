@@ -2,7 +2,7 @@
 
 状态：设计完成，待实施与验收。
 
-本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](p6-cloudflare-v4-wrangler-compatibility.md)
+本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 limits 合同。它只定义 open-compute 平台本身，不包含 LynxOS 的团队规模、单机容量默认值、部署拓扑
 或运维策略。
 
