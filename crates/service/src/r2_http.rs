@@ -30,9 +30,6 @@ const MAX_JSON_BODY: usize = 4096;
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// Maximum raw body size for operator R2 object PUT requests.
-pub(crate) const R2_OPERATOR_PUT_MAX_BODY: usize = 26 * 1024 * 1024;
-
 /// Shared logical-bucket control-plane composition state.
 #[derive(Clone)]
 pub struct R2ApiState {
@@ -251,18 +248,6 @@ pub fn control_router() -> Router<HttpState> {
             "/v1/accounts/{account_id}/r2/buckets/{resource_id}/objects/{key}",
             get(get_object).put(put_object).delete(delete_object),
         )
-}
-
-/// Returns true when `path` targets an operator R2 object PUT with a concrete key segment.
-pub(crate) fn operator_r2_object_put_path(path: &str) -> bool {
-    const PREFIX: &str = "/operator/api/v1/accounts/";
-    if !path.starts_with(PREFIX) {
-        return false;
-    }
-    let Some(objects_index) = path.find("/objects/") else {
-        return false;
-    };
-    path.contains("/r2/buckets/") && objects_index + "/objects/".len() < path.len()
 }
 
 #[derive(Deserialize)]

@@ -155,18 +155,6 @@ pub fn control_router() -> Router<HttpState> {
         )
 }
 
-/// Returns true when `path` targets an operator KV value mutation with a concrete key segment.
-pub(crate) fn operator_kv_value_put_path(path: &str) -> bool {
-    const PREFIX: &str = "/operator/api/v1/accounts/";
-    if !path.starts_with(PREFIX) {
-        return false;
-    }
-    let Some(values_index) = path.find("/values/") else {
-        return false;
-    };
-    path.contains("/kv/namespaces/") && values_index + "/values/".len() < path.len()
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ListNamespacesQuery {

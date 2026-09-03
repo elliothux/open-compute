@@ -70,7 +70,6 @@ impl AccountAuthority {
     }
 
     /// Public Cloudflare-compatible account identifier.
-    #[cfg(test)]
     pub(crate) fn public_id(&self) -> &str {
         &self.public_id
     }

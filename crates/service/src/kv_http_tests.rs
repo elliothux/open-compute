@@ -910,10 +910,6 @@ async fn operator_value_put_get_and_delete_round_trip() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["value"], Value::Null);
 
-    assert!(operator_kv_value_put_path(&value_uri));
-    assert!(!operator_kv_value_put_path(
-        "/operator/api/v1/accounts/x/kv/namespaces/y/values/"
-    ));
 }
 
 #[tokio::test]

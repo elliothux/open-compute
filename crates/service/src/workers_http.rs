@@ -16,9 +16,6 @@ use std::time::Duration;
 
 pub(crate) mod v4;
 
-/// Absolute HTTP admission ceiling for fixed-Wrangler multipart Worker uploads.
-pub(crate) const HARD_MAX_BUNDLE_BODY: usize = 64 * 1024 * 1024;
-
 /// Shared Worker management and ingress authority.
 #[derive(Clone)]
 pub struct WorkerApiState {
