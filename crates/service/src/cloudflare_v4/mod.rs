@@ -10,6 +10,7 @@ mod storage;
 mod vectorize;
 mod vendor;
 mod wire;
+mod workflows;
 
 pub(crate) use accounts::V4ResourceKind;
 pub(crate) use wire::{
@@ -24,6 +25,7 @@ pub(crate) fn storage_router() -> Router<HttpState> {
         .merge(r2::router())
         .merge(vectorize::router())
         .merge(ai_search::router())
+        .merge(workflows::router())
 }
 
 use crate::http::HttpState;

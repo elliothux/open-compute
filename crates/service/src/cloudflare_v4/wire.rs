@@ -202,25 +202,33 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::AssetLimitExceeded
             | ErrorCode::KvValueTooLarge
             | ErrorCode::BindingLimitExceeded
-            | ErrorCode::R2ObjectTooLarge => Self::Official(V4OfficialError::RequestTooLarge),
+            | ErrorCode::R2ObjectTooLarge
+            | ErrorCode::WorkflowPayloadTooLarge => {
+                Self::Official(V4OfficialError::RequestTooLarge)
+            }
             ErrorCode::QuotaExceeded
             | ErrorCode::AdmissionBusy
             | ErrorCode::KvBusy
             | ErrorCode::KvStorageFull
             | ErrorCode::ResourceLimitExceeded
-            | ErrorCode::R2Overloaded => Self::RateLimited,
+            | ErrorCode::R2Overloaded
+            | ErrorCode::WorkflowStateQuotaExceeded
+            | ErrorCode::WorkflowEventQueueFull => Self::RateLimited,
             ErrorCode::AccountNotFound
             | ErrorCode::WorkerNotFound
             | ErrorCode::VersionNotFound
             | ErrorCode::BindingNotFound
             | ErrorCode::QueueNotFound
             | ErrorCode::ResourceNotFound
-            | ErrorCode::DoNamespaceNotFound => Self::NotFound,
+            | ErrorCode::DoNamespaceNotFound
+            | ErrorCode::WorkflowNotFound
+            | ErrorCode::WorkflowInstanceNotFound => Self::NotFound,
             ErrorCode::PlatformUnavailable
             | ErrorCode::ResourceNotReady
             | ErrorCode::ResourceUnavailable
             | ErrorCode::KvUnavailable
-            | ErrorCode::R2ProviderUnavailable => Self::Unavailable,
+            | ErrorCode::R2ProviderUnavailable
+            | ErrorCode::WorkflowRuntimeUnavailable => Self::Unavailable,
             ErrorCode::IdempotencyConflict
             | ErrorCode::VersionNotReady
             | ErrorCode::VersionActive
@@ -232,7 +240,16 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::ResourceNameConflict
             | ErrorCode::ResourceReferenced
             | ErrorCode::R2BucketNotEmpty
-            | ErrorCode::R2PreconditionFailed => Self::Conflict,
+            | ErrorCode::R2PreconditionFailed
+            | ErrorCode::WorkflowReferenced
+            | ErrorCode::WorkflowNameConflict
+            | ErrorCode::WorkflowNotReady
+            | ErrorCode::WorkflowVersionNotReady
+            | ErrorCode::WorkflowInstanceAlreadyExists
+            | ErrorCode::WorkflowInstanceStateConflict
+            | ErrorCode::WorkflowInstanceBusy
+            | ErrorCode::WorkflowInstanceCleanupPending
+            | ErrorCode::WorkflowRunStale => Self::Conflict,
             ErrorCode::BindingCapabilityUnsupported | ErrorCode::CompatibilityUnsupported => {
                 Self::Unsupported
             }
@@ -258,6 +275,11 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::R2MultipartInvalid
             | ErrorCode::R2MetadataTooLarge
             | ErrorCode::R2CursorInvalid
+            | ErrorCode::WorkflowInstanceIdInvalid
+            | ErrorCode::WorkflowEventTypeInvalid
+            | ErrorCode::WorkflowSerializationUnsupported
+            | ErrorCode::WorkflowDurationInvalid
+            | ErrorCode::WorkflowMethodUnsupported
             | ErrorCode::BindingProtocolError => Self::InvalidRequest,
             _ => Self::Internal,
         }
