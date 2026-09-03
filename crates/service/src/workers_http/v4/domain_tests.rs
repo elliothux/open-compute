@@ -38,6 +38,7 @@ async fn deprecated_queue_binding_delay_does_not_change_queue_authority() {
             None,
             false,
             false,
+            None,
             0,
         )
         .unwrap();
@@ -81,6 +82,7 @@ async fn service_binding_props_are_projected_into_the_immutable_version_input() 
             None,
             false,
             false,
+            None,
             0,
         )
         .unwrap();
@@ -88,4 +90,59 @@ async fn service_binding_props_are_projected_into_the_immutable_version_input() 
     let service = input.services.get("CATALOG").unwrap();
     assert_eq!(service.target_worker_id, target.id);
     assert_eq!(service.props, Some(props));
+}
+
+#[tokio::test]
+async fn failed_upload_content_releases_its_unconsumed_workflow_reservation() {
+    let (_temp, _mock, state, account) = crate::tests::initialized_worker_http_fixture().await;
+    let api = state.worker_api().unwrap();
+    let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
+        "main_module": "index.js",
+        "compatibility_date": "2026-08-30",
+        "bindings": [{
+            "name": "FLOW",
+            "type": "workflow",
+            "workflow_name": "failed-upload",
+            "class_name": "Flow"
+        }]
+    }))
+    .unwrap();
+    let mut input = UploadInput::new(metadata).unwrap();
+    input
+        .apply_explicit_bindings(
+            api,
+            &AccountAuthority::new(PlatformId::generate(), account, 1),
+            account,
+            WorkerId::generate(),
+            None,
+            false,
+            true,
+            Some("failed-operation"),
+            1,
+        )
+        .unwrap();
+    assert!(
+        input
+            .content(api, account, "caller", None, Some("failed-operation"), 2)
+            .await
+            .is_err()
+    );
+    input
+        .release_workflow_reservations(api, account, 3)
+        .unwrap();
+    assert!(
+        WorkflowRepository::new(api.storage.db())
+            .definitions(
+                account,
+                Some("failed-upload"),
+                None,
+                CatalogSort::Name,
+                CatalogDirection::Asc,
+                None,
+                10,
+            )
+            .unwrap()
+            .items
+            .is_empty()
+    );
 }

@@ -8,7 +8,8 @@ use axum::response::Response;
 use open_compute_core::{AccountId, WorkflowOperationId, WorkflowVersionId};
 use open_compute_storage::scheduler::WorkflowInstanceInspection;
 use open_compute_storage::{
-    VersionState, WorkerRepository, WorkflowVersion, decode_catalog_cursor,
+    VersionState, WorkerRepository, WorkflowDefinitionReservation, WorkflowVersion,
+    decode_catalog_cursor,
 };
 use open_compute_workers::WorkflowController;
 use serde::{Deserialize, Serialize};
@@ -134,6 +135,7 @@ pub(super) async fn put(
                 &workflow_name,
                 &script_name,
                 &body.class_name,
+                request_id,
             )
         })
         .await
@@ -143,17 +145,19 @@ pub(super) async fn put(
         Ok(Err(error)) => return error_response(error, request_id),
         Err(_) => return error_response(V4Error::Internal, request_id),
     };
+    let reservation = prepared.reservation.clone();
     let version = match prepared.version {
-        Some(version) if version.state == VersionState::Validating => {
-            api.validate_version(version).await
-        }
         Some(version) => Ok(version),
         None => {
-            api.create_version(
+            api.create_reserved_version(
                 account,
                 prepared.definition.id,
                 prepared.worker_version,
                 prepared.class_name.clone(),
+                match prepared.reservation {
+                    Some(reservation) => reservation,
+                    None => return error_response(V4Error::Internal, request_id),
+                },
             )
             .await
         }
@@ -161,7 +165,22 @@ pub(super) async fn put(
     let version = match version {
         Ok(version) if version.state == VersionState::Ready => version,
         Ok(_) => return error_response(V4Error::Unavailable, request_id),
-        Err(error) => return error_response(V4Error::from(&error), request_id),
+        Err(error) => {
+            if let Some(reservation) = reservation {
+                let repository = WorkflowRepository::new(api.storage().db());
+                let cleanup_now = match now_ms() {
+                    Ok(value) => value,
+                    Err(cleanup_error) => return error_response(cleanup_error, request_id),
+                };
+                if repository
+                    .release_definition_reservation(account, &reservation, cleanup_now)
+                    .is_err()
+                {
+                    return error_response(V4Error::Internal, request_id);
+                }
+            }
+            return error_response(V4Error::from(&error), request_id);
+        }
     };
     match update_result(&api, prepared.definition, &version, &prepared.script_name) {
         Ok(result) => success_response(context, result),
@@ -323,6 +342,7 @@ struct PreparedUpdate {
     class_name: String,
     script_name: String,
     version: Option<WorkflowVersion>,
+    reservation: Option<WorkflowDefinitionReservation>,
 }
 
 fn prepare_update(
@@ -331,6 +351,7 @@ fn prepare_update(
     workflow_name: &str,
     script_name: &str,
     class_name: &str,
+    request_id: open_compute_core::RequestId,
 ) -> Result<PreparedUpdate, V4Error> {
     let workers = WorkerRepository::new(api.storage().db());
     let worker = workers
@@ -341,39 +362,69 @@ fn prepare_update(
         .ok_or(V4Error::NotFound)?;
     let worker_version = worker.active_version_id.ok_or(V4Error::Conflict)?;
     let repository = WorkflowRepository::new(api.storage().db());
-    let definition = match definition(api, account, workflow_name) {
-        Ok(definition) => definition,
-        Err(V4Error::NotFound) => {
-            let _admission = api
-                .storage()
-                .reserve_mutation(64 * 1024)
-                .map_err(|error| V4Error::from(&error))?;
-            repository
-                .reserve_definition(account, workflow_name, class_name, now_ms()?)
-                .map_err(|error| V4Error::from(&error))?
-        }
-        Err(error) => return Err(error),
+    let existing = repository
+        .definitions(
+            account,
+            Some(workflow_name),
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            100,
+        )
+        .map_err(|error| V4Error::from(&error))?
+        .items
+        .into_iter()
+        .find(|definition| definition.name == workflow_name);
+    let versions = match &existing {
+        Some(definition) => all_versions(api, account, definition.id)?,
+        None => Vec::new(),
     };
-    let versions = all_versions(api, account, definition.id)?;
     if versions.iter().any(|version| {
         version.target.worker_id != worker.id && version.state == VersionState::Ready
     }) {
         return Err(V4Error::Conflict);
     }
-    let version = versions.into_iter().find(|version| {
-        version.target.worker_version_id == worker_version
-            && version.target.class_name == class_name
-            && matches!(
-                version.state,
-                VersionState::Ready | VersionState::Validating
-            )
+    let reusable = existing.as_ref().and_then(|definition| {
+        definition.current_version_id.and_then(|current| {
+            versions.iter().find(|version| {
+                version.target.workflow_version_id == current
+                    && version.target.worker_version_id == worker_version
+                    && version.target.class_name == class_name
+                    && version.state == VersionState::Ready
+            })
+        })
     });
+    let _admission = api
+        .storage()
+        .reserve_mutation(64 * 1024)
+        .map_err(|error| V4Error::from(&error))?;
+    let reservation = repository
+        .reserve_definition(
+            account,
+            workflow_name,
+            class_name,
+            &request_id.to_string(),
+            now_ms()?,
+        )
+        .map_err(|error| V4Error::from(&error))?;
+    let definition = reservation.definition.clone();
+    let version = reusable.cloned();
+    let reservation = if version.is_some() {
+        repository
+            .release_definition_reservation(account, &reservation, now_ms()?)
+            .map_err(|error| V4Error::from(&error))?;
+        None
+    } else {
+        Some(reservation)
+    };
     Ok(PreparedUpdate {
         definition,
         worker_version,
         class_name: class_name.to_owned(),
         script_name: script_name.to_owned(),
         version,
+        reservation,
     })
 }
 
@@ -390,7 +441,7 @@ fn all_definitions(
             .definitions(
                 account,
                 search,
-                None,
+                Some(ResourceState::Ready),
                 CatalogSort::CreatedAt,
                 CatalogDirection::Desc,
                 cursor,

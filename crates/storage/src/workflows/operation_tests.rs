@@ -37,6 +37,8 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
             "FLOW",
             definition.id,
             "Flow",
+            None,
+            None,
             Vec::new(),
             3,
         )

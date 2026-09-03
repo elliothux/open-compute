@@ -12,7 +12,7 @@ use open_compute_core::{
 use open_compute_storage::{
     BuiltinBindingKind, CatalogDirection, CatalogSort, DeploymentSource, DurableObjectRepository,
     QueueRepository, ResourceRepository, VersionSnapshot, WorkerRecord, WorkerRepository,
-    WorkflowRepository,
+    WorkflowDefinitionReservation, WorkflowRepository,
 };
 use open_compute_workers::{
     CreateVersionOutcome, CreateVersionRequest, ModuleBindingKind, RuntimeValidator,
@@ -92,7 +92,8 @@ async fn create_from_prepared_upload(
         })
         .transpose()?;
     input.apply_inheritance(api, previous.as_ref(), strict_inheritance)?;
-    input.apply_explicit_bindings(
+    let reservation_owner = request_id.to_string();
+    if let Err(error) = input.apply_explicit_bindings(
         api,
         account_authority,
         account_id,
@@ -100,19 +101,29 @@ async fn create_from_prepared_upload(
         migration.map(super::do_lifecycle::PreparedDoMigration::tag),
         false,
         true,
+        Some(&reservation_owner),
         now_ms,
-    )?;
-    let reservation_id = request_id.to_string();
-    let (content, asset_session) = input
+    ) {
+        input.release_workflow_reservations(api, account_id, now_ms)?;
+        return Err(error);
+    }
+    let (content, asset_session) = match input
         .content(
             api,
             account_id,
             &worker.name,
             upload.bundle,
-            Some(&reservation_id),
+            Some(&reservation_owner),
             now_ms,
         )
-        .await?;
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            input.release_workflow_reservations(api, account_id, now_ms)?;
+            return Err(error);
+        }
+    };
     let idempotency_key = match &asset_session {
         Some(reservation) => format!(
             "v4-assets/{}",
@@ -134,6 +145,7 @@ async fn create_from_prepared_upload(
     if let Some(migration) = migration {
         controller = controller.with_durable_object_migration(migration.plan().clone());
     }
+    let workflow_reservations = std::mem::take(&mut input.workflow_reservations);
     let outcome = controller
         .create_version(CreateVersionRequest {
             account_id,
@@ -165,6 +177,7 @@ async fn create_from_prepared_upload(
             {
                 super::assets::release_assets(api, &session, now_ms)?;
             }
+            release_workflow_reservations(api, account_id, &workflow_reservations, now_ms)?;
             Err(error)
         }
     }
@@ -189,6 +202,7 @@ pub(super) async fn validate_new_upload(
         None,
         true,
         false,
+        None,
         now_ms,
     )?;
     input
@@ -212,6 +226,7 @@ pub(super) struct UploadInput {
     pub(super) services: BTreeMap<String, VersionServiceInput>,
     pub(super) runtime_features: VersionRuntimeFeatures,
     pub(super) crons: Vec<String>,
+    workflow_reservations: Vec<WorkflowDefinitionReservation>,
 }
 
 impl UploadInput {
@@ -255,6 +270,7 @@ impl UploadInput {
             bindings: BTreeMap::new(),
             services: BTreeMap::new(),
             crons: Vec::new(),
+            workflow_reservations: Vec::new(),
         })
     }
 
@@ -377,6 +393,7 @@ impl UploadInput {
                         permissions: CanonicalPermissions::default(),
                         config: CanonicalBindingConfig {
                             workflow_class_name: Some(binding.descriptor.class_name.clone()),
+                            workflow_reservation_fence: None,
                             workflow_schedules: binding.descriptor.schedules.clone(),
                         },
                     },
@@ -505,6 +522,7 @@ impl UploadInput {
         migration_tag: Option<&str>,
         allow_declared_do: bool,
         reserve_workflows: bool,
+        reservation_owner: Option<&str>,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
         let bindings = self.metadata.bindings.clone();
@@ -663,28 +681,36 @@ impl UploadInput {
                         .as_deref()
                         .ok_or_else(|| invalid("Workflow class name is required"))?;
                     let repository = WorkflowRepository::new(api.storage.db());
-                    let definition = repository
-                        .definitions(
-                            account,
-                            Some(workflow_name.as_str()),
-                            None,
-                            CatalogSort::Name,
-                            CatalogDirection::Asc,
-                            None,
-                            100,
-                        )?
-                        .items
-                        .into_iter()
-                        .find(|value| value.name == *workflow_name);
-                    let definition = match definition {
-                        Some(definition) => definition,
-                        None if reserve_workflows => repository.reserve_definition(
+                    let (definition, reservation_fence) = if reserve_workflows {
+                        let reservation = repository.reserve_definition(
                             account,
                             workflow_name,
                             class_name,
+                            reservation_owner.ok_or_else(invariant)?,
                             now_ms,
-                        )?,
-                        None => continue,
+                        )?;
+                        let definition = reservation.definition.clone();
+                        let fence = reservation.fence;
+                        self.workflow_reservations.push(reservation);
+                        (definition, Some(fence))
+                    } else {
+                        let definition = repository
+                            .definitions(
+                                account,
+                                Some(workflow_name.as_str()),
+                                None,
+                                CatalogSort::Name,
+                                CatalogDirection::Asc,
+                                None,
+                                100,
+                            )?
+                            .items
+                            .into_iter()
+                            .find(|value| value.name == *workflow_name);
+                        let Some(definition) = definition else {
+                            continue;
+                        };
+                        (definition, None)
                     };
                     self.bindings.insert(
                         name,
@@ -695,6 +721,7 @@ impl UploadInput {
                             permissions: CanonicalPermissions::default(),
                             config: CanonicalBindingConfig {
                                 workflow_class_name: Some(class_name.to_owned()),
+                                workflow_reservation_fence: reservation_fence,
                                 workflow_schedules: Vec::new(),
                             },
                         },
@@ -738,6 +765,15 @@ impl UploadInput {
             }
         }
         Ok(())
+    }
+
+    fn release_workflow_reservations(
+        &self,
+        api: &WorkerApiState,
+        account: AccountId,
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        release_workflow_reservations(api, account, &self.workflow_reservations, now_ms)
     }
 
     fn resource(
@@ -833,6 +869,19 @@ impl UploadInput {
             )),
         }
     }
+}
+
+fn release_workflow_reservations(
+    api: &WorkerApiState,
+    account: AccountId,
+    reservations: &[WorkflowDefinitionReservation],
+    now_ms: i64,
+) -> Result<(), PlatformError> {
+    let repository = WorkflowRepository::new(api.storage.db());
+    for reservation in reservations {
+        repository.release_definition_reservation(account, reservation, now_ms)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -60,12 +60,19 @@ pub(super) fn definition_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workfl
         availability_code: row.get(5)?,
         lifecycle_generation: row.get(6)?,
         reserved_class_name: row.get(7)?,
-        current_version_id: row
-            .get::<_, Option<String>>(8)?
+        reservation_owner: row.get(8)?,
+        reservation_fence: row.get(9)?,
+        reservation_state: row
+            .get::<_, Option<String>>(10)?
             .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
-        created_at_ms: row.get(9)?,
-        updated_at_ms: row.get(10)?,
+        reservation_created_definition: row.get(11)?,
+        current_version_id: row
+            .get::<_, Option<String>>(12)?
+            .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
+            .transpose()?,
+        created_at_ms: row.get(13)?,
+        updated_at_ms: row.get(14)?,
     })
 }
 
@@ -93,12 +100,15 @@ pub(super) fn version_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowV
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         created_at_ms: row.get(13)?,
         rejection_code: row.get(14)?,
+        reservation_owner: row.get(15)?,
+        reservation_fence: row.get(16)?,
     })
 }
 
 pub(super) const DEFINITION_SELECT: &str =
     "SELECT id,account_id,name,state,availability,availability_code,
-    lifecycle_generation,reserved_class_name,current_version_id,created_at_ms,updated_at_ms FROM workflow_definitions";
+    lifecycle_generation,reserved_class_name,reservation_owner,reservation_fence,reservation_state,
+    reservation_created_definition,current_version_id,created_at_ms,updated_at_ms FROM workflow_definitions";
 
 pub(super) fn validate_class_name(class_name: &str) -> Result<(), PlatformError> {
     let bytes = class_name.as_bytes();
@@ -116,7 +126,7 @@ pub(super) fn validate_class_name(class_name: &str) -> Result<(), PlatformError>
 }
 pub(super) const VERSION_SELECT: &str = "SELECT f.account_id,f.id,f.name,v.id,v.worker_id,v.worker_version_id,
     v.worker_code_sha256,v.class_name,v.loader_schema_version,v.capability_version,v.descriptor_sha256,
-    v.version_number,v.state,v.created_at_ms,v.rejection_code FROM workflow_versions v
+    v.version_number,v.state,v.created_at_ms,v.rejection_code,v.reservation_owner,v.reservation_fence FROM workflow_versions v
     JOIN workflow_definitions f ON f.id=v.definition_id";
 
 pub(crate) fn version_digest(target: &WorkflowTarget) -> Result<[u8; 32], PlatformError> {

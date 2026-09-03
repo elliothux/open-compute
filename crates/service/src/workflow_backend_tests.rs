@@ -41,6 +41,8 @@ fn ready_binding(f: &Fixture, definition: WorkflowId) -> WorkflowBindingRecord {
             "FLOW",
             definition,
             "Flow",
+            None,
+            None,
             Vec::new(),
             3,
         )

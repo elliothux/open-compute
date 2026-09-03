@@ -22,6 +22,8 @@ struct Fixture {
     _temp: tempfile::TempDir,
     app: Router,
     public_account: String,
+    account: AccountId,
+    storage: Arc<PlatformStorage>,
     workflow_id: WorkflowId,
     workflow_version: open_compute_core::WorkflowVersionId,
 }
@@ -111,7 +113,7 @@ fn fixture() -> Fixture {
     )
     .with_cloudflare_v4_account(authority)
     .with_workflow_api(Some(WorkflowApiState::new(
-        storage,
+        storage.clone(),
         scheduler,
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
         Default::default(),
@@ -121,9 +123,56 @@ fn fixture() -> Fixture {
         _temp: temp,
         app,
         public_account,
+        account,
+        storage,
         workflow_id: definition.id,
         workflow_version: version.target.workflow_version_id,
     }
+}
+
+#[tokio::test]
+async fn official_reads_hide_reservations_and_put_can_create_the_definition() {
+    let f = fixture();
+    let repository = WorkflowRepository::new(f.storage.db());
+    repository
+        .reserve_definition(f.account, "upload-only", "Flow", "interrupted-upload", 7)
+        .unwrap();
+    let hidden = f
+        .request("GET", &f.path("/upload-only"), Some("read-token"), None)
+        .await;
+    assert_eq!(hidden.0, StatusCode::NOT_FOUND);
+    let list = f
+        .request("GET", &f.path(""), Some("read-token"), None)
+        .await;
+    assert_eq!(list.1["result"].as_array().unwrap().len(), 1);
+
+    let create = f
+        .request(
+            "PUT",
+            &f.path("/created-by-put"),
+            Some("deployer-token"),
+            Some(serde_json::json!({
+                "script_name":"workflow-api", "class_name":"Flow"
+            })),
+        )
+        .await;
+    // The fixture has no live workerd supervisor, so the frozen version remains validating.
+    // Reaching 503 proves official PUT took the create path instead of the 10200 lookup path.
+    assert_eq!(create.0, StatusCode::SERVICE_UNAVAILABLE);
+    let created = repository
+        .definitions(
+            f.account,
+            Some("created-by-put"),
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            10,
+        )
+        .unwrap()
+        .items;
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].state, ResourceState::Creating);
 }
 
 impl Fixture {

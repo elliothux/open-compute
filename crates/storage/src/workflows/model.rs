@@ -25,14 +25,71 @@ pub struct WorkflowDefinition {
     pub availability_code: Option<String>,
     /// Binding-breaking lifecycle generation.
     pub lifecycle_generation: i64,
-    /// Class reserved by a Worker upload while the first Workflow version is pending.
+    /// Class selected by the fenced upload/PUT operation that is pending publication.
     pub reserved_class_name: Option<String>,
+    /// Opaque owner of the pending reservation; never part of the public Workflow result.
+    #[serde(skip_serializing)]
+    pub reservation_owner: Option<String>,
+    /// Monotonic fencing generation for reservation ownership changes.
+    #[serde(skip_serializing)]
+    pub reservation_fence: i64,
+    /// Durable prepare/bound state of the pending reservation.
+    #[serde(skip_serializing)]
+    pub reservation_state: Option<WorkflowReservationState>,
+    /// Whether the current owner also created this not-yet-published definition.
+    #[serde(skip_serializing)]
+    pub reservation_created_definition: Option<bool>,
     /// Version selected by new instance creation.
     pub current_version_id: Option<WorkflowVersionId>,
     /// Creation timestamp.
     pub created_at_ms: i64,
     /// Most recent catalog mutation.
     pub updated_at_ms: i64,
+}
+
+/// Durable state of one upload-before-PUT Workflow reservation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkflowReservationState {
+    /// The definition/class is reserved, but no immutable binding or Workflow version is stored.
+    Reserved,
+    /// At least one immutable binding or Workflow version has consumed the current fence.
+    Bound,
+}
+
+impl WorkflowReservationState {
+    /// Stable SQLite representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reserved => "reserved",
+            Self::Bound => "bound",
+        }
+    }
+}
+
+impl std::str::FromStr for WorkflowReservationState {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "reserved" => Ok(Self::Reserved),
+            "bound" => Ok(Self::Bound),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Fenced ownership returned to the exact operation that reserved a Workflow definition/class.
+#[derive(Clone, Debug)]
+pub struct WorkflowDefinitionReservation {
+    /// Reserved definition.
+    pub definition: WorkflowDefinition,
+    /// Opaque operation owner recorded in SQLite.
+    pub owner: String,
+    /// Monotonic fence that invalidates older owners.
+    pub fence: i64,
+    /// Whether this owner created the underlying creating definition.
+    pub created_definition: bool,
 }
 
 /// Immutable class, version, and capability identity copied into each instance.
@@ -77,6 +134,12 @@ pub struct WorkflowVersion {
     pub created_at_ms: i64,
     /// Sanitized permanent validation rejection.
     pub rejection_code: Option<String>,
+    /// Reservation owner used to stage this version, if it came from upload-before-PUT.
+    #[serde(skip_serializing)]
+    pub reservation_owner: Option<String>,
+    /// Reservation fence used to stage this version.
+    #[serde(skip_serializing)]
+    pub reservation_fence: Option<i64>,
 }
 
 /// Immutable caller binding descriptor; this exact shape is hashed once at version creation.
@@ -112,6 +175,10 @@ pub struct WorkflowBindingRecord {
     pub version_id: VersionId,
     /// Exact descriptor digest.
     pub descriptor_sha256: [u8; 32],
+    /// Reservation owner that admitted this immutable row, if any.
+    pub reservation_owner: Option<String>,
+    /// Reservation fence that admitted this immutable row, if any.
+    pub reservation_fence: Option<i64>,
     /// Creation timestamp.
     pub created_at_ms: i64,
 }

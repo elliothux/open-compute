@@ -67,6 +67,7 @@ fn resource_tokens_and_typed_json_are_strict() {
         .unwrap(),
         CanonicalBindingConfig {
             workflow_class_name: Some("Flow".to_owned()),
+            workflow_reservation_fence: None,
             workflow_schedules: vec!["0 * * * *".to_owned()],
         }
     );

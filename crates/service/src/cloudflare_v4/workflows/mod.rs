@@ -13,7 +13,7 @@ use axum::Router;
 use axum::extract::Request;
 use axum::response::Response;
 use axum::routing::{get, post};
-use open_compute_core::{AccountId, WorkflowId};
+use open_compute_core::{AccountId, ResourceState, WorkflowId};
 use open_compute_storage::scheduler::WorkflowState;
 use open_compute_storage::{CatalogDirection, CatalogSort, WorkflowDefinition, WorkflowRepository};
 use std::sync::Arc;
@@ -88,7 +88,7 @@ fn definition(
         .definitions(
             account,
             Some(name),
-            None,
+            Some(ResourceState::Ready),
             CatalogSort::Name,
             CatalogDirection::Asc,
             None,

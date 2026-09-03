@@ -40,6 +40,10 @@ impl VersionController<'_> {
                 }
                 let definition = open_compute_core::WorkflowId::from_uuid(input.id.as_uuid())
                     .map_err(|_| invariant())?;
+                let reservation_owner = input
+                    .config
+                    .workflow_reservation_fence
+                    .map(|_| request.request_id.to_string());
                 let binding = open_compute_storage::WorkflowRepository::new(self.storage.db())
                     .prepare_binding(
                         request.account_id,
@@ -52,6 +56,8 @@ impl VersionController<'_> {
                                 "Workflow binding requires an exact class name",
                             )
                         })?,
+                        reservation_owner.as_deref(),
+                        input.config.workflow_reservation_fence,
                         input.config.workflow_schedules.clone(),
                         request.now_ms,
                     )?;

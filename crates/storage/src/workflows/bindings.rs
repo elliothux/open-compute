@@ -46,16 +46,32 @@ impl WorkflowRepository<'_> {
         name: &str,
         definition: WorkflowId,
         class_name: &str,
+        reservation_owner: Option<&str>,
+        reservation_fence: Option<i64>,
         mut schedules: Vec<String>,
         now_ms: i64,
     ) -> Result<WorkflowBindingRecord, PlatformError> {
         let definition = self.definition(account, definition)?;
         validate_class_name(class_name)?;
-        match definition.state {
-            ResourceState::Creating
-                if definition.current_version_id.is_none()
-                    && definition.reserved_class_name.as_deref() == Some(class_name) => {}
-            ResourceState::Ready if definition.availability == ResourceAvailability::Healthy => {
+        if reservation_owner.is_some() != reservation_fence.is_some()
+            || reservation_owner.is_some_and(|owner| owner.is_empty() || owner.len() > 128)
+            || reservation_fence.is_some_and(|fence| fence < 1)
+        {
+            return Err(invariant());
+        }
+        match (reservation_owner, reservation_fence) {
+            (Some(owner), Some(fence))
+                if matches!(
+                    definition.state,
+                    ResourceState::Creating | ResourceState::Ready
+                ) && definition.reserved_class_name.as_deref() == Some(class_name)
+                    && definition.reservation_owner.as_deref() == Some(owner)
+                    && definition.reservation_fence == fence
+                    && definition.reservation_state.is_some() => {}
+            (None, None)
+                if definition.state == ResourceState::Ready
+                    && definition.availability == ResourceAvailability::Healthy =>
+            {
                 let current = definition
                     .current_version_id
                     .ok_or_else(|| error(ErrorCode::WorkflowNotReady))?;
@@ -86,6 +102,8 @@ impl WorkflowRepository<'_> {
             descriptor_sha256: descriptor.sha256()?,
             descriptor,
             version_id: version,
+            reservation_owner: reservation_owner.map(str::to_owned),
+            reservation_fence,
             created_at_ms: now_ms,
         })
     }
@@ -229,10 +247,12 @@ pub(crate) fn insert_workflow_bindings(
             return Err(invariant());
         }
         tx.execute("INSERT INTO workflow_bindings(id,version_id,name,definition_id,definition_lifecycle_generation,
-            class_name,capability_version,schedules_json,descriptor_sha256,created_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![
+            class_name,capability_version,schedules_json,descriptor_sha256,reservation_owner,reservation_fence,created_at_ms)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![
             descriptor.binding_id.to_string(),binding.version_id.to_string(),descriptor.name,descriptor.definition_id.to_string(),
             descriptor.definition_lifecycle_generation,descriptor.class_name,descriptor.capability_version,
-            serde_json::to_vec(&descriptor.schedules).map_err(|_| invariant())?,binding.descriptor_sha256.as_slice(),binding.created_at_ms]).map_err(sql_error)?;
+            serde_json::to_vec(&descriptor.schedules).map_err(|_| invariant())?,binding.descriptor_sha256.as_slice(),
+            binding.reservation_owner,binding.reservation_fence,binding.created_at_ms]).map_err(sql_error)?;
     }
     Ok(())
 }
@@ -255,7 +275,8 @@ pub(crate) fn read_workflow_bindings(
 
 pub(super) const BINDING_SELECT: &str =
     "SELECT b.id,b.version_id,b.name,b.definition_id,b.definition_lifecycle_generation,
-    b.class_name,b.capability_version,b.schedules_json,b.descriptor_sha256,b.created_at_ms FROM workflow_bindings b";
+    b.class_name,b.capability_version,b.schedules_json,b.descriptor_sha256,b.created_at_ms,
+    b.reservation_owner,b.reservation_fence FROM workflow_bindings b";
 pub(super) fn binding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowBindingRecord> {
     Ok(WorkflowBindingRecord {
         descriptor: WorkflowBindingDescriptor {
@@ -272,6 +293,8 @@ pub(super) fn binding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowB
         },
         version_id: parse(row, 1)?,
         descriptor_sha256: digest(row, 8)?,
+        reservation_owner: row.get(10)?,
+        reservation_fence: row.get(11)?,
         created_at_ms: row.get(9)?,
     })
 }

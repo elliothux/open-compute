@@ -180,6 +180,12 @@ pub struct CanonicalBindingConfig {
     /// Exact `WorkflowEntrypoint` export selected by a Workflow binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_class_name: Option<String>,
+    /// Internal fencing generation for an upload-first Workflow reservation.
+    ///
+    /// This value is populated only by the authenticated Worker upload adapter and is never
+    /// accepted from, or emitted to, the public binding wire contract.
+    #[serde(skip)]
+    pub workflow_reservation_fence: Option<i64>,
     /// Direct cron schedules attached to a Workflow binding.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflow_schedules: Vec<String>,

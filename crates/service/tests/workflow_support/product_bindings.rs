@@ -199,6 +199,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             permissions: Default::default(),
             config: CanonicalBindingConfig {
                 workflow_class_name: Some("Flow".into()),
+                workflow_reservation_fence: None,
                 workflow_schedules: vec!["* * * * *".into()],
             },
         },

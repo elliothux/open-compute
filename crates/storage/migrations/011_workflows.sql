@@ -7,11 +7,14 @@ CREATE TABLE workflow_bindings (
   definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
   definition_lifecycle_generation INTEGER NOT NULL CHECK(definition_lifecycle_generation >= 1),
   class_name TEXT NOT NULL CHECK(length(class_name) BETWEEN 1 AND 128),
+  reservation_owner TEXT CHECK(reservation_owner IS NULL OR length(reservation_owner) BETWEEN 1 AND 128),
+  reservation_fence INTEGER CHECK(reservation_fence IS NULL OR reservation_fence >= 1),
   capability_version INTEGER NOT NULL CHECK(capability_version = 1),
   schedules_json BLOB NOT NULL CHECK(length(schedules_json) BETWEEN 2 AND 32768),
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   created_at_ms INTEGER NOT NULL,
-  UNIQUE(version_id,name)
+  UNIQUE(version_id,name),
+  CHECK((reservation_owner IS NULL) = (reservation_fence IS NULL))
 ) STRICT;
 
 CREATE TABLE workflow_binding_operations (
@@ -62,12 +65,22 @@ CREATE TABLE workflow_definitions (
   availability_code TEXT,
   lifecycle_generation INTEGER NOT NULL CHECK(lifecycle_generation >= 1),
   reserved_class_name TEXT CHECK(reserved_class_name IS NULL OR length(reserved_class_name) BETWEEN 1 AND 128),
+  reservation_owner TEXT CHECK(reservation_owner IS NULL OR length(reservation_owner) BETWEEN 1 AND 128),
+  reservation_fence INTEGER NOT NULL DEFAULT 0 CHECK(reservation_fence >= 0),
+  reservation_state TEXT CHECK(reservation_state IS NULL OR reservation_state IN ('reserved','bound')),
+  reservation_created_definition INTEGER CHECK(reservation_created_definition IS NULL OR reservation_created_definition IN (0,1)),
   current_version_id TEXT REFERENCES workflow_versions(id) DEFERRABLE INITIALLY DEFERRED,
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
   deleted_at_ms INTEGER,
   CHECK((state = 'tombstoned') = (deleted_at_ms IS NOT NULL)),
-  CHECK((availability = 'healthy') = (availability_code IS NULL))
+  CHECK((availability = 'healthy') = (availability_code IS NULL)),
+  CHECK((reserved_class_name IS NULL AND reservation_owner IS NULL AND reservation_state IS NULL
+         AND reservation_created_definition IS NULL)
+     OR (reserved_class_name IS NOT NULL AND reservation_owner IS NOT NULL AND reservation_fence >= 1
+         AND reservation_state IS NOT NULL AND reservation_created_definition IS NOT NULL
+         AND state IN ('creating','ready')
+         AND (reservation_created_definition=0 OR (state='creating' AND current_version_id IS NULL))))
 ) STRICT;
 
 CREATE TABLE workflow_instance_operations (
@@ -130,6 +143,8 @@ CREATE TABLE workflow_versions (
   worker_id TEXT NOT NULL REFERENCES workers(id),
   worker_version_id TEXT NOT NULL REFERENCES worker_versions(id),
   class_name TEXT NOT NULL CHECK(length(class_name) BETWEEN 1 AND 128),
+  reservation_owner TEXT CHECK(reservation_owner IS NULL OR length(reservation_owner) BETWEEN 1 AND 128),
+  reservation_fence INTEGER CHECK(reservation_fence IS NULL OR reservation_fence >= 1),
   worker_code_sha256 BLOB NOT NULL CHECK(length(worker_code_sha256) = 32),
   loader_schema_version INTEGER NOT NULL CHECK(loader_schema_version > 0),
   capability_version INTEGER NOT NULL CHECK(capability_version = 1),
@@ -141,7 +156,8 @@ CREATE TABLE workflow_versions (
   deleted_at_ms INTEGER,
   UNIQUE(definition_id,version_number),
   CHECK((state = 'tombstoned') = (deleted_at_ms IS NOT NULL)),
-  CHECK(state != 'ready' OR ready_at_ms IS NOT NULL)
+  CHECK(state != 'ready' OR ready_at_ms IS NOT NULL),
+  CHECK((reservation_owner IS NULL) = (reservation_fence IS NULL))
 ) STRICT;
 
 CREATE UNIQUE INDEX workflow_definitions_live_name ON workflow_definitions(account_id,name)
@@ -171,9 +187,13 @@ BEGIN
     JOIN workflow_definitions f ON f.account_id = w.account_id
     WHERE d.id = NEW.version_id AND d.state = 'staging' AND f.id = NEW.definition_id
       AND f.lifecycle_generation = NEW.definition_lifecycle_generation
-      AND ((f.state = 'creating' AND f.current_version_id IS NULL
-            AND f.reserved_class_name = NEW.class_name)
-        OR (f.state = 'ready' AND f.availability = 'healthy'
+      AND (((NEW.reservation_owner IS NOT NULL AND NEW.reservation_fence IS NOT NULL)
+            AND f.state IN ('creating','ready') AND f.reserved_class_name = NEW.class_name
+            AND f.reservation_owner = NEW.reservation_owner
+            AND f.reservation_fence = NEW.reservation_fence
+            AND f.reservation_state IN ('reserved','bound'))
+        OR (NEW.reservation_owner IS NULL AND NEW.reservation_fence IS NULL
+            AND f.state = 'ready' AND f.availability = 'healthy'
             AND EXISTS(SELECT 1 FROM workflow_versions v
               WHERE v.id = f.current_version_id AND v.definition_id = f.id
                 AND v.state = 'ready' AND v.class_name = NEW.class_name)))
@@ -184,6 +204,15 @@ BEGIN
     UNION ALL SELECT 1 FROM version_bindings WHERE version_id = NEW.version_id AND name = NEW.name
     UNION ALL SELECT 1 FROM queue_producer_bindings WHERE version_id = NEW.version_id AND name = NEW.name
   ) THEN RAISE(ABORT,'workflow binding name conflict') END;
+END;
+
+CREATE TRIGGER workflow_binding_marks_reservation_bound AFTER INSERT ON workflow_bindings
+WHEN NEW.reservation_owner IS NOT NULL AND NEW.reservation_fence IS NOT NULL
+BEGIN
+  UPDATE workflow_definitions SET reservation_state='bound',updated_at_ms=max(updated_at_ms,NEW.created_at_ms)
+   WHERE id=NEW.definition_id AND reservation_owner=NEW.reservation_owner
+     AND reservation_fence=NEW.reservation_fence AND reserved_class_name=NEW.class_name;
+  SELECT CASE WHEN changes()!=1 THEN RAISE(ABORT,'workflow reservation fence') END;
 END;
 
 CREATE TRIGGER workflow_binding_remove_ref AFTER DELETE ON workflow_bindings

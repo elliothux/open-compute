@@ -40,19 +40,35 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
         if definition.lifecycle_generation != 1 {
             return Err(invariant());
         }
-        if let Some(class_name) = &definition.reserved_class_name {
-            validate_class_name(class_name).map_err(|_| invariant())?;
-            if definition.state != ResourceState::Creating
-                || definition.current_version_id.is_some()
-            {
-                return Err(invariant());
+        match (
+            &definition.reserved_class_name,
+            &definition.reservation_owner,
+            definition.reservation_state,
+            definition.reservation_created_definition,
+        ) {
+            (Some(class_name), Some(owner), Some(_), Some(created)) => {
+                validate_class_name(class_name).map_err(|_| invariant())?;
+                if owner.is_empty()
+                    || owner.len() > 128
+                    || definition.reservation_fence < 1
+                    || (created
+                        && (definition.state != ResourceState::Creating
+                            || definition.current_version_id.is_some()))
+                {
+                    return Err(invariant());
+                }
             }
+            (None, None, None, None) => {}
+            _ => return Err(invariant()),
         }
     }
     let mut versions = conn.prepare(VERSION_SELECT).map_err(sql_error)?;
     for version in versions.query_map([], version_row).map_err(sql_error)? {
         let version = version.map_err(sql_error)?;
         if version_digest(&version.target)? != version.target.descriptor_sha256 {
+            return Err(invariant());
+        }
+        if version.reservation_owner.is_some() != version.reservation_fence.is_some() {
             return Err(invariant());
         }
     }
@@ -63,6 +79,9 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
     {
         let binding = binding.map_err(sql_error)?;
         if binding.descriptor.sha256()? != binding.descriptor_sha256 {
+            return Err(invariant());
+        }
+        if binding.reservation_owner.is_some() != binding.reservation_fence.is_some() {
             return Err(invariant());
         }
     }
@@ -116,12 +135,21 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
            AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN workflow_definitions f ON f.id=b.definition_id
              JOIN worker_versions d ON d.id=b.version_id JOIN workers w ON w.id=d.worker_id
              WHERE f.account_id!=w.account_id OR f.lifecycle_generation!=b.definition_lifecycle_generation
-               OR NOT ((f.state='creating' AND f.current_version_id IS NULL
-                         AND f.reserved_class_name=b.class_name)
-                     OR (f.state='ready' AND f.availability='healthy' AND EXISTS(
-                         SELECT 1 FROM workflow_versions cv WHERE cv.id=f.current_version_id
-                           AND cv.definition_id=f.id AND cv.state='ready'
-                           AND cv.class_name=b.class_name))))
+               OR f.state NOT IN ('creating','ready')
+               OR (f.state='creating' AND NOT (f.current_version_id IS NULL
+                     AND b.reservation_owner IS NOT NULL AND b.reservation_fence IS NOT NULL
+                     AND f.reserved_class_name=b.class_name
+                     AND f.reservation_owner=b.reservation_owner
+                     AND f.reservation_fence=b.reservation_fence)))
+           AND NOT EXISTS(SELECT 1 FROM workflow_versions v JOIN workflow_definitions f ON f.id=v.definition_id
+             WHERE v.state IN ('staging','validating') AND v.reservation_owner IS NOT NULL
+               AND NOT (f.reserved_class_name=v.class_name AND f.reservation_owner=v.reservation_owner
+                 AND f.reservation_fence=v.reservation_fence))
+           AND NOT EXISTS(SELECT 1 FROM workflow_definitions f WHERE f.reservation_state='bound'
+             AND NOT EXISTS(SELECT 1 FROM workflow_bindings b WHERE b.definition_id=f.id
+               AND b.reservation_owner=f.reservation_owner AND b.reservation_fence=f.reservation_fence)
+             AND NOT EXISTS(SELECT 1 FROM workflow_versions v WHERE v.definition_id=f.id
+               AND v.reservation_owner=f.reservation_owner AND v.reservation_fence=f.reservation_fence))
            AND NOT EXISTS(SELECT 1 FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.workflow_version_id
              WHERE r.definition_id!=v.definition_id OR r.worker_version_id!=v.worker_version_id
                OR (r.state!='released' AND v.state!='ready'))",

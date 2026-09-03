@@ -2,7 +2,10 @@
 
 use crate::runtime_bridge::WorkerdTransport;
 use open_compute_core::{AccountId, ErrorCode, PlatformError, VersionId, WorkflowId};
-use open_compute_storage::{PlatformStorage, SchedulerStore, WorkflowRepository, WorkflowVersion};
+use open_compute_storage::{
+    PlatformStorage, SchedulerStore, WorkflowDefinitionReservation, WorkflowRepository,
+    WorkflowVersion,
+};
 use std::sync::Arc;
 
 /// Workflow composition over the one catalog, scheduler, and runtime probe authority.
@@ -73,11 +76,29 @@ impl WorkflowApiState {
         validate_version(self.storage.clone(), &self.transport, version).await
     }
 
-    /// Re-probe a durable validating version after an interrupted deployment.
-    pub(crate) async fn validate_version(
+    /// Freeze a target through the exact fenced upload-before-PUT reservation.
+    pub async fn create_reserved_version(
         &self,
-        version: WorkflowVersion,
+        account: AccountId,
+        definition: WorkflowId,
+        version: VersionId,
+        class_name: String,
+        reservation: WorkflowDefinitionReservation,
     ) -> Result<WorkflowVersion, PlatformError> {
+        let storage = self.storage.clone();
+        let version = tokio::task::spawn_blocking(move || {
+            let _admission = storage.reserve_mutation(64 * 1024)?;
+            WorkflowRepository::new(storage.db()).stage_reserved_version(
+                account,
+                definition,
+                version,
+                &class_name,
+                &reservation,
+                now_ms(),
+            )
+        })
+        .await
+        .map_err(|_| unavailable())??;
         validate_version(self.storage.clone(), &self.transport, version).await
     }
 }

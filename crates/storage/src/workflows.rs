@@ -69,18 +69,23 @@ impl<'a> WorkflowRepository<'a> {
 
     /// Reserve or reuse the creating definition required by Wrangler's upload-before-PUT flow.
     ///
-    /// The reservation is account/name scoped and freezes the first class selection across
-    /// upload retries and process restarts. Ready definitions are returned unchanged; binding
-    /// admission separately proves their current ready version selects the exact class.
+    /// The reservation is account/name scoped and freezes class selection across retries and
+    /// process restarts. Reclaiming the same class advances the fence; a different pending class
+    /// fails closed. Ready definitions retain their current runtime version while staging the
+    /// pending class.
     pub fn reserve_definition(
         &self,
         account: AccountId,
         name: &str,
         class_name: &str,
+        owner: &str,
         now_ms: i64,
-    ) -> Result<WorkflowDefinition, PlatformError> {
+    ) -> Result<WorkflowDefinitionReservation, PlatformError> {
         open_compute_core::workflow::validate_workflow_name(name)?;
         validate_class_name(class_name)?;
+        if owner.is_empty() || owner.len() > 128 {
+            return Err(invariant());
+        }
         self.db.with_immediate(|tx| {
             if !tx
                 .query_row(
@@ -103,48 +108,175 @@ impl<'a> WorkflowRepository<'a> {
                 .optional()
                 .map_err(sql_error)?;
             if let Some(existing) = existing {
-                return match existing.state {
-                    ResourceState::Ready => Ok(existing),
-                    ResourceState::Creating
-                        if existing.reserved_class_name.as_deref() == Some(class_name) =>
-                    {
-                        Ok(existing)
-                    }
-                    ResourceState::Creating if existing.reserved_class_name.is_none() => {
-                        let changed = tx
-                            .execute(
-                                "UPDATE workflow_definitions SET reserved_class_name=?2,updated_at_ms=?3
-                                 WHERE id=?1 AND state='creating' AND reserved_class_name IS NULL",
-                                params![existing.id.to_string(), class_name, now_ms],
-                            )
-                            .map_err(sql_error)?;
-                        if changed != 1 {
-                            return Err(error(ErrorCode::WorkflowNameConflict));
-                        }
-                        tx.query_row(
-                            &format!("{DEFINITION_SELECT} WHERE id=?1"),
-                            [existing.id.to_string()],
-                            definition_row,
-                        )
-                        .map_err(sql_error)
-                    }
-                    _ => Err(error(ErrorCode::WorkflowNameConflict)),
-                };
+                if !matches!(existing.state, ResourceState::Creating | ResourceState::Ready) {
+                    return Err(error(ErrorCode::WorkflowNameConflict));
+                }
+                if existing
+                    .reserved_class_name
+                    .as_deref()
+                    .is_some_and(|reserved| reserved != class_name)
+                {
+                    return Err(error(ErrorCode::WorkflowNameConflict));
+                }
+                if existing.reserved_class_name.as_deref() == Some(class_name)
+                    && existing.reservation_owner.as_deref() == Some(owner)
+                {
+                    return reservation(existing);
+                }
+                let fence = existing
+                    .reservation_fence
+                    .checked_add(1)
+                    .ok_or_else(invariant)?;
+                let changed = tx
+                    .execute(
+                        "UPDATE workflow_definitions SET reserved_class_name=?2,reservation_owner=?3,
+                         reservation_fence=?4,reservation_state='reserved',reservation_created_definition=0,
+                         updated_at_ms=?5 WHERE id=?1 AND state IN ('creating','ready')",
+                        params![existing.id.to_string(), class_name, owner, fence, now_ms],
+                    )
+                    .map_err(sql_error)?;
+                if changed != 1 {
+                    return Err(error(ErrorCode::WorkflowNameConflict));
+                }
+                let definition = tx
+                    .query_row(
+                        &format!("{DEFINITION_SELECT} WHERE id=?1"),
+                        [existing.id.to_string()],
+                        definition_row,
+                    )
+                    .map_err(sql_error)?;
+                return reservation(definition);
             }
             let id = WorkflowId::generate();
             tx.execute(
                 "INSERT INTO workflow_definitions(id,account_id,name,state,availability,availability_code,
-                 lifecycle_generation,reserved_class_name,created_at_ms,updated_at_ms)
-                 VALUES(?1,?2,?3,'creating','degraded','WORKFLOW_VERSION_NOT_READY',1,?4,?5,?5)",
-                params![id.to_string(), account.to_string(), name, class_name, now_ms],
+                 lifecycle_generation,reserved_class_name,reservation_owner,reservation_fence,reservation_state,
+                 reservation_created_definition,created_at_ms,updated_at_ms)
+                 VALUES(?1,?2,?3,'creating','degraded','WORKFLOW_VERSION_NOT_READY',1,?4,?5,1,'reserved',1,?6,?6)",
+                params![id.to_string(), account.to_string(), name, class_name, owner, now_ms],
             )
             .map_err(sql_error)?;
-            tx.query_row(
-                &format!("{DEFINITION_SELECT} WHERE id=?1"),
-                [id.to_string()],
-                definition_row,
-            )
-            .map_err(sql_error)
+            let definition = tx
+                .query_row(
+                    &format!("{DEFINITION_SELECT} WHERE id=?1"),
+                    [id.to_string()],
+                    definition_row,
+                )
+                .map_err(sql_error)?;
+            reservation(definition)
+        })
+    }
+
+    /// Release only the exact still-unconsumed reservation owned by this operation.
+    pub fn release_definition_reservation(
+        &self,
+        account: AccountId,
+        reservation: &WorkflowDefinitionReservation,
+        now_ms: i64,
+    ) -> Result<bool, PlatformError> {
+        self.db.with_immediate(|tx| {
+            let current = tx
+                .query_row(
+                    &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
+                    params![account.to_string(), reservation.definition.id.to_string()],
+                    definition_row,
+                )
+                .optional()
+                .map_err(sql_error)?;
+            let Some(current) = current else {
+                return Ok(false);
+            };
+            if current.reservation_owner.as_deref() != Some(reservation.owner.as_str())
+                || current.reservation_fence != reservation.fence
+            {
+                return Ok(false);
+            }
+            let consumed = tx
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM workflow_bindings WHERE reservation_owner=?1 AND reservation_fence=?2
+                            AND definition_id=?3
+                        UNION ALL
+                        SELECT 1 FROM workflow_versions WHERE reservation_owner=?1 AND reservation_fence=?2
+                            AND definition_id=?3
+                    )",
+                    params![
+                        reservation.owner,
+                        reservation.fence,
+                        reservation.definition.id.to_string()
+                    ],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?;
+            if consumed {
+                return Ok(false);
+            }
+            if reservation.created_definition
+                && current.reservation_created_definition == Some(true)
+                && current.state == ResourceState::Creating
+                && current.current_version_id.is_none()
+            {
+                let has_any_consumers = tx
+                    .query_row(
+                        "SELECT EXISTS(
+                            SELECT 1 FROM workflow_bindings WHERE definition_id=?1
+                            UNION ALL
+                            SELECT 1 FROM workflow_versions WHERE definition_id=?1
+                        )",
+                        [current.id.to_string()],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(sql_error)?;
+                if has_any_consumers {
+                    return Ok(false);
+                }
+                let deleting = tx
+                    .execute(
+                        "UPDATE workflow_definitions SET state='deleting',reserved_class_name=NULL,
+                         reservation_owner=NULL,reservation_state=NULL,reservation_created_definition=NULL,
+                         updated_at_ms=?4
+                         WHERE account_id=?1 AND id=?2 AND reservation_owner=?3 AND reservation_fence=?5
+                         AND state='creating' AND current_version_id IS NULL",
+                        params![
+                            account.to_string(),
+                            current.id.to_string(),
+                            reservation.owner,
+                            now_ms,
+                            reservation.fence
+                        ],
+                    )
+                    .map_err(sql_error)?;
+                if deleting != 1 {
+                    return Ok(false);
+                }
+                let tombstoned = tx
+                    .execute(
+                        "UPDATE workflow_definitions SET state='tombstoned',updated_at_ms=?3,deleted_at_ms=?3
+                         WHERE account_id=?1 AND id=?2 AND state='deleting'",
+                        params![account.to_string(), current.id.to_string(), now_ms],
+                    )
+                    .map_err(sql_error)?;
+                return Ok(tombstoned == 1);
+            }
+            if current.state == ResourceState::Ready {
+                let changed = tx
+                    .execute(
+                        "UPDATE workflow_definitions SET reserved_class_name=NULL,reservation_owner=NULL,
+                         reservation_state=NULL,reservation_created_definition=NULL,updated_at_ms=?5
+                         WHERE account_id=?1 AND id=?2 AND reservation_owner=?3 AND reservation_fence=?4
+                         AND state='ready'",
+                        params![
+                            account.to_string(),
+                            current.id.to_string(),
+                            reservation.owner,
+                            reservation.fence,
+                            now_ms
+                        ],
+                    )
+                    .map_err(sql_error)?;
+                return Ok(changed == 1);
+            }
+            Ok(false)
         })
     }
 
@@ -312,4 +444,25 @@ impl<'a> WorkflowRepository<'a> {
             Ok(())
         })
     }
+}
+
+fn reservation(
+    definition: WorkflowDefinition,
+) -> Result<WorkflowDefinitionReservation, PlatformError> {
+    let owner = definition.reservation_owner.clone().ok_or_else(invariant)?;
+    let created_definition = definition
+        .reservation_created_definition
+        .ok_or_else(invariant)?;
+    if definition.reserved_class_name.is_none()
+        || definition.reservation_fence < 1
+        || definition.reservation_state.is_none()
+    {
+        return Err(invariant());
+    }
+    Ok(WorkflowDefinitionReservation {
+        fence: definition.reservation_fence,
+        definition,
+        owner,
+        created_definition,
+    })
 }
