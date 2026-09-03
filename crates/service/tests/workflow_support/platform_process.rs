@@ -2,6 +2,7 @@
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
+use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 use std::fs;
 use std::net::SocketAddr;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
@@ -66,20 +67,70 @@ async fn admin_response(
 }
 
 pub(crate) struct Process(pub(crate) Child, PathBuf, String);
+impl Process {
+    #[allow(dead_code, reason = "only process Gates that require graceful exit call this")]
+    pub(crate) async fn stop(&mut self) {
+        let runtime_pid = lease_pid(&self.1);
+        let pid = Pid::from_raw(self.0.id() as i32).expect("ocd PID must be positive");
+        kill_process(pid, Signal::TERM).expect("signal ocd for graceful shutdown");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(status) = self.0.try_wait().expect("wait for ocd shutdown") {
+                assert!(status.success(), "ocd graceful shutdown failed: {status}");
+                break;
+            }
+            assert!(Instant::now() < deadline, "ocd graceful shutdown timed out");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(
+            !self.1.exists(),
+            "normal shutdown left the workerd child lease"
+        );
+        assert_pid_gone(runtime_pid, "stock workerd after ocd shutdown");
+    }
+}
+
 impl Drop for Process {
     fn drop(&mut self) {
         if self.0.try_wait().unwrap().is_none() {
             let _ = self.0.kill();
         }
         let _ = self.0.wait();
-        // Normal crash cuts deliberately leave orphan recovery to the next
-        // ocd. On assertion failure, clean only the formally identified
-        // child before retaining the rest of the failure evidence.
-        if std::thread::panicking()
-            && let Err(error) = open_compute_runtime::recover_orphan_for_test(&self.1, &self.2)
-        {
-            eprintln!("Workflow Gate orphan cleanup failed: {}", error.code());
+        // Recover only the formally identified child before failure evidence
+        // is retained or successful temporary state is removed.
+        if let Err(error) = open_compute_runtime::recover_orphan_for_test(&self.1, &self.2) {
+            if std::thread::panicking() {
+                eprintln!("Workflow Gate orphan cleanup failed: {}", error.code());
+            } else {
+                panic!("Workflow Gate orphan cleanup failed: {}", error.code());
+            }
         }
+    }
+}
+
+fn lease_pid(path: &Path) -> i32 {
+    let bytes = fs::read(path).expect("ready ocd must own a workerd child lease");
+    let lease: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("workerd child lease must be valid JSON");
+    let pid = lease["pid"]
+        .as_i64()
+        .and_then(|value| i32::try_from(value).ok())
+        .expect("workerd child lease must contain a PID");
+    assert!(pid > 1, "workerd child PID must be signal-safe");
+    pid
+}
+
+fn assert_pid_gone(pid: i32, what: &str) {
+    let pid = Pid::from_raw(pid).expect("tracked PID must be positive");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match test_kill_process(pid) {
+            Err(error) if error == rustix::io::Errno::SRCH => return,
+            Ok(()) => {}
+            Err(error) => panic!("failed to inspect {what}: {error}"),
+        }
+        assert!(Instant::now() < deadline, "{what} is still live");
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 pub(crate) struct Evidence(pub(crate) Option<tempfile::TempDir>);

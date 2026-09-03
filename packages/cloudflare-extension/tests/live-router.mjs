@@ -102,7 +102,13 @@ async function workersContract() {
 
   const upload = await client.workers.scripts.update(uploadedWorkerName, {
     account_id: accountID,
-    metadata: { main_module: "index.js", compatibility_date: "2026-08-30" },
+    metadata: {
+      main_module: "index.js",
+      compatibility_date: "2026-08-30",
+      compatibility_flags: ["nodejs_compat"],
+      annotations: { "workers/tag": "official-sdk-typed-upload" },
+      bindings: [{ name: "SDK_TYPED_MODE", type: "plain_text", text: "sdk" }],
+    },
     files: [new File(
       ["export default { fetch() { return new Response('sdk'); } };"],
       "index.js",
@@ -114,6 +120,16 @@ async function workersContract() {
     account_id: accountID, page: 1, per_page: 10,
   });
   assert.equal(uploadedVersions.result.items.length, 1);
+  const uploadedVersion = await client.workers.scripts.versions.get(
+    uploadedVersions.result.items[0].id,
+    { account_id: accountID, script_name: uploadedWorkerName },
+  );
+  assert.deepEqual(uploadedVersion.resources.script_runtime.compatibility_flags, ["nodejs_compat"]);
+  assert.equal(uploadedVersion.annotations["workers/tag"], "official-sdk-typed-upload");
+  assert.deepEqual(
+    uploadedVersion.resources.bindings.find(({ name }) => name === "SDK_TYPED_MODE"),
+    { name: "SDK_TYPED_MODE", type: "plain_text", text: "sdk" },
+  );
   const uploadedDeployments = await client.workers.scripts.deployments.list(uploadedWorkerName, {
     account_id: accountID,
   });

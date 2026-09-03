@@ -1,11 +1,7 @@
 //! Bounded streaming parser for Cloudflare Worker multipart uploads.
 
 use super::model::WorkerUploadMetadata;
-use axum::body::Body;
-use axum::extract::{Multipart, Request};
-use axum::http::{HeaderValue, header};
-use bytes::Bytes;
-use futures::{StreamExt as _, stream};
+use axum::extract::Multipart;
 use open_compute_core::{ErrorCode, PlatformError};
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, ModuleInput, ModuleType, supports_worker_compatibility,
@@ -13,16 +9,20 @@ use open_compute_workers::{
 use std::collections::BTreeSet;
 
 const METADATA_PART: &str = "metadata";
-const MAX_METADATA_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_METADATA_BYTES: usize = 1024 * 1024;
 const MULTIPART_OVERHEAD_BYTES: usize = 1024 * 1024;
-const MAX_BOUNDARY_BYTES: usize = 70;
+const MAX_SDK_METADATA_FIELDS: usize = 2_048;
+
+/// Maximum complete Worker upload wire body accepted by the fixed P6 surface.
+pub(super) const MAX_BODY_BYTES: usize =
+    16 * 1024 * 1024 + MAX_METADATA_BYTES + MULTIPART_OVERHEAD_BYTES;
 
 #[derive(Clone, Debug)]
-struct RawPart {
-    name: String,
-    file_name: Option<String>,
-    content_type: Option<String>,
-    bytes: Vec<u8>,
+pub(super) struct RawPart {
+    pub(super) name: String,
+    pub(super) file_name: Option<String>,
+    pub(super) content_type: Option<String>,
+    pub(super) bytes: Vec<u8>,
 }
 
 /// Fully validated upload ready for the immutable Version pipeline.
@@ -34,106 +34,55 @@ pub(crate) struct ParsedWorkerUpload {
     pub bundle: Option<Vec<u8>>,
 }
 
-/// Recover the multipart boundary omitted from the media type by the fixed
-/// `cloudflare@7.1.0` `workers.scripts.update()` implementation. That SDK
-/// converts the typed body to `FormData` but retains its generated
-/// `Content-Type: application/javascript` header. Only a valid RFC multipart
-/// opening delimiter is accepted; all other JavaScript bodies still fail
-/// closed at the multipart extractor.
-pub(crate) async fn normalize_sdk_multipart_request(
-    request: Request,
-) -> Result<Request, PlatformError> {
-    let is_sdk_upload = request
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.eq_ignore_ascii_case("application/javascript"));
-    if !is_sdk_upload {
-        return Ok(request);
-    }
-
-    let (mut parts, body) = request.into_parts();
-    let mut body = body.into_data_stream();
-    let mut preserved = Vec::<Result<Bytes, axum::Error>>::new();
-    let mut opening = Vec::with_capacity(MAX_BOUNDARY_BYTES + 2);
-    'opening: loop {
-        let chunk = body
-            .next()
-            .await
-            .ok_or_else(invalid)?
-            .map_err(|_| invalid())?;
-        for byte in chunk.iter().copied() {
-            if opening.last() == Some(&b'\r') && byte == b'\n' {
-                opening.pop();
-                preserved.push(Ok(chunk));
-                break 'opening;
-            }
-            opening.push(byte);
-            if opening.len() > MAX_BOUNDARY_BYTES + 2 {
-                return Err(invalid());
-            }
-        }
-        preserved.push(Ok(chunk));
-    }
-    let boundary = opening.strip_prefix(b"--").ok_or_else(invalid)?;
-    if boundary.is_empty()
-        || boundary.len() > MAX_BOUNDARY_BYTES
-        || !boundary.iter().copied().all(valid_boundary_byte)
-    {
-        return Err(invalid());
-    }
-    let boundary = std::str::from_utf8(boundary).map_err(|_| invalid())?;
-    parts.headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_str(&format!("multipart/form-data; boundary={boundary}"))
-            .map_err(|_| invalid())?,
-    );
-    let prefix = stream::iter(preserved);
-    Ok(Request::from_parts(
-        parts,
-        Body::from_stream(prefix.chain(body)),
-    ))
-}
-
-fn valid_boundary_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric()
-        || matches!(
-            byte,
-            b'\'' | b'(' | b')' | b'+' | b'_' | b',' | b'-' | b'.' | b'/' | b':' | b'=' | b'?'
-        )
-}
-
 /// Incrementally read and bound a Worker multipart request.
 pub(crate) async fn parse_worker_upload(
     mut multipart: Multipart,
     limits: BundleLimits,
 ) -> Result<ParsedWorkerUpload, PlatformError> {
-    let total_limit = limits
-        .max_total_module_bytes
-        .checked_add(MAX_METADATA_BYTES)
-        .and_then(|value| value.checked_add(MULTIPART_OVERHEAD_BYTES))
-        .ok_or_else(too_large)?;
-    let part_limit = limits.max_module_bytes.max(MAX_METADATA_BYTES);
-    let mut total = 0_usize;
+    let mut module_total = 0_usize;
+    let mut metadata_total = 0_usize;
+    let mut module_count = 0_usize;
+    let mut metadata_field_count = 0_usize;
     let mut names = BTreeSet::new();
     let mut parts = Vec::new();
     while let Some(mut field) = multipart.next_field().await.map_err(|_| invalid())? {
-        if parts.len() >= limits.max_modules.saturating_add(1) {
-            return Err(too_large());
-        }
         let name = field.name().ok_or_else(invalid)?.to_owned();
-        validate_part_name(&name)?;
+        let is_metadata = name == METADATA_PART || name.starts_with("metadata[");
+        if is_metadata {
+            metadata_field_count = metadata_field_count.checked_add(1).ok_or_else(too_large)?;
+            if metadata_field_count > MAX_SDK_METADATA_FIELDS {
+                return Err(too_large());
+            }
+            super::sdk_multipart::validate_metadata_field_name(&name)?;
+        } else {
+            module_count = module_count.checked_add(1).ok_or_else(too_large)?;
+            if module_count > limits.max_modules {
+                return Err(too_large());
+            }
+            validate_part_name(&name)?;
+        }
         let file_name = field.file_name().map(ToOwned::to_owned);
         let content_type = field.content_type().map(ToOwned::to_owned);
         let mut bytes = Vec::new();
         while let Some(chunk) = field.chunk().await.map_err(|_| invalid())? {
-            total = total.checked_add(chunk.len()).ok_or_else(too_large)?;
-            if total > total_limit
-                || bytes
-                    .len()
-                    .checked_add(chunk.len())
-                    .is_none_or(|value| value > part_limit)
-            {
+            let next_part = bytes.len().checked_add(chunk.len()).ok_or_else(too_large)?;
+            let aggregate = if is_metadata {
+                &mut metadata_total
+            } else {
+                &mut module_total
+            };
+            *aggregate = aggregate.checked_add(chunk.len()).ok_or_else(too_large)?;
+            let aggregate_limit = if is_metadata {
+                MAX_METADATA_BYTES
+            } else {
+                limits.max_total_module_bytes
+            };
+            let part_limit = if is_metadata {
+                MAX_METADATA_BYTES
+            } else {
+                limits.max_module_bytes
+            };
+            if *aggregate > aggregate_limit || next_part > part_limit {
                 return Err(too_large());
             }
             bytes.extend_from_slice(&chunk);
@@ -145,65 +94,13 @@ pub(crate) async fn parse_worker_upload(
             bytes,
         });
     }
-    normalize_sdk_parts(&mut parts)?;
+    super::sdk_multipart::normalize_parts(&mut parts)?;
     for part in &parts {
         if !names.insert(part.name.clone()) {
             return Err(invalid());
         }
     }
     parse_parts(parts, limits)
-}
-
-fn normalize_sdk_parts(parts: &mut Vec<RawPart>) -> Result<(), PlatformError> {
-    for part in parts.iter_mut().filter(|part| part.name == "files[]") {
-        let file_name = part.file_name.take().ok_or_else(invalid)?;
-        validate_part_name(&file_name)?;
-        part.name = file_name;
-    }
-    if parts.iter().any(|part| part.name == METADATA_PART) {
-        if parts.iter().any(|part| part.name.starts_with("metadata[")) {
-            return Err(invalid());
-        }
-        return Ok(());
-    }
-
-    let mut metadata = serde_json::Map::new();
-    let mut retained = Vec::with_capacity(parts.len());
-    for part in parts.drain(..) {
-        let key = match part.name.as_str() {
-            "metadata[main_module]" => Some("main_module"),
-            "metadata[body_part]" => Some("body_part"),
-            "metadata[compatibility_date]" => Some("compatibility_date"),
-            _ if part.name.starts_with("metadata[") => return Err(invalid()),
-            _ => None,
-        };
-        let Some(key) = key else {
-            retained.push(part);
-            continue;
-        };
-        if part.content_type.is_some() || part.file_name.is_some() || part.bytes.is_empty() {
-            return Err(invalid());
-        }
-        let value = String::from_utf8(part.bytes).map_err(|_| invalid())?;
-        if metadata
-            .insert(key.to_owned(), serde_json::Value::String(value))
-            .is_some()
-        {
-            return Err(invalid());
-        }
-    }
-    if metadata.is_empty() {
-        *parts = retained;
-        return Ok(());
-    }
-    retained.push(RawPart {
-        name: METADATA_PART.to_owned(),
-        file_name: None,
-        content_type: Some("application/json".to_owned()),
-        bytes: serde_json::to_vec(&metadata).map_err(|_| invalid())?,
-    });
-    *parts = retained;
-    Ok(())
 }
 
 fn parse_parts(
@@ -402,7 +299,7 @@ fn module_type(content_type: Option<&str>) -> Result<ModuleType, PlatformError> 
     }
 }
 
-fn validate_part_name(name: &str) -> Result<(), PlatformError> {
+pub(super) fn validate_part_name(name: &str) -> Result<(), PlatformError> {
     if name.is_empty()
         || name.len() > 1_024
         || name.starts_with('/')
@@ -460,14 +357,14 @@ fn validate_binding_name(name: &str) -> Result<(), PlatformError> {
     if valid { Ok(()) } else { Err(invalid()) }
 }
 
-fn invalid() -> PlatformError {
+pub(super) fn invalid() -> PlatformError {
     PlatformError::new(
         ErrorCode::BundleInvalid,
         "Worker multipart upload is invalid",
     )
 }
 
-fn too_large() -> PlatformError {
+pub(super) fn too_large() -> PlatformError {
     PlatformError::new(
         ErrorCode::BundleTooLarge,
         "Worker multipart upload exceeds limits",
@@ -494,48 +391,6 @@ mod tests {
             content_type: None,
             bytes: bytes.to_vec(),
         }
-    }
-
-    #[test]
-    fn normalizes_fixed_cloudflare_sdk_metadata_and_file_fields() {
-        let mut parts = vec![
-            string_part("metadata[main_module]", b"index.js"),
-            string_part("metadata[compatibility_date]", b"2026-08-30"),
-            RawPart {
-                name: "files[]".to_owned(),
-                file_name: Some("index.js".to_owned()),
-                content_type: Some("application/javascript+module".to_owned()),
-                bytes: b"export default {}".to_vec(),
-            },
-        ];
-        normalize_sdk_parts(&mut parts).unwrap();
-        let parsed = parse_parts(parts, BundleLimits::default()).unwrap();
-        assert_eq!(parsed.metadata.main_module.as_deref(), Some("index.js"));
-        assert!(parsed.bundle.is_some());
-    }
-
-    #[tokio::test]
-    async fn recovers_fixed_cloudflare_sdk_form_boundary_from_body() {
-        use axum::extract::FromRequest as _;
-
-        let boundary = "----WebKitFormBoundary00112233445566778899aabbccddeeff";
-        let body = format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata[main_module]\"\r\n\r\nindex.js\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"metadata[compatibility_date]\"\r\n\r\n2026-08-30\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"files[]\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport default {{}}\r\n--{boundary}--\r\n"
-        );
-        let request = Request::builder()
-            .header(header::CONTENT_TYPE, "application/javascript")
-            .body(Body::from(body))
-            .unwrap();
-        let request = normalize_sdk_multipart_request(request).await.unwrap();
-        assert_eq!(
-            request.headers()[header::CONTENT_TYPE],
-            format!("multipart/form-data; boundary={boundary}")
-        );
-        let multipart = Multipart::from_request(request, &()).await.unwrap();
-        let parsed = parse_worker_upload(multipart, BundleLimits::default())
-            .await
-            .unwrap();
-        assert_eq!(parsed.metadata.main_module.as_deref(), Some("index.js"));
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::cloudflare_v4::{
 };
 use crate::http::HttpState;
 use axum::Router;
-use axum::extract::{FromRequest, Multipart, Path, Request, State};
+use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Path, Request, State};
 use axum::routing::{get, patch};
 use open_compute_core::{DeploymentId, PlatformError, RequestId, VersionId};
 use open_compute_storage::{
@@ -36,11 +36,14 @@ pub(crate) fn router() -> Router<HttpState> {
             "/accounts/{account}/workers/scripts/{script}",
             get(get_script)
                 .put(put_script)
-                .delete(super::mutations::delete_script),
+                .delete(super::mutations::delete_script)
+                .layer(DefaultBodyLimit::max(multipart::MAX_BODY_BYTES)),
         )
         .route(
             "/accounts/{account}/workers/scripts/{script}/versions",
-            get(list_versions).post(post_version),
+            get(list_versions)
+                .post(post_version)
+                .layer(DefaultBodyLimit::max(multipart::MAX_BODY_BYTES)),
         )
         .route(
             "/accounts/{account}/workers/scripts/{script}/versions/{version}",
@@ -387,7 +390,7 @@ async fn upload(
     let Some(api) = state.worker_api().cloned() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let request = match multipart::normalize_sdk_multipart_request(request).await {
+    let request = match super::sdk_multipart::normalize_request(request).await {
         Ok(value) => value,
         Err(error) => return platform_error(context.request_id(), &error),
     };

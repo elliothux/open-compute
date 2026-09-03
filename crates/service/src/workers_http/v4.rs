@@ -32,5 +32,7 @@ mod mutations;
 mod projection;
 #[path = "v4/query.rs"]
 mod query;
+#[path = "v4/sdk_multipart.rs"]
+mod sdk_multipart;
 
 pub(crate) use handlers::router;

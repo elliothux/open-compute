@@ -53,17 +53,25 @@ async fn official_cloudflare_sdk_matches_live_ocd_contract() {
         .env("NO_PROXY", "127.0.0.1,localhost")
         .output()
         .expect("run official Cloudflare SDK contract");
-    let process_log = fs::read_to_string(&fixture.log).unwrap_or_default();
     assert!(
         output.status.success(),
-        "stdout={}\nstderr={}\nocd={process_log}",
+        "stdout={}\nstderr={}\nocd={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
+        fs::read_to_string(&fixture.log).unwrap_or_default(),
     );
     assert!(
         fixture.process.0.try_wait().unwrap().is_none(),
-        "ocd exited after the SDK contract: {process_log}"
+        "ocd exited after the SDK contract: {}",
+        fs::read_to_string(&fixture.log).unwrap_or_default(),
     );
+    fixture.process.stop().await;
+    assert!(
+        tokio::net::TcpStream::connect(fixture.public_addr)
+            .await
+            .is_err()
+    );
+    let process_log = fs::read_to_string(&fixture.log).unwrap_or_default();
     for text in [
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
