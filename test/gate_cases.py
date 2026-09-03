@@ -48,7 +48,7 @@ ONCE = {
     'p1-snapshot': ('p1_full_snapshot_retention_and_fresh_host_restore_are_fail_closed',),
     'p3-assets': ('p3_assets_real_runtime_routing_binding_immutability_and_lifecycle',),
     'dashboard': (
-        'dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api',
+        'dashboard_real_runtime_serves_spa_assets_and_cloudflare_v4_api',
     ),
     'p3-services-hard': ('p3_services_native_rpc_type_pipeline_and_lifecycle_matrix',),
     'p3-services-events': (

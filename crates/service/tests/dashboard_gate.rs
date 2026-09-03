@@ -1,4 +1,4 @@
-//! Real pinned-workerd operator dashboard static-assets gate.
+//! Real pinned-workerd dashboard and Cloudflare v4 boundary gate.
 
 use axum::body::to_bytes;
 use axum::http::{Request, StatusCode, header};
@@ -40,7 +40,7 @@ use tokio::sync::RwLock;
 use tower::ServiceExt;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
+async fn dashboard_real_runtime_serves_spa_assets_and_cloudflare_v4_api() {
     let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
         .map(PathBuf::from)
         .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
@@ -277,6 +277,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
     };
     let state = HttpState::new(HealthCoordinator::new(), metrics, true, true, &server)
         .expect("dashboard gate HTTP state")
+        .with_platform_storage(storage.clone())
         .with_dashboard_dispatch(Arc::new(RwLock::new(Some(dispatch))));
     let router = admin_router(state);
 
@@ -376,7 +377,7 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/operator/api/v1/meta")
+                .uri("/client/v4/open-compute/capabilities")
                 .header(header::HOST, "localhost")
                 .header(header::AUTHORIZATION, "Bearer dashboard-gate-admin")
                 .body(axum::body::Body::empty())
@@ -390,17 +391,18 @@ async fn dashboard_real_runtime_serves_spa_assets_and_preserves_operator_api() {
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.contains("application/json")),
-        "operator API must not be handled by the dashboard SPA"
+        "Cloudflare v4 API must not be handled by the dashboard SPA"
     );
     let meta_body = to_bytes(meta.into_body(), 64 * 1024).await.unwrap();
     let meta_json: serde_json::Value = serde_json::from_slice(&meta_body).unwrap();
-    assert_eq!(meta_json["apiVersion"], "v1");
+    assert_eq!(meta_json["success"], true);
+    assert_eq!(meta_json["result"]["wrangler_version"], "4.127.1");
     assert_dashboard_surface_excludes_admin_token(&meta_body, "dashboard-gate-admin");
 
     let unauthorized = router
         .oneshot(
             Request::builder()
-                .uri("/operator/api/v1/account")
+                .uri("/client/v4/accounts")
                 .header(header::HOST, "localhost")
                 .body(axum::body::Body::empty())
                 .unwrap(),

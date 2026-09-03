@@ -47,6 +47,24 @@ pub(crate) async fn tenant_json(
     serde_json::from_slice(&bytes).unwrap()
 }
 
+async fn admin_response(
+    client: &Client,
+    address: SocketAddr,
+    path: &str,
+) -> Result<axum::http::Response<hyper::body::Incoming>, ()> {
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("http://{address}{path}"))
+        .header("host", "workflow.example")
+        .header("authorization", format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), client.request(request))
+        .await
+        .map_err(|_| ())?
+        .map_err(|_| ())
+}
+
 pub(crate) struct Process(pub(crate) Child, PathBuf, String);
 impl Drop for Process {
     fn drop(&mut self) {
@@ -125,7 +143,7 @@ pub(crate) async fn ready(client: &Client, admin: SocketAddr, child: &mut Proces
             return;
         }
         if Instant::now() >= deadline {
-            let status = response(client, admin, "/operator/api/v1/system/status", "GET")
+            let status = admin_response(client, admin, "/client/v4/open-compute/system/status")
                 .await
                 .unwrap();
             let bytes = to_bytes(Body::new(status.into_body()), 65536)
