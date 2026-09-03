@@ -37,6 +37,8 @@ async fn deprecated_queue_binding_delay_does_not_change_queue_authority() {
             WorkerId::generate(),
             None,
             false,
+            false,
+            0,
         )
         .unwrap();
 
@@ -78,6 +80,8 @@ async fn service_binding_props_are_projected_into_the_immutable_version_input() 
             WorkerId::generate(),
             None,
             false,
+            false,
+            0,
         )
         .unwrap();
 

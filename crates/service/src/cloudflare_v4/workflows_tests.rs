@@ -189,6 +189,11 @@ async fn definitions_versions_and_strict_permissions_use_v4_contracts() {
         .request("GET", &f.path("/orders"), Some("read-token"), None)
         .await;
     assert_eq!(detail.1["result"]["script_name"], "workflow-api");
+    let missing = f
+        .request("GET", &f.path("/missing"), Some("read-token"), None)
+        .await;
+    assert_eq!(missing.0, StatusCode::NOT_FOUND);
+    assert_eq!(missing.1["errors"][0]["code"], 10_200);
     let versions = f
         .request("GET", &f.path("/orders/versions"), Some("read-token"), None)
         .await;

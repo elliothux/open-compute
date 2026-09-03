@@ -26,6 +26,7 @@ pub(super) use super::json::json_body;
 pub(crate) fn router() -> Router<HttpState> {
     Router::new()
         .merge(super::assets::router())
+        .merge(super::account_subdomain::router())
         .route(
             "/accounts/{account}/workers/services/{script}",
             get(get_service_metadata),

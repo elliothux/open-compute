@@ -1,5 +1,7 @@
 //! Cloudflare v4 Worker protocol domain types and upload adapters.
 
+#[path = "v4/account_subdomain.rs"]
+mod account_subdomain;
 #[path = "v4/asset_wire.rs"]
 mod asset_wire;
 #[path = "v4/assets.rs"]

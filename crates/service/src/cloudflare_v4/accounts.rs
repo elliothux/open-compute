@@ -74,6 +74,12 @@ impl AccountAuthority {
         &self.public_id
     }
 
+    /// Return the stable, intentionally non-DNS account label required by the pinned Wrangler
+    /// Workflow deployment preflight.
+    pub(crate) fn workers_dev_prerequisite_label(&self) -> String {
+        format!("_open-compute-unroutable-{}", self.public_id)
+    }
+
     /// Map an internal resource identity to a stable, domain-separated public 32-hex ID.
     pub(crate) fn public_resource_id(&self, kind: V4ResourceKind, id: ResourceId) -> String {
         stable_id(kind.scope(), self.platform_id, Some(&id.to_string()))

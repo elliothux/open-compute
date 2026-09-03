@@ -80,6 +80,14 @@ Worker tombstone 在同一事务中释放 generic、Queue producer 和 Workflow 
 deployment declaration 仍保留为历史 authority。Queue/Workflow/R2/D1/KV/DO 删除按当前 Day1 tombstone
 模型确认无 live resource 后才允许同名重建，不保留旧 schema 或兼容清理分支。
 
+### Wrangler Workflow 部署 prerequisite
+
+固定 Wrangler 4.127.1 在 `workers_dev:false` 的 Workflow deploy 中，仍会于 Worker upload 后、Workflow
+PUT 前读取 `GET /accounts/{account_id}/workers/subdomain`，并丢弃返回值。open-compute 将该只读 route 标为
+`supported_with_deviation`：它返回以 `_` 开头、按 account 稳定派生的非 DNS label，只满足固定 CLI 的顺序
+prerequisite，不创建 workers.dev DNS、listener、route 或注册 authority；对应 `PUT/DELETE` 继续不支持。
+真实本地入口仍以 vendor Worker endpoints route 为准。
+
 ## Differential 与本地证据
 
 2026-09-01 的同源 portable fixtures 已在真实 Cloudflare 与 open-compute 对照以下七项：Workers、Cache

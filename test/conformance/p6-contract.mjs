@@ -58,7 +58,15 @@ export function buildSubset(openapi, manifest, revision, sourceSha256) {
   const seen = new Set();
   const deferred = new Map(manifest.deferredOperations.map(item => [item.operation, item]));
   const unsupported = new Map(manifest.unsupportedOperations.map(item => [item.operation, item]));
+  const deviated = new Map(
+    (manifest.supportedWithDeviationOperations ?? []).map(item => [item.operation, item]),
+  );
   const selectedOperations = [...manifest.operations, ...deferred.keys(), ...unsupported.keys()];
+  for (const key of deviated.keys()) {
+    if (!manifest.operations.includes(key)) {
+      throw new Error(`supported-with-deviation operation is not selected: ${key}`);
+    }
+  }
   for (const key of selectedOperations) {
     if (seen.has(key)) throw new Error(`duplicate selected operation: ${key}`);
     seen.add(key);
@@ -75,9 +83,12 @@ export function buildSubset(openapi, manifest, revision, sourceSha256) {
       method: method.toUpperCase(),
       path,
       operationId: operation.operationId,
-      status: unsupported.has(key) ? "unsupported" : deferred.has(key) ? "planned" : "supported",
+      status: unsupported.has(key) ? "unsupported"
+        : deferred.has(key) ? "planned"
+          : deviated.has(key) ? "supported_with_deviation" : "supported",
       source: "cloudflare-openapi",
       ...(deferred.has(key) ? { stage: deferred.get(key).stage } : {}),
+      ...(deviated.has(key) ? { constraint: deviated.get(key).reason } : {}),
       operationSha256: sha256(`${JSON.stringify(operation)}\n`),
     });
   }

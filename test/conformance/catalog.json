@@ -3,7 +3,7 @@
   "managementApi": {
     "authority": "openapi/p6-capability.json",
     "status": "planned",
-    "routeCount": 153,
+    "routeCount": 154,
     "legacyRouteCount": 4
   },
   "wrangler": {

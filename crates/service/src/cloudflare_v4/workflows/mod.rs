@@ -6,7 +6,7 @@ mod instances;
 mod value;
 
 use super::storage::{account, context};
-use super::{V4Error, V4Permission, V4RequestContext, error_response};
+use super::{V4Error, V4OfficialError, V4Permission, V4RequestContext, error_response};
 use crate::http::HttpState;
 use crate::workflow_http::WorkflowApiState;
 use axum::Router;
@@ -98,7 +98,7 @@ fn definition(
     page.items
         .into_iter()
         .find(|definition| definition.name == name)
-        .ok_or(V4Error::NotFound)
+        .ok_or(V4Error::Official(V4OfficialError::WorkflowNotFound))
 }
 
 fn valid_name(value: &str) -> Result<(), V4Error> {

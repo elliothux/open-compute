@@ -56,6 +56,16 @@
       "operationSha256": "2264ac72a581486a06ffd08ff6b493f88bf788e5a0c8fd4aec7d82f3a8acc3b9"
     },
     {
+      "id": "GET /accounts/{account_id}/workers/subdomain",
+      "method": "GET",
+      "path": "/accounts/{account_id}/workers/subdomain",
+      "operationId": "worker-subdomain-get-subdomain",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Fixed Wrangler 4.127.1 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion",
+      "operationSha256": "0b5d484de777f1236fc1d138a70d7c79070f82def0b495e8e052e5f363bd0db5"
+    },
+    {
       "id": "GET /accounts/{account_id}/workers/scripts",
       "method": "GET",
       "path": "/accounts/{account_id}/workers/scripts",
@@ -1641,6 +1651,80 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "user.memberships",
         "x-fern-sdk-method-name": "list",
+        "x-forge-hidden": true
+      }
+    },
+    "/accounts/{account_id}/workers/subdomain": {
+      "get": {
+        "operationId": "worker-subdomain-get-subdomain",
+        "summary": "Get Subdomain",
+        "description": "Returns a Workers subdomain for an account.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get Subdomain response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/workers_api-response-common"
+                    },
+                    {
+                      "properties": {
+                        "result": {
+                          "$ref": "#/components/schemas/workers_subdomain-2"
+                        }
+                      },
+                      "required": [
+                        "result"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Get Subdomain response failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workers_api-response-common-failure"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_token": []
+          },
+          {
+            "api_email": [],
+            "api_key": []
+          }
+        ],
+        "tags": [
+          "Worker Subdomain"
+        ],
+        "x-api-token-group": [
+          "Workers Scripts Write",
+          "Workers Scripts Read"
+        ],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "workers.subdomains",
+        "x-fern-sdk-method-name": "get",
         "x-forge-hidden": true
       }
     },
@@ -30946,42 +31030,41 @@
         "maxLength": 32,
         "x-auditable": true
       },
-      "workers_script-response-collection": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/workers_api-response-common"
+      "workers_api-response-common": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "$ref": "#/components/schemas/workers_messages"
           },
-          {
-            "properties": {
-              "result": {
-                "type": "array",
-                "items": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/workers_script-response"
-                    },
-                    {
-                      "properties": {
-                        "routes": {
-                          "description": "Routes associated with the Worker.",
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/workers_route"
-                          },
-                          "nullable": true
-                        }
-                      },
-                      "type": "object"
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "result"
-            ],
-            "type": "object"
+          "messages": {
+            "$ref": "#/components/schemas/workers_messages"
+          },
+          "success": {
+            "description": "Whether the API call was successful.",
+            "type": "boolean",
+            "example": true,
+            "enum": [
+              true
+            ]
           }
+        },
+        "required": [
+          "success",
+          "errors",
+          "messages"
+        ]
+      },
+      "workers_subdomain-2": {
+        "type": "object",
+        "properties": {
+          "subdomain": {
+            "type": "string",
+            "example": "my-subdomain",
+            "x-auditable": true
+          }
+        },
+        "required": [
+          "subdomain"
         ]
       },
       "workers_api-response-common-failure": {
@@ -31030,6 +31113,44 @@
           "errors",
           "messages",
           "result"
+        ]
+      },
+      "workers_script-response-collection": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/workers_api-response-common"
+          },
+          {
+            "properties": {
+              "result": {
+                "type": "array",
+                "items": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/workers_script-response"
+                    },
+                    {
+                      "properties": {
+                        "routes": {
+                          "description": "Routes associated with the Worker.",
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/workers_route"
+                          },
+                          "nullable": true
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "result"
+            ],
+            "type": "object"
+          }
         ]
       },
       "workers_script_name": {
@@ -31231,30 +31352,6 @@
             ],
             "type": "object"
           }
-        ]
-      },
-      "workers_api-response-common": {
-        "type": "object",
-        "properties": {
-          "errors": {
-            "$ref": "#/components/schemas/workers_messages"
-          },
-          "messages": {
-            "$ref": "#/components/schemas/workers_messages"
-          },
-          "success": {
-            "description": "Whether the API call was successful.",
-            "type": "boolean",
-            "example": true,
-            "enum": [
-              true
-            ]
-          }
-        },
-        "required": [
-          "success",
-          "errors",
-          "messages"
         ]
       },
       "workers_deployment": {
@@ -33915,6 +34012,38 @@
           }
         }
       },
+      "workers_messages": {
+        "type": "array",
+        "items": {
+          "properties": {
+            "code": {
+              "type": "integer",
+              "minimum": 1000
+            },
+            "documentation_url": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "source": {
+              "type": "object",
+              "properties": {
+                "pointer": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "type": "object",
+          "uniqueItems": true
+        },
+        "example": []
+      },
       "workers_script-response": {
         "properties": {
           "cache_options": {
@@ -34078,38 +34207,6 @@
           "id",
           "pattern"
         ]
-      },
-      "workers_messages": {
-        "type": "array",
-        "items": {
-          "properties": {
-            "code": {
-              "type": "integer",
-              "minimum": 1000
-            },
-            "documentation_url": {
-              "type": "string"
-            },
-            "message": {
-              "type": "string"
-            },
-            "source": {
-              "type": "object",
-              "properties": {
-                "pointer": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "type": "object",
-          "uniqueItems": true
-        },
-        "example": []
       },
       "workers_multipart-script": {
         "type": "object",

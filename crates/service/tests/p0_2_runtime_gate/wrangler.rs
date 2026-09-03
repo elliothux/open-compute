@@ -302,9 +302,16 @@ async fn verify_project(
             line.starts_with("PUT ") && line.contains("/workflows/wrangler-runtime-gate-flow")
         })
         .expect("Wrangler deploy must configure the Workflow");
+    let account_subdomain = trace
+        .iter()
+        .position(|line| {
+            line.starts_with("GET ")
+                && line.ends_with(&format!("/accounts/{public_account}/workers/subdomain"))
+        })
+        .expect("Wrangler Workflow deploy must read the account subdomain prerequisite");
     assert!(
-        upload < workflow_put,
-        "Wrangler must upload before Workflow PUT"
+        upload < account_subdomain && account_subdomain < workflow_put,
+        "Wrangler must upload, read the discarded account prerequisite, then configure Workflow"
     );
     assert!(trace.iter().any(|line| {
         line.starts_with("POST ") && line.contains("/versions?bindings_inherit=strict")

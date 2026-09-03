@@ -434,6 +434,7 @@ function conformanceSelfTests(): void {
       join(ROOT, "test/conformance/adapters.test.mjs"),
       join(ROOT, "test/conformance/case-evidence.test.mjs"),
       join(ROOT, "test/conformance/inventory.test.mjs"),
+      join(ROOT, "test/conformance/p6-contract.test.mjs"),
     ], { cwd: ROOT, encoding: "utf8", env: typesAstEnv(), timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
   } catch (error) {
     const failure = error as { message?: unknown; stderr?: unknown; stdout?: unknown };

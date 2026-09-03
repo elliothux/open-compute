@@ -291,6 +291,7 @@ shape，但返回明确 unsupported 错误；不能悄悄取第一个 Version。
 | Tails | `GET/POST /accounts/{account_id}/workers/scripts/{script_name}/tails`，`DELETE .../tails/{tail_id}` | 固定 Wrangler 的 `trace-v1` realtime tail；filter、session、overload 和 WebSocket 合同见专项设计 |
 | Secrets | `GET/PUT /accounts/{account_id}/workers/scripts/{script_name}/secrets`，`GET/DELETE .../secrets/{secret_name}`，`PUT .../secrets-bulk` | 支持固定 Wrangler 的 list/get/put/delete/bulk 请求 |
 | Cron | `GET/PUT /accounts/{account_id}/workers/scripts/{script_name}/schedules` | 以完整 schedule collection 更新映射现有 Cron authority |
+| Account subdomain | `GET /accounts/{account_id}/workers/subdomain` | 固定 Wrangler Workflow deploy 的只读 prerequisite；返回 account-scoped 稳定、不可路由 label，不创建 DNS/listener/route；`PUT/DELETE` 不支持 |
 | Subdomain | `GET/POST/DELETE /accounts/{account_id}/workers/scripts/{script_name}/subdomain` | 只表达 `enabled=false`、`previews_enabled=false`；启用请求明确拒绝 |
 
 `PUT Script` 和 `POST Version` 都是 Cloudflare 标准 API，不代表内部存在两套部署模型。前者只是兼容型组合操作，
@@ -307,6 +308,10 @@ shape，但返回明确 unsupported 错误；不能悄悄取第一个 Version。
 `.workers.dev`。因此 Day 1：
 
 - `wrangler.jsonc` 必须设置 `workers_dev: false`；
+- 固定 Wrangler 4.127.1 在 `workers_dev:false` 且同次 deploy 声明 Workflow 时，仍会无条件读取 account
+  subdomain 后丢弃其值；`GET /accounts/{account_id}/workers/subdomain` 因此返回以 `_` 开头的稳定 account-scoped
+  prerequisite label。该 label 不是合法 DNS hostname，不对应 DNS、listener、route 或可访问 URL；注册/修改/删除
+  account subdomain 仍不支持；
 - `preview_urls: true` 不支持；
 - `route`/`routes` 暂不支持，直到实现真实的 Zone/route API、内部 DNS 和 TLS 合同；
 - 不返回虚假的 workers.dev hostname；
@@ -1179,7 +1184,7 @@ response schema 和退出码；secret、token、signed upload token 和对象内
 | --- | --- |
 | 单机而非 Cloudflare 全球 fleet | API shape 保持，capacity/HA/latency 不伪装成 hosted semantics |
 | 一个 installation、一个 account | account scope 仍保留；不实现 billing/org/plan |
-| 无 `*.workers.dev` | 要求 `workers_dev:false`；真实入口通过 vendor endpoint 查询 |
+| 无 `*.workers.dev` | 要求 `workers_dev:false`；固定 Wrangler Workflow deploy 的 account subdomain GET 只返回不可路由 prerequisite label，且 CLI 丢弃该值；不创建或声明 DNS、listener、route；真实入口通过 vendor endpoint 查询 |
 | 无 Zone/DNS/TLS 管理 | `route`/`routes` 不支持；未来实现官方 Zone/Workers Routes 子集后再开放 |
 | 无 remote dev/preview URL | `wrangler dev` 仅支持上游本地模式；真实验证使用 dev environment deployment |
 | Deployment 只允许 100% 单 Version | 保留官方 request/response shape，拒绝多版本 rollout |

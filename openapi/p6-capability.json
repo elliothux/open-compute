@@ -54,6 +54,17 @@
         "requestMediaType": "none"
       },
       {
+        "id": "GET /accounts/{account_id}/workers/subdomain",
+        "method": "GET",
+        "path": "/accounts/{account_id}/workers/subdomain",
+        "operationId": "worker-subdomain-get-subdomain",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Fixed Wrangler 4.127.1 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion",
+        "operationSha256": "0b5d484de777f1236fc1d138a70d7c79070f82def0b495e8e052e5f363bd0db5",
+        "requestMediaType": "none"
+      },
+      {
         "id": "GET /accounts/{account_id}/workers/scripts",
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts",

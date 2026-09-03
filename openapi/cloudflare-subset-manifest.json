@@ -7,6 +7,7 @@
     "GET /accounts",
     "GET /accounts/{account_id}",
     "GET /memberships",
+    "GET /accounts/{account_id}/workers/subdomain",
     "GET /accounts/{account_id}/workers/scripts",
     "GET /accounts/{account_id}/workers/scripts/{script_name}",
     "PUT /accounts/{account_id}/workers/scripts/{script_name}",
@@ -143,6 +144,12 @@
       "operation": "GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects",
       "status": "unsupported",
       "reason": "P6 Day 1 object surface only qualifies exact object get/put/delete; bucket object listing must fail closed"
+    }
+  ],
+  "supportedWithDeviationOperations": [
+    {
+      "operation": "GET /accounts/{account_id}/workers/subdomain",
+      "reason": "Fixed Wrangler 4.127.1 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion"
     }
   ],
   "wranglerObservedOperations": [
