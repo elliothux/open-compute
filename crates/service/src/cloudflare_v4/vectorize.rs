@@ -8,7 +8,7 @@ use super::storage::{
 };
 use super::{V4Error, V4Permission, error_response, success_response};
 use crate::http::HttpState;
-use crate::search_http::SearchApiState;
+use crate::search_api::SearchApiState;
 use crate::vectorize_backend::{QueryOptions, ReturnMetadata, execute_query, run_query_cpu};
 use axum::Router;
 use axum::body::to_bytes;

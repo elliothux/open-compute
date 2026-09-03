@@ -11,7 +11,7 @@ use super::{
     V4Error, V4Permission, V4RequestContext, error_response, result_info_response, success_response,
 };
 use crate::http::HttpState;
-use crate::search_http::SearchApiState;
+use crate::search_api::SearchApiState;
 use axum::Router;
 use axum::extract::Request;
 use axum::response::Response;

@@ -53,7 +53,7 @@ pub mod run;
 pub mod runtime_bridge;
 pub mod runtime_generation;
 pub mod scheduler;
-pub mod search_http;
+pub mod search_api;
 pub mod service_invocations;
 mod snapshot_pins;
 mod sqlite_staging;
@@ -105,7 +105,7 @@ pub use run::run_platform;
 #[cfg(any(test, feature = "test-support"))]
 pub use run::{FailAfter, RunOptions, run_platform_with};
 pub use scheduler::SchedulerService;
-pub use search_http::SearchApiState;
+pub use search_api::SearchApiState;
 
 #[cfg(test)]
 mod tests;

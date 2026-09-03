@@ -30,7 +30,7 @@ use crate::r2_maintenance::R2Maintenance;
 use crate::runtime_bridge::{WorkerdTransport, bind_runtime_source, serve_runtime_source};
 use crate::runtime_generation::RuntimeGenerationResources;
 use crate::scheduler::SchedulerService;
-use crate::search_http::SearchApiState;
+use crate::search_api::SearchApiState;
 use crate::service_invocations::ServiceInvocationRegistry;
 use crate::snapshot_pins::{SnapshotPins, load_snapshot_pins};
 use crate::workers_http::WorkerApiState;

@@ -7,7 +7,7 @@ use crate::health::HealthCoordinator;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use crate::metrics::MetricsRegistry;
 use crate::p3_3_test_support::RuntimeFeatureFixture;
-use crate::search_http::SearchApiState;
+use crate::search_api::SearchApiState;
 use crate::snapshot_pins::SnapshotPins;
 use axum::body::to_bytes;
 use axum::http::{Request as HttpRequest, StatusCode};

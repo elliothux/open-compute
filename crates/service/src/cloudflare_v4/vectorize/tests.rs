@@ -4,7 +4,7 @@ use crate::cloudflare_v4::{router as v4_router, storage_router};
 use crate::health::HealthCoordinator;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use crate::metrics::MetricsRegistry;
-use crate::search_http::SearchApiState;
+use crate::search_api::SearchApiState;
 use crate::vectorize_coordinator::VectorizeCoordinator;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
