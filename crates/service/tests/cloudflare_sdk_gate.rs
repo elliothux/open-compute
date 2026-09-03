@@ -20,7 +20,6 @@ use open_compute_storage::{
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write as _;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
@@ -131,7 +130,7 @@ impl Fixture {
         let (public_addr, admin_addr) = platform_process::distinct_addresses();
         let config =
             platform_process::config(&root, &data, &mock.endpoint, public_addr, admin_addr);
-        append_role_tokens(&config, &root);
+        append_role_tokens(&root);
         let log = root.join("ocd.stderr.log");
         let mut process = platform_process::spawn(&config, &log);
         let client =
@@ -149,19 +148,11 @@ impl Fixture {
     }
 }
 
-fn append_role_tokens(config: &Path, root: &Path) {
-    let deployer = root.join("deployer.token");
-    let read_only = root.join("read-only.token");
-    write_token(&deployer, DEPLOYER_TOKEN);
-    write_token(&read_only, READ_ONLY_TOKEN);
-    let mut file = fs::OpenOptions::new().append(true).open(config).unwrap();
-    writeln!(
-        file,
-        "\n[server.deployer_auth]\nfile = \"{}\"\n\n[server.read_only_auth]\nfile = \"{}\"",
-        deployer.display(),
-        read_only.display(),
-    )
-    .unwrap();
+fn append_role_tokens(root: &Path) {
+    // platform_process::config already declares the three auth tables; only replace
+    // the secret file contents so this Gate can assert its own token values.
+    write_token(&root.join("deployer.token"), DEPLOYER_TOKEN);
+    write_token(&root.join("read-only.token"), READ_ONLY_TOKEN);
 }
 
 fn write_token(path: &Path, value: &str) {
