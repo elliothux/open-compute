@@ -28,12 +28,14 @@ use open_compute_service::runtime_bridge::{
     ScheduledDispatchRequest, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
 use open_compute_service::workers_http::WorkerApiState;
+use open_compute_service::workflow_http::WorkflowApiState;
 use open_compute_service::{
     HealthCoordinator, MetricsRegistry, SqliteKvBindingExecutor, bind_binding_backend,
     serve_binding_backend,
 };
 use open_compute_storage::{
     PlatformStorage, QueueContentType, SchedulerStore, VersionState, WorkerRepository,
+    WorkflowRepository,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
@@ -181,7 +183,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
     )
     .with_product_promoter(open_compute_service::product_promotion_for_test(
         storage.clone(),
-        scheduler,
+        scheduler.clone(),
     ));
 
     let a = deploy(
@@ -640,6 +642,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         artifacts.clone(),
         transport.clone(),
         account,
+        scheduler,
     )
     .await;
 

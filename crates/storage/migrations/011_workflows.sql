@@ -6,6 +6,7 @@ CREATE TABLE workflow_bindings (
   name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 64),
   definition_id TEXT NOT NULL REFERENCES workflow_definitions(id),
   definition_lifecycle_generation INTEGER NOT NULL CHECK(definition_lifecycle_generation >= 1),
+  class_name TEXT NOT NULL CHECK(length(class_name) BETWEEN 1 AND 128),
   capability_version INTEGER NOT NULL CHECK(capability_version = 1),
   schedules_json BLOB NOT NULL CHECK(length(schedules_json) BETWEEN 2 AND 32768),
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
@@ -60,6 +61,7 @@ CREATE TABLE workflow_definitions (
   availability TEXT NOT NULL CHECK(availability IN ('healthy','degraded','unavailable')),
   availability_code TEXT,
   lifecycle_generation INTEGER NOT NULL CHECK(lifecycle_generation >= 1),
+  reserved_class_name TEXT CHECK(reserved_class_name IS NULL OR length(reserved_class_name) BETWEEN 1 AND 128),
   current_version_id TEXT REFERENCES workflow_versions(id) DEFERRABLE INITIALLY DEFERRED,
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
@@ -168,8 +170,13 @@ BEGIN
     SELECT 1 FROM worker_versions d JOIN workers w ON w.id = d.worker_id
     JOIN workflow_definitions f ON f.account_id = w.account_id
     WHERE d.id = NEW.version_id AND d.state = 'staging' AND f.id = NEW.definition_id
-      AND f.state = 'ready' AND f.availability = 'healthy'
       AND f.lifecycle_generation = NEW.definition_lifecycle_generation
+      AND ((f.state = 'creating' AND f.current_version_id IS NULL
+            AND f.reserved_class_name = NEW.class_name)
+        OR (f.state = 'ready' AND f.availability = 'healthy'
+            AND EXISTS(SELECT 1 FROM workflow_versions v
+              WHERE v.id = f.current_version_id AND v.definition_id = f.id
+                AND v.state = 'ready' AND v.class_name = NEW.class_name)))
   ) THEN RAISE(ABORT,'workflow binding authority') END;
   SELECT CASE WHEN EXISTS (
     SELECT 1 FROM version_vars WHERE version_id = NEW.version_id AND name = NEW.name

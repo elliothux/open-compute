@@ -198,6 +198,7 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
             permissions: Default::default(),
             config: CanonicalBindingConfig {
+                workflow_class_name: Some("Flow".into()),
                 workflow_schedules: vec!["* * * * *".into()],
             },
         },

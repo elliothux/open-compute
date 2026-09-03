@@ -61,9 +61,13 @@ fn resource_tokens_and_typed_json_are_strict() {
         "{}"
     );
     assert_eq!(
-        serde_json::from_str::<CanonicalBindingConfig>(r#"{"workflowSchedules":["0 * * * *"]}"#)
-            .unwrap()
-            .workflow_schedules,
-        ["0 * * * *"]
+        serde_json::from_str::<CanonicalBindingConfig>(
+            r#"{"workflowClassName":"Flow","workflowSchedules":["0 * * * *"]}"#
+        )
+        .unwrap(),
+        CanonicalBindingConfig {
+            workflow_class_name: Some("Flow".to_owned()),
+            workflow_schedules: vec!["0 * * * *".to_owned()],
+        }
     );
 }

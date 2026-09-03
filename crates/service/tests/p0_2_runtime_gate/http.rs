@@ -7,6 +7,7 @@ pub(super) async fn api_matrix(
     artifacts: ArtifactStore,
     transport: WorkerdTransport,
     account: open_compute_core::AccountId,
+    scheduler: Arc<SchedulerStore>,
 ) {
     let health = HealthCoordinator::new();
     for component in [
@@ -36,6 +37,12 @@ pub(super) async fn api_matrix(
         read_only_auth: token_reference(&secrets.join("read-only.token"), READ_ONLY_TOKEN),
         ..ServerConfig::default()
     };
+    let workflow_api = WorkflowApiState::new(
+        storage.clone(),
+        scheduler,
+        transport.clone(),
+        open_compute_core::WorkflowsConfig::default(),
+    );
     let state = HttpState::new(health, metrics, false, false, &server)
         .unwrap()
         .with_worker_api(WorkerApiState::new(
@@ -45,7 +52,8 @@ pub(super) async fn api_matrix(
             VersionPins::new(),
             BundleLimits::default(),
             Duration::from_secs(5),
-        ));
+        ))
+        .with_workflow_api(Some(workflow_api));
     let (state, public_account) =
         open_compute_service::cloudflare_v4_for_test(state, storage.clone());
     wrangler::exercise(

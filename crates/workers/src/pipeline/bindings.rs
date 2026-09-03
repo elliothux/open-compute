@@ -46,6 +46,12 @@ impl VersionController<'_> {
                         version,
                         name,
                         definition,
+                        input.config.workflow_class_name.as_deref().ok_or_else(|| {
+                            PlatformError::new(
+                                ErrorCode::WorkflowBindingStale,
+                                "Workflow binding requires an exact class name",
+                            )
+                        })?,
                         input.config.workflow_schedules.clone(),
                         request.now_ms,
                     )?;
@@ -89,6 +95,12 @@ impl VersionController<'_> {
                 });
                 queue_descriptors.push(descriptor);
                 continue;
+            }
+            if input.config != CanonicalBindingConfig::default() {
+                return Err(PlatformError::new(
+                    ErrorCode::BindingTypeMismatch,
+                    "resource binding does not accept Workflow config",
+                ));
             }
             let resource = repository.get(request.account_id, input.id)?;
             if resource.state != ResourceState::Ready {

@@ -40,6 +40,14 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
         if definition.lifecycle_generation != 1 {
             return Err(invariant());
         }
+        if let Some(class_name) = &definition.reserved_class_name {
+            validate_class_name(class_name).map_err(|_| invariant())?;
+            if definition.state != ResourceState::Creating
+                || definition.current_version_id.is_some()
+            {
+                return Err(invariant());
+            }
+        }
     }
     let mut versions = conn.prepare(VERSION_SELECT).map_err(sql_error)?;
     for version in versions.query_map([], version_row).map_err(sql_error)? {
@@ -108,7 +116,12 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
            AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN workflow_definitions f ON f.id=b.definition_id
              JOIN worker_versions d ON d.id=b.version_id JOIN workers w ON w.id=d.worker_id
              WHERE f.account_id!=w.account_id OR f.lifecycle_generation!=b.definition_lifecycle_generation
-               OR f.state!='ready')
+               OR NOT ((f.state='creating' AND f.current_version_id IS NULL
+                         AND f.reserved_class_name=b.class_name)
+                     OR (f.state='ready' AND f.availability='healthy' AND EXISTS(
+                         SELECT 1 FROM workflow_versions cv WHERE cv.id=f.current_version_id
+                           AND cv.definition_id=f.id AND cv.state='ready'
+                           AND cv.class_name=b.class_name))))
            AND NOT EXISTS(SELECT 1 FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.workflow_version_id
              WHERE r.definition_id!=v.definition_id OR r.worker_version_id!=v.worker_version_id
                OR (r.state!='released' AND v.state!='ready'))",

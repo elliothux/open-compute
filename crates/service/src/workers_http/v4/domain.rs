@@ -99,6 +99,8 @@ async fn create_from_prepared_upload(
         worker.id,
         migration.map(super::do_lifecycle::PreparedDoMigration::tag),
         false,
+        true,
+        now_ms,
     )?;
     let reservation_id = request_id.to_string();
     let (content, asset_session) = input
@@ -186,6 +188,8 @@ pub(super) async fn validate_new_upload(
         WorkerId::generate(),
         None,
         true,
+        false,
+        now_ms,
     )?;
     input
         .content(
@@ -372,6 +376,7 @@ impl UploadInput {
                             .map_err(|_| invariant())?,
                         permissions: CanonicalPermissions::default(),
                         config: CanonicalBindingConfig {
+                            workflow_class_name: Some(binding.descriptor.class_name.clone()),
                             workflow_schedules: binding.descriptor.schedules.clone(),
                         },
                     },
@@ -499,6 +504,8 @@ impl UploadInput {
         worker: WorkerId,
         migration_tag: Option<&str>,
         allow_declared_do: bool,
+        reserve_workflows: bool,
+        now_ms: i64,
     ) -> Result<(), PlatformError> {
         let bindings = self.metadata.bindings.clone();
         for binding in &bindings {
@@ -647,12 +654,16 @@ impl UploadInput {
                     script_name,
                     ..
                 } => {
-                    if class_name.is_some() || script_name.is_some() {
+                    if script_name.is_some() {
                         return Err(unsupported(
-                            "Workflow class/script selectors are unsupported",
+                            "cross-Script Workflow bindings are unsupported",
                         ));
                     }
-                    let definition = WorkflowRepository::new(api.storage.db())
+                    let class_name = class_name
+                        .as_deref()
+                        .ok_or_else(|| invalid("Workflow class name is required"))?;
+                    let repository = WorkflowRepository::new(api.storage.db());
+                    let definition = repository
                         .definitions(
                             account,
                             Some(workflow_name.as_str()),
@@ -664,8 +675,17 @@ impl UploadInput {
                         )?
                         .items
                         .into_iter()
-                        .find(|value| value.name == *workflow_name)
-                        .ok_or_else(|| invalid("Workflow was not found"))?;
+                        .find(|value| value.name == *workflow_name);
+                    let definition = match definition {
+                        Some(definition) => definition,
+                        None if reserve_workflows => repository.reserve_definition(
+                            account,
+                            workflow_name,
+                            class_name,
+                            now_ms,
+                        )?,
+                        None => continue,
+                    };
                     self.bindings.insert(
                         name,
                         VersionBindingInput {
@@ -673,7 +693,10 @@ impl UploadInput {
                             id: ResourceId::from_uuid(definition.id.as_uuid())
                                 .map_err(|_| invariant())?,
                             permissions: CanonicalPermissions::default(),
-                            config: CanonicalBindingConfig::default(),
+                            config: CanonicalBindingConfig {
+                                workflow_class_name: Some(class_name.to_owned()),
+                                workflow_schedules: Vec::new(),
+                            },
                         },
                     );
                 }

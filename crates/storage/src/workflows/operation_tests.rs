@@ -36,6 +36,7 @@ fn current_descriptor_and_retained_history_pin_without_consuming_active_quota() 
             VersionId::generate(),
             "FLOW",
             definition.id,
+            "Flow",
             Vec::new(),
             3,
         )

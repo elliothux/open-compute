@@ -86,6 +86,7 @@ pub(super) fn public_bindings(
             "name": binding.descriptor.name,
             "type": "workflow",
             "workflow_name": definition.name,
+            "class_name": binding.descriptor.class_name,
         }));
     }
     let workers = WorkerRepository::new(api.storage.db()).list_workers(snapshot.account_id)?;

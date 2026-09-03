@@ -25,6 +25,8 @@ pub struct WorkflowDefinition {
     pub availability_code: Option<String>,
     /// Binding-breaking lifecycle generation.
     pub lifecycle_generation: i64,
+    /// Class reserved by a Worker upload while the first Workflow version is pending.
+    pub reserved_class_name: Option<String>,
     /// Version selected by new instance creation.
     pub current_version_id: Option<WorkflowVersionId>,
     /// Creation timestamp.
@@ -93,6 +95,8 @@ pub struct WorkflowBindingDescriptor {
     pub definition_id: WorkflowId,
     /// Frozen definition lifecycle generation.
     pub definition_lifecycle_generation: i64,
+    /// Exact `WorkflowEntrypoint` export selected by this binding.
+    pub class_name: String,
     /// Supported facade capability.
     pub capability_version: u32,
     /// Exact direct cron schedules owned by this binding.

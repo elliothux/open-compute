@@ -349,7 +349,7 @@ fn prepare_update(
                 .reserve_mutation(64 * 1024)
                 .map_err(|error| V4Error::from(&error))?;
             repository
-                .create_definition(account, workflow_name, now_ms()?)
+                .reserve_definition(account, workflow_name, class_name, now_ms()?)
                 .map_err(|error| V4Error::from(&error))?
         }
         Err(error) => return Err(error),

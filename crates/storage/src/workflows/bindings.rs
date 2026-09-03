@@ -20,6 +20,8 @@ impl WorkflowBindingDescriptor {
         {
             return Err(error(ErrorCode::WorkflowBindingStale));
         }
+        validate_class_name(&self.class_name)
+            .map_err(|_| error(ErrorCode::WorkflowBindingStale))?;
         if self
             .schedules
             .windows(2)
@@ -43,14 +45,29 @@ impl WorkflowRepository<'_> {
         version: VersionId,
         name: &str,
         definition: WorkflowId,
+        class_name: &str,
         mut schedules: Vec<String>,
         now_ms: i64,
     ) -> Result<WorkflowBindingRecord, PlatformError> {
         let definition = self.definition(account, definition)?;
-        if definition.state != ResourceState::Ready
-            || definition.availability != ResourceAvailability::Healthy
-        {
-            return Err(error(ErrorCode::WorkflowNotReady));
+        validate_class_name(class_name)?;
+        match definition.state {
+            ResourceState::Creating
+                if definition.current_version_id.is_none()
+                    && definition.reserved_class_name.as_deref() == Some(class_name) => {}
+            ResourceState::Ready if definition.availability == ResourceAvailability::Healthy => {
+                let current = definition
+                    .current_version_id
+                    .ok_or_else(|| error(ErrorCode::WorkflowNotReady))?;
+                let current = self.version(account, current)?;
+                if current.state != VersionState::Ready
+                    || current.target.definition_id != definition.id
+                    || current.target.class_name != class_name
+                {
+                    return Err(error(ErrorCode::WorkflowNotReady));
+                }
+            }
+            _ => return Err(error(ErrorCode::WorkflowNotReady)),
         }
         schedules.sort();
         schedules.dedup();
@@ -61,6 +78,7 @@ impl WorkflowRepository<'_> {
             name: name.into(),
             definition_id: definition.id,
             definition_lifecycle_generation: definition.lifecycle_generation,
+            class_name: class_name.to_owned(),
             capability_version: 1,
             schedules,
         };
@@ -81,9 +99,12 @@ impl WorkflowRepository<'_> {
     ) -> Result<(AccountId, WorkflowBindingRecord), PlatformError> {
         self.db.with_read(|conn| {
             let binding = conn.query_row(&format!("{BINDING_SELECT} JOIN worker_versions d ON d.id=b.version_id
-                JOIN workflow_definitions f ON f.id=b.definition_id JOIN workers w ON w.id=d.worker_id
+                JOIN workflow_definitions f ON f.id=b.definition_id JOIN workflow_versions v ON v.id=f.current_version_id
+                JOIN workers w ON w.id=d.worker_id
                 WHERE b.id=?1 AND b.version_id=?2 AND d.state='ready' AND w.account_id=f.account_id
-                AND b.definition_lifecycle_generation=f.lifecycle_generation"),params![id.to_string(),version.to_string()],binding_row)
+                AND b.definition_lifecycle_generation=f.lifecycle_generation AND f.state='ready'
+                AND f.availability='healthy' AND v.state='ready' AND v.definition_id=f.id
+                AND v.class_name=b.class_name"),params![id.to_string(),version.to_string()],binding_row)
                 .optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::WorkflowBindingStale))?;
             if binding.descriptor_sha256 != *expected || binding.descriptor.sha256()? != *expected { return Err(error(ErrorCode::WorkflowBindingStale)); }
             let account = conn.query_row("SELECT account_id FROM workflow_definitions WHERE id=?1",
@@ -208,9 +229,9 @@ pub(crate) fn insert_workflow_bindings(
             return Err(invariant());
         }
         tx.execute("INSERT INTO workflow_bindings(id,version_id,name,definition_id,definition_lifecycle_generation,
-            capability_version,schedules_json,descriptor_sha256,created_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![
+            class_name,capability_version,schedules_json,descriptor_sha256,created_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![
             descriptor.binding_id.to_string(),binding.version_id.to_string(),descriptor.name,descriptor.definition_id.to_string(),
-            descriptor.definition_lifecycle_generation,descriptor.capability_version,
+            descriptor.definition_lifecycle_generation,descriptor.class_name,descriptor.capability_version,
             serde_json::to_vec(&descriptor.schedules).map_err(|_| invariant())?,binding.descriptor_sha256.as_slice(),binding.created_at_ms]).map_err(sql_error)?;
     }
     Ok(())
@@ -234,7 +255,7 @@ pub(crate) fn read_workflow_bindings(
 
 pub(super) const BINDING_SELECT: &str =
     "SELECT b.id,b.version_id,b.name,b.definition_id,b.definition_lifecycle_generation,
-    b.capability_version,b.schedules_json,b.descriptor_sha256,b.created_at_ms FROM workflow_bindings b";
+    b.class_name,b.capability_version,b.schedules_json,b.descriptor_sha256,b.created_at_ms FROM workflow_bindings b";
 pub(super) fn binding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowBindingRecord> {
     Ok(WorkflowBindingRecord {
         descriptor: WorkflowBindingDescriptor {
@@ -244,12 +265,13 @@ pub(super) fn binding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowB
             name: row.get(2)?,
             definition_id: parse(row, 3)?,
             definition_lifecycle_generation: row.get(4)?,
-            capability_version: row.get(5)?,
-            schedules: serde_json::from_slice(&row.get::<_, Vec<u8>>(6)?)
+            class_name: row.get(5)?,
+            capability_version: row.get(6)?,
+            schedules: serde_json::from_slice(&row.get::<_, Vec<u8>>(7)?)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
         },
         version_id: parse(row, 1)?,
-        descriptor_sha256: digest(row, 7)?,
-        created_at_ms: row.get(8)?,
+        descriptor_sha256: digest(row, 8)?,
+        created_at_ms: row.get(9)?,
     })
 }

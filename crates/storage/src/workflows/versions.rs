@@ -68,23 +68,21 @@ impl WorkflowRepository<'_> {
         class_name: &str,
         now_ms: i64,
     ) -> Result<WorkflowVersion, PlatformError> {
-        let bytes = class_name.as_bytes();
-        if bytes.is_empty()
-            || bytes.len() > 128
-            || class_name.starts_with("__")
-            || !(bytes[0].is_ascii_alphabetic() || matches!(bytes[0], b'_' | b'$'))
-            || !bytes
-                .iter()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
-        {
-            return Err(error(ErrorCode::WorkflowVersionNotReady));
-        }
+        validate_class_name(class_name)?;
         self.db.with_immediate(|tx| {
             let definition_row = tx.query_row(&format!("{DEFINITION_SELECT} WHERE id=?1 AND account_id=?2"),
                 params![definition.to_string(),account.to_string()], definition_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotFound))?;
             if !matches!(definition_row.state, ResourceState::Creating|ResourceState::Ready) {
                 return Err(error(ErrorCode::WorkflowNotReady));
+            }
+            if definition_row.state == ResourceState::Creating {
+                if definition_row.reserved_class_name.as_deref().is_some_and(|reserved| reserved != class_name) {
+                    return Err(error(ErrorCode::WorkflowVersionNotReady));
+                }
+                tx.execute("UPDATE workflow_definitions SET reserved_class_name=?2,updated_at_ms=?3
+                    WHERE id=?1 AND state='creating' AND (reserved_class_name IS NULL OR reserved_class_name=?2)",
+                    params![definition.to_string(),class_name,now_ms]).map_err(sql_error)?;
             }
             let version = tx.query_row("SELECT w.id,d.id,d.worker_code_sha256,d.loader_schema_version
                 FROM worker_versions d JOIN workers w ON w.id=d.worker_id
@@ -152,7 +150,7 @@ impl WorkflowRepository<'_> {
                 tx.execute("UPDATE workflow_versions SET state='ready',ready_at_ms=?2 WHERE id=?1 AND state='validating'",
                     params![id.to_string(),now_ms]).map_err(sql_error)?;
                 tx.execute("UPDATE workflow_definitions SET state='ready',availability='healthy',availability_code=NULL,
-                    current_version_id=?2,updated_at_ms=?3 WHERE id=?1 AND state IN ('creating','ready')
+                    reserved_class_name=NULL,current_version_id=?2,updated_at_ms=?3 WHERE id=?1 AND state IN ('creating','ready')
                     AND (current_version_id IS NULL OR (SELECT version_number FROM workflow_versions WHERE id=current_version_id)<?4)",
                     params![version.target.definition_id.to_string(),id.to_string(),now_ms,version.version_number]).map_err(sql_error)?;
             } else {

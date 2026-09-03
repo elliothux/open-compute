@@ -67,6 +67,87 @@ impl<'a> WorkflowRepository<'a> {
         })
     }
 
+    /// Reserve or reuse the creating definition required by Wrangler's upload-before-PUT flow.
+    ///
+    /// The reservation is account/name scoped and freezes the first class selection across
+    /// upload retries and process restarts. Ready definitions are returned unchanged; binding
+    /// admission separately proves their current ready version selects the exact class.
+    pub fn reserve_definition(
+        &self,
+        account: AccountId,
+        name: &str,
+        class_name: &str,
+        now_ms: i64,
+    ) -> Result<WorkflowDefinition, PlatformError> {
+        open_compute_core::workflow::validate_workflow_name(name)?;
+        validate_class_name(class_name)?;
+        self.db.with_immediate(|tx| {
+            if !tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM accounts WHERE id=?1 AND deleted_at_ms IS NULL)",
+                    [account.to_string()],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?
+            {
+                return Err(error(ErrorCode::WorkflowNotFound));
+            }
+            let existing = tx
+                .query_row(
+                    &format!(
+                        "{DEFINITION_SELECT} WHERE account_id=?1 AND name=?2 AND state!='tombstoned'"
+                    ),
+                    params![account.to_string(), name],
+                    definition_row,
+                )
+                .optional()
+                .map_err(sql_error)?;
+            if let Some(existing) = existing {
+                return match existing.state {
+                    ResourceState::Ready => Ok(existing),
+                    ResourceState::Creating
+                        if existing.reserved_class_name.as_deref() == Some(class_name) =>
+                    {
+                        Ok(existing)
+                    }
+                    ResourceState::Creating if existing.reserved_class_name.is_none() => {
+                        let changed = tx
+                            .execute(
+                                "UPDATE workflow_definitions SET reserved_class_name=?2,updated_at_ms=?3
+                                 WHERE id=?1 AND state='creating' AND reserved_class_name IS NULL",
+                                params![existing.id.to_string(), class_name, now_ms],
+                            )
+                            .map_err(sql_error)?;
+                        if changed != 1 {
+                            return Err(error(ErrorCode::WorkflowNameConflict));
+                        }
+                        tx.query_row(
+                            &format!("{DEFINITION_SELECT} WHERE id=?1"),
+                            [existing.id.to_string()],
+                            definition_row,
+                        )
+                        .map_err(sql_error)
+                    }
+                    _ => Err(error(ErrorCode::WorkflowNameConflict)),
+                };
+            }
+            let id = WorkflowId::generate();
+            tx.execute(
+                "INSERT INTO workflow_definitions(id,account_id,name,state,availability,availability_code,
+                 lifecycle_generation,reserved_class_name,created_at_ms,updated_at_ms)
+                 VALUES(?1,?2,?3,'creating','degraded','WORKFLOW_VERSION_NOT_READY',1,?4,?5,?5)",
+                params![id.to_string(), account.to_string(), name, class_name, now_ms],
+            )
+            .map_err(sql_error)?;
+            tx.query_row(
+                &format!("{DEFINITION_SELECT} WHERE id=?1"),
+                [id.to_string()],
+                definition_row,
+            )
+            .map_err(sql_error)
+        })
+    }
+
     /// Read a definition only inside its owning account, including retained tombstones.
     pub fn definition(
         &self,

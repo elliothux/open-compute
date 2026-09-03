@@ -172,11 +172,14 @@ impl Default for CanonicalPermissions {
 /// Canonical product configuration carried by an immutable binding.
 ///
 /// Fields are admitted only by their owning product adapter; a non-Workflow
-/// binding rejects `workflow_schedules` even though version input shares
+/// binding rejects the Workflow fields even though version input shares
 /// this closed wire shape.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CanonicalBindingConfig {
+    /// Exact `WorkflowEntrypoint` export selected by a Workflow binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_class_name: Option<String>,
     /// Direct cron schedules attached to a Workflow binding.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflow_schedules: Vec<String>,

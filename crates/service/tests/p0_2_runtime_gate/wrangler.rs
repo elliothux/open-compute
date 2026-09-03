@@ -11,6 +11,7 @@ use std::process::Output;
 
 const WRANGLER_VERSION: &str = "4.127.1";
 const WORKER_NAME: &str = "wrangler-runtime-gate";
+const WORKFLOW_NAME: &str = "wrangler-runtime-gate-flow";
 const FIXTURE_SECRET: &str = "wrangler-runtime-gate-secret";
 
 pub(super) async fn exercise(
@@ -113,6 +114,34 @@ async fn verify_project(
     let first = worker
         .active_version_id
         .expect("Wrangler deploy must create an active Version");
+    let workflow_repository = WorkflowRepository::new(storage.db());
+    let workflow = workflow_repository
+        .definitions(
+            account,
+            Some(WORKFLOW_NAME),
+            None,
+            open_compute_storage::CatalogSort::Name,
+            open_compute_storage::CatalogDirection::Asc,
+            None,
+            10,
+        )
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|definition| definition.name == WORKFLOW_NAME)
+        .expect("Wrangler deploy must complete the upload-first Workflow reservation");
+    assert_eq!(workflow.state, open_compute_core::ResourceState::Ready);
+    assert!(workflow.reserved_class_name.is_none());
+    let workflow_version = workflow_repository
+        .version(account, workflow.current_version_id.unwrap())
+        .unwrap();
+    assert_eq!(workflow_version.target.worker_version_id, first);
+    assert_eq!(workflow_version.target.class_name, "Flow");
+    let snapshot = repository
+        .version_snapshot(account, worker.id, first, false)
+        .unwrap();
+    assert_eq!(snapshot.workflow_bindings.len(), 1);
+    assert_eq!(snapshot.workflow_bindings[0].descriptor.class_name, "Flow");
     assert_eq!(
         repository.list_versions(account, worker.id).unwrap().len(),
         1
@@ -140,7 +169,17 @@ async fn verify_project(
         ])
         .await;
     assert_success(&viewed);
-    assert_eq!(json_output(&viewed)["id"], first_id);
+    let viewed = json_output(&viewed);
+    assert_eq!(viewed["id"], first_id);
+    assert!(
+        viewed["resources"]["bindings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|binding| binding["type"] == "workflow"
+                && binding["workflow_name"] == WORKFLOW_NAME
+                && binding["class_name"] == "Flow")
+    );
 
     std::fs::write(
         project.join("value.ts"),
@@ -249,6 +288,24 @@ async fn verify_project(
             && line.contains("/workers/scripts/wrangler-runtime-gate")
             && line.contains("excludeScript=true")
     }));
+    let upload = trace
+        .iter()
+        .position(|line| {
+            line.starts_with("PUT ")
+                && line.contains("/workers/scripts/wrangler-runtime-gate")
+                && line.contains("excludeScript=true")
+        })
+        .expect("Wrangler deploy must upload the Worker");
+    let workflow_put = trace
+        .iter()
+        .position(|line| {
+            line.starts_with("PUT ") && line.contains("/workflows/wrangler-runtime-gate-flow")
+        })
+        .expect("Wrangler deploy must configure the Workflow");
+    assert!(
+        upload < workflow_put,
+        "Wrangler must upload before Workflow PUT"
+    );
     assert!(trace.iter().any(|line| {
         line.starts_with("POST ") && line.contains("/versions?bindings_inherit=strict")
     }));
@@ -283,6 +340,11 @@ fn write_project(project: &Path, account_id: &str, wrangler: &Path) {
             "compatibility_flags": ["nodejs_compat"],
             "workers_dev": false,
             "observability": {"enabled": false},
+            "workflows": [{
+                "binding": "FLOW",
+                "name": WORKFLOW_NAME,
+                "class_name": "Flow"
+            }],
             "vars": {"GREETING": "你好 🌍"}
         }))
         .unwrap(),
@@ -305,8 +367,12 @@ fn write_project(project: &Path, account_id: &str, wrangler: &Path) {
     .unwrap();
     std::fs::write(
         project.join("index.ts"),
-        r#"import { answer } from './value.js';
+        r#"import { WorkflowEntrypoint } from 'cloudflare:workers';
+import { answer } from './value.js';
 interface Env { GREETING: string; TOKEN: string }
+export class Flow extends WorkflowEntrypoint<Env, unknown> {
+  async run(): Promise<unknown> { return {ok: true}; }
+}
 export default { async fetch(_request: Request, env: Env): Promise<Response> {
   const { suffix } = await import('./lazy.js');
   return Response.json({greeting: env.GREETING, answer, suffix, hasSecret: env.TOKEN.length > 0});

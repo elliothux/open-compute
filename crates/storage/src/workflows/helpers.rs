@@ -59,12 +59,13 @@ pub(super) fn definition_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workfl
         availability: parse(row, 4)?,
         availability_code: row.get(5)?,
         lifecycle_generation: row.get(6)?,
+        reserved_class_name: row.get(7)?,
         current_version_id: row
-            .get::<_, Option<String>>(7)?
+            .get::<_, Option<String>>(8)?
             .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
-        created_at_ms: row.get(8)?,
-        updated_at_ms: row.get(9)?,
+        created_at_ms: row.get(9)?,
+        updated_at_ms: row.get(10)?,
     })
 }
 
@@ -97,7 +98,22 @@ pub(super) fn version_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowV
 
 pub(super) const DEFINITION_SELECT: &str =
     "SELECT id,account_id,name,state,availability,availability_code,
-    lifecycle_generation,current_version_id,created_at_ms,updated_at_ms FROM workflow_definitions";
+    lifecycle_generation,reserved_class_name,current_version_id,created_at_ms,updated_at_ms FROM workflow_definitions";
+
+pub(super) fn validate_class_name(class_name: &str) -> Result<(), PlatformError> {
+    let bytes = class_name.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 128
+        || class_name.starts_with("__")
+        || !(bytes[0].is_ascii_alphabetic() || matches!(bytes[0], b'_' | b'$'))
+        || !bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
+    {
+        return Err(error(ErrorCode::WorkflowVersionNotReady));
+    }
+    Ok(())
+}
 pub(super) const VERSION_SELECT: &str = "SELECT f.account_id,f.id,f.name,v.id,v.worker_id,v.worker_version_id,
     v.worker_code_sha256,v.class_name,v.loader_schema_version,v.capability_version,v.descriptor_sha256,
     v.version_number,v.state,v.created_at_ms,v.rejection_code FROM workflow_versions v

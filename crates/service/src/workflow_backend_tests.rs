@@ -35,7 +35,15 @@ fn ready_binding(f: &Fixture, definition: WorkflowId) -> WorkflowBindingRecord {
         .unwrap();
     let version = VersionId::generate();
     let binding = repository
-        .prepare_binding(f.account, version, "FLOW", definition, Vec::new(), 3)
+        .prepare_binding(
+            f.account,
+            version,
+            "FLOW",
+            definition,
+            "Flow",
+            Vec::new(),
+            3,
+        )
         .unwrap();
     workers
         .insert_staging_version(

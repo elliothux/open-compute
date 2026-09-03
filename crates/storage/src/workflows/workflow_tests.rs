@@ -378,11 +378,45 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
     assert_ne!(caller_worker.id, target_worker);
     let caller = staging(&storage, caller_worker.id);
     let binding = repo
-        .prepare_binding(account, caller, "ORDERS", definition.id, Vec::new(), 1)
+        .prepare_binding(
+            account,
+            caller,
+            "ORDERS",
+            definition.id,
+            "Orders",
+            Vec::new(),
+            1,
+        )
         .unwrap();
+    assert_eq!(binding.descriptor.class_name, "Orders");
+    let mut other_class = binding.descriptor.clone();
+    other_class.class_name = "Other".into();
+    assert_ne!(other_class.sha256().unwrap(), binding.descriptor_sha256);
+    assert_eq!(
+        repo.prepare_binding(
+            account,
+            caller,
+            "OTHER_CLASS",
+            definition.id,
+            "Other",
+            Vec::new(),
+            1,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::WorkflowNotReady
+    );
     assert!(
-        repo.prepare_binding(account, caller, "__PRIVATE", definition.id, Vec::new(), 1)
-            .is_err()
+        repo.prepare_binding(
+            account,
+            caller,
+            "__PRIVATE",
+            definition.id,
+            "Orders",
+            Vec::new(),
+            1
+        )
+        .is_err()
     );
     storage
         .db()
@@ -472,6 +506,119 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
         )
         .unwrap();
     repo.delete(account, definition.id, 5).unwrap();
+}
+
+#[test]
+fn workflow_upload_reservation_freezes_class_and_fails_closed_until_ready() {
+    let (_tmp, storage, target_version) = setup();
+    let repo = WorkflowRepository::new(storage.db());
+    let account = storage.identity().default_account_id;
+    let definition = repo
+        .reserve_definition(account, "upload-first", "Flow", 1)
+        .unwrap();
+    assert_eq!(definition.state, ResourceState::Creating);
+    assert_eq!(definition.reserved_class_name.as_deref(), Some("Flow"));
+    assert_eq!(
+        repo.reserve_definition(account, "upload-first", "Flow", 2)
+            .unwrap()
+            .id,
+        definition.id
+    );
+    assert_eq!(
+        repo.reserve_definition(account, "upload-first", "Other", 2)
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowNameConflict
+    );
+
+    let workers = WorkerRepository::new(storage.db());
+    let caller_worker = workers
+        .create_worker(
+            account,
+            "upload-first-caller",
+            RequestId::generate(),
+            2,
+            1_000_000,
+        )
+        .unwrap()
+        .0;
+    let caller = staging(&storage, caller_worker.id);
+    let binding = repo
+        .prepare_binding(
+            account,
+            caller,
+            "FLOW",
+            definition.id,
+            "Flow",
+            Vec::new(),
+            3,
+        )
+        .unwrap();
+    storage
+        .db()
+        .with_immediate(|tx| {
+            bindings::insert_workflow_bindings(tx, caller, std::slice::from_ref(&binding))
+        })
+        .unwrap();
+    workers.begin_validation(caller).unwrap();
+    workers.mark_ready(caller, 4).unwrap();
+    assert_eq!(
+        repo.authorize_binding(
+            binding.descriptor.binding_id,
+            caller,
+            &binding.descriptor_sha256,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::WorkflowBindingStale
+    );
+
+    let workflow_version = repo
+        .stage_version(account, definition.id, target_version, "Flow", 5)
+        .unwrap();
+    repo.finish_version(
+        account,
+        workflow_version.target.workflow_version_id,
+        true,
+        6,
+    )
+    .unwrap();
+    assert!(
+        repo.definition(account, definition.id)
+            .unwrap()
+            .reserved_class_name
+            .is_none()
+    );
+    repo.authorize_binding(
+        binding.descriptor.binding_id,
+        caller,
+        &binding.descriptor_sha256,
+    )
+    .unwrap();
+
+    let without_current = repo
+        .create_definition(account, "without-current", 7)
+        .unwrap();
+    assert_eq!(
+        repo.prepare_binding(
+            account,
+            caller,
+            "MISSING_CURRENT",
+            without_current.id,
+            "Flow",
+            Vec::new(),
+            8,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::WorkflowNotReady
+    );
+    let claimed = repo
+        .reserve_definition(account, "without-current", "Flow", 9)
+        .unwrap();
+    assert_eq!(claimed.id, without_current.id);
+    assert_eq!(claimed.reserved_class_name.as_deref(), Some("Flow"));
+    repo.verify_catalog().unwrap();
 }
 
 #[test]
