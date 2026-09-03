@@ -157,6 +157,18 @@ pub(crate) fn address() -> SocketAddr {
         .unwrap()
 }
 
+pub(crate) fn distinct_addresses() -> (SocketAddr, SocketAddr) {
+    let public = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let admin = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let public_addr = public.local_addr().unwrap();
+    let admin_addr = admin.local_addr().unwrap();
+    assert_ne!(
+        public_addr, admin_addr,
+        "public and admin listeners must be distinct"
+    );
+    (public_addr, admin_addr)
+}
+
 pub(crate) fn spawn(config: &Path, log: &Path) -> Process {
     let parsed =
         open_compute_core::PlatformConfig::from_toml_str(&fs::read_to_string(config).unwrap())

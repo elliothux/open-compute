@@ -168,26 +168,28 @@ pub(super) async fn exercise_vectorize(command: &WranglerCommand<'_>, project: &
     assert_success(&fetched);
     let fetched = String::from_utf8_lossy(&fetched.stdout);
     assert!(fetched.contains("first") && fetched.contains("second"));
-    assert_success(
-        &command
-            .run(&[
-                "vectorize",
-                "query",
-                VECTOR_INDEX,
-                "--vector",
-                "0",
-                "0",
-                "1",
-                "--top-k",
-                "2",
-                "--return-values",
-                "--return-metadata",
-                "all",
-                "--config",
-                "wrangler.jsonc",
-            ])
-            .await,
-    );
+    let query = command
+        .run(&[
+            "vectorize",
+            "query",
+            VECTOR_INDEX,
+            "--vector",
+            "0",
+            "0",
+            "1",
+            "--top-k",
+            "2",
+            "--return-values",
+            "--return-metadata",
+            "all",
+            "--config",
+            "wrangler.jsonc",
+        ])
+        .await;
+    assert_success(&query);
+    let query = String::from_utf8_lossy(&query.stdout);
+    assert!(query.contains("\"id\": \"first\""));
+    assert!(query.contains("\"kind\": \"updated\""));
     assert_success(
         &command
             .run(&[
@@ -200,37 +202,50 @@ pub(super) async fn exercise_vectorize(command: &WranglerCommand<'_>, project: &
             .await,
     );
 
-    for args in [
-        vec![
-            "vectorize",
-            "create-metadata-index",
-            VECTOR_INDEX,
-            "--propertyName",
-            "kind",
-            "--type",
-            "string",
-            "--config",
-            "wrangler.jsonc",
-        ],
-        vec![
+    assert_success(
+        &command
+            .run(&[
+                "vectorize",
+                "create-metadata-index",
+                VECTOR_INDEX,
+                "--propertyName",
+                "kind",
+                "--type",
+                "string",
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
+    let metadata = command
+        .run(&[
             "vectorize",
             "list-metadata-index",
             VECTOR_INDEX,
+            "--json",
             "--config",
             "wrangler.jsonc",
-        ],
-        vec![
-            "vectorize",
-            "delete-metadata-index",
-            VECTOR_INDEX,
-            "--propertyName",
-            "kind",
-            "--config",
-            "wrangler.jsonc",
-        ],
-    ] {
-        assert_success(&command.run(&args).await);
-    }
+        ])
+        .await;
+    assert_success(&metadata);
+    assert!(json_stdout(&metadata).as_array().is_some_and(|indexes| {
+        indexes
+            .iter()
+            .any(|index| index["propertyName"] == "kind" && index["indexType"] == "string")
+    }));
+    assert_success(
+        &command
+            .run(&[
+                "vectorize",
+                "delete-metadata-index",
+                VECTOR_INDEX,
+                "--propertyName",
+                "kind",
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
     assert_success(
         &command
             .run(&[
@@ -326,20 +341,25 @@ pub(super) async fn exercise_vectorize(command: &WranglerCommand<'_>, project: &
 }
 
 pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
-    assert_success(
-        &command
-            .run(&[
-                "ai-search",
-                "namespace",
-                "create",
-                AI_NAMESPACE,
-                "--description",
-                "fixed Wrangler resource Gate",
-                "--json",
-                "--config",
-                "wrangler.jsonc",
-            ])
-            .await,
+    let created_namespace = command
+        .run(&[
+            "ai-search",
+            "namespace",
+            "create",
+            AI_NAMESPACE,
+            "--description",
+            "fixed Wrangler resource Gate",
+            "--json",
+            "--config",
+            "wrangler.jsonc",
+        ])
+        .await;
+    assert_success(&created_namespace);
+    let created_namespace = json_stdout(&created_namespace);
+    assert_eq!(created_namespace["name"], AI_NAMESPACE);
+    assert_eq!(
+        created_namespace["description"],
+        "fixed Wrangler resource Gate"
     );
     for args in [
         vec![
@@ -371,28 +391,43 @@ pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
             "wrangler.jsonc",
         ],
     ] {
-        assert_success(&command.run(&args).await);
+        let output = command.run(&args).await;
+        assert_success(&output);
+        let value = json_stdout(&output);
+        match args[2] {
+            "list" => assert!(value.as_array().is_some_and(|namespaces| {
+                namespaces
+                    .iter()
+                    .any(|namespace| namespace["name"] == AI_NAMESPACE)
+            })),
+            "get" => assert_eq!(value["description"], "fixed Wrangler resource Gate"),
+            "update" => assert_eq!(value["description"], "updated by fixed Wrangler"),
+            _ => unreachable!(),
+        }
     }
-    assert_success(
-        &command
-            .run(&[
-                "ai-search",
-                "create",
-                AI_INSTANCE,
-                "--namespace",
-                AI_NAMESPACE,
-                "--type",
-                "builtin",
-                "--embedding-model",
-                EMBEDDING_ALIAS,
-                "--chunk-size",
-                "64",
-                "--json",
-                "--config",
-                "wrangler.jsonc",
-            ])
-            .await,
-    );
+    let created_instance = command
+        .run(&[
+            "ai-search",
+            "create",
+            AI_INSTANCE,
+            "--namespace",
+            AI_NAMESPACE,
+            "--type",
+            "builtin",
+            "--embedding-model",
+            EMBEDDING_ALIAS,
+            "--chunk-size",
+            "64",
+            "--json",
+            "--config",
+            "wrangler.jsonc",
+        ])
+        .await;
+    assert_success(&created_instance);
+    let created_instance = json_stdout(&created_instance);
+    assert_eq!(created_instance["id"], AI_INSTANCE);
+    assert_eq!(created_instance["namespace"], AI_NAMESPACE);
+    assert_eq!(created_instance["chunk_size"], 64);
     for args in [
         vec![
             "ai-search",
@@ -449,13 +484,37 @@ pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
         ],
     ] {
         let output = command.run(&args).await;
-        assert!(
-            output.status.success(),
-            "fixed Wrangler command failed: {args:?}\nstdout={}\nstderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
         assert_success(&output);
+        let value = json_stdout(&output);
+        match args[1] {
+            "list" => assert!(value.as_array().is_some_and(|instances| {
+                instances
+                    .iter()
+                    .any(|instance| instance["id"] == AI_INSTANCE)
+            })),
+            "get" => assert_eq!(value["id"], AI_INSTANCE),
+            "update" => assert_eq!(value["max_num_results"], 7),
+            "stats" => {
+                for field in [
+                    "queued",
+                    "running",
+                    "completed",
+                    "skipped",
+                    "outdated",
+                    "error",
+                ] {
+                    assert!(
+                        value[field].is_number(),
+                        "missing numeric AI Search stat {field}"
+                    );
+                }
+            }
+            "search" => {
+                assert_eq!(value["search_query"], "local resource Gate");
+                assert!(value["chunks"].is_array());
+            }
+            _ => unreachable!(),
+        }
     }
 
     let created = command
@@ -512,7 +571,22 @@ pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
             "wrangler.jsonc",
         ],
     ] {
-        assert_success(&command.run(&args).await);
+        let output = command.run(&args).await;
+        assert_success(&output);
+        let value = json_stdout(&output);
+        match args[2] {
+            "list" => assert!(
+                value
+                    .as_array()
+                    .is_some_and(|jobs| { jobs.iter().any(|job| job["id"] == job_id) })
+            ),
+            "get" => {
+                assert_eq!(value["id"], job_id);
+                assert_eq!(value["description"], "fixed Wrangler job");
+            }
+            "logs" => assert!(value.is_array()),
+            _ => unreachable!(),
+        }
     }
     assert_success(
         &command
@@ -544,6 +618,25 @@ pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
             ])
             .await,
     );
+    let instances_after_delete = command
+        .run(&[
+            "ai-search",
+            "list",
+            "--namespace",
+            AI_NAMESPACE,
+            "--json",
+            "--config",
+            "wrangler.jsonc",
+        ])
+        .await;
+    assert_success(&instances_after_delete);
+    assert!(
+        json_stdout(&instances_after_delete)
+            .as_array()
+            .is_some_and(|instances| instances
+                .iter()
+                .all(|instance| instance["id"] != AI_INSTANCE))
+    );
     assert_success(
         &command
             .run(&[
@@ -556,6 +649,24 @@ pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
                 "wrangler.jsonc",
             ])
             .await,
+    );
+    let namespaces_after_delete = command
+        .run(&[
+            "ai-search",
+            "namespace",
+            "list",
+            "--json",
+            "--config",
+            "wrangler.jsonc",
+        ])
+        .await;
+    assert_success(&namespaces_after_delete);
+    assert!(
+        json_stdout(&namespaces_after_delete)
+            .as_array()
+            .is_some_and(|namespaces| namespaces
+                .iter()
+                .all(|namespace| namespace["name"] != AI_NAMESPACE))
     );
 }
 

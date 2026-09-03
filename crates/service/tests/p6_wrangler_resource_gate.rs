@@ -2,6 +2,8 @@
 
 #![cfg(feature = "test-support")]
 
+#[path = "p6_wrangler_resource_gate/evidence.rs"]
+mod evidence;
 #[path = "p6_wrangler_resource_gate/search.rs"]
 mod search;
 
@@ -12,6 +14,7 @@ mod search;
 #[path = "workflow_support/platform_process.rs"]
 mod platform_process;
 
+use evidence::Evidence;
 use open_compute_artifacts::MockS3;
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{Redactor, RequestId, SystemClock, VersionId};
@@ -27,12 +30,14 @@ use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Output;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const WRANGLER_VERSION: &str = "4.127.1";
 const ADMIN_TOKEN: &str = platform_process::ADMIN_TOKEN;
 const TOKEN: &str = "p6-wrangler-resource-gate-deployer-token";
 const READ_ONLY_TOKEN: &str = "p6-wrangler-resource-gate-read-only-token";
+const S3_ACCESS_KEY: &str = "AKIAEXAMPLEKEYID01";
+const S3_SECRET_KEY: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 const KV_NAME: &str = "resource-gate-kv";
 const D1_NAME: &str = "resource-gate-d1";
 const R2_NAME: &str = "resource-gate-r2";
@@ -58,10 +63,12 @@ async fn fixed_wrangler_resource_commands_use_live_v4_authorities() {
     search::exercise_vectorize(&command, &fixture.project).await;
     search::exercise_ai_search(&command).await;
 
+    let log = fs::read(&fixture.log).unwrap_or_default();
+    assert_clean_output(&log);
     assert!(
         fixture.process.0.try_wait().unwrap().is_none(),
         "ocd exited while fixed Wrangler was using the public v4 listener: {}",
-        fs::read_to_string(&fixture.log).unwrap_or_default(),
+        String::from_utf8_lossy(&log),
     );
     fixture.process.stop().await;
     assert!(
@@ -207,16 +214,21 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
     )
     .unwrap();
 
-    for args in [
-        vec![
+    let info = command
+        .run(&[
             "d1",
             "info",
             D1_NAME,
             "--json",
             "--config",
             "wrangler.jsonc",
-        ],
-        vec![
+        ])
+        .await;
+    assert_success(&info);
+    assert!(json_contains(&json_stdout(&info), "name", D1_NAME.into()));
+
+    let answer = command
+        .run(&[
             "d1",
             "execute",
             D1_NAME,
@@ -226,19 +238,43 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
             "--json",
             "--config",
             "wrangler.jsonc",
-        ],
-        vec![
+        ])
+        .await;
+    assert_success(&answer);
+    assert!(json_contains(&json_stdout(&answer), "answer", 42.into()));
+
+    assert_success(
+        &command
+            .run(&[
+                "d1",
+                "migrations",
+                "apply",
+                D1_NAME,
+                "--remote",
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
+    let migrated = command
+        .run(&[
             "d1",
-            "migrations",
-            "apply",
+            "execute",
             D1_NAME,
             "--remote",
+            "--command",
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='items'",
+            "--json",
             "--config",
             "wrangler.jsonc",
-        ],
-    ] {
-        assert_success(&command.run(&args).await);
-    }
+        ])
+        .await;
+    assert_success(&migrated);
+    assert!(json_contains(
+        &json_stdout(&migrated),
+        "name",
+        "items".into()
+    ));
     assert_success(
         &command
             .run(&[
@@ -251,6 +287,15 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
             ])
             .await,
     );
+    let after_delete = command
+        .run(&["d1", "list", "--json", "--config", "wrangler.jsonc"])
+        .await;
+    assert_success(&after_delete);
+    assert!(!json_contains(
+        &json_stdout(&after_delete),
+        "name",
+        D1_NAME.into()
+    ));
 }
 
 async fn exercise_r2(command: &WranglerCommand<'_>, project: &Path) {
@@ -350,6 +395,11 @@ async fn exercise_queues(command: &WranglerCommand<'_>) {
             .run(&["queues", "delete", QUEUE_NAME, "--config", "wrangler.jsonc"])
             .await,
     );
+    let after_delete = command
+        .run(&["queues", "list", "--config", "wrangler.jsonc"])
+        .await;
+    assert_success(&after_delete);
+    assert!(!String::from_utf8_lossy(&after_delete.stdout).contains(QUEUE_NAME));
 }
 
 async fn exercise_workflows(command: &WranglerCommand<'_>) {
@@ -358,17 +408,20 @@ async fn exercise_workflows(command: &WranglerCommand<'_>) {
         .await;
     assert_success(&listed);
     assert!(String::from_utf8_lossy(&listed.stdout).contains(WORKFLOW_NAME));
-    assert_success(
-        &command
-            .run(&[
-                "workflows",
-                "describe",
-                WORKFLOW_NAME,
-                "--config",
-                "wrangler.jsonc",
-            ])
-            .await,
-    );
+    let described = command
+        .run(&[
+            "workflows",
+            "describe",
+            WORKFLOW_NAME,
+            "--config",
+            "wrangler.jsonc",
+        ])
+        .await;
+    assert_success(&described);
+    let described = String::from_utf8_lossy(&described.stdout);
+    assert!(described.contains(WORKFLOW_NAME));
+    assert!(described.contains("resource-gate-worker"));
+    assert!(described.contains("ResourceFlow"));
     assert_success(
         &command
             .run(&[
@@ -380,12 +433,17 @@ async fn exercise_workflows(command: &WranglerCommand<'_>) {
             ])
             .await,
     );
+    let after_delete = command
+        .run(&["workflows", "list", "--config", "wrangler.jsonc"])
+        .await;
+    assert_success(&after_delete);
+    assert!(!String::from_utf8_lossy(&after_delete.stdout).contains(WORKFLOW_NAME));
 }
 
 struct Fixture {
     process: platform_process::Process,
     _mock: MockS3,
-    _evidence: platform_process::Evidence,
+    _evidence: Evidence,
     _embedding: search::EmbeddingFixture,
     project: PathBuf,
     public_addr: SocketAddr,
@@ -418,7 +476,8 @@ impl Fixture {
             .prefix("resources-")
             .tempdir_in(runs)
             .unwrap();
-        let root = temp.path().to_owned();
+        let evidence = Evidence::new(temp);
+        let root = evidence.path().to_owned();
         let data = root.join("data");
         let storage = PlatformStorage::bootstrap(&storage_config(&data), &SystemClock).unwrap();
         let public_account = storage.identity().default_account_id.to_string();
@@ -427,8 +486,7 @@ impl Fixture {
 
         let mock = MockS3::spawn("open-compute").await;
         let embedding = search::EmbeddingFixture::spawn().await;
-        let public_addr = platform_process::address();
-        let admin_addr = platform_process::address();
+        let (public_addr, admin_addr) = platform_process::distinct_addresses();
         let config =
             platform_process::config(&root, &data, &mock.endpoint, public_addr, admin_addr);
         append_resource_config(&config, &root, &embedding.base_url);
@@ -438,7 +496,7 @@ impl Fixture {
         let client =
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
                 .build_http();
-        platform_process::ready(&client, admin_addr, &mut process).await;
+        wait_ready(&client, admin_addr, &mut process, &log).await;
 
         let project = root.join("wrangler-project");
         fs::create_dir(&project).unwrap();
@@ -448,7 +506,7 @@ impl Fixture {
         Self {
             process,
             _mock: mock,
-            _evidence: platform_process::Evidence(Some(temp)),
+            _evidence: evidence,
             _embedding: embedding,
             project,
             public_addr,
@@ -456,6 +514,40 @@ impl Fixture {
             public_account,
             log,
         }
+    }
+}
+
+async fn wait_ready(
+    client: &platform_process::Client,
+    admin_addr: SocketAddr,
+    process: &mut platform_process::Process,
+    log: &Path,
+) {
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        if process.0.try_wait().unwrap().is_some() {
+            let log = fs::read(log).unwrap_or_default();
+            assert_clean_output(&log);
+            panic!(
+                "ocd exited before readiness: {}",
+                String::from_utf8_lossy(&log)
+            );
+        }
+        if platform_process::response(client, admin_addr, "/health/ready", "GET")
+            .await
+            .is_ok_and(|response| response.status() == 200)
+        {
+            return;
+        }
+        if Instant::now() >= deadline {
+            let log = fs::read(log).unwrap_or_default();
+            assert_clean_output(&log);
+            panic!(
+                "ocd readiness timed out; retained sanitized failure evidence; stderr={}",
+                String::from_utf8_lossy(&log)
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -643,19 +735,19 @@ fn fixed_wrangler() -> PathBuf {
 }
 
 fn assert_success(output: &Output) {
+    assert_clean_output(&output.stdout);
+    assert_clean_output(&output.stderr);
     assert!(
         output.status.success(),
         "stdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_clean_output(&output.stdout);
-    assert_clean_output(&output.stderr);
 }
 
 fn assert_clean_output(bytes: &[u8]) {
     let text = String::from_utf8_lossy(bytes);
-    for secret in [ADMIN_TOKEN, TOKEN, READ_ONLY_TOKEN] {
+    for secret in evidence::known_secrets() {
         assert!(!text.contains(secret));
     }
     assert!(!text.contains("api.cloudflare.com"));
@@ -668,6 +760,21 @@ fn json_stdout(output: &Output) -> Value {
             String::from_utf8_lossy(&output.stdout)
         )
     })
+}
+
+fn json_contains(value: &Value, key: &str, expected: Value) -> bool {
+    match value {
+        Value::Object(object) => {
+            object.get(key) == Some(&expected)
+                || object
+                    .values()
+                    .any(|value| json_contains(value, key, expected.clone()))
+        }
+        Value::Array(values) => values
+            .iter()
+            .any(|value| json_contains(value, key, expected.clone())),
+        _ => false,
+    }
 }
 
 fn storage_config(root: &Path) -> StorageConfig {
