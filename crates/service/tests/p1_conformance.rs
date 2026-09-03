@@ -83,7 +83,7 @@ fn p1_capabilities_are_complete_and_identical_across_fresh_processes() {
         first["release"]["workerd_lock_sha256"]
     );
     let products = first["products"].as_object().expect("products");
-    for name in ["versions", "service_bindings", "workers_cache"] {
+    for name in ["deployments", "service_bindings", "workers_cache"] {
         assert_eq!(
             products[name]["status"], "supported_with_deviation",
             "{name}"
