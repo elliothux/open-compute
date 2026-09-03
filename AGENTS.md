@@ -18,6 +18,14 @@
 - Day1 design does not authorize deleting or resetting existing local data, rewriting Git history, or removing retained evidence. The Operating Contract's approval requirements and evidence-preservation rules still apply.
 - The completed removals and their acceptance evidence are archived in [Day1 architecture cleanup](docs/implemented/day1-architecture-cleanup.md). Historical stage documents do not recreate compatibility obligations.
 
+## Deployment Profile and Complexity Budget
+
+- open-compute targets a self-hosted, single-machine deployment for small and medium-sized businesses. Design and review decisions must optimize for that operating profile rather than for Cloudflare's multi-region control plane, hyperscale fleet coordination, or managed-service internals.
+- Prioritize security boundaries, authorization, secret handling, data integrity, crash/restart recovery, deterministic local operation, and the common documented Cloudflare-compatible paths in the declared support scope.
+- Balance implementation and maintenance cost against observable benefit. Do not add substantial state machines, distributed-systems machinery, compatibility layers, generalized abstractions, or broad test infrastructure solely to eliminate low-probability or low-impact long-tail behavior in the single-machine SMB profile.
+- Long-tail gaps may be deferred when the supported common path remains fail-closed and data-safe. Record the exact limitation, affected surface, practical impact, and evidence instead of implying full coverage.
+- This complexity budget does not permit weakening an already declared official Cloudflare contract, bypassing a required Gate, accepting secret exposure or corrupt state, or ignoring a reproducible failure on a supported common path. Narrow the declared support scope explicitly when the correct implementation is not worth its cost.
+
 ## Repository Scope
 
 - This file applies to the entire repository. Do not add nested `AGENTS.md` files.
