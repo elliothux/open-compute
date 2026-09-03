@@ -82,6 +82,7 @@ pub(crate) fn validate_service_set(
             name.clone(),
             service.target_worker_id,
             service.entrypoint.clone(),
+            service.props.clone(),
         )?;
     }
     Ok(())

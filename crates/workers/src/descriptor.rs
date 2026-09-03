@@ -80,6 +80,9 @@ pub struct ServiceDescriptorV1 {
     /// Optional named `WorkerEntrypoint` export.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
+    /// Immutable deployer-authenticated properties delivered as `ctx.props`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props: Option<serde_json::Value>,
     /// Invocation policy schema enforced by the trusted controller.
     pub policy_version: u32,
 }
@@ -217,6 +220,7 @@ impl ServiceDescriptorV1 {
         name: String,
         target_worker_id: WorkerId,
         entrypoint: Option<String>,
+        props: Option<serde_json::Value>,
     ) -> Result<Self, PlatformError> {
         validate_env_name(&name)?;
         if name.len() > 64 {
@@ -238,11 +242,13 @@ impl ServiceDescriptorV1 {
                 "Service entrypoint name is invalid",
             ));
         }
+        let props = props.map(canonical_service_props).transpose()?;
         Ok(Self {
             schema_version: 1,
             name,
             target_worker_id,
             entrypoint,
+            props,
             policy_version: 1,
         })
     }
@@ -252,12 +258,69 @@ impl ServiceDescriptorV1 {
         if self.schema_version != 1 || self.policy_version != 1 {
             return Err(binding_invariant());
         }
+        if let Some(props) = &self.props
+            && canonical_service_props(props.clone())? != *props
+        {
+            return Err(binding_invariant());
+        }
         serde_json::to_vec(self).map_err(|_| binding_invariant())
     }
 
     /// SHA-256 of canonical descriptor bytes.
     pub fn sha256(&self) -> Result<[u8; 32], PlatformError> {
         Ok(Sha256::digest(self.canonical_bytes()?).into())
+    }
+}
+
+fn canonical_service_props(value: serde_json::Value) -> Result<serde_json::Value, PlatformError> {
+    if !value.is_object() {
+        return Err(PlatformError::new(
+            ErrorCode::BundleInvalid,
+            "Service binding props must be a JSON object",
+        ));
+    }
+    let canonical = canonical_service_json(value, 0)?;
+    if serde_json::to_vec(&canonical)
+        .map_err(|_| binding_invariant())?
+        .len()
+        > 64 * 1024
+    {
+        return Err(PlatformError::new(
+            ErrorCode::ResourceLimitExceeded,
+            "Service binding props exceed the supported size",
+        ));
+    }
+    Ok(canonical)
+}
+
+fn canonical_service_json(
+    value: serde_json::Value,
+    depth: usize,
+) -> Result<serde_json::Value, PlatformError> {
+    if depth > 32 {
+        return Err(PlatformError::new(
+            ErrorCode::ResourceLimitExceeded,
+            "Service binding props exceed the supported depth",
+        ));
+    }
+    match value {
+        serde_json::Value::Array(items) => items
+            .into_iter()
+            .map(|item| canonical_service_json(item, depth + 1))
+            .collect::<Result<Vec<_>, _>>()
+            .map(serde_json::Value::Array),
+        serde_json::Value::Object(map) => {
+            let mut sorted = BTreeMap::new();
+            for (key, value) in map {
+                sorted.insert(key, canonical_service_json(value, depth + 1)?);
+            }
+            let mut canonical = serde_json::Map::new();
+            for (key, value) in sorted {
+                canonical.insert(key, value);
+            }
+            Ok(serde_json::Value::Object(canonical))
+        }
+        scalar => Ok(scalar),
     }
 }
 

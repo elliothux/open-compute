@@ -15,9 +15,14 @@ struct Fixture {
     target_version: VersionId,
     caller_digest: [u8; 32],
     target_digest: [u8; 32],
+    caller_props: serde_json::Value,
 }
 
 fn fixture() -> Fixture {
+    fixture_with_corrupt_props(false)
+}
+
+fn fixture_with_corrupt_props(corrupt_props: bool) -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
     let storage = Arc::new(
@@ -45,7 +50,9 @@ fn fixture() -> Fixture {
         .create_worker(account, "registry-target", request, 2, 1_000)
         .unwrap()
         .0;
-    let target_digest = [4; 32];
+    let target_descriptor =
+        ServiceDescriptorV1::new("SELF".to_owned(), target.id, None, None).unwrap();
+    let target_digest = target_descriptor.sha256().unwrap();
     let target_version = insert_ready(
         repo,
         account,
@@ -55,6 +62,7 @@ fn fixture() -> Fixture {
             binding_name: "SELF".to_owned(),
             target_worker_id: target.id,
             entrypoint: None,
+            props_json: None,
             descriptor_sha256: target_digest,
         }],
         request,
@@ -62,7 +70,23 @@ fn fixture() -> Fixture {
     );
     repo.promote(account, target.id, target_version, None, request, 5)
         .unwrap();
-    let caller_digest = [7; 32];
+    let caller_props = serde_json::json!({
+        "constructor": {"enabled": true},
+        "z": [1, {"__proto__": "ordinary JSON data"}],
+    });
+    let caller_descriptor = ServiceDescriptorV1::new(
+        "TARGET".to_owned(),
+        target.id,
+        None,
+        Some(caller_props.clone()),
+    )
+    .unwrap();
+    let caller_digest = caller_descriptor.sha256().unwrap();
+    let caller_props_json = if corrupt_props {
+        br#"{"z":[1,{"__proto__":"ordinary JSON data"}],"constructor":{"enabled":true}}"#.to_vec()
+    } else {
+        serde_json::to_vec(caller_descriptor.props.as_ref().unwrap()).unwrap()
+    };
     let caller_version = insert_ready(
         repo,
         account,
@@ -72,6 +96,7 @@ fn fixture() -> Fixture {
             binding_name: "TARGET".to_owned(),
             target_worker_id: target.id,
             entrypoint: None,
+            props_json: Some(caller_props_json),
             descriptor_sha256: caller_digest,
         }],
         request,
@@ -86,6 +111,7 @@ fn fixture() -> Fixture {
         target_version,
         caller_digest,
         target_digest,
+        caller_props,
     }
 }
 
@@ -153,6 +179,56 @@ fn connect_request(
         operation: ServiceOperation::Connect,
         ..resolve_request(version, binding_name, digest, None)
     }
+}
+
+#[test]
+fn admission_delivers_canonical_arbitrary_json_props() {
+    let fixture = fixture();
+    let pins = VersionPins::new();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
+    let admission = registry
+        .resolve(&resolve_request(
+            fixture.caller_version,
+            "TARGET",
+            fixture.caller_digest,
+            None,
+        ))
+        .unwrap();
+    assert_eq!(admission.target.props, Some(fixture.caller_props));
+    registry
+        .complete(&ServiceReleaseRequest {
+            handle: admission.handle,
+        })
+        .unwrap();
+    registry
+        .complete_root(&ServiceRootCompleteRequest {
+            frame: admission.caller_frame,
+        })
+        .unwrap();
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
+}
+
+#[test]
+fn admission_rejects_noncanonical_persisted_props_without_leaking_pins() {
+    let fixture = fixture_with_corrupt_props(true);
+    let pins = VersionPins::new();
+    let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
+    assert_eq!(
+        registry
+            .resolve(&resolve_request(
+                fixture.caller_version,
+                "TARGET",
+                fixture.caller_digest,
+                None,
+            ))
+            .unwrap_err()
+            .code(),
+        ErrorCode::ServiceBindingDenied
+    );
+    assert_eq!(registry.counts(), (0, 0, 0));
+    assert_eq!(pins.count(fixture.caller_version), 0);
+    assert_eq!(pins.count(fixture.target_version), 0);
 }
 
 #[test]

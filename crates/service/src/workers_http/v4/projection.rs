@@ -8,6 +8,7 @@ use open_compute_storage::{
     BuiltinBindingKind, QueueRepository, ResourceRepository, VersionSnapshot, WorkerRepository,
     WorkflowRepository,
 };
+use open_compute_workers::ServiceDescriptorV1;
 
 pub(super) fn public_bindings(
     api: &WorkerApiState,
@@ -89,16 +90,47 @@ pub(super) fn public_bindings(
     }
     let workers = WorkerRepository::new(api.storage.db()).list_workers(snapshot.account_id)?;
     for binding in &snapshot.services {
+        let props = binding
+            .props_json
+            .as_deref()
+            .map(serde_json::from_slice::<serde_json::Value>)
+            .transpose()
+            .map_err(|_| invariant())?;
+        let descriptor = ServiceDescriptorV1::new(
+            binding.binding_name.clone(),
+            binding.target_worker_id,
+            binding.entrypoint.clone(),
+            props,
+        )
+        .map_err(|_| invariant())?;
+        let canonical_props = descriptor
+            .props
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()
+            .map_err(|_| invariant())?;
+        if canonical_props != binding.props_json
+            || descriptor.sha256().map_err(|_| invariant())? != binding.descriptor_sha256
+        {
+            return Err(invariant());
+        }
         let service = workers
             .iter()
             .find(|worker| worker.id == binding.target_worker_id)
             .ok_or_else(invariant)?;
-        values.push(serde_json::json!({
+        let mut value = serde_json::json!({
             "name": binding.binding_name,
             "type": "service",
             "service": service.name,
             "entrypoint": binding.entrypoint,
-        }));
+        });
+        if let Some(props) = descriptor.props {
+            value
+                .as_object_mut()
+                .ok_or_else(invariant)?
+                .insert("props".to_owned(), props);
+        }
+        values.push(value);
     }
     values.extend(snapshot.builtin_bindings.iter().map(|binding| {
         let kind = match binding.kind {

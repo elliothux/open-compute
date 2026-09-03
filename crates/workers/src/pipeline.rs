@@ -88,6 +88,9 @@ pub struct VersionServiceInput {
     /// Optional named `WorkerEntrypoint` export.
     #[serde(default)]
     pub entrypoint: Option<String>,
+    /// Optional deployer-authenticated JSON object delivered to the target as `ctx.props`.
+    #[serde(default)]
+    pub props: Option<serde_json::Value>,
 }
 
 /// Automatic response-cache policy on the default or a named Worker entrypoint.

@@ -3,7 +3,9 @@ import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CompiledModule, CompiledModuleType, CompiledWorker } from "../build-worker.ts";
 import type { JsonValue, RuntimeFeatures, WorkerBinding, WorkerProject, WorkerService } from "../project.ts";
-import { assertNoUnsupportedWranglerBindings, parseRuntimeFeatures, record } from "../project.ts";
+import {
+  assertNoUnsupportedWranglerBindings, canonicalServiceProps, parseRuntimeFeatures, record,
+} from "../project.ts";
 import { loadFormalRuntimeLock, type FormalRuntimeLock } from "../runtime-lock.ts";
 import type { AssetsProject } from "../assets/types.ts";
 
@@ -241,11 +243,12 @@ function serviceDeclarations(value: unknown): Record<string, WorkerService> {
   }
   for (const item of value) {
     if (!record(item)) throw new Error("generated framework service is invalid");
-    onlyKeys(item, ["binding", "service", "entrypoint"], "generated framework service");
+    onlyKeys(item, ["binding", "service", "entrypoint", "props"], "generated framework service");
     const binding = string(item.binding, "generated framework service binding");
     const service = string(item.service, "generated framework service target");
     const entrypoint = item.entrypoint === undefined
       ? undefined : string(item.entrypoint, "generated framework service entrypoint");
+    const props = item.props === undefined ? undefined : canonicalServiceProps(item.props);
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(binding)
         || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(service)
         || (entrypoint !== undefined && !/^[A-Za-z_$][A-Za-z0-9_$]{0,127}$/.test(entrypoint))
@@ -253,7 +256,11 @@ function serviceDeclarations(value: unknown): Record<string, WorkerService> {
       throw new Error("generated framework service is invalid");
     }
     Object.defineProperty(services, binding, {
-      value: { service, ...(entrypoint === undefined ? {} : { entrypoint }) },
+      value: {
+        service,
+        ...(entrypoint === undefined ? {} : { entrypoint }),
+        ...(props === undefined ? {} : { props }),
+      },
       enumerable: true,
     });
   }
@@ -267,7 +274,8 @@ function reconciledServices(value: unknown, local: Record<string, WorkerService>
   }
   for (const [binding, declaration] of Object.entries(local)) {
     const expected = generated[binding];
-    if (expected === undefined || expected.entrypoint !== declaration.entrypoint) {
+    if (expected === undefined || expected.entrypoint !== declaration.entrypoint
+        || JSON.stringify(expected.props) !== JSON.stringify(declaration.props)) {
       throw new Error("generated framework services differ from the project");
     }
   }

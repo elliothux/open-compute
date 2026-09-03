@@ -2,7 +2,7 @@
 
 use open_compute_core::{ErrorCode, PlatformError, VersionId};
 use open_compute_storage::{ResolvedServiceTarget, ServiceRepository};
-use open_compute_workers::{VersionPin, VersionPins};
+use open_compute_workers::{ServiceDescriptorV1, VersionPin, VersionPins};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
@@ -118,6 +118,9 @@ pub struct ServiceTargetPayload {
     /// Persisted optional named entrypoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
+    /// Deployer-authenticated immutable properties for the target `ExecutionContext`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub props: Option<serde_json::Value>,
 }
 
 /// Admitted native invocation returned to the trusted controller.
@@ -287,6 +290,33 @@ impl ServiceInvocationRegistry {
     ) -> Result<ServiceAdmission, PlatformError> {
         let digest = parse_digest(&request.descriptor_sha256)?;
         let target = self.resolve_and_pin(request, &digest)?;
+        let props = target
+            .0
+            .service
+            .props_json
+            .as_deref()
+            .map(serde_json::from_slice)
+            .transpose()
+            .map_err(|_| denied())?;
+        let verified_descriptor = ServiceDescriptorV1::new(
+            target.0.service.binding_name.clone(),
+            target.0.service.target_worker_id,
+            target.0.service.entrypoint.clone(),
+            props.clone(),
+        )
+        .map_err(|_| denied())?;
+        let canonical_props = verified_descriptor
+            .props
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()
+            .map_err(|_| denied())?;
+        if canonical_props != target.0.service.props_json
+            || verified_descriptor.sha256().map_err(|_| denied())?
+                != target.0.service.descriptor_sha256
+        {
+            return Err(denied());
+        }
         let target_version_id = target.0.target_version_id;
         let target_worker_id = target.0.service.target_worker_id;
         let target_pin = target.1;
@@ -395,6 +425,7 @@ impl ServiceInvocationRegistry {
                 route_generation: target.0.target_route_generation,
                 content_kind: target.0.target_content_kind,
                 entrypoint: target.0.service.entrypoint,
+                props,
             },
         })
     }

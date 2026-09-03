@@ -616,12 +616,29 @@ impl RuntimeSource {
         let mut service_descriptors = Vec::with_capacity(snapshot.services.len());
         let mut runtime_services = Vec::with_capacity(snapshot.services.len());
         for service in &snapshot.services {
+            let props = service
+                .props_json
+                .as_deref()
+                .map(serde_json::from_slice)
+                .transpose()
+                .map_err(|_| invariant())?;
             let descriptor = ServiceDescriptorV1::new(
                 service.binding_name.clone(),
                 service.target_worker_id,
                 service.entrypoint.clone(),
-            )?;
-            let digest = descriptor.sha256()?;
+                props,
+            )
+            .map_err(|_| invariant())?;
+            let canonical_props = descriptor
+                .props
+                .as_ref()
+                .map(serde_json::to_vec)
+                .transpose()
+                .map_err(|_| invariant())?;
+            if canonical_props != service.props_json {
+                return Err(invariant());
+            }
+            let digest = descriptor.sha256().map_err(|_| invariant())?;
             if digest != service.descriptor_sha256 {
                 return Err(invariant());
             }

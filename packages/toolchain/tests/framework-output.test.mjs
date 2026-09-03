@@ -117,15 +117,30 @@ test("rejects missing, older, newer, duplicate, opt-out, experimental, and unkno
 test("reconciles provider identities while preserving local services and binding resource IDs", async t => {
   const lock = await loadFormalRuntimeLock();
   const project = await fixture(t);
-  project.services = { SELF: { service: "local-companion", entrypoint: "Api" } };
+  project.services = {
+    SELF: { service: "local-companion", entrypoint: "Api", props: { mode: "local", nested: [1, true] } },
+  };
   project.bindings = { KV: { type: "kv_namespace", id: "local-kv" } };
   await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
-    services: [{ binding: "SELF", service: "cloudflare-companion", entrypoint: "Api" }],
+    services: [{
+      binding: "SELF",
+      service: "cloudflare-companion",
+      entrypoint: "Api",
+      props: { nested: [1, true], mode: "local" },
+    }],
     kv_namespaces: [{ binding: "KV", id: "cloudflare-kv" }],
   })));
   const imported = await importFrameworkOutput(project);
-  assert.deepEqual(imported.services, { SELF: { service: "local-companion", entrypoint: "Api" } });
+  assert.deepEqual(imported.services, {
+    SELF: { service: "local-companion", entrypoint: "Api", props: { mode: "local", nested: [1, true] } },
+  });
   withoutSelectors(imported);
+
+  await writeFile(join(project.project, "dist", "server", "wrangler.json"), JSON.stringify(generatedConfig(lock, {
+    services: [{ binding: "SELF", service: "cloudflare-companion", entrypoint: "Api", props: { mode: "other" } }],
+    kv_namespaces: [{ binding: "KV", id: "cloudflare-kv" }],
+  })));
+  await assert.rejects(importFrameworkOutput(project), /services differ/);
 });
 
 test("imports Wrangler Vectorize and AI Search declarations while retaining local resource IDs", async t => {

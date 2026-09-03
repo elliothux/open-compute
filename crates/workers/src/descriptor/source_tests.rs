@@ -4,6 +4,71 @@ use serde_json::json;
 use sha2::Digest;
 
 #[test]
+fn service_props_are_canonical_bounded_and_part_of_identity() {
+    let target = WorkerId::generate();
+    let descriptor = ServiceDescriptorV1::new(
+        "CATALOG".to_owned(),
+        target,
+        Some("CatalogApi".to_owned()),
+        Some(json!({
+            "z": [1, {"__proto__": "ordinary JSON data"}],
+            "constructor": {"enabled": true},
+        })),
+    )
+    .unwrap();
+    let bytes = descriptor.canonical_bytes().unwrap();
+    assert!(
+        bytes
+            .windows(b"constructor".len())
+            .any(|part| part == b"constructor")
+    );
+    assert_ne!(
+        descriptor.sha256().unwrap(),
+        ServiceDescriptorV1::new(
+            "CATALOG".to_owned(),
+            target,
+            Some("CatalogApi".to_owned()),
+            Some(json!({"constructor": {"enabled": false}})),
+        )
+        .unwrap()
+        .sha256()
+        .unwrap()
+    );
+
+    let oversized = ServiceDescriptorV1::new(
+        "CATALOG".to_owned(),
+        target,
+        None,
+        Some(json!({"value": "x".repeat(64 * 1024)})),
+    )
+    .unwrap_err();
+    assert_eq!(oversized.code(), ErrorCode::ResourceLimitExceeded);
+
+    let mut nested = json!(true);
+    for _ in 0..33 {
+        nested = json!([nested]);
+    }
+    assert_eq!(
+        ServiceDescriptorV1::new(
+            "CATALOG".to_owned(),
+            target,
+            None,
+            Some(json!({"nested": nested})),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::ResourceLimitExceeded
+    );
+
+    let mut corrupted = descriptor;
+    corrupted.props = Some(json!([]));
+    assert_eq!(
+        corrupted.sha256().unwrap_err().code(),
+        ErrorCode::BundleInvalid
+    );
+}
+
+#[test]
 fn every_version_binds_the_complete_system_source_identity() {
     let bundle = crate::CanonicalBundle::build(
         "index.js",

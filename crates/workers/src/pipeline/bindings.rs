@@ -155,11 +155,18 @@ impl VersionController<'_> {
                 name.clone(),
                 input.target_worker_id,
                 input.entrypoint.clone(),
+                input.props.clone(),
             )?;
             service_rows.push(NewVersionService {
                 binding_name: descriptor.name.clone(),
                 target_worker_id: descriptor.target_worker_id,
                 entrypoint: descriptor.entrypoint.clone(),
+                props_json: descriptor
+                    .props
+                    .as_ref()
+                    .map(serde_json::to_vec)
+                    .transpose()
+                    .map_err(|_| invariant())?,
                 descriptor_sha256: descriptor.sha256()?,
             });
             service_descriptors.push(descriptor);

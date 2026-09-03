@@ -2242,12 +2242,14 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
         binding_name: "CATALOG".to_owned(),
         target_worker_id: target.id,
         entrypoint: Some("CatalogApi".to_owned()),
+        props_json: Some(br#"{"mode":"readonly"}"#.to_vec()),
         descriptor_sha256: descriptor,
     };
     let self_service = crate::NewVersionService {
         binding_name: "SELF".to_owned(),
         target_worker_id: caller.id,
         entrypoint: None,
+        props_json: None,
         descriptor_sha256: [6; 32],
     };
     let declarations = [service, self_service];
@@ -2289,6 +2291,10 @@ fn service_declarations_follow_active_targets_and_protect_worker_identity() {
         .unwrap();
     assert_eq!(first.target_version_id, target_v1);
     assert_eq!(first.service.entrypoint.as_deref(), Some("CatalogApi"));
+    assert_eq!(
+        first.service.props_json.as_deref(),
+        Some(br#"{"mode":"readonly"}"#.as_slice())
+    );
     assert_eq!(
         services.inbound_referrers(account, target.id, 10).unwrap(),
         vec![crate::ServiceReferrer {

@@ -990,6 +990,7 @@ fn caller_request(
             VersionServiceInput {
                 target_worker_id,
                 entrypoint: Some("Producer".to_owned()),
+                props: None,
             },
         )]),
         runtime_features: Default::default(),

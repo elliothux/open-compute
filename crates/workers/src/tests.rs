@@ -1157,6 +1157,10 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         VersionServiceInput {
             target_worker_id: target.id,
             entrypoint: Some("CatalogApi".to_owned()),
+            props: Some(serde_json::json!({
+                "constructor": {"enabled": true},
+                "z": [1, {"__proto__": "ordinary JSON data"}],
+            })),
         },
     );
     request.runtime_features.cache.entrypoints.insert(
@@ -1221,6 +1225,10 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     assert_eq!(
         snapshot.services[0].descriptor.entrypoint.as_deref(),
         Some("CatalogApi")
+    );
+    assert_eq!(
+        snapshot.services[0].descriptor.props,
+        request.services["CATALOG"].props
     );
     assert_eq!(
         snapshot.secrets["API_TOKEN"].expose(),
@@ -1290,6 +1298,8 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         ErrorCode::VersionNotReady
     );
 
+    let canonical_service_props =
+        serde_json::to_vec(request.services["CATALOG"].props.as_ref().unwrap()).unwrap();
     let mut conflict = request;
     conflict.secrets.insert(
         "API_TOKEN".to_owned(),
@@ -1323,9 +1333,39 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         }
     }
 
-    // Simulate out-of-band corruption by removing the production guard. The
-    // RuntimeSource pre-get descriptor check must still fail closed.
+    // Simulate out-of-band corruption by removing production guards. The
+    // RuntimeSource descriptor checks must still fail closed.
     let conn = rusqlite::Connection::open(root.join("control.sqlite")).unwrap();
+    conn.execute_batch("DROP TRIGGER version_services_update_guard;")
+        .unwrap();
+    conn.execute(
+        "UPDATE version_services SET props_json = ?1 WHERE version_id = ?2 AND binding_name = 'CATALOG'",
+        rusqlite::params![
+            br#"{"z":[1,{"__proto__":"ordinary JSON data"}],"constructor":{"enabled":true}}"#,
+            version_id.to_string()
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        source
+            .resolve(
+                &loader_key(account, worker.id, version_id),
+                &descriptor_hash,
+                RuntimeScope::Runtime,
+            )
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::VersionInvariantViolation
+    );
+    conn.execute(
+        "UPDATE version_services SET props_json = ?1 WHERE version_id = ?2 AND binding_name = 'CATALOG'",
+        rusqlite::params![
+            canonical_service_props,
+            version_id.to_string()
+        ],
+    )
+    .unwrap();
     conn.execute_batch("DROP TRIGGER version_immutable_guard;")
         .unwrap();
     conn.execute(

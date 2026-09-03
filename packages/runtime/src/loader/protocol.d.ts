@@ -45,6 +45,7 @@ export interface RuntimeServiceBinding {
   name: string;
   targetWorkerId: string;
   entrypoint?: string;
+  props?: Record<string, unknown>;
   policyVersion: 1;
   descriptorSha256: string;
 }

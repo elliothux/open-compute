@@ -156,6 +156,7 @@ async fn p3_service_calls_from_queue_cron_do_and_workflow_event_sources() {
             VersionServiceInput {
                 target_worker_id: target.id,
                 entrypoint: None,
+                props: None,
             },
         )]),
         2,

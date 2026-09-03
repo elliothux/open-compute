@@ -511,6 +511,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
         VersionServiceInput {
             target_worker_id: target.id,
             entrypoint: None,
+            props: None,
         },
     )]);
     let caller_version = deploy(

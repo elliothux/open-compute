@@ -8,6 +8,16 @@ function invalid(): never {
   throw Object.assign(new Error("VERSION_INVARIANT_VIOLATION"), { stableCode: "VERSION_INVARIANT_VIOLATION" });
 }
 
+function jsonValue(value: unknown, depth: number): boolean {
+  if (depth > 32) return false;
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(item => jsonValue(item, depth + 1));
+  if (!record(value)
+      || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) return false;
+  return Object.values(value).every(item => jsonValue(item, depth + 1));
+}
+
 /** Check the internal wire shape; Rust remains the authority for identity and policy. */
 export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot {
   if (!record(value) || value.schemaVersion !== 1 || typeof value.loaderKey !== "string"
@@ -83,6 +93,8 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
     if (!record(service) || service.schemaVersion !== 1 || service.policyVersion !== 1
         || typeof service.name !== "string" || typeof service.targetWorkerId !== "string"
         || typeof service.descriptorSha256 !== "string"
-        || (service.entrypoint !== undefined && typeof service.entrypoint !== "string")) invalid();
+        || (service.entrypoint !== undefined && typeof service.entrypoint !== "string")
+        || (service.props !== undefined && (!record(service.props) || !jsonValue(service.props, 0)
+          || new TextEncoder().encode(JSON.stringify(service.props)).byteLength > 64 * 1024))) invalid();
   }
 }

@@ -16,6 +16,8 @@ pub struct VersionServiceRecord {
     pub target_worker_id: WorkerId,
     /// Optional named `WorkerEntrypoint` export.
     pub entrypoint: Option<String>,
+    /// Canonical optional JSON object delivered to the target as `ctx.props`.
+    pub props_json: Option<Vec<u8>>,
     /// Digest of the canonical Service descriptor.
     pub descriptor_sha256: [u8; 32],
     /// Creation timestamp.
@@ -31,6 +33,8 @@ pub struct NewVersionService {
     pub target_worker_id: WorkerId,
     /// Optional named `WorkerEntrypoint` export.
     pub entrypoint: Option<String>,
+    /// Canonical optional JSON object delivered to the target as `ctx.props`.
+    pub props_json: Option<Vec<u8>>,
     /// Canonical descriptor digest.
     pub descriptor_sha256: [u8; 32],
 }
@@ -98,7 +102,7 @@ impl<'a> ServiceRepository<'a> {
             let row = conn
                 .query_row(
                     "SELECT s.version_id, s.binding_name, s.target_worker_id, s.entrypoint,
-                            s.descriptor_sha256, s.created_at_ms,
+                            s.props_json, s.descriptor_sha256, s.created_at_ms,
                             caller.account_id, caller.id, caller.deleted_at_ms, cd.state,
                             target.deleted_at_ms, target.route_generation,
                             td.id, td.content_kind, td.state, td.worker_code_sha256
@@ -112,16 +116,16 @@ impl<'a> ServiceRepository<'a> {
                     params![caller_version_id.to_string(), binding_name],
                     |row| {
                         let service = map_service(row)?;
-                        let account: String = row.get(6)?;
-                        let caller_worker: String = row.get(7)?;
-                        let caller_deleted: Option<i64> = row.get(8)?;
-                        let caller_state: String = row.get(9)?;
-                        let target_deleted: Option<i64> = row.get(10)?;
-                        let route_generation: i64 = row.get(11)?;
-                        let target_version: Option<String> = row.get(12)?;
-                        let content_kind: Option<String> = row.get(13)?;
-                        let target_state: Option<String> = row.get(14)?;
-                        let target_digest: Option<Vec<u8>> = row.get(15)?;
+                        let account: String = row.get(7)?;
+                        let caller_worker: String = row.get(8)?;
+                        let caller_deleted: Option<i64> = row.get(9)?;
+                        let caller_state: String = row.get(10)?;
+                        let target_deleted: Option<i64> = row.get(11)?;
+                        let route_generation: i64 = row.get(12)?;
+                        let target_version: Option<String> = row.get(13)?;
+                        let content_kind: Option<String> = row.get(14)?;
+                        let target_state: Option<String> = row.get(15)?;
+                        let target_digest: Option<Vec<u8>> = row.get(16)?;
                         Ok((
                             service,
                             account,
@@ -250,14 +254,15 @@ pub(crate) fn insert_staging_services(
     for service in services {
         tx.execute(
             "INSERT INTO version_services
-             (version_id, binding_name, target_worker_id, entrypoint,
+             (version_id, binding_name, target_worker_id, entrypoint, props_json,
               descriptor_sha256, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 version_id.to_string(),
                 service.binding_name,
                 service.target_worker_id.to_string(),
                 service.entrypoint,
+                service.props_json,
                 service.descriptor_sha256.as_slice(),
                 now_ms,
             ],
@@ -273,7 +278,7 @@ pub(crate) fn read_version_services_conn(
 ) -> Result<Vec<VersionServiceRecord>, PlatformError> {
     let mut statement = conn
         .prepare(
-            "SELECT version_id, binding_name, target_worker_id, entrypoint,
+            "SELECT version_id, binding_name, target_worker_id, entrypoint, props_json,
                     descriptor_sha256, created_at_ms
              FROM version_services WHERE version_id = ?1 ORDER BY binding_name",
         )
@@ -287,17 +292,18 @@ pub(crate) fn read_version_services_conn(
 fn map_service(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionServiceRecord> {
     let version: String = row.get(0)?;
     let target: String = row.get(2)?;
-    let digest: Vec<u8> = row.get(4)?;
+    let digest: Vec<u8> = row.get(5)?;
     Ok(VersionServiceRecord {
         version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
         binding_name: row.get(1)?,
         target_worker_id: WorkerId::from_str(&target).map_err(|_| rusqlite::Error::InvalidQuery)?,
         entrypoint: row.get(3)?,
+        props_json: row.get(4)?,
         descriptor_sha256: digest
             .as_slice()
             .try_into()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        created_at_ms: row.get(5)?,
+        created_at_ms: row.get(6)?,
     })
 }
 

@@ -28,6 +28,7 @@ interface ServiceAdmission {
     routeGeneration: number;
     contentKind: "worker" | "assets_only";
     entrypoint?: string;
+    props?: Record<string, unknown>;
   };
 }
 interface CapabilityAdmission { handle: string; frame: string; deadlineMs: number }
@@ -418,7 +419,10 @@ async function loadedServiceTarget(
   const runtimeEntrypoint = entrypoint ?? "__OpenComputeDefaultService";
   return {
     snapshot,
-    target: stub.getEntrypoint(runtimeEntrypoint) as object,
+    target: stub.getEntrypoint(
+      runtimeEntrypoint,
+      admission.target.props === undefined ? undefined : { props: admission.target.props },
+    ) as object,
   };
 }
 

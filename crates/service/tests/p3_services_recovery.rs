@@ -108,6 +108,7 @@ async fn p3_service_generation_exit_releases_inflight_handles_and_pins() {
                 VersionServiceInput {
                     target_worker_id: target.id,
                     entrypoint: None,
+                    props: None,
                 },
             )]),
             2,

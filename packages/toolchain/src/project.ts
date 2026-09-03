@@ -68,6 +68,7 @@ export interface WorkerBinding {
 export interface WorkerService {
   service: string;
   entrypoint?: string;
+  props?: { [key: string]: JsonValue };
 }
 
 export interface RuntimeFeatures {
@@ -101,6 +102,37 @@ export interface WorkerProject {
 /** Narrow untrusted JSON objects before reading generated framework fields. */
 export function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function canonicalJson(value: unknown, depth: number): JsonValue {
+  if (depth > 32) throw new Error("service props exceed the supported depth");
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.map(item => canonicalJson(item, depth + 1));
+  if (record(value) && Object.prototype.toString.call(value) === "[object Object]") {
+    const canonical: { [key: string]: JsonValue } = {};
+    for (const key of Object.keys(value).sort()) {
+      Object.defineProperty(canonical, key, {
+        enumerable: true,
+        value: canonicalJson(value[key], depth + 1),
+      });
+    }
+    return canonical;
+  }
+  throw new Error("service props must contain only JSON values");
+}
+
+/** Validate and canonicalize one Wrangler Service binding props object. */
+export function canonicalServiceProps(value: unknown): { [key: string]: JsonValue } {
+  if (!record(value)) throw new Error("service props must be a JSON object");
+  const canonical = canonicalJson(value, 0);
+  if (Array.isArray(canonical) || canonical === null || typeof canonical !== "object") {
+    throw new Error("service props must be a JSON object");
+  }
+  if (new TextEncoder().encode(JSON.stringify(canonical)).byteLength > 64 * 1024) {
+    throw new Error("service props exceed the supported size");
+  }
+  return canonical;
 }
 
 const UNSUPPORTED_WRANGLER_BINDING_KEYS = [
@@ -226,13 +258,18 @@ function normalizeBindings(config: NormalizedWranglerConfig): Record<string, Wor
 function normalizeServices(config: NormalizedWranglerConfig): Record<string, WorkerService> {
   const services: Record<string, WorkerService> = {};
   for (const item of config.services ?? []) {
-    if (item.environment !== undefined || item.props !== undefined || item.remote !== undefined) {
-      throw new Error("service environment, props, and remote selectors are unsupported by the local adapter");
+    if (item.environment !== undefined || item.remote !== undefined) {
+      throw new Error("service environment and remote selectors are unsupported by the local adapter");
     }
+    const props = item.props === undefined ? undefined : canonicalServiceProps(item.props);
     if (Object.hasOwn(services, item.binding)) throw new Error(`duplicate Wrangler binding ${item.binding}`);
     Object.defineProperty(services, item.binding, {
       enumerable: true,
-      value: { service: item.service, ...(item.entrypoint === undefined ? {} : { entrypoint: item.entrypoint }) },
+      value: {
+        service: item.service,
+        ...(item.entrypoint === undefined ? {} : { entrypoint: item.entrypoint }),
+        ...(props === undefined ? {} : { props }),
+      },
     });
   }
   return services;

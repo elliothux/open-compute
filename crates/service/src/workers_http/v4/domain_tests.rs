@@ -45,3 +45,43 @@ async fn deprecated_queue_binding_delay_does_not_change_queue_authority() {
     assert_eq!(binding.config, CanonicalBindingConfig::default());
     assert_eq!(queues.get(account, queue_id).unwrap().config, config);
 }
+
+#[tokio::test]
+async fn service_binding_props_are_projected_into_the_immutable_version_input() {
+    let (_temp, _mock, state, account) = crate::tests::initialized_worker_http_fixture().await;
+    let api = state.worker_api().unwrap();
+    let target = WorkerRepository::new(api.storage.db())
+        .create_worker(account, "catalog", RequestId::generate(), 1, 1_000_000)
+        .unwrap()
+        .0;
+    let props = serde_json::json!({
+        "constructor": {"enabled": true},
+        "nested": [1, {"__proto__": "ordinary JSON data"}],
+    });
+    let metadata: WorkerUploadMetadata = serde_json::from_value(serde_json::json!({
+        "main_module": "index.js",
+        "compatibility_date": "2026-08-30",
+        "bindings": [{
+            "name": "CATALOG",
+            "type": "service",
+            "service": "catalog",
+            "props": props.clone(),
+        }]
+    }))
+    .unwrap();
+    let mut input = UploadInput::new(metadata).unwrap();
+    input
+        .apply_explicit_bindings(
+            api,
+            &AccountAuthority::new(PlatformId::generate(), account, 1),
+            account,
+            WorkerId::generate(),
+            None,
+            false,
+        )
+        .unwrap();
+
+    let service = input.services.get("CATALOG").unwrap();
+    assert_eq!(service.target_worker_id, target.id);
+    assert_eq!(service.props, Some(props));
+}

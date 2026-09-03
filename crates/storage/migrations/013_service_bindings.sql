@@ -3,6 +3,7 @@ CREATE TABLE version_services (
   binding_name TEXT NOT NULL,
   target_worker_id TEXT NOT NULL REFERENCES workers(id),
   entrypoint TEXT,
+  props_json BLOB CHECK(props_json IS NULL OR length(props_json) BETWEEN 2 AND 65536),
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   created_at_ms INTEGER NOT NULL,
   PRIMARY KEY(version_id, binding_name),

@@ -50,6 +50,7 @@ export default class Caller extends WorkerEntrypoint {
       return new Response(Array.from(bytes).join(","));
     }
     if (path === "/default-rpc") return Response.json(await this.env.TARGET.identify());
+    if (path === "/props") return Response.json(await this.env.TARGET.bindingProps());
     if (path === "/named-rpc") return new Response(String(await this.env.NAMED.multiply(6, 7)));
     if (path === "/asset-only-rpc") {
       try { await this.env.ASSET_ONLY.identify(); return new Response("unexpected"); }
@@ -205,6 +206,11 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
             VersionServiceInput {
                 target_worker_id: target.id,
                 entrypoint: None,
+                props: Some(serde_json::json!({
+                    "constructor": {"enabled": true},
+                    "nested": [1, {"__proto__": "ordinary JSON data"}],
+                    "region": "earth",
+                })),
             },
         ),
         (
@@ -212,6 +218,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
             VersionServiceInput {
                 target_worker_id: target.id,
                 entrypoint: Some("NamedApi".to_owned()),
+                props: None,
             },
         ),
         (
@@ -219,6 +226,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
             VersionServiceInput {
                 target_worker_id: asset_only.id,
                 entrypoint: None,
+                props: None,
             },
         ),
         (
@@ -226,6 +234,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
             VersionServiceInput {
                 target_worker_id: object_target.id,
                 entrypoint: None,
+                props: None,
             },
         ),
         (
@@ -233,6 +242,7 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
             VersionServiceInput {
                 target_worker_id: caller.id,
                 entrypoint: None,
+                props: None,
             },
         ),
     ]);
@@ -350,6 +360,18 @@ async fn p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix(
     assert_eq!(
         identity,
         serde_json::json!({"version":"v1","owner":"target-v1"})
+    );
+    wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
+    let props = dispatch(&transport, account, caller.id, &caller_version, "/props").await;
+    assert_eq!(props.status(), StatusCode::OK);
+    let props: serde_json::Value = serde_json::from_slice(&body(props).await).unwrap();
+    assert_eq!(
+        props,
+        serde_json::json!({
+            "constructor": {"enabled": true},
+            "nested": [1, {"__proto__": "ordinary JSON data"}],
+            "region": "earth",
+        })
     );
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
     assert_body(
@@ -525,6 +547,7 @@ export default class Target extends WorkerEntrypoint {{
     reader.releaseLock();
   }}
   identify() {{ return {{ version: VERSION, owner: this.env.OWNER }}; }}
+  bindingProps() {{ return this.ctx.props; }}
   background() {{
     this.ctx.waitUntil(scheduler.wait(750));
     return `background-${{VERSION}}`;

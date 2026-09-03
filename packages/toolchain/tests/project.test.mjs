@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { loadProject } from "../src/project.ts";
+import { canonicalServiceProps, loadProject } from "../src/project.ts";
 
 async function fixture(t, value, name = "wrangler.jsonc") {
   const directory = await mkdtemp(join(tmpdir(), "open-compute-wrangler-"));
@@ -30,7 +30,12 @@ test("uses pinned Wrangler parsing and projects standard bindings", async t => {
     vectorize: [{ binding: "VECTOR", index_name: "vectors" }],
     ai_search_namespaces: [{ binding: "SEARCH_NS", namespace: "team" }],
     ai_search: [{ binding: "SEARCH", instance_name: "docs" }],
-    services: [{ binding: "CATALOG", service: "catalog", entrypoint: "CatalogApi" }],
+    services: [{
+      binding: "CATALOG",
+      service: "catalog",
+      entrypoint: "CatalogApi",
+      props: { z: [1, { ordinary: "JSON data" }], constructor: { enabled: true } },
+    }],
     images: { binding: "IMAGES" },
     ai: { binding: "AI" },
     version_metadata: { binding: "VERSION" },
@@ -42,9 +47,26 @@ test("uses pinned Wrangler parsing and projects standard bindings", async t => {
   assert.deepEqual(project.secrets, ["TOKEN"]);
   assert.equal(project.bindings.DB.id, "d1-id");
   assert.equal(project.bindings.OBJECTS.className, "PortableObject");
-  assert.deepEqual(project.services.CATALOG, { service: "catalog", entrypoint: "CatalogApi" });
+  assert.deepEqual(project.services.CATALOG, {
+    service: "catalog",
+    entrypoint: "CatalogApi",
+    props: { constructor: { enabled: true }, z: [1, { ordinary: "JSON data" }] },
+  });
+  assert.deepEqual(Object.keys(project.services.CATALOG.props), ["constructor", "z"]);
   assert.deepEqual(project.runtimeFeatures.images, { binding: "IMAGES" });
   assert.equal(project.assets.binding, "ASSETS");
+});
+
+test("canonicalizes arbitrary Service props and enforces JSON depth and size", () => {
+  const props = canonicalServiceProps(JSON.parse('{"z":1,"__proto__":{"ok":true},"a":[null,false]}'));
+  assert.deepEqual(Object.keys(props), ["__proto__", "a", "z"]);
+  assert.equal(Object.hasOwn(props, "__proto__"), true);
+  assert.throws(() => canonicalServiceProps({ value: Number.NaN }), /only JSON values/);
+  assert.throws(() => canonicalServiceProps({ value: new Date(0) }), /only JSON values/);
+  assert.throws(() => canonicalServiceProps({ value: "x".repeat(64 * 1024) }), /supported size/);
+  let nested = true;
+  for (let index = 0; index < 33; index += 1) nested = [nested];
+  assert.throws(() => canonicalServiceProps({ nested }), /supported depth/);
 });
 
 test("loads the exact requested config when a directory contains multiple Wrangler configs", async t => {

@@ -16,8 +16,9 @@ use open_compute_storage::{
 };
 use open_compute_workers::{
     CreateVersionOutcome, CreateVersionRequest, ModuleBindingKind, RuntimeValidator,
-    VersionBindingInput, VersionBundle, VersionCachePolicyInput, VersionContent, VersionController,
-    VersionModuleBindingInput, VersionRuntimeFeatures, VersionServiceInput,
+    ServiceDescriptorV1, VersionBindingInput, VersionBundle, VersionCachePolicyInput,
+    VersionContent, VersionController, VersionModuleBindingInput, VersionRuntimeFeatures,
+    VersionServiceInput,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -379,11 +380,36 @@ impl UploadInput {
         }
         for service in &previous.services {
             if inherit_name(&service.binding_name, "service") {
+                let props = service
+                    .props_json
+                    .as_deref()
+                    .map(serde_json::from_slice)
+                    .transpose()
+                    .map_err(|_| invariant())?;
+                let descriptor = ServiceDescriptorV1::new(
+                    service.binding_name.clone(),
+                    service.target_worker_id,
+                    service.entrypoint.clone(),
+                    props,
+                )
+                .map_err(|_| invariant())?;
+                let canonical_props = descriptor
+                    .props
+                    .as_ref()
+                    .map(serde_json::to_vec)
+                    .transpose()
+                    .map_err(|_| invariant())?;
+                if canonical_props != service.props_json
+                    || descriptor.sha256().map_err(|_| invariant())? != service.descriptor_sha256
+                {
+                    return Err(invariant());
+                }
                 self.services.insert(
                     service.binding_name.clone(),
                     VersionServiceInput {
                         target_worker_id: service.target_worker_id,
                         entrypoint: service.entrypoint.clone(),
+                        props: descriptor.props,
                     },
                 );
             }
@@ -654,6 +680,7 @@ impl UploadInput {
                 WorkerUploadBinding::Service {
                     service,
                     entrypoint,
+                    props,
                     ..
                 } => {
                     let target = worker_by_name(api, account, service.as_str())?;
@@ -662,6 +689,7 @@ impl UploadInput {
                         VersionServiceInput {
                             target_worker_id: target.id,
                             entrypoint: entrypoint.clone(),
+                            props: props.clone(),
                         },
                     );
                 }

@@ -305,9 +305,8 @@ impl WorkerUploadBinding {
             Self::Service {
                 environment,
                 cross_account_grant,
-                props,
                 ..
-            } => environment.is_some() || cross_account_grant.is_some() || props.is_some(),
+            } => environment.is_some() || cross_account_grant.is_some(),
             _ => false,
         }
     }
