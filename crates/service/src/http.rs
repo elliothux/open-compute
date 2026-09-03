@@ -7,10 +7,10 @@ use crate::d1_http::D1ApiState;
 use crate::dashboard::DashboardDispatch;
 use crate::do_http::DoApiState;
 use crate::health::HealthCoordinator;
-use crate::kv_http::{self, KvApiState};
+use crate::kv_http::KvApiState;
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
 use crate::queue_http::QueueApiState;
-use crate::r2_http::{self, R2ApiState};
+use crate::r2_http::R2ApiState;
 use crate::scheduler::SchedulerService;
 use crate::search_http::SearchApiState;
 use crate::workers_http::{self, WorkerApiState};
@@ -36,7 +36,7 @@ pub const REQUEST_ID_HEADER: &str = "x-open-compute-request-id";
 const MAX_BODY: usize = 4096;
 const MAX_HEADER_BYTES: usize = 8192;
 const MAX_HEADER_TOTAL: usize = 16_384;
-const MAX_WORKER_UPLOAD_BODY: usize = 64 * 1024 * 1024;
+const MAX_V4_BODY: usize = 64 * 1024 * 1024;
 
 /// Stable error metadata attached internally for low-cardinality product metrics.
 #[derive(Clone, Copy, Debug)]
@@ -427,7 +427,10 @@ pub fn admin_router(state: HttpState) -> Router {
         .route("/health/ready", get(ready))
         .nest(
             "/client/v4",
-            crate::cloudflare_v4::router(v4_state, workers_http::v4::router()),
+            crate::cloudflare_v4::router(
+                v4_state,
+                workers_http::v4::router().merge(crate::cloudflare_v4::storage_router()),
+            ),
         )
         .merge(removed_management_router(false));
     if metrics_enabled {
@@ -457,7 +460,10 @@ pub fn merged_router(state: HttpState) -> Router {
         .route("/health/ready", get(ready))
         .nest(
             "/client/v4",
-            crate::cloudflare_v4::router(v4_state, workers_http::v4::router()),
+            crate::cloudflare_v4::router(
+                v4_state,
+                workers_http::v4::router().merge(crate::cloudflare_v4::storage_router()),
+            ),
         )
         .merge(removed_management_router(false));
     if metrics_enabled {
@@ -754,7 +760,6 @@ async fn bounds_middleware(
     {
         return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
     }
-    let worker_upload = is_v4_worker_upload(request.uri().path());
     let mut header_total = 0_usize;
     for (name, value) in request.headers() {
         if value.len() > MAX_HEADER_BYTES || name.as_str().len() > 256 {
@@ -767,16 +772,8 @@ async fn bounds_middleware(
             return Err(StatusCode::PAYLOAD_TOO_LARGE);
         }
     }
-    let kv_value_put = request.method() == Method::PUT
-        && kv_http::operator_kv_value_put_path(request.uri().path());
-    let r2_object_put = request.method() == Method::PUT
-        && r2_http::operator_r2_object_put_path(request.uri().path());
-    let body_limit = if worker_upload {
-        MAX_WORKER_UPLOAD_BODY
-    } else if kv_value_put {
-        kv_http::KV_OPERATOR_PUT_MAX_BODY
-    } else if r2_object_put {
-        r2_http::R2_OPERATOR_PUT_MAX_BODY
+    let body_limit = if request.uri().path().starts_with("/client/v4/") {
+        MAX_V4_BODY
     } else {
         MAX_BODY
     };
@@ -829,30 +826,6 @@ async fn bounds_middleware(
         "http"
     );
     Ok(response)
-}
-
-fn is_v4_worker_upload(path: &str) -> bool {
-    let parts = path
-        .strip_prefix('/')
-        .unwrap_or(path)
-        .split('/')
-        .collect::<Vec<_>>();
-    if parts.len() < 7
-        || parts[0] != "client"
-        || parts[1] != "v4"
-        || parts[2] != "accounts"
-        || parts[3].is_empty()
-        || parts[4] != "workers"
-    {
-        return false;
-    }
-    (parts.len() == 8 && parts[5] == "scripts" && !parts[6].is_empty() && parts[7] == "versions")
-        || (parts.len() == 7 && parts[5] == "scripts" && !parts[6].is_empty())
-        || (parts.len() == 8
-            && parts[5] == "assets"
-            && parts[6] == "upload"
-            && !parts[7].is_empty())
-        || (parts.len() == 7 && parts[5] == "assets" && parts[6] == "upload")
 }
 
 fn product_operation(path: &str) -> Option<OperationClass> {

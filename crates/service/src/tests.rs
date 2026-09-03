@@ -867,7 +867,7 @@ async fn liveness_ready_status_and_bounds() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let version_path = "/operator/api/v1/accounts/acct_test/workers/wrk_test/versions";
+    let version_path = "/client/v4/accounts/acct_test/workers/scripts/wrk_test/versions";
     let res = app
         .clone()
         .oneshot(
@@ -875,10 +875,6 @@ async fn liveness_ready_status_and_bounds() {
                 .method("POST")
                 .uri(version_path)
                 .header("content-length", 18 * 1024 * 1024)
-                .header(
-                    "x-open-compute-version-metadata",
-                    format!("{{\"padding\":\"{}\"}}", "x".repeat(9000)),
-                )
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -900,14 +896,15 @@ async fn liveness_ready_status_and_bounds() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let staged_upload_path = "/operator/api/v1/accounts/acct_test/workers/wrk_test/version-uploads/upload_test/objects/digest";
+    let staged_upload_path =
+        "/client/v4/accounts/acct_test/workers/scripts/wrk_test/assets-upload-session";
     let res = app
         .clone()
         .oneshot(
             Request::builder()
-                .method("PUT")
+                .method("POST")
                 .uri(staged_upload_path)
-                .header("content-length", 18 * 1024 * 1024)
+                .header("content-length", 16 * 1024)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -919,7 +916,7 @@ async fn liveness_ready_status_and_bounds() {
         .clone()
         .oneshot(
             Request::builder()
-                .method("PUT")
+                .method("POST")
                 .uri(staged_upload_path)
                 .header("content-length", 64 * 1024 * 1024 + 1)
                 .body(Body::empty())
@@ -928,6 +925,20 @@ async fn liveness_ready_status_and_bounds() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/client/v4/accounts/acct_test/storage/kv/namespaces/ns_test/bulk")
+                .header("content-length", 16 * 1024)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
     let res = app
         .clone()
@@ -935,27 +946,13 @@ async fn liveness_ready_status_and_bounds() {
             Request::builder()
                 .method("POST")
                 .uri("/operator/api/v1/accounts/acct_test/workers/wrk_test/version-uploads")
-                .header("content-length", 16 * 1024)
+                .header("content-length", 1024)
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_ne!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
-
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/operator/api/v1/accounts/acct_test/workers/wrk_test/version-uploads-extra")
-                .header("content-length", 16 * 1024)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 
     let res = app
         .clone()
