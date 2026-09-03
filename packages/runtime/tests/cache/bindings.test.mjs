@@ -13,6 +13,7 @@ const snapshot = {
   workerCodeSha256: "ab".repeat(32),
   env: { PUBLIC: "value" },
   bindings: [],
+  moduleBindings: [],
   services: [],
   cachePolicy: {
     enabled: false,
