@@ -165,7 +165,7 @@ impl<'a> QueueRepository<'a> {
         let fetch = u32::from(limit).saturating_add(1);
         let query = build_catalog_sql(
             "SELECT id, account_id, name, state, availability, availability_code,
-                    lifecycle_generation, config_generation, delivery_delay_seconds,
+                    lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                     retention_seconds, max_message_bytes, max_batch_messages,
                     max_batch_bytes, max_backlog_bytes, created_at_ms, updated_at_ms,
                     deleted_at_ms
@@ -214,6 +214,27 @@ impl<'a> QueueRepository<'a> {
         })
     }
 
+    /// List every live Queue for one account in stable identity order.
+    pub fn list_account(&self, account_id: AccountId) -> Result<Vec<QueueRecord>, PlatformError> {
+        self.db.with_read(|connection| {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, account_id, name, state, availability, availability_code,
+                            lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
+                            retention_seconds, max_message_bytes, max_batch_messages,
+                            max_batch_bytes, max_backlog_bytes, created_at_ms, updated_at_ms,
+                            deleted_at_ms
+                     FROM queues WHERE account_id = ?1 AND state != 'tombstoned'
+                     ORDER BY created_at_ms, id",
+                )
+                .map_err(|_| db_error())?;
+            let rows = statement
+                .query_map([account_id.to_string()], map_queue)
+                .map_err(|_| db_error())?;
+            collect(rows)
+        })
+    }
+
     /// List a bounded stable batch that requires cross-database reconciliation.
     pub fn list_reconcile(&self, limit: u32) -> Result<Vec<QueueRecord>, PlatformError> {
         if limit == 0 || limit > 1000 {
@@ -226,7 +247,7 @@ impl<'a> QueueRepository<'a> {
             let mut statement = conn
                 .prepare(
                     "SELECT id, account_id, name, state, availability, availability_code,
-                            lifecycle_generation, config_generation, delivery_delay_seconds,
+                            lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                             retention_seconds, max_message_bytes, max_batch_messages,
                             max_batch_bytes, max_backlog_bytes, created_at_ms, updated_at_ms,
                             deleted_at_ms
@@ -238,6 +259,59 @@ impl<'a> QueueRepository<'a> {
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map([i64::from(limit)], map_queue)
+                .map_err(|_| db_error())?;
+            collect(rows)
+        })
+    }
+
+    /// Persist the desired Queue delivery pause without changing send-policy generation.
+    pub fn set_delivery_paused(
+        &self,
+        account_id: AccountId,
+        queue_id: QueueId,
+        paused: bool,
+        now_ms: i64,
+    ) -> Result<QueueRecord, PlatformError> {
+        self.db.with_immediate(|tx| {
+            let changed = tx
+                .execute(
+                    "UPDATE queues SET delivery_paused = ?1, updated_at_ms = ?2
+                     WHERE id = ?3 AND account_id = ?4 AND state = 'ready'
+                       AND availability = 'healthy'",
+                    params![paused, now_ms, queue_id.to_string(), account_id.to_string()],
+                )
+                .map_err(|_| db_error())?;
+            if changed != 1 {
+                return Err(not_ready());
+            }
+            read_queue_tx(tx, account_id, queue_id)
+        })
+    }
+
+    /// List active Worker producers that reference one Queue.
+    pub fn active_producer_names(
+        &self,
+        account_id: AccountId,
+        queue_id: QueueId,
+    ) -> Result<Vec<String>, PlatformError> {
+        self.db.with_read(|connection| {
+            let mut statement = connection
+                .prepare(
+                    "SELECT DISTINCT w.name
+                     FROM queue_producer_bindings b
+                     JOIN worker_versions v ON v.id = b.version_id
+                     JOIN workers w ON w.id = v.worker_id
+                     JOIN worker_deployments d ON d.id = w.active_deployment_id
+                     WHERE b.queue_id = ?1 AND w.account_id = ?2
+                       AND d.version_id = b.version_id AND w.deleted_at_ms IS NULL
+                     ORDER BY w.name",
+                )
+                .map_err(|_| db_error())?;
+            let rows = statement
+                .query_map(
+                    params![queue_id.to_string(), account_id.to_string()],
+                    |row| row.get(0),
+                )
                 .map_err(|_| db_error())?;
             collect(rows)
         })
@@ -670,7 +744,7 @@ impl<'a> QueueRepository<'a> {
                             b.descriptor_sha256, b.created_at_ms,
                             q.id, q.account_id, q.name, q.state, q.availability,
                             q.availability_code, q.lifecycle_generation, q.config_generation,
-                            q.delivery_delay_seconds, q.retention_seconds, q.max_message_bytes,
+                            q.delivery_paused, q.delivery_delay_seconds, q.retention_seconds, q.max_message_bytes,
                             q.max_batch_messages, q.max_batch_bytes, q.max_backlog_bytes,
                             q.created_at_ms, q.updated_at_ms, q.deleted_at_ms,
                             w.account_id, d.state,
@@ -687,9 +761,9 @@ impl<'a> QueueRepository<'a> {
                     |row| {
                         let binding = map_binding_offset(row, 0)?;
                         let queue = map_queue_offset(row, 8)?;
-                        let account: String = row.get(25)?;
-                        let version_state: String = row.get(26)?;
-                        let referrer: bool = row.get(27)?;
+                        let account: String = row.get(26)?;
+                        let version_state: String = row.get(27)?;
+                        let referrer: bool = row.get(28)?;
                         Ok((binding, queue, account, version_state, referrer))
                     },
                 )
@@ -786,11 +860,11 @@ fn insert_creating_tx(
     tx.execute(
         "INSERT INTO queues
          (id, account_id, name, state, availability, availability_code,
-          lifecycle_generation, config_generation, delivery_delay_seconds,
+          lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
           retention_seconds, max_message_bytes, max_batch_messages, max_batch_bytes,
           max_backlog_bytes, created_at_ms, updated_at_ms, deleted_at_ms)
          VALUES (?1, ?2, ?3, 'creating', 'degraded', 'QUEUE_PROJECTION_PENDING',
-                 1, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, NULL)",
+                 1, 1, 0, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, NULL)",
         params![
             queue_id.to_string(),
             account_id.to_string(),
@@ -869,7 +943,7 @@ fn read_queue_conn(
 ) -> Result<Option<QueueRecord>, PlatformError> {
     conn.query_row(
         "SELECT id, account_id, name, state, availability, availability_code,
-                lifecycle_generation, config_generation, delivery_delay_seconds,
+                lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                 retention_seconds, max_message_bytes, max_batch_messages, max_batch_bytes,
                 max_backlog_bytes, created_at_ms, updated_at_ms, deleted_at_ms
          FROM queues WHERE id = ?1 AND account_id = ?2",
@@ -887,7 +961,7 @@ fn read_queue_tx(
 ) -> Result<QueueRecord, PlatformError> {
     tx.query_row(
         "SELECT id, account_id, name, state, availability, availability_code,
-                lifecycle_generation, config_generation, delivery_delay_seconds,
+                lifecycle_generation, config_generation, delivery_paused, delivery_delay_seconds,
                 retention_seconds, max_message_bytes, max_batch_messages, max_batch_bytes,
                 max_backlog_bytes, created_at_ms, updated_at_ms, deleted_at_ms
          FROM queues WHERE id = ?1 AND account_id = ?2",
@@ -908,12 +982,12 @@ fn map_queue_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<
     let availability: String = row.get(offset + 4)?;
     let lifecycle: i64 = row.get(offset + 6)?;
     let generation: i64 = row.get(offset + 7)?;
-    let delay: i64 = row.get(offset + 8)?;
-    let retention: i64 = row.get(offset + 9)?;
-    let message_bytes: i64 = row.get(offset + 10)?;
-    let batch_messages: i64 = row.get(offset + 11)?;
-    let batch_bytes: i64 = row.get(offset + 12)?;
-    let backlog_bytes: i64 = row.get(offset + 13)?;
+    let delay: i64 = row.get(offset + 9)?;
+    let retention: i64 = row.get(offset + 10)?;
+    let message_bytes: i64 = row.get(offset + 11)?;
+    let batch_messages: i64 = row.get(offset + 12)?;
+    let batch_bytes: i64 = row.get(offset + 13)?;
+    let backlog_bytes: i64 = row.get(offset + 14)?;
     Ok(QueueRecord {
         id: QueueId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
         account_id: AccountId::from_str(&account).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -925,6 +999,7 @@ fn map_queue_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<
         lifecycle_generation: u64::try_from(lifecycle)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         config_generation: u64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        delivery_paused: row.get(offset + 8)?,
         config: QueueConfig {
             delivery_delay_seconds: u32::try_from(delay)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -941,9 +1016,9 @@ fn map_queue_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<
         }
         .validate()
         .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        created_at_ms: row.get(offset + 14)?,
-        updated_at_ms: row.get(offset + 15)?,
-        deleted_at_ms: row.get(offset + 16)?,
+        created_at_ms: row.get(offset + 15)?,
+        updated_at_ms: row.get(offset + 16)?,
+        deleted_at_ms: row.get(offset + 17)?,
     })
 }
 

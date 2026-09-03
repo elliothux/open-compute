@@ -3135,7 +3135,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
         .unwrap();
     assert!(
         consumer_repo
-            .begin_update(second_consumer.id, 2, &third_declaration, 60_002)
+            .begin_update(second_consumer.id, 2, worker.id, &third_declaration, 60_002,)
             .unwrap()
     );
     for result in [
@@ -3332,6 +3332,7 @@ async fn p2_3_promotion_is_idempotent_preserves_pause_and_resumes_an_interrupted
             .begin_update(
                 reactivated.id,
                 reactivated.consumer_generation,
+                worker.id,
                 &retargeted_declaration,
                 706_003,
             )

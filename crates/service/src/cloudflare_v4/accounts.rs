@@ -9,7 +9,7 @@ use axum::Router;
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
 use axum::routing::get;
-use open_compute_core::{AccountId, PlatformId, ResourceId, WorkerId};
+use open_compute_core::{AccountId, PlatformId, QueueConsumerId, QueueId, ResourceId, WorkerId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use url::form_urlencoded;
@@ -93,6 +93,30 @@ impl AccountAuthority {
         public: &str,
     ) -> bool {
         public.len() == 32 && self.public_resource_id(kind, id) == public
+    }
+
+    /// Map a Queue identity to its Cloudflare-shaped stable public ID.
+    pub(crate) fn public_queue_id(&self, id: QueueId) -> String {
+        stable_id("queue", self.platform_id, Some(&id.to_string()))
+    }
+
+    /// Compare a public Queue ID without exposing the internal UUID.
+    pub(crate) fn matches_public_queue_id(&self, id: QueueId, public: &str) -> bool {
+        public.len() == 32 && self.public_queue_id(id) == public
+    }
+
+    /// Map a Queue consumer identity to its Cloudflare-shaped stable public ID.
+    pub(crate) fn public_queue_consumer_id(&self, id: QueueConsumerId) -> String {
+        stable_id("queue-consumer", self.platform_id, Some(&id.to_string()))
+    }
+
+    /// Compare a public Queue consumer ID without exposing its internal UUID.
+    pub(crate) fn matches_public_queue_consumer_id(
+        &self,
+        id: QueueConsumerId,
+        public: &str,
+    ) -> bool {
+        public.len() == 32 && self.public_queue_consumer_id(id) == public
     }
 
     fn account(&self) -> Result<Account, V4Error> {
@@ -276,6 +300,7 @@ fn success_collection<T: Serialize>(
             per_page: query.per_page,
             count,
             total_count,
+            total_pages: total_count.div_ceil(query.per_page),
         },
     )
 }

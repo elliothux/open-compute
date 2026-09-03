@@ -81,7 +81,7 @@ impl SchedulerService {
         for record in queues.list_live(limit)? {
             let mut record = record;
             let mut declaration = queues.declaration(record.declaration_id)?;
-            let worker = workers.get_worker(record.account_id, record.worker_id)?;
+            let mut worker = workers.get_worker(record.account_id, record.worker_id)?;
             if record.state == QueueConsumerState::Deleting {
                 let mut drained = true;
                 for generation in [
@@ -148,6 +148,7 @@ impl SchedulerService {
                 }
                 record = queues.get(record.id)?;
                 declaration = pending;
+                worker = workers.get_worker(record.account_id, record.worker_id)?;
             }
             let execution_generation = if worker.active_version_id == Some(record.version_id) {
                 worker.route_generation

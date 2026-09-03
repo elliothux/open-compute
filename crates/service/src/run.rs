@@ -23,7 +23,7 @@ use crate::metrics::{
     DoFacetReloadReason, KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage,
 };
 use crate::p2_3_promotion::P23PromotionCoordinator;
-use crate::queue_http::QueueApiState;
+use crate::queue_api::QueueApiState;
 use crate::r2_api::R2ApiState;
 use crate::r2_backend::R2BindingService;
 use crate::r2_maintenance::R2Maintenance;
@@ -532,9 +532,13 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     )
     .with_metrics(metrics.clone())
     .with_scheduler(Some(scheduler_store.clone()));
-    let queue_api = QueueApiState::new(storage.clone(), scheduler_store.clone())
-        .with_metrics(metrics.clone())
-        .with_default_max_backlog_bytes(loaded.config.queues.default_max_backlog_bytes);
+    let queue_api = QueueApiState::new(
+        storage.clone(),
+        scheduler_service.clone(),
+        loaded.config.queues.max_consumer_concurrency,
+    )
+    .with_metrics(metrics.clone())
+    .with_default_max_backlog_bytes(loaded.config.queues.default_max_backlog_bytes);
     let workflow_api = crate::workflow_http::WorkflowApiState::new(
         storage.clone(),
         scheduler_store.clone(),

@@ -42,8 +42,8 @@ pub mod metrics;
 mod p2_3_promotion;
 #[cfg(test)]
 mod p3_3_test_support;
+mod queue_api;
 pub mod queue_backend;
-pub mod queue_http;
 pub mod r2_api;
 pub mod r2_backend;
 mod r2_maintenance;

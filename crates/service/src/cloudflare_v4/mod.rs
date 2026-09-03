@@ -5,6 +5,7 @@ mod ai_search;
 mod d1;
 mod d1_transfer;
 mod kv;
+mod queues;
 mod r2;
 mod storage;
 mod vectorize;
@@ -25,6 +26,7 @@ pub(crate) fn storage_router() -> Router<HttpState> {
         .merge(r2::router())
         .merge(vectorize::router())
         .merge(ai_search::router())
+        .merge(queues::router())
         .merge(workflows::router())
 }
 

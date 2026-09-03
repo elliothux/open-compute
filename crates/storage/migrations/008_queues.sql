@@ -15,6 +15,7 @@ CREATE TABLE queues (
   config_generation        INTEGER NOT NULL CHECK(config_generation >= 1),
   delivery_delay_seconds   INTEGER NOT NULL
                            CHECK(delivery_delay_seconds BETWEEN 0 AND 86400),
+  delivery_paused         INTEGER NOT NULL DEFAULT 0 CHECK(delivery_paused IN (0, 1)),
   retention_seconds        INTEGER NOT NULL
                            CHECK(retention_seconds BETWEEN 60 AND 1209600),
   max_message_bytes        INTEGER NOT NULL CHECK(max_message_bytes > 0),
@@ -73,6 +74,7 @@ WHEN OLD.id != NEW.id OR OLD.account_id != NEW.account_id OR
        NEW.state != OLD.state OR NEW.name != OLD.name OR
        NEW.config_generation != OLD.config_generation OR
        NEW.delivery_delay_seconds != OLD.delivery_delay_seconds OR
+       NEW.delivery_paused != OLD.delivery_paused OR
        NEW.retention_seconds != OLD.retention_seconds OR
        NEW.max_message_bytes != OLD.max_message_bytes OR
        NEW.max_batch_messages != OLD.max_batch_messages OR
@@ -141,6 +143,17 @@ WHEN OLD.name != NEW.name AND NOT (
 )
 BEGIN
   SELECT RAISE(ABORT, 'queue rename lifecycle invariant');
+END;
+
+CREATE TRIGGER queues_delivery_pause_guard
+BEFORE UPDATE OF delivery_paused ON queues
+WHEN OLD.delivery_paused != NEW.delivery_paused AND NOT (
+  OLD.state = 'ready' AND NEW.state = 'ready' AND
+  OLD.availability = 'healthy' AND NEW.availability = 'healthy' AND
+  OLD.config_generation = NEW.config_generation
+)
+BEGIN
+  SELECT RAISE(ABORT, 'queue delivery pause invariant');
 END;
 
 CREATE TRIGGER queues_delete_referrer_guard

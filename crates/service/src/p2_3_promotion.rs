@@ -85,6 +85,7 @@ impl P23PromotionCoordinator {
                             if !queue_repo.begin_update(
                                 current.id,
                                 current.consumer_generation,
+                                request.worker_id,
                                 declaration,
                                 request.now_ms,
                             )? {

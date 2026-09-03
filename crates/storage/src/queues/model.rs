@@ -175,6 +175,8 @@ pub struct QueueRecord {
     pub lifecycle_generation: u64,
     /// Send-behavior projection generation.
     pub config_generation: u64,
+    /// Whether consumer delivery is administratively paused.
+    pub delivery_paused: bool,
     /// Persisted Queue policy.
     #[serde(flatten)]
     pub config: QueueConfig,

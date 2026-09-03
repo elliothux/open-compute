@@ -8,7 +8,7 @@ use crate::dashboard::DashboardDispatch;
 use crate::health::HealthCoordinator;
 use crate::kv_api::KvApiState;
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
-use crate::queue_http::QueueApiState;
+use crate::queue_api::QueueApiState;
 use crate::r2_api::R2ApiState;
 use crate::scheduler::SchedulerService;
 use crate::search_api::SearchApiState;

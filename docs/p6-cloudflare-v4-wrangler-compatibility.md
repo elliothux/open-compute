@@ -583,6 +583,12 @@ GET/PUT/DELETE
 Queue 名称与 ID、producer binding、consumer Worker、batch、timeout、retry、delay、dead-letter queue 和最大并发
 映射到现有 Queue/Scheduler authority。pull consumer 和 `visibility_timeout_ms` 不在 Day 1 子集。
 
+当前实现证据（不代表 P6 整体完成）：上述十个 Queue endpoint 已接入 `/client/v4`，使用公开稳定 ID、官方
+envelope 与固定 Wrangler 的 query/JSON shape；consumer 更新先持久化不可变 generation，再由唯一
+Scheduler repair authority 执行旧 generation drain、fence、target switch 和重启 reconcile。Queue pause 是
+持久 desired state，重启后会与 consumer projection 收敛。`openapi/p6-capability-source.json` 是这十项从
+`planned` 提升为 `supported` 的状态 authority；pull consumer 仍按 Day 1 范围明确拒绝。
+
 **Workflows。**
 
 ```text

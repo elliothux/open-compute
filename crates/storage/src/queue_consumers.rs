@@ -184,6 +184,8 @@ pub struct QueueConsumerRecord {
     pub pending_declaration_id: Option<QueueConsumerId>,
     /// Desired version retained until the generation switch commits.
     pub pending_version_id: Option<VersionId>,
+    /// Desired Worker retained until the generation switch commits.
+    pub pending_worker_id: Option<WorkerId>,
     /// Monotonic consumer generation.
     pub consumer_generation: u64,
     /// Lifecycle state.
@@ -220,6 +222,7 @@ impl<'a> QueueConsumerRepository<'a> {
                 .query_row(
                     "SELECT id, account_id, queue_id, worker_id, declaration_id,
                             version_id, pending_declaration_id, pending_version_id,
+                            pending_worker_id,
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE id = ?1",
@@ -261,7 +264,7 @@ impl<'a> QueueConsumerRepository<'a> {
                 .prepare(
                     "SELECT id, account_id, queue_id, worker_id, declaration_id,
                             version_id, pending_declaration_id, pending_version_id,
-                            consumer_generation, state, availability,
+                            pending_worker_id, consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE state != 'tombstoned'
                      ORDER BY account_id, queue_id, id LIMIT ?1",
@@ -287,7 +290,8 @@ impl<'a> QueueConsumerRepository<'a> {
                             max_retries, retry_delay_seconds, max_concurrency,
                             dlq_queue_id, dlq_lifecycle_generation, capability_version,
                             descriptor_sha256, created_at_ms
-                     FROM version_queue_consumers WHERE version_id = ?1
+                     FROM version_queue_consumers c
+                     WHERE version_id = ?1 AND origin = 'version'
                      ORDER BY queue_id, id",
                 )
                 .map_err(|_| invariant())?;
@@ -295,6 +299,29 @@ impl<'a> QueueConsumerRepository<'a> {
                 .query_map([version_id.to_string()], map_declaration)
                 .map_err(|_| invariant())?;
             collect(rows)
+        })
+    }
+
+    /// Append an immutable API consumer generation to an active ready Worker version.
+    pub fn create_api_declaration(
+        &self,
+        version_id: VersionId,
+        declaration: &NewQueueConsumerDeclaration,
+        now_ms: i64,
+    ) -> Result<QueueConsumerDeclaration, PlatformError> {
+        self.db.with_immediate(|tx| {
+            insert_declaration(tx, version_id, declaration, DeclarationOrigin::Api, now_ms)?;
+            tx.query_row(
+                "SELECT id, version_id, queue_id, queue_lifecycle_generation,
+                        entrypoint, max_batch_size, max_batch_timeout_seconds,
+                        max_retries, retry_delay_seconds, max_concurrency,
+                        dlq_queue_id, dlq_lifecycle_generation, capability_version,
+                        descriptor_sha256, created_at_ms
+                 FROM version_queue_consumers WHERE id = ?1",
+                [declaration.id.to_string()],
+                map_declaration,
+            )
+            .map_err(|_| invariant())
         })
     }
 
@@ -308,6 +335,7 @@ impl<'a> QueueConsumerRepository<'a> {
                 .query_row(
                     "SELECT id, account_id, queue_id, worker_id, declaration_id,
                             version_id, pending_declaration_id, pending_version_id,
+                            pending_worker_id,
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE queue_id = ?1 AND state != 'tombstoned'",
@@ -329,6 +357,7 @@ impl<'a> QueueConsumerRepository<'a> {
                 .prepare(
                     "SELECT id, account_id, queue_id, worker_id, declaration_id,
                             version_id, pending_declaration_id, pending_version_id,
+                            pending_worker_id,
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE worker_id = ?1 AND state != 'tombstoned'
@@ -447,6 +476,7 @@ impl<'a> QueueConsumerRepository<'a> {
         &self,
         id: QueueConsumerId,
         generation: u64,
+        worker_id: WorkerId,
         declaration: &QueueConsumerDeclaration,
         now_ms: i64,
     ) -> Result<bool, PlatformError> {
@@ -457,17 +487,19 @@ impl<'a> QueueConsumerRepository<'a> {
                     "UPDATE queue_consumers
                      SET consumer_generation = ?1, state = 'updating', availability = 'degraded',
                          pending_declaration_id = ?2, pending_version_id = ?3,
+                         pending_worker_id = ?4,
                          availability_code = CASE state
                            WHEN 'paused' THEN 'QUEUE_CONSUMER_DRAINING_PAUSED'
                            ELSE 'QUEUE_CONSUMER_DRAINING'
                          END,
-                         updated_at_ms = ?4
-                     WHERE id = ?5 AND queue_id = ?6 AND consumer_generation = ?7
+                         updated_at_ms = ?5
+                     WHERE id = ?6 AND queue_id = ?7 AND consumer_generation = ?8
                        AND state IN ('active', 'paused')",
                     params![
                         as_i64(next)?,
                         declaration.id.to_string(),
                         declaration.version_id.to_string(),
+                        worker_id.to_string(),
                         now_ms,
                         id.to_string(),
                         declaration.queue_id.to_string(),
@@ -491,7 +523,8 @@ impl<'a> QueueConsumerRepository<'a> {
             let changed = tx
                 .execute(
                     "UPDATE queue_consumers SET declaration_id = ?1, version_id = ?2,
-                            pending_declaration_id = NULL, pending_version_id = NULL,
+                            worker_id = pending_worker_id, pending_declaration_id = NULL,
+                            pending_version_id = NULL, pending_worker_id = NULL,
                             updated_at_ms = ?3
                      WHERE id = ?4 AND queue_id = ?5 AND consumer_generation = ?6
                        AND state = 'updating' AND pending_declaration_id = ?1
@@ -566,7 +599,7 @@ impl<'a> QueueConsumerRepository<'a> {
                     "UPDATE queue_consumers SET state = 'tombstoned', availability = 'unavailable',
                             availability_code = 'QUEUE_CONSUMER_DELETED', updated_at_ms = ?1,
                             deleted_at_ms = ?1, pending_declaration_id = NULL,
-                            pending_version_id = NULL
+                            pending_version_id = NULL, pending_worker_id = NULL
                      WHERE id = ?2 AND consumer_generation = ?3 AND state = 'deleting'",
                     params![now_ms, id.to_string(), as_i64(generation)?],
                 )
@@ -645,38 +678,56 @@ pub(crate) fn insert_staging_declarations(
     now_ms: i64,
 ) -> Result<(), PlatformError> {
     for declaration in declarations {
-        let (dlq, dlq_generation) = declaration
-            .dead_letter_queue
-            .map_or((None, None), |(id, generation)| {
-                (Some(id.to_string()), Some(generation))
-            });
-        tx.execute(
-            "INSERT INTO version_queue_consumers
-             (id, version_id, queue_id, queue_lifecycle_generation, entrypoint,
+        insert_declaration(
+            tx,
+            version_id,
+            declaration,
+            DeclarationOrigin::Version,
+            now_ms,
+        )?;
+    }
+    Ok(())
+}
+
+fn insert_declaration(
+    tx: &Transaction<'_>,
+    version_id: VersionId,
+    declaration: &NewQueueConsumerDeclaration,
+    origin: DeclarationOrigin,
+    now_ms: i64,
+) -> Result<(), PlatformError> {
+    let (dlq, dlq_generation) = declaration
+        .dead_letter_queue
+        .map_or((None, None), |(id, generation)| {
+            (Some(id.to_string()), Some(generation))
+        });
+    tx.execute(
+        "INSERT INTO version_queue_consumers
+             (id, version_id, origin, queue_id, queue_lifecycle_generation, entrypoint,
               max_batch_size, max_batch_timeout_seconds, max_retries, retry_delay_seconds,
               max_concurrency, dlq_queue_id, dlq_lifecycle_generation, capability_version,
               descriptor_sha256, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-            params![
-                declaration.id.to_string(),
-                version_id.to_string(),
-                declaration.queue_id.to_string(),
-                as_i64(declaration.queue_lifecycle_generation)?,
-                declaration.entrypoint,
-                i64::from(declaration.config.max_batch_size),
-                i64::from(declaration.config.max_batch_timeout_seconds),
-                i64::from(declaration.config.max_retries),
-                i64::from(declaration.config.retry_delay_seconds),
-                i64::from(declaration.config.max_concurrency),
-                dlq,
-                dlq_generation.map(as_i64).transpose()?,
-                i64::from(declaration.capability_version),
-                declaration.descriptor_sha256.as_slice(),
-                now_ms,
-            ],
-        )
-        .map_err(|_| invariant())?;
-    }
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        params![
+            declaration.id.to_string(),
+            version_id.to_string(),
+            origin.as_str(),
+            declaration.queue_id.to_string(),
+            as_i64(declaration.queue_lifecycle_generation)?,
+            declaration.entrypoint,
+            i64::from(declaration.config.max_batch_size),
+            i64::from(declaration.config.max_batch_timeout_seconds),
+            i64::from(declaration.config.max_retries),
+            i64::from(declaration.config.retry_delay_seconds),
+            i64::from(declaration.config.max_concurrency),
+            dlq,
+            dlq_generation.map(as_i64).transpose()?,
+            i64::from(declaration.capability_version),
+            declaration.descriptor_sha256.as_slice(),
+            now_ms,
+        ],
+    )
+    .map_err(|_| invariant())?;
     Ok(())
 }
 
@@ -686,7 +737,7 @@ fn read_record_tx(
 ) -> Result<QueueConsumerRecord, PlatformError> {
     tx.query_row(
         "SELECT id, account_id, queue_id, worker_id, declaration_id, version_id,
-                pending_declaration_id, pending_version_id, consumer_generation,
+                pending_declaration_id, pending_version_id, pending_worker_id, consumer_generation,
                 state, availability, availability_code,
                 created_at_ms, updated_at_ms, deleted_at_ms
          FROM queue_consumers WHERE id = ?1",
@@ -694,6 +745,21 @@ fn read_record_tx(
         map_record,
     )
     .map_err(|_| invariant())
+}
+
+#[derive(Clone, Copy)]
+enum DeclarationOrigin {
+    Version,
+    Api,
+}
+
+impl DeclarationOrigin {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Version => "version",
+            Self::Api => "api",
+        }
+    }
 }
 
 fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerDeclaration> {
@@ -740,16 +806,21 @@ fn map_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerRecord> 
             .as_deref()
             .map(parse)
             .transpose()?,
-        consumer_generation: unsigned(row.get(8)?)?,
+        pending_worker_id: row
+            .get::<_, Option<String>>(8)?
+            .as_deref()
+            .map(parse)
+            .transpose()?,
+        consumer_generation: unsigned(row.get(9)?)?,
         state: row
-            .get::<_, String>(9)?
+            .get::<_, String>(10)?
             .parse()
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        availability: row.get(10)?,
-        availability_code: row.get(11)?,
-        created_at_ms: row.get(12)?,
-        updated_at_ms: row.get(13)?,
-        deleted_at_ms: row.get(14)?,
+        availability: row.get(11)?,
+        availability_code: row.get(12)?,
+        created_at_ms: row.get(13)?,
+        updated_at_ms: row.get(14)?,
+        deleted_at_ms: row.get(15)?,
     })
 }
 

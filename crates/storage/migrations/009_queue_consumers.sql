@@ -2,6 +2,7 @@ CREATE TABLE version_queue_consumers (
   id                         TEXT PRIMARY KEY
                              CHECK(length(id) = 36 AND id = lower(id)),
   version_id              TEXT NOT NULL REFERENCES worker_versions(id),
+  origin                     TEXT NOT NULL CHECK(origin IN ('version', 'api')),
   queue_id                   TEXT NOT NULL REFERENCES queues(id),
   queue_lifecycle_generation INTEGER NOT NULL CHECK(queue_lifecycle_generation >= 1),
   entrypoint                 TEXT CHECK(entrypoint IS NULL OR length(entrypoint) BETWEEN 1 AND 128),
@@ -15,11 +16,14 @@ CREATE TABLE version_queue_consumers (
   capability_version         INTEGER NOT NULL CHECK(capability_version = 1),
   descriptor_sha256          BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   created_at_ms              INTEGER NOT NULL,
-  UNIQUE(version_id, queue_id),
   CHECK((dlq_queue_id IS NULL) = (dlq_lifecycle_generation IS NULL)),
   CHECK(dlq_lifecycle_generation IS NULL OR dlq_lifecycle_generation >= 1),
   CHECK(dlq_queue_id IS NULL OR dlq_queue_id != queue_id)
 ) STRICT;
+
+CREATE UNIQUE INDEX version_queue_consumers_manifest_queue
+ON version_queue_consumers(version_id, queue_id)
+WHERE origin = 'version';
 
 CREATE INDEX version_queue_consumers_queue
 ON version_queue_consumers(queue_id, version_id, id);
@@ -34,6 +38,7 @@ CREATE TABLE queue_consumers (
   version_id         TEXT NOT NULL REFERENCES worker_versions(id),
   pending_declaration_id TEXT REFERENCES version_queue_consumers(id),
   pending_version_id TEXT REFERENCES worker_versions(id),
+  pending_worker_id       TEXT REFERENCES workers(id),
   consumer_generation   INTEGER NOT NULL CHECK(consumer_generation >= 1),
   state                 TEXT NOT NULL CHECK(state IN (
                           'activating', 'active', 'paused', 'updating',
@@ -48,6 +53,7 @@ CREATE TABLE queue_consumers (
   deleted_at_ms         INTEGER,
   CHECK(availability_code IS NULL OR length(availability_code) BETWEEN 1 AND 128),
   CHECK((pending_declaration_id IS NULL) = (pending_version_id IS NULL)),
+  CHECK((pending_declaration_id IS NULL) = (pending_worker_id IS NULL)),
   CHECK(pending_version_id IS NULL OR state IN ('updating', 'deleting')),
   CHECK((state = 'tombstoned') = (deleted_at_ms IS NOT NULL)),
   CHECK((availability = 'healthy') = (availability_code IS NULL))
@@ -74,7 +80,13 @@ BEGIN
     SELECT 1 FROM worker_versions d
     JOIN workers w ON w.id = d.worker_id
     JOIN queues q ON q.id = NEW.queue_id
-    WHERE d.id = NEW.version_id AND d.state = 'staging'
+    WHERE d.id = NEW.version_id AND (
+      (NEW.origin = 'version' AND d.state = 'staging') OR
+      (NEW.origin = 'api' AND d.state = 'ready' AND EXISTS (
+        SELECT 1 FROM worker_deployments p
+        WHERE p.id = w.active_deployment_id AND p.version_id = d.id
+      ))
+    )
       AND w.account_id = q.account_id
       AND q.state = 'ready' AND q.availability = 'healthy'
       AND q.lifecycle_generation = NEW.queue_lifecycle_generation
@@ -83,7 +95,13 @@ BEGIN
     SELECT 1 FROM worker_versions d
     JOIN workers w ON w.id = d.worker_id
     JOIN queues q ON q.id = NEW.dlq_queue_id
-    WHERE d.id = NEW.version_id
+    WHERE d.id = NEW.version_id AND (
+      (NEW.origin = 'version' AND d.state = 'staging') OR
+      (NEW.origin = 'api' AND d.state = 'ready' AND EXISTS (
+        SELECT 1 FROM worker_deployments p
+        WHERE p.id = w.active_deployment_id AND p.version_id = d.id
+      ))
+    )
       AND w.account_id = q.account_id
       AND q.state = 'ready' AND q.availability = 'healthy'
       AND q.lifecycle_generation = NEW.dlq_lifecycle_generation
@@ -98,7 +116,7 @@ END;
 
 CREATE TRIGGER version_queue_consumers_delete_guard
 BEFORE DELETE ON version_queue_consumers
-WHEN NOT EXISTS (
+WHEN OLD.origin = 'version' AND NOT EXISTS (
   SELECT 1 FROM worker_versions d
   WHERE d.id = OLD.version_id AND d.state IN ('staging', 'rejected', 'deleting')
 )
@@ -129,7 +147,7 @@ CREATE TRIGGER queue_consumer_referrer_delete_guard
 BEFORE DELETE ON queue_referrers
 WHEN OLD.referrer_kind IN ('consumer', 'dlq') AND EXISTS (
   SELECT 1 FROM version_queue_consumers c
-  WHERE c.id = OLD.referrer_id AND (
+  WHERE c.id = OLD.referrer_id AND c.origin = 'version' AND (
     (OLD.referrer_kind = 'consumer' AND c.queue_id = OLD.queue_id) OR
     (OLD.referrer_kind = 'dlq' AND c.dlq_queue_id = OLD.queue_id)
   )
@@ -156,7 +174,7 @@ BEGIN
 END;
 
 CREATE TRIGGER queue_consumers_identity_guard
-BEFORE UPDATE OF id, account_id, queue_id, worker_id, created_at_ms ON queue_consumers
+BEFORE UPDATE OF id, account_id, queue_id, created_at_ms ON queue_consumers
 BEGIN
   SELECT RAISE(ABORT, 'queue consumer identity is immutable');
 END;
@@ -180,6 +198,7 @@ WHEN OLD.consumer_generation != NEW.consumer_generation AND NOT (
   NEW.consumer_generation = OLD.consumer_generation + 1 AND
   NEW.state = 'updating' AND NEW.availability = 'degraded' AND
   NEW.pending_declaration_id IS NOT NULL AND NEW.pending_version_id IS NOT NULL AND
+  NEW.pending_worker_id IS NOT NULL AND
   NEW.availability_code IN (
     'QUEUE_CONSUMER_DRAINING', 'QUEUE_CONSUMER_DRAINING_PAUSED'
   )
@@ -189,39 +208,42 @@ BEGIN
 END;
 
 CREATE TRIGGER queue_consumers_pending_target_guard
-BEFORE UPDATE OF pending_declaration_id, pending_version_id ON queue_consumers
+BEFORE UPDATE OF pending_declaration_id, pending_version_id, pending_worker_id ON queue_consumers
 WHEN NOT (
-  (OLD.pending_declaration_id IS NULL AND OLD.pending_version_id IS NULL AND
-   NEW.pending_declaration_id IS NOT NULL AND NEW.pending_version_id IS NOT NULL AND
+  (OLD.pending_declaration_id IS NULL AND OLD.pending_version_id IS NULL AND OLD.pending_worker_id IS NULL AND
+   NEW.pending_declaration_id IS NOT NULL AND NEW.pending_version_id IS NOT NULL AND NEW.pending_worker_id IS NOT NULL AND
    OLD.state IN ('active', 'paused') AND NEW.state = 'updating' AND
    NEW.consumer_generation = OLD.consumer_generation + 1 AND EXISTS (
      SELECT 1 FROM version_queue_consumers c
      JOIN worker_versions d ON d.id = c.version_id
      WHERE c.id = NEW.pending_declaration_id
        AND c.version_id = NEW.pending_version_id
-       AND c.queue_id = NEW.queue_id AND d.worker_id = NEW.worker_id
+       AND c.queue_id = NEW.queue_id AND d.worker_id = NEW.pending_worker_id
        AND d.state = 'ready'
    )) OR
-  (OLD.pending_declaration_id IS NOT NULL AND OLD.pending_version_id IS NOT NULL AND
-   NEW.pending_declaration_id IS NULL AND NEW.pending_version_id IS NULL AND
+  (OLD.pending_declaration_id IS NOT NULL AND OLD.pending_version_id IS NOT NULL AND OLD.pending_worker_id IS NOT NULL AND
+   NEW.pending_declaration_id IS NULL AND NEW.pending_version_id IS NULL AND NEW.pending_worker_id IS NULL AND
    OLD.state IN ('updating', 'deleting') AND NEW.state IN ('updating', 'tombstoned')) OR
   (OLD.pending_declaration_id IS NEW.pending_declaration_id AND
-   OLD.pending_version_id IS NEW.pending_version_id)
+   OLD.pending_version_id IS NEW.pending_version_id AND
+   OLD.pending_worker_id IS NEW.pending_worker_id)
 )
 BEGIN
   SELECT RAISE(ABORT, 'queue consumer pending target invariant');
 END;
 
 CREATE TRIGGER queue_consumers_target_guard
-BEFORE UPDATE OF declaration_id, version_id ON queue_consumers
-WHEN OLD.declaration_id != NEW.declaration_id OR OLD.version_id != NEW.version_id
+BEFORE UPDATE OF declaration_id, version_id, worker_id ON queue_consumers
+WHEN OLD.declaration_id != NEW.declaration_id OR OLD.version_id != NEW.version_id OR OLD.worker_id != NEW.worker_id
 BEGIN
   SELECT CASE WHEN OLD.state != 'updating' OR NEW.state != 'updating' OR
                    OLD.consumer_generation != NEW.consumer_generation OR
                    NEW.declaration_id != OLD.pending_declaration_id OR
                    NEW.version_id != OLD.pending_version_id OR
+                   NEW.worker_id != OLD.pending_worker_id OR
                    NEW.pending_declaration_id IS NOT NULL OR
-                   NEW.pending_version_id IS NOT NULL OR NOT EXISTS (
+                   NEW.pending_version_id IS NOT NULL OR
+                   NEW.pending_worker_id IS NOT NULL OR NOT EXISTS (
     SELECT 1 FROM version_queue_consumers c
     JOIN worker_versions d ON d.id = c.version_id
     WHERE c.id = NEW.declaration_id AND c.version_id = NEW.version_id
@@ -276,4 +298,27 @@ WHEN NEW.state = 'tombstoned'
 BEGIN
   DELETE FROM version_referrers
   WHERE version_id = NEW.version_id AND kind = 'queue_consumer' AND ref_id = NEW.id;
+END;
+
+CREATE TRIGGER queue_consumers_api_referrers_target_switch
+AFTER UPDATE OF declaration_id ON queue_consumers
+WHEN OLD.declaration_id != NEW.declaration_id AND EXISTS (
+  SELECT 1 FROM version_queue_consumers c WHERE c.id = OLD.declaration_id AND c.origin = 'api'
+)
+BEGIN
+  DELETE FROM queue_referrers
+  WHERE referrer_id = OLD.declaration_id AND referrer_kind IN ('consumer', 'dlq');
+END;
+
+CREATE TRIGGER queue_consumers_api_referrers_tombstone
+AFTER UPDATE OF state ON queue_consumers
+WHEN NEW.state = 'tombstoned'
+BEGIN
+  DELETE FROM queue_referrers
+  WHERE referrer_id IN (OLD.declaration_id, OLD.pending_declaration_id)
+    AND referrer_kind IN ('consumer', 'dlq')
+    AND EXISTS (
+      SELECT 1 FROM version_queue_consumers c
+      WHERE c.id = queue_referrers.referrer_id AND c.origin = 'api'
+    );
 END;
