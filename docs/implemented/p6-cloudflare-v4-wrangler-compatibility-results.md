@@ -27,7 +27,7 @@ public `worker_loaders`/Worker Loader 仍分别标为 `planned` 或 `unsupported
 | Wrangler | `4.127.1`；package SHA-256 `f076e0a2cbff001c064a584f1abbde0dd2a58002ab38db5f57abaa2224bab043`；config schema SHA-256 `e42dc556dcb039aa1103d4811b1f58497e2676aceee20488d9ceb1d8ab712018` |
 | Cloudflare TypeScript SDK | `7.1.0`；package SHA-256 `57cca8de9f72799d0c23cc1f2e289ac16d150a23352e9e7676ef22aee676139a` |
 | Cloudflare OpenAPI | `cloudflare/api-schemas@b8687f42e28fbfcb296a350f7dbf16349ea900af`；`openapi.json` SHA-256 `2ffedbbf8b25361a3be2062b7793946e7b9efc0e48b462da68f3195f12ab052b` |
-| P6 generated contract | subset SHA-256 `5ac5f2fc531c6b87da5bb5b4c4cac55b54267109291d5f749e23cf38a1da56b9`；capability SHA-256 `72da9ff5cc0fe65a15c2e479a8c58580b2735297384a34abb923d937f9fb5aaf` |
+| P6 generated contract | subset SHA-256 `486e41018352aa664ef1035c75e13b69ee3bbe17bf3cf9c1b5b1267e738484e3`；capability SHA-256 `ea4230ac2c065a0e17f433d7bf7ebcdcae0e9a1c2a3e0c51b21dc4b9d351948b` |
 | workerd | `v1.20260830.1` / revision `e9dda5963aba7ee4323960db795690ec78fec118`；effective compatibility date `2026-08-30` |
 | workers-types / workers-sdk | `5.20260830.1` / revision `f8085545bcaa2c639f171c25e4424685036a0e10` |
 | 部署画像 | self-hosted、单机、SMB；不声称 Cloudflare 全球 fleet、multi-region control plane、商业 plan 或托管服务内部语义 |
@@ -52,6 +52,12 @@ public `worker_loaders`/Worker Loader 仍分别标为 `planned` 或 `unsupported
 
 - KV namespace/key/bulk、D1 database/query/import/migrations/time-travel、R2 bucket/object、Vectorize index/vector/metadata
   index 以及 AI Search namespace/instance/stats/search/jobs/item 的 P6 子集均已接入标准 v4 路径。
+- D1 time-travel 两个 route 明确为 `supported_with_deviation`：普通 Worker mutation 不再同步复制整库，只有显式
+  management 操作建立最多 8 个 retained checkpoints；timestamp/restore 仅解析这些点，容量被 durable transfer/
+  restore evidence 占满时在复制或 mutation 前拒绝，过期 terminal transfer authority/file 会精确回收并释放 pin；
+  每库同时最多保留 8 个未过期 terminal transfer file，生成新 export/import file 前达到上限会拒绝；不宣称
+  Cloudflare always-on 分钟级 7/30 天 PITR。authority 删除后的极低概率 checkpoint/transfer unlink orphan
+  作为单机磁盘清理长尾保留，不增加启动扫描或日志型 GC 状态机。
 - 固定 Wrangler 的 Vectorize multipart 被显式 bounded，超过上限按稳定请求错误分类；AI Search update 对显式非法
   indexing/retrieval 配置拒绝，不再把它们当作可丢弃的继承默认值。
 - 固定 SDK 的 typed Worker upload 对 D1 binding 发送 `database_id`，固定 Wrangler 发送 `id`。adapter 只在 binding

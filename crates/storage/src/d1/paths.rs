@@ -243,6 +243,26 @@ impl D1Paths {
         Ok(bytes)
     }
 
+    /// Remove one expired terminal transfer file whose authority row was pruned.
+    pub fn remove_pruned_transfer(
+        &self,
+        key: &str,
+        account: AccountId,
+        resource: ResourceId,
+        session_id: &str,
+        filename: &str,
+    ) -> Result<(), PlatformError> {
+        let path = self.resolve_transfer_key(key, account, resource, session_id, filename)?;
+        std::fs::remove_file(&path)
+            .map_err(|_| path_error("failed to remove expired D1 transfer"))?;
+        let directory = path.parent().ok_or_else(identity_mismatch)?;
+        fs::fsync_dir(directory)?;
+        std::fs::remove_dir(directory)
+            .map_err(|_| path_error("failed to remove expired D1 transfer directory"))?;
+        let parent = directory.parent().ok_or_else(identity_mismatch)?;
+        fs::fsync_dir(parent)
+    }
+
     /// Atomically publish one verified snapshot and fsync its directory entry.
     pub fn publish_snapshot(
         &self,
@@ -276,6 +296,21 @@ impl D1Paths {
             .map_err(|_| path_error("failed to publish D1 snapshot"))?;
         fs::fsync_dir(&history)?;
         Ok(destination)
+    }
+
+    /// Remove one checkpoint whose authority row was already pruned.
+    pub fn remove_pruned_snapshot(
+        &self,
+        snapshot_key: &str,
+        account: AccountId,
+        resource: ResourceId,
+        session_version: u64,
+    ) -> Result<(), PlatformError> {
+        let path = self.resolve_snapshot_key(snapshot_key, account, resource, session_version)?;
+        std::fs::remove_file(&path)
+            .map_err(|_| path_error("failed to remove pruned D1 snapshot"))?;
+        let history = path.parent().ok_or_else(identity_mismatch)?;
+        fs::fsync_dir(history)
     }
 
     /// Create and validate an account directory.

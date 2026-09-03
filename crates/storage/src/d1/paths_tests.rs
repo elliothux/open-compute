@@ -64,6 +64,26 @@ fn typed_paths_reject_wrong_parents_content_and_operation_symlinks() {
             .code(),
         ErrorCode::D1IdentityMismatch
     );
+    let transfer_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let transfer_key = paths
+        .write_transfer(account, resource, &transfer_id, "expired.sql", b"SELECT 1;")
+        .unwrap();
+    let transfer_dir = paths
+        .root()
+        .join(".transfers")
+        .join(account.to_string())
+        .join(resource.to_string())
+        .join(&transfer_id);
+    paths
+        .remove_pruned_transfer(
+            &transfer_key,
+            account,
+            resource,
+            &transfer_id,
+            "expired.sql",
+        )
+        .unwrap();
+    assert!(!transfer_dir.exists());
     let wrong_snapshot = paths.database_dir(account, resource).join("wrong.sqlite");
     std::fs::write(&wrong_snapshot, b"snapshot").unwrap();
     assert_eq!(

@@ -512,13 +512,26 @@ POST      /accounts/{account_id}/d1/database/{database_id}/time_travel/restore
 `/migrations/apply` 私有控制面路径不保留。export/import/time-travel 可以复用现有 snapshot/backup primitives，
 但 response、bookmark 和恢复原子性必须按官方端点重新建模并取得差分证据，不能只改 URL。
 
-P6 本地实现已经完成本节声明的 D1 surface。固定 `cloudflare@7.1.0` 的
+P6 本地实现已经完成本节声明的 D1 route surface；两个 time-travel route 标记为
+`supported_with_deviation`。固定 `cloudflare@7.1.0` 的
 `resources/d1/database/database.mjs` 与 `time-travel.mjs` 所列 export/import/time-travel endpoint 已接入
 `/client/v4`；SQL
 export 支持 `dump_options`，import 使用只存 capability fingerprint 的持久 init/upload/ingest/poll session，
 导入提交在 durable snapshot/history 之前不会返回成功，重启会先 reconcile fenced ingest。time-travel 的
-bookmark/timestamp 只解析 completed snapshot，restore 保留 database identity 并产生单调递增的新
-session version。`openapi/p6-capability-source.json` 是 route 状态 authority；固定 Wrangler/SDK 的最终本地
+bookmark/timestamp 只解析 retained completed checkpoint，restore 保留 database identity 并产生单调递增的新
+session version。
+
+Cloudflare Time Travel 是 always-on、分钟级、7/30 天 PITR；单机 SMB 实现不为每次普通 Worker D1 mutation
+同步复制整库，也不把普通 D1 Session bookmark 自动升级为可恢复快照。只有显式 export/import/time-travel
+管理操作会建立当前 checkpoint；每个数据库最多保留 8 个 checkpoint，仍被 transfer/restore intent 引用的点
+不能回收。terminal transfer 的 URL capability 过期后会先删除其 authority 和 exact transfer file，释放所 pin 的
+history；每库同时最多保留 8 个未过期 terminal transfer file。若尚未过期的 durable evidence 已占满 checkpoint
+上限，或 transfer file 达到上限，新的显式操作在复制或 mutation 前以稳定容量错误拒绝；普通
+Worker 读写继续只依赖 live SQLite durability，不因管理面 checkpoint 创建、验证或回收失败返回 result unknown。
+timestamp 仅解析仍保留的显式点，restore bookmark 也必须精确对应其中一个点；authority-row 删除后的极低概率
+checkpoint 或 expired transfer file unlink 失败可能留下不再可达的 orphan file，当前不为此引入启动扫描/日志型
+GC 状态机。
+`openapi/p6-capability-source.json` 是 route 状态 authority；固定 Wrangler/SDK 的最终本地
 Gate 需要在 P6 source freeze 后按第 15 节单轮执行，托管端 differential 仍单独待验收。
 
 **R2。**
@@ -1064,7 +1077,7 @@ Operator router。
 | KV backup/restore | account-scoped `open-compute/kv...` extension |
 | D1 CRUD/query | `/client/v4/accounts/{id}/d1...` |
 | D1 migrations | Wrangler migration ledger + standard D1 query/import |
-| D1 backup/restore | 标准 export/import/time-travel；本地额外快照进入 extension |
+| D1 backup/restore | 标准 export/import；time-travel route 为 8 个显式 checkpoint 的单机 deviation；本地额外快照进入 extension |
 | R2 bucket/object | `/client/v4/accounts/{id}/r2...` |
 | Vectorize index/metadata/vector operations | `/client/v4/accounts/{id}/vectorize/v2/indexes...` |
 | AI Search namespace/instance/items/jobs/search/chat | `/client/v4/accounts/{id}/ai-search/namespaces...` |

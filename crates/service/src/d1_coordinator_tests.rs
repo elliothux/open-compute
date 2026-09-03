@@ -63,7 +63,7 @@ fn fixture() -> (
 }
 
 #[tokio::test]
-async fn every_entry_snapshots_initial_mutation_and_preserves_failed_exec_error() {
+async fn ordinary_mutations_do_not_depend_on_completed_history() {
     let (_temp, storage, account, resource, coordinator) = fixture();
     coordinator
         .execute(
@@ -76,14 +76,7 @@ async fn every_entry_snapshots_initial_mutation_and_preserves_failed_exec_error(
         .await
         .unwrap();
     let history = D1SnapshotRepository::new(storage.db());
-    assert_eq!(
-        history
-            .latest_snapshot(account, resource)
-            .unwrap()
-            .unwrap()
-            .session_version,
-        0
-    );
+    assert_eq!(history.latest_snapshot(account, resource).unwrap(), None);
 
     coordinator
         .execute(account, resource, Duration::from_secs(2), true, |context| {
@@ -95,14 +88,7 @@ async fn every_entry_snapshots_initial_mutation_and_preserves_failed_exec_error(
         })
         .await
         .unwrap();
-    assert_eq!(
-        history
-            .latest_snapshot(account, resource)
-            .unwrap()
-            .unwrap()
-            .session_version,
-        1
-    );
+    assert_eq!(history.latest_snapshot(account, resource).unwrap(), None);
 
     let partial = coordinator
         .execute(account, resource, Duration::from_secs(2), true, |context| {
@@ -116,14 +102,29 @@ async fn every_entry_snapshots_initial_mutation_and_preserves_failed_exec_error(
         .await
         .unwrap_err();
     assert_eq!(partial.code(), ErrorCode::D1SqlInvalid);
-    assert_eq!(
-        history
-            .latest_snapshot(account, resource)
-            .unwrap()
-            .unwrap()
-            .session_version,
-        2
-    );
+    assert_eq!(history.latest_snapshot(account, resource).unwrap(), None);
+
+    let checkpoint = coordinator
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| context.checkpoint_completed_history(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(checkpoint.session_version, 2);
+    let paths = D1Paths::open(storage.data_dir().root()).unwrap();
+    let checkpoint_path = paths
+        .resolve_snapshot_key(
+            &checkpoint.snapshot_key,
+            account,
+            resource,
+            checkpoint.session_version,
+        )
+        .unwrap();
+    std::fs::remove_file(checkpoint_path).unwrap();
 
     let catalog = D1DatabaseRepository::new(storage.db())
         .get(account, resource)
@@ -174,7 +175,110 @@ async fn every_entry_snapshots_initial_mutation_and_preserves_failed_exec_error(
             .unwrap()
             .unwrap()
             .session_version,
-        3
+        2
+    );
+}
+
+#[tokio::test]
+async fn explicit_completed_history_retains_only_eight_unpinned_points() {
+    let (_temp, storage, account, resource, coordinator) = fixture();
+    for version in 1..=10 {
+        coordinator
+            .execute(account, resource, Duration::from_secs(2), true, |context| {
+                context.mark_mutation();
+                context.engine.exec(
+                    "CREATE TABLE IF NOT EXISTS retained(value INTEGER); \
+                     INSERT INTO retained VALUES (1)",
+                    D1QueryLimits::query(context.config)?,
+                )
+            })
+            .await
+            .unwrap();
+        let checkpoint = coordinator
+            .execute(
+                account,
+                resource,
+                Duration::from_secs(2),
+                false,
+                |context| context.checkpoint_completed_history(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(checkpoint.session_version, version);
+    }
+
+    let history = D1SnapshotRepository::new(storage.db());
+    for version in 1..=2 {
+        assert_eq!(
+            history
+                .snapshot(account, resource, version)
+                .unwrap_err()
+                .code(),
+            ErrorCode::ResourceNotFound,
+        );
+    }
+    for version in 3..=10 {
+        assert_eq!(
+            history
+                .snapshot(account, resource, version)
+                .unwrap()
+                .session_version,
+            version,
+        );
+    }
+}
+
+#[tokio::test]
+async fn history_work_reclaims_an_expired_non_ingesting_transfer() {
+    let (_temp, storage, account, resource, coordinator) = fixture();
+    coordinator
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| context.checkpoint_completed_history().map(|_| ()),
+        )
+        .await
+        .unwrap();
+    let transfer_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let history = D1SnapshotRepository::new(storage.db());
+    history
+        .create_transfer(&NewD1Transfer {
+            id: &transfer_id,
+            account_id: account,
+            resource_id: resource,
+            kind: D1TransferKind::Import,
+            at_session_version: 0,
+            filename: "expired-upload.sql",
+            etag_md5: Some(&[2; 16]),
+            token_fingerprint: &[3; 32],
+            token_action: D1TransferAction::Upload,
+            token_expires_at_ms: 1,
+            now_ms: 0,
+        })
+        .unwrap();
+
+    coordinator
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| context.checkpoint_completed_history().map(|_| ()),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        history
+            .active_transfer(account, resource)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        history.transfer(account, &transfer_id).unwrap_err().code(),
+        ErrorCode::ResourceNotFound,
     );
 }
 
@@ -233,6 +337,16 @@ async fn cloned_coordinator_has_one_lane_for_control_and_runtime_entries() {
 async fn pending_restore_replays_publication_and_completes_history_after_restart() {
     let (_temp, storage, account, resource, coordinator) = fixture();
     coordinator
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| context.checkpoint_completed_history(),
+        )
+        .await
+        .unwrap();
+    coordinator
         .execute(account, resource, Duration::from_secs(2), true, |context| {
             context.mark_mutation();
             context.engine.exec(
@@ -240,6 +354,16 @@ async fn pending_restore_replays_publication_and_completes_history_after_restart
                 D1QueryLimits::query(context.config)?,
             )
         })
+        .await
+        .unwrap();
+    coordinator
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| context.checkpoint_completed_history(),
+        )
         .await
         .unwrap();
     let history = D1SnapshotRepository::new(storage.db());
@@ -305,7 +429,7 @@ async fn restart_replays_fenced_ingest_before_admitting_the_next_operation() {
             resource,
             Duration::from_secs(2),
             false,
-            |context| context.engine.user_version(),
+            |context| context.checkpoint_completed_history().map(|_| ()),
         )
         .await
         .unwrap();

@@ -248,7 +248,7 @@ impl<'a> D1SnapshotRepository<'a> {
         Self { db }
     }
 
-    /// Commit one fully durable snapshot, enforcing gap-free session history.
+    /// Commit one fully durable explicit checkpoint in monotonic session order.
     #[allow(clippy::too_many_arguments)]
     pub fn record_completed_snapshot(
         &self,
@@ -287,18 +287,11 @@ impl<'a> D1SnapshotRepository<'a> {
                 )
                 .optional()
                 .map_err(|_| invariant())?;
-            match latest {
-                None if session_version != 0 => return Err(invariant()),
-                Some((latest_version, latest_at))
-                    if u64::try_from(latest_version)
-                        .ok()
-                        .and_then(|value| value.checked_add(1))
-                        != Some(session_version)
-                        || now_ms < latest_at =>
-                {
-                    return Err(invariant());
-                }
-                _ => {}
+            if let Some((latest_version, latest_at)) = latest
+                && (u64::try_from(latest_version).map_err(|_| invariant())? >= session_version
+                    || now_ms < latest_at)
+            {
+                return Err(invariant());
             }
             tx.execute(
                 "INSERT INTO d1_snapshots
@@ -785,7 +778,15 @@ impl<'a> D1SnapshotRepository<'a> {
     }
 }
 
+fn history_capacity() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::D1DatabaseFull,
+        "D1 completed history reached its retained checkpoint limit",
+    )
+}
+
 mod helpers;
+mod retention;
 use helpers::*;
 #[cfg(test)]
 #[path = "history_tests.rs"]

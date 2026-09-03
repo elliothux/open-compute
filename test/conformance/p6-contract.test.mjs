@@ -61,8 +61,8 @@ test("vendor extension operations have stable typed envelopes and exact request 
 
 test("settings surfaces, asset upload variants, and old routes are classified exactly", () => {
   const routes = new Map(capability.managementApi.routes.map(item => [item.id, item]));
-  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported").length, 149);
-  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported_with_deviation").length, 2);
+  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported").length, 147);
+  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported_with_deviation").length, 4);
   assert.equal(capability.managementApi.routes.filter(item => item.status === "planned").length, 3);
   assert.equal(capability.managementApi.routes.filter(item => item.status === "unsupported").length, 1);
   assert.equal(routes.get("PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings")?.requestMediaType, "multipart");
@@ -87,8 +87,21 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
       routes.get("GET /accounts/{account_id}/ai-search/tokens")?.deviations],
     ["supported_with_deviation", ["OC-AI-SEARCH-TOKEN-001"]],
   );
+  assert.deepEqual(
+    [routes.get("GET /accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark")?.status,
+      routes.get("POST /accounts/{account_id}/d1/database/{database_id}/time_travel/restore")?.status],
+    ["supported_with_deviation", "supported_with_deviation"],
+  );
+  assert.deepEqual(
+    routes.get("GET /accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark")?.deviations,
+    ["OC-D1-001"],
+  );
+  assert.match(
+    routes.get("POST /accounts/{account_id}/d1/database/{database_id}/time_travel/restore")?.constraint ?? "",
+    /not automatically retained restore points/,
+  );
   assert.deepEqual(capability.managementApi.deviations,
-    ["OC-ACCOUNT-SUBDOMAIN-001", "OC-AI-SEARCH-TOKEN-001"]);
+    ["OC-ACCOUNT-SUBDOMAIN-001", "OC-D1-001", "OC-AI-SEARCH-TOKEN-001"]);
   assert.deepEqual(
     [routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.status,
       routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.source],

@@ -65,7 +65,7 @@ fn snapshot_key(resource: ResourceId, version: u64) -> String {
 }
 
 #[test]
-fn completed_history_is_gap_free_replay_safe_and_timestamp_resolved() {
+fn completed_history_is_sparse_replay_safe_and_timestamp_resolved() {
     let (_temp, _config, storage, account, resource) = fixture();
     let history = D1SnapshotRepository::new(storage.db());
     let zero = history
@@ -109,35 +109,35 @@ fn completed_history_is_gap_free_replay_safe_and_timestamp_resolved() {
             .code(),
         ErrorCode::IdempotencyConflict
     );
-    assert_eq!(
-        history
-            .record_completed_snapshot(
-                account,
-                resource,
-                2,
-                &snapshot_key(resource, 2),
-                &[2; 32],
-                100,
-                20,
-            )
-            .unwrap_err()
-            .code(),
-        ErrorCode::ResourceInvariantViolation
-    );
-    let one = history
+    let two = history
         .record_completed_snapshot(
             account,
             resource,
-            1,
-            &snapshot_key(resource, 1),
+            2,
+            &snapshot_key(resource, 2),
             &[2; 32],
             101,
             20,
         )
         .unwrap();
     assert_eq!(
+        history
+            .record_completed_snapshot(
+                account,
+                resource,
+                1,
+                &snapshot_key(resource, 1),
+                &[3; 32],
+                100,
+                21,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceInvariantViolation
+    );
+    assert_eq!(
         history.latest_snapshot(account, resource).unwrap(),
-        Some(one.clone())
+        Some(two.clone())
     );
     assert_eq!(
         history.snapshot_at_or_before(account, resource, 9).unwrap(),
@@ -153,7 +153,7 @@ fn completed_history_is_gap_free_replay_safe_and_timestamp_resolved() {
         history
             .snapshot_at_or_before(account, resource, 20)
             .unwrap(),
-        Some(one)
+        Some(two)
     );
     assert_eq!(
         history
@@ -562,6 +562,85 @@ fn terminal_transfer_replays_keep_original_times_after_restart() {
         history.expire_transfer(account, &expired_id, 70).unwrap(),
         expired
     );
+}
+
+#[test]
+fn expired_terminal_transfer_gc_releases_completed_history_capacity() {
+    let (_temp, _config, storage, account, resource) = fixture();
+    let history = D1SnapshotRepository::new(storage.db());
+    history
+        .record_completed_snapshot(
+            account,
+            resource,
+            0,
+            &snapshot_key(resource, 0),
+            &[1; 32],
+            100,
+            10,
+        )
+        .unwrap();
+    let export_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    history
+        .create_transfer(&NewD1Transfer {
+            id: &export_id,
+            account_id: account,
+            resource_id: resource,
+            kind: D1TransferKind::Export,
+            at_session_version: 0,
+            filename: "bounded-export.sql",
+            etag_md5: None,
+            token_fingerprint: &[2; 32],
+            token_action: D1TransferAction::Download,
+            token_expires_at_ms: 100,
+            now_ms: 20,
+        })
+        .unwrap();
+    history
+        .complete_export(
+            account,
+            &export_id,
+            "d1/transfers/bounded-export.sql",
+            &[3; 32],
+            200,
+            30,
+        )
+        .unwrap();
+
+    assert_eq!(
+        history
+            .ensure_completed_snapshot_capacity(account, resource, 1, [None, None])
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1DatabaseFull,
+    );
+    assert_eq!(
+        history
+            .ensure_transfer_file_capacity(account, resource, 1, 99)
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1DatabaseFull,
+    );
+    assert!(
+        history
+            .prune_expired_terminal_transfers(account, resource, 99)
+            .unwrap()
+            .is_empty()
+    );
+    let removed = history
+        .prune_expired_terminal_transfers(account, resource, 100)
+        .unwrap();
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].id, export_id);
+    assert_eq!(
+        history.transfer(account, &export_id).unwrap_err().code(),
+        ErrorCode::ResourceNotFound,
+    );
+    history
+        .ensure_completed_snapshot_capacity(account, resource, 1, [None, None])
+        .unwrap();
+    history
+        .ensure_transfer_file_capacity(account, resource, 1, 100)
+        .unwrap();
 }
 
 #[test]

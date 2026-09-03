@@ -154,6 +154,16 @@
       "reason": "Fixed Wrangler 4.127.1 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion"
     },
     {
+      "operation": "GET /accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark",
+      "deviations": ["OC-D1-001"],
+      "reason": "Single-machine D1 retains at most eight explicit management checkpoints instead of Cloudflare's always-on minute-level 7/30-day PITR; timestamps resolve only retained checkpoints and ordinary Worker mutations do not create full database snapshots"
+    },
+    {
+      "operation": "POST /accounts/{account_id}/d1/database/{database_id}/time_travel/restore",
+      "deviations": ["OC-D1-001"],
+      "reason": "Restore accepts only an exact retained explicit management checkpoint; ordinary D1 Session bookmarks are visibility tokens but are not automatically retained restore points"
+    },
+    {
       "operation": "GET /accounts/{account_id}/ai-search/tokens",
       "deviations": ["OC-AI-SEARCH-TOKEN-001"],
       "reason": "Fixed Wrangler 4.127.1 requires account token metadata before AI Search creation; open-compute exposes one stable installation-managed metadata record without Cloudflare account credential storage or token mutation"

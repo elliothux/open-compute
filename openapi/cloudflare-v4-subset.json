@@ -63,10 +63,10 @@
       "status": "supported_with_deviation",
       "source": "cloudflare-openapi",
       "constraint": "Fixed Wrangler 4.127.1 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion",
-      "operationSha256": "0b5d484de777f1236fc1d138a70d7c79070f82def0b495e8e052e5f363bd0db5",
       "deviations": [
         "OC-ACCOUNT-SUBDOMAIN-001"
-      ]
+      ],
+      "operationSha256": "0b5d484de777f1236fc1d138a70d7c79070f82def0b495e8e052e5f363bd0db5"
     },
     {
       "id": "GET /accounts/{account_id}/workers/scripts",
@@ -523,8 +523,12 @@
       "method": "GET",
       "path": "/accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark",
       "operationId": "d1-time-travel-get-bookmark",
-      "status": "supported",
+      "status": "supported_with_deviation",
       "source": "cloudflare-openapi",
+      "constraint": "Single-machine D1 retains at most eight explicit management checkpoints instead of Cloudflare's always-on minute-level 7/30-day PITR; timestamps resolve only retained checkpoints and ordinary Worker mutations do not create full database snapshots",
+      "deviations": [
+        "OC-D1-001"
+      ],
       "operationSha256": "c4df1ceb1430c555a5007ec4117974454508dae08bcc89140e52e4afe24b06c1"
     },
     {
@@ -532,8 +536,12 @@
       "method": "POST",
       "path": "/accounts/{account_id}/d1/database/{database_id}/time_travel/restore",
       "operationId": "d1-time-travel-restore",
-      "status": "supported",
+      "status": "supported_with_deviation",
       "source": "cloudflare-openapi",
+      "constraint": "Restore accepts only an exact retained explicit management checkpoint; ordinary D1 Session bookmarks are visibility tokens but are not automatically retained restore points",
+      "deviations": [
+        "OC-D1-001"
+      ],
       "operationSha256": "37289525a6133b7dc8ebeee87835508c82cb809e5b6125304233a73dde6d6c67"
     },
     {
@@ -741,11 +749,11 @@
       "operationId": "ai-search-list-tokens",
       "status": "supported_with_deviation",
       "source": "cloudflare-openapi",
-      "operationSha256": "5325159dd20b495d3374783d44caf0f117b2f8561a59ca2f0d64fbe383c5c7de",
       "constraint": "Fixed Wrangler 4.127.1 requires account token metadata before AI Search creation; open-compute exposes one stable installation-managed metadata record without Cloudflare account credential storage or token mutation",
       "deviations": [
         "OC-AI-SEARCH-TOKEN-001"
-      ]
+      ],
+      "operationSha256": "5325159dd20b495d3374783d44caf0f117b2f8561a59ca2f0d64fbe383c5c7de"
     },
     {
       "id": "GET /accounts/{account_id}/ai-search/namespaces",

@@ -75,6 +75,20 @@ backend 和 workerd 内部 listener 仍仅监听 loopback。
 该 SDK Gate 的回读发生在同一个 ready `ocd` 进程内，本次只证明写入 authority 后的立即持久投影，不单独
 声称 official SDK wrapper 已完成重启后回读资格；Version authority 的通用重启/恢复仍由独立真实进程 Gate 所有。
 
+### D1 Time Travel retention
+
+[Cloudflare D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/) 是自动启用、分钟级且保留
+7/30 天的 PITR；普通 D1 Session bookmark 也可作为同一历史中的恢复位置。open-compute 的单机 SMB 合同不模拟
+该日志型历史：普通 Worker mutation 只提交 live SQLite，不同步生成整库副本；export/import/time-travel
+显式管理操作才建立 completed checkpoint。每个数据库硬限制为 8 个 checkpoint；transfer/restore intent 引用的
+durable evidence 不会被提前回收，terminal transfer capability 过期后会删除其 authority 与 exact file 并释放 pin；
+每库同时最多保留 8 个未过期 terminal transfer file。若尚未过期的 evidence 使系统无可回收点或 transfer file
+达到上限，新显式操作会在复制或 mutation 前拒绝。timestamp 只解析仍保留的
+显式点，restore 只接受精确 retained checkpoint；普通 Session bookmark 继续提供同库顺序可见性，但不因此自动
+成为 restore point。两个 official time-travel route 因此标记为 `supported_with_deviation` 并关联 `OC-D1-001`，
+不能外推成 Cloudflare always-on PITR 已实现。checkpoint/expired-transfer authority row 删除后若极低概率的 exact
+file unlink 失败，会留下不可达 orphan；单机 SMB 当前接受该磁盘清理长尾，不引入启动扫描或日志型 GC 状态机。
+
 ### Service Binding `props`
 
 固定 Wrangler 4.127.1 的 schema 把 `services[].props` 定义为传给目标 Worker `ctx.props` 的可选 object。

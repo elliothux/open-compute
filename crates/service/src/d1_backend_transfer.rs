@@ -41,18 +41,14 @@ impl D1BindingService {
     ) -> Result<D1TransferGrant, PlatformError> {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         self.coordinator
-            .execute(account_id, resource_id, timeout, true, move |context| {
+            .execute(account_id, resource_id, timeout, false, move |context| {
                 let now_ms = checked_now_ms()?;
                 let expires_at_ms = now_ms
                     .checked_add(D1_TRANSFER_TOKEN_TTL_MS)
                     .ok_or_else(history_invariant)?;
                 let repository = D1SnapshotRepository::new(context.storage.db());
-                let snapshot = repository
-                    .latest_snapshot(account_id, resource_id)?
-                    .ok_or_else(history_invariant)?;
-                if snapshot.session_version != context.engine.session_version()? {
-                    return Err(history_invariant());
-                }
+                let snapshot = context.checkpoint_completed_history()?;
+                context.ensure_transfer_file_capacity()?;
                 let session_id = uuid::Uuid::now_v7().hyphenated().to_string();
                 let filename = format!("export-{resource_id}-{session_id}.sql");
                 let token = transfer_token(
@@ -63,6 +59,7 @@ impl D1BindingService {
                     D1TransferAction::Download,
                 );
                 let token_fingerprint = transfer_token_fingerprint(context.storage, &token);
+                context.mark_mutation();
                 let transfer = repository.create_transfer(&NewD1Transfer {
                     id: &session_id,
                     account_id,
@@ -139,14 +136,9 @@ impl D1BindingService {
     ) -> Result<D1TransferGrant, PlatformError> {
         let timeout = Duration::from_millis(self.config.query_timeout_ms);
         self.coordinator
-            .execute(account_id, resource_id, timeout, true, move |context| {
+            .execute(account_id, resource_id, timeout, false, move |context| {
                 let repository = D1SnapshotRepository::new(context.storage.db());
-                let snapshot = repository
-                    .latest_snapshot(account_id, resource_id)?
-                    .ok_or_else(history_invariant)?;
-                if snapshot.session_version != context.engine.session_version()? {
-                    return Err(history_invariant());
-                }
+                let snapshot = context.checkpoint_completed_history()?;
                 let filename = format!("import-{resource_id}-{}.sql", hex::encode(etag_md5));
                 if let Some(existing) = repository.transfer_by_filename(
                     account_id,
@@ -187,6 +179,7 @@ impl D1BindingService {
                     D1TransferAction::Upload,
                 );
                 let token_fingerprint = transfer_token_fingerprint(context.storage, &token);
+                context.mark_mutation();
                 let transfer = repository.create_transfer(&NewD1Transfer {
                     id: &session_id,
                     account_id,
@@ -219,7 +212,8 @@ impl D1BindingService {
         }
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         self.coordinator
-            .execute(account_id, resource_id, timeout, true, move |context| {
+            .execute(account_id, resource_id, timeout, false, move |context| {
+                context.reclaim_expired_transfers()?;
                 let repository = D1SnapshotRepository::new(context.storage.db());
                 let token_fingerprint = transfer_token_fingerprint(context.storage, &token);
                 let transfer = repository.authorize_transfer_token(
@@ -241,6 +235,8 @@ impl D1BindingService {
                 let key =
                     D1Paths::transfer_key(account_id, resource_id, &session_id, &transfer.filename);
                 if transfer.state == D1TransferState::Uploading {
+                    context.ensure_transfer_file_capacity()?;
+                    context.mark_mutation();
                     let published = paths.write_transfer(
                         account_id,
                         resource_id,
@@ -291,6 +287,7 @@ impl D1BindingService {
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
                 move |context| {
+                    context.reclaim_expired_transfers()?;
                     let fingerprint = transfer_token_fingerprint(context.storage, &token);
                     D1SnapshotRepository::new(context.storage.db()).authorize_transfer_token(
                         account_id,
@@ -315,9 +312,10 @@ impl D1BindingService {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         let outcome = self
             .coordinator
-            .execute(account_id, resource_id, timeout, true, {
+            .execute(account_id, resource_id, timeout, false, {
                 let session_id = session_id.clone();
                 move |context| {
+                    context.reclaim_expired_transfers()?;
                     let repository = D1SnapshotRepository::new(context.storage.db());
                     let transfer = repository.transfer(account_id, &session_id)?;
                     if transfer.resource_id != resource_id {
@@ -331,7 +329,8 @@ impl D1BindingService {
                     {
                         return Err(history_invariant());
                     }
-                    context.mark_mutation();
+                    context.ensure_completed_history_capacity([None, None])?;
+                    context.require_completed_history();
                     ensure_d1_storage_headroom(context.storage)?;
                     let paths = D1Paths::open(context.storage.data_dir().root())?;
                     let bytes = paths.read_transfer(
@@ -344,6 +343,7 @@ impl D1BindingService {
                     verify_import_bytes(&transfer, &bytes)?;
                     let sql =
                         std::str::from_utf8(&bytes).map_err(|_| transfer_integrity_error())?;
+                    context.mark_mutation();
                     context.engine.import_sql(
                         sql,
                         D1QueryLimits::batch(context.config)?,
@@ -395,6 +395,7 @@ impl D1BindingService {
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
                 move |context| {
+                    context.reclaim_expired_transfers()?;
                     D1SnapshotRepository::new(context.storage.db())
                         .transfer(account_id, &session_id)
                 },
@@ -442,6 +443,7 @@ impl D1BindingService {
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
                 move |context| {
+                    context.reclaim_expired_transfers()?;
                     let repository = D1SnapshotRepository::new(context.storage.db());
                     let token_fingerprint = transfer_token_fingerprint(context.storage, &token);
                     let transfer = repository.authorize_transfer_token(
@@ -494,12 +496,13 @@ impl D1BindingService {
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
                 move |context| {
+                    context.reclaim_expired_transfers()?;
                     let repository = D1SnapshotRepository::new(context.storage.db());
                     let snapshot = match timestamp_ms {
                         Some(timestamp) => {
                             repository.snapshot_at_or_before(account_id, resource_id, timestamp)?
                         }
-                        None => repository.latest_snapshot(account_id, resource_id)?,
+                        None => Some(context.checkpoint_completed_history()?),
                     }
                     .ok_or_else(|| {
                         PlatformError::new(
@@ -530,6 +533,7 @@ impl D1BindingService {
                 Duration::from_millis(self.config.query_timeout_ms),
                 false,
                 move |context| {
+                    context.reclaim_expired_transfers()?;
                     D1SnapshotRepository::new(context.storage.db())
                         .snapshot(account_id, resource_id, version)
                         .map(|_| ())
@@ -551,13 +555,9 @@ impl D1BindingService {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
         let result_version = self
             .coordinator
-            .execute(account_id, resource_id, timeout, true, move |context| {
-                context.mark_mutation();
-                ensure_d1_storage_headroom(context.storage)?;
+            .execute(account_id, resource_id, timeout, false, move |context| {
+                context.reclaim_expired_transfers()?;
                 let repository = D1SnapshotRepository::new(context.storage.db());
-                let latest = repository
-                    .latest_snapshot(account_id, resource_id)?
-                    .ok_or_else(history_invariant)?;
                 let source = match target {
                     D1TimeTravelTarget::Bookmark(bookmark) => {
                         let version = context.storage.crypto().open_d1_bookmark(
@@ -576,6 +576,14 @@ impl D1BindingService {
                             )
                         })?,
                 };
+                let latest = context
+                    .checkpoint_completed_history_preserving(Some(source.session_version))?;
+                context.ensure_completed_history_capacity([
+                    Some(source.session_version),
+                    Some(latest.session_version),
+                ])?;
+                context.require_completed_history();
+                ensure_d1_storage_headroom(context.storage)?;
                 if source.session_version > latest.session_version
                     || latest.session_version != context.engine.session_version()?
                 {
@@ -590,6 +598,7 @@ impl D1BindingService {
                     .crypto()
                     .fingerprint_request(canonical.as_bytes());
                 let intent_id = uuid::Uuid::now_v7().hyphenated().to_string();
+                context.mark_mutation();
                 let intent = repository.prepare_restore(
                     account_id,
                     resource_id,
