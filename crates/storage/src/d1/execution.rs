@@ -7,7 +7,7 @@ use super::engine::{
     bump_session_version, limit_error,
 };
 use super::hardening::{
-    ExecutionControl, SqlAuthority, install_guard, map_sqlite_error, remove_guard,
+    ExecutionControl, SqlAuthority, install_guard, map_sqlite_error, reinstall_guard, remove_guard,
 };
 use fallible_iterator::FallibleIterator as _;
 use open_compute_core::{ErrorCode, PlatformError};
@@ -199,29 +199,12 @@ impl D1Engine {
         let connection = self.open()?;
         let started = Instant::now();
         let control = install_guard(&connection, limits, SqlAuthority::Tenant);
-        let mut committed_write = false;
-        let result = execute_tail_batch_observed(
-            &connection,
-            sql,
-            D1_MAX_EXEC_STATEMENTS,
-            &control,
-            &mut committed_write,
-        );
+        let result =
+            execute_tail_batch_versioned(&connection, sql, D1_MAX_EXEC_STATEMENTS, &control);
         remove_guard(&connection);
-        let (count, any_write) = match result {
-            Ok(result) => result,
-            Err(error) => {
-                if committed_write {
-                    bump_session_version(&connection).map_err(|_| result_unknown())?;
-                }
-                return Err(error);
-            }
-        };
+        let count = result?;
         if count == 0 {
             return Err(sql_invalid());
-        }
-        if any_write {
-            bump_session_version(&connection).map_err(|_| result_unknown())?;
         }
         Ok(D1ExecResult {
             count: u32::try_from(count).map_err(|_| limit_error())?,
@@ -500,17 +483,6 @@ fn execute_tail_batch(
     maximum: usize,
     control: &ExecutionControl,
 ) -> Result<(usize, bool), PlatformError> {
-    let mut committed_write = false;
-    execute_tail_batch_observed(connection, sql, maximum, control, &mut committed_write)
-}
-
-fn execute_tail_batch_observed(
-    connection: &Connection,
-    sql: &str,
-    maximum: usize,
-    control: &ExecutionControl,
-    committed_write: &mut bool,
-) -> Result<(usize, bool), PlatformError> {
     let mut batch = Batch::new(connection, sql);
     let mut count = 0_usize;
     let mut any_write = false;
@@ -533,9 +505,54 @@ fn execute_tail_batch_observed(
             .map_err(|error| map_sqlite_error(&error, control))?
             .is_some()
         {}
-        *committed_write |= write;
     }
     Ok((count, any_write))
+}
+
+fn execute_tail_batch_versioned(
+    connection: &Connection,
+    sql: &str,
+    maximum: usize,
+    control: &Arc<ExecutionControl>,
+) -> Result<usize, PlatformError> {
+    let mut batch = Batch::new(connection, sql);
+    let mut count = 0_usize;
+    let mut version_persisted = false;
+    while let Some(mut statement) = batch
+        .next()
+        .map_err(|error| map_sqlite_error(&error, control))?
+    {
+        count = count.checked_add(1).ok_or_else(limit_error)?;
+        if count > maximum {
+            return Err(limit_error());
+        }
+        if statement.parameter_count() != 0 {
+            return Err(parameter_mismatch());
+        }
+        if !statement.readonly() && !version_persisted {
+            remove_guard(connection);
+            if let Err(error) = connection.execute_batch("BEGIN IMMEDIATE") {
+                return Err(map_sqlite_error(&error, control));
+            }
+            if let Err(error) = bump_session_version(connection) {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error);
+            }
+            if connection.execute_batch("COMMIT").is_err() {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(result_unknown());
+            }
+            version_persisted = true;
+            reinstall_guard(connection, SqlAuthority::Tenant, control.clone());
+        }
+        let mut rows = statement.raw_query();
+        while rows
+            .next()
+            .map_err(|error| map_sqlite_error(&error, control))?
+            .is_some()
+        {}
+    }
+    Ok(count)
 }
 
 fn result_unknown() -> PlatformError {

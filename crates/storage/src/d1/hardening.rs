@@ -30,13 +30,19 @@ pub(crate) enum SqlAuthority {
 pub(crate) struct ExecutionControl {
     reason: AtomicU8,
     vm_steps: AtomicU64,
+    deadline: Instant,
+    max_vm_steps: u64,
 }
 
 impl ExecutionControl {
-    fn new() -> Self {
+    fn new(limits: D1QueryLimits) -> Self {
         Self {
             reason: AtomicU8::new(INTERRUPT_NONE),
             vm_steps: AtomicU64::new(0),
+            deadline: Instant::now()
+                .checked_add(limits.timeout)
+                .unwrap_or_else(Instant::now),
+            max_vm_steps: limits.max_vm_steps,
         }
     }
 
@@ -130,7 +136,17 @@ pub(crate) fn install_guard(
     limits: D1QueryLimits,
     authority: SqlAuthority,
 ) -> Arc<ExecutionControl> {
-    let control = Arc::new(ExecutionControl::new());
+    let control = Arc::new(ExecutionControl::new(limits));
+    reinstall_guard(connection, authority, control.clone());
+    control
+}
+
+/// Reinstall transient callbacks without resetting one operation's deadline or VM budget.
+pub(crate) fn reinstall_guard(
+    connection: &Connection,
+    authority: SqlAuthority,
+    control: Arc<ExecutionControl>,
+) {
     let auth_control = control.clone();
     connection.authorizer(Some(move |context: AuthContext<'_>| {
         let decision = authorize(context, authority);
@@ -140,13 +156,10 @@ pub(crate) fn install_guard(
         decision
     }));
     let progress_control = control.clone();
-    let deadline = Instant::now()
-        .checked_add(limits.timeout)
-        .unwrap_or_else(Instant::now);
     connection.progress_handler(
         1000,
         Some(move || {
-            if Instant::now() >= deadline {
+            if Instant::now() >= progress_control.deadline {
                 progress_control.mark(INTERRUPT_TIMEOUT);
                 return true;
             }
@@ -154,14 +167,13 @@ pub(crate) fn install_guard(
                 .vm_steps
                 .fetch_add(1000, Ordering::AcqRel)
                 .saturating_add(1000);
-            if steps > limits.max_vm_steps {
+            if steps > progress_control.max_vm_steps {
                 progress_control.mark(INTERRUPT_VM_LIMIT);
                 return true;
             }
             false
         }),
     );
-    control
 }
 
 /// Remove every transient callback before host transaction control or reuse.

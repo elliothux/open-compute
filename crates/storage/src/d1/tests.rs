@@ -461,6 +461,7 @@ fn exec_uses_sqlite_tail_parser_and_versions_a_committed_prefix() {
         .engine
         .exec(
             "CREATE TABLE events(value TEXT);\n
+         CREATE TABLE prefix_log(value TEXT UNIQUE);\n
          CREATE TRIGGER mirror AFTER INSERT ON events WHEN new.value = 'source' BEGIN\n
            INSERT INTO events(value) VALUES ('trigger;body');\n
          END;\n
@@ -476,19 +477,90 @@ fn exec_uses_sqlite_tail_parser_and_versions_a_committed_prefix() {
         )
         .unwrap();
     assert_eq!(rows.rows.len(), 2);
-    let error = fixture.engine.exec(
-        "INSERT INTO events(value) VALUES ('prefix'); SELECT * FROM missing_table; INSERT INTO events VALUES ('never')",
-        limits(),
-    ).unwrap_err();
+    let before = fixture.engine.session_version().unwrap();
+    let error = fixture
+        .engine
+        .exec(
+            "INSERT INTO prefix_log(value) VALUES ('prefix');
+             INSERT INTO prefix_log(value) VALUES ('prefix');
+             INSERT INTO prefix_log(value) VALUES ('never')",
+            limits(),
+        )
+        .unwrap_err();
     assert_eq!(error.code(), ErrorCode::D1SqlInvalid);
+    assert_eq!(fixture.engine.session_version().unwrap(), before + 1);
     let prefix = fixture
         .engine
         .query(
-            &statement("SELECT count(*) FROM events WHERE value = 'prefix'", vec![]),
+            &statement(
+                "SELECT count(*) FROM prefix_log WHERE value = 'prefix'",
+                vec![],
+            ),
             limits(),
         )
         .unwrap();
     assert_eq!(prefix.rows, vec![vec![D1Value::Integer(1)]]);
+}
+
+#[test]
+fn exec_persists_no_write_when_the_history_bump_fails() {
+    let fixture = fixture();
+    let connection = fixture.engine.open().unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_session_bump
+             BEFORE UPDATE ON __open_compute_meta
+             WHEN old.key = 'session_version'
+             BEGIN
+               SELECT RAISE(ABORT, 'injected bump failure');
+             END;",
+        )
+        .unwrap();
+    drop(connection);
+
+    assert!(
+        fixture
+            .engine
+            .exec("CREATE TABLE must_not_exist(value TEXT)", limits())
+            .is_err()
+    );
+    let connection = fixture.engine.open().unwrap();
+    let count: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'must_not_exist'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn exec_commit_failure_keeps_data_rolled_back_and_head_reconcilable() {
+    let fixture = fixture();
+    fixture
+        .engine
+        .exec(
+            "CREATE TABLE parent(id INTEGER PRIMARY KEY);
+             CREATE TABLE child(
+               parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED
+             )",
+            limits(),
+        )
+        .unwrap();
+    let before = fixture.engine.session_version().unwrap();
+
+    let error = fixture
+        .engine
+        .exec("INSERT INTO child(parent_id) VALUES (1)", limits())
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::D1SqlInvalid);
+    assert_eq!(fixture.engine.session_version().unwrap(), before + 1);
+    let rows = fixture
+        .engine
+        .query(&statement("SELECT count(*) FROM child", vec![]), limits())
+        .unwrap();
+    assert_eq!(rows.rows, vec![vec![D1Value::Integer(0)]]);
 }
 
 #[test]

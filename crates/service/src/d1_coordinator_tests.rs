@@ -87,7 +87,7 @@ async fn every_entry_snapshots_initial_mutation_and_lost_response_head() {
         .execute(account, resource, Duration::from_secs(2), true, |context| {
             context.mark_mutation();
             context.engine.exec(
-                "CREATE TABLE history(value TEXT)",
+                "CREATE TABLE history(value TEXT UNIQUE)",
                 D1QueryLimits::query(context.config)?,
             )
         })
@@ -100,6 +100,27 @@ async fn every_entry_snapshots_initial_mutation_and_lost_response_head() {
             .unwrap()
             .session_version,
         1
+    );
+
+    let partial = coordinator
+        .execute(account, resource, Duration::from_secs(2), true, |context| {
+            context.mark_mutation();
+            context.engine.exec(
+                "INSERT INTO history VALUES ('prefix');
+                 INSERT INTO history VALUES ('prefix')",
+                D1QueryLimits::query(context.config)?,
+            )
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(partial.code(), ErrorCode::D1ResultUnknown);
+    assert_eq!(
+        history
+            .latest_snapshot(account, resource)
+            .unwrap()
+            .unwrap()
+            .session_version,
+        2
     );
 
     let catalog = D1DatabaseRepository::new(storage.db())
@@ -138,14 +159,20 @@ async fn every_entry_snapshots_initial_mutation_and_lost_response_head() {
         )
         .await
         .unwrap();
-    assert_eq!(rows.rows, vec![vec![D1Value::Text("committed".to_owned())]]);
+    assert_eq!(
+        rows.rows,
+        vec![
+            vec![D1Value::Text("prefix".to_owned())],
+            vec![D1Value::Text("committed".to_owned())],
+        ]
+    );
     assert_eq!(
         history
             .latest_snapshot(account, resource)
             .unwrap()
             .unwrap()
             .session_version,
-        2
+        3
     );
 }
 
