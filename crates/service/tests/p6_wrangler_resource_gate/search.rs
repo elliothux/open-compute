@@ -2,20 +2,10 @@ use super::{WranglerCommand, assert_success, json_stdout};
 use axum::Router;
 use axum::body::Bytes;
 use axum::routing::post;
-use open_compute_artifacts::{AiSearchObjectStore, S3ArtifactClient};
-use open_compute_core::{
-    AiAuthConfig, AiConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiProviderConfig,
-    AiTokenizer, AiTokenizerArtifactConfig, DocumentParserConfig,
-};
-use open_compute_service::document_parser_backend::DocumentParserBindingService;
-use open_compute_service::{SearchApiState, VectorizeCoordinator};
-use open_compute_storage::PlatformStorage;
-use open_compute_workers::ResourcePins;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const VECTOR_INDEX: &str = "resource-gate-vectors";
 const LARGE_VECTOR_INDEX: &str = "resource-gate-vectors-large";
@@ -23,56 +13,68 @@ const AI_NAMESPACE: &str = "resource-gate-search";
 const AI_INSTANCE: &str = "resource-gate-ai";
 const EMBEDDING_ALIAS: &str = "@cf/qwen/qwen3-embedding-0.6b";
 
-pub(super) struct SearchFixture {
-    pub(super) api: SearchApiState,
-    coordinator: VectorizeCoordinator,
-    embedding_task: tokio::task::JoinHandle<()>,
+pub(super) struct EmbeddingFixture {
+    pub(super) base_url: String,
+    task: tokio::task::JoinHandle<()>,
 }
 
-impl SearchFixture {
-    pub(super) async fn new(
-        storage: Arc<PlatformStorage>,
-        pins: ResourcePins,
-        s3: S3ArtifactClient,
-    ) -> Self {
-        let (embedding_base_url, embedding_task) = spawn_embedding_fixture().await;
-        let ai = ai_config(&embedding_base_url);
-        let parser = Arc::new(DocumentParserBindingService::with_executable(
-            storage.clone(),
-            DocumentParserConfig::default(),
-            PathBuf::from("/usr/bin/false"),
-        ));
-        let api = SearchApiState::new(
-            storage.clone(),
-            pins.clone(),
-            storage.sqlite_busy_timeout_ms(),
-            Duration::from_secs(1),
-        )
-        .with_ai_search_for_test(ai, AiSearchObjectStore::new(s3), parser)
-        .unwrap();
+impl EmbeddingFixture {
+    pub(super) async fn spawn() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route("/v1/embeddings", post(embedding_fixture)),
+            )
+            .await
+            .unwrap();
+        });
         Self {
-            api,
-            coordinator: VectorizeCoordinator::new(storage, pins),
-            embedding_task,
+            base_url: format!("http://{address}/v1"),
+            task,
         }
     }
-
-    fn drain_vectorize(&self) {
-        assert_eq!(self.coordinator.drain_once().unwrap().applied, 1);
-    }
 }
 
-impl Drop for SearchFixture {
+impl Drop for EmbeddingFixture {
     fn drop(&mut self) {
-        self.embedding_task.abort();
+        self.task.abort();
     }
 }
 
-pub(super) async fn exercise_vectorize(
-    command: &WranglerCommand<'_>,
-    project: &Path,
-    fixture: &SearchFixture,
-) {
+pub(super) fn ai_config_toml(embedding_base_url: &str) -> String {
+    let tokenizer_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/tokenizer-word-level.json")
+        .canonicalize()
+        .expect("in-repo tokenizer fixture");
+    let tokenizer = std::fs::read(&tokenizer_path).unwrap();
+    format!(
+        r#"[ai]
+default_embedding_model = "{EMBEDDING_ALIAS}"
+
+[ai.providers.resource-gate]
+base_url = {embedding_base_url}
+auth = {{ kind = "none" }}
+
+[ai.embedding_models."{EMBEDDING_ALIAS}"]
+provider = "resource-gate"
+remote_model = "{EMBEDDING_ALIAS}"
+model_revision = "fixed-wrangler-resource-gate"
+dimensions = 1024
+metric = "cosine"
+max_input_tokens = 8192
+tokenizer = "qwen3"
+tokenizer_revision = "fixed-wrangler-resource-gate"
+tokenizer_artifact = {{ path = {tokenizer_path}, sha256 = "{tokenizer_sha256}" }}
+"#,
+        embedding_base_url = toml::Value::String(embedding_base_url.to_owned()),
+        tokenizer_path = toml::Value::String(tokenizer_path.display().to_string()),
+        tokenizer_sha256 = hex::encode(Sha256::digest(tokenizer)),
+    )
+}
+
+pub(super) async fn exercise_vectorize(command: &WranglerCommand<'_>, project: &Path) {
     assert_success(
         &command
             .run(&[
@@ -127,7 +129,8 @@ pub(super) async fn exercise_vectorize(
             ])
             .await,
     );
-    fixture.drain_vectorize();
+    wait_for_vector_text(command, VECTOR_INDEX, "first", "\"kind\": \"primary\"").await;
+    wait_for_vector_text(command, VECTOR_INDEX, "second", "\"kind\": \"secondary\"").await;
 
     std::fs::write(
         project.join("vectors-upsert.ndjson"),
@@ -148,7 +151,7 @@ pub(super) async fn exercise_vectorize(
             ])
             .await,
     );
-    fixture.drain_vectorize();
+    wait_for_vector_text(command, VECTOR_INDEX, "first", "\"kind\": \"updated\"").await;
 
     let fetched = command
         .run(&[
@@ -241,7 +244,7 @@ pub(super) async fn exercise_vectorize(
             ])
             .await,
     );
-    fixture.drain_vectorize();
+    wait_for_vector_absent(command, VECTOR_INDEX, "second").await;
     assert_success(
         &command
             .run(&[
@@ -301,7 +304,13 @@ pub(super) async fn exercise_vectorize(
             ])
             .await,
     );
-    fixture.drain_vectorize();
+    wait_for_vector_text(
+        command,
+        LARGE_VECTOR_INDEX,
+        "large-999",
+        "\"id\": \"large-999\"",
+    )
+    .await;
     assert_success(
         &command
             .run(&[
@@ -550,52 +559,64 @@ pub(super) async fn exercise_ai_search(command: &WranglerCommand<'_>) {
     );
 }
 
-fn ai_config(embedding_base_url: &str) -> AiConfig {
-    let tokenizer_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tokenizer-word-level.json");
-    let tokenizer = std::fs::read(&tokenizer_path).unwrap();
-    let mut config = AiConfig::default();
-    config.providers.insert(
-        "resource-gate".to_owned(),
-        AiProviderConfig {
-            base_url: embedding_base_url.to_owned(),
-            auth: AiAuthConfig::None,
-        },
-    );
-    config.embedding_models.insert(
-        EMBEDDING_ALIAS.to_owned(),
-        AiEmbeddingModelConfig {
-            provider: "resource-gate".to_owned(),
-            remote_model: EMBEDDING_ALIAS.to_owned(),
-            model_revision: "fixed-wrangler-resource-gate".to_owned(),
-            dimensions: 1_024,
-            request_dimensions: None,
-            metric: AiEmbeddingMetric::Cosine,
-            max_input_tokens: 8_192,
-            tokenizer: AiTokenizer::Qwen3,
-            tokenizer_revision: "fixed-wrangler-resource-gate".to_owned(),
-            tokenizer_artifact: AiTokenizerArtifactConfig {
-                path: tokenizer_path,
-                sha256: hex::encode(Sha256::digest(tokenizer)),
-            },
-        },
-    );
-    config.default_embedding_model = Some(EMBEDDING_ALIAS.to_owned());
-    config
+async fn wait_for_vector_text(
+    command: &WranglerCommand<'_>,
+    index: &str,
+    id: &str,
+    expected: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let output = command
+            .run(&[
+                "vectorize",
+                "get-vectors",
+                index,
+                "--ids",
+                id,
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await;
+        assert_success(&output);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.contains(expected) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for Vectorize mutation: index={index} id={id} expected={expected} stdout={stdout} stderr={}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
-async fn spawn_embedding_fixture() -> (String, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            Router::new().route("/v1/embeddings", post(embedding_fixture)),
-        )
-        .await
-        .unwrap();
-    });
-    (format!("http://{address}/v1"), task)
+async fn wait_for_vector_absent(command: &WranglerCommand<'_>, index: &str, id: &str) {
+    let needle = format!("\"id\": \"{id}\"");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let output = command
+            .run(&[
+                "vectorize",
+                "get-vectors",
+                index,
+                "--ids",
+                id,
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await;
+        assert_success(&output);
+        if !String::from_utf8_lossy(&output.stdout).contains(&needle) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for Vectorize deletion: index={index} id={id}",
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 async fn embedding_fixture(body: Bytes) -> axum::http::Response<String> {
