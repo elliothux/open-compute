@@ -436,17 +436,22 @@ impl AiSearchBindingService {
         for (key, value) in patch {
             merged.insert(key.clone(), value.clone());
         }
-        if !patch.contains_key("fusion_method") {
-            let hybrid = merged
-                .get("index_method")
-                .and_then(Value::as_object)
-                .is_some_and(|index| {
-                    index.get("vector").and_then(Value::as_bool) == Some(true)
-                        && index.get("keyword").and_then(Value::as_bool) == Some(true)
-                });
-            if !hybrid {
-                merged.remove("fusion_method");
-            }
+        let index = merged.get("index_method").and_then(Value::as_object);
+        let keyword = index
+            .and_then(|index| index.get("keyword"))
+            .and_then(Value::as_bool)
+            == Some(true);
+        let hybrid = keyword
+            && index
+                .and_then(|index| index.get("vector"))
+                .and_then(Value::as_bool)
+                == Some(true);
+        if !keyword {
+            merged.remove("indexing_options");
+            merged.remove("retrieval_options");
+        }
+        if !patch.contains_key("fusion_method") && !hybrid {
+            merged.remove("fusion_method");
         }
         let input: AiSearchCreateInput =
             serde_json::from_value(Value::Object(merged)).map_err(|_| protocol())?;

@@ -82,6 +82,7 @@
     "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/create",
     "GET /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/list",
     "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/delete",
+    "GET /accounts/{account_id}/ai-search/tokens",
     "GET /accounts/{account_id}/ai-search/namespaces",
     "POST /accounts/{account_id}/ai-search/namespaces",
     "GET /accounts/{account_id}/ai-search/namespaces/{name}",

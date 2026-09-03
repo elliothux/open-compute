@@ -5,6 +5,7 @@ mod cursor;
 mod instances;
 mod items;
 mod namespaces;
+mod tokens;
 
 use super::storage::{account, context, strict_query};
 use super::{
@@ -25,6 +26,10 @@ const CURSOR_LIFETIME_MS: i64 = 15 * 60 * 1_000;
 
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
+        .route(
+            "/accounts/{account_id}/ai-search/tokens",
+            get(tokens::list),
+        )
         .route(
             "/accounts/{account_id}/ai-search/namespaces",
             get(namespaces::list).post(namespaces::create),

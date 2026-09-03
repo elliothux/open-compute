@@ -64,9 +64,68 @@ async fn official_ai_json(response: Response) -> Value {
 }
 
 #[tokio::test]
-async fn official_ai_search_routes_cover_the_frozen_29_operation_surface() {
+async fn official_ai_search_routes_cover_the_frozen_30_operation_surface() {
     let fixture = SearchBehaviorFixture::create().await;
     let (state, account) = official_ai_state(&fixture);
+    let tokens = format!("/accounts/{account}/ai-search/tokens");
+    let first_token_list =
+        official_ai_send(&state, "GET", &tokens, "read-token", None, Body::empty()).await;
+    assert_eq!(first_token_list.status(), StatusCode::OK);
+    let first_token_list = official_ai_json(first_token_list).await;
+    assert_eq!(first_token_list["result_info"]["count"], 1);
+    assert_eq!(first_token_list["result_info"]["total_count"], 1);
+    let token = &first_token_list["result"][0];
+    let token_id = token["id"].as_str().unwrap();
+    assert_eq!(token["cf_api_id"], token_id);
+    assert_eq!(Uuid::parse_str(token_id).unwrap().get_version_num(), 8);
+    let token_wire = serde_json::to_string(token).unwrap();
+    assert!(!token_wire.contains("cf_api_key"));
+    assert!(!token_wire.contains("deployer-token"));
+
+    let second_token_list = official_ai_send(
+        &state,
+        "GET",
+        &format!("{tokens}?search=INSTALLATION-MANAGED"),
+        "read-token",
+        None,
+        Body::empty(),
+    )
+    .await;
+    let second_token_list = official_ai_json(second_token_list).await;
+    assert_eq!(second_token_list["result"][0]["id"], token_id);
+    let empty_token_page = official_ai_send(
+        &state,
+        "GET",
+        &format!("{tokens}?page=2&per_page=1"),
+        "read-token",
+        None,
+        Body::empty(),
+    )
+    .await;
+    let empty_token_page = official_ai_json(empty_token_page).await;
+    assert_eq!(empty_token_page["result"], json!([]));
+    assert_eq!(empty_token_page["result_info"]["total_count"], 1);
+    let invalid_token_page = official_ai_send(
+        &state,
+        "GET",
+        &format!("{tokens}?page=101"),
+        "read-token",
+        None,
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(invalid_token_page.status(), StatusCode::BAD_REQUEST);
+    let token_mutation = official_ai_send(
+        &state,
+        "POST",
+        &tokens,
+        "deployer-token",
+        Some("application/json"),
+        json!({"name":"unsupported","cf_api_key":"must-not-be-accepted"}).to_string(),
+    )
+    .await;
+    assert_eq!(token_mutation.status(), StatusCode::METHOD_NOT_ALLOWED);
+
     let namespaces = format!("/accounts/{account}/ai-search/namespaces");
     let main = format!("{namespaces}/search-behavior");
 
@@ -205,6 +264,43 @@ async fn official_ai_search_routes_cover_the_frozen_29_operation_surface() {
         .await;
         assert_eq!(create.status(), StatusCode::OK);
     }
+    let create_vector_only = official_ai_send(
+        &state,
+        "POST",
+        &instances,
+        "deployer-token",
+        Some("application/json"),
+        json!({
+            "id":"vector-only",
+            "embedding_model":"@cf/qwen/qwen3-embedding-0.6b",
+            "chunk_size":32,
+            "chunk_overlap":0
+        })
+        .to_string(),
+    )
+    .await;
+    assert_eq!(create_vector_only.status(), StatusCode::OK);
+    let vector_only = format!("{instances}/vector-only");
+    let update_vector_only = official_ai_send(
+        &state,
+        "PUT",
+        &vector_only,
+        "deployer-token",
+        Some("application/json"),
+        json!({"max_num_results":7}).to_string(),
+    )
+    .await;
+    assert_eq!(update_vector_only.status(), StatusCode::OK);
+    let delete_vector_only = official_ai_send(
+        &state,
+        "DELETE",
+        &vector_only,
+        "deployer-token",
+        None,
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(delete_vector_only.status(), StatusCode::OK);
     let unsupported_connector = official_ai_send(
         &state,
         "POST",

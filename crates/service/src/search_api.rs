@@ -60,4 +60,23 @@ impl SearchApiState {
     pub(crate) fn ai_search(&self) -> Option<&Arc<AiSearchBindingService>> {
         self.ai_search.as_ref()
     }
+
+    /// Compose the real AI Search authority for isolated integration fixtures.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_ai_search_for_test(
+        self,
+        ai: open_compute_core::AiConfig,
+        objects: open_compute_artifacts::AiSearchObjectStore,
+        parser: Arc<crate::document_parser_backend::DocumentParserBindingService>,
+    ) -> Result<Self, open_compute_core::PlatformError> {
+        let service = AiSearchBindingService::new(
+            self.storage.clone(),
+            self.pins.clone(),
+            ai,
+            objects,
+            Arc::new(crate::snapshot_pins::SnapshotPins::empty()),
+            parser,
+        )?;
+        Ok(self.with_ai_search(Arc::new(service)))
+    }
 }

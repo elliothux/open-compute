@@ -805,6 +805,16 @@
         "requestMediaType": "json"
       },
       {
+        "id": "GET /accounts/{account_id}/ai-search/tokens",
+        "method": "GET",
+        "path": "/accounts/{account_id}/ai-search/tokens",
+        "operationId": "ai-search-list-tokens",
+        "status": "supported",
+        "source": "cloudflare-openapi",
+        "operationSha256": "5325159dd20b495d3374783d44caf0f117b2f8561a59ca2f0d64fbe383c5c7de",
+        "requestMediaType": "none"
+      },
+      {
         "id": "GET /accounts/{account_id}/ai-search/namespaces",
         "method": "GET",
         "path": "/accounts/{account_id}/ai-search/namespaces",
@@ -1527,6 +1537,9 @@
         "source": "open-compute-extension",
         "requestMediaType": "json"
       }
+    ],
+    "deviations": [
+      "OC-AI-SEARCH-TOKEN-001"
     ],
     "legacyRoutes": [
       {

@@ -535,9 +535,12 @@ index 子命令都必须复用这些端点和现有唯一 domain authority。V1/
 **AI Search 与 `ai`。**
 
 P6 只暴露 P5 已实现的 built-in storage 子集，不借 v4 adapter 扩张到 website/R2 connector、crawler、public
-endpoint、MCP、token、AI Gateway 或完整 Workers AI inference：
+endpoint、MCP、credential mutation、AI Gateway 或完整 Workers AI inference。固定 Wrangler 4.127.1 的
+`ai-search create` 会先列出 stored credentials，因此只额外开放一个只读 preflight：
 
 ```text
+GET       /accounts/{account_id}/ai-search/tokens
+
 GET/POST  /accounts/{account_id}/ai-search/namespaces
 GET/PUT/DELETE
           /accounts/{account_id}/ai-search/namespaces/{namespace_name}
@@ -569,6 +572,15 @@ method、multipart item upload、pagination、cancel/sync body 和 response shap
 部署时若 namespace 不存在，会先 GET 再 POST 官方 namespace endpoint。`ai_search` 只绑定 `default` namespace
 中已经存在的 `instance_name`，不得隐式创建 instance。两种 binding 都在 Version 创建前解析并冻结当前 live
 resource generation；namespace runtime CRUD 仍受该 namespace capability 和现有 read/write permissions 约束。
+
+`GET /ai-search/tokens` 遵循 SDK 7.1.0 `TokenListResponse` 和官方 v4 pagination，但本机返回的唯一记录是由
+installation authority 管理、按 account 稳定派生且不含 secret 的 credential metadata。它只满足固定 Wrangler
+创建 built-in instance 的只读 preflight；客户端提交的 Cloudflare `cf_api_key` 不被接受或保存，token
+POST/PUT/DELETE 与按 ID 管理端点继续不支持：collection mutation 返回 method-not-allowed，未声明的按 ID 路径
+保持中性 404。此单机语义登记为 `OC-AI-SEARCH-TOKEN-001`；官方来源是固定 OpenAPI 的
+`ai-search-list-tokens` 与 SDK 7.1.0 `TokenListResponse`。`official_ai_search_routes_cover_the_frozen_30_operation_surface`
+回归验证稳定 metadata、pagination 和不泄露 `cf_api_key`，`p6-wrangler-resources` Gate 验证固定 subprocess
+create 成功且输出不含本机认证 token。
 
 `ai: {binding}` 只生成 `{name,type:"ai"}` multipart binding，并注入 P5 已验证的
 `aiGatewayLogId`、`toMarkdown()` 与 `supported()` 子集。其它 Workers AI 方法继续按 capability matrix 明确拒绝；
@@ -1190,6 +1202,7 @@ response schema 和退出码；secret、token、signed upload token 和对象内
 | Deployment 只允许 100% 单 Version | 保留官方 request/response shape，拒绝多版本 rollout |
 | 只支持部分 bindings/products | capability manifest 明确列出；upload fail closed |
 | 不实现 Cloudflare commercial plan / billing quotas | Standard runtime 合同与部署方 capacity 分树报告；不写人数或单机默认值，不伪造 Free/Paid plan |
+| `OC-AI-SEARCH-TOKEN-001` | 官方 list tokens 返回 account stored credential metadata；单机安装只返回一个 account-scoped、稳定、无 secret 的 installation-managed metadata 供固定 Wrangler create preflight 使用，所有 token mutation 与按 ID 管理继续 unsupported |
 | Wrangler 内部 API base URL 行为非稳定承诺 | 精确 pin、trace Gate、逐版本升级 |
 
 任何新 deviation 必须包含官方来源、可观察差异、影响范围、错误行为和回归 case。不能用“私有部署”作为静默

@@ -2,6 +2,9 @@
   "schemaVersion": 1,
   "managementApi": {
     "root": "/client/v4",
+    "deviations": [
+      "OC-AI-SEARCH-TOKEN-001"
+    ],
     "vendorRoutes": [
       "GET /open-compute/capabilities",
       "GET /open-compute/system/status",

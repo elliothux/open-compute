@@ -123,7 +123,7 @@ async fn all_vectorize_routes_use_the_official_boundary_and_durable_engine() {
         "POST",
         &root,
         "deployer-token",
-        Some("application/json; charset=utf-8"),
+        Some("application/json; charset=utf-8;"),
         json!({"name":"vectors","config":{"dimensions":1,"metric":"cosine"},"description":"official"}).to_string(),
     )
     .await;
@@ -150,19 +150,35 @@ async fn all_vectorize_routes_use_the_official_boundary_and_durable_engine() {
     assert_eq!(body(get).await["result"]["config"]["dimensions"], 1);
 
     let values = vec![1.0];
+    let boundary = "fixed-wrangler-vectorize-boundary";
+    let multipart = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"vectors\"; filename=\"vectors.ndjson\"\r\nContent-Type: application/x-ndjson\r\n\r\n{}\n\r\n--{boundary}--\r\n",
+        json!({"id":"first","values":values,"metadata":{"kind":"one"}})
+    );
     let insert = send(
         &fixture,
         "POST",
         &format!("{index}/insert?unparsable-behavior=error"),
         "deployer-token",
-        Some("application/x-ndjson"),
-        format!(
-            "{}\n",
-            json!({"id":"first","values":values,"metadata":{"kind":"one"}})
-        ),
+        Some(&format!("multipart/form-data; boundary={boundary}")),
+        multipart,
     )
     .await;
     assert!(body(insert).await["result"]["mutationId"].is_string());
+    let extra_part = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"vectors\"; filename=\"vectors.ndjson\"\r\nContent-Type: application/x-ndjson\r\n\r\n{}\n\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"extra\"\r\n\r\nrejected\r\n--{boundary}--\r\n",
+        json!({"id":"rejected","values":values})
+    );
+    let rejected_extra_part = send(
+        &fixture,
+        "POST",
+        &format!("{index}/insert"),
+        "deployer-token",
+        Some(&format!("multipart/form-data; boundary={boundary}")),
+        extra_part,
+    )
+    .await;
+    assert_eq!(rejected_extra_part.status(), StatusCode::BAD_REQUEST);
     let upsert = send(
         &fixture,
         "POST",

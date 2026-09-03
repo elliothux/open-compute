@@ -12,9 +12,10 @@ use crate::search_api::SearchApiState;
 use crate::vectorize_backend::{QueryOptions, ReturnMetadata, execute_query, run_query_cpu};
 use axum::Router;
 use axum::body::to_bytes;
-use axum::extract::{Path, Request, State};
+use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::response::Response;
 use axum::routing::{get, post};
+use bytes::{Bytes, BytesMut};
 use open_compute_core::{AccountId, PlatformError, ResourceState};
 use open_compute_storage::{
     VectorMutationInput, VectorMutationKind, VectorizeEngine, VectorizeIndexRecord,
@@ -116,14 +117,12 @@ async fn mutate(
         .get("unparsable-behavior")
         .map(String::as_str)
         .unwrap_or("error");
-    if !matches!(behavior, "error" | "discard")
-        || !exact_content_type(&request, "application/x-ndjson")
-    {
+    if !matches!(behavior, "error" | "discard") {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
-    let bytes = match to_bytes(request.into_body(), MAX_NDJSON_BODY).await {
+    let bytes = match read_vectors(request).await {
         Ok(value) => value,
-        Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+        Err(error) => return error_response(error, context.request_id()),
     };
     let items = match parse_ndjson(&bytes, behavior == "discard") {
         Ok(value) => value,
@@ -153,6 +152,49 @@ async fn mutate(
         Ok(Err(error)) => error_response(error, request_id),
         Err(_) => error_response(V4Error::Internal, request_id),
     }
+}
+
+async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
+    if exact_content_type(&request, "application/x-ndjson") {
+        return to_bytes(request.into_body(), MAX_NDJSON_BODY)
+            .await
+            .map_err(|_| V4Error::InvalidRequest);
+    }
+    if !request
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("multipart/form-data; boundary="))
+    {
+        return Err(V4Error::InvalidRequest);
+    }
+    let mut multipart = Multipart::from_request(request, &())
+        .await
+        .map_err(|_| V4Error::InvalidRequest)?;
+    let mut vectors = None;
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| V4Error::InvalidRequest)?
+    {
+        if field.name() != Some("vectors")
+            || field.content_type() != Some("application/x-ndjson")
+            || vectors.is_some()
+        {
+            return Err(V4Error::InvalidRequest);
+        }
+        let mut bytes = BytesMut::new();
+        while let Some(chunk) = field.chunk().await.map_err(|_| V4Error::InvalidRequest)? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_NDJSON_BODY {
+                return Err(V4Error::InvalidRequest);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        vectors = Some(bytes.freeze());
+    }
+    vectors
+        .filter(|value| !value.is_empty())
+        .ok_or(V4Error::InvalidRequest)
 }
 
 #[derive(Deserialize)]

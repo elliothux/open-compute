@@ -2,6 +2,9 @@
 
 #![cfg(feature = "test-support")]
 
+#[path = "p6_wrangler_resource_gate/search.rs"]
+mod search;
+
 use axum::Router;
 use axum::middleware;
 use open_compute_artifacts::{
@@ -75,6 +78,8 @@ async fn fixed_wrangler_resource_commands_use_live_v4_authorities() {
     exercise_r2(&command, fixture.project.path()).await;
     exercise_queues(&command).await;
     exercise_workflows(&command).await;
+    search::exercise_vectorize(&command, fixture.project.path(), &fixture.search).await;
+    search::exercise_ai_search(&command).await;
 
     server.abort();
     let trace = requests.lock().unwrap();
@@ -84,6 +89,9 @@ async fn fixed_wrangler_resource_commands_use_live_v4_authorities() {
         "/r2/buckets",
         "/queues",
         "/workflows",
+        "/vectorize/v2/indexes",
+        "/ai-search/namespaces",
+        "/ai-search/tokens",
     ] {
         assert!(
             trace.iter().any(|line| line.contains(fragment)),
@@ -405,6 +413,7 @@ struct Fixture {
     project: tempfile::TempDir,
     app: Router,
     public_account: String,
+    search: search::SearchFixture,
 }
 
 impl Fixture {
@@ -414,8 +423,9 @@ impl Fixture {
         let storage =
             Arc::new(PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap());
         let mock = MockS3::spawn("open-compute").await;
-        let (artifacts, objects) = stores(&mock);
+        let (artifacts, objects, s3) = stores(&mock);
         let pins = ResourcePins::new();
+        let search = search::SearchFixture::new(storage.clone(), pins.clone(), s3).await;
         let metrics = Arc::new(
             MetricsRegistry::new(&MetricsConfig::default(), "p6-wrangler", "local-v4").unwrap(),
         );
@@ -501,7 +511,8 @@ impl Fixture {
             transport,
             Default::default(),
         )))
-        .with_scheduler(Some(scheduler));
+        .with_scheduler(Some(scheduler))
+        .with_search_api(search.api.clone());
         let (state, public_account) = open_compute_service::cloudflare_v4_for_test(state, storage);
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir(project.path().join("xdg")).unwrap();
@@ -517,6 +528,7 @@ impl Fixture {
             project,
             app: merged_router(state),
             public_account,
+            search,
         }
     }
 }
@@ -701,7 +713,7 @@ fn json_stdout(output: &Output) -> Value {
     })
 }
 
-fn stores(mock: &MockS3) -> (ArtifactStore, R2ObjectStore) {
+fn stores(mock: &MockS3) -> (ArtifactStore, R2ObjectStore, S3ArtifactClient) {
     let config = PlatformConfig::from_toml_str(&format!(
         r#"
 [s3]
@@ -732,7 +744,8 @@ request_timeout_ms = 3000
     let client = S3ArtifactClient::connect(&config, &credentials, 32 * 1024 * 1024).unwrap();
     (
         ArtifactStore::new(client.clone()),
-        R2ObjectStore::new(client),
+        R2ObjectStore::new(client.clone()),
+        client,
     )
 }
 

@@ -152,9 +152,10 @@ fn json_content_type(value: &str) -> bool {
     if parts.next() != Some("application/json") {
         return false;
     }
-    match (parts.next(), parts.next()) {
-        (None, None) => true,
-        (Some(parameter), None) => parameter.eq_ignore_ascii_case("charset=utf-8"),
+    match (parts.next(), parts.next(), parts.next()) {
+        (None, None, None) => true,
+        (Some(parameter), None, None) => parameter.eq_ignore_ascii_case("charset=utf-8"),
+        (Some(parameter), Some(""), None) => parameter.eq_ignore_ascii_case("charset=utf-8"),
         _ => false,
     }
 }
@@ -251,6 +252,7 @@ mod tests {
     fn json_content_type_accepts_only_the_frozen_parameter_shape() {
         assert!(json_content_type("application/json"));
         assert!(json_content_type("application/json; charset=UTF-8"));
+        assert!(json_content_type("application/json; charset=utf-8;"));
         assert!(!json_content_type(
             "application/json;charset=utf-8;charset=utf-8"
         ));

@@ -133,6 +133,8 @@ pub use run::run_platform;
 pub use run::{FailAfter, RunOptions, run_platform_with};
 pub use scheduler::SchedulerService;
 pub use search_api::SearchApiState;
+#[cfg(any(test, feature = "test-support"))]
+pub use vectorize_coordinator::VectorizeCoordinator;
 
 #[cfg(test)]
 mod tests;
