@@ -35,7 +35,7 @@ pub(super) async fn create_job(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_namespace(&namespace) || !valid_instance(&instance) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -45,7 +45,7 @@ pub(super) async fn create_job(
     }
     let payload = match json::<Value>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if payload
         .get("description")
@@ -100,7 +100,7 @@ pub(super) async fn cancel_job(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_namespace(&namespace) || !valid_instance(&instance) || !valid_object_id(&job_id) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -116,7 +116,7 @@ pub(super) async fn cancel_job(
     match json::<Cancel>(request, context.request_id()).await {
         Ok(value) if value.action == "cancel" => {}
         Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     }
     domain_response(
         context,
@@ -142,7 +142,7 @@ pub(super) async fn job_logs(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) || !valid_instance(&instance) || !valid_object_id(&job_id) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -179,7 +179,7 @@ pub(super) async fn list_items(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) || !valid_instance(&instance) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -316,7 +316,7 @@ pub(super) async fn item_logs(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) || !valid_instance(&instance) || !valid_object_id(&item_id) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -325,9 +325,8 @@ pub(super) async fn item_logs(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let limit = match parse_u32(&query, "limit", 50) {
-        Ok(value @ 1..=100) => value,
-        _ => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(limit @ 1..=100) = parse_u32(&query, "limit", 50) else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let now = match now_ms() {
         Ok(value) => value,
@@ -369,9 +368,8 @@ pub(super) async fn item_logs(
         .and_then(|info| info.remove("cursor"));
     let sealed = match raw_cursor {
         Some(Value::String(after)) => {
-            let expires = match now.checked_add(CURSOR_LIFETIME_MS) {
-                Some(value) => value,
-                None => return error_response(V4Error::Internal, context.request_id()),
+            let Some(expires) = now.checked_add(CURSOR_LIFETIME_MS) else {
+                return error_response(V4Error::Internal, context.request_id());
             };
             match cursor::seal(
                 api.storage(),
@@ -404,7 +402,7 @@ pub(super) async fn item_chunks(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) || !valid_instance(&instance) || !valid_object_id(&item_id) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -413,9 +411,8 @@ pub(super) async fn item_chunks(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let limit = match parse_u32(&query, "limit", 20) {
-        Ok(value @ 1..=100) => value,
-        _ => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(limit @ 1..=100) = parse_u32(&query, "limit", 20) else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let offset = match parse_u64(&query, "offset", 0) {
         Ok(value) => value,
@@ -449,7 +446,7 @@ async fn page_call(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) || !valid_instance(&instance) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -492,7 +489,7 @@ async fn id_call(
     let (context, account, api) = match authenticated(&state, &request, permission, &public_account)
     {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_namespace(&namespace) || !valid_instance(&instance) || !valid_object_id(&object_id) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -546,7 +543,7 @@ async fn item_mutation(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_namespace(&namespace) || !valid_instance(&instance) || !valid_object_id(&item_id) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -567,7 +564,7 @@ async fn item_mutation(
                 let _wait_for_completion = value.wait_for_completion;
             }
             Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         }
     }
     let result = call(

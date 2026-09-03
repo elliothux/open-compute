@@ -36,7 +36,7 @@ impl P23PromotionCoordinator {
         }
     }
 
-    fn coordinate(&self, request: ProductPromotionRequest) -> Result<(), PlatformError> {
+    fn coordinate(&self, request: &ProductPromotionRequest) -> Result<(), PlatformError> {
         let workers = WorkerRepository::new(self.storage.db());
         let worker = workers.get_worker(request.account_id, request.worker_id)?;
         let already_promoted = worker.active_version_id == Some(request.version_id);
@@ -441,7 +441,7 @@ impl ProductPromotionCoordinator for P23PromotionCoordinator {
     ) -> Pin<Box<dyn Future<Output = Result<(), PlatformError>> + Send + '_>> {
         let coordinator = self.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || coordinator.coordinate(request))
+            tokio::task::spawn_blocking(move || coordinator.coordinate(&request))
                 .await
                 .map_err(|_| projection_pending())?
         })

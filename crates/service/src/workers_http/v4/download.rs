@@ -119,9 +119,8 @@ fn multipart_response(
             )
             .as_bytes(),
         );
-        let bytes = match bundle.and_then(|value| value.module_bytes(module).ok()) {
-            Some(value) => value,
-            None => return error_response(V4Error::Internal, context.request_id()),
+        let Some(bytes) = bundle.and_then(|value| value.module_bytes(module).ok()) else {
+            return error_response(V4Error::Internal, context.request_id());
         };
         body.extend_from_slice(bytes);
         body.extend_from_slice(b"\r\n");

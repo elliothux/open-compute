@@ -91,14 +91,14 @@ impl QueueApiState {
                         record.id,
                         record.consumer_generation,
                         request_id,
-                    )?
+                    )?;
                 }
                 (false, QueueConsumerState::Paused) => {
                     self.scheduler.resume_queue_consumer_operator(
                         record.id,
                         record.consumer_generation,
                         request_id,
-                    )?
+                    )?;
                 }
                 _ => {}
             }

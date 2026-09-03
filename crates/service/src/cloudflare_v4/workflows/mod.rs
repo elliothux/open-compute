@@ -6,12 +6,11 @@ mod instances;
 mod value;
 
 use super::storage::{account, context};
-use super::{V4Error, V4OfficialError, V4Permission, V4RequestContext, error_response};
+use super::{HttpError, V4Error, V4OfficialError, V4Permission, V4RequestContext, error_response};
 use crate::http::HttpState;
 use crate::workflow_http::WorkflowApiState;
 use axum::Router;
 use axum::extract::Request;
-use axum::response::Response;
 use axum::routing::{get, post};
 use open_compute_core::{AccountId, ResourceState, WorkflowId};
 use open_compute_storage::scheduler::WorkflowState;
@@ -67,7 +66,7 @@ fn authenticated(
     request: &Request,
     permission: V4Permission,
     public_account: &str,
-) -> Result<(V4RequestContext, AccountId, Arc<WorkflowApiState>), Response> {
+) -> Result<(V4RequestContext, AccountId, Arc<WorkflowApiState>), HttpError> {
     let context = context(request, permission)?;
     let account = account(state, public_account)
         .map_err(|error| error_response(error, context.request_id()))?;

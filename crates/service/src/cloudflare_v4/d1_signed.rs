@@ -24,9 +24,8 @@ async fn upload_import(
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
-    let token = match one_query(request.uri().query(), "token", true) {
-        Ok(Some(value)) => value,
-        _ => return raw_error(StatusCode::UNAUTHORIZED, request_id),
+    let Ok(Some(token)) = one_query(request.uri().query(), "token", true) else {
+        return raw_error(StatusCode::UNAUTHORIZED, request_id);
     };
     let (account, database) = match resolve_database(&state, &account_id, &database_id) {
         Ok(value) => value,
@@ -76,9 +75,8 @@ async fn download_export(
     request: Request,
 ) -> Response {
     let request_id = request_id(&request);
-    let token = match one_query(request.uri().query(), "token", true) {
-        Ok(Some(value)) => value,
-        _ => return raw_error(StatusCode::UNAUTHORIZED, request_id),
+    let Ok(Some(token)) = one_query(request.uri().query(), "token", true) else {
+        return raw_error(StatusCode::UNAUTHORIZED, request_id);
     };
     let (account, database) = match resolve_database(&state, &account_id, &database_id) {
         Ok(value) => value,

@@ -69,13 +69,13 @@ async fn list_consumers(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, account, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -88,7 +88,7 @@ async fn list_consumers(
         QueueConsumerRepository::new(storage.db())
             .live_for_queue(queue.id)?
             .into_iter()
-            .map(|record| consumer_response(&account, &storage, &queue, record))
+            .map(|record| consumer_response(&account, &storage, &queue, &record))
             .collect::<Result<Vec<_>, _>>()
     })
     .await;
@@ -127,14 +127,14 @@ async fn mutate_consumer(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     let body = match json_body::<ConsumerBody>(request, context).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if matches!(body.kind, ConsumerKind::HttpPull) {
         return error_response(V4Error::Unsupported, context.request_id());
@@ -182,7 +182,7 @@ async fn mutate_consumer(
             dead_letter_queue,
             now_ms()?,
         )?;
-        consumer_response(&account, api.storage(), &queue, record)
+        consumer_response(&account, api.storage(), &queue, &record)
     })
     .await;
     respond_consumer(result, context)
@@ -195,13 +195,13 @@ async fn get_consumer(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, account, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -212,7 +212,7 @@ async fn get_consumer(
     let result = tokio::task::spawn_blocking(move || {
         let queue = resolve_queue(&account, &storage, account_id, &queue_public)?;
         let record = resolve_consumer(&account, &storage, account_id, queue.id, &consumer_public)?;
-        consumer_response(&account, &storage, &queue, record)
+        consumer_response(&account, &storage, &queue, &record)
     })
     .await;
     respond_consumer(result, context)
@@ -225,13 +225,13 @@ async fn delete_consumer(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, account, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -325,7 +325,7 @@ pub(super) fn consumer_response(
     authority: &crate::cloudflare_v4::accounts::AccountAuthority,
     storage: &PlatformStorage,
     queue: &QueueRecord,
-    record: QueueConsumerRecord,
+    record: &QueueConsumerRecord,
 ) -> Result<ConsumerResponse, PlatformError> {
     let declaration =
         QueueConsumerRepository::new(storage.db()).declaration(record.declaration_id)?;

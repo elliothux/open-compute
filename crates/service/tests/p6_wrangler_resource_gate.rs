@@ -227,7 +227,11 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
         ])
         .await;
     assert_success(&info);
-    assert!(json_contains(&json_stdout(&info), "name", D1_NAME.into()));
+    assert!(json_contains(
+        &json_stdout(&info),
+        "name",
+        &Value::from(D1_NAME)
+    ));
 
     let answer = command
         .run(&[
@@ -243,7 +247,11 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
         ])
         .await;
     assert_success(&answer);
-    assert!(json_contains(&json_stdout(&answer), "answer", 42.into()));
+    assert!(json_contains(
+        &json_stdout(&answer),
+        "answer",
+        &Value::from(42)
+    ));
 
     assert_success(
         &command
@@ -275,7 +283,7 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
     assert!(json_contains(
         &json_stdout(&migrated),
         "name",
-        "items".into()
+        &Value::from("items")
     ));
     assert_success(
         &command
@@ -296,7 +304,7 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
     assert!(!json_contains(
         &json_stdout(&after_delete),
         "name",
-        D1_NAME.into()
+        &Value::from(D1_NAME)
     ));
 }
 
@@ -792,17 +800,17 @@ fn json_stdout(output: &Output) -> Value {
     })
 }
 
-fn json_contains(value: &Value, key: &str, expected: Value) -> bool {
+fn json_contains(value: &Value, key: &str, expected: &Value) -> bool {
     match value {
         Value::Object(object) => {
-            object.get(key) == Some(&expected)
+            object.get(key) == Some(expected)
                 || object
                     .values()
-                    .any(|value| json_contains(value, key, expected.clone()))
+                    .any(|value| json_contains(value, key, expected))
         }
         Value::Array(values) => values
             .iter()
-            .any(|value| json_contains(value, key, expected.clone())),
+            .any(|value| json_contains(value, key, expected)),
         _ => false,
     }
 }

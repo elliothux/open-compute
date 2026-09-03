@@ -1,6 +1,7 @@
 //! Official AI Search item upload, upsert, and raw download routes.
 
 use super::*;
+use crate::ai_search_backend::OfficialUpload;
 use crate::cloudflare_v4::storage::{json, require_no_query};
 use crate::http::REQUEST_ID_HEADER;
 use axum::extract::{FromRequest, Multipart, Path, State};
@@ -24,7 +25,7 @@ pub(super) async fn upload(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_namespace(&namespace) || !valid_instance(&instance) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -39,9 +40,8 @@ pub(super) async fn upload(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let service = match api.ai_search() {
-        Some(value) => value,
-        None => return error_response(V4Error::Unavailable, context.request_id()),
+    let Some(service) = api.ai_search() else {
+        return error_response(V4Error::Unavailable, context.request_id());
     };
     match service
         .official_upload(
@@ -49,11 +49,13 @@ pub(super) async fn upload(
             &namespace,
             &instance,
             context.request_id(),
-            upload.filename,
-            upload.content_type,
-            upload.metadata,
-            upload.bytes,
-            upload.wait_for_completion,
+            OfficialUpload {
+                name: upload.filename,
+                content_type: upload.content_type,
+                metadata: upload.metadata,
+                bytes: upload.bytes,
+                wait_for_completion: upload.wait_for_completion,
+            },
         )
         .await
     {
@@ -77,7 +79,7 @@ pub(super) async fn index_by_key(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_namespace(&namespace) || !valid_instance(&instance) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -96,7 +98,7 @@ pub(super) async fn index_by_key(
     let body = match json::<Upsert>(request, context.request_id()).await {
         Ok(value) if valid_filename(&value.key) && value.next_action == "INDEX" => value,
         Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let listed = match call(
         &api,
@@ -148,7 +150,7 @@ pub(super) async fn download(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) || !valid_instance(&instance) || !valid_object_id(&item_id) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -156,9 +158,8 @@ pub(super) async fn download(
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
-    let service = match api.ai_search() {
-        Some(value) => value,
-        None => return error_response(V4Error::Unavailable, context.request_id()),
+    let Some(service) = api.ai_search() else {
+        return error_response(V4Error::Unavailable, context.request_id());
     };
     let mut response = match service
         .official_download(
@@ -173,9 +174,8 @@ pub(super) async fn download(
         Ok(value) => value,
         Err(error) => return error_response(V4Error::from(&error), context.request_id()),
     };
-    let request_id = match HeaderValue::from_str(&context.request_id().to_string()) {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::Internal, context.request_id()),
+    let Ok(request_id) = HeaderValue::from_str(&context.request_id().to_string()) else {
+        return error_response(V4Error::Internal, context.request_id());
     };
     response.headers_mut().insert(REQUEST_ID_HEADER, request_id);
     response

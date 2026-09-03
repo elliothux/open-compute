@@ -34,7 +34,7 @@ pub(super) async fn update(
     let (context, account_id, record) =
         match namespace(&state, &request, &account_id, &namespace_id, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -43,7 +43,7 @@ pub(super) async fn update(
         match json_with_limit::<Vec<BulkPut>>(request, context.request_id(), MAX_BULK_BODY).await {
             Ok(value) if value.len() <= MAX_BULK_KEYS => value,
             Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let now_seconds = match now_ms()
         .and_then(|value| u64::try_from(value / 1000).map_err(|_| V4Error::Internal))
@@ -51,9 +51,8 @@ pub(super) async fn update(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let minimum_expiration = match now_seconds.checked_add(60) {
-        Some(value) => value,
-        None => return error_response(V4Error::Internal, context.request_id()),
+    let Some(minimum_expiration) = now_seconds.checked_add(60) else {
+        return error_response(V4Error::Internal, context.request_id());
     };
     let mut commands = Vec::with_capacity(values.len());
     for value in values {
@@ -69,7 +68,9 @@ pub(super) async fn update(
         let bytes = if value.base64 {
             match base64::engine::general_purpose::STANDARD.decode(value.value) {
                 Ok(value) => value,
-                Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+                Err(_) => {
+                    return error_response(V4Error::InvalidRequest, context.request_id());
+                }
             }
         } else {
             value.value.into_bytes()
@@ -142,7 +143,7 @@ pub(super) async fn get(
     let (context, account_id, record) =
         match namespace(&state, &request, &account_id, &namespace_id, false) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -150,7 +151,7 @@ pub(super) async fn get(
     let body = match json::<BulkGet>(request, context.request_id()).await {
         Ok(value) if value.keys.len() <= 100 => value,
         Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if body
         .keys
@@ -224,7 +225,7 @@ pub(super) async fn delete(
     let (context, account_id, record) =
         match namespace(&state, &request, &account_id, &namespace_id, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -232,7 +233,7 @@ pub(super) async fn delete(
     let keys = match json::<Vec<String>>(request, context.request_id()).await {
         Ok(value) if value.len() <= MAX_BULK_KEYS => value,
         Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if keys
         .iter()

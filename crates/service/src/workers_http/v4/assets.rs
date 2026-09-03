@@ -106,18 +106,16 @@ async fn create_session(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
-    let body =
-        match super::json::json_body_with_limit::<CreateSessionBody>(request, 16 * 1024 * 1024)
-            .await
-        {
-            Ok(value) => value,
-            Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-        };
+    let Ok(body) =
+        super::json::json_body_with_limit::<CreateSessionBody>(request, 16 * 1024 * 1024).await
+    else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
+    };
     let account_id = match domain::resolve_account(&state, &account) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
@@ -153,9 +151,8 @@ async fn create_session(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let expires = match now.checked_add(SESSION_TTL_MS) {
-        Some(value) => value,
-        None => return error_response(V4Error::Internal, context.request_id()),
+    let Some(expires) = now.checked_add(SESSION_TTL_MS) else {
+        return error_response(V4Error::Internal, context.request_id());
     };
     let session_id = uuid::Uuid::now_v7().to_string();
     let session = AssetUploadRepository::new(api.storage.db()).create(
@@ -197,7 +194,7 @@ async fn upload_bulk(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_bulk_query(request.uri().query()) {
         return error_response(V4Error::InvalidRequest, context.request_id());
@@ -216,9 +213,8 @@ async fn upload_bulk(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let multipart = match Multipart::from_request(request, &state).await {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(multipart) = Multipart::from_request(request, &state).await else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     upload_multipart(&api, context, claims, multipart).await
 }
@@ -229,9 +225,8 @@ async fn upload_multipart(
     claims: AssetTokenClaims,
     mut multipart: Multipart,
 ) -> Response {
-    let account = match AccountId::from_str(&claims.account) {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(account) = AccountId::from_str(&claims.account) else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let mut session = match current_session(api, &claims) {
         Ok(value) => value,
@@ -246,9 +241,8 @@ async fn upload_multipart(
             return error_response(V4Error::InvalidRequest, context.request_id());
         };
         let content_type = normalize_content_type(field.content_type());
-        let encoded = match field.bytes().await {
-            Ok(value) => value,
-            Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+        let Ok(encoded) = field.bytes().await else {
+            return error_response(V4Error::InvalidRequest, context.request_id());
         };
         total = match total.checked_add(encoded.len()) {
             Some(value) if value <= MAX_UPLOAD_BYTES => value,
@@ -259,9 +253,8 @@ async fn upload_multipart(
                 );
             }
         };
-        let bytes = match base64::engine::general_purpose::STANDARD.decode(&encoded) {
-            Ok(value) => value,
-            Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&encoded) else {
+            return error_response(V4Error::InvalidRequest, context.request_id());
         };
         session = match persist_asset(
             api,
@@ -288,7 +281,7 @@ async fn upload_single(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
@@ -438,6 +431,7 @@ fn upload_result(
     response
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn redeem_assets(
     api: &WorkerApiState,
     token: &str,

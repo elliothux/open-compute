@@ -31,7 +31,7 @@ pub(super) async fn list(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -70,14 +70,10 @@ pub(super) async fn list(
     {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
-    let order_by = query
-        .get("order_by")
-        .map(String::as_str)
-        .unwrap_or("created_at");
+    let order_by = query.get("order_by").map_or("created_at", String::as_str);
     let direction = query
         .get("order_by_direction")
-        .map(String::as_str)
-        .unwrap_or("desc");
+        .map_or("desc", String::as_str);
     if order_by != "created_at" || !matches!(direction, "asc" | "desc") {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
@@ -230,7 +226,7 @@ async fn read(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) || !valid_instance(&instance) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -271,7 +267,7 @@ async fn mutation(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_namespace(&namespace)
         || instance
@@ -288,7 +284,7 @@ async fn mutation(
     } else {
         match json::<Value>(request, context.request_id()).await {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         }
     };
     if !delete && let Err(error) = reject_unsupported_fields(&payload, UNSUPPORTED_INSTANCE_FIELDS)
@@ -323,7 +319,7 @@ async fn query_call(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&namespace) || !valid_instance(&instance) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -333,7 +329,7 @@ async fn query_call(
     }
     let payload = match json::<Value>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = namespaces::reject_query_features(&payload) {
         return error_response(error, context.request_id());

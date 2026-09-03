@@ -38,11 +38,7 @@ impl ListQuery {
         if values.contains_key("cursor") && values.contains_key("page") {
             return Err(V4Error::InvalidRequest);
         }
-        let direction = match values
-            .get("direction")
-            .map(String::as_str)
-            .unwrap_or("desc")
-        {
+        let direction = match values.get("direction").map_or("desc", String::as_str) {
             "asc" => Direction::Asc,
             "desc" => Direction::Desc,
             _ => return Err(V4Error::InvalidRequest),
@@ -145,12 +141,12 @@ impl DetailQuery {
         {
             return Err(V4Error::InvalidRequest);
         }
-        let simple = match values.get("simple").map(String::as_str).unwrap_or("false") {
+        let simple = match values.get("simple").map_or("false", String::as_str) {
             "true" => true,
             "false" => false,
             _ => return Err(V4Error::InvalidRequest),
         };
-        let order = match values.get("order").map(String::as_str).unwrap_or("asc") {
+        let order = match values.get("order").map_or("asc", String::as_str) {
             "asc" => Direction::Asc,
             "desc" => Direction::Desc,
             _ => return Err(V4Error::InvalidRequest),
@@ -239,7 +235,7 @@ fn timestamp(value: Option<&String>) -> Result<Option<i64>, V4Error> {
         .map(|value| {
             value
                 .parse::<jiff::Timestamp>()
-                .map(|timestamp| timestamp.as_millisecond())
+                .map(jiff::Timestamp::as_millisecond)
                 .map_err(|_| V4Error::InvalidRequest)
         })
         .transpose()

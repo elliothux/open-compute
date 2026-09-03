@@ -469,6 +469,7 @@ impl R2BindingService {
     }
 
     /// Replace one object from a bounded authenticated management request body.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn management_object_put(
         &self,
         account_id: AccountId,

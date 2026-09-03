@@ -681,6 +681,15 @@ struct StagedUpload {
     size: u64,
 }
 
+/// Official multipart upload body for the AI Search v4 adapter.
+pub(crate) struct OfficialUpload {
+    pub(crate) name: String,
+    pub(crate) content_type: String,
+    pub(crate) metadata: Map<String, Value>,
+    pub(crate) bytes: Bytes,
+    pub(crate) wait_for_completion: bool,
+}
+
 impl AiSearchBindingService {
     async fn execute_call(
         &self,

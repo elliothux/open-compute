@@ -30,14 +30,14 @@ pub(super) async fn create(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::ProductWrite, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body: CreateBody = match json(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let prepared = match prepare_create(body, api.limits()) {
         Ok(value) => value,
@@ -79,7 +79,7 @@ pub(super) async fn batch(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::ProductWrite, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -90,7 +90,7 @@ pub(super) async fn batch(
         {
             Ok(value) if (1..=100).contains(&value.len()) => value,
             Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let prepared = match body
         .into_iter()
@@ -148,7 +148,7 @@ pub(super) async fn list(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let query = match ListQuery::parse(&request) {
         Ok(value) => value,
@@ -251,7 +251,7 @@ pub(super) async fn get(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let query = match DetailQuery::parse(&request) {
         Ok(value) => value,
@@ -288,14 +288,14 @@ pub(super) async fn status(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::ProductWrite, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body: StatusBody = match json(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let action = match body.validate() {
         Ok(value) => value,
@@ -366,7 +366,7 @@ pub(super) async fn event(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::ProductWrite, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -377,7 +377,7 @@ pub(super) async fn event(
     let body: Value = match json(request, context.request_id()).await {
         Ok(Value::Object(fields)) => Value::Object(fields),
         Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let payload = match value::encode(&body) {
         Ok(value) => value,

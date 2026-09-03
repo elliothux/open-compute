@@ -111,7 +111,7 @@ async fn mutate(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match strict_query(&request) {
         Ok(value) => value,
@@ -122,8 +122,7 @@ async fn mutate(
     }
     let behavior = query
         .get("unparsable-behavior")
-        .map(String::as_str)
-        .unwrap_or("error");
+        .map_or("error", String::as_str);
     if !matches!(behavior, "error" | "discard") {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
@@ -176,13 +175,17 @@ async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
     if content_type == "application/x-ndjson" {
         return to_bytes(request.into_body(), MAX_NDJSON_BODY)
             .await
-            .map_err(body_read_error);
+            .map_err(|error| body_read_error(&error));
     }
     let mut multipart = Multipart::from_request(request, &())
         .await
         .map_err(|_| V4Error::InvalidRequest)?;
     let mut vectors = None;
-    while let Some(mut field) = multipart.next_field().await.map_err(multipart_error)? {
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| multipart_error(&error))?
+    {
         if field.name() != Some("vectors")
             || field.content_type() != Some("application/x-ndjson")
             || vectors.is_some()
@@ -190,7 +193,11 @@ async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
             return Err(V4Error::InvalidRequest);
         }
         let mut bytes = BytesMut::new();
-        while let Some(chunk) = field.chunk().await.map_err(multipart_error)? {
+        while let Some(chunk) = field
+            .chunk()
+            .await
+            .map_err(|error| multipart_error(&error))?
+        {
             if bytes.len().saturating_add(chunk.len()) > MAX_NDJSON_BODY {
                 return Err(request_too_large());
             }
@@ -203,15 +210,17 @@ async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
         .ok_or(V4Error::InvalidRequest)
 }
 
-fn body_read_error(error: axum::Error) -> V4Error {
-    if std::error::Error::source(&error).is_some_and(|source| source.is::<LengthLimitError>()) {
+fn body_read_error(error: &axum::Error) -> V4Error {
+    if std::error::Error::source(error)
+        .is_some_and(<dyn std::error::Error + 'static>::is::<LengthLimitError>)
+    {
         request_too_large()
     } else {
         V4Error::Internal
     }
 }
 
-fn multipart_error(error: MultipartError) -> V4Error {
+fn multipart_error(error: &MultipartError) -> V4Error {
     match error.status() {
         StatusCode::PAYLOAD_TOO_LARGE => request_too_large(),
         status if status.is_server_error() => V4Error::Internal,
@@ -293,14 +302,14 @@ async fn query(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<Query>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (_, api, record) = match ready_index(&state, &account_id, &index_name) {
         Ok(value) => value,
@@ -371,14 +380,14 @@ async fn vector_ids(
     };
     let context = match context(&request, permission) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<Ids>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if body.ids.is_empty() {
         return error_response(V4Error::InvalidRequest, context.request_id());
@@ -436,7 +445,7 @@ async fn info(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -469,7 +478,7 @@ async fn list_vectors(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match strict_query(&request) {
         Ok(value) => value,
@@ -481,11 +490,10 @@ async fn list_vectors(
     {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
-    let count = match query.get("count").map_or(Ok(100), |value| {
+    let Ok(count @ 1..=1000) = query.get("count").map_or(Ok(100), |value| {
         value.parse::<usize>().map_err(|_| V4Error::InvalidRequest)
-    }) {
-        Ok(value @ 1..=1000) => value,
-        _ => return error_response(V4Error::InvalidRequest, context.request_id()),
+    }) else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let (account, api, record) = match ready_index(&state, &account_id, &index_name) {
         Ok(value) => value,
@@ -520,9 +528,8 @@ async fn list_vectors(
     }
     let truncated = ids.len() > count;
     ids.truncate(count);
-    let expires = match now.checked_add(CURSOR_LIFETIME_MS) {
-        Some(value) => value,
-        None => return error_response(V4Error::Internal, context.request_id()),
+    let Some(expires) = now.checked_add(CURSOR_LIFETIME_MS) else {
+        return error_response(V4Error::Internal, context.request_id());
     };
     let next = if truncated {
         match ids
@@ -573,14 +580,14 @@ async fn create_metadata_index(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<CreateMetadata>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (_, api, record) = match ready_index(&state, &account_id, &index_name) {
         Ok(value) => value,
@@ -606,7 +613,7 @@ async fn list_metadata_indexes(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -632,14 +639,14 @@ async fn delete_metadata_index(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<DeleteMetadata>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (_, api, record) = match ready_index(&state, &account_id, &index_name) {
         Ok(value) => value,

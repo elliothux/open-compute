@@ -167,17 +167,14 @@ pub async fn public_ingress(State(state): State<HttpState>, request: Request) ->
         Ok(pin) => pin,
         Err(error) => return crate::http::platform_error_response(&error, request_id),
     };
-    let route_generation = match i64::try_from(snapshot.worker.route_generation) {
-        Ok(value) => value,
-        Err(_) => {
-            return crate::http::platform_error_response(
-                &PlatformError::new(
-                    ErrorCode::VersionInvariantViolation,
-                    "route generation exceeds the runtime protocol",
-                ),
-                request_id,
-            );
-        }
+    let Ok(route_generation) = i64::try_from(snapshot.worker.route_generation) else {
+        return crate::http::platform_error_response(
+            &PlatformError::new(
+                ErrorCode::VersionInvariantViolation,
+                "route generation exceeds the runtime protocol",
+            ),
+            request_id,
+        );
     };
     let target = DispatchTarget {
         account_id: snapshot.route.account_id,

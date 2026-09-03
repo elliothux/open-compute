@@ -13,6 +13,7 @@ use open_compute_workers::{
 
 use super::{d1_config, kv_config, r2_config};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_product_resource(
     storage: &PlatformStorage,
     objects: &R2ObjectStore,

@@ -1952,7 +1952,7 @@ async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority()
 async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() {
     assert_eq!(
         crate::snapshot_pins::SnapshotPins::Unavailable
-            .ensure_unpinned("system/artifacts/v1/sha256/untrusted")
+            .contains_object_key("system/artifacts/v1/sha256/untrusted")
             .unwrap_err()
             .code(),
         ErrorCode::ResourceReferenced
@@ -2581,8 +2581,7 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
         "assets": {"jwt": completion_token, "config": {}}
     });
     let body = format!(
-        "--fixed\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{}\r\n--fixed\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport default {{ fetch() {{ return new Response('ok'); }} }};\r\n--fixed--\r\n",
-        metadata
+        "--fixed\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n--fixed\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport default {{ fetch() {{ return new Response('ok'); }} }};\r\n--fixed--\r\n"
     );
     let upload_script = |name: &str, exclude_script: bool| {
         let query = if exclude_script {

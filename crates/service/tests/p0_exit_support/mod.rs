@@ -339,7 +339,7 @@ pub(super) fn admin_router(
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     objects: R2ObjectStore,
-    pins: ResourcePins,
+    pins: &ResourcePins,
     stack: &GateStack,
 ) -> Router {
     let metrics = Arc::new(

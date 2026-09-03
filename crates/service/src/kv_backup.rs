@@ -141,6 +141,7 @@ pub(crate) async fn create_backup(
 }
 
 /// Restore a ready KV backup as a new namespace and return its immutable ID.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn restore_backup(
     api: &KvApiState,
     metrics: &MetricsRegistry,

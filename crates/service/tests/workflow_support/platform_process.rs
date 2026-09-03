@@ -157,6 +157,7 @@ pub(crate) fn address() -> SocketAddr {
         .unwrap()
 }
 
+#[allow(dead_code)] // used by sibling integration tests that share this module
 pub(crate) fn distinct_addresses() -> (SocketAddr, SocketAddr) {
     let public = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let admin = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

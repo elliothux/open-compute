@@ -169,7 +169,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         storage.clone(),
         artifacts.clone(),
         objects.clone(),
-        pins.clone(),
+        &pins,
         &stack,
     );
     let (bindings, do_plan) =
@@ -479,7 +479,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         storage.clone(),
         artifacts.clone(),
         objects.clone(),
-        pins.clone(),
+        &pins,
         &stack,
     );
     let persisted_worker = WorkerRepository::new(storage.db())
@@ -567,7 +567,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         "p0-exit-owner",
     )
     .await;
-    let router = admin_router(storage.clone(), artifacts, objects, pins.clone(), &stack);
+    let router = admin_router(storage.clone(), artifacts, objects, &pins, &stack);
     let restored_worker = WorkerRepository::new(storage.db())
         .get_worker(account, worker.id)
         .unwrap();

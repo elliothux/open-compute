@@ -65,7 +65,7 @@ impl AiSearchBindingService {
             digest,
             size,
         } = upload;
-        let instance = self.resolve_instance(&authority, header.instance.as_deref())?;
+        let instance = self.resolve_instance(authority, header.instance.as_deref())?;
         validate_source(&header.name, &header.content_type, size)?;
         let (store, inspection) = self.open_store(&instance.record)?;
         let config: ResolvedAiSearchConfig =
@@ -135,12 +135,15 @@ impl AiSearchBindingService {
         namespace: &str,
         instance: &str,
         request_id: RequestId,
-        name: String,
-        content_type: String,
-        metadata: Map<String, Value>,
-        bytes: Bytes,
-        wait_for_completion: bool,
+        upload: OfficialUpload,
     ) -> Result<Value, PlatformError> {
+        let OfficialUpload {
+            name,
+            content_type,
+            metadata,
+            bytes,
+            wait_for_completion,
+        } = upload;
         validate_source(
             &name,
             &content_type,

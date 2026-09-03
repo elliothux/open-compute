@@ -4,7 +4,7 @@ use super::domain;
 use super::handlers::{
     authorize, json_body, now_ms, platform_error, respond, timestamp, worker_api,
 };
-use crate::cloudflare_v4::{V4Error, V4Permission, error_response, success_response};
+use crate::cloudflare_v4::{HttpError, V4Error, V4Permission, error_response, success_response};
 use crate::http::HttpState;
 use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::response::Response;
@@ -21,7 +21,7 @@ pub(super) async fn delete_script(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match delete_force_query(request.uri().query()) {
         Ok(false) => {}
@@ -122,10 +122,10 @@ pub(super) async fn get_script_settings(
     Path(path): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    settings_read_context(&state, &path, &request, V4Permission::Read).map_or_else(
-        |response| response,
-        |context| success_response(context, ScriptSettings::disabled()),
-    )
+    settings_read_context(&state, &path, &request, V4Permission::Read)
+        .map_or_else(HttpError::into_response, |context| {
+            success_response(context, ScriptSettings::disabled())
+        })
 }
 
 pub(super) async fn patch_script_settings(
@@ -135,7 +135,7 @@ pub(super) async fn patch_script_settings(
 ) -> Response {
     let context = match settings_read_context(&state, &path, &request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let patch = match json_body::<ScriptSettingsPatch>(request).await {
         Ok(value) => value,
@@ -201,7 +201,7 @@ pub(super) async fn get_settings(
 ) -> Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = active_snapshot(&state, &account, &script).and_then(|(_, snapshot)| {
         let api = worker_api(&state)?;
@@ -227,11 +227,10 @@ pub(super) async fn patch_settings(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
-    let multipart = match Multipart::from_request(request, &state).await {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(multipart) = Multipart::from_request(request, &state).await else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let patch = match read_settings_part(multipart).await {
         Ok(value) => value,
@@ -286,7 +285,9 @@ pub(super) async fn patch_settings(
                 },
                 match state.cloudflare_v4_account() {
                     Some(value) => value,
-                    None => return error_response(V4Error::Unavailable, context.request_id()),
+                    None => {
+                        return error_response(V4Error::Unavailable, context.request_id());
+                    }
                 },
                 &snapshot,
             ) {
@@ -371,7 +372,7 @@ pub(super) async fn list_secrets(
 ) -> Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = active_snapshot(&state, &account, &script).map(|(_, snapshot)| {
         snapshot
@@ -393,7 +394,7 @@ pub(super) async fn put_secret(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let secret = match json_body::<SecretBody>(request)
         .await
@@ -430,7 +431,7 @@ pub(super) async fn get_secret(
 ) -> Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = active_snapshot(&state, &account, &script).and_then(|(_, snapshot)| {
         snapshot
@@ -452,7 +453,7 @@ pub(super) async fn delete_secret(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let mut updates = BTreeMap::new();
     updates.insert(secret, None);
@@ -485,7 +486,7 @@ pub(super) async fn patch_secrets_bulk(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let body = match json_body::<SecretBulkPatch>(request).await {
         Ok(value) => value,
@@ -503,7 +504,9 @@ pub(super) async fn patch_secrets_bulk(
         let value = match value {
             Some(value) => match value.text() {
                 Ok((body_name, text)) if body_name == map_name => Some(text),
-                Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+                Ok(_) => {
+                    return error_response(V4Error::InvalidRequest, context.request_id());
+                }
                 Err(error) => return error_response(error, context.request_id()),
             },
             None => None,
@@ -565,7 +568,7 @@ pub(super) async fn get_schedules(
 ) -> Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = active_snapshot(&state, &account, &script).and_then(|(_, snapshot)| {
         CronRepository::new(worker_api(&state)?.storage.db())
@@ -594,7 +597,7 @@ pub(super) async fn put_schedules(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let schedules = match json_body::<Vec<Schedule>>(request).await {
         Ok(value) => value,
@@ -635,7 +638,7 @@ pub(super) async fn get_subdomain(
     request: Request,
 ) -> Response {
     settings_read_context(&state, &path, &request, V4Permission::Read).map_or_else(
-        |response| response,
+        HttpError::into_response,
         |context| {
             success_response(
                 context,
@@ -655,7 +658,7 @@ pub(super) async fn post_subdomain(
 ) -> Response {
     let context = match settings_read_context(&state, &path, &request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let body = match json_body::<SubdomainPatch>(request).await {
         Ok(value) => value,
@@ -679,7 +682,7 @@ pub(super) async fn delete_subdomain(
     request: Request,
 ) -> Response {
     settings_read_context(&state, &path, &request, V4Permission::ProductWrite).map_or_else(
-        |response| response,
+        HttpError::into_response,
         |context| {
             success_response(
                 context,
@@ -697,7 +700,7 @@ fn settings_read_context(
     (account, script): &(String, String),
     request: &Request,
     permission: V4Permission,
-) -> Result<crate::cloudflare_v4::V4RequestContext, Response> {
+) -> Result<crate::cloudflare_v4::V4RequestContext, HttpError> {
     let context = authorize(request, permission)?;
     let account = domain::resolve_account(state, account)
         .map_err(|error| error_response(error, context.request_id()))?;

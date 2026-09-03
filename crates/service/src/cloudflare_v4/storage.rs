@@ -1,11 +1,10 @@
 //! Shared account scope, public resource identifiers, and request parsing for storage adapters.
 
 use super::accounts::{AccountAuthority, V4ResourceKind};
-use super::{V4Error, V4Permission, V4RequestContext, error_response, request_context};
+use super::{HttpError, V4Error, V4Permission, V4RequestContext, error_response, request_context};
 use crate::http::HttpState;
 use axum::body::to_bytes;
 use axum::extract::Request;
-use axum::response::Response;
 use open_compute_core::{AccountId, RequestId, ResourceId};
 use serde::de::{DeserializeOwned, Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -17,11 +16,11 @@ pub(super) const MAX_JSON_BODY: usize = 1024 * 1024;
 pub(super) fn context(
     request: &Request,
     permission: V4Permission,
-) -> Result<V4RequestContext, Response> {
+) -> Result<V4RequestContext, HttpError> {
     let context = request_context(request)?;
     context
         .require(permission)
-        .map_err(|error| error_response(error, context.request_id()))?;
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     Ok(context)
 }
 
@@ -52,7 +51,7 @@ pub(super) fn resolve_resource_id<'a, T: 'a>(
 pub(super) async fn json<T: DeserializeOwned>(
     request: Request,
     request_id: RequestId,
-) -> Result<T, Response> {
+) -> Result<T, HttpError> {
     json_with_limit(request, request_id, MAX_JSON_BODY).await
 }
 
@@ -60,7 +59,7 @@ pub(super) async fn json_with_limit<T: DeserializeOwned>(
     request: Request,
     request_id: RequestId,
     limit: usize,
-) -> Result<T, Response> {
+) -> Result<T, HttpError> {
     let mut content_types = request
         .headers()
         .get_all(axum::http::header::CONTENT_TYPE)
@@ -71,14 +70,19 @@ pub(super) async fn json_with_limit<T: DeserializeOwned>(
             .and_then(|value| value.to_str().ok())
             .is_some_and(json_content_type);
     if !valid_content_type {
-        return Err(error_response(V4Error::InvalidRequest, request_id));
+        return Err(HttpError::from_response(error_response(
+            V4Error::InvalidRequest,
+            request_id,
+        )));
     }
-    let bytes = to_bytes(request.into_body(), limit)
-        .await
-        .map_err(|_| error_response(V4Error::InvalidRequest, request_id))?;
-    serde_json::from_slice::<UniqueJson>(&bytes)
-        .map_err(|_| error_response(V4Error::InvalidRequest, request_id))?;
-    serde_json::from_slice(&bytes).map_err(|_| error_response(V4Error::InvalidRequest, request_id))
+    let bytes = to_bytes(request.into_body(), limit).await.map_err(|_| {
+        HttpError::from_response(error_response(V4Error::InvalidRequest, request_id))
+    })?;
+    serde_json::from_slice::<UniqueJson>(&bytes).map_err(|_| {
+        HttpError::from_response(error_response(V4Error::InvalidRequest, request_id))
+    })?;
+    serde_json::from_slice(&bytes)
+        .map_err(|_| HttpError::from_response(error_response(V4Error::InvalidRequest, request_id)))
 }
 
 struct UniqueJson;

@@ -3,7 +3,7 @@
 use super::{
     error_response, read_context, resolve_account, resolve_resource, success_response, timestamp,
 };
-use crate::cloudflare_v4::{V4Error, V4Permission, V4RequestContext, V4ResourceKind};
+use crate::cloudflare_v4::{HttpError, V4Error, V4Permission, V4RequestContext, V4ResourceKind};
 use crate::http::HttpState;
 use crate::metrics::{D1Lifecycle, D1LifecycleGuard, KvLifecycle, KvLifecycleGuard};
 use axum::Router;
@@ -49,7 +49,7 @@ async fn kv_backups(
 ) -> Response {
     let context = match bodyless_request(request, V4Permission::Read).await {
         Ok((value, _)) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (account, namespace) = match resolve_resource(
         &state,
@@ -78,7 +78,7 @@ async fn kv_backups(
                 .map(Backup::try_from)
                 .collect(),
         ),
-        Ok(Err(error)) => backup_platform_error(error, context),
+        Ok(Err(error)) => backup_platform_error(&error, context),
         Err(_) => error_response(V4Error::Internal, context.request_id()),
     }
 }
@@ -90,7 +90,7 @@ async fn create_kv_backup(
 ) -> Response {
     let (context, key) = match bodyless_request(request, V4Permission::Maintenance).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (account, namespace) = match resolve_resource(
         &state,
@@ -126,7 +126,7 @@ async fn create_kv_backup(
             }
             Err(error) => error_response(error, context.request_id()),
         },
-        Err(error) => backup_platform_error(error, context),
+        Err(error) => backup_platform_error(&error, context),
     }
 }
 
@@ -137,7 +137,7 @@ async fn restore_kv_backup(
 ) -> Response {
     let (context, key, body) = match restore_request(request).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let account = match resolve_account(&state, &account) {
         Ok(value) => value,
@@ -176,7 +176,7 @@ async fn restore_kv_backup(
             }
             Err(error) => error_response(error, context.request_id()),
         },
-        Err(error) => backup_platform_error(error, context),
+        Err(error) => backup_platform_error(&error, context),
     }
 }
 
@@ -187,7 +187,7 @@ async fn d1_backups(
 ) -> Response {
     let context = match bodyless_request(request, V4Permission::Read).await {
         Ok((value, _)) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (account, database) = match resolve_resource(
         &state,
@@ -211,7 +211,7 @@ async fn d1_backups(
         Ok(Ok(backups)) => {
             backup_list_response(context, backups.into_iter().map(Backup::try_from).collect())
         }
-        Ok(Err(error)) => backup_platform_error(error, context),
+        Ok(Err(error)) => backup_platform_error(&error, context),
         Err(_) => error_response(V4Error::Internal, context.request_id()),
     }
 }
@@ -223,7 +223,7 @@ async fn create_d1_backup(
 ) -> Response {
     let (context, key) = match bodyless_request(request, V4Permission::Maintenance).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (account, database) = match resolve_resource(
         &state,
@@ -259,7 +259,7 @@ async fn create_d1_backup(
             }
             Err(error) => error_response(error, context.request_id()),
         },
-        Err(error) => backup_platform_error(error, context),
+        Err(error) => backup_platform_error(&error, context),
     }
 }
 
@@ -270,7 +270,7 @@ async fn restore_d1_backup(
 ) -> Response {
     let (context, key, body) = match restore_request(request).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let account = match resolve_account(&state, &account) {
         Ok(value) => value,
@@ -308,7 +308,7 @@ async fn restore_d1_backup(
             }
             Err(error) => error_response(error, context.request_id()),
         },
-        Err(error) => backup_platform_error(error, context),
+        Err(error) => backup_platform_error(&error, context),
     }
 }
 
@@ -332,11 +332,11 @@ fn restored_resource(
     })
 }
 
-fn backup_platform_error(error: PlatformError, context: V4RequestContext) -> Response {
+fn backup_platform_error(error: &PlatformError, context: V4RequestContext) -> Response {
     let wire = match error.code() {
         ErrorCode::ArtifactIntegrityError => V4Error::IntegrityFailure,
         ErrorCode::ArtifactUnavailable | ErrorCode::S3Unavailable => V4Error::Unavailable,
-        _ => V4Error::from(&error),
+        _ => V4Error::from(error),
     };
     error_response(wire, context.request_id())
 }
@@ -344,28 +344,31 @@ fn backup_platform_error(error: PlatformError, context: V4RequestContext) -> Res
 async fn bodyless_request(
     request: Request,
     permission: V4Permission,
-) -> Result<(V4RequestContext, Option<String>), Response> {
+) -> Result<(V4RequestContext, Option<String>), HttpError> {
     let context = read_context(&request, permission)?;
     let key = optional_idempotency_key(&request)
-        .map_err(|error| error_response(error, context.request_id()))?;
-    let bytes = to_bytes(request.into_body(), 1)
-        .await
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))?;
-    if !bytes.is_empty() {
-        return Err(error_response(
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
+    let bytes = to_bytes(request.into_body(), 1).await.map_err(|_| {
+        HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        ))
+    })?;
+    if !bytes.is_empty() {
+        return Err(HttpError::from_response(error_response(
+            V4Error::InvalidRequest,
+            context.request_id(),
+        )));
     }
     Ok((context, key))
 }
 
 async fn restore_request(
     request: Request,
-) -> Result<(V4RequestContext, Option<String>, RestoreRequest), Response> {
+) -> Result<(V4RequestContext, Option<String>, RestoreRequest), HttpError> {
     let context = read_context(&request, V4Permission::Maintenance)?;
     let key = optional_idempotency_key(&request)
-        .map_err(|error| error_response(error, context.request_id()))?;
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     let content_types = request.headers().get_all(CONTENT_TYPE);
     let mut content_types = content_types.iter();
     let valid_content_type = content_types
@@ -375,16 +378,25 @@ async fn restore_request(
         .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
         && content_types.next().is_none();
     if !valid_content_type {
-        return Err(error_response(
+        return Err(HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        )));
     }
     let bytes = to_bytes(request.into_body(), MAX_RESTORE_BODY)
         .await
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))?;
-    let body = serde_json::from_slice(&bytes)
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))?;
+        .map_err(|_| {
+            HttpError::from_response(error_response(
+                V4Error::InvalidRequest,
+                context.request_id(),
+            ))
+        })?;
+    let body = serde_json::from_slice(&bytes).map_err(|_| {
+        HttpError::from_response(error_response(
+            V4Error::InvalidRequest,
+            context.request_id(),
+        ))
+    })?;
     Ok((context, key, body))
 }
 

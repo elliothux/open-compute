@@ -28,7 +28,7 @@ async fn deprecated_queue_binding_delay_does_not_change_queue_authority() {
         }]
     }))
     .unwrap();
-    let mut input = UploadInput::new(metadata).unwrap();
+    let mut input = UploadInput::new(metadata);
     input
         .apply_explicit_bindings(
             api,
@@ -72,7 +72,7 @@ async fn service_binding_props_are_projected_into_the_immutable_version_input() 
         }]
     }))
     .unwrap();
-    let mut input = UploadInput::new(metadata).unwrap();
+    let mut input = UploadInput::new(metadata);
     input
         .apply_explicit_bindings(
             api,
@@ -107,7 +107,7 @@ async fn failed_upload_content_releases_its_unconsumed_workflow_reservation() {
         }]
     }))
     .unwrap();
-    let mut input = UploadInput::new(metadata).unwrap();
+    let mut input = UploadInput::new(metadata);
     input
         .apply_explicit_bindings(
             api,

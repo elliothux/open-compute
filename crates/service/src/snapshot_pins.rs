@@ -45,19 +45,6 @@ impl SnapshotPins {
         }
     }
 
-    /// Refuse exact immutable-object deletion while any authenticated manifest pins it.
-    #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn ensure_unpinned(&self, key: &str) -> Result<(), PlatformError> {
-        match self {
-            Self::Verified { object_keys, .. } if !object_keys.contains(key) => Ok(()),
-            Self::Verified { .. } => Err(PlatformError::new(
-                ErrorCode::ResourceReferenced,
-                "immutable object is pinned by a committed platform snapshot",
-            )),
-            Self::Unavailable => Err(pins_unavailable()),
-        }
-    }
-
     /// Return whether an authenticated committed manifest retains this exact
     /// immutable object. An unavailable inventory fails closed.
     pub(crate) fn contains_object_key(&self, key: &str) -> Result<bool, PlatformError> {
@@ -119,10 +106,6 @@ mod tests {
         pins.extend_artifacts(&mut retained).unwrap();
         assert_eq!(retained, HashSet::from([artifact]));
         assert!(
-            pins.ensure_unpinned("system/backups/kv/other/data.sqlite")
-                .is_ok()
-        );
-        assert!(
             pins.contains_object_key("system/backups/kv/owned/data.sqlite")
                 .unwrap()
         );
@@ -130,12 +113,6 @@ mod tests {
             !pins
                 .contains_object_key("system/backups/kv/other/data.sqlite")
                 .unwrap()
-        );
-        assert_eq!(
-            pins.ensure_unpinned("system/backups/kv/owned/data.sqlite")
-                .unwrap_err()
-                .code(),
-            ErrorCode::ResourceReferenced
         );
         assert_eq!(
             SnapshotPins::Unavailable

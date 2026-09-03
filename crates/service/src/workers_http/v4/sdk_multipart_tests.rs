@@ -175,13 +175,11 @@ async fn bounds_standard_boundaries_and_rejects_duplicate_content_types() {
 }
 
 async fn bounded_upload(request: Request) -> StatusCode {
-    let request = match normalize_request(request).await {
-        Ok(request) => request,
-        Err(_) => return StatusCode::BAD_REQUEST,
+    let Ok(request) = normalize_request(request).await else {
+        return StatusCode::BAD_REQUEST;
     };
-    let multipart = match Multipart::from_request(request, &()).await {
-        Ok(multipart) => multipart,
-        Err(_) => return StatusCode::BAD_REQUEST,
+    let Ok(multipart) = Multipart::from_request(request, &()).await else {
+        return StatusCode::BAD_REQUEST;
     };
     match parse_worker_upload(multipart, BundleLimits::default()).await {
         Ok(_) => StatusCode::NO_CONTENT,
