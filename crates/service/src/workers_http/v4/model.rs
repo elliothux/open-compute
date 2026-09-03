@@ -213,7 +213,9 @@ pub(crate) enum WorkerUploadBinding {
     Queue {
         name: String,
         queue_name: String,
-        delivery_delay: Option<u32>,
+        /// Deprecated Wrangler field retained in upload metadata but ignored by the server.
+        #[serde(rename = "delivery_delay")]
+        _delivery_delay: Option<serde_json::Number>,
         raw: Option<bool>,
     },
     /// Existing Workflow definition.

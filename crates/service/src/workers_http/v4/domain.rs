@@ -589,16 +589,7 @@ impl UploadInput {
                         },
                     );
                 }
-                WorkerUploadBinding::Queue {
-                    queue_name,
-                    delivery_delay,
-                    ..
-                } => {
-                    if delivery_delay.is_some() {
-                        return Err(unsupported(
-                            "per-binding Queue delivery delay is unsupported",
-                        ));
-                    }
+                WorkerUploadBinding::Queue { queue_name, .. } => {
                     let queue = QueueRepository::new(api.storage.db())
                         .list(
                             account,
@@ -792,3 +783,7 @@ impl UploadInput {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "domain_tests.rs"]
+mod tests;

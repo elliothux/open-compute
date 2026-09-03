@@ -668,4 +668,34 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn fixed_wrangler_deprecated_queue_delay_metadata_is_accepted() {
+        let parsed = parse_parts(
+            vec![
+                part(
+                    "metadata",
+                    "application/json",
+                    br#"{"main_module":"index.js","compatibility_date":"2026-08-30","bindings":[{"name":"EVENTS","type":"queue","queue_name":"events","delivery_delay":60}]}"#,
+                ),
+                part(
+                    "index.js",
+                    "application/javascript+module",
+                    b"export default {}",
+                ),
+            ],
+            BundleLimits::default(),
+        )
+        .unwrap();
+        let [
+            super::super::model::WorkerUploadBinding::Queue {
+                _delivery_delay: Some(delay),
+                ..
+            },
+        ] = parsed.metadata.bindings.as_slice()
+        else {
+            panic!("fixed Wrangler Queue binding was not parsed");
+        };
+        assert_eq!(delay.as_u64(), Some(60));
+    }
 }
