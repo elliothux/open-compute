@@ -26,6 +26,10 @@ pub(super) use super::json::json_body;
 pub(crate) fn router() -> Router<HttpState> {
     Router::new()
         .merge(super::assets::router())
+        .route(
+            "/accounts/{account}/workers/services/{script}",
+            get(get_service_metadata),
+        )
         .route("/accounts/{account}/workers/scripts", get(list_scripts))
         .route(
             "/accounts/{account}/workers/scripts/{script}",
@@ -80,6 +84,53 @@ pub(crate) fn router() -> Router<HttpState> {
                 .post(super::mutations::post_subdomain)
                 .delete(super::mutations::delete_subdomain),
         )
+}
+
+#[derive(Serialize)]
+struct ServiceMetadata {
+    default_environment: ServiceEnvironment,
+}
+
+#[derive(Serialize)]
+struct ServiceEnvironment {
+    environment: &'static str,
+    script: ServiceScript,
+}
+
+#[derive(Serialize)]
+struct ServiceScript {
+    tag: String,
+    tags: Vec<String>,
+    last_deployed_from: &'static str,
+}
+
+async fn get_service_metadata(
+    State(state): State<HttpState>,
+    Path((account, script)): Path<(String, String)>,
+    request: Request,
+) -> axum::response::Response {
+    let context = match authorize(&request, V4Permission::Read) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let result = (|| {
+        let account = domain::resolve_account(&state, &account)?;
+        let authority = state.cloudflare_v4_account().ok_or(V4Error::Unavailable)?;
+        let api = worker_api(&state)?;
+        let worker =
+            domain::worker_by_name(api, account, &script).map_err(|error| V4Error::from(&error))?;
+        Ok(ServiceMetadata {
+            default_environment: ServiceEnvironment {
+                environment: "production",
+                script: ServiceScript {
+                    tag: authority.public_worker_tag(worker.id),
+                    tags: Vec::new(),
+                    last_deployed_from: "wrangler",
+                },
+            },
+        })
+    })();
+    respond(context, result)
 }
 
 #[derive(Serialize)]
@@ -343,9 +394,6 @@ async fn upload(
         Ok(value) => value,
         Err(error) => return platform_error(context.request_id(), &error),
     };
-    if query.exclude_script && upload.bundle.is_some() {
-        return error_response(V4Error::InvalidRequest, context.request_id());
-    }
     let now = match now_ms() {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),

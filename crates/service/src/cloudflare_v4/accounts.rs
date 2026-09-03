@@ -9,7 +9,7 @@ use axum::Router;
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
 use axum::routing::get;
-use open_compute_core::{AccountId, PlatformId, ResourceId};
+use open_compute_core::{AccountId, PlatformId, ResourceId, WorkerId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use url::form_urlencoded;
@@ -77,6 +77,12 @@ impl AccountAuthority {
     /// Map an internal resource identity to a stable, domain-separated public 32-hex ID.
     pub(crate) fn public_resource_id(&self, kind: V4ResourceKind, id: ResourceId) -> String {
         stable_id(kind.scope(), self.platform_id, Some(&id.to_string()))
+    }
+
+    /// Derive the stable non-secret service tag exposed by Cloudflare's legacy
+    /// service metadata probe used by the pinned Wrangler deploy workflow.
+    pub(crate) fn public_worker_tag(&self, id: WorkerId) -> String {
+        stable_id("worker-tag", self.platform_id, Some(&id.to_string()))
     }
 
     /// Compare a public resource ID without exposing the internal UUID.

@@ -32,8 +32,8 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_service::{SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend};
 use open_compute_storage::{
-    DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRepository, PlatformStorage, SchedulerStore,
-    VersionRecord, WorkerRepository,
+    DO_NAMESPACE_SCHEMA_VERSION, DurableObjectRepository, PlatformStorage, VersionRecord,
+    WorkerRepository,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateResourceOutcome, CreateResourceRequest,
@@ -1097,7 +1097,7 @@ fn version_request(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote,
+        deployment_source: promote.then_some(open_compute_storage::DeploymentSource::ScriptUpload),
         request_id: RequestId::generate(),
         now_ms,
     }

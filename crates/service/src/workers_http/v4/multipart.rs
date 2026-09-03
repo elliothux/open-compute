@@ -91,8 +91,10 @@ fn parse_parts(
         .position(|part| part.name == METADATA_PART)
         .ok_or_else(invalid)?;
     let metadata_part = parts.remove(metadata_index);
-    if metadata_part.content_type.as_deref() != Some("application/json")
-        || metadata_part.bytes.is_empty()
+    if !matches!(
+        metadata_part.content_type.as_deref(),
+        None | Some("application/json")
+    ) || metadata_part.bytes.is_empty()
         || metadata_part.bytes.len() > MAX_METADATA_BYTES
     {
         return Err(invalid());
@@ -201,6 +203,16 @@ fn validate_metadata(metadata: &WorkerUploadMetadata) -> Result<(), PlatformErro
             return Err(invalid());
         }
         validate_assets_config(&assets.config)?;
+    }
+    if metadata
+        .observability
+        .as_ref()
+        .is_some_and(|observability| observability.enabled)
+    {
+        return Err(PlatformError::new(
+            ErrorCode::BindingCapabilityUnsupported,
+            "Cloudflare-hosted Worker observability is unsupported",
+        ));
     }
     Ok(())
 }
@@ -335,6 +347,14 @@ mod tests {
         RawPart {
             name: name.to_owned(),
             content_type: Some(content_type.to_owned()),
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    fn string_part(name: &str, bytes: &[u8]) -> RawPart {
+        RawPart {
+            name: name.to_owned(),
+            content_type: None,
             bytes: bytes.to_vec(),
         }
     }
@@ -574,6 +594,21 @@ mod tests {
     #[test]
     fn metadata_part_has_exact_fixed_wrangler_mime_and_is_unique() {
         let metadata = br#"{"main_module":"index.js","compatibility_date":"2026-08-30"}"#;
+        assert!(
+            parse_parts(
+                vec![
+                    string_part("metadata", metadata),
+                    part(
+                        "index.js",
+                        "application/javascript+module",
+                        b"export default {}",
+                    ),
+                ],
+                BundleLimits::default(),
+            )
+            .is_ok(),
+            "Undici FormData emits Wrangler's metadata string without a Content-Type"
+        );
         for content_type in ["text/plain", "application/json; charset=utf-8"] {
             assert!(
                 parse_parts(

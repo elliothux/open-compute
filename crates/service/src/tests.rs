@@ -2332,6 +2332,26 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
         )
         .with_cloudflare_v4_account(authority);
     let app = http::admin_router(state);
+    let missing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/workers/scripts/missing-worker"
+                ))
+                .header("authorization", "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    let missing_body = axum::body::to_bytes(missing.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let missing_json: serde_json::Value = serde_json::from_slice(&missing_body).unwrap();
+    assert_eq!(missing_json["errors"][0]["code"], 10_007);
+
     let upload_path = format!(
         "/client/v4/accounts/{public_account}/workers/assets/upload/4c73266e449fea54bba5a6dea074dbbd"
     );
@@ -2506,12 +2526,16 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
         .unwrap();
     assert!(!cross_script.status().is_success());
 
-    let invalid_exclude = app
+    let excluded_projection = app
         .clone()
         .oneshot(upload_script("assets-worker", true))
         .await
         .unwrap();
-    assert_eq!(invalid_exclude.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        excluded_projection.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "excludeScript is a response projection and must reach normal runtime validation"
+    );
 
     let failed = app
         .clone()

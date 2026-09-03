@@ -101,6 +101,7 @@ pub(super) async fn clone_active(
         .collect(),
         annotations: BTreeMap::new(),
         assets: None,
+        observability: None,
         cache_options: None,
         exports: None,
         migrations: None,

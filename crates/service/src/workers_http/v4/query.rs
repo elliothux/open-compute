@@ -5,12 +5,10 @@ use std::collections::BTreeSet;
 
 pub(super) struct UploadQuery {
     pub(super) strict_inheritance: bool,
-    pub(super) exclude_script: bool,
 }
 
 pub(super) fn upload(query: Option<&str>, put_script: bool) -> Result<UploadQuery, V4Error> {
     let mut strict = false;
-    let mut exclude_script = false;
     let mut seen = BTreeSet::new();
     for (key, value) in url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()) {
         if !seen.insert(key.clone()) {
@@ -18,13 +16,14 @@ pub(super) fn upload(query: Option<&str>, put_script: bool) -> Result<UploadQuer
         }
         match (key.as_ref(), value.as_ref()) {
             ("bindings_inherit", "strict") => strict = true,
-            ("excludeScript", "true") if put_script => exclude_script = true,
+            // Fixed Wrangler uses this response-projection flag for every
+            // Script PUT, including uploads that contain Worker modules.
+            ("excludeScript", "true") if put_script => {}
             _ => return Err(V4Error::InvalidRequest),
         }
     }
     Ok(UploadQuery {
         strict_inheritance: strict,
-        exclude_script,
     })
 }
 

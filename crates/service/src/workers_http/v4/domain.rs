@@ -259,14 +259,12 @@ impl UploadInput {
         previous: Option<&VersionSnapshot>,
         strict: bool,
     ) -> Result<(), PlatformError> {
-        if (!self.metadata.keep_bindings.is_empty()
-            || self
-                .metadata
-                .bindings
-                .iter()
-                .any(|binding| matches!(binding, WorkerUploadBinding::Inherit { .. })))
-            && !strict
-        {
+        let explicit_inheritance = self
+            .metadata
+            .bindings
+            .iter()
+            .any(|binding| matches!(binding, WorkerUploadBinding::Inherit { .. }));
+        if (!self.metadata.keep_bindings.is_empty() || explicit_inheritance) && !strict {
             return Err(invalid(
                 "binding inheritance requires bindings_inherit=strict",
             ));
@@ -277,17 +275,17 @@ impl UploadInput {
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        if requested.is_empty()
-            && !self
-                .metadata
-                .bindings
-                .iter()
-                .any(|binding| matches!(binding, WorkerUploadBinding::Inherit { .. }))
-        {
+        if requested.is_empty() && !explicit_inheritance {
             return Ok(());
         }
-        let previous =
-            previous.ok_or_else(|| invalid("binding inheritance has no prior Version"))?;
+        let Some(previous) = previous else {
+            if explicit_inheritance {
+                return Err(invalid("binding inheritance has no prior Version"));
+            }
+            // Fixed Wrangler supplies keep_bindings for explicitly uploaded
+            // secrets even on the first deploy. There is nothing to inherit.
+            return Ok(());
+        };
         let explicit_names = self
             .metadata
             .bindings

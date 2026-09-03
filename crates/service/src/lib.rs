@@ -81,6 +81,31 @@ pub fn product_promotion_for_test(
     ))
 }
 
+/// Attach the production Cloudflare v4 account mapping to an HTTP test state.
+///
+/// The returned account identifier is the public salted identifier that fixed
+/// Cloudflare clients must place in both configuration and request paths. This
+/// entry point is absent from ordinary production builds.
+#[cfg(feature = "test-support")]
+#[must_use]
+pub fn cloudflare_v4_for_test(
+    state: http::HttpState,
+    storage: std::sync::Arc<open_compute_storage::PlatformStorage>,
+) -> (http::HttpState, String) {
+    let authority = cloudflare_v4::accounts::AccountAuthority::new(
+        storage.identity().platform_id,
+        storage.identity().default_account_id,
+        storage.identity().created_at_ms,
+    );
+    let public_id = authority.public_id().to_owned();
+    (
+        state
+            .with_cloudflare_v4_account(authority)
+            .with_platform_storage(storage),
+        public_id,
+    )
+}
+
 #[cfg(any(test, feature = "test-support"))]
 pub use binding_backend::UnavailableKvBindingExecutor;
 #[cfg(any(test, feature = "test-support"))]

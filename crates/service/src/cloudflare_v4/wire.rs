@@ -105,6 +105,8 @@ pub(crate) enum V4OfficialError {
     Authentication,
     /// A bounded request exceeds the endpoint maximum.
     RequestTooLarge,
+    /// Cloudflare Workers script/service does not exist.
+    WorkerNotFound,
 }
 
 impl V4Error {
@@ -176,6 +178,7 @@ impl V4OfficialError {
         match self {
             Self::Authentication => 10_000,
             Self::RequestTooLarge => 10_027,
+            Self::WorkerNotFound => 10_007,
         }
     }
 
@@ -183,6 +186,7 @@ impl V4OfficialError {
         match self {
             Self::Authentication => StatusCode::UNAUTHORIZED,
             Self::RequestTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::WorkerNotFound => StatusCode::NOT_FOUND,
         }
     }
 
@@ -190,6 +194,7 @@ impl V4OfficialError {
         match self {
             Self::Authentication => "Authentication error",
             Self::RequestTooLarge => "Request body is too large",
+            Self::WorkerNotFound => "Worker not found",
         }
     }
 }
@@ -214,8 +219,8 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::R2Overloaded
             | ErrorCode::WorkflowStateQuotaExceeded
             | ErrorCode::WorkflowEventQueueFull => Self::RateLimited,
+            ErrorCode::WorkerNotFound => Self::Official(V4OfficialError::WorkerNotFound),
             ErrorCode::AccountNotFound
-            | ErrorCode::WorkerNotFound
             | ErrorCode::VersionNotFound
             | ErrorCode::BindingNotFound
             | ErrorCode::QueueNotFound

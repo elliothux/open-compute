@@ -28,6 +28,8 @@ pub(crate) struct WorkerUploadMetadata {
     pub annotations: BTreeMap<String, String>,
     /// Static Assets completion token and routing configuration.
     pub assets: Option<WorkerUploadAssets>,
+    /// Wrangler's upload-time observability projection.
+    pub observability: Option<WorkerUploadObservability>,
     /// Version-scoped automatic cache configuration.
     pub cache_options: Option<WorkerUploadCacheOptions>,
     /// Declarative Durable Object and Worker entrypoint exports.
@@ -108,11 +110,20 @@ impl std::fmt::Debug for WorkerUploadMetadata {
             .field("keep_bindings", &self.keep_bindings)
             .field("annotations", &self.annotations)
             .field("has_assets", &self.assets.is_some())
+            .field("has_observability", &self.observability.is_some())
             .field("has_cache_options", &self.cache_options.is_some())
             .field("has_exports", &self.exports.is_some())
             .field("has_migrations", &self.migrations.is_some())
             .finish()
     }
+}
+
+/// Upload metadata accepted for the Day 1 disabled-observability contract.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerUploadObservability {
+    /// Whether Cloudflare-hosted observability is enabled.
+    pub enabled: bool,
 }
 
 /// Static Assets token and configuration carried by a Worker upload.

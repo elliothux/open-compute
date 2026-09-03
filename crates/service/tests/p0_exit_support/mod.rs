@@ -334,7 +334,7 @@ pub(super) fn admin_router(
     objects: R2ObjectStore,
     pins: ResourcePins,
     stack: &GateStack,
-    scheduler_store: Arc<SchedulerStore>,
+    _scheduler_store: Arc<SchedulerStore>,
 ) -> Router {
     let metrics = Arc::new(
         MetricsRegistry::new(&MetricsConfig::default(), "p0-exit-gate", "pinned-workerd").unwrap(),
@@ -511,7 +511,7 @@ pub(super) fn version_request(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        promote,
+        deployment_source: promote.then_some(open_compute_storage::DeploymentSource::ScriptUpload),
         request_id: RequestId::generate(),
         now_ms,
     }

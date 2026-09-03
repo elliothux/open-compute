@@ -48,14 +48,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-use tower::ServiceExt;
 
 #[path = "p0_2_runtime_gate/http.rs"]
 mod http;
 #[path = "p0_2_runtime_gate/nodejs.rs"]
 mod nodejs;
-#[path = "p0_2_runtime_gate/worker_toolchain.rs"]
-mod worker_toolchain;
+#[path = "p0_2_runtime_gate/wrangler.rs"]
+mod wrangler;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
@@ -1227,7 +1226,7 @@ export default {{
             "1 * * * *".to_owned(),
             "2 * * * *".to_owned(),
         ],
-        promote,
+        deployment_source: promote.then_some(open_compute_storage::DeploymentSource::ScriptUpload),
         request_id: RequestId::generate(),
         now_ms: 2,
     }
@@ -1402,13 +1401,13 @@ request_timeout_ms = 3000
 
 pub(crate) const ADMIN_TOKEN: &str = "p0-2-admin-secret";
 
-pub(crate) fn write_admin_secret(path: &Path) -> PathBuf {
-    std::fs::write(path, format!("{ADMIN_TOKEN}\n")).expect("write admin token");
+pub(crate) fn write_secret(path: &Path, value: &str) -> PathBuf {
+    std::fs::write(path, format!("{value}\n")).expect("write HTTP token");
     let mut permissions = std::fs::metadata(path)
-        .expect("admin token metadata")
+        .expect("HTTP token metadata")
         .permissions();
     permissions.set_mode(0o600);
-    std::fs::set_permissions(path, permissions).expect("admin token permissions");
+    std::fs::set_permissions(path, permissions).expect("HTTP token permissions");
     path.to_owned()
 }
 

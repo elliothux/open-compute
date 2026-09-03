@@ -344,8 +344,8 @@ impl HttpState {
         self.read_only_secret.as_deref()
     }
 
-    /// Attach three distinct v4 Bearer capabilities in test-support builds.
-    #[cfg(any(test, feature = "test-support"))]
+    /// Attach three distinct v4 Bearer capabilities in crate-local tests.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn with_v4_tokens(
         mut self,
