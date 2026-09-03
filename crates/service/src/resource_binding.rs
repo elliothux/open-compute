@@ -1,4 +1,4 @@
-//! Synthetic binding authority for authenticated operator data APIs.
+//! Synthetic binding authority for authenticated resource management operations.
 
 use open_compute_core::{
     AccountId, BindingId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, ErrorCode,
@@ -8,8 +8,8 @@ use open_compute_storage::{
     AuthorizedBinding, PlatformStorage, ResourceRepository, VersionBindingRecord,
 };
 
-/// Build a full-permission operator binding for one persisted resource.
-pub(crate) fn operator_binding(
+/// Build a full-permission management binding for one persisted resource.
+pub(crate) fn management_binding(
     storage: &PlatformStorage,
     account_id: AccountId,
     resource_id: ResourceId,
@@ -19,14 +19,14 @@ pub(crate) fn operator_binding(
     if resource.kind != kind {
         return Err(PlatformError::new(
             ErrorCode::ConfigInvalid,
-            "resource kind does not match operator request",
+            "resource kind does not match management request",
         ));
     }
     Ok(AuthorizedBinding {
         binding: VersionBindingRecord {
             id: BindingId::generate(),
             version_id: VersionId::generate(),
-            name: "__operator__".to_owned(),
+            name: "__management__".to_owned(),
             kind,
             resource_id,
             resource_spec_generation: resource.spec_generation,

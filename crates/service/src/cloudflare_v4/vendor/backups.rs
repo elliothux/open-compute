@@ -110,7 +110,7 @@ async fn create_kv_backup(
         Err(error) => return error_response(error, context.request_id()),
     };
     let metric = KvLifecycleGuard::new(state.metrics().clone(), KvLifecycle::Backup);
-    match crate::kv_http::backup::create_backup(
+    match crate::kv_api::backup::create_backup(
         api,
         account,
         namespace,
@@ -151,7 +151,7 @@ async fn restore_kv_backup(
         Err(error) => return error_response(error, context.request_id()),
     };
     let metric = KvLifecycleGuard::new(state.metrics().clone(), KvLifecycle::Restore);
-    match crate::kv_http::backup::restore_backup(
+    match crate::kv_api::backup::restore_backup(
         api,
         state.metrics(),
         account,

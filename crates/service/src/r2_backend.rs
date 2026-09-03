@@ -428,7 +428,7 @@ impl R2BindingService {
         resource_id: ResourceId,
         key: &UserObjectKey,
     ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
-        let binding = crate::operator_binding::operator_binding(
+        let binding = crate::resource_binding::management_binding(
             &self.storage,
             account_id,
             resource_id,
@@ -450,7 +450,7 @@ impl R2BindingService {
         resource_id: ResourceId,
         key: &UserObjectKey,
     ) -> Result<Option<(R2ObjectMetadata, Vec<u8>)>, PlatformError> {
-        let binding = crate::operator_binding::operator_binding(
+        let binding = crate::resource_binding::management_binding(
             &self.storage,
             account_id,
             resource_id,
@@ -501,7 +501,7 @@ impl R2BindingService {
         expected_length: Option<u64>,
         body: Body,
     ) -> Result<Option<R2ObjectMetadata>, PlatformError> {
-        let binding = crate::operator_binding::operator_binding(
+        let binding = crate::resource_binding::management_binding(
             &self.storage,
             account_id,
             resource_id,
@@ -599,7 +599,7 @@ impl R2BindingService {
         resource_id: ResourceId,
         key: &UserObjectKey,
     ) -> Result<bool, PlatformError> {
-        let binding = crate::operator_binding::operator_binding(
+        let binding = crate::resource_binding::management_binding(
             &self.storage,
             account_id,
             resource_id,

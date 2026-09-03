@@ -12,7 +12,7 @@ use super::{
 use crate::binding_backend::KvBindingExecutor;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use crate::kv_backend::{KvCommand, KvCommandResult};
-use crate::operator_binding::operator_binding;
+use crate::resource_binding::management_binding;
 use axum::extract::{Path, Request, State};
 use axum::http::HeaderValue;
 use axum::response::{IntoResponse, Response};
@@ -378,7 +378,7 @@ async fn list_keys(
     let Some(api) = state.kv_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let binding = match operator_binding(
+    let binding = match management_binding(
         api.storage(),
         account_id,
         record.resource.id,

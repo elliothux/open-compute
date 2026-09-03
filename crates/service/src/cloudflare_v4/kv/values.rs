@@ -6,7 +6,7 @@ use crate::cloudflare_v4::storage::{context, require_no_query, strict_query};
 use crate::cloudflare_v4::{V4Error, V4Permission, error_response, success_response};
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use crate::kv_backend::{KvCommand, KvCommandResult};
-use crate::operator_binding::operator_binding;
+use crate::resource_binding::management_binding;
 use axum::body::to_bytes;
 use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -204,7 +204,7 @@ pub(super) fn execute(
     command: KvCommand,
 ) -> Result<KvCommandResult, V4Error> {
     let api = state.kv_api().ok_or(V4Error::Unavailable)?;
-    let binding = operator_binding(
+    let binding = management_binding(
         api.storage(),
         account_id,
         resource_id,

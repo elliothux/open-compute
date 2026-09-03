@@ -17,8 +17,8 @@ use crate::document_parser_backend::DocumentParserBindingService;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState};
 use crate::images_backend::ImageBindingService;
+use crate::kv_api::KvApiState;
 use crate::kv_backend::SqliteKvBindingExecutor;
-use crate::kv_http::KvApiState;
 use crate::metrics::{
     DoFacetReloadReason, KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage,
 };

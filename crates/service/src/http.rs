@@ -6,7 +6,7 @@ use crate::cloudflare_v4::accounts::AccountAuthority;
 use crate::d1_http::D1ApiState;
 use crate::dashboard::DashboardDispatch;
 use crate::health::HealthCoordinator;
-use crate::kv_http::KvApiState;
+use crate::kv_api::KvApiState;
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
 use crate::queue_http::QueueApiState;
 use crate::r2_http::R2ApiState;
