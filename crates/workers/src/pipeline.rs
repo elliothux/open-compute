@@ -140,6 +140,28 @@ pub struct VersionVersionMetadataInput {
     pub tag: Option<String>,
 }
 
+/// Service-worker global backed by one immutable multipart module part.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VersionModuleBindingInput {
+    /// Exact canonical bundle module name.
+    pub module: String,
+    /// Exact global representation emitted by fixed Wrangler.
+    pub kind: ModuleBindingKind,
+}
+
+/// Supported service-worker multipart global representations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModuleBindingKind {
+    /// Compile bytes as a `WebAssembly.Module`.
+    WasmModule,
+    /// Decode bytes as UTF-8 text.
+    TextBlob,
+    /// Expose bytes as an `ArrayBuffer`.
+    DataBlob,
+}
+
 /// Platform-provided runtime capabilities frozen with one version.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -150,6 +172,9 @@ pub struct VersionRuntimeFeatures {
     /// Immutable compatibility flags passed to the tenant isolate.
     #[serde(default)]
     pub compatibility_flags: Vec<String>,
+    /// Immutable closed Cloudflare Version annotations.
+    #[serde(default)]
+    pub annotations: BTreeMap<String, String>,
     /// Automatic response-cache policy.
     #[serde(default)]
     pub cache: VersionCacheInput,
@@ -162,6 +187,9 @@ pub struct VersionRuntimeFeatures {
     /// Optional frozen Version Metadata binding.
     #[serde(default)]
     pub version_metadata: Option<VersionVersionMetadataInput>,
+    /// Service-worker module globals keyed by tenant binding name.
+    #[serde(default)]
+    pub module_bindings: BTreeMap<String, VersionModuleBindingInput>,
 }
 
 impl Default for VersionRuntimeFeatures {
@@ -169,10 +197,12 @@ impl Default for VersionRuntimeFeatures {
         Self {
             compatibility_date: default_compatibility_date(),
             compatibility_flags: Vec::new(),
+            annotations: BTreeMap::new(),
             cache: VersionCacheInput::default(),
             ai: None,
             images: None,
             version_metadata: None,
+            module_bindings: BTreeMap::new(),
         }
     }
 }
@@ -263,7 +293,7 @@ pub trait ProductPromotionCoordinator: Send + Sync + 'static {
 }
 
 /// Immutable authority needed by the Queue/Cron promotion coordinator.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProductPromotionRequest {
     /// Owning account.
     pub account_id: AccountId,
@@ -273,6 +303,8 @@ pub struct ProductPromotionRequest {
     pub version_id: VersionId,
     /// Exact v4 operation that creates the immutable Deployment.
     pub source: DeploymentSource,
+    /// Closed Cloudflare deployment annotations persisted with the traffic assignment.
+    pub annotations: BTreeMap<String, String>,
     /// Audit request identity.
     pub request_id: RequestId,
     /// Control-plane wall time.
@@ -733,6 +765,43 @@ impl<'a> VersionController<'a> {
         let cron = prepare_cron_config(request, &workflow_binding_descriptors)?;
         let (cache_policy, mut cache_rows, builtin_descriptors, builtin_rows) =
             prepare_runtime_features(&request.runtime_features)?;
+        let mut builtin_names = HashSet::new();
+        for descriptor in &builtin_descriptors {
+            if !builtin_names.insert(descriptor.name.as_str())
+                || canonical_vars.contains_key(&descriptor.name)
+                || request.secrets.contains_key(&descriptor.name)
+                || request.bindings.contains_key(&descriptor.name)
+                || request.services.contains_key(&descriptor.name)
+                || content
+                    .assets()
+                    .and_then(|assets| assets.routing.binding.as_deref())
+                    == Some(descriptor.name.as_str())
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::BindingTypeMismatch,
+                    "runtime binding names must be unique",
+                ));
+            }
+            let expected_type = match descriptor.kind {
+                BuiltinBindingDescriptorKindV1::WasmModule => Some(crate::ModuleType::Wasm),
+                BuiltinBindingDescriptorKindV1::TextBlob => Some(crate::ModuleType::Text),
+                BuiltinBindingDescriptorKindV1::DataBlob => Some(crate::ModuleType::Data),
+                _ => None,
+            };
+            if let Some(expected_type) = expected_type {
+                let module_name = descriptor.tag.as_deref().ok_or_else(invariant)?;
+                if !content.bundle().is_some_and(|bundle| {
+                    bundle.manifest().modules.iter().any(|module| {
+                        module.name == module_name && module.module_type == expected_type
+                    })
+                }) {
+                    return Err(PlatformError::new(
+                        ErrorCode::BundleInvalid,
+                        "service-worker module binding does not match a canonical bundle part",
+                    ));
+                }
+            }
+        }
         let descriptor = WorkerCodeDescriptorV1::new(
             request.account_id,
             request.worker_id,
@@ -796,6 +865,7 @@ impl<'a> VersionController<'a> {
                 now_ms: request.now_ms,
             },
             &open_compute_storage::NewVersionProducts {
+                annotations: Some(&request.runtime_features.annotations),
                 assets: prepared_assets.as_ref().map(|value| &value.0),
                 asset_object_refs: prepared_assets
                     .as_ref()
@@ -1014,6 +1084,7 @@ impl<'a> VersionController<'a> {
                         worker_id: request.worker_id,
                         version_id: version.id,
                         source,
+                        annotations: BTreeMap::new(),
                         request_id: request.request_id,
                         now_ms: request.now_ms,
                     })
@@ -1031,6 +1102,7 @@ impl<'a> VersionController<'a> {
                     None,
                     Some(worker.route_generation),
                     source,
+                    &BTreeMap::new(),
                     request.request_id,
                     request.now_ms,
                 )?;
@@ -1220,6 +1292,18 @@ fn prepare_runtime_features(
             metadata.tag.clone(),
         )?);
     }
+    for (name, binding) in &input.module_bindings {
+        let kind = match binding.kind {
+            ModuleBindingKind::WasmModule => BuiltinBindingDescriptorKindV1::WasmModule,
+            ModuleBindingKind::TextBlob => BuiltinBindingDescriptorKindV1::TextBlob,
+            ModuleBindingKind::DataBlob => BuiltinBindingDescriptorKindV1::DataBlob,
+        };
+        descriptors.push(BuiltinBindingDescriptorV1::new(
+            name.clone(),
+            kind,
+            Some(binding.module.clone()),
+        )?);
+    }
     descriptors.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
     let rows = descriptors
         .iter()
@@ -1232,6 +1316,9 @@ fn prepare_runtime_features(
                     BuiltinBindingDescriptorKindV1::VersionMetadata => {
                         BuiltinBindingKind::VersionMetadata
                     }
+                    BuiltinBindingDescriptorKindV1::WasmModule => BuiltinBindingKind::WasmModule,
+                    BuiltinBindingDescriptorKindV1::TextBlob => BuiltinBindingKind::TextBlob,
+                    BuiltinBindingDescriptorKindV1::DataBlob => BuiltinBindingKind::DataBlob,
                 },
                 tag: descriptor.tag.clone(),
                 descriptor_sha256: descriptor.sha256()?,
@@ -1250,13 +1337,15 @@ fn validate_compatibility(input: &VersionRuntimeFeatures) -> Result<Vec<String>,
             "compatibility date is outside the certified pinned-workerd range",
         ));
     }
-    if !input.compatibility_flags.is_empty() {
+    if !(input.compatibility_flags.is_empty()
+        || input.compatibility_flags.as_slice() == ["nodejs_compat"])
+    {
         return Err(PlatformError::new(
             ErrorCode::CompatibilityUnsupported,
-            "tenant compatibility flags are not in the certified pinned-workerd contract",
+            "compatibility flags are outside the fixed 2026-08-30 contract",
         ));
     }
-    Ok(Vec::new())
+    Ok(input.compatibility_flags.clone())
 }
 
 fn validate_asset_content(

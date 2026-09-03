@@ -48,7 +48,8 @@ pub use ai_search::{
     inspect_ai_search_instance, inspect_ai_search_object_references,
 };
 pub use assets::{
-    BeginVersionUploadFinalize, NewVersionAssets, NewVersionObjectRef, NewVersionUpload,
+    AssetUploadEntry, AssetUploadRepository, AssetUploadSession, BeginVersionUploadFinalize,
+    NewAssetUploadEntry, NewVersionAssets, NewVersionObjectRef, NewVersionUpload,
     NewVersionUploadObject, VersionAssetsRecord, VersionAssetsRepository, VersionObjectKind,
     VersionUploadFinalize, VersionUploadFinalizeDisposition, VersionUploadObjectRecord,
     VersionUploadRecord, VersionUploadRepository, VersionUploadStatus,

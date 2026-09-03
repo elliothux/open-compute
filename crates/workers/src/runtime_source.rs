@@ -42,6 +42,17 @@ pub struct RuntimeModule {
     pub bytes: Vec<u8>,
 }
 
+/// One verified service-worker global backed by an immutable module part.
+#[derive(Clone, Eq, PartialEq)]
+pub struct RuntimeModuleBinding {
+    /// Tenant global binding name.
+    pub name: String,
+    /// Exact module representation (`Wasm`, `Text`, or `Data`).
+    pub module_type: ModuleType,
+    /// Raw verified module bytes.
+    pub bytes: Vec<u8>,
+}
+
 /// One verified binding descriptor and its persisted canonical digest.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeBinding {
@@ -92,6 +103,17 @@ impl std::fmt::Debug for DurableObjectFacadeIdentity {
 impl std::fmt::Debug for RuntimeModule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RuntimeModule")
+            .field("name", &self.name)
+            .field("module_type", &self.module_type)
+            .field("size", &self.bytes.len())
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for RuntimeModuleBinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeModuleBinding")
             .field("name", &self.name)
             .field("module_type", &self.module_type)
             .field("size", &self.bytes.len())
@@ -221,6 +243,8 @@ pub struct RuntimeSnapshot {
     pub main_module: Option<String>,
     /// Verified modules.
     pub modules: Vec<RuntimeModule>,
+    /// Verified service-worker globals backed by module parts.
+    pub module_bindings: Vec<RuntimeModuleBinding>,
     /// Canonical structured-clone-compatible vars.
     pub vars: BTreeMap<String, serde_json::Value>,
     /// Decrypted secret values. Empty in validation scope.
@@ -256,6 +280,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
             .field("worker_code_sha256", &self.worker_code_sha256)
             .field("main_module", &self.main_module)
             .field("module_count", &self.modules.len())
+            .field("module_binding_count", &self.module_bindings.len())
             .field("var_count", &self.vars.len())
             .field("secret_count", &self.secrets.len())
             .field("binding_count", &self.bindings.len())
@@ -629,6 +654,7 @@ impl RuntimeSource {
         let mut ai_binding = None;
         let mut images_binding = None;
         let mut version_metadata_binding = None;
+        let mut module_bindings = Vec::new();
         for binding in &snapshot.builtin_bindings {
             let kind = match binding.kind {
                 BuiltinBindingKind::Ai => BuiltinBindingDescriptorKindV1::Ai,
@@ -636,6 +662,9 @@ impl RuntimeSource {
                 BuiltinBindingKind::VersionMetadata => {
                     BuiltinBindingDescriptorKindV1::VersionMetadata
                 }
+                BuiltinBindingKind::WasmModule => BuiltinBindingDescriptorKindV1::WasmModule,
+                BuiltinBindingKind::TextBlob => BuiltinBindingDescriptorKindV1::TextBlob,
+                BuiltinBindingKind::DataBlob => BuiltinBindingDescriptorKindV1::DataBlob,
             };
             let descriptor =
                 BuiltinBindingDescriptorV1::new(binding.name.clone(), kind, binding.tag.clone())?;
@@ -663,6 +692,31 @@ impl RuntimeSource {
                         tag: binding.tag.clone(),
                         timestamp_ms: snapshot.version.created_at_ms,
                         descriptor_sha256: hex::encode(digest),
+                    });
+                }
+                BuiltinBindingKind::WasmModule
+                | BuiltinBindingKind::TextBlob
+                | BuiltinBindingKind::DataBlob => {
+                    let module_type = match binding.kind {
+                        BuiltinBindingKind::WasmModule => ModuleType::Wasm,
+                        BuiltinBindingKind::TextBlob => ModuleType::Text,
+                        BuiltinBindingKind::DataBlob => ModuleType::Data,
+                        _ => return Err(invariant()),
+                    };
+                    let module_name = binding.tag.as_deref().ok_or_else(invariant)?;
+                    let bundle = bundle.as_ref().ok_or_else(invariant)?;
+                    let module = bundle
+                        .manifest()
+                        .modules
+                        .iter()
+                        .find(|module| {
+                            module.name == module_name && module.module_type == module_type
+                        })
+                        .ok_or_else(invariant)?;
+                    module_bindings.push(RuntimeModuleBinding {
+                        name: binding.name.clone(),
+                        module_type,
+                        bytes: bundle.module_bytes(module)?.to_vec(),
                     });
                 }
             }
@@ -744,6 +798,7 @@ impl RuntimeSource {
                 .as_ref()
                 .map(|bundle| bundle.manifest().main_module.clone()),
             modules,
+            module_bindings,
             vars,
             secrets,
             bindings: runtime_bindings,
@@ -788,6 +843,7 @@ impl RuntimeSource {
             #[serde(skip_serializing_if = "Option::is_none")]
             main_module: Option<&'a str>,
             modules: Vec<Module<'a>>,
+            module_bindings: Vec<Module<'a>>,
             env: BTreeMap<&'a str, serde_json::Value>,
             bindings: Vec<BindingPayload<'a>>,
             scheduled_targets: &'a [RuntimeScheduledTarget],
@@ -836,6 +892,15 @@ impl RuntimeSource {
                 name: &module.name,
                 module_type: module.module_type,
                 bytes_base64: base64::engine::general_purpose::STANDARD.encode(&module.bytes),
+            })
+            .collect();
+        let module_bindings = snapshot
+            .module_bindings
+            .iter()
+            .map(|binding| Module {
+                name: &binding.name,
+                module_type: binding.module_type,
+                bytes_base64: base64::engine::general_purpose::STANDARD.encode(&binding.bytes),
             })
             .collect();
         let mut env: BTreeMap<&str, serde_json::Value> = snapshot
@@ -889,6 +954,7 @@ impl RuntimeSource {
             content_kind: snapshot.content_kind,
             main_module: snapshot.main_module.as_deref(),
             modules,
+            module_bindings,
             env,
             bindings,
             scheduled_targets: &snapshot.scheduled_targets,

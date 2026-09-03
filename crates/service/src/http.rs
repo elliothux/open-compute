@@ -36,6 +36,7 @@ pub const REQUEST_ID_HEADER: &str = "x-open-compute-request-id";
 const MAX_BODY: usize = 4096;
 const MAX_HEADER_BYTES: usize = 8192;
 const MAX_HEADER_TOTAL: usize = 16_384;
+const MAX_WORKER_UPLOAD_BODY: usize = 64 * 1024 * 1024;
 
 /// Stable error metadata attached internally for low-cardinality product metrics.
 #[derive(Clone, Copy, Debug)]
@@ -426,7 +427,7 @@ pub fn admin_router(state: HttpState) -> Router {
         .route("/health/ready", get(ready))
         .nest(
             "/client/v4",
-            crate::cloudflare_v4::router(v4_state, Router::new()),
+            crate::cloudflare_v4::router(v4_state, workers_http::v4::router()),
         )
         .merge(removed_management_router(false));
     if metrics_enabled {
@@ -456,7 +457,7 @@ pub fn merged_router(state: HttpState) -> Router {
         .route("/health/ready", get(ready))
         .nest(
             "/client/v4",
-            crate::cloudflare_v4::router(v4_state, Router::new()),
+            crate::cloudflare_v4::router(v4_state, workers_http::v4::router()),
         )
         .merge(removed_management_router(false));
     if metrics_enabled {
@@ -771,7 +772,7 @@ async fn bounds_middleware(
     let r2_object_put = request.method() == Method::PUT
         && r2_http::operator_r2_object_put_path(request.uri().path());
     let body_limit = if worker_upload {
-        workers_http::HARD_MAX_BUNDLE_BODY
+        MAX_WORKER_UPLOAD_BODY
     } else if kv_value_put {
         kv_http::KV_OPERATOR_PUT_MAX_BODY
     } else if r2_object_put {

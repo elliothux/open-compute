@@ -145,6 +145,27 @@ impl SecretCrypto {
         mac.finalize().into_bytes().into()
     }
 
+    /// Sign an opaque fixed-Wrangler Static Assets token payload.
+    #[must_use]
+    pub fn sign_asset_upload_token(&self, payload: &[u8]) -> [u8; 32] {
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&self.fingerprint_key)
+            .expect("SHA-256 HMAC accepts a 32-byte key");
+        mac.update(b"open-compute/wrangler-assets/v1\0");
+        mac.update(payload);
+        mac.finalize().into_bytes().into()
+    }
+
+    /// Constant-time verification for a fixed-Wrangler Static Assets token.
+    #[must_use]
+    pub fn verify_asset_upload_token(&self, payload: &[u8], signature: &[u8]) -> bool {
+        let Ok(mut mac) = <Hmac<Sha256> as Mac>::new_from_slice(&self.fingerprint_key) else {
+            return false;
+        };
+        mac.update(b"open-compute/wrangler-assets/v1\0");
+        mac.update(payload);
+        mac.verify_slice(signature).is_ok()
+    }
+
     /// Sign a canonical KV list-cursor payload with a domain-separated key.
     #[must_use]
     pub fn sign_kv_cursor(&self, payload: &[u8]) -> [u8; 32] {

@@ -50,11 +50,35 @@ CREATE TABLE worker_versions (
 CREATE INDEX versions_worker_state
 ON worker_versions(worker_id, state, version_number DESC);
 
+CREATE TABLE version_annotations (
+  version_id TEXT NOT NULL REFERENCES worker_versions(id),
+  name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY(version_id, name),
+  CHECK(name IN ('workers/message', 'workers/tag', 'workers/triggered_by')),
+  CHECK(length(value) BETWEEN 1 AND 1000)
+) WITHOUT ROWID, STRICT;
+
+CREATE TRIGGER version_annotations_update_guard
+BEFORE UPDATE ON version_annotations
+BEGIN
+  SELECT RAISE(ABORT, 'immutable version annotation');
+END;
+
+CREATE TRIGGER version_annotations_delete_guard
+BEFORE DELETE ON version_annotations
+WHEN (SELECT state FROM worker_versions WHERE id = OLD.version_id)
+  NOT IN ('staging', 'deleting')
+BEGIN
+  SELECT RAISE(ABORT, 'immutable version annotation');
+END;
+
 CREATE TABLE worker_deployments (
   id TEXT PRIMARY KEY,
   worker_id TEXT NOT NULL REFERENCES workers(id),
   version_id TEXT NOT NULL REFERENCES worker_versions(id),
   source TEXT NOT NULL CHECK(source IN ('script_upload', 'versions_api', 'rollback', 'system')),
+  annotations_json BLOB NOT NULL,
   created_at_ms INTEGER NOT NULL,
   deleted_at_ms INTEGER
 ) STRICT;

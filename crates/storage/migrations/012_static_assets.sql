@@ -68,6 +68,80 @@ CREATE TABLE version_uploads (
 CREATE INDEX version_uploads_worker_status
 ON version_uploads(account_id, worker_id, status, expires_at_ms);
 
+CREATE TABLE asset_upload_sessions (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  script_name TEXT NOT NULL CHECK(length(script_name) BETWEEN 1 AND 63),
+  status TEXT NOT NULL CHECK(status IN ('open', 'complete', 'reserved', 'consumed', 'expired')),
+  reservation_id TEXT,
+  released_reservation_id TEXT,
+  created_at_ms INTEGER NOT NULL,
+  expires_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  CHECK(
+    (status IN ('open', 'expired') AND reservation_id IS NULL AND released_reservation_id IS NULL) OR
+    (status = 'complete' AND reservation_id IS NULL) OR
+    (status IN ('reserved', 'consumed') AND reservation_id IS NOT NULL AND released_reservation_id IS NULL)
+  )
+) STRICT;
+
+CREATE TRIGGER asset_upload_session_identity_immutable
+BEFORE UPDATE ON asset_upload_sessions
+WHEN NEW.id != OLD.id OR NEW.account_id != OLD.account_id
+  OR NEW.script_name != OLD.script_name OR NEW.created_at_ms != OLD.created_at_ms
+  OR NEW.expires_at_ms != OLD.expires_at_ms
+BEGIN
+  SELECT RAISE(ABORT, 'asset upload session identity is immutable');
+END;
+
+CREATE TRIGGER asset_upload_session_transition_guard
+BEFORE UPDATE ON asset_upload_sessions
+WHEN NOT (
+  (OLD.status = 'open' AND NEW.status IN ('open', 'complete', 'expired')) OR
+  (OLD.status = 'complete' AND NEW.status IN ('complete', 'reserved')) OR
+  (OLD.status = 'reserved' AND NEW.status IN ('reserved', 'complete', 'consumed')) OR
+  (OLD.status = 'consumed' AND NEW.status = 'consumed') OR
+  (OLD.status = 'expired' AND NEW.status = 'expired')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'invalid asset upload session transition');
+END;
+
+CREATE INDEX asset_upload_sessions_scope
+ON asset_upload_sessions(account_id, script_name, status, expires_at_ms);
+
+CREATE TABLE asset_upload_entries (
+  session_id TEXT NOT NULL REFERENCES asset_upload_sessions(id),
+  path TEXT NOT NULL,
+  wrangler_hash TEXT NOT NULL CHECK(length(wrangler_hash) = 32),
+  size INTEGER NOT NULL CHECK(size >= 0),
+  content_type TEXT,
+  artifact_sha256 BLOB CHECK(artifact_sha256 IS NULL OR length(artifact_sha256) = 32),
+  uploaded_at_ms INTEGER,
+  PRIMARY KEY(session_id, path),
+  CHECK((artifact_sha256 IS NULL AND uploaded_at_ms IS NULL) OR
+        (artifact_sha256 IS NOT NULL AND uploaded_at_ms IS NOT NULL))
+) WITHOUT ROWID, STRICT;
+
+CREATE TRIGGER asset_upload_entry_evidence_immutable
+BEFORE UPDATE ON asset_upload_entries
+WHEN NEW.session_id != OLD.session_id OR NEW.path != OLD.path
+  OR NEW.wrangler_hash != OLD.wrangler_hash OR NEW.size != OLD.size
+  OR (OLD.artifact_sha256 IS NOT NULL AND (
+    NEW.artifact_sha256 IS NOT OLD.artifact_sha256
+    OR NEW.content_type IS NOT OLD.content_type
+    OR NEW.uploaded_at_ms IS NOT OLD.uploaded_at_ms
+  ))
+  OR (OLD.artifact_sha256 IS NULL AND NEW.artifact_sha256 IS NOT NULL AND (
+    length(NEW.artifact_sha256) != 32 OR NEW.content_type IS NULL OR NEW.uploaded_at_ms IS NULL
+  ))
+BEGIN
+  SELECT RAISE(ABORT, 'asset upload entry evidence is immutable');
+END;
+
+CREATE INDEX asset_upload_entries_hash
+ON asset_upload_entries(session_id, wrangler_hash);
+
 CREATE TABLE version_upload_objects (
   session_id TEXT NOT NULL REFERENCES version_uploads(id),
   sha256 BLOB NOT NULL CHECK(length(sha256) = 32),

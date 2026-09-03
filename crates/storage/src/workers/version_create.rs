@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 /// All product metadata committed with an immutable version in one control transaction.
 #[derive(Clone, Debug, Default)]
 pub struct NewVersionProducts<'a> {
+    /// Immutable closed Cloudflare Version annotations.
+    pub annotations: Option<&'a BTreeMap<String, String>>,
     /// Optional immutable static-asset metadata.
     pub assets: Option<&'a crate::NewVersionAssets>,
     /// Static manifest/blob object references derived from the canonical manifest.
@@ -134,6 +136,14 @@ impl WorkerRepository<'_> {
                     ],
                 )
                 .map_err(|_| db_error())?;
+            }
+            for (name, value) in products.annotations.into_iter().flatten() {
+                tx.execute(
+                    "INSERT INTO version_annotations (version_id, name, value)
+                     VALUES (?1, ?2, ?3)",
+                    params![input.id.to_string(), name, value],
+                )
+                .map_err(|_| invariant())?;
             }
             crate::bindings::insert_staging_bindings(
                 tx,

@@ -53,6 +53,11 @@ export interface RuntimeModule {
   type: "esModule" | "commonJsModule" | "text" | "json" | "data" | "wasm";
   bytesBase64: string;
 }
+export interface RuntimeModuleBinding {
+  name: string;
+  type: "text" | "data" | "wasm";
+  bytesBase64: string;
+}
 /** Wire projection produced only by Rust RuntimeSource::internal_payload. */
 export interface RuntimeSnapshot {
   schemaVersion: 1;
@@ -64,6 +69,7 @@ export interface RuntimeSnapshot {
   contentKind: "worker" | "assets_only";
   mainModule?: string;
   modules: RuntimeModule[];
+  moduleBindings: RuntimeModuleBinding[];
   env: Record<string, unknown>;
   bindings: RuntimeBinding[];
   scheduledTargets: RuntimeScheduledTarget[];

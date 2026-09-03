@@ -209,6 +209,9 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::R2Overloaded => Self::RateLimited,
             ErrorCode::AccountNotFound
             | ErrorCode::WorkerNotFound
+            | ErrorCode::VersionNotFound
+            | ErrorCode::BindingNotFound
+            | ErrorCode::QueueNotFound
             | ErrorCode::ResourceNotFound
             | ErrorCode::DoNamespaceNotFound => Self::NotFound,
             ErrorCode::PlatformUnavailable
@@ -217,6 +220,11 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::KvUnavailable
             | ErrorCode::R2ProviderUnavailable => Self::Unavailable,
             ErrorCode::IdempotencyConflict
+            | ErrorCode::VersionNotReady
+            | ErrorCode::VersionActive
+            | ErrorCode::VersionReferenced
+            | ErrorCode::AssetUploadConflict
+            | ErrorCode::AssetUploadIncomplete
             | ErrorCode::RouteConflict
             | ErrorCode::WorkerNameConflict
             | ErrorCode::ResourceNameConflict
@@ -228,6 +236,10 @@ impl From<&PlatformError> for V4Error {
             ErrorCode::ConfigInvalid
             | ErrorCode::PathInvalid
             | ErrorCode::LimitInvalid
+            | ErrorCode::BundleInvalid
+            | ErrorCode::SecretInvalid
+            | ErrorCode::AssetManifestInvalid
+            | ErrorCode::AssetPathInvalid
             | ErrorCode::KvKeyInvalid
             | ErrorCode::KvKeyTooLarge
             | ErrorCode::KvMetadataInvalid
@@ -418,11 +430,22 @@ pub(super) async fn authentication_boundary(
     let mut roles = matches
         .into_iter()
         .filter_map(|(role, matched)| matched.then_some(role));
-    let Some(role) = roles.next() else {
-        return error_response(
-            V4Error::Official(V4OfficialError::Authentication),
-            request_id,
-        );
+    let role = match roles.next() {
+        Some(role) => role,
+        None if crate::workers_http::v4::assets::authenticate_upload_token(
+            &state,
+            request.uri().path(),
+            presented.and_then(|value| value.strip_prefix("Bearer ")),
+        ) =>
+        {
+            V4Role::Deployer
+        }
+        None => {
+            return error_response(
+                V4Error::Official(V4OfficialError::Authentication),
+                request_id,
+            );
+        }
     };
     if roles.next().is_some() {
         return error_response(

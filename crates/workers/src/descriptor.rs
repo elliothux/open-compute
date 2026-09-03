@@ -141,6 +141,12 @@ pub enum BuiltinBindingDescriptorKindV1 {
     Images,
     /// Frozen version Version Metadata object.
     VersionMetadata,
+    /// Service-worker WebAssembly module global.
+    WasmModule,
+    /// Service-worker UTF-8 text global.
+    TextBlob,
+    /// Service-worker byte global.
+    DataBlob,
 }
 
 /// Canonical descriptor for an Images or Version Metadata binding.
@@ -166,11 +172,18 @@ impl BuiltinBindingDescriptorV1 {
         tag: Option<String>,
     ) -> Result<Self, PlatformError> {
         validate_env_name(&name)?;
+        let tag_allowed = matches!(
+            kind,
+            BuiltinBindingDescriptorKindV1::VersionMetadata
+                | BuiltinBindingDescriptorKindV1::WasmModule
+                | BuiltinBindingDescriptorKindV1::TextBlob
+                | BuiltinBindingDescriptorKindV1::DataBlob
+        );
         if name.len() > 64
-            || !matches!(kind, BuiltinBindingDescriptorKindV1::VersionMetadata) && tag.is_some()
+            || !tag_allowed && tag.is_some()
             || tag.as_deref().is_some_and(|value| {
                 value.is_empty()
-                    || value.len() > 128
+                    || value.len() > 1_024
                     || value.bytes().any(|byte| byte.is_ascii_control())
             })
         {
@@ -441,7 +454,8 @@ impl WorkerCodeDescriptorV1 {
     ) -> Result<Self, PlatformError> {
         if created_at_ms < 0
             || compatibility_date != "2026-08-30"
-            || !compatibility_flags.is_empty()
+            || !(compatibility_flags.is_empty()
+                || compatibility_flags.as_slice() == ["nodejs_compat"])
         {
             return Err(binding_invariant());
         }

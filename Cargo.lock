@@ -3414,6 +3414,7 @@ dependencies = [
  "aws-sdk-s3",
  "axum",
  "base64 0.22.1",
+ "blake3",
  "bytes",
  "clap",
  "futures",

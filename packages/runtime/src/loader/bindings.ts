@@ -1,6 +1,6 @@
 // Assemble only capabilities resolved and verified by RuntimeSource.
 import { bindingError } from "./host.js";
-import type { BindingContext, RuntimeBinding, RuntimeSnapshot } from "./protocol.js";
+import type { BindingContext, RuntimeBinding, RuntimeModuleBinding, RuntimeSnapshot } from "./protocol.js";
 import type { DoPolicy } from "../durable-objects/protocol.js";
 
 function makeBinding(ctx: BindingContext, descriptor: RuntimeBinding, versionId: string,
@@ -44,12 +44,33 @@ function makeBinding(ctx: BindingContext, descriptor: RuntimeBinding, versionId:
   }
 }
 
+function moduleBindingBytes(value: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function makeModuleBinding(binding: RuntimeModuleBinding): unknown {
+  const bytes = moduleBindingBytes(binding.bytesBase64);
+  switch (binding.type) {
+    case "text":
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+    case "data": return bytes.buffer;
+    case "wasm": return Reflect.construct(WebAssembly.Module, [bytes]) as WebAssembly.Module;
+  }
+}
+
 export function tenantEnv(snapshot: RuntimeSnapshot, ctx: BindingContext, versionId: string,
   policy: DoPolicy, durableObject = false, builtinFeatures = true,
   currentEntrypoint = "default"): Record<string, unknown> {
   const env = { ...snapshot.env };
   const [accountId, workerId] = snapshot.loaderKey.split("/");
   if (!accountId || !workerId) throw bindingError("VERSION_INVARIANT_VIOLATION");
+  for (const binding of snapshot.moduleBindings) {
+    if (Object.prototype.hasOwnProperty.call(env, binding.name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
+    env[binding.name] = makeModuleBinding(binding);
+  }
   for (const descriptor of snapshot.bindings) {
     if (Object.prototype.hasOwnProperty.call(env, descriptor.name)) throw bindingError("VERSION_INVARIANT_VIOLATION");
     env[descriptor.name] = makeBinding(ctx, descriptor, versionId, snapshot.routeGeneration,

@@ -152,6 +152,7 @@ async fn route_edits_preserve_queue_and_cron_epochs_during_repromotion_and_resta
             worker_id: worker.id,
             version_id: result.version.id,
             source: open_compute_storage::DeploymentSource::VersionsApi,
+            annotations: std::collections::BTreeMap::new(),
             request_id: open_compute_core::RequestId::generate(),
             now_ms: 60_002,
         })

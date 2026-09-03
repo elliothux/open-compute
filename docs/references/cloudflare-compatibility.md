@@ -11,8 +11,14 @@
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
 `workerd v1.20260830.1`，revision `e9dda5963aba7ee4323960db795690ec78fec118`，唯一
 `effectiveCompatibilityDate` 为 `2026-08-30`；stable types 是
-`@cloudflare/workers-types@5.20260830.1`。tenant 不得选择 compatibility date 或 flags，也不保留旧
-open-compute schema、descriptor、runtime 或 API 的兼容路径。
+`@cloudflare/workers-types@5.20260830.1`。tenant 不得选择其它 compatibility date 或任意 flags，也不保留旧
+open-compute schema、descriptor、runtime 或 API 的兼容路径。官方在 compatibility date `2026-08-04`
+起默认启用 Node.js compatibility，并明确此日期后的 `nodejs_compat` 是被 Wrangler/runtime 忽略的冗余
+正向 flag（[官方 changelog](https://developers.cloudflare.com/changelog/post/2026-08-04-nodejs-compat-default/)、
+[Compatibility Flags](https://developers.cloudflare.com/workers/configuration/compatibility-flags/)）。因此 P6 wire
+只额外接受并逐 Version 原样持久化精确的单值 `["nodejs_compat"]`，其与空数组在 pinned
+`workerd v1.20260830.1` 下使用同一最新平台语义；其它 flag、组合与所有其它日期继续 fail closed。对应
+multipart、descriptor、runtime-source/loader 回归防止它扩成 tenant 可选历史模式。
 
 ## 当前结论
 

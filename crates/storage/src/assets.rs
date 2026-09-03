@@ -5,10 +5,14 @@ use open_compute_core::{AccountId, ErrorCode, PlatformError, VersionId, WorkerId
 use rusqlite::{OptionalExtension, Transaction, params};
 
 mod uploads;
+mod wrangler_uploads;
 pub use uploads::{
     BeginVersionUploadFinalize, NewVersionUpload, NewVersionUploadObject, VersionUploadFinalize,
     VersionUploadFinalizeDisposition, VersionUploadObjectRecord, VersionUploadRecord,
     VersionUploadRepository, VersionUploadStatus,
+};
+pub use wrangler_uploads::{
+    AssetUploadEntry, AssetUploadRepository, AssetUploadSession, NewAssetUploadEntry,
 };
 
 /// One version's canonical static-asset authority.

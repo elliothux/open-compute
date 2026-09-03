@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 /// Cloudflare Worker upload metadata emitted by Wrangler 4.127.1.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkerUploadMetadata {
     /// ES module entry point.
@@ -29,11 +29,71 @@ pub(crate) struct WorkerUploadMetadata {
     /// Static Assets completion token and routing configuration.
     pub assets: Option<WorkerUploadAssets>,
     /// Version-scoped automatic cache configuration.
-    pub cache_options: Option<serde_json::Value>,
+    pub cache_options: Option<WorkerUploadCacheOptions>,
     /// Declarative Durable Object and Worker entrypoint exports.
-    pub exports: Option<serde_json::Value>,
+    pub exports: Option<BTreeMap<String, WorkerUploadExport>>,
     /// Declarative Durable Object migrations.
-    pub migrations: Option<serde_json::Value>,
+    pub migrations: Option<WorkerUploadMigrations>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerUploadCacheOptions {
+    pub enabled: bool,
+    #[serde(default)]
+    pub cross_version_cache: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) enum WorkerUploadExport {
+    Worker {
+        cache: Option<WorkerUploadEntrypointCache>,
+    },
+    DurableObject {
+        state: Option<String>,
+        storage: Option<String>,
+        renamed_to: Option<String>,
+        container: Option<String>,
+        transferred_to: Option<String>,
+        transfer_from: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerUploadEntrypointCache {
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerUploadMigrations {
+    pub old_tag: Option<String>,
+    pub new_tag: String,
+    pub steps: Vec<WorkerUploadMigrationStep>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerUploadMigrationStep {
+    #[serde(default)]
+    pub new_classes: Vec<String>,
+    #[serde(default)]
+    pub new_sqlite_classes: Vec<String>,
+    #[serde(default)]
+    pub renamed_classes: Vec<WorkerUploadClassRename>,
+    #[serde(default)]
+    pub deleted_classes: Vec<String>,
+    #[serde(default)]
+    pub transferred_classes: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerUploadClassRename {
+    pub from: String,
+    pub to: String,
 }
 
 impl std::fmt::Debug for WorkerUploadMetadata {
@@ -82,7 +142,7 @@ pub(crate) struct WorkerUploadAssetsConfig {
 }
 
 /// P6 binding subset emitted in Wrangler multipart metadata.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum WorkerUploadBinding {
     /// Plain UTF-8 environment value.

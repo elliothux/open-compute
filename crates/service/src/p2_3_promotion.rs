@@ -259,6 +259,7 @@ impl P23PromotionCoordinator {
                 worker.active_version_id,
                 Some(worker.route_generation),
                 request.source,
+                &request.annotations,
                 request.request_id,
                 request.now_ms,
             )?;

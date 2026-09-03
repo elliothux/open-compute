@@ -94,6 +94,8 @@ pub struct DeploymentRecord {
     pub version_id: VersionId,
     /// Stable creation source.
     pub source: DeploymentSource,
+    /// Closed Cloudflare deployment annotations.
+    pub annotations: BTreeMap<String, String>,
     /// Creation time.
     pub created_at_ms: i64,
     /// Tombstone time for a non-current Deployment.
@@ -339,6 +341,8 @@ pub struct VersionSnapshot {
     pub worker: WorkerRecord,
     /// Version row.
     pub version: VersionRecord,
+    /// Immutable closed Cloudflare Version annotations.
+    pub annotations: BTreeMap<String, String>,
     /// Static-asset authority when the version declares assets.
     pub assets: Option<crate::VersionAssetsRecord>,
     /// Canonical JSON vars keyed by env name.
@@ -1051,6 +1055,7 @@ impl<'a> WorkerRepository<'a> {
             } else {
                 DeploymentSource::VersionsApi
             },
+            &BTreeMap::new(),
             request_id,
             now_ms,
         )
@@ -1067,6 +1072,7 @@ impl<'a> WorkerRepository<'a> {
         expected_active: Option<VersionId>,
         expected_route_generation: Option<u64>,
         source: DeploymentSource,
+        annotations: &BTreeMap<String, String>,
         request_id: RequestId,
         now_ms: i64,
     ) -> Result<(WorkerRecord, DeploymentRecord), PlatformError> {
@@ -1101,13 +1107,14 @@ impl<'a> WorkerRepository<'a> {
             }
             tx.execute(
                 "INSERT INTO worker_deployments
-                 (id, worker_id, version_id, source, created_at_ms, deleted_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+                 (id, worker_id, version_id, source, annotations_json, created_at_ms, deleted_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
                 params![
                     deployment_id.to_string(),
                     worker_id.to_string(),
                     target.to_string(),
                     source.as_str(),
+                    serde_json::to_vec(annotations).map_err(|_| invariant())?,
                     now_ms,
                 ],
             )
@@ -1150,6 +1157,7 @@ impl<'a> WorkerRepository<'a> {
                     worker_id,
                     version_id: target,
                     source,
+                    annotations: annotations.clone(),
                     created_at_ms: now_ms,
                     deleted_at_ms: None,
                 },
@@ -1216,6 +1224,7 @@ impl<'a> WorkerRepository<'a> {
                 worker,
                 assets: crate::assets::read_assets_conn(conn, version_id)?,
                 version,
+                annotations: read_version_annotations(conn, version_id)?,
                 vars,
                 secrets,
                 bindings,
@@ -1258,6 +1267,18 @@ impl<'a> WorkerRepository<'a> {
                 .map_err(|_| db_error())?;
             collect_rows(rows)
         })
+    }
+
+    /// Read immutable closed Cloudflare annotations for one account-scoped Version.
+    pub fn version_annotations(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        version_id: VersionId,
+    ) -> Result<BTreeMap<String, String>, PlatformError> {
+        self.get_worker_version(account_id, worker_id, version_id)?;
+        self.db
+            .with_read(|conn| read_version_annotations(conn, version_id))
     }
 
     /// Read one version while enforcing the account and Worker boundary.
@@ -1306,7 +1327,7 @@ impl<'a> WorkerRepository<'a> {
         self.db.with_read(|conn| {
             let mut statement = conn
                 .prepare(
-                    "SELECT id,worker_id,version_id,source,created_at_ms,deleted_at_ms
+                    "SELECT id,worker_id,version_id,source,annotations_json,created_at_ms,deleted_at_ms
                      FROM worker_deployments WHERE worker_id=?1 AND deleted_at_ms IS NULL
                      ORDER BY created_at_ms DESC,id DESC",
                 )
@@ -1328,7 +1349,7 @@ impl<'a> WorkerRepository<'a> {
         self.get_tenant_worker(account_id, worker_id)?;
         self.db.with_read(|conn| {
             conn.query_row(
-                "SELECT id,worker_id,version_id,source,created_at_ms,deleted_at_ms
+                "SELECT id,worker_id,version_id,source,annotations_json,created_at_ms,deleted_at_ms
                  FROM worker_deployments WHERE id=?1 AND worker_id=?2 AND deleted_at_ms IS NULL",
                 params![deployment_id.to_string(), worker_id.to_string()],
                 map_deployment,
@@ -1420,7 +1441,7 @@ impl<'a> WorkerRepository<'a> {
             let active_deployment = worker.active_deployment_id.ok_or_else(route_not_found)?;
             let deployment = conn
                 .query_row(
-                    "SELECT id,worker_id,version_id,source,created_at_ms,deleted_at_ms
+                    "SELECT id,worker_id,version_id,source,annotations_json,created_at_ms,deleted_at_ms
                      FROM worker_deployments WHERE id=?1 AND worker_id=?2 AND deleted_at_ms IS NULL",
                     params![active_deployment.to_string(), worker.id.to_string()],
                     map_deployment,
@@ -2857,6 +2878,31 @@ fn map_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionRecord> {
     })
 }
 
+fn read_version_annotations(
+    conn: &rusqlite::Connection,
+    version_id: VersionId,
+) -> Result<BTreeMap<String, String>, PlatformError> {
+    let mut statement = conn
+        .prepare(
+            "SELECT name, value FROM version_annotations
+             WHERE version_id = ?1 ORDER BY name",
+        )
+        .map_err(|_| db_error())?;
+    let rows = statement
+        .query_map([version_id.to_string()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|_| db_error())?;
+    let mut annotations = BTreeMap::new();
+    for row in rows {
+        let (name, value) = row.map_err(|_| db_error())?;
+        if annotations.insert(name, value).is_some() {
+            return Err(invariant());
+        }
+    }
+    Ok(annotations)
+}
+
 fn map_route(row: &rusqlite::Row<'_>) -> rusqlite::Result<RouteRecord> {
     let account: String = row.get(1)?;
     let worker: String = row.get(2)?;
@@ -2879,13 +2925,16 @@ fn map_deployment(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeploymentRecord>
     let worker: String = row.get(1)?;
     let version: String = row.get(2)?;
     let source: String = row.get(3)?;
+    let annotations: Vec<u8> = row.get(4)?;
     Ok(DeploymentRecord {
         id: DeploymentId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
         worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
         version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
         source: DeploymentSource::parse(&source).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        created_at_ms: row.get(4)?,
-        deleted_at_ms: row.get(5)?,
+        annotations: serde_json::from_slice(&annotations)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        created_at_ms: row.get(5)?,
+        deleted_at_ms: row.get(6)?,
     })
 }
 

@@ -27,6 +27,12 @@ pub enum BuiltinBindingKind {
     Images,
     /// Frozen version version metadata object.
     VersionMetadata,
+    /// Service-worker global backed by an immutable WebAssembly module part.
+    WasmModule,
+    /// Service-worker global backed by an immutable UTF-8 text part.
+    TextBlob,
+    /// Service-worker global backed by an immutable byte part.
+    DataBlob,
 }
 
 impl BuiltinBindingKind {
@@ -37,6 +43,9 @@ impl BuiltinBindingKind {
             Self::Ai => "ai",
             Self::Images => "images",
             Self::VersionMetadata => "version_metadata",
+            Self::WasmModule => "wasm_module",
+            Self::TextBlob => "text_blob",
+            Self::DataBlob => "data_blob",
         }
     }
 
@@ -45,6 +54,9 @@ impl BuiltinBindingKind {
             "ai" => Ok(Self::Ai),
             "images" => Ok(Self::Images),
             "version_metadata" => Ok(Self::VersionMetadata),
+            "wasm_module" => Ok(Self::WasmModule),
+            "text_blob" => Ok(Self::TextBlob),
+            "data_blob" => Ok(Self::DataBlob),
             _ => Err(invariant()),
         }
     }

@@ -49,11 +49,12 @@ pub use durable_objects::DurableObjectResourceDriver;
 pub use kv::KvResourceDriver;
 pub use pins::{VersionPin, VersionPins};
 pub use pipeline::{
-    CreateVersionOutcome, CreateVersionRequest, CreateVersionResult, ProductPromotionCoordinator,
-    ProductPromotionRequest, QueueConsumerInput, RuntimeValidator, ValidationCandidate,
-    VersionAiInput, VersionBindingInput, VersionBundle, VersionCacheInput, VersionCachePolicyInput,
-    VersionContent, VersionController, VersionImagesInput, VersionRuntimeFeatures,
-    VersionServiceInput, VersionVersionMetadataInput,
+    CreateVersionOutcome, CreateVersionRequest, CreateVersionResult, ModuleBindingKind,
+    ProductPromotionCoordinator, ProductPromotionRequest, QueueConsumerInput, RuntimeValidator,
+    ValidationCandidate, VersionAiInput, VersionBindingInput, VersionBundle, VersionCacheInput,
+    VersionCachePolicyInput, VersionContent, VersionController, VersionImagesInput,
+    VersionModuleBindingInput, VersionRuntimeFeatures, VersionServiceInput,
+    VersionVersionMetadataInput,
 };
 pub use queue_lifecycle::{
     CreateQueueOutcome, CreateQueueRequest, CreateQueueResult, DeleteQueueResult, QueueController,

@@ -90,7 +90,9 @@ export function snapshotWorkerCode(snapshot: RuntimeSnapshot): {
 } {
   if (snapshot.compatibilityDate !== "2026-08-30"
       || !Array.isArray(snapshot.compatibilityFlags)
-      || snapshot.compatibilityFlags.length !== 0) {
+      || !(snapshot.compatibilityFlags.length === 0
+        || (snapshot.compatibilityFlags.length === 1
+          && snapshot.compatibilityFlags[0] === "nodejs_compat"))) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
   return {

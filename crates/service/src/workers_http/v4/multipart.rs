@@ -19,7 +19,7 @@ struct RawPart {
 }
 
 /// Fully validated upload ready for the immutable Version pipeline.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ParsedWorkerUpload {
     /// Closed metadata emitted by the pinned Wrangler multipart generator.
     pub metadata: WorkerUploadMetadata,
@@ -77,12 +77,23 @@ fn parse_parts(
     mut parts: Vec<RawPart>,
     limits: BundleLimits,
 ) -> Result<ParsedWorkerUpload, PlatformError> {
+    if parts
+        .iter()
+        .filter(|part| part.name == METADATA_PART)
+        .count()
+        != 1
+    {
+        return Err(invalid());
+    }
     let metadata_index = parts
         .iter()
         .position(|part| part.name == METADATA_PART)
         .ok_or_else(invalid)?;
     let metadata_part = parts.remove(metadata_index);
-    if metadata_part.bytes.is_empty() || metadata_part.bytes.len() > MAX_METADATA_BYTES {
+    if metadata_part.content_type.as_deref() != Some("application/json")
+        || metadata_part.bytes.is_empty()
+        || metadata_part.bytes.len() > MAX_METADATA_BYTES
+    {
         return Err(invalid());
     }
     let metadata: WorkerUploadMetadata =
@@ -142,7 +153,8 @@ fn parse_parts(
 
 fn validate_metadata(metadata: &WorkerUploadMetadata) -> Result<(), PlatformError> {
     if metadata.compatibility_date != EFFECTIVE_COMPATIBILITY_DATE
-        || !metadata.compatibility_flags.is_empty()
+        || !(metadata.compatibility_flags.is_empty()
+            || metadata.compatibility_flags.as_slice() == ["nodejs_compat"])
     {
         return Err(PlatformError::new(
             ErrorCode::BundleInvalid,
@@ -154,6 +166,30 @@ fn validate_metadata(metadata: &WorkerUploadMetadata) -> Result<(), PlatformErro
         || metadata.annotations.len() > 16
     {
         return Err(too_large());
+    }
+    let durable_exports = metadata.exports.as_ref().is_some_and(|exports| {
+        exports.values().any(|export| {
+            matches!(
+                export,
+                super::model::WorkerUploadExport::DurableObject { .. }
+            )
+        })
+    });
+    if durable_exports || metadata.migrations.is_some() {
+        return Err(PlatformError::new(
+            ErrorCode::BindingCapabilityUnsupported,
+            "Durable Object exports and migrations are not supported",
+        ));
+    }
+    if let Some(exports) = &metadata.exports {
+        for (name, export) in exports {
+            if name != "default" {
+                validate_binding_name(name)?;
+            }
+            if !matches!(export, super::model::WorkerUploadExport::Worker { .. }) {
+                return Err(invalid());
+            }
+        }
     }
     let mut names = BTreeSet::new();
     for binding in &metadata.bindings {
@@ -168,12 +204,15 @@ fn validate_metadata(metadata: &WorkerUploadMetadata) -> Result<(), PlatformErro
         }
     }
     if metadata.annotations.iter().any(|(name, value)| {
-        !matches!(
-            name.as_str(),
-            "workers/message" | "workers/tag" | "workers/alias"
-        ) || value.len() > 1_000
+        !matches!(name.as_str(), "workers/tag" | "workers/message")
+            || value.is_empty()
+            || value.len() > 1_000
+            || value.chars().any(char::is_control)
     }) {
-        return Err(invalid());
+        return Err(PlatformError::new(
+            ErrorCode::BindingCapabilityUnsupported,
+            "Worker Version annotations are unsupported",
+        ));
     }
     if let Some(assets) = &metadata.assets {
         if assets.jwt.is_empty() || assets.jwt.len() > 16 * 1024 {
@@ -480,10 +519,29 @@ mod tests {
     }
 
     #[test]
-    fn rejects_historical_dates_flags_unknown_fields_and_module_paths() {
+    fn accepts_redundant_node_flag_and_rejects_other_compatibility_metadata() {
+        assert!(
+            parse_parts(
+                vec![
+                    part(
+                        "metadata",
+                        "application/json",
+                        br#"{"main_module":"index.js","compatibility_date":"2026-08-30","compatibility_flags":["nodejs_compat"]}"#,
+                    ),
+                    part(
+                        "index.js",
+                        "application/javascript+module",
+                        b"export default {}",
+                    ),
+                ],
+                BundleLimits::default(),
+            )
+            .is_ok()
+        );
         for metadata in [
             br#"{"main_module":"index.js","compatibility_date":"2026-08-29"}"#.as_slice(),
-            br#"{"main_module":"index.js","compatibility_date":"2026-08-30","compatibility_flags":["nodejs_compat"]}"#.as_slice(),
+            br#"{"main_module":"index.js","compatibility_date":"2026-08-30","compatibility_flags":["nodejs_compat_v2"]}"#.as_slice(),
+            br#"{"main_module":"index.js","compatibility_date":"2026-08-30","compatibility_flags":["nodejs_compat","nodejs_compat"]}"#.as_slice(),
             br#"{"main_module":"index.js","compatibility_date":"2026-08-30","limits":{"cpu_ms":10}}"#.as_slice(),
         ] {
             assert!(parse_parts(
@@ -529,5 +587,41 @@ mod tests {
             BundleLimits::default(),
         )
         .is_err());
+    }
+
+    #[test]
+    fn metadata_part_has_exact_fixed_wrangler_mime_and_is_unique() {
+        let metadata = br#"{"main_module":"index.js","compatibility_date":"2026-08-30"}"#;
+        for content_type in ["text/plain", "application/json; charset=utf-8"] {
+            assert!(
+                parse_parts(
+                    vec![
+                        part("metadata", content_type, metadata),
+                        part(
+                            "index.js",
+                            "application/javascript+module",
+                            b"export default {}",
+                        ),
+                    ],
+                    BundleLimits::default(),
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            parse_parts(
+                vec![
+                    part("metadata", "application/json", metadata),
+                    part("metadata", "application/json", metadata),
+                    part(
+                        "index.js",
+                        "application/javascript+module",
+                        b"export default {}",
+                    ),
+                ],
+                BundleLimits::default(),
+            )
+            .is_err()
+        );
     }
 }
