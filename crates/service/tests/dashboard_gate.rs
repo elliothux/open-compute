@@ -273,6 +273,20 @@ async fn dashboard_real_runtime_serves_spa_assets_and_cloudflare_v4_api() {
             env: None,
             file: Some(admin_token),
         },
+        deployer_auth: open_compute_core::config::SecretReference {
+            env: None,
+            file: Some(write_admin_secret_with_value(
+                &temp.path().join("deployer.token"),
+                "dashboard-gate-deployer",
+            )),
+        },
+        read_only_auth: open_compute_core::config::SecretReference {
+            env: None,
+            file: Some(write_admin_secret_with_value(
+                &temp.path().join("read-only.token"),
+                "dashboard-gate-read-only",
+            )),
+        },
         ..ServerConfig::default()
     };
     let state = HttpState::new(HealthCoordinator::new(), metrics, true, true, &server)
@@ -443,7 +457,11 @@ fn assert_dashboard_surface_excludes_admin_token(body: &[u8], token: &str) {
 }
 
 fn write_admin_secret(path: &Path) -> PathBuf {
-    std::fs::write(path, "dashboard-gate-admin").unwrap();
+    write_admin_secret_with_value(path, "dashboard-gate-admin")
+}
+
+fn write_admin_secret_with_value(path: &Path, value: &str) -> PathBuf {
+    std::fs::write(path, value).unwrap();
     let mut permissions = std::fs::metadata(path).unwrap().permissions();
     permissions.set_mode(0o600);
     std::fs::set_permissions(path, permissions).unwrap();

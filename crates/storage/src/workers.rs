@@ -1375,6 +1375,17 @@ impl<'a> WorkerRepository<'a> {
         deployment_id: DeploymentId,
     ) -> Result<DeploymentRecord, PlatformError> {
         self.get_tenant_worker(account_id, worker_id)?;
+        self.get_worker_deployment(account_id, worker_id, deployment_id)
+    }
+
+    /// Read one immutable Deployment for any live Worker, including system-owned Workers.
+    pub fn get_worker_deployment(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        deployment_id: DeploymentId,
+    ) -> Result<DeploymentRecord, PlatformError> {
+        self.get_worker(account_id, worker_id)?;
         self.db.with_read(|conn| {
             conn.query_row(
                 "SELECT id,worker_id,version_id,source,annotations_json,created_at_ms,deleted_at_ms

@@ -1100,7 +1100,7 @@ impl<'a> VersionController<'a> {
                 let deployment_id = worker.active_deployment_id.ok_or_else(invariant)?;
                 return Ok(CreateVersionResult {
                     version,
-                    deployment: Some(repo.get_deployment(
+                    deployment: Some(repo.get_worker_deployment(
                         request.account_id,
                         request.worker_id,
                         deployment_id,
@@ -1146,7 +1146,11 @@ impl<'a> VersionController<'a> {
             }
             let worker = repo.get_worker(request.account_id, request.worker_id)?;
             let deployment_id = worker.active_deployment_id.ok_or_else(invariant)?;
-            Some(repo.get_deployment(request.account_id, request.worker_id, deployment_id)?)
+            Some(repo.get_worker_deployment(
+                request.account_id,
+                request.worker_id,
+                deployment_id,
+            )?)
         } else {
             None
         };
