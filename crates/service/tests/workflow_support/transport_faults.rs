@@ -374,7 +374,10 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                         kind: BindingKind::Workflow,
                         id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                         permissions: CanonicalPermissions::default(),
-                        config: CanonicalBindingConfig::default(),
+                        config: CanonicalBindingConfig {
+                            workflow_class_name: Some("Flow".into()),
+                            ..Default::default()
+                        },
                     },
                 )]),
             )
