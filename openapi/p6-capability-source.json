@@ -3,6 +3,7 @@
   "managementApi": {
     "root": "/client/v4",
     "deviations": [
+      "OC-ACCOUNT-SUBDOMAIN-001",
       "OC-AI-SEARCH-TOKEN-001"
     ],
     "vendorRoutes": [

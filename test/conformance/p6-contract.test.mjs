@@ -14,6 +14,7 @@ test("P6 pinned OpenAPI subset and capability projection are internally reproduc
     sdkRoot: new URL("../../packages/cloudflare-extension/node_modules/cloudflare/", import.meta.url).pathname,
   }));
   assert.equal(catalog.managementApi.routeCount, capability.managementApi.routes.length);
+  assert.deepEqual(catalog.managementApi.deviations, capability.managementApi.deviations);
   assert.equal(catalog.wrangler.fieldCount, capability.wrangler.fields.length);
   assert.equal(catalog.wrangler.bindingCount, capability.wrangler.bindings.length);
   assert.equal(catalog.wrangler.commandCount, capability.wrangler.commands.length);
@@ -61,7 +62,7 @@ test("vendor extension operations have stable typed envelopes and exact request 
 test("settings surfaces, asset upload variants, and old routes are classified exactly", () => {
   const routes = new Map(capability.managementApi.routes.map(item => [item.id, item]));
   assert.equal(capability.managementApi.routes.filter(item => item.status === "supported").length, 149);
-  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported_with_deviation").length, 1);
+  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported_with_deviation").length, 2);
   assert.equal(capability.managementApi.routes.filter(item => item.status === "planned").length, 3);
   assert.equal(capability.managementApi.routes.filter(item => item.status === "unsupported").length, 1);
   assert.equal(routes.get("PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings")?.requestMediaType, "multipart");
@@ -77,6 +78,17 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
     routes.get("GET /accounts/{account_id}/workers/subdomain")?.constraint ?? "",
     /non-DNS label/,
   );
+  assert.deepEqual(
+    routes.get("GET /accounts/{account_id}/workers/subdomain")?.deviations,
+    ["OC-ACCOUNT-SUBDOMAIN-001"],
+  );
+  assert.deepEqual(
+    [routes.get("GET /accounts/{account_id}/ai-search/tokens")?.status,
+      routes.get("GET /accounts/{account_id}/ai-search/tokens")?.deviations],
+    ["supported_with_deviation", ["OC-AI-SEARCH-TOKEN-001"]],
+  );
+  assert.deepEqual(capability.managementApi.deviations,
+    ["OC-ACCOUNT-SUBDOMAIN-001", "OC-AI-SEARCH-TOKEN-001"]);
   assert.deepEqual(
     [routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.status,
       routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.source],

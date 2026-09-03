@@ -89,6 +89,7 @@ export function buildSubset(openapi, manifest, revision, sourceSha256) {
       source: "cloudflare-openapi",
       ...(deferred.has(key) ? { stage: deferred.get(key).stage } : {}),
       ...(deviated.has(key) ? { constraint: deviated.get(key).reason } : {}),
+      ...(deviated.has(key) ? { deviations: deviated.get(key).deviations } : {}),
       operationSha256: sha256(`${JSON.stringify(operation)}\n`),
     });
   }
@@ -153,6 +154,28 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
     routes.push({ id, method: method.toUpperCase(), path,
       operationId: EXTENSION_OPERATIONS[id][0], status: "supported", source: "open-compute-extension",
       requestMediaType: RESTORE_OPERATIONS.has(id) ? "json" : "none" });
+  }
+  const declaredDeviations = new Set(source.managementApi.deviations);
+  const referencedDeviations = new Set();
+  for (const route of routes) {
+    const deviations = route.deviations ?? [];
+    if ((route.status === "supported_with_deviation") !== (deviations.length > 0)) {
+      throw new Error(`route deviation status/link mismatch: ${route.id}`);
+    }
+    if (new Set(deviations).size !== deviations.length) {
+      throw new Error(`duplicate route deviation: ${route.id}`);
+    }
+    for (const deviation of deviations) {
+      if (!declaredDeviations.has(deviation)) {
+        throw new Error(`route references undeclared deviation: ${route.id} -> ${deviation}`);
+      }
+      referencedDeviations.add(deviation);
+    }
+  }
+  for (const deviation of declaredDeviations) {
+    if (!referencedDeviations.has(deviation)) {
+      throw new Error(`unreferenced management deviation: ${deviation}`);
+    }
   }
   const topFields = Object.keys(configSchema.definitions?.RawConfig?.properties ?? {});
   if (topFields.length === 0) throw new Error("Wrangler RawConfig field inventory is empty");

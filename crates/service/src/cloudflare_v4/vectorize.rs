@@ -12,6 +12,7 @@ use crate::search_api::SearchApiState;
 use crate::vectorize_backend::{QueryOptions, ReturnMetadata, execute_query, run_query_cpu};
 use axum::Router;
 use axum::body::to_bytes;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -29,6 +30,16 @@ const MAX_NDJSON_BODY: usize = 24 * 1024 * 1024;
 const CURSOR_LIFETIME_MS: i64 = 15 * 60 * 1_000;
 
 pub(super) fn router() -> Router<HttpState> {
+    let mutation_routes = Router::new()
+        .route(
+            "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/insert",
+            post(insert),
+        )
+        .route(
+            "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert",
+            post(upsert),
+        )
+        .layer(DefaultBodyLimit::max(MAX_NDJSON_BODY));
     Router::new()
         .route(
             "/accounts/{account_id}/vectorize/v2/indexes",
@@ -38,14 +49,7 @@ pub(super) fn router() -> Router<HttpState> {
             "/accounts/{account_id}/vectorize/v2/indexes/{index_name}",
             get(indexes::get).delete(indexes::delete),
         )
-        .route(
-            "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/insert",
-            post(insert),
-        )
-        .route(
-            "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert",
-            post(upsert),
-        )
+        .merge(mutation_routes)
         .route(
             "/accounts/{account_id}/vectorize/v2/indexes/{index_name}/query",
             post(query),
@@ -155,18 +159,21 @@ async fn mutate(
 }
 
 async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
-    if exact_content_type(&request, "application/x-ndjson") {
+    let mut content_types = request
+        .headers()
+        .get_all(axum::http::header::CONTENT_TYPE)
+        .iter();
+    let content_type = content_types
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .ok_or(V4Error::InvalidRequest)?;
+    if content_types.next().is_some() {
+        return Err(V4Error::InvalidRequest);
+    }
+    if content_type == "application/x-ndjson" {
         return to_bytes(request.into_body(), MAX_NDJSON_BODY)
             .await
             .map_err(|_| V4Error::InvalidRequest);
-    }
-    if !request
-        .headers()
-        .get(axum::http::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.starts_with("multipart/form-data; boundary="))
-    {
-        return Err(V4Error::InvalidRequest);
     }
     let mut multipart = Multipart::from_request(request, &())
         .await
@@ -697,13 +704,6 @@ fn valid_index_name(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
         })
-}
-fn exact_content_type(request: &Request, expected: &str) -> bool {
-    let mut values = request
-        .headers()
-        .get_all(axum::http::header::CONTENT_TYPE)
-        .iter();
-    values.next().and_then(|value| value.to_str().ok()) == Some(expected) && values.next().is_none()
 }
 
 fn internal_platform() -> PlatformError {

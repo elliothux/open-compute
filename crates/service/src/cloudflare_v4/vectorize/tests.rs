@@ -7,7 +7,7 @@ use crate::metrics::MetricsRegistry;
 use crate::search_api::SearchApiState;
 use crate::vectorize_coordinator::VectorizeCoordinator;
 use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
+use axum::http::{HeaderValue, Request, StatusCode, header};
 use open_compute_core::config::{MetricsConfig, StorageConfig};
 use open_compute_core::{SecretString, SystemClock};
 use open_compute_storage::PlatformStorage;
@@ -112,6 +112,74 @@ async fn body(response: Response) -> Value {
             .expect("bounded response"),
     )
     .expect("JSON response")
+}
+
+#[tokio::test]
+async fn multipart_uses_mime_boundary_parsing_and_the_explicit_total_limit() {
+    let fixture = fixture();
+    let root = format!("/accounts/{}/vectorize/v2/indexes", fixture.account);
+    let create = send(
+        &fixture,
+        "POST",
+        &root,
+        "deployer-token",
+        Some("application/json"),
+        json!({"name":"large-vectors","config":{"dimensions":1,"metric":"cosine"}}).to_string(),
+    )
+    .await;
+    assert_eq!(create.status(), StatusCode::OK);
+
+    let boundary = "quoted-vectorize-boundary";
+    let multipart = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"vectors\"; filename=\"vectors.ndjson\"\r\nContent-Type: application/x-ndjson\r\n\r\n{}\n{}\n\r\n--{boundary}--\r\n",
+        json!({"id":"kept","values":[1]}),
+        "x".repeat(2 * 1024 * 1024),
+    );
+    assert!(multipart.len() > 2 * 1024 * 1024);
+    let insert = send(
+        &fixture,
+        "POST",
+        &format!("{root}/large-vectors/insert?unparsable-behavior=discard"),
+        "deployer-token",
+        Some(&format!(
+            "multipart/form-data;charset=utf-8;boundary=\"{boundary}\""
+        )),
+        multipart.clone(),
+    )
+    .await;
+    assert_eq!(insert.status(), StatusCode::OK);
+    assert!(body(insert).await["result"]["mutationId"].is_string());
+
+    let mut duplicate = Request::builder()
+        .method("POST")
+        .uri(format!("{root}/large-vectors/insert"))
+        .header(header::AUTHORIZATION, "Bearer deployer-token")
+        .body(Body::from(multipart))
+        .expect("request");
+    duplicate.headers_mut().append(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("multipart/form-data;boundary=quoted-vectorize-boundary"),
+    );
+    duplicate.headers_mut().append(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("multipart/form-data;boundary=quoted-vectorize-boundary"),
+    );
+    let duplicate = app(fixture.state.clone())
+        .oneshot(duplicate)
+        .await
+        .expect("response");
+    assert_eq!(duplicate.status(), StatusCode::BAD_REQUEST);
+
+    let invalid = send(
+        &fixture,
+        "POST",
+        &format!("{root}/large-vectors/insert"),
+        "deployer-token",
+        Some("multipart/form-data;boundary=\"unterminated"),
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

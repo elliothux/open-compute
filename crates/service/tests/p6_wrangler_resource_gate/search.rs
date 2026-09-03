@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const VECTOR_INDEX: &str = "resource-gate-vectors";
+const LARGE_VECTOR_INDEX: &str = "resource-gate-vectors-large";
 const AI_NAMESPACE: &str = "resource-gate-search";
 const AI_INSTANCE: &str = "resource-gate-ai";
 const EMBEDDING_ALIAS: &str = "@cf/qwen/qwen3-embedding-0.6b";
@@ -247,6 +248,66 @@ pub(super) async fn exercise_vectorize(
                 "vectorize",
                 "delete",
                 VECTOR_INDEX,
+                "--force",
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
+
+    assert_success(
+        &command
+            .run(&[
+                "vectorize",
+                "create",
+                LARGE_VECTOR_INDEX,
+                "--dimensions",
+                "1200",
+                "--metric",
+                "cosine",
+                "--json",
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
+    let mut large_vectors = String::new();
+    for id in 0..1_000 {
+        large_vectors.push_str(
+            &serde_json::json!({
+                "id": format!("large-{id}"),
+                "values": vec![0; 1_200],
+            })
+            .to_string(),
+        );
+        large_vectors.push('\n');
+    }
+    assert!(large_vectors.len() > 2 * 1024 * 1024);
+    assert!(large_vectors.len() < 24 * 1024 * 1024);
+    std::fs::write(project.join("vectors-large.ndjson"), large_vectors).unwrap();
+    assert_success(
+        &command
+            .run(&[
+                "vectorize",
+                "insert",
+                LARGE_VECTOR_INDEX,
+                "--file",
+                "vectors-large.ndjson",
+                "--batch-size",
+                "1000",
+                "--json",
+                "--config",
+                "wrangler.jsonc",
+            ])
+            .await,
+    );
+    fixture.drain_vectorize();
+    assert_success(
+        &command
+            .run(&[
+                "vectorize",
+                "delete",
+                LARGE_VECTOR_INDEX,
                 "--force",
                 "--config",
                 "wrangler.jsonc",

@@ -86,7 +86,13 @@ deployment declaration 仍保留为历史 authority。Queue/Workflow/R2/D1/KV/DO
 PUT 前读取 `GET /accounts/{account_id}/workers/subdomain`，并丢弃返回值。open-compute 将该只读 route 标为
 `supported_with_deviation`：它返回以 `_` 开头、按 account 稳定派生的非 DNS label，只满足固定 CLI 的顺序
 prerequisite，不创建 workers.dev DNS、listener、route 或注册 authority；对应 `PUT/DELETE` 继续不支持。
-真实本地入口仍以 vendor Worker endpoints route 为准。
+真实本地入口仍以 vendor Worker endpoints route 为准。该 route 与 capability 的关联 deviation 为
+`OC-ACCOUNT-SUBDOMAIN-001`。
+
+固定 Wrangler 4.127.1 创建 AI Search instance 前还会读取
+`GET /accounts/{account_id}/ai-search/tokens`。单机实现只返回一个 account-scoped、稳定、无 secret 的
+installation-managed metadata；不暴露 bearer token、provider credential 或 ciphertext，也不开放 token mutation。
+该 route 标为 `supported_with_deviation` 并关联 `OC-AI-SEARCH-TOKEN-001`。
 
 ## Differential 与本地证据
 

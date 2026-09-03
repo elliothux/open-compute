@@ -291,6 +291,34 @@ async fn official_ai_search_routes_cover_the_frozen_30_operation_surface() {
     )
     .await;
     assert_eq!(update_vector_only.status(), StatusCode::OK);
+    for invalid_options in [
+        json!({"indexing_options":{"keyword_tokenizer":"porter"}}),
+        json!({"retrieval_options":{"keyword_match_mode":"and"}}),
+    ] {
+        let rejected = official_ai_send(
+            &state,
+            "PUT",
+            &vector_only,
+            "deployer-token",
+            Some("application/json"),
+            invalid_options.to_string(),
+        )
+        .await;
+        assert_eq!(rejected.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+    let unchanged = official_ai_send(
+        &state,
+        "GET",
+        &vector_only,
+        "read-token",
+        None,
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(
+        official_ai_json(unchanged).await["result"]["max_num_results"],
+        7
+    );
     let delete_vector_only = official_ai_send(
         &state,
         "DELETE",

@@ -10,10 +10,15 @@
     "managementApi": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["root", "routes", "legacyRoutes"],
+      "required": ["root", "routes", "deviations", "legacyRoutes"],
       "properties": {
         "root": {"const": "/client/v4"},
         "routes": {"type": "array", "items": {"$ref": "#/$defs/item"}},
+        "deviations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
         "legacyRoutes": {"type": "array", "items": {"$ref": "#/$defs/item"}}
       }
     },
@@ -35,15 +40,36 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "status", "source"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "supported_with_deviation"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {"deviations": true},
+            "required": ["deviations"]
+          },
+          "else": {"not": {"required": ["deviations"]}}
+        }
+      ],
       "properties": {
         "id": {"type": "string", "minLength": 1},
+        "method": {"type": "string", "pattern": "^[A-Z]+$"},
+        "path": {"type": "string", "minLength": 1},
         "status": {"enum": ["supported", "supported_with_deviation", "planned", "unsupported"]},
         "source": {"type": "string", "minLength": 1},
         "stage": {"type": "string"},
         "operationId": {"type": "string"},
         "operationSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "requestMediaType": {"enum": ["json", "multipart", "raw", "none"]},
-        "constraint": {"type": "string"}
+        "constraint": {"type": "string"},
+        "deviations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
       }
     }
   }

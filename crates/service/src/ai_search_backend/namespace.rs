@@ -447,8 +447,12 @@ impl AiSearchBindingService {
                 .and_then(Value::as_bool)
                 == Some(true);
         if !keyword {
-            merged.remove("indexing_options");
-            merged.remove("retrieval_options");
+            if !patch.contains_key("indexing_options") {
+                merged.remove("indexing_options");
+            }
+            if !patch.contains_key("retrieval_options") {
+                merged.remove("retrieval_options");
+            }
         }
         if !patch.contains_key("fusion_method") && !hybrid {
             merged.remove("fusion_method");

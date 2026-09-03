@@ -323,6 +323,10 @@ function deviationBijection(): void {
     match[1] === undefined ? [] : [match[1]]);
   const advertised = new Set<string>();
   const mapped = new Set<string>();
+  for (const id of strings(record(inventory().managementApi, "managementApi").deviations ?? [],
+    "managementApi.deviations")) advertised.add(id);
+  for (const id of strings(record(catalog().managementApi, "catalog.managementApi").deviations ?? [],
+    "catalog.managementApi.deviations")) mapped.add(id);
   for (const raw of Object.values(capabilities())) {
     for (const id of strings(record(raw, "capability").deviations ?? [], "deviations")) advertised.add(id);
   }

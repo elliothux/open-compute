@@ -150,7 +150,13 @@
   "supportedWithDeviationOperations": [
     {
       "operation": "GET /accounts/{account_id}/workers/subdomain",
+      "deviations": ["OC-ACCOUNT-SUBDOMAIN-001"],
       "reason": "Fixed Wrangler 4.127.1 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion"
+    },
+    {
+      "operation": "GET /accounts/{account_id}/ai-search/tokens",
+      "deviations": ["OC-AI-SEARCH-TOKEN-001"],
+      "reason": "Fixed Wrangler 4.127.1 requires account token metadata before AI Search creation; open-compute exposes one stable installation-managed metadata record without Cloudflare account credential storage or token mutation"
     }
   ],
   "wranglerObservedOperations": [
