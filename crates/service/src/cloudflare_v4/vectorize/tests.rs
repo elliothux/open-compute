@@ -83,6 +83,19 @@ fn app(state: HttpState) -> Router {
     v4_router(state.clone(), storage_router()).with_state(state)
 }
 
+fn app_with_default_limit_probe(state: HttpState) -> Router {
+    v4_router(state.clone(), storage_router())
+        .route("/__test/default-multipart-limit", post(default_limit_probe))
+        .with_state(state)
+}
+
+async fn default_limit_probe(mut multipart: Multipart) -> Result<(), MultipartError> {
+    while let Some(field) = multipart.next_field().await? {
+        let _ = field.bytes().await?;
+    }
+    Ok(())
+}
+
 async fn send(
     fixture: &Fixture,
     method: &str,
@@ -180,6 +193,63 @@ async fn multipart_uses_mime_boundary_parsing_and_the_explicit_total_limit() {
     )
     .await;
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let oversized_raw = send(
+        &fixture,
+        "POST",
+        &format!("{root}/large-vectors/insert"),
+        "deployer-token",
+        Some("application/x-ndjson"),
+        vec![b' '; MAX_NDJSON_BODY + 1],
+    )
+    .await;
+    assert_eq!(oversized_raw.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body(oversized_raw).await["errors"][0]["code"], 10_027);
+
+    let oversized_boundary = "oversized-vectorize-boundary";
+    let mut oversized_multipart = format!(
+        "--{oversized_boundary}\r\nContent-Disposition: form-data; name=\"vectors\"; filename=\"vectors.ndjson\"\r\nContent-Type: application/x-ndjson\r\n\r\n"
+    )
+    .into_bytes();
+    oversized_multipart.resize(MAX_NDJSON_BODY + 1, b' ');
+    let oversized_multipart = send(
+        &fixture,
+        "POST",
+        &format!("{root}/large-vectors/insert"),
+        "deployer-token",
+        Some(&format!(
+            "multipart/form-data; boundary={oversized_boundary}"
+        )),
+        oversized_multipart,
+    )
+    .await;
+    assert_eq!(oversized_multipart.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body(oversized_multipart).await["errors"][0]["code"], 10_027);
+}
+
+#[tokio::test]
+async fn vector_mutation_body_limit_does_not_expand_sibling_routes() {
+    let fixture = fixture();
+    let boundary = "default-limit-probe";
+    let multipart = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"probe\"\r\n\r\n{}\r\n--{boundary}--\r\n",
+        "x".repeat(2 * 1024 * 1024),
+    );
+    let response = app_with_default_limit_probe(fixture.state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/__test/default-multipart-limit")
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(multipart))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
 #[tokio::test]

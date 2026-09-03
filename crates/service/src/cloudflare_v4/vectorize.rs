@@ -6,17 +6,20 @@ mod indexes;
 use super::storage::{
     account, context, iso_timestamp, json, now_ms, require_no_query, strict_query,
 };
-use super::{V4Error, V4Permission, error_response, success_response};
+use super::{V4Error, V4OfficialError, V4Permission, error_response, success_response};
 use crate::http::HttpState;
 use crate::search_api::SearchApiState;
 use crate::vectorize_backend::{QueryOptions, ReturnMetadata, execute_query, run_query_cpu};
 use axum::Router;
 use axum::body::to_bytes;
 use axum::extract::DefaultBodyLimit;
+use axum::extract::multipart::MultipartError;
 use axum::extract::{FromRequest, Multipart, Path, Request, State};
+use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::{get, post};
 use bytes::{Bytes, BytesMut};
+use http_body_util::LengthLimitError;
 use open_compute_core::{AccountId, PlatformError, ResourceState};
 use open_compute_storage::{
     VectorMutationInput, VectorMutationKind, VectorizeEngine, VectorizeIndexRecord,
@@ -173,17 +176,13 @@ async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
     if content_type == "application/x-ndjson" {
         return to_bytes(request.into_body(), MAX_NDJSON_BODY)
             .await
-            .map_err(|_| V4Error::InvalidRequest);
+            .map_err(body_read_error);
     }
     let mut multipart = Multipart::from_request(request, &())
         .await
         .map_err(|_| V4Error::InvalidRequest)?;
     let mut vectors = None;
-    while let Some(mut field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| V4Error::InvalidRequest)?
-    {
+    while let Some(mut field) = multipart.next_field().await.map_err(multipart_error)? {
         if field.name() != Some("vectors")
             || field.content_type() != Some("application/x-ndjson")
             || vectors.is_some()
@@ -191,9 +190,9 @@ async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
             return Err(V4Error::InvalidRequest);
         }
         let mut bytes = BytesMut::new();
-        while let Some(chunk) = field.chunk().await.map_err(|_| V4Error::InvalidRequest)? {
+        while let Some(chunk) = field.chunk().await.map_err(multipart_error)? {
             if bytes.len().saturating_add(chunk.len()) > MAX_NDJSON_BODY {
-                return Err(V4Error::InvalidRequest);
+                return Err(request_too_large());
             }
             bytes.extend_from_slice(&chunk);
         }
@@ -202,6 +201,26 @@ async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
     vectors
         .filter(|value| !value.is_empty())
         .ok_or(V4Error::InvalidRequest)
+}
+
+fn body_read_error(error: axum::Error) -> V4Error {
+    if std::error::Error::source(&error).is_some_and(|source| source.is::<LengthLimitError>()) {
+        request_too_large()
+    } else {
+        V4Error::Internal
+    }
+}
+
+fn multipart_error(error: MultipartError) -> V4Error {
+    match error.status() {
+        StatusCode::PAYLOAD_TOO_LARGE => request_too_large(),
+        status if status.is_server_error() => V4Error::Internal,
+        _ => V4Error::InvalidRequest,
+    }
+}
+
+const fn request_too_large() -> V4Error {
+    V4Error::Official(V4OfficialError::RequestTooLarge)
 }
 
 #[derive(Deserialize)]
