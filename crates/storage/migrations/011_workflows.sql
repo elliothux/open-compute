@@ -69,6 +69,7 @@ CREATE TABLE workflow_definitions (
   reservation_fence INTEGER NOT NULL DEFAULT 0 CHECK(reservation_fence >= 0),
   reservation_state TEXT CHECK(reservation_state IS NULL OR reservation_state IN ('reserved','bound')),
   reservation_created_definition INTEGER CHECK(reservation_created_definition IS NULL OR reservation_created_definition IN (0,1)),
+  delete_fence INTEGER NOT NULL DEFAULT 0 CHECK(delete_fence >= 0),
   current_version_id TEXT REFERENCES workflow_versions(id) DEFERRABLE INITIALLY DEFERRED,
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
@@ -80,7 +81,9 @@ CREATE TABLE workflow_definitions (
      OR (reserved_class_name IS NOT NULL AND reservation_owner IS NOT NULL AND reservation_fence >= 1
          AND reservation_state IS NOT NULL AND reservation_created_definition IS NOT NULL
          AND state IN ('creating','ready')
-         AND (reservation_created_definition=0 OR (state='creating' AND current_version_id IS NULL))))
+         AND (reservation_created_definition=0 OR (state='creating' AND current_version_id IS NULL)))),
+  CHECK((state IN ('creating','ready') AND delete_fence=0)
+    OR (state IN ('deleting','tombstoned') AND delete_fence>=1))
 ) STRICT;
 
 CREATE TABLE workflow_instance_operations (
@@ -215,8 +218,9 @@ BEGIN
   SELECT CASE WHEN changes()!=1 THEN RAISE(ABORT,'workflow reservation fence') END;
 END;
 
-CREATE TRIGGER workflow_reservation_release_rejected_worker AFTER UPDATE OF state ON worker_versions
-WHEN OLD.state IN ('staging','validating') AND NEW.state='rejected'
+CREATE TRIGGER workflow_reservation_release_terminal_worker AFTER UPDATE OF state ON worker_versions
+WHEN (OLD.state IN ('staging','validating') AND NEW.state='rejected')
+  OR (OLD.state IN ('ready','rejected') AND NEW.state='deleting')
 BEGIN
   UPDATE workflow_definitions
      SET reserved_class_name=NULL,reservation_owner=NULL,reservation_state=NULL,
@@ -251,7 +255,7 @@ BEGIN
 END;
 
 CREATE TRIGGER workflow_definition_delete_guard BEFORE UPDATE OF state ON workflow_definitions
-WHEN NEW.state IN ('deleting','tombstoned') AND (
+WHEN NEW.state = 'tombstoned' AND (
   EXISTS (SELECT 1 FROM workflow_referrers WHERE definition_id = OLD.id) OR
   EXISTS (SELECT 1 FROM workflow_versions WHERE definition_id = OLD.id AND state IN ('staging','validating'))
 ) BEGIN SELECT RAISE(ABORT,'workflow is referenced'); END;

@@ -40,6 +40,17 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
         if definition.lifecycle_generation != 1 {
             return Err(invariant());
         }
+        if (matches!(
+            definition.state,
+            ResourceState::Creating | ResourceState::Ready
+        ) && definition.delete_fence != 0)
+            || (matches!(
+                definition.state,
+                ResourceState::Deleting | ResourceState::Tombstoned
+            ) && definition.delete_fence < 1)
+        {
+            return Err(invariant());
+        }
         match (
             &definition.reserved_class_name,
             &definition.reservation_owner,
@@ -141,9 +152,13 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
                OR (f.state='creating' AND NOT (f.current_version_id IS NULL
                      AND b.reservation_owner IS NOT NULL AND b.reservation_fence IS NOT NULL)))
            AND NOT EXISTS(SELECT 1 FROM workflow_versions v JOIN workflow_definitions f ON f.id=v.definition_id
-             WHERE v.state IN ('staging','validating') AND v.reservation_owner IS NOT NULL
+             WHERE v.reservation_owner IS NOT NULL
                AND f.reservation_owner=v.reservation_owner AND f.reservation_fence=v.reservation_fence
-               AND f.reserved_class_name!=v.class_name)
+               AND f.reserved_class_name IS NOT v.class_name)
+           AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN workflow_definitions f ON f.id=b.definition_id
+             WHERE b.reservation_owner IS NOT NULL
+               AND f.reservation_owner=b.reservation_owner AND f.reservation_fence=b.reservation_fence
+               AND f.reserved_class_name IS NOT b.class_name)
            AND NOT EXISTS(SELECT 1 FROM workflow_definitions f WHERE f.reservation_state='bound'
              AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN worker_versions d ON d.id=b.version_id
                WHERE b.definition_id=f.id AND b.reservation_owner=f.reservation_owner

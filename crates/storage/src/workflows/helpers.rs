@@ -67,12 +67,13 @@ pub(super) fn definition_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workfl
             .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
         reservation_created_definition: row.get(11)?,
+        delete_fence: row.get(12)?,
         current_version_id: row
-            .get::<_, Option<String>>(12)?
+            .get::<_, Option<String>>(13)?
             .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
-        created_at_ms: row.get(13)?,
-        updated_at_ms: row.get(14)?,
+        created_at_ms: row.get(14)?,
+        updated_at_ms: row.get(15)?,
     })
 }
 
@@ -108,7 +109,7 @@ pub(super) fn version_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowV
 pub(super) const DEFINITION_SELECT: &str =
     "SELECT id,account_id,name,state,availability,availability_code,
     lifecycle_generation,reserved_class_name,reservation_owner,reservation_fence,reservation_state,
-    reservation_created_definition,current_version_id,created_at_ms,updated_at_ms FROM workflow_definitions";
+    reservation_created_definition,delete_fence,current_version_id,created_at_ms,updated_at_ms FROM workflow_definitions";
 
 pub(super) fn validate_class_name(class_name: &str) -> Result<(), PlatformError> {
     let bytes = class_name.as_bytes();

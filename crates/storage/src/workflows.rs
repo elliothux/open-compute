@@ -218,7 +218,7 @@ impl<'a> WorkflowRepository<'a> {
                     .execute(
                         "UPDATE workflow_definitions SET state='deleting',reserved_class_name=NULL,
                          reservation_owner=NULL,reservation_state=NULL,reservation_created_definition=NULL,
-                         updated_at_ms=?4
+                         delete_fence=delete_fence+1,updated_at_ms=?4
                          WHERE account_id=?1 AND id=?2 AND reservation_owner=?3 AND reservation_fence=?5
                          AND state='creating' AND current_version_id IS NULL",
                         params![
@@ -399,20 +399,96 @@ impl<'a> WorkflowRepository<'a> {
                 [id.to_string()],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
                 return Err(error(ErrorCode::WorkflowReferenced));
             }
-            tx.execute("UPDATE workflow_definitions SET state='deleting',current_version_id=NULL,updated_at_ms=?2 WHERE id=?1",
-                params![id.to_string(),now_ms]).map_err(sql_error)?;
-            tx.execute("UPDATE workflow_versions SET state='deleting' WHERE definition_id=?1 AND state IN ('ready','rejected')",
-                [id.to_string()]).map_err(sql_error)?;
-            tx.execute("UPDATE workflow_versions SET state='tombstoned',deleted_at_ms=?2 WHERE definition_id=?1 AND state='deleting'",
-                params![id.to_string(),now_ms]).map_err(sql_error)?;
-            tx.execute("UPDATE workflow_definitions SET state='tombstoned',deleted_at_ms=?2,updated_at_ms=?2 WHERE id=?1",
-                params![id.to_string(),now_ms]).map_err(sql_error)?;
-            tx.query_row(
-                &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
-                params![account.to_string(), id.to_string()],
-                definition_row,
-            )
-            .map_err(sql_error)
+            let fence = if definition.state == ResourceState::Deleting {
+                definition.delete_fence
+            } else {
+                let changed = tx.execute(
+                    "UPDATE workflow_definitions SET state='deleting',delete_fence=delete_fence+1,
+                     updated_at_ms=?3 WHERE account_id=?1 AND id=?2 AND state IN ('creating','ready')",
+                    params![account.to_string(),id.to_string(),now_ms],
+                ).map_err(sql_error)?;
+                if changed != 1 { return Err(error(ErrorCode::WorkflowNotReady)); }
+                definition.delete_fence.checked_add(1).ok_or_else(invariant)?
+            };
+            finalize_definition_delete(tx, account, id, fence, now_ms)
+        })
+    }
+
+    /// Atomically fence new reservations before asynchronous instance cleanup begins.
+    pub fn begin_definition_delete(
+        &self,
+        account: AccountId,
+        name: &str,
+        now_ms: i64,
+    ) -> Result<WorkflowDeleteIntent, PlatformError> {
+        open_compute_core::workflow::validate_workflow_name(name)?;
+        self.db.with_immediate(|tx| {
+            let definition = tx
+                .query_row(
+                    &format!(
+                        "{DEFINITION_SELECT} WHERE account_id=?1 AND name=?2
+                     AND state IN ('ready','deleting')"
+                    ),
+                    params![account.to_string(), name],
+                    definition_row,
+                )
+                .optional()
+                .map_err(sql_error)?
+                .ok_or_else(|| error(ErrorCode::WorkflowNotFound))?;
+            if definition.state == ResourceState::Deleting {
+                return delete_intent(definition);
+            }
+            let id = definition.id;
+            if definition.reservation_owner.is_some()
+                || tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM workflow_referrers
+                       WHERE definition_id=?1 AND referrer_kind='binding')
+                     OR EXISTS(SELECT 1 FROM workflow_versions
+                       WHERE definition_id=?1 AND state IN ('staging','validating'))",
+                        [id.to_string()],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(sql_error)?
+            {
+                return Err(error(ErrorCode::WorkflowReferenced));
+            }
+            let fence = definition
+                .delete_fence
+                .checked_add(1)
+                .ok_or_else(invariant)?;
+            let changed = tx.execute(
+                "UPDATE workflow_definitions SET state='deleting',delete_fence=?3,updated_at_ms=?4
+                 WHERE account_id=?1 AND id=?2 AND state IN ('creating','ready')
+                   AND reservation_owner IS NULL AND delete_fence=?5",
+                params![account.to_string(),id.to_string(),fence,now_ms,definition.delete_fence],
+            ).map_err(sql_error)?;
+            if changed != 1 {
+                return Err(error(ErrorCode::WorkflowReferenced));
+            }
+            let claimed = tx
+                .query_row(
+                    &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
+                    params![account.to_string(), id.to_string()],
+                    definition_row,
+                )
+                .map_err(sql_error)?;
+            delete_intent(claimed)
+        })
+    }
+
+    /// Finalize the exact durable delete intent after every instance referrer is gone.
+    pub fn finish_definition_delete(
+        &self,
+        account: AccountId,
+        intent: &WorkflowDeleteIntent,
+        now_ms: i64,
+    ) -> Result<WorkflowDefinition, PlatformError> {
+        if intent.definition.account_id != account {
+            return Err(invariant());
+        }
+        self.db.with_immediate(|tx| {
+            finalize_definition_delete(tx, account, intent.definition.id, intent.fence, now_ms)
         })
     }
 
@@ -481,6 +557,83 @@ fn reservation_has_active_consumer(
             definition.id.to_string()
         ],
         |row| row.get::<_, bool>(0),
+    )
+    .map_err(sql_error)
+}
+
+fn delete_intent(definition: WorkflowDefinition) -> Result<WorkflowDeleteIntent, PlatformError> {
+    if definition.state != ResourceState::Deleting || definition.delete_fence < 1 {
+        return Err(invariant());
+    }
+    let fence = definition.delete_fence;
+    Ok(WorkflowDeleteIntent { definition, fence })
+}
+
+fn finalize_definition_delete(
+    tx: &rusqlite::Transaction<'_>,
+    account: AccountId,
+    id: WorkflowId,
+    fence: i64,
+    now_ms: i64,
+) -> Result<WorkflowDefinition, PlatformError> {
+    if fence < 1 {
+        return Err(invariant());
+    }
+    let definition = tx
+        .query_row(
+            &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
+            params![account.to_string(), id.to_string()],
+            definition_row,
+        )
+        .optional()
+        .map_err(sql_error)?
+        .ok_or_else(|| error(ErrorCode::WorkflowNotFound))?;
+    if definition.state == ResourceState::Tombstoned && definition.delete_fence == fence {
+        return Ok(definition);
+    }
+    if definition.state != ResourceState::Deleting || definition.delete_fence != fence {
+        return Err(error(ErrorCode::WorkflowNotReady));
+    }
+    if tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM workflow_referrers WHERE definition_id=?1)
+         OR EXISTS(SELECT 1 FROM workflow_versions WHERE definition_id=?1 AND state IN ('staging','validating'))",
+        [id.to_string()],
+        |row| row.get::<_,bool>(0),
+    ).map_err(sql_error)? {
+        return Err(error(ErrorCode::WorkflowReferenced));
+    }
+    tx.execute(
+        "UPDATE workflow_definitions SET current_version_id=NULL,updated_at_ms=?3
+         WHERE account_id=?1 AND id=?2 AND state='deleting' AND delete_fence=?4",
+        params![account.to_string(), id.to_string(), now_ms, fence],
+    )
+    .map_err(sql_error)?;
+    tx.execute(
+        "UPDATE workflow_versions SET state='deleting'
+         WHERE definition_id=?1 AND state IN ('ready','rejected')",
+        [id.to_string()],
+    )
+    .map_err(sql_error)?;
+    tx.execute(
+        "UPDATE workflow_versions SET state='tombstoned',deleted_at_ms=?2
+         WHERE definition_id=?1 AND state='deleting'",
+        params![id.to_string(), now_ms],
+    )
+    .map_err(sql_error)?;
+    let changed = tx
+        .execute(
+            "UPDATE workflow_definitions SET state='tombstoned',deleted_at_ms=?3,updated_at_ms=?3
+         WHERE account_id=?1 AND id=?2 AND state='deleting' AND delete_fence=?4",
+            params![account.to_string(), id.to_string(), now_ms, fence],
+        )
+        .map_err(sql_error)?;
+    if changed != 1 {
+        return Err(invariant());
+    }
+    tx.query_row(
+        &format!("{DEFINITION_SELECT} WHERE account_id=?1 AND id=?2"),
+        params![account.to_string(), id.to_string()],
+        definition_row,
     )
     .map_err(sql_error)
 }

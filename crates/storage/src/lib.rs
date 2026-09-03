@@ -189,8 +189,8 @@ pub use workers::{
 };
 pub use workflows::{
     WorkflowAppliedOperation, WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition,
-    WorkflowDefinitionReservation, WorkflowGcAcknowledgement, WorkflowGcReceipt,
-    WorkflowInstanceIdentity, WorkflowOperation, WorkflowOperationInspection,
+    WorkflowDefinitionReservation, WorkflowDeleteIntent, WorkflowGcAcknowledgement,
+    WorkflowGcReceipt, WorkflowInstanceIdentity, WorkflowOperation, WorkflowOperationInspection,
     WorkflowOperationKind, WorkflowOperationResult, WorkflowRefState, WorkflowRejectedOperation,
     WorkflowRepository, WorkflowReservation, WorkflowReservationState, WorkflowTarget,
     WorkflowVersion,

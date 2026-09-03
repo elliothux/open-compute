@@ -5,7 +5,7 @@ use crate::cloudflare_v4::storage::{iso_timestamp, json, now_ms, require_no_quer
 use crate::cloudflare_v4::{V4ResultInfo, paginated_response, success_response};
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
-use open_compute_core::{AccountId, WorkflowOperationId, WorkflowVersionId};
+use open_compute_core::{AccountId, ErrorCode, WorkflowOperationId, WorkflowVersionId};
 use open_compute_storage::scheduler::WorkflowInstanceInspection;
 use open_compute_storage::{
     VersionState, WorkerRepository, WorkflowDefinitionReservation, WorkflowVersion,
@@ -203,27 +203,32 @@ pub(super) async fn delete(
     }
     let request_id = context.request_id();
     let result = tokio::task::spawn_blocking(move || {
-        let definition = definition(&api, account, &workflow_name)?;
         let now = now_ms()?;
-        let instances = all_instances(&api, account, definition.id)?;
-        let controller = WorkflowController::new(api.storage(), api.scheduler(), api.limits());
-        for instance in instances {
-            controller
-                .delete(
-                    account,
-                    definition.id,
-                    instance.id,
-                    WorkflowOperationId::generate(),
-                    now,
-                )
-                .map_err(|error| V4Error::from(&error))?;
-        }
         let _admission = api
             .storage()
             .reserve_mutation(64 * 1024)
             .map_err(|error| V4Error::from(&error))?;
-        WorkflowRepository::new(api.storage().db())
-            .delete(account, definition.id, now)
+        let repository = WorkflowRepository::new(api.storage().db());
+        let intent = repository
+            .begin_definition_delete(account, &workflow_name, now)
+            .map_err(|error| V4Error::from(&error))?;
+        let definition = intent.definition.id;
+        let instances = all_instances(&api, account, definition)?;
+        let controller = WorkflowController::new(api.storage(), api.scheduler(), api.limits());
+        for instance in instances {
+            if let Err(error) = controller.delete(
+                account,
+                definition,
+                instance.id,
+                WorkflowOperationId::generate(),
+                now,
+            ) && error.code() != ErrorCode::WorkflowInstanceNotFound
+            {
+                return Err(V4Error::from(&error));
+            }
+        }
+        repository
+            .finish_definition_delete(account, &intent, now)
             .map_err(|error| V4Error::from(&error))?;
         Ok::<_, V4Error>(DeleteResult {
             success: Some(true),

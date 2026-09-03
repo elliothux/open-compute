@@ -14,6 +14,7 @@ use open_compute_storage::{
     NewVersion, NewVersionProducts, PlatformStorage, SchedulerStore, VersionContentKind,
     WorkerRepository, WorkflowRepository,
 };
+use open_compute_workers::{WorkflowController, WorkflowCreateInput};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt as _;
@@ -24,6 +25,7 @@ struct Fixture {
     public_account: String,
     account: AccountId,
     storage: Arc<PlatformStorage>,
+    scheduler: Arc<SchedulerStore>,
     workflow_id: WorkflowId,
     workflow_version: open_compute_core::WorkflowVersionId,
 }
@@ -114,7 +116,7 @@ fn fixture() -> Fixture {
     .with_cloudflare_v4_account(authority)
     .with_workflow_api(Some(WorkflowApiState::new(
         storage.clone(),
-        scheduler,
+        scheduler.clone(),
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
         Default::default(),
     )));
@@ -125,6 +127,7 @@ fn fixture() -> Fixture {
         public_account,
         account,
         storage,
+        scheduler,
         workflow_id: definition.id,
         workflow_version: version.target.workflow_version_id,
     }
@@ -193,6 +196,100 @@ async fn official_delete_reports_conflict_while_an_upload_reservation_is_pending
         .request("DELETE", &f.path("/orders"), Some("deployer-token"), None)
         .await;
     assert_eq!(deleted.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn pending_upload_delete_conflict_does_not_mutate_a_live_instance() {
+    let f = fixture();
+    let config = open_compute_core::WorkflowsConfig::default();
+    let identity = WorkflowController::new(&f.storage, &f.scheduler, &config)
+        .create(
+            f.account,
+            f.workflow_id,
+            open_compute_core::WorkflowOperationId::generate(),
+            Some("delete-conflict-live"),
+            WorkflowCreateInput {
+                payload_base64: "T0NEVgECAA==",
+                retention: None,
+                schedule: None,
+            },
+            7,
+        )
+        .unwrap();
+    let before = f
+        .scheduler
+        .workflow_instance(identity.instance_id)
+        .unwrap()
+        .unwrap();
+    let repository = WorkflowRepository::new(f.storage.db());
+    repository
+        .reserve_definition(f.account, "orders", "Replacement", "pending-upload", 8)
+        .unwrap();
+
+    let conflict = f
+        .request("DELETE", &f.path("/orders"), Some("deployer-token"), None)
+        .await;
+    assert_eq!(conflict.0, StatusCode::CONFLICT);
+    let after = f
+        .scheduler
+        .workflow_instance(identity.instance_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.state, before.state);
+    assert_eq!(after.updated_at_ms, before.updated_at_ms);
+    assert_eq!(
+        repository
+            .reservation(identity.instance_id)
+            .unwrap()
+            .unwrap()
+            .state,
+        open_compute_storage::WorkflowRefState::Live
+    );
+    assert_eq!(
+        repository
+            .definition(f.account, f.workflow_id)
+            .unwrap()
+            .state,
+        ResourceState::Ready
+    );
+}
+
+#[tokio::test]
+async fn delete_intent_purges_live_instances_before_finalizing_the_definition() {
+    let f = fixture();
+    let config = open_compute_core::WorkflowsConfig::default();
+    let identity = WorkflowController::new(&f.storage, &f.scheduler, &config)
+        .create(
+            f.account,
+            f.workflow_id,
+            open_compute_core::WorkflowOperationId::generate(),
+            Some("delete-intent-live"),
+            WorkflowCreateInput {
+                payload_base64: "T0NEVgECAA==",
+                retention: None,
+                schedule: None,
+            },
+            7,
+        )
+        .unwrap();
+
+    let deleted = f
+        .request("DELETE", &f.path("/orders"), Some("deployer-token"), None)
+        .await;
+    assert_eq!(deleted.0, StatusCode::OK);
+    assert!(
+        f.scheduler
+            .workflow_instance(identity.instance_id)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        WorkflowRepository::new(f.storage.db())
+            .definition(f.account, f.workflow_id)
+            .unwrap()
+            .state,
+        ResourceState::Tombstoned
+    );
 }
 
 impl Fixture {

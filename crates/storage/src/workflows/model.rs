@@ -39,12 +39,24 @@ pub struct WorkflowDefinition {
     /// Whether the current owner also created this not-yet-published definition.
     #[serde(skip_serializing)]
     pub reservation_created_definition: Option<bool>,
+    /// Monotonic durable fence for the one-way definition deletion intent.
+    #[serde(skip_serializing)]
+    pub delete_fence: i64,
     /// Version selected by new instance creation.
     pub current_version_id: Option<WorkflowVersionId>,
     /// Creation timestamp.
     pub created_at_ms: i64,
     /// Most recent catalog mutation.
     pub updated_at_ms: i64,
+}
+
+/// Durable one-way claim that fences new reservations before definition cleanup starts.
+#[derive(Clone, Debug)]
+pub struct WorkflowDeleteIntent {
+    /// Definition claimed for deletion.
+    pub definition: WorkflowDefinition,
+    /// Exact deletion fence required to finalize this claim.
+    pub fence: i64,
 }
 
 /// Durable state of one upload-before-PUT Workflow reservation.
