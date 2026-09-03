@@ -12,6 +12,8 @@
 | [P7 Workers Logs 与 realtime tail](p7-workers-logs-realtime-tail.md) | 设计完成；stock workerd Tail 采集、`wrangler tail`、Workers Logs persistence/Telemetry query 与 Dashboard Live Tail 尚未实施 |
 | [P8 Workers Standard limits](p8-workers-standard-limits.md) | 设计完成；structural limits、Version settings 与 stock workerd runtime enforcer 尚未实施，CPU/subrequest/memory/startup/connection 当前受 `OC-WKR-LIMIT-001` 阻断 |
 | [P9 Dynamic Workers / Worker Loader](p9-dynamic-workers-worker-loader.md) | 合同与架构完成；`worker_loaders` v4/Version 支持受 upstream stock workerd nested-loader、limits 与 bounded-cache G0 阻断；Workers for Platforms 不在范围内 |
+| [P10 Cloudflare Artifacts](p10-cloudflare-artifacts.md) | Day 1 合同与架构完成；标准 v4/Worker binding/Git Smart HTTP 受进程内 Git engine G0 阻断；不把现有内部 ArtifactStore 或 LynxOS 文件夹伪装成 Cloudflare Artifacts |
+| [P11 Cloudflare Browser Run](p11-browser-run.md) | Day 1 合同与架构完成；标准 binding/Quick Actions/DevTools/CDP 通过 operator-owned 外部 Browser Provider 执行，受真实 stock-workerd/package/provider G0 阻断；正式 open-compute 发布仍是单个 `ocd` |
 
 新的管理面与项目配置目标由 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](p6-cloudflare-v4-wrangler-compatibility.md)
 定义。Operator API 与 Dashboard 已完成并归档：见[设计文档](implemented/operator-api-dashboard.md)、

@@ -40,8 +40,11 @@ Workers Standard 的 structural/runtime limits 由
 [`P8 Workers Standard limits 设计`](p8-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
 `WorkerLoader.load/get` 和 nested stock-workerd Gate 由
 [`P9 Dynamic Workers / Worker Loader 设计`](p9-dynamic-workers-worker-loader.md) 细化。后者只覆盖
-Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。P6 必须识别这些固定 Wrangler 字段，
-但在 P8/P9 分别通过前保持 fail closed；四个阶段各自具有独立的 Definition of Done。
+Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。Cloudflare Artifacts 的 v4/Worker/Git
+contract 由 [`P10 Cloudflare Artifacts 兼容设计`](p10-cloudflare-artifacts.md) 细化；Browser Run 的 binding、
+Quick Actions、DevTools/CDP 与 operator-owned 外部 Browser Provider 由
+[`P11 Cloudflare Browser Run 兼容设计`](p11-browser-run.md) 细化。P6 必须识别这些固定 Wrangler 字段，但在各专项
+通过前保持 fail closed；P6 与 P7—P11 各自具有独立的 Definition of Done。
 
 ## 1. 结论与边界
 
@@ -669,7 +672,7 @@ Wrangler schema validation
 
 ### 10.2 P6 支持字段与显式后续阶段
 
-下表未标阶段的行属于 P6 目标；标记 P7/P8/P9 的行只冻结固定 Wrangler 语法和 fail-closed handoff，不能在
+下表未标阶段的行属于 P6 目标；标记 P7—P11 的行只冻结固定 Wrangler 语法和 fail-closed handoff，不能在
 对应阶段完成前出现在成功 upload/settings response 或 capabilities 的 `supported` 集合中。
 
 | 类别 | Day 1 字段 | 说明 |
@@ -701,6 +704,8 @@ Wrangler schema validation
 | Standard limits（P8） | `usage_model: "standard"`, `limits.cpu_ms`, `limits.subrequests` | P6 识别字段但 fail closed；P8 完成后才成为 supported immutable Version state，见 [limits 专项](p8-workers-standard-limits.md) |
 | Worker Loader（P9） | `worker_loaders[].binding` | P6 识别字段但 fail closed；P9 当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](p9-dynamic-workers-worker-loader.md) |
 | Observability logs（P7） | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | P6 只提供共用 v4 core；P7 完成前 settings mutation fail closed；`destinations` 只接受空数组 |
+| Cloudflare Artifacts（P10） | `artifacts[].binding`, `artifacts[].namespace` | P6 识别固定 config/multipart，但 P10 Git engine G0、v4/Worker binding/Smart HTTP 全部通过前 fail closed，见 [Artifacts 专项](p10-cloudflare-artifacts.md)；`remote` 仅 local dev |
+| Browser Run（P11） | `browser.binding` | P6 识别固定 config/multipart，但 P11 provider、binding、Quick Actions、DevTools/CDP 全部通过前 fail closed，见 [Browser Run 专项](p11-browser-run.md)；`remote` 仅 local dev |
 | Secrets declaration | `secrets.required` | 只影响本地 type/dev validation；值由 `wrangler secret` 管理，不写入配置 |
 
 `wrangler dev` 的纯本地模式由上游 Wrangler/Miniflare 提供，不是 open-compute server conformance 的证据。
@@ -724,17 +729,20 @@ observability.logs.destinations（非空）/ observability.traces.destinations�
 logpush / tail_consumers / streaming_tail_consumers
 placement
 websearch / agent_memory
-hyperdrive / browser
+hyperdrive
 analytics_engine_datasets
 dispatch_namespaces
 containers / cloudchamber
 mtls_certificates / ratelimits
 pipelines / stream / media
-secrets_store_secrets / artifacts / flagship
+secrets_store_secrets / flagship
 vpc_services / vpc_networks
 send_email
 unsafe
 ```
+
+`artifacts` 与 `browser` 不在以上永久 unsupported 列表中：它们分别是 P10/P11 的显式 planned 能力。在专项 DoD
+完成前，行为仍是 fail closed，而不是 P6 提前标记 supported。
 
 该列表不是 future Wrangler schema 的自动 denylist。实施时从固定 schema 和固定 multipart generator 提取完整字段
 inventory，每个字段都有 capability 状态。升级新增字段默认 unsupported，经过实现和 Gate 后才能转为 supported。
@@ -1012,7 +1020,8 @@ package imports，并在同一变更删除旧 router、旧 SDK、`open-compute.j
 - 把 `wrangler@4.127.1` 变成直接、精确 pin，而不是偶然的 transitive dependency；
 - 保存 config schema SHA-256、Wrangler package integrity、官方 OpenAPI snapshot revision/hash；
 - 用一个最小支持项目记录 `whoami`、deploy、Versions、Deployments、Secrets、Assets、Vectorize、AI Search 和
-  其它 P6 资源命令的 HTTP trace；P7 独立冻结 `tail`、Telemetry 与 WebSocket trace；
+  其它 P6 资源命令的 HTTP trace；P7 独立冻结 `tail`、Telemetry 与 WebSocket trace，P10 独立冻结 Artifacts
+  v4/raw/Git trace，P11 独立冻结 Browser Run raw/binary/CDP/WebSocket trace；
 - 扩展 capability manifest 与 conformance catalog，给每个 route、field、binding 和 command 一个状态。
 
 **M1：v4 protocol core。**
@@ -1188,7 +1197,7 @@ response schema 和退出码；secret、token、signed upload token 和对象内
 - 旧 URL 在 public、admin、merged listener 上均为中性 HTTP 404，未被 Dashboard SPA 或 tenant ingress 接管；
 - multipart Worker upload 和 Static Assets 三段协议通过 success、failure、restart、crash 和 security tests；
 - Worker compatibility date/flags 已成为 immutable Version authority；
-- P7/P8/P9 字段在对应阶段完成前由 route/field/binding inventory 明确标为 `planned` 或 `unsupported`，且 upload、
+- P7—P11 字段在对应阶段完成前由 route/field/binding inventory 明确标为 `planned` 或 `unsupported`，且 upload、
   settings mutation 和 command 均 fail closed；P6 不冒充后续阶段完成；
 - KV、D1、R2、Vectorize、AI Search、Queues、Workflows 和 Cron 的声明子集通过 API/runtime Gate；
 - Cloudflare differential 已完成，或剩余 credential 限制被拆成独立 active acceptance 文档；
@@ -1211,6 +1220,12 @@ response schema 和退出码；secret、token、signed upload token 和对象内
 - [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/)
 - [Worker Loader API](https://developers.cloudflare.com/dynamic-workers/api-reference/)
 - [Dynamic Workers limits](https://developers.cloudflare.com/dynamic-workers/platform/limits/)
+- [Cloudflare Artifacts REST API](https://developers.cloudflare.com/artifacts/api/rest-api/)
+- [Cloudflare Artifacts Workers binding](https://developers.cloudflare.com/artifacts/api/workers-binding/)
+- [Cloudflare Artifacts Git protocol](https://developers.cloudflare.com/artifacts/api/git-protocol/)
+- [Cloudflare Browser Run API](https://developers.cloudflare.com/api/resources/browser_rendering/)
+- [Browser Run CDP](https://developers.cloudflare.com/browser-run/cdp/)
+- [Browser Run Wrangler commands](https://developers.cloudflare.com/browser-run/reference/wrangler-commands/)
 - [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/)
 - [Multipart upload metadata](https://developers.cloudflare.com/workers/configuration/multipart-upload-metadata/)
 - [Static Assets direct uploads](https://developers.cloudflare.com/workers/static-assets/direct-upload/)
