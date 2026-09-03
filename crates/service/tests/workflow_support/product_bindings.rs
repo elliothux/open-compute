@@ -86,13 +86,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             json!({"name":"workflow-d1"}),
             false,
         ),
-        (
-            "OBJECTS",
-            BindingKind::DoNamespace,
-            "durable-objects/namespaces",
-            json!({"name":"workflow-do","workerId":worker.id,"className":"Counter"}),
-            false,
-        ),
     ] {
         let (status, value) = admin_json(
             &api,
@@ -118,6 +111,33 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             },
         );
     }
+    let do_repository = open_compute_storage::DurableObjectRepository::new(&storage);
+    let do_plan = open_compute_storage::DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: None,
+        new_tag: "workflow-products-v1".to_owned(),
+        new_sqlite_classes: vec!["Counter".to_owned()],
+        renamed_classes: Vec::new(),
+        deleted_classes: Vec::new(),
+    };
+    do_repository
+        .prepare_worker_migration(account, worker.id, &do_plan, now())
+        .unwrap();
+    let namespace = do_repository
+        .namespace_for_worker_upload(account, worker.id, "Counter", Some("workflow-products-v1"))
+        .unwrap();
+    do_repository
+        .complete_worker_migration(worker.id, &do_plan, now())
+        .unwrap();
+    bindings.insert(
+        "OBJECTS".into(),
+        VersionBindingInput {
+            kind: BindingKind::DoNamespace,
+            id: namespace.resource.id,
+            permissions: Default::default(),
+            config: Default::default(),
+        },
+    );
     let CreateQueueOutcome::Applied(queue) = QueueController::new(&storage, scheduler.clone())
         .create(&CreateQueueRequest {
             account_id: account,

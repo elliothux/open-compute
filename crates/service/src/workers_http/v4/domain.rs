@@ -37,6 +37,52 @@ pub(super) async fn create_from_upload(
     request_id: RequestId,
     now_ms: i64,
 ) -> Result<CreateVersionOutcome, PlatformError> {
+    let migration =
+        super::do_lifecycle::prepare(api, account_id, worker.id, &upload.metadata, now_ms)?;
+    let result = create_from_prepared_upload(
+        api,
+        account_authority,
+        account_id,
+        worker,
+        upload,
+        strict_inheritance,
+        deployment_source,
+        request_id,
+        now_ms,
+        migration
+            .as_ref()
+            .map(super::do_lifecycle::PreparedDoMigration::tag),
+    )
+    .await;
+    match result {
+        Ok(outcome) => {
+            if let Some(migration) = &migration {
+                migration.complete(api, worker.id, now_ms)?;
+            }
+            Ok(outcome)
+        }
+        Err(error) => {
+            if let Some(migration) = &migration {
+                migration.rollback(api, worker.id, now_ms)?;
+            }
+            Err(error)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn create_from_prepared_upload(
+    api: &WorkerApiState,
+    account_authority: &AccountAuthority,
+    account_id: AccountId,
+    worker: &WorkerRecord,
+    upload: ParsedWorkerUpload,
+    strict_inheritance: bool,
+    deployment_source: Option<DeploymentSource>,
+    request_id: RequestId,
+    now_ms: i64,
+    migration_tag: Option<&str>,
+) -> Result<CreateVersionOutcome, PlatformError> {
     let mut input = UploadInput::new(upload.metadata)?;
     let previous = worker
         .active_version_id
@@ -46,7 +92,14 @@ pub(super) async fn create_from_upload(
         })
         .transpose()?;
     input.apply_inheritance(api, previous.as_ref(), strict_inheritance)?;
-    input.apply_explicit_bindings(api, account_authority, account_id, worker.id)?;
+    input.apply_explicit_bindings(
+        api,
+        account_authority,
+        account_id,
+        worker.id,
+        migration_tag,
+        false,
+    )?;
     let reservation_id = request_id.to_string();
     let (content, asset_session) = input
         .content(
@@ -123,7 +176,14 @@ pub(super) async fn validate_new_upload(
 ) -> Result<(), PlatformError> {
     let mut input = UploadInput::new(upload.metadata.clone())?;
     input.apply_inheritance(api, None, strict_inheritance)?;
-    input.apply_explicit_bindings(api, account_authority, account_id, WorkerId::generate())?;
+    input.apply_explicit_bindings(
+        api,
+        account_authority,
+        account_id,
+        WorkerId::generate(),
+        None,
+        true,
+    )?;
     input
         .content(
             api,
@@ -411,6 +471,8 @@ impl UploadInput {
         account_authority: &AccountAuthority,
         account: AccountId,
         worker: WorkerId,
+        migration_tag: Option<&str>,
+        allow_declared_do: bool,
     ) -> Result<(), PlatformError> {
         let bindings = self.metadata.bindings.clone();
         for binding in &bindings {
@@ -499,13 +561,24 @@ impl UploadInput {
                             "cross-Script Durable Object bindings are unsupported",
                         ));
                     }
-                    let namespace = DurableObjectRepository::new(&api.storage)
-                        .list_namespaces(account)?
-                        .into_iter()
-                        .find(|value| {
-                            value.owner_worker_id == worker && value.class_name == *class_name
-                        })
-                        .ok_or_else(|| invalid("Durable Object namespace was not found"))?;
+                    let namespace = match DurableObjectRepository::new(&api.storage)
+                        .namespace_for_worker_upload(account, worker, class_name, migration_tag)
+                    {
+                        Ok(value) => value,
+                        Err(error)
+                            if allow_declared_do
+                                && super::do_lifecycle::declares_live_class(
+                                    &self.metadata,
+                                    class_name,
+                                ) =>
+                        {
+                            let _ = error;
+                            continue;
+                        }
+                        Err(_) => {
+                            return Err(invalid("Durable Object namespace was not found"));
+                        }
+                    };
                     self.bindings.insert(
                         name,
                         VersionBindingInput {

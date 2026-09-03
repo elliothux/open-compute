@@ -5,11 +5,23 @@ CREATE TABLE do_namespaces (
   do_storage_id         TEXT NOT NULL,
   namespace_storage_key TEXT NOT NULL UNIQUE,
   schema_version        INTEGER NOT NULL CHECK(schema_version >= 1),
+  lifecycle_state       TEXT NOT NULL DEFAULT 'active' CHECK(lifecycle_state IN (
+                          'pending', 'active', 'retired'
+                        )),
+  migration_tag         TEXT,
+  previous_class_name   TEXT,
   created_at_ms         INTEGER NOT NULL,
   CHECK(length(class_name) BETWEEN 1 AND 128),
   CHECK(class_name NOT GLOB '*[^A-Za-z0-9_$]*'),
   CHECK(class_name NOT GLOB '[^A-Za-z_$]*'),
   CHECK(length(do_storage_id) BETWEEN 1 AND 128),
+  CHECK(migration_tag IS NULL OR length(migration_tag) BETWEEN 1 AND 128),
+  CHECK(previous_class_name IS NULL OR (
+    length(previous_class_name) BETWEEN 1 AND 128 AND
+    previous_class_name NOT GLOB '*[^A-Za-z0-9_$]*' AND
+    previous_class_name NOT GLOB '[^A-Za-z_$]*'
+  )),
+  CHECK((lifecycle_state = 'pending') = (migration_tag IS NOT NULL)),
   CHECK(length(namespace_storage_key) = 64 AND namespace_storage_key = lower(namespace_storage_key)),
   UNIQUE(owner_worker_id, class_name)
 ) STRICT;
@@ -56,10 +68,49 @@ BEGIN
 END;
 
 CREATE TRIGGER do_namespace_identity_immutable_guard
-BEFORE UPDATE ON do_namespaces
+BEFORE UPDATE OF resource_id, owner_worker_id, do_storage_id,
+  namespace_storage_key, schema_version, created_at_ms ON do_namespaces
 BEGIN
   SELECT RAISE(ABORT, 'immutable durable object namespace identity');
 END;
+
+CREATE TRIGGER do_namespace_lifecycle_guard
+BEFORE UPDATE OF lifecycle_state ON do_namespaces
+WHEN OLD.lifecycle_state != NEW.lifecycle_state AND NOT (
+  (OLD.lifecycle_state = 'pending' AND NEW.lifecycle_state IN ('active', 'retired')) OR
+  (OLD.lifecycle_state = 'active' AND NEW.lifecycle_state IN ('pending', 'retired')) OR
+  (OLD.lifecycle_state = 'retired' AND NEW.lifecycle_state = 'pending')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'invalid durable object namespace lifecycle transition');
+END;
+
+CREATE TRIGGER do_namespace_migration_metadata_guard
+BEFORE UPDATE OF class_name, migration_tag, previous_class_name ON do_namespaces
+WHEN NOT (
+  (OLD.lifecycle_state = 'active' AND NEW.lifecycle_state = 'pending' AND
+   NEW.class_name != OLD.class_name AND NEW.migration_tag IS NOT NULL AND
+   NEW.previous_class_name = OLD.class_name) OR
+  (OLD.lifecycle_state = 'retired' AND NEW.lifecycle_state = 'pending' AND
+   NEW.class_name = OLD.class_name AND NEW.migration_tag IS NOT NULL AND
+   NEW.previous_class_name = OLD.class_name) OR
+  (OLD.lifecycle_state = 'pending' AND NEW.lifecycle_state = 'active' AND
+   (NEW.class_name = OLD.class_name OR NEW.class_name = OLD.previous_class_name) AND
+   NEW.migration_tag IS NULL AND NEW.previous_class_name IS NULL) OR
+  (OLD.lifecycle_state = 'pending' AND NEW.lifecycle_state = 'retired' AND
+   NEW.class_name = OLD.class_name AND NEW.migration_tag IS NULL AND
+   NEW.previous_class_name IS NULL)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'invalid durable object namespace migration metadata');
+END;
+
+CREATE TABLE worker_do_migration_tags (
+  worker_id TEXT PRIMARY KEY REFERENCES workers(id),
+  current_tag TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  CHECK(length(current_tag) BETWEEN 1 AND 128)
+) STRICT;
 
 CREATE TRIGGER do_namespace_delete_guard
 BEFORE DELETE ON do_namespaces

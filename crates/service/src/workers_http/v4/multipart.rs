@@ -3,13 +3,14 @@
 use super::model::WorkerUploadMetadata;
 use axum::extract::Multipart;
 use open_compute_core::{ErrorCode, PlatformError};
-use open_compute_workers::{BundleLimits, CanonicalBundle, ModuleInput, ModuleType};
+use open_compute_workers::{
+    BundleLimits, CanonicalBundle, ModuleInput, ModuleType, supports_worker_compatibility,
+};
 use std::collections::BTreeSet;
 
 const METADATA_PART: &str = "metadata";
 const MAX_METADATA_BYTES: usize = 1024 * 1024;
 const MULTIPART_OVERHEAD_BYTES: usize = 1024 * 1024;
-const EFFECTIVE_COMPATIBILITY_DATE: &str = "2026-08-30";
 
 #[derive(Clone, Debug)]
 struct RawPart {
@@ -152,10 +153,7 @@ fn parse_parts(
 }
 
 fn validate_metadata(metadata: &WorkerUploadMetadata) -> Result<(), PlatformError> {
-    if metadata.compatibility_date != EFFECTIVE_COMPATIBILITY_DATE
-        || !(metadata.compatibility_flags.is_empty()
-            || metadata.compatibility_flags.as_slice() == ["nodejs_compat"])
-    {
+    if !supports_worker_compatibility(&metadata.compatibility_date, &metadata.compatibility_flags) {
         return Err(PlatformError::new(
             ErrorCode::BundleInvalid,
             "Worker compatibility metadata is unsupported by the pinned runtime",
@@ -167,28 +165,12 @@ fn validate_metadata(metadata: &WorkerUploadMetadata) -> Result<(), PlatformErro
     {
         return Err(too_large());
     }
-    let durable_exports = metadata.exports.as_ref().is_some_and(|exports| {
-        exports.values().any(|export| {
-            matches!(
-                export,
-                super::model::WorkerUploadExport::DurableObject { .. }
-            )
-        })
-    });
-    if durable_exports || metadata.migrations.is_some() {
-        return Err(PlatformError::new(
-            ErrorCode::BindingCapabilityUnsupported,
-            "Durable Object exports and migrations are not supported",
-        ));
-    }
     if let Some(exports) = &metadata.exports {
         for (name, export) in exports {
             if name != "default" {
                 validate_binding_name(name)?;
             }
-            if !matches!(export, super::model::WorkerUploadExport::Worker { .. }) {
-                return Err(invalid());
-            }
+            let _ = export;
         }
     }
     let mut names = BTreeSet::new();

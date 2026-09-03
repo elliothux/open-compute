@@ -18,6 +18,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 
+#[path = "durable_object_migrations.rs"]
+mod worker_migrations;
+pub use worker_migrations::{DurableObjectClassRename, DurableObjectMigrationPlan};
+
 /// Product schema version for P0.7 namespace rows.
 pub const DO_NAMESPACE_SCHEMA_VERSION: u32 = 1;
 
@@ -294,7 +298,13 @@ impl<'a> DurableObjectRepository<'a> {
         resources
             .into_iter()
             .filter(|resource| resource.state != ResourceState::Tombstoned)
+            .filter_map(|resource| match self.namespace_is_active(resource.id) {
+                Ok(true) => Some(Ok(resource)),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            })
             .map(|resource| {
+                let resource = resource?;
                 let product = self
                     .storage
                     .db()
@@ -302,6 +312,19 @@ impl<'a> DurableObjectRepository<'a> {
                 Ok(namespace_record(resource, product))
             })
             .collect()
+    }
+
+    fn namespace_is_active(&self, resource_id: ResourceId) -> Result<bool, PlatformError> {
+        self.storage.db().with_read(|conn| {
+            conn.query_row(
+                "SELECT lifecycle_state = 'active' FROM do_namespaces WHERE resource_id = ?1",
+                [resource_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| db_error())?
+            .ok_or_else(namespace_not_found)
+        })
     }
 
     /// List one bounded, filtered, and sorted page of namespace resources.
@@ -332,7 +355,8 @@ impl<'a> DurableObjectRepository<'a> {
                     n.owner_worker_id, n.class_name, n.do_storage_id,
                     n.namespace_storage_key, n.schema_version, n.created_at_ms
              FROM resources r JOIN do_namespaces n ON n.resource_id = r.id
-             WHERE r.account_id = ? AND r.kind = 'do_namespace' AND r.state != 'tombstoned'",
+             WHERE r.account_id = ? AND r.kind = 'do_namespace' AND r.state != 'tombstoned'
+               AND n.lifecycle_state = 'active'",
             CatalogColumns {
                 id: "r.id",
                 name: "r.name",

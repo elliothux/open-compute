@@ -69,31 +69,31 @@ pub(crate) struct WorkerUploadEntrypointCache {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkerUploadMigrations {
-    pub old_tag: Option<String>,
-    pub new_tag: String,
-    pub steps: Vec<WorkerUploadMigrationStep>,
+    pub(super) old_tag: Option<String>,
+    pub(super) new_tag: String,
+    pub(super) steps: Vec<WorkerUploadMigrationStep>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkerUploadMigrationStep {
     #[serde(default)]
-    pub new_classes: Vec<String>,
+    pub(super) new_classes: Vec<String>,
     #[serde(default)]
-    pub new_sqlite_classes: Vec<String>,
+    pub(super) new_sqlite_classes: Vec<String>,
     #[serde(default)]
-    pub renamed_classes: Vec<WorkerUploadClassRename>,
+    pub(super) renamed_classes: Vec<WorkerUploadClassRename>,
     #[serde(default)]
-    pub deleted_classes: Vec<String>,
+    pub(super) deleted_classes: Vec<String>,
     #[serde(default)]
-    pub transferred_classes: Vec<serde_json::Value>,
+    pub(super) transferred_classes: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkerUploadClassRename {
-    pub from: String,
-    pub to: String,
+    pub(super) from: String,
+    pub(super) to: String,
 }
 
 impl std::fmt::Debug for WorkerUploadMetadata {
@@ -273,33 +273,6 @@ impl WorkerUploadBinding {
             Self::TextBlob { part, .. } => Some((part, open_compute_workers::ModuleType::Text)),
             Self::DataBlob { part, .. } => Some((part, open_compute_workers::ModuleType::Data)),
             _ => None,
-        }
-    }
-
-    /// Return the exact Wrangler binding kind.
-    pub(crate) const fn kind(&self) -> &'static str {
-        match self {
-            Self::PlainText { .. } => "plain_text",
-            Self::Json { .. } => "json",
-            Self::SecretText { .. } => "secret_text",
-            Self::KvNamespace { .. } => "kv_namespace",
-            Self::R2Bucket { .. } => "r2_bucket",
-            Self::D1 { .. } => "d1",
-            Self::Vectorize { .. } => "vectorize",
-            Self::AiSearchNamespace { .. } => "ai_search_namespace",
-            Self::AiSearch { .. } => "ai_search",
-            Self::Ai { .. } => "ai",
-            Self::DurableObjectNamespace { .. } => "durable_object_namespace",
-            Self::Queue { .. } => "queue",
-            Self::Workflow { .. } => "workflow",
-            Self::Service { .. } => "service",
-            Self::Images { .. } => "images",
-            Self::VersionMetadata { .. } => "version_metadata",
-            Self::Assets { .. } => "assets",
-            Self::WasmModule { .. } => "wasm_module",
-            Self::TextBlob { .. } => "text_blob",
-            Self::DataBlob { .. } => "data_blob",
-            Self::Inherit { .. } => "inherit",
         }
     }
 

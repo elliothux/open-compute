@@ -5,7 +5,6 @@ use crate::cache_images_http::CacheImagesApiState;
 use crate::cloudflare_v4::accounts::AccountAuthority;
 use crate::d1_http::D1ApiState;
 use crate::dashboard::DashboardDispatch;
-use crate::do_http::DoApiState;
 use crate::health::HealthCoordinator;
 use crate::kv_http::KvApiState;
 use crate::metrics::{CONTENT_TYPE, MetricsRegistry};
@@ -60,7 +59,6 @@ pub struct HttpState {
     kv_api: Option<Arc<KvApiState>>,
     r2_api: Option<Arc<R2ApiState>>,
     d1_api: Option<Arc<D1ApiState>>,
-    do_api: Option<Arc<DoApiState>>,
     queue_api: Option<Arc<QueueApiState>>,
     workflow_api: Option<Arc<WorkflowApiState>>,
     scheduler: Option<Arc<SchedulerService>>,
@@ -90,7 +88,6 @@ impl std::fmt::Debug for HttpState {
             .field("kv_api", &self.kv_api.is_some())
             .field("r2_api", &self.r2_api.is_some())
             .field("d1_api", &self.d1_api.is_some())
-            .field("do_api", &self.do_api.is_some())
             .field("queue_api", &self.queue_api.is_some())
             .field("workflow_api", &self.workflow_api.is_some())
             .field("scheduler", &self.scheduler.is_some())
@@ -138,7 +135,6 @@ impl HttpState {
             kv_api: None,
             r2_api: None,
             d1_api: None,
-            do_api: None,
             queue_api: None,
             workflow_api: None,
             scheduler: None,
@@ -181,7 +177,6 @@ impl HttpState {
             kv_api: None,
             r2_api: None,
             d1_api: None,
-            do_api: None,
             queue_api: None,
             workflow_api: None,
             scheduler: None,
@@ -260,19 +255,6 @@ impl HttpState {
     #[must_use]
     pub(crate) fn d1_api(&self) -> Option<&Arc<D1ApiState>> {
         self.d1_api.as_ref()
-    }
-
-    /// Attach the P0.7 Durable Object control plane.
-    #[must_use]
-    pub fn with_do_api(mut self, do_api: DoApiState) -> Self {
-        self.do_api = Some(Arc::new(do_api));
-        self
-    }
-
-    /// Borrow the optional P0.7 Durable Object control-plane state.
-    #[must_use]
-    pub(crate) fn do_api(&self) -> Option<&Arc<DoApiState>> {
-        self.do_api.as_ref()
     }
 
     /// Attach the P2.2 Queue catalog control plane.

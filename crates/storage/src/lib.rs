@@ -91,8 +91,9 @@ pub use data_dir::{expected_directories, future_resource_paths};
 pub use disk_admission::DiskAdmission;
 pub use durable_objects::{
     AuthorizedDurableObjectDelete, AuthorizedDurableObjectDispatch, DO_NAMESPACE_SCHEMA_VERSION,
-    DurableObjectListPage, DurableObjectNamespaceRecord, DurableObjectRecord,
-    DurableObjectRepository, decode_object_list_cursor, encode_object_list_cursor,
+    DurableObjectClassRename, DurableObjectListPage, DurableObjectMigrationPlan,
+    DurableObjectNamespaceRecord, DurableObjectRecord, DurableObjectRepository,
+    decode_object_list_cursor, encode_object_list_cursor,
 };
 pub use fs::atomic_write;
 pub use identity::{ARTIFACT_SCHEMA_VERSION, StableIdentity};

@@ -208,7 +208,7 @@ impl Default for VersionRuntimeFeatures {
 }
 
 fn default_compatibility_date() -> String {
-    "2026-08-30".to_owned()
+    crate::WORKER_COMPATIBILITY_DATE.to_owned()
 }
 
 /// Immutable Queue push-consumer declaration supplied with a version.
@@ -1331,18 +1331,17 @@ fn prepare_runtime_features(
 fn validate_compatibility(input: &VersionRuntimeFeatures) -> Result<Vec<String>, PlatformError> {
     // P6 intentionally certifies only the formal pin's latest date. Supporting an older date
     // requires separate stock-workerd evidence and an explicit capability-range update.
-    if input.compatibility_date != "2026-08-30" {
+    if input.compatibility_date != crate::WORKER_COMPATIBILITY_DATE {
         return Err(PlatformError::new(
             ErrorCode::CompatibilityUnsupported,
             "compatibility date is outside the certified pinned-workerd range",
         ));
     }
-    if !(input.compatibility_flags.is_empty()
-        || input.compatibility_flags.as_slice() == ["nodejs_compat"])
+    if !crate::supports_worker_compatibility(&input.compatibility_date, &input.compatibility_flags)
     {
         return Err(PlatformError::new(
             ErrorCode::CompatibilityUnsupported,
-            "compatibility flags are outside the fixed 2026-08-30 contract",
+            "compatibility flags are outside the fixed pinned-runtime contract",
         ));
     }
     Ok(input.compatibility_flags.clone())

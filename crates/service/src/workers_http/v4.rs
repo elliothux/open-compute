@@ -8,6 +8,8 @@ pub(crate) mod assets;
 mod authority;
 #[path = "v4/cloning.rs"]
 mod cloning;
+#[path = "v4/do_lifecycle.rs"]
+mod do_lifecycle;
 #[path = "v4/domain.rs"]
 mod domain;
 #[path = "v4/download.rs"]

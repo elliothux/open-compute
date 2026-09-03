@@ -184,6 +184,137 @@ fn open_compute_workers_forbidden_descriptor(
 }
 
 #[test]
+fn worker_migrations_publish_rename_retire_and_rollback_namespaces() {
+    let (_temp, storage) = storage();
+    let account = storage.identity().default_account_id;
+    let (worker, _) = WorkerRepository::new(storage.db())
+        .create_worker(account, "migration-worker", RequestId::generate(), 100, 100)
+        .unwrap();
+    let repository = DurableObjectRepository::new(&storage);
+    let create = DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: None,
+        new_tag: "v1".to_owned(),
+        new_sqlite_classes: vec!["Counter".to_owned()],
+        renamed_classes: Vec::new(),
+        deleted_classes: Vec::new(),
+    };
+    repository
+        .prepare_worker_migration(account, worker.id, &create, 101)
+        .unwrap();
+    assert!(repository.list_namespaces(account).unwrap().is_empty());
+    let pending = repository
+        .namespace_for_worker_upload(account, worker.id, "Counter", Some("v1"))
+        .unwrap();
+    assert!(
+        repository
+            .namespace_for_worker_upload(account, worker.id, "Counter", None)
+            .is_err()
+    );
+    repository
+        .complete_worker_migration(worker.id, &create, 102)
+        .unwrap();
+    assert_eq!(
+        repository.current_worker_migration_tag(worker.id).unwrap(),
+        Some("v1".to_owned())
+    );
+    assert_eq!(repository.list_namespaces(account).unwrap().len(), 1);
+    let illegal_rename = storage
+        .db()
+        .with_immediate(|tx| {
+            Ok(tx
+                .execute(
+                    "UPDATE do_namespaces SET class_name = 'Corrupt' WHERE resource_id = ?1",
+                    [pending.resource.id.to_string()],
+                )
+                .is_err())
+        })
+        .unwrap();
+    assert!(illegal_rename);
+
+    let declarative = DurableObjectMigrationPlan {
+        declarative: true,
+        old_tag: Some("v1".to_owned()),
+        new_tag: "exports-v2".to_owned(),
+        new_sqlite_classes: vec!["Counter".to_owned(), "Another".to_owned()],
+        renamed_classes: Vec::new(),
+        deleted_classes: Vec::new(),
+    };
+    repository
+        .prepare_worker_migration(account, worker.id, &declarative, 103)
+        .unwrap();
+    repository
+        .complete_worker_migration(worker.id, &declarative, 104)
+        .unwrap();
+    assert_eq!(repository.list_namespaces(account).unwrap().len(), 2);
+
+    let rename = DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: Some("exports-v2".to_owned()),
+        new_tag: "v3".to_owned(),
+        new_sqlite_classes: Vec::new(),
+        renamed_classes: vec![DurableObjectClassRename {
+            from: "Counter".to_owned(),
+            to: "RenamedCounter".to_owned(),
+        }],
+        deleted_classes: Vec::new(),
+    };
+    repository
+        .prepare_worker_migration(account, worker.id, &rename, 105)
+        .unwrap();
+    let renamed = repository
+        .namespace_for_worker_upload(account, worker.id, "RenamedCounter", Some("v3"))
+        .unwrap();
+    assert_eq!(renamed.resource.id, pending.resource.id);
+    repository
+        .complete_worker_migration(worker.id, &rename, 106)
+        .unwrap();
+
+    let failed = DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: Some("v3".to_owned()),
+        new_tag: "v4-failed".to_owned(),
+        new_sqlite_classes: vec!["Temporary".to_owned()],
+        renamed_classes: Vec::new(),
+        deleted_classes: Vec::new(),
+    };
+    repository
+        .prepare_worker_migration(account, worker.id, &failed, 107)
+        .unwrap();
+    repository
+        .rollback_worker_migration(worker.id, "v4-failed", 108)
+        .unwrap();
+    assert!(
+        repository
+            .namespace_for_worker_upload(account, worker.id, "Temporary", Some("v4-failed"))
+            .is_err()
+    );
+
+    let delete = DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: Some("v3".to_owned()),
+        new_tag: "v4".to_owned(),
+        new_sqlite_classes: Vec::new(),
+        renamed_classes: Vec::new(),
+        deleted_classes: vec!["RenamedCounter".to_owned()],
+    };
+    repository
+        .prepare_worker_migration(account, worker.id, &delete, 109)
+        .unwrap();
+    repository
+        .complete_worker_migration(worker.id, &delete, 110)
+        .unwrap();
+    assert_eq!(repository.list_namespaces(account).unwrap().len(), 1);
+    assert_eq!(
+        repository
+            .get_namespace(account, pending.resource.id)
+            .unwrap()
+            .namespace_storage_key,
+        pending.namespace_storage_key
+    );
+}
+
+#[test]
 fn namespace_identity_dispatch_and_generation_fence_are_durable() {
     let (_temp, storage) = storage();
     let fixture = ready_fixture(&storage);

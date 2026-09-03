@@ -453,9 +453,7 @@ impl WorkerCodeDescriptorV1 {
         loader_schema_version: u32,
     ) -> Result<Self, PlatformError> {
         if created_at_ms < 0
-            || compatibility_date != "2026-08-30"
-            || !(compatibility_flags.is_empty()
-                || compatibility_flags.as_slice() == ["nodejs_compat"])
+            || !crate::supports_worker_compatibility(&compatibility_date, &compatibility_flags)
         {
             return Err(binding_invariant());
         }

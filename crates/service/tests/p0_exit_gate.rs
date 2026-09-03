@@ -172,7 +172,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         &stack,
         scheduler_store.clone(),
     );
-    let bindings = create_product_set(&router, account, worker.id).await;
+    let bindings = create_product_set(&router, &storage, account, worker.id).await;
     assert_control_catalogs(&router, account).await;
     apply_primary_d1_migration(&router, account, bindings.d1).await;
 
@@ -692,6 +692,7 @@ async fn p0_real_combined_exit_matrix_inner() {
 
 async fn create_product_set(
     router: &axum::Router,
+    storage: &PlatformStorage,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
 ) -> ProductBindings {
@@ -760,22 +761,31 @@ async fn create_product_set(
         &["resourceId"],
     )
     .await;
-    let objects = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/durable-objects/namespaces"),
-        json!({"name": "combined-do", "workerId": worker, "className": "AppObject"}),
-        "p0-exit-create-do",
-        &["resourceId"],
-    )
-    .await;
-    let objects_other = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/durable-objects/namespaces"),
-        json!({"name": "combined-do-other", "workerId": worker, "className": "OtherObject"}),
-        "p0-exit-create-do-other",
-        &["resourceId"],
-    )
-    .await;
+    let do_repository = open_compute_storage::DurableObjectRepository::new(storage);
+    let do_plan = open_compute_storage::DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: None,
+        new_tag: "p0-exit-v1".to_owned(),
+        new_sqlite_classes: vec!["AppObject".to_owned(), "OtherObject".to_owned()],
+        renamed_classes: Vec::new(),
+        deleted_classes: Vec::new(),
+    };
+    do_repository
+        .prepare_worker_migration(account, worker, &do_plan, 1_000_000)
+        .unwrap();
+    let objects = do_repository
+        .namespace_for_worker_upload(account, worker, "AppObject", Some("p0-exit-v1"))
+        .unwrap()
+        .resource
+        .id;
+    let objects_other = do_repository
+        .namespace_for_worker_upload(account, worker, "OtherObject", Some("p0-exit-v1"))
+        .unwrap()
+        .resource
+        .id;
+    do_repository
+        .complete_worker_migration(worker, &do_plan, 1_000_001)
+        .unwrap();
     ProductBindings {
         kv,
         kv_other,
@@ -824,11 +834,6 @@ async fn assert_control_catalogs(router: &axum::Router, account: open_compute_co
             format!("/operator/api/v1/accounts/{account}/d1/databases"),
             "databases",
             3,
-        ),
-        (
-            format!("/operator/api/v1/accounts/{account}/durable-objects/namespaces"),
-            "namespaces",
-            2,
         ),
     ] {
         let (status, value) = admin_json(router, "GET", &uri, Value::Null, None).await;

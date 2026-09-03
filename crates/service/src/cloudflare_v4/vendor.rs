@@ -59,6 +59,9 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
         Ok((value, _)) => value,
         Err(error) => return platform_error(error, context),
     };
+    if lock.effective_compatibility_date != open_compute_workers::WORKER_COMPATIBILITY_DATE {
+        return error_response(V4Error::Internal, context.request_id());
+    }
     let inventory: serde_json::Value = match serde_json::from_slice(include_bytes!(
         "../../../../share/cloudflare-capabilities.json"
     )) {
@@ -127,7 +130,7 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
                 minimum: &lock.effective_compatibility_date,
                 maximum: &lock.effective_compatibility_date,
             },
-            compatibility_flags: &lock.required_compatibility_flags,
+            compatibility_flags: open_compute_workers::ALLOWED_WORKER_COMPATIBILITY_FLAGS,
             endpoints,
             deviations: deviations.into_iter().collect(),
         },
@@ -510,7 +513,7 @@ struct Capabilities<'a> {
     release: &'a str,
     wrangler_version: &'a str,
     compatibility_date: CompatibilityDate<'a>,
-    compatibility_flags: &'a [String],
+    compatibility_flags: &'static [&'static str],
     endpoints: BTreeMap<&'a str, &'static str>,
     deviations: Vec<String>,
 }

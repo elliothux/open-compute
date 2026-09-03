@@ -102,13 +102,6 @@ pub(super) async fn prepare() -> Fixture {
             json!({"name":"chain-db"}),
             false,
         ),
-        (
-            "OBJECTS",
-            BindingKind::DoNamespace,
-            "durable-objects/namespaces",
-            json!({"name":"chain-objects","workerId":worker.id,"className":"Counter"}),
-            false,
-        ),
     ] {
         let (status, result) = admin_json(
             &api,
@@ -129,6 +122,28 @@ pub(super) async fn prepare() -> Fixture {
             binding(kind, id.as_str().unwrap().parse().unwrap()),
         );
     }
+    let do_repository = open_compute_storage::DurableObjectRepository::new(&storage);
+    let do_plan = open_compute_storage::DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: None,
+        new_tag: "p2-chain-v1".to_owned(),
+        new_sqlite_classes: vec!["Counter".to_owned()],
+        renamed_classes: Vec::new(),
+        deleted_classes: Vec::new(),
+    };
+    do_repository
+        .prepare_worker_migration(account, worker.id, &do_plan, now_ms())
+        .unwrap();
+    let namespace = do_repository
+        .namespace_for_worker_upload(account, worker.id, "Counter", Some("p2-chain-v1"))
+        .unwrap();
+    do_repository
+        .complete_worker_migration(worker.id, &do_plan, now_ms())
+        .unwrap();
+    bindings.insert(
+        "OBJECTS".into(),
+        binding(BindingKind::DoNamespace, namespace.resource.id),
+    );
     let CreateQueueOutcome::Applied(queue) = QueueController::new(&storage, scheduler.clone())
         .create(&CreateQueueRequest {
             account_id: account,

@@ -12,7 +12,7 @@ use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
 use crate::d1_http::D1ApiState;
 use crate::dashboard::bootstrap_dashboard;
-use crate::do_http::DoApiState;
+use crate::do_lifecycle::DurableObjectLifecycleService;
 use crate::document_parser_backend::DocumentParserBindingService;
 use crate::health::HealthCoordinator;
 use crate::http::{self, HttpState};
@@ -526,12 +526,10 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         loaded.config.hardening.max_resources_per_kind_per_account,
         Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     );
-    let do_api = DoApiState::new(
+    let do_lifecycle = DurableObjectLifecycleService::new(
         storage.clone(),
-        resource_pins.clone(),
         transport.clone(),
         loaded.config.durable_objects.clone(),
-        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
     )
     .with_metrics(metrics.clone())
     .with_scheduler(Some(scheduler_store.clone()));
@@ -546,7 +544,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     );
     queue_api.reconcile_pending().await?;
     metrics.set_do_storage_watermark(0);
-    let maintenance_do_api = do_api.clone();
+    let maintenance_do_lifecycle = do_lifecycle.clone();
     let binding_executor = Arc::new(
         SqliteKvBindingExecutor::with_config(
             storage.clone(),
@@ -600,7 +598,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     )
     .with_r2_api(r2_api)
     .with_d1_api(d1_api)
-    .with_do_api(do_api)
     .with_queue_api(Some(queue_api))
     .with_workflow_api(Some(workflow_api))
     .with_scheduler(Some(scheduler_service.clone()))
@@ -743,7 +740,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
                             "P1 disk and resource metrics refresh failed"
                         );
                     }
-                    let _ = maintenance_do_api.reconcile_pending().await;
+                    let _ = maintenance_do_lifecycle.reconcile_pending().await;
                 }
             }
         }

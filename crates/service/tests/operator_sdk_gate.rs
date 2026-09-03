@@ -5,14 +5,11 @@ use open_compute_artifacts::{
     ArtifactStore, MapEnv, MockS3, R2ObjectStore, S3ArtifactClient, resolve_s3_credentials_with,
 };
 use open_compute_core::config::{MetricsConfig, SecretReference, ServerConfig, StorageConfig};
-use open_compute_core::{
-    D1Config, DurableObjectsConfig, KvConfig, PlatformError, R2Config, WorkflowsConfig,
-};
+use open_compute_core::{D1Config, KvConfig, PlatformError, R2Config, WorkflowsConfig};
 use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_service::SqliteKvBindingExecutor;
 use open_compute_service::d1_backend::D1BindingService;
 use open_compute_service::d1_http::D1ApiState;
-use open_compute_service::do_http::DoApiState;
 use open_compute_service::health::HealthCoordinator;
 use open_compute_service::http::{HttpState, admin_router};
 use open_compute_service::kv_http::KvApiState;
@@ -185,17 +182,6 @@ async fn build_operator_http_state(
                 max_resources,
                 delete_drain,
             ))
-            .with_do_api(
-                DoApiState::new(
-                    storage.clone(),
-                    resource_pins,
-                    transport.clone(),
-                    DurableObjectsConfig::default(),
-                    delete_drain,
-                )
-                .with_metrics(metrics.clone())
-                .with_scheduler(Some(scheduler.clone())),
-            )
             .with_queue_api(Some(queue_api))
             .with_workflow_api(Some(WorkflowApiState::new(
                 storage,

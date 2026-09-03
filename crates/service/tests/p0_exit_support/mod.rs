@@ -25,9 +25,8 @@ use open_compute_service::runtime_bridge::{
 };
 use open_compute_service::scheduler::SchedulerService;
 use open_compute_service::{
-    D1ApiState, D1BindingService, DoApiState, HealthCoordinator, KvApiState, MetricsRegistry,
-    R2ApiState, R2BindingService, SqliteKvBindingExecutor, bind_binding_backend,
-    serve_binding_backend,
+    D1ApiState, D1BindingService, HealthCoordinator, KvApiState, MetricsRegistry, R2ApiState,
+    R2BindingService, SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend,
 };
 use open_compute_storage::{
     D1DatabaseRepository, D1Paths, PlatformStorage, SchedulerStore, VersionRecord,
@@ -375,16 +374,6 @@ pub(super) fn admin_router(
         1_000,
         Duration::from_secs(2),
     ))
-    .with_do_api(
-        DoApiState::new(
-            storage,
-            pins,
-            stack.transport.clone(),
-            durable_objects_config(),
-            Duration::from_secs(2),
-        )
-        .with_scheduler(Some(scheduler_store)),
-    )
     .with_scheduler(Some(stack.scheduler.clone()));
     http::admin_router(state)
 }
