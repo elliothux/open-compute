@@ -126,9 +126,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     let namespace = do_repository
         .namespace_for_worker_upload(account, worker.id, "Counter", Some("workflow-products-v1"))
         .unwrap();
-    do_repository
-        .complete_worker_migration(worker.id, &do_plan, now())
-        .unwrap();
     bindings.insert(
         "OBJECTS".into(),
         VersionBindingInput {
@@ -172,14 +169,15 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
     .unwrap();
     let controller = VersionController::new(
         &storage,
-        artifacts,
+        artifacts.clone(),
         Arc::new(stack.transport.clone()),
         BundleLimits::default(),
     )
     .with_product_promoter(open_compute_service::product_promotion_for_test(
         storage.clone(),
         scheduler.clone(),
-    ));
+    ))
+    .with_durable_object_migration(do_plan);
     let workflow_version = deploy(
         &controller,
         CreateVersionRequest {
@@ -233,8 +231,18 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
             },
         },
     );
+    let scheduled_controller = VersionController::new(
+        &storage,
+        artifacts,
+        Arc::new(stack.transport.clone()),
+        BundleLimits::default(),
+    )
+    .with_product_promoter(open_compute_service::product_promotion_for_test(
+        storage.clone(),
+        scheduler.clone(),
+    ));
     let scheduled_version = deploy(
-        &controller,
+        &scheduled_controller,
         CreateVersionRequest {
             account_id: account,
             worker_id: worker.id,

@@ -37,8 +37,14 @@ pub(super) async fn create_from_upload(
     request_id: RequestId,
     now_ms: i64,
 ) -> Result<CreateVersionOutcome, PlatformError> {
-    let migration =
-        super::do_lifecycle::prepare(api, account_id, worker.id, &upload.metadata, now_ms)?;
+    let migration = super::do_lifecycle::prepare(
+        api,
+        account_id,
+        worker.id,
+        &upload.metadata,
+        upload.bundle.as_deref(),
+        now_ms,
+    )?;
     let result = create_from_prepared_upload(
         api,
         account_authority,
@@ -49,18 +55,11 @@ pub(super) async fn create_from_upload(
         deployment_source,
         request_id,
         now_ms,
-        migration
-            .as_ref()
-            .map(super::do_lifecycle::PreparedDoMigration::tag),
+        migration.as_ref(),
     )
     .await;
     match result {
-        Ok(outcome) => {
-            if let Some(migration) = &migration {
-                migration.complete(api, worker.id, now_ms)?;
-            }
-            Ok(outcome)
-        }
+        Ok(outcome) => Ok(outcome),
         Err(error) => {
             if let Some(migration) = &migration {
                 migration.rollback(api, worker.id, now_ms)?;
@@ -81,7 +80,7 @@ async fn create_from_prepared_upload(
     deployment_source: Option<DeploymentSource>,
     request_id: RequestId,
     now_ms: i64,
-    migration_tag: Option<&str>,
+    migration: Option<&super::do_lifecycle::PreparedDoMigration>,
 ) -> Result<CreateVersionOutcome, PlatformError> {
     let mut input = UploadInput::new(upload.metadata)?;
     let previous = worker
@@ -97,7 +96,7 @@ async fn create_from_prepared_upload(
         account_authority,
         account_id,
         worker.id,
-        migration_tag,
+        migration.map(super::do_lifecycle::PreparedDoMigration::tag),
         false,
     )?;
     let reservation_id = request_id.to_string();
@@ -128,6 +127,9 @@ async fn create_from_prepared_upload(
     .with_queue_consumer_limit(api.max_queue_consumer_concurrency);
     if let Some(promoter) = &api.product_promoter {
         controller = controller.with_product_promoter(promoter.clone());
+    }
+    if let Some(migration) = migration {
+        controller = controller.with_durable_object_migration(migration.plan().clone());
     }
     let outcome = controller
         .create_version(CreateVersionRequest {

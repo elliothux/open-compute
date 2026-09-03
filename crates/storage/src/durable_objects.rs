@@ -20,7 +20,11 @@ use std::str::FromStr;
 
 #[path = "durable_object_migrations.rs"]
 mod worker_migrations;
-pub use worker_migrations::{DurableObjectClassRename, DurableObjectMigrationPlan};
+pub(crate) use worker_migrations::publish_worker_migration_tx;
+pub use worker_migrations::{
+    DurableObjectClassRename, DurableObjectMigrationHead, DurableObjectMigrationPlan,
+    DurableObjectMigrationPreparation,
+};
 
 /// Product schema version for P0.7 namespace rows.
 pub const DO_NAMESPACE_SCHEMA_VERSION: u32 = 1;
@@ -1239,6 +1243,9 @@ fn db_error() -> PlatformError {
     )
 }
 
+#[cfg(test)]
+#[path = "durable_object_migrations_tests.rs"]
+mod migration_tests;
 #[cfg(test)]
 #[path = "durable_objects_tests.rs"]
 mod tests;

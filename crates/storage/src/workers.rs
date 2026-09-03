@@ -931,6 +931,34 @@ impl<'a> WorkerRepository<'a> {
         )
     }
 
+    /// Atomically publish a validated Version and its prepared Durable Object migration.
+    pub fn mark_ready_with_durable_object_migration(
+        &self,
+        version_id: VersionId,
+        worker_id: WorkerId,
+        plan: &crate::DurableObjectMigrationPlan,
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        self.db.with_immediate(|tx| {
+            let changed = tx
+                .execute(
+                    "UPDATE worker_versions SET state = 'ready', ready_at_ms = ?1
+                     WHERE id = ?2 AND worker_id = ?3 AND state = 'validating'",
+                    params![now_ms, version_id.to_string(), worker_id.to_string()],
+                )
+                .map_err(|_| db_error())?;
+            if changed != 1 {
+                return Err(PlatformError::new(
+                    ErrorCode::VersionNotReady,
+                    "version state transition precondition failed",
+                ));
+            }
+            crate::durable_objects::publish_worker_migration_tx(
+                tx, worker_id, version_id, plan, now_ms,
+            )
+        })
+    }
+
     /// Reject a staging or validating version with a stable safe code.
     pub fn mark_rejected(
         &self,

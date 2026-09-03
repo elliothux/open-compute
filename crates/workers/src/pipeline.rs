@@ -35,12 +35,13 @@ use open_compute_core::{
 };
 use open_compute_storage::{
     BindingRepository, BuiltinBindingKind, CRON_PARSER_VERSION, DeploymentRecord, DeploymentSource,
-    DurableObjectRepository, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewCronConfig,
-    NewCronDeclaration, NewQueueConsumerDeclaration, NewQueueProducerBinding, NewVersion,
-    NewVersionAssets, NewVersionBinding, NewVersionObjectRef, NewVersionService, PlatformStorage,
-    QueueAvailability, QueueConsumerConfig, QueueConsumerRepository, QueueRepository, QueueState,
-    ResourceRepository, StoredVersionSecret, VersionBuiltinBindingRecord, VersionCachePolicyRecord,
-    VersionContentKind, VersionObjectKind, VersionRecord, VersionState, WorkerRepository,
+    DurableObjectMigrationPlan, DurableObjectRepository, IdempotencyReservation,
+    LOADER_SCHEMA_VERSION, NewCronConfig, NewCronDeclaration, NewQueueConsumerDeclaration,
+    NewQueueProducerBinding, NewVersion, NewVersionAssets, NewVersionBinding, NewVersionObjectRef,
+    NewVersionService, PlatformStorage, QueueAvailability, QueueConsumerConfig,
+    QueueConsumerRepository, QueueRepository, QueueState, ResourceRepository, StoredVersionSecret,
+    VersionBuiltinBindingRecord, VersionCachePolicyRecord, VersionContentKind, VersionObjectKind,
+    VersionRecord, VersionState, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -549,6 +550,7 @@ pub struct VersionController<'a> {
     bundle_limits: BundleLimits,
     max_queue_consumer_concurrency: u32,
     product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
+    durable_object_migration: Option<DurableObjectMigrationPlan>,
 }
 
 impl std::fmt::Debug for VersionController<'_> {
@@ -576,6 +578,7 @@ impl<'a> VersionController<'a> {
             bundle_limits,
             max_queue_consumer_concurrency: DEFAULT_MAX_QUEUE_CONSUMER_CONCURRENCY,
             product_promoter: None,
+            durable_object_migration: None,
         }
     }
 
@@ -590,6 +593,13 @@ impl<'a> VersionController<'a> {
     #[must_use]
     pub fn with_product_promoter(mut self, promoter: Arc<dyn ProductPromotionCoordinator>) -> Self {
         self.product_promoter = Some(promoter);
+        self
+    }
+
+    /// Attach the prepared Durable Object plan published by this Version's ready transition.
+    #[must_use]
+    pub fn with_durable_object_migration(mut self, plan: DurableObjectMigrationPlan) -> Self {
+        self.durable_object_migration = Some(plan);
         self
     }
 
@@ -636,8 +646,13 @@ impl<'a> VersionController<'a> {
         // Authentication/account scoping happens before reserving a key, so a
         // nonexistent target cannot strand a running idempotency row.
         repo.get_worker(request.account_id, request.worker_id)?;
-        let fingerprint_input =
-            request_fingerprint(&request, &content, &canonical_vars, version_id)?;
+        let fingerprint_input = request_fingerprint(
+            &request,
+            &content,
+            &canonical_vars,
+            version_id,
+            self.durable_object_migration.as_ref(),
+        )?;
         let fingerprint = self
             .storage
             .crypto()
@@ -674,7 +689,20 @@ impl<'a> VersionController<'a> {
         }
 
         let fixed_version_id = version_id.unwrap_or_else(VersionId::generate);
-        let operation = if recover_running {
+        let migration_preflight = self
+            .durable_object_migration
+            .as_ref()
+            .map(|plan| {
+                DurableObjectRepository::new(self.storage).validate_worker_migration_version(
+                    request.worker_id,
+                    fixed_version_id,
+                    plan,
+                )
+            })
+            .transpose();
+        let operation = if let Err(error) = migration_preflight {
+            Err(error)
+        } else if recover_running {
             self.resume_reserved(
                 &request,
                 content,
@@ -1053,7 +1081,16 @@ impl<'a> VersionController<'a> {
             }
         }
         if version.state == VersionState::Validating {
-            repo.mark_ready(version.id, request.now_ms)?;
+            if let Some(plan) = &self.durable_object_migration {
+                repo.mark_ready_with_durable_object_migration(
+                    version.id,
+                    request.worker_id,
+                    plan,
+                    request.now_ms,
+                )?;
+            } else {
+                repo.mark_ready(version.id, request.now_ms)?;
+            }
             version.state = VersionState::Ready;
             version.ready_at_ms = Some(request.now_ms);
         }

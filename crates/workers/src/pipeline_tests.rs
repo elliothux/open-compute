@@ -2,6 +2,7 @@ use super::*;
 use crate::assets::{
     AssetEntryV1, AssetManifestV1, AssetRoutingConfigV1, HtmlHandling, NotFoundHandling,
 };
+use crate::{ModuleInput, ModuleType};
 
 fn version_assets(binding: Option<&str>, worker_first: RunWorkerFirst) -> VersionAssets {
     VersionAssets {
@@ -33,6 +34,42 @@ fn assets_only_request(assets: &VersionAssets) -> CreateVersionRequest {
         idempotency_key: "asset-test".to_owned(),
         content: VersionContent::AssetsOnly {
             assets: assets.clone(),
+        },
+        vars: BTreeMap::new(),
+        secrets: BTreeMap::new(),
+        bindings: BTreeMap::new(),
+        services: BTreeMap::new(),
+        runtime_features: Default::default(),
+        queue_consumers: Vec::new(),
+        crons: Vec::new(),
+        deployment_source: None,
+        request_id: RequestId::generate(),
+        now_ms: 1,
+    }
+}
+
+fn worker_request(
+    account_id: AccountId,
+    worker_id: WorkerId,
+    source: &[u8],
+) -> CreateVersionRequest {
+    let bundle = CanonicalBundle::build(
+        "index.js",
+        vec![ModuleInput {
+            name: "index.js".to_owned(),
+            module_type: ModuleType::EsModule,
+            bytes: source.to_vec(),
+        }],
+        BundleLimits::default(),
+    )
+    .unwrap();
+    CreateVersionRequest {
+        account_id,
+        worker_id,
+        idempotency_key: "migration-replay".to_owned(),
+        content: VersionContent::Worker {
+            bundle: bundle.into_bytes().into(),
+            assets: None,
         },
         vars: BTreeMap::new(),
         secrets: BTreeMap::new(),
@@ -142,4 +179,73 @@ fn asset_store_errors_are_sanitized_by_product_semantics() {
             expected
         );
     }
+}
+
+#[test]
+fn migration_replay_identity_includes_version_content_and_exact_plan() {
+    let account_id = AccountId::generate();
+    let worker_id = WorkerId::generate();
+    let first = worker_request(account_id, worker_id, b"export default { fetch() {} }");
+    let changed = worker_request(
+        account_id,
+        worker_id,
+        b"export default { fetch() { return new Response('changed') } }",
+    );
+    let first_content = PreparedContent::prepare(&first.content, BundleLimits::default()).unwrap();
+    let changed_content =
+        PreparedContent::prepare(&changed.content, BundleLimits::default()).unwrap();
+    let plan = DurableObjectMigrationPlan {
+        declarative: false,
+        old_tag: None,
+        new_tag: "v1".to_owned(),
+        new_sqlite_classes: vec!["Counter".to_owned()],
+        renamed_classes: Vec::new(),
+        deleted_classes: Vec::new(),
+    };
+    let version_id = VersionId::generate();
+    let first_fingerprint = request_fingerprint(
+        &first,
+        &first_content,
+        &BTreeMap::new(),
+        Some(version_id),
+        Some(&plan),
+    )
+    .unwrap();
+    assert_ne!(
+        first_fingerprint,
+        request_fingerprint(
+            &changed,
+            &changed_content,
+            &BTreeMap::new(),
+            Some(version_id),
+            Some(&plan),
+        )
+        .unwrap()
+    );
+    assert_ne!(
+        first_fingerprint,
+        request_fingerprint(
+            &first,
+            &first_content,
+            &BTreeMap::new(),
+            Some(VersionId::generate()),
+            Some(&plan),
+        )
+        .unwrap()
+    );
+    let changed_plan = DurableObjectMigrationPlan {
+        new_sqlite_classes: vec!["Different".to_owned()],
+        ..plan
+    };
+    assert_ne!(
+        first_fingerprint,
+        request_fingerprint(
+            &first,
+            &first_content,
+            &BTreeMap::new(),
+            Some(version_id),
+            Some(&changed_plan),
+        )
+        .unwrap()
+    );
 }

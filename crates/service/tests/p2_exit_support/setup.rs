@@ -137,9 +137,6 @@ pub(super) async fn prepare() -> Fixture {
     let namespace = do_repository
         .namespace_for_worker_upload(account, worker.id, "Counter", Some("p2-chain-v1"))
         .unwrap();
-    do_repository
-        .complete_worker_migration(worker.id, &do_plan, now_ms())
-        .unwrap();
     bindings.insert(
         "OBJECTS".into(),
         binding(BindingKind::DoNamespace, namespace.resource.id),
@@ -162,16 +159,6 @@ pub(super) async fn prepare() -> Fixture {
         .create_definition(account, "chain-flow", now_ms())
         .unwrap()
         .id;
-    let controller = VersionController::new(
-        &storage,
-        artifacts,
-        Arc::new(stack.transport.clone()),
-        BundleLimits::default(),
-    )
-    .with_product_promoter(open_compute_service::product_promotion_for_test(
-        storage.clone(),
-        scheduler.clone(),
-    ));
     let source = include_str!("../fixtures/p2-exit-worker.js");
     let mut versions = Vec::new();
     for index in 0..3 {
@@ -236,6 +223,19 @@ pub(super) async fn prepare() -> Fixture {
             request_id: RequestId::generate(),
             now_ms: now_ms(),
         };
+        let mut controller = VersionController::new(
+            &storage,
+            artifacts.clone(),
+            Arc::new(stack.transport.clone()),
+            BundleLimits::default(),
+        )
+        .with_product_promoter(open_compute_service::product_promotion_for_test(
+            storage.clone(),
+            scheduler.clone(),
+        ));
+        if index == 0 {
+            controller = controller.with_durable_object_migration(do_plan.clone());
+        }
         let version = deploy(&controller, request, &stack.supervisor).await;
         // The first version makes the self-binding deployable; publish the
         // gateway's version too so its DO calls use the active Worker version.

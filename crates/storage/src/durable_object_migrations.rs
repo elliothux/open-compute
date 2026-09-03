@@ -29,6 +29,59 @@ pub struct DurableObjectMigrationPlan {
     pub deleted_classes: Vec<String>,
 }
 
+impl DurableObjectMigrationPlan {
+    /// Compute the domain-separated identity of this exact closed migration declaration.
+    pub fn fingerprint(&self) -> Result<[u8; 32], PlatformError> {
+        validate_migration_plan(self)?;
+        let mut canonical = Vec::new();
+        canonical.push(u8::from(self.declarative));
+        frame(&mut canonical, self.old_tag.as_deref().unwrap_or_default())?;
+        frame(&mut canonical, &self.new_tag)?;
+        for class_name in &self.new_sqlite_classes {
+            canonical.push(1);
+            frame(&mut canonical, class_name)?;
+        }
+        for rename in &self.renamed_classes {
+            canonical.push(2);
+            frame(&mut canonical, &rename.from)?;
+            frame(&mut canonical, &rename.to)?;
+        }
+        for class_name in &self.deleted_classes {
+            canonical.push(3);
+            frame(&mut canonical, class_name)?;
+        }
+        let mut digest = Sha256::new();
+        digest.update(b"open-compute/durable-object-migration/v1");
+        digest.update(canonical);
+        Ok(digest.finalize().into())
+    }
+}
+
+/// Durable result of preparing a migration before runtime validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DurableObjectMigrationPreparation {
+    /// Namespace changes are pending and must publish with the Version ready transition.
+    Pending,
+    /// The exact plan was already published by this immutable Version.
+    AlreadyCommitted {
+        /// Version that already owns the exact migration plan.
+        version_id: VersionId,
+    },
+}
+
+/// Last committed Durable Object migration head for one Worker.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurableObjectMigrationHead {
+    /// Current immutable migration tag.
+    pub tag: String,
+    /// Prior committed migration tag, absent for the first migration.
+    pub old_tag: Option<String>,
+    /// Exact plan identity bound to the Version.
+    pub plan_sha256: [u8; 32],
+    /// Version whose ready transition published the migration.
+    pub version_id: VersionId,
+}
+
 impl DurableObjectRepository<'_> {
     /// Prepare new/renamed namespace identities without making an unvalidated migration visible.
     pub fn prepare_worker_migration(
@@ -37,8 +90,9 @@ impl DurableObjectRepository<'_> {
         worker_id: WorkerId,
         plan: &DurableObjectMigrationPlan,
         now_ms: i64,
-    ) -> Result<(), PlatformError> {
+    ) -> Result<DurableObjectMigrationPreparation, PlatformError> {
         validate_migration_plan(plan)?;
+        let plan_sha256 = plan.fingerprint()?;
         let max_namespaces = self.storage.hardening().max_resources_per_kind_per_account;
         self.storage.db().with_immediate(|tx| {
             let worker: Option<(String, String, Option<i64>)> = tx
@@ -55,19 +109,31 @@ impl DurableObjectRepository<'_> {
             if deleted_at_ms.is_some() || worker_account != account_id.to_string() {
                 return Err(namespace_not_found());
             }
-            let current_tag: Option<String> = tx
+            let current = read_migration_head(tx, worker_id)?;
+            if let Some(current) = &current
+                && current.tag == plan.new_tag
+            {
+                if current.plan_sha256 == plan_sha256 {
+                    return Ok(DurableObjectMigrationPreparation::AlreadyCommitted {
+                        version_id: current.version_id,
+                    });
+                }
+                return Err(migration_conflict());
+            }
+            let reused_tag: bool = tx
                 .query_row(
-                    "SELECT current_tag FROM worker_do_migration_tags WHERE worker_id = ?1",
-                    [worker_id.to_string()],
+                    "SELECT EXISTS(SELECT 1 FROM worker_do_migrations
+                     WHERE worker_id = ?1 AND tag = ?2)",
+                    params![worker_id.to_string(), plan.new_tag],
                     |row| row.get(0),
                 )
-                .optional()
                 .map_err(|_| db_error())?;
-            if current_tag.as_ref() != plan.old_tag.as_ref() {
-                return Err(PlatformError::new(
-                    ErrorCode::IdempotencyConflict,
-                    "Durable Object migration tag does not match current authority",
-                ));
+            if reused_tag {
+                return Err(migration_conflict());
+            }
+            let current_tag = current.as_ref().map(|value| value.tag.as_str());
+            if current_tag != plan.old_tag.as_deref() {
+                return Err(migration_conflict());
             }
             let live_count: i64 = tx
                 .query_row(
@@ -126,7 +192,7 @@ impl DurableObjectRepository<'_> {
                     return Err(namespace_not_found());
                 }
             }
-            Ok(())
+            Ok(DurableObjectMigrationPreparation::Pending)
         })
     }
 
@@ -166,61 +232,52 @@ impl DurableObjectRepository<'_> {
     }
 
     /// Read the last committed Durable Object migration tag for one Worker.
-    pub fn current_worker_migration_tag(
+    pub fn current_worker_migration(
         &self,
         worker_id: WorkerId,
-    ) -> Result<Option<String>, PlatformError> {
-        self.storage.db().with_read(|conn| {
-            conn.query_row(
-                "SELECT current_tag FROM worker_do_migration_tags WHERE worker_id = ?1",
-                [worker_id.to_string()],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|_| db_error())
-        })
+    ) -> Result<Option<DurableObjectMigrationHead>, PlatformError> {
+        self.storage
+            .db()
+            .with_read(|conn| read_migration_head(conn, worker_id))
     }
 
-    /// Publish one successfully validated migration and retire its deleted classes atomically.
-    pub fn complete_worker_migration(
+    /// Require this plan to be publishable by the selected immutable Version identity.
+    pub fn validate_worker_migration_version(
         &self,
         worker_id: WorkerId,
+        version_id: VersionId,
         plan: &DurableObjectMigrationPlan,
-        now_ms: i64,
     ) -> Result<(), PlatformError> {
         validate_migration_plan(plan)?;
-        self.storage.db().with_immediate(|tx| {
-            tx.execute(
-                "UPDATE do_namespaces
-                     SET lifecycle_state = 'active', migration_tag = NULL,
-                         previous_class_name = NULL
-                     WHERE owner_worker_id = ?1 AND lifecycle_state = 'pending'
-                       AND migration_tag = ?2",
-                params![worker_id.to_string(), plan.new_tag],
-            )
-            .map_err(|_| db_error())?;
-            for class_name in &plan.deleted_classes {
-                let changed = tx
-                    .execute(
-                        "UPDATE do_namespaces SET lifecycle_state = 'retired'
-                         WHERE owner_worker_id = ?1 AND class_name = ?2
-                           AND lifecycle_state = 'active'",
-                        params![worker_id.to_string(), class_name],
-                    )
-                    .map_err(|_| db_error())?;
-                if changed != 1 {
-                    return Err(namespace_not_found());
+        let plan_sha256 = plan.fingerprint()?;
+        self.storage.db().with_read(|conn| {
+            let current = read_migration_head(conn, worker_id)?;
+            if let Some(current) = current {
+                if current.tag == plan.new_tag {
+                    return if current.plan_sha256 == plan_sha256 && current.version_id == version_id
+                    {
+                        Ok(())
+                    } else {
+                        Err(migration_conflict())
+                    };
                 }
+                if Some(current.tag.as_str()) != plan.old_tag.as_deref() {
+                    return Err(migration_conflict());
+                }
+            } else if plan.old_tag.is_some() {
+                return Err(migration_conflict());
             }
-            tx.execute(
-                "INSERT INTO worker_do_migration_tags (worker_id, current_tag, updated_at_ms)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(worker_id) DO UPDATE SET
-                   current_tag = excluded.current_tag,
-                   updated_at_ms = excluded.updated_at_ms",
-                params![worker_id.to_string(), plan.new_tag, now_ms],
-            )
-            .map_err(|_| db_error())?;
+            let reused_tag: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM worker_do_migrations
+                     WHERE worker_id = ?1 AND tag = ?2)",
+                    params![worker_id.to_string(), plan.new_tag],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if reused_tag {
+                return Err(migration_conflict());
+            }
             Ok(())
         })
     }
@@ -299,6 +356,210 @@ impl DurableObjectRepository<'_> {
             Ok(())
         })
     }
+}
+
+pub(crate) fn publish_worker_migration_tx(
+    tx: &rusqlite::Transaction<'_>,
+    worker_id: WorkerId,
+    version_id: VersionId,
+    plan: &DurableObjectMigrationPlan,
+    now_ms: i64,
+) -> Result<(), PlatformError> {
+    validate_migration_plan(plan)?;
+    let plan_sha256 = plan.fingerprint()?;
+    if let Some(current) = read_migration_head(tx, worker_id)? {
+        if current.tag == plan.new_tag {
+            return if current.plan_sha256 == plan_sha256 && current.version_id == version_id {
+                Ok(())
+            } else {
+                Err(migration_conflict())
+            };
+        }
+        if Some(current.tag.as_str()) != plan.old_tag.as_deref() {
+            return Err(migration_conflict());
+        }
+    } else if plan.old_tag.is_some() {
+        return Err(migration_conflict());
+    }
+    let reused_tag: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM worker_do_migrations
+             WHERE worker_id = ?1 AND tag = ?2)",
+            params![worker_id.to_string(), plan.new_tag],
+            |row| row.get(0),
+        )
+        .map_err(|_| db_error())?;
+    if reused_tag {
+        return Err(migration_conflict());
+    }
+
+    let mut pending_statement = tx
+        .prepare(
+            "SELECT class_name, previous_class_name FROM do_namespaces
+             WHERE owner_worker_id = ?1 AND lifecycle_state = 'pending'
+               AND migration_tag = ?2 ORDER BY class_name",
+        )
+        .map_err(|_| db_error())?;
+    let pending_rows = pending_statement
+        .query_map(params![worker_id.to_string(), plan.new_tag], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .map_err(|_| db_error())?;
+    let mut pending = Vec::new();
+    for row in pending_rows {
+        pending.push(row.map_err(|_| db_error())?);
+    }
+    drop(pending_statement);
+    for (class_name, previous) in &pending {
+        let declared = match previous {
+            Some(previous) if previous != class_name => plan
+                .renamed_classes
+                .iter()
+                .any(|rename| rename.from == *previous && rename.to == *class_name),
+            Some(_) | None => plan
+                .new_sqlite_classes
+                .iter()
+                .any(|name| name == class_name),
+        };
+        if !declared {
+            return Err(invariant());
+        }
+    }
+    for class_name in &plan.new_sqlite_classes {
+        let lifecycle: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT lifecycle_state, migration_tag FROM do_namespaces
+                 WHERE owner_worker_id = ?1 AND class_name = ?2",
+                params![worker_id.to_string(), class_name],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| db_error())?;
+        let valid = lifecycle.is_some_and(|(state, tag)| {
+            (state == "pending" && tag.as_deref() == Some(plan.new_tag.as_str()))
+                || (plan.declarative && state == "active" && tag.is_none())
+        });
+        if !valid {
+            return Err(invariant());
+        }
+    }
+    for rename in &plan.renamed_classes {
+        let exact: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM do_namespaces
+                 WHERE owner_worker_id = ?1 AND class_name = ?2
+                   AND lifecycle_state = 'pending' AND migration_tag = ?3
+                   AND previous_class_name = ?4)",
+                params![worker_id.to_string(), rename.to, plan.new_tag, rename.from],
+                |row| row.get(0),
+            )
+            .map_err(|_| db_error())?;
+        if !exact {
+            return Err(invariant());
+        }
+    }
+    for class_name in &plan.deleted_classes {
+        let exact: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM do_namespaces
+                 WHERE owner_worker_id = ?1 AND class_name = ?2
+                   AND lifecycle_state = 'active')",
+                params![worker_id.to_string(), class_name],
+                |row| row.get(0),
+            )
+            .map_err(|_| db_error())?;
+        if !exact {
+            return Err(invariant());
+        }
+    }
+
+    tx.execute(
+        "UPDATE do_namespaces
+             SET lifecycle_state = 'active', migration_tag = NULL,
+                 previous_class_name = NULL
+             WHERE owner_worker_id = ?1 AND lifecycle_state = 'pending'
+               AND migration_tag = ?2",
+        params![worker_id.to_string(), plan.new_tag],
+    )
+    .map_err(|_| db_error())?;
+    for class_name in &plan.deleted_classes {
+        let changed = tx
+            .execute(
+                "UPDATE do_namespaces SET lifecycle_state = 'retired'
+                 WHERE owner_worker_id = ?1 AND class_name = ?2
+                   AND lifecycle_state = 'active'",
+                params![worker_id.to_string(), class_name],
+            )
+            .map_err(|_| db_error())?;
+        if changed != 1 {
+            return Err(invariant());
+        }
+    }
+    tx.execute(
+        "INSERT INTO worker_do_migrations
+         (worker_id, tag, old_tag, plan_sha256, version_id, created_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            worker_id.to_string(),
+            plan.new_tag,
+            plan.old_tag,
+            plan_sha256.as_slice(),
+            version_id.to_string(),
+            now_ms,
+        ],
+    )
+    .map_err(|_| db_error())?;
+    tx.execute(
+        "INSERT INTO worker_do_migration_heads (worker_id, current_tag, updated_at_ms)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(worker_id) DO UPDATE SET
+           current_tag = excluded.current_tag,
+           updated_at_ms = excluded.updated_at_ms",
+        params![worker_id.to_string(), plan.new_tag, now_ms],
+    )
+    .map_err(|_| db_error())?;
+    Ok(())
+}
+
+fn read_migration_head(
+    conn: &rusqlite::Connection,
+    worker_id: WorkerId,
+) -> Result<Option<DurableObjectMigrationHead>, PlatformError> {
+    let row: Option<(String, Option<String>, Vec<u8>, String)> = conn
+        .query_row(
+            "SELECT h.current_tag, m.old_tag, m.plan_sha256, m.version_id
+             FROM worker_do_migration_heads h
+             JOIN worker_do_migrations m
+               ON m.worker_id = h.worker_id AND m.tag = h.current_tag
+             WHERE h.worker_id = ?1",
+            [worker_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|_| db_error())?;
+    row.map(|(tag, old_tag, digest, version)| {
+        Ok(DurableObjectMigrationHead {
+            tag,
+            old_tag,
+            plan_sha256: digest.try_into().map_err(|_| invariant())?,
+            version_id: VersionId::from_str(&version).map_err(|_| invariant())?,
+        })
+    })
+    .transpose()
+}
+
+fn frame(bytes: &mut Vec<u8>, value: &str) -> Result<(), PlatformError> {
+    let length = u64::try_from(value.len()).map_err(|_| invariant())?;
+    bytes.extend_from_slice(&length.to_be_bytes());
+    bytes.extend_from_slice(value.as_bytes());
+    Ok(())
+}
+
+fn migration_conflict() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::IdempotencyConflict,
+        "Durable Object migration tag conflicts with immutable Version authority",
+    )
 }
 
 fn validate_migration_plan(plan: &DurableObjectMigrationPlan) -> Result<(), PlatformError> {

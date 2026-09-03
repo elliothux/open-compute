@@ -108,6 +108,7 @@ pub(super) fn request_fingerprint(
     content: &PreparedContent,
     vars: &BTreeMap<String, serde_json::Value>,
     version_id: Option<VersionId>,
+    durable_object_migration: Option<&DurableObjectMigrationPlan>,
 ) -> Result<[u8; 32], PlatformError> {
     let mut canonical = Vec::new();
     frame(&mut canonical, request.account_id.to_string().as_bytes())?;
@@ -161,6 +162,15 @@ pub(super) fn request_fingerprint(
     frame(
         &mut canonical,
         &serde_json::to_vec(&request.crons).map_err(|_| invariant())?,
+    )?;
+    frame(
+        &mut canonical,
+        durable_object_migration
+            .map(DurableObjectMigrationPlan::fingerprint)
+            .transpose()?
+            .as_ref()
+            .map(<[u8; 32]>::as_slice)
+            .unwrap_or_default(),
     )?;
     canonical.extend_from_slice(
         request

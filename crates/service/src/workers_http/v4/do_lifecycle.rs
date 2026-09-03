@@ -3,16 +3,16 @@
 use super::errors::{invalid, unsupported};
 use super::model::{WorkerUploadExport, WorkerUploadMetadata};
 use crate::workers_http::WorkerApiState;
-use open_compute_core::{AccountId, ErrorCode, PlatformError, WorkerId};
+use open_compute_core::{AccountId, PlatformError, WorkerId};
 use open_compute_storage::{
-    DurableObjectClassRename, DurableObjectMigrationPlan, DurableObjectRepository,
+    DurableObjectClassRename, DurableObjectMigrationHead, DurableObjectMigrationPlan,
+    DurableObjectRepository,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct PreparedDoMigration {
     plan: DurableObjectMigrationPlan,
-    already_committed: bool,
 }
 
 impl PreparedDoMigration {
@@ -20,17 +20,8 @@ impl PreparedDoMigration {
         &self.plan.new_tag
     }
 
-    pub(super) fn complete(
-        &self,
-        api: &WorkerApiState,
-        worker_id: WorkerId,
-        now_ms: i64,
-    ) -> Result<(), PlatformError> {
-        if self.already_committed {
-            return Ok(());
-        }
-        DurableObjectRepository::new(&api.storage)
-            .complete_worker_migration(worker_id, &self.plan, now_ms)
+    pub(super) fn plan(&self) -> &DurableObjectMigrationPlan {
+        &self.plan
     }
 
     pub(super) fn rollback(
@@ -39,9 +30,6 @@ impl PreparedDoMigration {
         worker_id: WorkerId,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        if self.already_committed {
-            return Ok(());
-        }
         DurableObjectRepository::new(&api.storage).rollback_worker_migration(
             worker_id,
             &self.plan.new_tag,
@@ -55,31 +43,31 @@ pub(super) fn prepare(
     account_id: AccountId,
     worker_id: WorkerId,
     metadata: &WorkerUploadMetadata,
+    bundle: Option<&[u8]>,
     now_ms: i64,
 ) -> Result<Option<PreparedDoMigration>, PlatformError> {
     let repository = DurableObjectRepository::new(&api.storage);
-    let current = repository.current_worker_migration_tag(worker_id)?;
-    let Some(mut plan) = migration_plan(metadata, current.clone())? else {
+    let current = repository.current_worker_migration(worker_id)?;
+    let current_tag = current.as_ref().map(|migration| migration.tag.clone());
+    let Some(mut plan) = migration_plan(metadata, current_tag, bundle)? else {
         return Ok(None);
     };
-    if current.as_deref() == Some(plan.new_tag.as_str()) {
-        return Ok(Some(PreparedDoMigration {
-            plan,
-            already_committed: true,
-        }));
-    }
-    if current.as_ref() != plan.old_tag.as_ref() {
-        return Err(PlatformError::new(
-            ErrorCode::IdempotencyConflict,
-            "Durable Object migration tag does not match current Script authority",
-        ));
-    }
-    repository.prepare_worker_migration(account_id, worker_id, &plan, now_ms)?;
+    normalize_declarative_replay_base(&mut plan, current.as_ref());
     plan.new_sqlite_classes.sort();
-    Ok(Some(PreparedDoMigration {
-        plan,
-        already_committed: false,
-    }))
+    repository.prepare_worker_migration(account_id, worker_id, &plan, now_ms)?;
+    Ok(Some(PreparedDoMigration { plan }))
+}
+
+fn normalize_declarative_replay_base(
+    plan: &mut DurableObjectMigrationPlan,
+    current: Option<&DurableObjectMigrationHead>,
+) {
+    if plan.declarative
+        && let Some(current) = current
+        && current.tag == plan.new_tag
+    {
+        plan.old_tag.clone_from(&current.old_tag);
+    }
 }
 
 pub(super) fn declares_live_class(metadata: &WorkerUploadMetadata, class_name: &str) -> bool {
@@ -112,6 +100,7 @@ pub(super) fn declares_live_class(metadata: &WorkerUploadMetadata, class_name: &
 fn migration_plan(
     metadata: &WorkerUploadMetadata,
     current_tag: Option<String>,
+    bundle: Option<&[u8]>,
 ) -> Result<Option<DurableObjectMigrationPlan>, PlatformError> {
     let durable_exports = metadata
         .exports
@@ -165,18 +154,20 @@ fn migration_plan(
     if durable_exports.is_empty() {
         return Ok(None);
     }
-    declarative_export_plan(&durable_exports, current_tag).map(Some)
+    let bundle = bundle.ok_or_else(|| invalid("Durable Object exports require Worker code"))?;
+    declarative_export_plan(&durable_exports, current_tag, Sha256::digest(bundle).into()).map(Some)
 }
 
 fn declarative_export_plan(
     exports: &BTreeMap<&String, &WorkerUploadExport>,
     current_tag: Option<String>,
+    bundle_sha256: [u8; 32],
 ) -> Result<DurableObjectMigrationPlan, PlatformError> {
     let mut live = BTreeSet::new();
     let mut rename_targets = BTreeSet::new();
     let mut renamed_classes = Vec::new();
     let mut deleted_classes = Vec::new();
-    let mut tag_material = Vec::new();
+    let mut tag_material = bundle_sha256.to_vec();
     for (name, export) in exports {
         let WorkerUploadExport::DurableObject {
             state,
@@ -269,7 +260,7 @@ mod tests {
                 }]
             }
         }));
-        let plan = migration_plan(&migrations, Some("v1".to_owned()))
+        let plan = migration_plan(&migrations, Some("v1".to_owned()), Some(b"first code"))
             .unwrap()
             .unwrap();
         assert_eq!(plan.new_tag, "v2");
@@ -286,7 +277,7 @@ mod tests {
                 "Gone": {"type": "durable-object", "state": "deleted"}
             }
         }));
-        let plan = migration_plan(&exports, Some("prior".to_owned()))
+        let plan = migration_plan(&exports, Some("prior".to_owned()), Some(b"first code"))
             .unwrap()
             .unwrap();
         assert_eq!(plan.old_tag.as_deref(), Some("prior"));
@@ -294,6 +285,28 @@ mod tests {
         assert_eq!(plan.renamed_classes[0].from, "OldName");
         assert_eq!(plan.deleted_classes, ["Gone"]);
         assert!(declares_live_class(&exports, "NewName"));
+
+        let mut replay = migration_plan(&exports, Some(plan.new_tag.clone()), Some(b"first code"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(replay.old_tag.as_ref(), Some(&plan.new_tag));
+        normalize_declarative_replay_base(
+            &mut replay,
+            Some(&DurableObjectMigrationHead {
+                tag: plan.new_tag.clone(),
+                old_tag: plan.old_tag.clone(),
+                plan_sha256: plan.fingerprint().unwrap(),
+                version_id: open_compute_core::VersionId::generate(),
+            }),
+        );
+        assert_eq!(replay.fingerprint().unwrap(), plan.fingerprint().unwrap());
+        assert_ne!(
+            migration_plan(&exports, Some(plan.new_tag.clone()), Some(b"changed code"))
+                .unwrap()
+                .unwrap()
+                .new_tag,
+            plan.new_tag
+        );
     }
 
     #[test]
@@ -310,7 +323,7 @@ mod tests {
                 "exports": {"Moved": {"type": "durable-object", "state": "transferred", "transferred_to": "other"}}
             }),
         ] {
-            assert!(migration_plan(&metadata(value), None).is_err());
+            assert!(migration_plan(&metadata(value), None, Some(b"code")).is_err());
         }
     }
 }

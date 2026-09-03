@@ -105,12 +105,53 @@ BEGIN
   SELECT RAISE(ABORT, 'invalid durable object namespace migration metadata');
 END;
 
-CREATE TABLE worker_do_migration_tags (
-  worker_id TEXT PRIMARY KEY REFERENCES workers(id),
-  current_tag TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
+CREATE TABLE worker_do_migrations (
+  worker_id      TEXT NOT NULL REFERENCES workers(id),
+  tag            TEXT NOT NULL,
+  old_tag        TEXT,
+  plan_sha256    BLOB NOT NULL CHECK(length(plan_sha256) = 32),
+  version_id     TEXT NOT NULL REFERENCES worker_versions(id),
+  created_at_ms  INTEGER NOT NULL,
+  PRIMARY KEY(worker_id, tag),
+  UNIQUE(worker_id, version_id),
+  FOREIGN KEY(worker_id, old_tag)
+    REFERENCES worker_do_migrations(worker_id, tag),
+  CHECK(length(tag) BETWEEN 1 AND 128),
+  CHECK(old_tag IS NULL OR length(old_tag) BETWEEN 1 AND 128)
+) STRICT;
+
+CREATE TABLE worker_do_migration_heads (
+  worker_id      TEXT PRIMARY KEY REFERENCES workers(id),
+  current_tag    TEXT NOT NULL,
+  updated_at_ms  INTEGER NOT NULL,
+  FOREIGN KEY(worker_id, current_tag)
+    REFERENCES worker_do_migrations(worker_id, tag),
   CHECK(length(current_tag) BETWEEN 1 AND 128)
 ) STRICT;
+
+CREATE TRIGGER worker_do_migration_insert_guard
+BEFORE INSERT ON worker_do_migrations
+BEGIN
+  SELECT CASE WHEN NOT EXISTS (
+    SELECT 1 FROM worker_versions v
+    WHERE v.id = NEW.version_id
+      AND v.worker_id = NEW.worker_id
+      AND v.state = 'ready'
+      AND v.deleted_at_ms IS NULL
+  ) THEN RAISE(ABORT, 'durable object migration version authority invariant') END;
+END;
+
+CREATE TRIGGER worker_do_migration_update_guard
+BEFORE UPDATE ON worker_do_migrations
+BEGIN
+  SELECT RAISE(ABORT, 'immutable durable object migration authority');
+END;
+
+CREATE TRIGGER worker_do_migration_delete_guard
+BEFORE DELETE ON worker_do_migrations
+BEGIN
+  SELECT RAISE(ABORT, 'immutable durable object migration authority');
+END;
 
 CREATE TRIGGER do_namespace_delete_guard
 BEFORE DELETE ON do_namespaces

@@ -172,7 +172,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         &stack,
         scheduler_store.clone(),
     );
-    let bindings = create_product_set(&router, &storage, account, worker.id).await;
+    let (bindings, do_plan) = create_product_set(&router, &storage, account, worker.id).await;
     assert_control_catalogs(&router, account).await;
     apply_primary_d1_migration(&router, account, bindings.d1).await;
 
@@ -183,7 +183,8 @@ async fn p0_real_combined_exit_matrix_inner() {
             artifacts.clone(),
             validator,
             BundleLimits::default(),
-        );
+        )
+        .with_durable_object_migration(do_plan);
         deploy(
             &controller,
             version_request(
@@ -695,7 +696,10 @@ async fn create_product_set(
     storage: &PlatformStorage,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
-) -> ProductBindings {
+) -> (
+    ProductBindings,
+    open_compute_storage::DurableObjectMigrationPlan,
+) {
     let kv = create_resource(
         router,
         &format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
@@ -783,20 +787,20 @@ async fn create_product_set(
         .unwrap()
         .resource
         .id;
-    do_repository
-        .complete_worker_migration(worker, &do_plan, 1_000_001)
-        .unwrap();
-    ProductBindings {
-        kv,
-        kv_other,
-        r2,
-        r2_other,
-        d1,
-        d1_other,
-        d1_corrupt,
-        objects,
-        objects_other,
-    }
+    (
+        ProductBindings {
+            kv,
+            kv_other,
+            r2,
+            r2_other,
+            d1,
+            d1_other,
+            d1_corrupt,
+            objects,
+            objects_other,
+        },
+        do_plan,
+    )
 }
 
 async fn create_resource(
