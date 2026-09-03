@@ -678,14 +678,24 @@
             }
           }
         ],
-        "x-open-compute-request-body": "none",
+        "x-open-compute-request-body": "json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BackupResponse"
+                  "$ref": "#/components/schemas/RestoredResourceResponse"
                 }
               }
             }
@@ -695,7 +705,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BackupResponse"
+                  "$ref": "#/components/schemas/RestoredResourceResponse"
                 }
               }
             }
@@ -867,14 +877,24 @@
             }
           }
         ],
-        "x-open-compute-request-body": "none",
+        "x-open-compute-request-body": "json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful vendor extension response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BackupResponse"
+                  "$ref": "#/components/schemas/RestoredResourceResponse"
                 }
               }
             }
@@ -884,7 +904,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BackupResponse"
+                  "$ref": "#/components/schemas/RestoredResourceResponse"
                 }
               }
             }
@@ -1199,8 +1219,7 @@
         "required": [
           "id",
           "created_on",
-          "state",
-          "size"
+          "state"
         ],
         "properties": {
           "id": {
@@ -1216,6 +1235,52 @@
           "size": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "RestoreRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+          }
+        }
+      },
+      "RestoredResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "created_on"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "kv_namespace",
+              "d1_database"
+            ]
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -1567,6 +1632,38 @@
             "items": {
               "$ref": "#/components/schemas/Backup"
             }
+          },
+          "errors": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "RestoredResourceResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "success",
+          "result",
+          "errors",
+          "messages"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/RestoredResource"
           },
           "errors": {
             "type": "array",
