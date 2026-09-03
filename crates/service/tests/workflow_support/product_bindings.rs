@@ -9,7 +9,7 @@ use open_compute_workers::{
     ModuleInput, ModuleType, QueueController, VersionController,
 };
 use p0_exit_support::{
-    GateStack, admin_json, admin_router, deploy, open_scheduler, repo_root, storage_config, stores,
+    GateStack, create_product_resource, deploy, open_scheduler, repo_root, storage_config, stores,
 };
 use serde_json::{Value, json};
 
@@ -44,14 +44,6 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         "workflow-products",
     )
     .await;
-    let api = admin_router(
-        storage.clone(),
-        artifacts.clone(),
-        objects,
-        pins,
-        &stack,
-        scheduler.clone(),
-    );
     let account = storage.identity().default_account_id;
     let worker = WorkerRepository::new(storage.db())
         .create_worker(
@@ -64,48 +56,27 @@ async fn workflow_step_uses_kv_d1_r2_do_queue_and_replay_preserves_external_effe
         .unwrap()
         .0;
     let mut bindings = BTreeMap::new();
-    for (binding, kind, path, body, nested) in [
-        (
-            "KV",
-            BindingKind::KvNamespace,
-            "kv/namespaces",
-            json!({"name":"workflow-kv"}),
-            false,
-        ),
-        (
-            "R2",
-            BindingKind::R2Bucket,
-            "r2/buckets",
-            json!({"name":"workflow-r2"}),
-            true,
-        ),
-        (
-            "DB",
-            BindingKind::D1Database,
-            "d1/databases",
-            json!({"name":"workflow-d1"}),
-            false,
-        ),
+    for (binding, kind, resource_name) in [
+        ("KV", BindingKind::KvNamespace, "workflow-kv"),
+        ("R2", BindingKind::R2Bucket, "workflow-r2"),
+        ("DB", BindingKind::D1Database, "workflow-d1"),
     ] {
-        let (status, value) = admin_json(
-            &api,
-            "POST",
-            &format!("/operator/api/v1/accounts/{account}/{path}"),
-            body,
-            Some(binding),
+        let id = create_product_resource(
+            &storage,
+            &objects,
+            &pins,
+            account,
+            kind,
+            resource_name,
+            &format!("workflow-products-{binding}"),
+            now(),
         )
         .await;
-        assert!(status.is_success(), "{value}");
-        let id = if nested {
-            &value["bucket"]["resourceId"]
-        } else {
-            &value["resourceId"]
-        };
         bindings.insert(
             binding.into(),
             VersionBindingInput {
                 kind,
-                id: id.as_str().unwrap().parse().unwrap(),
+                id,
                 permissions: Default::default(),
                 config: Default::default(),
             },

@@ -1,7 +1,7 @@
 //! Provision real product resources before transferring exclusive ownership to ocd.
 
 use crate::p0_exit_support::{
-    GateStack, admin_json, admin_router, deploy, now_ms, open_scheduler, repo_root, storage_config,
+    GateStack, create_product_resource, deploy, now_ms, open_scheduler, repo_root, storage_config,
     stores, wait_pid_change,
 };
 use crate::platform_process::Evidence;
@@ -16,7 +16,6 @@ use open_compute_workers::{
     ModuleInput, ModuleType, QueueConsumerInput, QueueController, ResourcePins,
     VersionBindingInput, VersionController,
 };
-use serde_json::json;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 pub(super) struct Fixture {
@@ -59,14 +58,6 @@ pub(super) async fn prepare() -> Fixture {
         "p2-exit",
     )
     .await;
-    let api = admin_router(
-        storage.clone(),
-        artifacts.clone(),
-        objects,
-        pins,
-        &stack,
-        scheduler.clone(),
-    );
     let account = storage.identity().default_account_id;
     let workers = WorkerRepository::new(storage.db());
     let worker = workers
@@ -80,47 +71,23 @@ pub(super) async fn prepare() -> Fixture {
         .unwrap()
         .0;
     let mut bindings = BTreeMap::new();
-    for (name, kind, path, body, nested) in [
-        (
-            "KV",
-            BindingKind::KvNamespace,
-            "kv/namespaces",
-            json!({"name":"chain-kv"}),
-            false,
-        ),
-        (
-            "R2",
-            BindingKind::R2Bucket,
-            "r2/buckets",
-            json!({"name":"chain-r2"}),
-            true,
-        ),
-        (
-            "DB",
-            BindingKind::D1Database,
-            "d1/databases",
-            json!({"name":"chain-db"}),
-            false,
-        ),
+    for (name, kind, resource_name) in [
+        ("KV", BindingKind::KvNamespace, "chain-kv"),
+        ("R2", BindingKind::R2Bucket, "chain-r2"),
+        ("DB", BindingKind::D1Database, "chain-db"),
     ] {
-        let (status, result) = admin_json(
-            &api,
-            "POST",
-            &format!("/operator/api/v1/accounts/{account}/{path}"),
-            body,
-            Some(name),
+        let id = create_product_resource(
+            &storage,
+            &objects,
+            &pins,
+            account,
+            kind,
+            resource_name,
+            &format!("p2-exit-{name}"),
+            now_ms(),
         )
         .await;
-        assert!(status.is_success(), "{result}");
-        let id = if nested {
-            &result["bucket"]["resourceId"]
-        } else {
-            &result["resourceId"]
-        };
-        bindings.insert(
-            name.into(),
-            binding(kind, id.as_str().unwrap().parse().unwrap()),
-        );
+        bindings.insert(name.into(), binding(kind, id));
     }
     let do_repository = open_compute_storage::DurableObjectRepository::new(&storage);
     let do_plan = open_compute_storage::DurableObjectMigrationPlan {
@@ -288,6 +255,44 @@ pub(super) async fn prepare() -> Fixture {
         frozen: versions[1],
         future: versions[2],
     }
+}
+
+pub(super) async fn activate_future(fixture: &Fixture) {
+    let root = repo_root();
+    let storage =
+        Arc::new(PlatformStorage::bootstrap(&storage_config(&fixture.data), &SystemClock).unwrap());
+    let scheduler = open_scheduler(&storage);
+    let (artifacts, objects) = stores(&fixture.mock);
+    let stack = GateStack::start(
+        storage.clone(),
+        scheduler.clone(),
+        artifacts,
+        objects,
+        ResourcePins::new(),
+        std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
+            .unwrap()
+            .into(),
+        root.join("packages/runtime/workerd.lock.json"),
+        root.join("packages/runtime"),
+        "p2-exit-version-activation",
+    )
+    .await;
+    let version = WorkflowApiState::new(
+        storage.clone(),
+        scheduler.clone(),
+        stack.transport.clone(),
+        Default::default(),
+    )
+    .create_version(
+        fixture.account,
+        fixture.definition,
+        fixture.future,
+        "Flow".into(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(version.state, open_compute_storage::VersionState::Ready);
+    stack.stop().await;
 }
 
 fn binding(kind: BindingKind, id: ResourceId) -> VersionBindingInput {

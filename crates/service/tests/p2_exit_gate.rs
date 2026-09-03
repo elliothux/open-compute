@@ -211,17 +211,6 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     )
     .await;
     assert_eq!(count(&database, "SELECT count(*) FROM workflow_events"), 1);
-    let version = request(
-        &client,
-        admin,
-        &format!(
-            "/operator/api/v1/accounts/{}/workflows/{}/versions",
-            fixture.account, fixture.definition
-        ),
-        json!({"versionId":fixture.future,"className":"Flow"}),
-    )
-    .await;
-    assert_eq!(version["state"], "ready");
     request(&client, public, "/arm/chain", json!({})).await;
     assert!(
         p0_exit_support::now_ms() < due,
@@ -231,6 +220,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     // A paused Workflow retains the accepted event and original sleep deadline.
     // Both its deadline and the DO's native alarm become due while ocd is down.
     crash(&mut process);
+    setup::activate_future(&fixture).await;
     let delay = u64::try_from(due.saturating_sub(p0_exit_support::now_ms()).max(0)).unwrap();
     tokio::time::sleep(Duration::from_millis(delay.max(2200))).await;
     process = spawn(&config, &log);
@@ -422,18 +412,13 @@ fn grant(database: &Connection) -> Option<(WorkflowFence, WorkflowStepAttempt)> 
 }
 
 async fn request(client: &Client, address: SocketAddr, path: &str, body: Value) -> Value {
-    let mut builder = Request::builder()
+    let request = Request::builder()
         .method("POST")
         .uri(format!("http://{address}{path}"))
         .header("host", "workflow.example")
-        .header("content-type", "application/json");
-    if path.starts_with("/operator/api/") {
-        builder = builder.header(
-            "authorization",
-            format!("Bearer {}", platform_process::ADMIN_TOKEN),
-        );
-    }
-    let request = builder.body(Body::from(body.to_string())).unwrap();
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
     let response = tokio::time::timeout(Duration::from_secs(10), client.request(request))
         .await
         .unwrap()

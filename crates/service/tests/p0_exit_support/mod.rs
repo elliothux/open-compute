@@ -29,7 +29,7 @@ use open_compute_service::{
     R2BindingService, SqliteKvBindingExecutor, bind_binding_backend, serve_binding_backend,
 };
 use open_compute_storage::{
-    D1DatabaseRepository, D1Paths, PlatformStorage, SchedulerStore, VersionRecord,
+    D1DatabaseRepository, D1Paths, DeploymentSource, PlatformStorage, SchedulerStore, VersionRecord,
 };
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
@@ -43,6 +43,14 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
 use tower::ServiceExt as _;
+
+mod product_resources;
+pub(super) use product_resources::create_product_resource;
+mod v4;
+#[allow(unused_imports)]
+pub(super) use v4::{
+    assert_envelope as assert_v4_envelope, assert_public_id, product_ids as v4_product_ids,
+};
 
 const WORKER_SOURCE: &str = include_str!("../fixtures/p0_exit_worker.js");
 const P1_WORKERS: &str = include_str!("../fixtures/p1-conformance/workers.mjs");
@@ -327,14 +335,12 @@ impl GateStack {
 
 pub(super) const ADMIN_TOKEN: &str = "p0-exit-admin";
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn admin_router(
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     objects: R2ObjectStore,
     pins: ResourcePins,
     stack: &GateStack,
-    _scheduler_store: Arc<SchedulerStore>,
 ) -> Router {
     let metrics = Arc::new(
         MetricsRegistry::new(&MetricsConfig::default(), "p0-exit-gate", "pinned-workerd").unwrap(),
@@ -374,6 +380,7 @@ pub(super) fn admin_router(
         1_000,
         Duration::from_secs(2),
     ))
+    .with_platform_storage(storage)
     .with_scheduler(Some(stack.scheduler.clone()));
     http::admin_router(state)
 }
@@ -390,18 +397,21 @@ pub(super) async fn admin_json(
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
-        .header(header::CONTENT_TYPE, "application/json")
         .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"));
+    if !body.is_null() {
+        builder = builder.header(header::CONTENT_TYPE, "application/json");
+    }
     if let Some(key) = idempotency_key {
         builder = builder.header("idempotency-key", key);
     }
+    let request_body = if body.is_null() {
+        Body::empty()
+    } else {
+        Body::from(serde_json::to_vec(&body).unwrap())
+    };
     let response = router
         .clone()
-        .oneshot(
-            builder
-                .body(Body::from(serde_json::to_vec(&body).unwrap()))
-                .unwrap(),
-        )
+        .oneshot(builder.body(request_body).unwrap())
         .await
         .unwrap();
     let status = response.status();
@@ -511,7 +521,7 @@ pub(super) fn version_request(
         runtime_features: Default::default(),
         queue_consumers: Vec::new(),
         crons: Vec::new(),
-        deployment_source: promote.then_some(open_compute_storage::DeploymentSource::ScriptUpload),
+        deployment_source: promote.then_some(DeploymentSource::VersionsApi),
         request_id: RequestId::generate(),
         now_ms,
     }

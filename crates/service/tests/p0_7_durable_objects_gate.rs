@@ -6,27 +6,24 @@
 #![cfg(feature = "test-support")]
 
 use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
+use axum::http::{Request, header};
 use hmac::{Hmac, Mac};
 use open_compute_artifacts::{
     ArtifactStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
 use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{
-    DurableObjectsConfig, MetricsConfig, PlatformConfig, RuntimeConfig, StorageConfig,
+    DurableObjectsConfig, PlatformConfig, RuntimeConfig, StorageConfig,
 };
 use open_compute_core::{
     AccountId, BindingKind, CanonicalBindingConfig, CanonicalPermissions, DurableObjectId,
-    Redactor, RequestId, ResourceId, SecretString, WorkerId,
+    Redactor, RequestId, ResourceId, WorkerId,
 };
 use open_compute_runtime::{
     DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
     PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
     WorkerdSupervisorOptions, verify_runtime_binary,
 };
-use open_compute_service::health::HealthCoordinator;
-use open_compute_service::http::{HttpState, admin_router};
-use open_compute_service::metrics::MetricsRegistry;
 use open_compute_service::runtime_bridge::{
     DispatchTarget, WorkerdTransport, bind_runtime_source, serve_runtime_source,
 };
@@ -47,7 +44,6 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tower::ServiceExt as _;
 
 #[path = "../../../test/runtime/durable-objects/hibernation.rs"]
 mod hibernation;
@@ -285,7 +281,6 @@ async fn p0_7_real_durable_objects_matrix() {
         );
     }
     assert_eq!(first.body, "A:1");
-    assert_operator_do_surface_removed(account, counter).await;
     let second = dispatch(
         &transport,
         account,
@@ -1116,44 +1111,6 @@ fn assert_rpc_capability(response: &DispatchResponse, release: &str) {
     assert_eq!(value["property"], format!("{release}:capability"));
     assert_eq!(value["nested"], format!("{release}:nested:ok"));
     assert_eq!(value["envelope"], format!("{release}:ok"));
-}
-
-async fn assert_operator_do_surface_removed(account: AccountId, namespace: ResourceId) {
-    let metrics = Arc::new(
-        MetricsRegistry::new(&MetricsConfig::default(), "p0-7-do-canary", "workerd").unwrap(),
-    );
-    let state = HttpState::for_test(
-        HealthCoordinator::new(),
-        metrics,
-        false,
-        Some(SecretString::new("p0-7-admin")),
-    );
-    let router = admin_router(state);
-    let objects_path = format!(
-        "/operator/api/v1/accounts/{account}/durable-objects/namespaces/{namespace}/objects"
-    );
-    let response = router
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(objects_path)
-                .header("authorization", "Bearer p0-7-admin")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    let rendered = String::from_utf8(body.to_vec())
-        .unwrap()
-        .to_ascii_lowercase();
-    for forbidden in ["storage", "sqlite", "objectid"] {
-        assert!(
-            !rendered.contains(forbidden),
-            "removed Durable Object API leaked internal detail: {forbidden}"
-        );
-    }
 }
 
 async fn dispatch(

@@ -16,12 +16,12 @@ use common::load_file_only_platform_config;
 use axum::http::StatusCode;
 use open_compute_artifacts::{Fault, MockS3};
 use open_compute_core::clock::SystemClock;
-use open_compute_core::{RequestId, ResourceAvailability, ResourceId};
+use open_compute_core::{BindingKind, RequestId, ResourceAvailability, ResourceId};
 use open_compute_service::backup_cli::{
     backup_attest_restore_smoke, backup_create, backup_inspect, backup_restore,
 };
 use open_compute_service::doctor::{DoctorMode, doctor_report};
-use open_compute_storage::{PlatformStorage, ResourceRepository, WorkerRepository};
+use open_compute_storage::{D1Migration, PlatformStorage, ResourceRepository, WorkerRepository};
 use open_compute_workers::{BundleLimits, ResourcePins, RuntimeValidator, VersionController};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -31,9 +31,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use support::{
-    GateStack, ProductBindings, admin_json, admin_router, capacity_summary, corrupt_d1, deploy,
-    dispatch, kill_workerd, now_ms, open_scheduler, repo_root, reset_capacity_samples,
-    storage_config, stores, version_request, wait_pid_change,
+    GateStack, ProductBindings, admin_json, admin_router, assert_public_id, assert_v4_envelope,
+    capacity_summary, corrupt_d1, create_product_resource, deploy, dispatch, kill_workerd, now_ms,
+    open_scheduler, repo_root, reset_capacity_samples, storage_config, stores, v4_product_ids,
+    version_request, wait_pid_change,
 };
 
 struct PlatformConfigInput<'a> {
@@ -170,11 +171,11 @@ async fn p0_real_combined_exit_matrix_inner() {
         objects.clone(),
         pins.clone(),
         &stack,
-        scheduler_store.clone(),
     );
-    let (bindings, do_plan) = create_product_set(&router, &storage, account, worker.id).await;
-    assert_control_catalogs(&router, account).await;
-    apply_primary_d1_migration(&router, account, bindings.d1).await;
+    let (bindings, do_plan) =
+        create_product_set(&storage, &objects, &pins, account, worker.id).await;
+    let public_ids = v4_product_ids(&router).await;
+    apply_primary_d1_migration(&stack, account, bindings.d1).await;
 
     let version_a = {
         let validator: Arc<dyn RuntimeValidator> = Arc::new(stack.transport.clone());
@@ -250,8 +251,8 @@ async fn p0_real_combined_exit_matrix_inner() {
     let kv_backup = create_backup(
         &router,
         &format!(
-            "/operator/api/v1/accounts/{account}/kv/namespaces/{}/backups",
-            bindings.kv
+            "/client/v4/accounts/{}/open-compute/kv/namespaces/{}/backups",
+            public_ids.account, public_ids.kv
         ),
         "p0-exit-kv-backup",
     )
@@ -259,8 +260,8 @@ async fn p0_real_combined_exit_matrix_inner() {
     let d1_backup = create_backup(
         &router,
         &format!(
-            "/operator/api/v1/accounts/{account}/d1/databases/{}/backups",
-            bindings.d1
+            "/client/v4/accounts/{}/open-compute/d1/databases/{}/backups",
+            public_ids.account, public_ids.d1
         ),
         "p0-exit-d1-backup",
     )
@@ -289,16 +290,26 @@ async fn p0_real_combined_exit_matrix_inner() {
     );
     let restored_kv = restore_resource(
         &router,
-        &format!("/operator/api/v1/accounts/{account}/kv/namespaces:restore"),
-        &kv_backup,
+        &storage,
+        account,
+        BindingKind::KvNamespace,
+        &format!(
+            "/client/v4/accounts/{}/open-compute/kv/backups/{kv_backup}/restore",
+            public_ids.account
+        ),
         "restored-kv",
         "p0-exit-kv-restore",
     )
     .await;
     let restored_d1 = restore_resource(
         &router,
-        &format!("/operator/api/v1/accounts/{account}/d1/databases:restore"),
-        &d1_backup,
+        &storage,
+        account,
+        BindingKind::D1Database,
+        &format!(
+            "/client/v4/accounts/{}/open-compute/d1/backups/{d1_backup}/restore",
+            public_ids.account
+        ),
         "restored-d1",
         "p0-exit-d1-restore",
     )
@@ -470,7 +481,6 @@ async fn p0_real_combined_exit_matrix_inner() {
         objects.clone(),
         pins.clone(),
         &stack,
-        scheduler_store,
     );
     let persisted_worker = WorkerRepository::new(storage.db())
         .get_worker(account, worker.id)
@@ -557,14 +567,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         "p0-exit-owner",
     )
     .await;
-    let router = admin_router(
-        storage.clone(),
-        artifacts,
-        objects,
-        pins.clone(),
-        &stack,
-        scheduler_store,
-    );
+    let router = admin_router(storage.clone(), artifacts, objects, pins.clone(), &stack);
     let restored_worker = WorkerRepository::new(storage.db())
         .get_worker(account, worker.id)
         .unwrap();
@@ -613,13 +616,14 @@ async fn p0_real_combined_exit_matrix_inner() {
         &router,
         "POST",
         &format!(
-            "/operator/api/v1/accounts/{account}/kv/namespaces/{}/backups",
-            bindings.kv_other
+            "/client/v4/accounts/{}/open-compute/kv/namespaces/{}/backups",
+            public_ids.account, public_ids.kv_other
         ),
         Value::Null,
         Some("p0-exit-s3-failed-backup"),
     )
     .await;
+    assert_v4_envelope(failed_backup_status, &failed_backup);
     assert_eq!(failed_backup_status, StatusCode::SERVICE_UNAVAILABLE);
     let failure_text = failed_backup.to_string();
     assert!(!failure_text.contains(&mock.endpoint));
@@ -692,77 +696,90 @@ async fn p0_real_combined_exit_matrix_inner() {
 }
 
 async fn create_product_set(
-    router: &axum::Router,
     storage: &PlatformStorage,
+    objects: &open_compute_artifacts::R2ObjectStore,
+    pins: &ResourcePins,
     account: open_compute_core::AccountId,
     worker: open_compute_core::WorkerId,
 ) -> (
     ProductBindings,
     open_compute_storage::DurableObjectMigrationPlan,
 ) {
-    let kv = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
-        json!({"name": "combined-kv"}),
+    let kv = create_product_resource(
+        storage,
+        objects,
+        pins,
+        account,
+        BindingKind::KvNamespace,
+        "combined-kv",
         "p0-exit-create-kv",
-        &["resourceId"],
+        now_ms(),
     )
     .await;
-    let replay = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
-        json!({"name": "combined-kv"}),
-        "p0-exit-create-kv",
-        &["resourceId"],
-    )
-    .await;
-    assert_eq!(replay, kv);
-    let kv_other = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
-        json!({"name": "combined-kv-other"}),
+    let kv_other = create_product_resource(
+        storage,
+        objects,
+        pins,
+        account,
+        BindingKind::KvNamespace,
+        "combined-kv-other",
         "p0-exit-create-kv-other",
-        &["resourceId"],
+        now_ms(),
     )
     .await;
-    let r2 = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/r2/buckets"),
-        json!({"name": "combined-r2"}),
+    let r2 = create_product_resource(
+        storage,
+        objects,
+        pins,
+        account,
+        BindingKind::R2Bucket,
+        "combined-r2",
         "p0-exit-create-r2",
-        &["bucket", "resourceId"],
+        now_ms(),
     )
     .await;
-    let r2_other = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/r2/buckets"),
-        json!({"name": "combined-r2-other"}),
+    let r2_other = create_product_resource(
+        storage,
+        objects,
+        pins,
+        account,
+        BindingKind::R2Bucket,
+        "combined-r2-other",
         "p0-exit-create-r2-other",
-        &["bucket", "resourceId"],
+        now_ms(),
     )
     .await;
-    let d1 = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/d1/databases"),
-        json!({"name": "combined-d1"}),
+    let d1 = create_product_resource(
+        storage,
+        objects,
+        pins,
+        account,
+        BindingKind::D1Database,
+        "combined-d1",
         "p0-exit-create-d1",
-        &["resourceId"],
+        now_ms(),
     )
     .await;
-    let d1_other = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/d1/databases"),
-        json!({"name": "combined-d1-other"}),
+    let d1_other = create_product_resource(
+        storage,
+        objects,
+        pins,
+        account,
+        BindingKind::D1Database,
+        "combined-d1-other",
         "p0-exit-create-d1-other",
-        &["resourceId"],
+        now_ms(),
     )
     .await;
-    let d1_corrupt = create_resource(
-        router,
-        &format!("/operator/api/v1/accounts/{account}/d1/databases"),
-        json!({"name": "combined-d1-corrupt"}),
+    let d1_corrupt = create_product_resource(
+        storage,
+        objects,
+        pins,
+        account,
+        BindingKind::D1Database,
+        "combined-d1-corrupt",
         "p0-exit-create-d1-corrupt",
-        &["resourceId"],
+        now_ms(),
     )
     .await;
     let do_repository = open_compute_storage::DurableObjectRepository::new(storage);
@@ -803,104 +820,72 @@ async fn create_product_set(
     )
 }
 
-async fn create_resource(
-    router: &axum::Router,
-    uri: &str,
-    body: Value,
-    key: &str,
-    path: &[&str],
-) -> ResourceId {
-    let (status, response) = admin_json(router, "POST", uri, body, Some(key)).await;
-    assert!(
-        status == StatusCode::CREATED || status == StatusCode::OK,
-        "{status}: {response}"
-    );
-    let mut value = &response;
-    for segment in path {
-        value = &value[*segment];
-    }
-    value.as_str().unwrap().parse().unwrap()
-}
-
-async fn assert_control_catalogs(router: &axum::Router, account: open_compute_core::AccountId) {
-    for (uri, key, minimum) in [
-        (
-            format!("/operator/api/v1/accounts/{account}/kv/namespaces"),
-            "namespaces",
-            2,
-        ),
-        (
-            format!("/operator/api/v1/accounts/{account}/r2/buckets"),
-            "buckets",
-            2,
-        ),
-        (
-            format!("/operator/api/v1/accounts/{account}/d1/databases"),
-            "databases",
-            3,
-        ),
-    ] {
-        let (status, value) = admin_json(router, "GET", &uri, Value::Null, None).await;
-        assert_eq!(status, StatusCode::OK, "{value}");
-        assert!(value[key].as_array().unwrap().len() >= minimum);
-    }
-}
-
 async fn apply_primary_d1_migration(
-    router: &axum::Router,
+    stack: &GateStack,
     account: open_compute_core::AccountId,
     database: ResourceId,
 ) {
     let sql = "CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL)";
-    let digest = hex::encode(Sha256::digest(sql.as_bytes()));
-    let uri =
-        format!("/operator/api/v1/accounts/{account}/d1/databases/{database}/migrations/apply");
-    let body = json!({"migrations": [{
-        "id": 1,
-        "name": "0001_notes.sql",
-        "sha256": digest,
-        "sql": sql
-    }]});
-    let (status, applied) = admin_json(
-        router,
-        "POST",
-        &uri,
-        body.clone(),
-        Some("p0-exit-d1-migration"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{applied}");
-    assert_eq!(applied["migrations"].as_array().unwrap().len(), 1);
-    let (replay_status, _) =
-        admin_json(router, "POST", &uri, body, Some("p0-exit-d1-migration")).await;
-    assert_eq!(replay_status, StatusCode::OK);
+    let migration = D1Migration {
+        id: 1,
+        name: "0001_notes.sql".into(),
+        sha256: Sha256::digest(sql.as_bytes()).into(),
+        sql: sql.into(),
+    };
+    let applied = stack
+        .d1
+        .apply_migrations(account, database, vec![migration.clone()], now_ms())
+        .await
+        .unwrap();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(
+        stack
+            .d1
+            .apply_migrations(account, database, vec![migration], now_ms())
+            .await
+            .unwrap(),
+        applied
+    );
 }
 
 async fn create_backup(router: &axum::Router, uri: &str, key: &str) -> String {
     let (status, body) = admin_json(router, "POST", uri, Value::Null, Some(key)).await;
-    assert_eq!(status, StatusCode::CREATED, "{body}");
-    let id = body["backup"]["id"].as_str().unwrap().to_owned();
+    assert_v4_envelope(status, &body);
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let id = body["result"]["id"].as_str().unwrap().to_owned();
     let (replay_status, replay) = admin_json(router, "POST", uri, Value::Null, Some(key)).await;
+    assert_v4_envelope(replay_status, &replay);
     assert_eq!(replay_status, StatusCode::OK, "{replay}");
-    assert_eq!(replay["backup"]["id"], id);
+    assert_eq!(replay["result"]["id"], id);
     id
 }
 
 async fn restore_resource(
     router: &axum::Router,
+    storage: &PlatformStorage,
+    account: open_compute_core::AccountId,
+    kind: BindingKind,
     uri: &str,
-    backup_id: &str,
     name: &str,
     key: &str,
 ) -> ResourceId {
-    let body = json!({"backupId": backup_id, "newName": name});
+    let body = json!({"name": name});
     let (status, restored) = admin_json(router, "POST", uri, body.clone(), Some(key)).await;
-    assert_eq!(status, StatusCode::CREATED, "{restored}");
-    let resource: ResourceId = restored["resourceId"].as_str().unwrap().parse().unwrap();
+    assert_v4_envelope(status, &restored);
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_public_id(restored["result"]["id"].as_str().unwrap());
+    assert_eq!(restored["result"]["name"], name);
     let (replay_status, replay) = admin_json(router, "POST", uri, body, Some(key)).await;
+    assert_v4_envelope(replay_status, &replay);
     assert_eq!(replay_status, StatusCode::OK, "{replay}");
-    assert_eq!(replay["resourceId"], resource.to_string());
-    resource
+    assert_eq!(replay["result"]["id"], restored["result"]["id"]);
+    ResourceRepository::new(storage.db())
+        .list(account, Some(kind))
+        .unwrap()
+        .into_iter()
+        .find(|resource| resource.name == name)
+        .unwrap()
+        .id
 }
 
 async fn alarm_status(
