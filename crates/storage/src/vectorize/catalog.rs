@@ -145,6 +145,7 @@ impl<'a> VectorizeIndexRepository<'a> {
         self.db.with_read(|conn| {
             resources
                 .iter()
+                .filter(|resource| resource.state != ResourceState::Tombstoned)
                 .map(|resource| read_product(conn, resource))
                 .collect()
         })

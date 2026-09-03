@@ -1,8 +1,8 @@
 # P6：Cloudflare v4 API 与 Wrangler 子集兼容实现记录
 
-> 状态：**核心实现已完成，最终冻结验收待执行**，2026-09-03。
-> 本记录先冻结已经进入 production path 的 P6 范围和开发阶段证据；正式
-> `cf-compatibility-check`、最终单轮 P6/相关产品 Gate 与静态检查尚未执行，本文不把中间运行写成最终 PASS。
+> 状态：**核心实现与 P6 scoped Gate 已完成；canonical Clippy、hosted differential、workspace Gate 与 coverage 尚未闭环**，2026-09-03。
+> 本记录冻结已经进入 production path 的 P6 范围、正式 `cf-compatibility-check` 与本机验收证据；未执行或失败的
+> 项目继续明确保留，不从 focused PASS 外推整仓验收。
 
 ## 1. 结论与范围
 
@@ -60,6 +60,8 @@ public `worker_loaders`/Worker Loader 仍分别标为 `planned` 或 `unsupported
   作为单机磁盘清理长尾保留，不增加启动扫描或日志型 GC 状态机。
 - 固定 Wrangler 的 Vectorize multipart 被显式 bounded，超过上限按稳定请求错误分类；AI Search update 对显式非法
   indexing/retrieval 配置拒绝，不再把它们当作可丢弃的继承默认值。
+- Vectorize catalog 会在读取产品 locator 前排除已删除资源的 tombstone；删除一个 index 后不会再使同 account 的
+  后续 ready index 误报 404。live/transitional 行仍逐项严格校验，损坏 locator 不被静默跳过。
 - 固定 SDK 的 typed Worker upload 对 D1 binding 发送 `database_id`，固定 Wrangler 发送 `id`。adapter 只在 binding
   `type=d1` 且字段可唯一归组时把前者归一到内部唯一 `id`；两字段并存或其它 binding 使用 `database_id` 均拒绝。
 
@@ -92,6 +94,8 @@ public `worker_loaders`/Worker Loader 仍分别标为 `planned` 或 `unsupported
 | 项目 | 当前合同 |
 | --- | --- |
 | `OC-ACCOUNT-SUBDOMAIN-001` | `GET /accounts/{account_id}/workers/subdomain` 只为固定 Wrangler Workflow deploy prerequisite 返回 account-stable、以 `_` 开头的不可路由 label；不创建 DNS、listener、route 或 mutation authority，`PUT/DELETE` unsupported。 |
+| `OC-SERVICE-001` | 固定 Wrangler 的静态 Service Binding `props` 只支持最大 64 KiB、最大深度 32 的 canonical JSON object；不声称动态 `ctx.exports` 可接受的任意顶层 JSON、Cloudflare fleet placement 或全局 discovery。 |
+| `OC-D1-001` | D1 Session 保证同一 local primary 的顺序可见性；只有显式 management 操作创建最多 8 个 retained checkpoints，timestamp/restore 只解析这些点，不声称 Cloudflare always-on 分钟级 7/30 天 Time Travel。 |
 | `OC-AI-SEARCH-TOKEN-001` | `GET /accounts/{account_id}/ai-search/tokens` 只返回一个 account-scoped、稳定、无 secret 的 installation-managed metadata 供固定 Wrangler create preflight 使用；token mutation、按 ID 管理和未知 ID 均 unsupported/not found。 |
 | Queue `delivery_delay` | Wrangler 4.127.1 明确将字段视为 deprecated/no-effect，而当前 Cloudflare producer 文档仍描述该字段。P6 锁定 fixed-client 行为：wire 可接受、authority 不持久化；升级 Wrangler 时重新取 trace。 |
 | SDK 7.1 multipart | typed `workers.scripts.update()` 的 header/bracket encoding 是精确 pin 的 wire exception；归一化范围由 bounded closed schema 和 regression 固定，SDK 升级时必须重取 trace，并在上游修复后删除例外。 |
@@ -110,35 +114,64 @@ TOCTOU。它不位于 production listener 选择或 authority 路径，不影响
 socket inheritance/复杂 harness 的收益不足，暂不实现。若它在支持平台成为可复现失败，则不再按长尾处理，应修复
 根因或收窄 Gate 设计。
 
-## 6. 开发阶段验证（非最终冻结证据）
+## 6. `cf-compatibility-check` 结论
 
-| 检查 | 已知结果与限定 |
+正式 review 分别检查 committed branch、working tree、删除的旧 consumer 与相关 authority。P6 的 `/client/v4`
+管理面按 skill 合同不进入 tenant runtime denominator，另由生成合同、官方 SDK 与固定 Wrangler Gate 验证；tenant
+runtime 侧覆盖 D1、Queues、Workflows、Service Binding props、single-latest compatibility date/flags、pinned stock
+workerd 和固定 upstream types。
+
+review 最初发现三组问题并在冻结前修复：Service Binding 的中央 deviation 文档缺少静态 `props` 子集；D1 普通
+mutation 同步整库 checkpoint 会造成无界成本；D1 expired transfer/checkpoint pin、terminal transfer file 与 authority
+完成后 unlink error 会造成永久占用或把已完成操作误报 unknown。修复后未保留 actionable finding。
+
+| changed surface | verdict | 冻结证据 |
+| --- | --- | --- |
+| Service Binding `ctx.props` | aligned with declared deviation | canonical object、64 KiB/depth 32、descriptor digest、runtime projection、restart/failure coverage；`OC-SERVICE-001` 已同步。 |
+| Queues / Workflows | aligned | durable reservation/fence/delete、retry 与 capability lifetime 经 source/restart review 和真实 runtime Gate 覆盖。 |
+| D1 Worker/Session | aligned with declared single-primary deviation | 普通 mutation 不复制整库；opaque bookmark 保持 local sequential visibility；显式 checkpoint/transfer 有界并由 `OC-D1-001` 声明。 |
+| compatibility date/flags/types | aligned | workerd `v1.20260830.1`、effective date `2026-08-30`、workers-types `5.20260830.1`；没有 tenant-selectable historical branch。 |
+| `/client/v4`、Wrangler、SDK | excluded from skill denominator | 由 P6 generated contract、`p6-cloudflare-sdk` 与 `p6-wrangler-resources` 单独闭环。 |
+| global placement/replication/fleet limits | excluded self-host scope | 单机 SMB 画像明确，不移除 stable tenant API，也不弱化 local durability、security 或 restart contract。 |
+
+本结论只覆盖 P6 changed surfaces，不声称整个平台已经达到 Cloudflare 全产品兼容。
+
+## 7. 本机冻结验证
+
+### 7.1 Scoped Gate
+
+最终选择集为 `p0-2 p0-6 dashboard p3-services-product p6-cloudflare-sdk p6-wrangler-resources p3-contract`，
+共 21 个 registry case，使用 pinned stock workerd 和正式 archive。Gate 遵守 stop-on-first-failure：第一次暴露 runtime
+probe timeout 与错误 listener；第二次 20/21 通过并暴露 Wrangler fixture 使用 internal account UUID；第三次越过 account
+discovery 后暴露 Vectorize tombstone 使后续 ready index 404。各次均保留 failure evidence，修复根因后才重跑。
+
+- `20260903T173318-4116d954`：`p0-2` 2/2、`p0-6` 1/1、Dashboard 1/1、Service product 1/1、official SDK 1/1、
+  P3 contract 14/14 通过；Wrangler 在 account ID fixture 错误处停止。
+- `20260903T174344-c962bcd0`：最终受影响的 fixed Wrangler resource Gate 1/1 与 P3 contract 14/14 通过；报告
+  `source_sha256=b4344f9911d091deaf541a967c55e8ec831151b077afaf9b4457820350161ad3`，15/15 PASS，90.15 秒。
+- 最终 source baseline identity 为 `f80a995b3d2c971adfc3775ba629a1f16eb107059ce388d32bcf3e24fac44674`；
+  generated subset/capability hash 仍分别为 `486e41018352aa664ef1035c75e13b69ee3bbe17bf3cf9c1b5b1267e738484e3`、
+  `ea4230ac2c065a0e17f433d7bf7ebcdcae0e9a1c2a3e0c51b21dc4b9d351948b`。
+
+后两次源码差异仅为 Wrangler/SDK fixture 纠正、Vectorize tombstone catalog root fix 与对应回归；未把失败 target
+静默跳过，也未用重复轮次替代根因修复。由于 stop-on-failure policy，没有伪造一个不存在的全选择集单报告；上述
+报告共同给出每个选择 target 在其相关最终实现上的通过证据。
+
+### 7.2 Static 与 focused checks
+
+| 检查 | 结果 |
 | --- | --- |
-| TypeScript/runtime build | `bun run build` 在 P6 开发阶段通过；后续 source freeze 后仍须再执行一次。 |
-| focused Rust/JS tests | account/protocol、Worker multipart、SDK bracket adapter、KV/D1/R2、Vectorize/AI Search、Queue、Service props、Workflow reservation/delete 的定向 success/failure/restart 检查在各自实现批次通过；它们证明修复方向，不替代最终 Gate。 |
-| P0.2 development Gate | account subdomain/Workflow Wrangler 顺序在当时源码上使用真实 `ocd`、pinned stock workerd 单轮通过；随后 reservation/delete 又有实质修改，因此最终冻结后必须重跑。 |
-| Wrangler resource development Gate | 早期实现批次曾单轮通过；之后修复了真实 `ocd` process evidence、Vectorize multipart、AI Search validation 和 Workflow fencing，旧报告不计最终验收。 |
-| Cloudflare SDK development Gate | 早期批次曾运行，但 review 发现 typed upload/真实 process 证据不足，随后重写为真实 `ocd` + SDK typed path；旧结果已被 supersede，不计最终验收。 |
-| contract/generator | P6 OpenAPI/manifest generation、schema/catalog/inventory self-test 和开发期 contract 检查曾通过；最终 hash 与 route inventory 仍以冻结后重跑为准。 |
-| formatting/compile | 实现批次运行过 `cargo fmt`、focused compile 与 `git diff --check`；最终静态检查尚未完成。 |
+| `bun run build` | PASS；extension type generation check、Dashboard build/typecheck、toolchain/runtime、examples/scripts/conformance 均完成。 |
+| `cargo fmt --all --check` / `git diff --check` | PASS。 |
+| `cargo metadata --no-deps --format-version 1` | PASS。 |
+| `./test/check-boundaries.sh` | PASS。 |
+| no-default-features | `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=... RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features` PASS。 |
+| MSRV | `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE=... cargo +1.98.0 check --workspace --all-targets` PASS。 |
+| focused regressions | D1 history/transfer/restart、Workflow reservation/delete、Service props、Vectorize tombstone、official SDK typed live path 均通过对应 focused tests。 |
+| canonical Clippy | **FAIL，未声明 PASS**。完整 reachable run仍有 99 个 `service` lint diagnostics，主要为既有大函数/参数数、style 与 large error variant；继续批量机械改写的收益低于 P6 SMB 功能闭环，按复杂度预算保留为后续 debt。 |
 
-## 7. 最终冻结待执行
-
-以下项目目前均为**待执行**，不得写成 PASS：
-
-| 最终项 | 状态 |
-| --- | --- |
-| `cf-compatibility-check` | 待最终 source freeze 后正式执行；runtime/type/single-latest/authority 分母按 skill 复核。`/client/v4` 管理面不在该 skill denominator 内，另由 P6 contract、官方 SDK 与 Wrangler Gates 验证。 |
-| P6 contract | 待最终冻结单轮执行。 |
-| `p6-cloudflare-sdk` | 待最终冻结单轮执行，要求 official `cloudflare@7.1.0` typed path、真实 `ocd`、pinned stock workerd、memberships 和 vendor extension 同 client。 |
-| `p6-wrangler-resources` | 待最终冻结单轮执行，要求固定 Wrangler subprocess 通过真实 `ocd` 访问资源 authority。 |
-| `p0-2` | Workflow reservation/delete 最终实现后待单轮执行。 |
-| `p3-services-product` | Service Binding props 最终实现后待单轮执行。 |
-| format / scoped compile / metadata / dependency boundaries | 待最终冻结执行；不得从开发期运行外推。 |
-| canonical Clippy | 当前已知有 repository baseline lint，不能宣称 PASS；最终记录应给出准确 diagnostics 和下一步证据。 |
-
-按用户要求，最终 workspace Gate 与 Rust coverage 统一延期到 P9 完成后的单次全局验收，P6 不重复执行，也不把延期
-写成 P6 PASS。
+按用户约定，最终 workspace Gate 与 Rust coverage 统一延期到 P9 完成后的单次全局验收，P6 不重复执行，也不把延期
+写成 P6 PASS。Clippy 失败同样是明确未闭环项，不被 scoped Gate 覆盖。
 
 ## 8. 托管 Cloudflare differential 与保留边界
 

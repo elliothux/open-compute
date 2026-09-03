@@ -40,6 +40,7 @@ impl D1SnapshotRepository<'_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn transition_file(
     db: &ControlDb,
     account_id: AccountId,

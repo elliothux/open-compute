@@ -88,10 +88,10 @@ pub struct ManagementApiRouteV1 {
     pub status: InterfaceCapabilityStatus,
     /// Frozen authority that supplied this route.
     pub source: String,
-    /// Official Cloudflare OpenAPI operation identity when the route has one.
+    /// Official Cloudflare `OpenAPI` operation identity when the route has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
-    /// Digest of the canonical official OpenAPI operation when the route has one.
+    /// Digest of the canonical official `OpenAPI` operation when the route has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_sha256: Option<String>,
     /// Request body media family.
@@ -105,7 +105,7 @@ pub struct ManagementApiRouteV1 {
 }
 
 impl ManagementApiRouteV1 {
-    /// Validate route identity and its optional OpenAPI provenance.
+    /// Validate route identity and its optional `OpenAPI` provenance.
     pub fn validate(&self) -> bool {
         self.id == format!("{} {}", self.method.as_str(), self.path)
             && self.path.starts_with('/')

@@ -651,7 +651,7 @@ fn execute_tail_batch_versioned(
                 return Err(result_unknown());
             }
             version_persisted = true;
-            reinstall_guard(connection, SqlAuthority::Tenant, control.clone());
+            reinstall_guard(connection, SqlAuthority::Tenant, control);
         }
         let mut rows = statement.raw_query();
         while rows

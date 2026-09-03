@@ -137,7 +137,7 @@ pub(crate) fn install_guard(
     authority: SqlAuthority,
 ) -> Arc<ExecutionControl> {
     let control = Arc::new(ExecutionControl::new(limits));
-    reinstall_guard(connection, authority, control.clone());
+    reinstall_guard(connection, authority, &control);
     control
 }
 
@@ -145,7 +145,7 @@ pub(crate) fn install_guard(
 pub(crate) fn reinstall_guard(
     connection: &Connection,
     authority: SqlAuthority,
-    control: Arc<ExecutionControl>,
+    control: &Arc<ExecutionControl>,
 ) {
     let auth_control = control.clone();
     connection.authorizer(Some(move |context: AuthContext<'_>| {

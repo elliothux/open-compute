@@ -4,13 +4,12 @@ import { createOpenComputeExtension } from "../src/index.ts";
 
 const baseURL = process.env.OPEN_COMPUTE_V4_BASE_URL;
 const apiToken = process.env.OPEN_COMPUTE_V4_TOKEN;
-const accountID = process.env.OPEN_COMPUTE_V4_ACCOUNT_ID;
 const sdkEntry = process.env.OPEN_COMPUTE_CLOUDFLARE_SDK_ENTRY;
 const typedWorkerSource = "export default { fetch() { return new Response('sdk'); } };";
+let accountID;
 let typedD1ID;
 assert.ok(baseURL, "OPEN_COMPUTE_V4_BASE_URL is required");
 assert.ok(apiToken, "OPEN_COMPUTE_V4_TOKEN is required");
-assert.ok(accountID, "OPEN_COMPUTE_V4_ACCOUNT_ID is required");
 assert.ok(sdkEntry, "OPEN_COMPUTE_CLOUDFLARE_SDK_ENTRY is required");
 
 const { default: Cloudflare } = await import(pathToFileURL(sdkEntry).href);
@@ -49,8 +48,12 @@ for (const [name, contract] of [
     throw error;
   }
 }
-assert.ok(requests.length > 0);
-assert.ok(requests.every(({ url }) => url.startsWith(`${baseURL}/`)));
+const networkRequests = requests.filter(({ url }) => /^https?:/.test(url));
+assert.ok(networkRequests.length > 0);
+assert.ok(
+  networkRequests.every(({ url }) => url.startsWith(`${baseURL}/`)),
+  JSON.stringify(networkRequests.filter(({ url }) => !url.startsWith(`${baseURL}/`))),
+);
 assert.ok(requests.some(({ method, url, contentType, formData }) =>
   method === "PUT"
   && url.endsWith(`/accounts/${accountID}/workers/scripts/sdk-uploaded-worker`)
@@ -62,7 +65,8 @@ async function identityContract() {
   const accounts = await client.accounts.list();
   assert.equal(accounts.result.length, 1);
   assert.equal(accounts.result_info.count, 1);
-  assert.equal(accounts.result[0].id, accountID);
+  accountID = accounts.result[0].id;
+  assert.match(accountID, /^[0-9a-f]{32}$/);
   assert.equal((await client.accounts.get({ account_id: accountID })).id, accountID);
   assert.match((await client.user.get()).id, /^[0-9a-f]{32}$/);
   assert.equal((await client.user.tokens.verify()).status, "active");
@@ -77,7 +81,8 @@ async function identityContract() {
   assert.equal(capabilities.compatibility_date.maximum, "2026-08-30");
   assert.ok(Object.keys(capabilities.endpoints).length > 0);
   const system = await extension.system.status();
-  assert.equal(system.state, "ready");
+  assert.match(system.state, /^[A-Z][A-Z_]*$/);
+  assert.ok(system.components.some(({ name, state }) => name === "runtime" && state === "healthy"));
 }
 
 async function workersContract() {

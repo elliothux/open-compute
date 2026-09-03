@@ -151,6 +151,16 @@ fn vectorize_catalog_round_trips_and_pages_ready_indexes() {
         repository.ready_indexes(0).unwrap_err().code(),
         ErrorCode::ResourceInvariantViolation
     );
+
+    resources
+        .begin_delete(first.account_id, first.id, 22)
+        .unwrap();
+    resources
+        .mark_tombstoned(first.account_id, first.id, RequestId::generate(), 23)
+        .unwrap();
+    let live = repository.list(first.account_id).unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].resource.id, second.id);
 }
 
 #[test]

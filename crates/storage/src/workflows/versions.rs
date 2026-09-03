@@ -98,7 +98,7 @@ impl WorkflowRepository<'_> {
     }
 
     fn stage_version_inner(
-        &self,
+        self,
         account: AccountId,
         definition: WorkflowId,
         version: VersionId,

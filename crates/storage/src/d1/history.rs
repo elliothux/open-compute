@@ -153,7 +153,7 @@ pub struct NewD1Transfer<'a> {
     pub at_session_version: u64,
     /// Stable SQL filename.
     pub filename: &'a str,
-    /// Required import MD5 ETag; absent for exports.
+    /// Required import MD5 `ETag`; absent for exports.
     pub etag_md5: Option<&'a [u8; 16]>,
     /// Keyed fingerprint of the scoped URL capability.
     pub token_fingerprint: &'a [u8; 32],
@@ -184,7 +184,7 @@ pub struct D1TransferRecord {
     pub filename: String,
     /// Private staged SQL locator.
     pub file_key: Option<String>,
-    /// Import MD5 ETag.
+    /// Import MD5 `ETag`.
     pub etag_md5: Option<[u8; 16]>,
     /// Verified SQL SHA-256.
     pub sha256: Option<[u8; 32]>,
@@ -512,6 +512,7 @@ impl<'a> D1SnapshotRepository<'a> {
     }
 
     /// Fence an uploaded import and persist its statement count before SQL commit.
+    #[allow(clippy::too_many_arguments)]
     pub fn begin_ingest(
         &self,
         account_id: AccountId,

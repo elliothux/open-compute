@@ -14,6 +14,8 @@ mod search;
 #[path = "workflow_support/platform_process.rs"]
 mod platform_process;
 
+use axum::body::{Body, to_bytes};
+use axum::http::Request;
 use evidence::Evidence;
 use open_compute_artifacts::MockS3;
 use open_compute_core::config::StorageConfig;
@@ -50,7 +52,7 @@ async fn fixed_wrangler_resource_commands_use_live_v4_authorities() {
     let command = WranglerCommand {
         executable: fixed_wrangler(),
         project: &fixture.project,
-        api_base_url: format!("http://{}/client/v4", fixture.public_addr),
+        api_base_url: format!("http://{}/client/v4", fixture.admin_addr),
         account_id: &fixture.public_account,
     };
 
@@ -67,7 +69,7 @@ async fn fixed_wrangler_resource_commands_use_live_v4_authorities() {
     assert_clean_output(&log);
     assert!(
         fixture.process.0.try_wait().unwrap().is_none(),
-        "ocd exited while fixed Wrangler was using the public v4 listener: {}",
+        "ocd exited while fixed Wrangler was using the admin v4 listener: {}",
         String::from_utf8_lossy(&log),
     );
     fixture.process.stop().await;
@@ -480,7 +482,6 @@ impl Fixture {
         let root = evidence.path().to_owned();
         let data = root.join("data");
         let storage = PlatformStorage::bootstrap(&storage_config(&data), &SystemClock).unwrap();
-        let public_account = storage.identity().default_account_id.to_string();
         seed_workflow(&storage);
         drop(storage);
 
@@ -497,6 +498,7 @@ impl Fixture {
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
                 .build_http();
         wait_ready(&client, admin_addr, &mut process, &log).await;
+        let public_account = discover_public_account(&client, admin_addr).await;
 
         let project = root.join("wrangler-project");
         fs::create_dir(&project).unwrap();
@@ -515,6 +517,34 @@ impl Fixture {
             log,
         }
     }
+}
+
+async fn discover_public_account(
+    client: &platform_process::Client,
+    admin_addr: SocketAddr,
+) -> String {
+    let request = Request::builder()
+        .uri(format!("http://{admin_addr}/client/v4/accounts"))
+        .header("authorization", format!("Bearer {READ_ONLY_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(3), client.request(request))
+        .await
+        .expect("public account discovery timed out")
+        .expect("public account discovery request failed");
+    assert_eq!(response.status(), 200);
+    let body = to_bytes(Body::new(response.into_body()), 64 * 1024)
+        .await
+        .unwrap();
+    let envelope: Value = serde_json::from_slice(&body).unwrap();
+    let accounts = envelope["result"].as_array().unwrap();
+    assert_eq!(accounts.len(), 1);
+    let public_account = accounts[0]["id"].as_str().unwrap();
+    assert!(
+        public_account.len() == 32 && public_account.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "v4 account discovery must return one stable 32-hex public ID"
+    );
+    public_account.to_owned()
 }
 
 async fn wait_ready(

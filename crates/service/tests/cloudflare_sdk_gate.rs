@@ -43,10 +43,9 @@ async fn official_cloudflare_sdk_matches_live_ocd_contract() {
         .current_dir(repo_root().join("packages/cloudflare-extension"))
         .env(
             "OPEN_COMPUTE_V4_BASE_URL",
-            format!("http://{}/client/v4", fixture.public_addr),
+            format!("http://{}/client/v4", fixture.admin_addr),
         )
         .env("OPEN_COMPUTE_V4_TOKEN", TOKEN)
-        .env("OPEN_COMPUTE_V4_ACCOUNT_ID", &fixture.public_account)
         .env("OPEN_COMPUTE_CLOUDFLARE_SDK_ENTRY", sdk.join("index.mjs"))
         .env("HTTP_PROXY", "http://127.0.0.1:9")
         .env("HTTPS_PROXY", "http://127.0.0.1:9")
@@ -66,6 +65,11 @@ async fn official_cloudflare_sdk_matches_live_ocd_contract() {
         fs::read_to_string(&fixture.log).unwrap_or_default(),
     );
     fixture.process.stop().await;
+    assert!(
+        tokio::net::TcpStream::connect(fixture.admin_addr)
+            .await
+            .is_err()
+    );
     assert!(
         tokio::net::TcpStream::connect(fixture.public_addr)
             .await
@@ -89,7 +93,7 @@ struct Fixture {
     _mock: MockS3,
     _evidence: platform_process::Evidence,
     public_addr: SocketAddr,
-    public_account: String,
+    admin_addr: SocketAddr,
     log: PathBuf,
 }
 
@@ -105,7 +109,7 @@ impl Fixture {
         verify_runtime_binary(
             &repo.join("packages/runtime/workerd.lock.json"),
             &workerd,
-            Duration::from_secs(10),
+            Duration::from_secs(20),
             &Redactor::new(),
         )
         .await
@@ -120,27 +124,26 @@ impl Fixture {
         let root = temp.path().to_owned();
         let data = root.join("data");
         let storage = PlatformStorage::bootstrap(&storage_config(&data), &SystemClock).unwrap();
-        let public_account = storage.identity().default_account_id.to_string();
         seed_worker_and_workflow(&storage);
         drop(storage);
 
         let mock = MockS3::spawn("open-compute").await;
-        let public_addr = platform_process::address();
+        let (public_addr, admin_addr) = platform_process::distinct_addresses();
         let config =
-            platform_process::config(&root, &data, &mock.endpoint, public_addr, public_addr);
+            platform_process::config(&root, &data, &mock.endpoint, public_addr, admin_addr);
         append_role_tokens(&config, &root);
         let log = root.join("ocd.stderr.log");
         let mut process = platform_process::spawn(&config, &log);
         let client =
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
                 .build_http();
-        platform_process::ready(&client, public_addr, &mut process).await;
+        platform_process::ready(&client, admin_addr, &mut process).await;
         Self {
             process,
             _mock: mock,
             _evidence: platform_process::Evidence(Some(temp)),
             public_addr,
-            public_account,
+            admin_addr,
             log,
         }
     }

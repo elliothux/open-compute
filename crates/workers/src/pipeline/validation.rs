@@ -176,8 +176,7 @@ pub(super) fn request_fingerprint(
     canonical.extend_from_slice(
         request
             .deployment_source
-            .map(DeploymentSource::as_str)
-            .unwrap_or("")
+            .map_or("", DeploymentSource::as_str)
             .as_bytes(),
     );
     canonical.push(0);
