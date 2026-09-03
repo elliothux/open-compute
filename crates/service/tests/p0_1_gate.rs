@@ -209,11 +209,11 @@ async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
     let port = public_port.expect("public port");
     assert_eq!(http_status(port, "/health/live"), Some(200));
     assert_eq!(http_status(port, "/health/ready"), Some(200));
-    let status = http_get(port, "/operator/api/v1/system/status").expect("status");
+    let status = http_get(port, "/client/v4/open-compute/system/status").expect("status");
     assert_eq!(status.0, 200);
     assert!(!status.1.contains("gate-secret-value"));
     assert!(!status.1.contains("gate-access"));
-    let metrics = http_get(port, "/operator/metrics").expect("metrics");
+    let metrics = http_get(port, "/metrics").expect("metrics");
     assert!(!metrics.1.contains("gate-secret-value"));
 
     let workerd_pid = child_pids(pid as i32)
@@ -449,7 +449,8 @@ fn wait_ready(round: &mut Round, secs: u64) {
     panic!(
         "timeout waiting ready; listeners={:?}; health={:?}: {}",
         listen_ports(pid),
-        public_health_port(pid).and_then(|port| http_get(port, "/operator/api/v1/system/status")),
+        public_health_port(pid)
+            .and_then(|port| http_get(port, "/client/v4/open-compute/system/status")),
         read_lossy(&round.stderr)
     );
 }
@@ -504,7 +505,7 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
                 panic!(
                     "budget crash {i}: no new RUNNING workerd generation; ready={:?} status={:?}",
                     http_get(port, "/health/ready"),
-                    http_get(port, "/operator/api/v1/system/status")
+                    http_get(port, "/client/v4/open-compute/system/status")
                 );
             }
             std::thread::sleep(Duration::from_millis(30));
@@ -522,7 +523,7 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
     while Instant::now() < deadline {
         let live = http_status(port, "/health/live");
         let ready = http_get(port, "/health/ready");
-        let status = http_get(port, "/operator/api/v1/system/status");
+        let status = http_get(port, "/client/v4/open-compute/system/status");
         last_live = live;
         last_ready = ready.clone();
         last_status = status.clone();
@@ -821,7 +822,7 @@ fn http_status(port: u16, path: &str) -> Option<u16> {
 fn http_get(port: u16, path: &str) -> Option<(u16, String)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    let auth = if path.starts_with("/operator/") {
+    let auth = if path.starts_with("/client/v4/") || path == "/metrics" {
         format!("Authorization: Bearer {ADMIN_TOKEN}\r\n")
     } else {
         String::new()
