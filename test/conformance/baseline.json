@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "openComputeRevision": "86e74aedff040b3c91c68cccd2ea76b49728fe7ff4b756dc62a6141e805578d7",
+  "openComputeRevision": "7527a2d05cf8ba9f342a03404dcb33afb5e71f24312801d247c243ecdfd0ce88",
   "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes test/conformance/baseline.json and non-reference docs",
   "workerdLockSha256": "4ccb7814a1ec72f50a3862cfac7475be6a4cade0ca646e8d16a2cb9aac42cb0f",
   "workerd": {
@@ -27,8 +27,12 @@
     "lockSha256": "ef15324296cecd9d0b7ea3713c0731ffdf70d41db4751387f22ad436c2da3e4a",
     "treeSha256": "83b060c12487a749bb8fda309f9534fbd4a3de2563c37a9501c7a7f4bb8a52fe"
   },
-  "wrangler": { "version": "4.127.1" },
-  "vitePlugin": { "version": "1.54.2" },
+  "wrangler": {
+    "version": "4.127.1"
+  },
+  "vitePlugin": {
+    "version": "1.54.2"
+  },
   "toolchain": {
     "bun": "1.3.14",
     "typescript": "7.0.2",

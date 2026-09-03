@@ -11,6 +11,8 @@
 | [P7 Workers Logs 与 realtime tail](p7-workers-logs-realtime-tail.md) | 设计完成；stock workerd Tail 采集、`wrangler tail`、Workers Logs persistence/Telemetry query 与 Dashboard Live Tail 尚未实施 |
 | [P8 Workers Standard limits](p8-workers-standard-limits.md) | 设计完成；structural limits、Version settings 与 stock workerd runtime enforcer 尚未实施，CPU/subrequest/memory/startup/connection 当前受 `OC-WKR-LIMIT-001` 阻断 |
 | [P9 Dynamic Workers / Worker Loader](p9-dynamic-workers-worker-loader.md) | 合同与架构完成；`worker_loaders` v4/Version 支持受 upstream stock workerd nested-loader、limits 与 bounded-cache G0 阻断；Workers for Platforms 不在范围内 |
+| [P10 Cloudflare Artifacts](p10-cloudflare-artifacts.md) | Day 1 合同与架构完成；标准 v4/Worker binding/Git Smart HTTP 受进程内 Git engine G0 阻断；不把现有内部 ArtifactStore 或 LynxOS 文件夹伪装成 Cloudflare Artifacts |
+| [P11 Cloudflare Browser Run](p11-browser-run.md) | Day 1 合同与架构完成；标准 binding/Quick Actions/DevTools/CDP 通过 operator-owned 外部 Browser Provider 执行，受真实 stock-workerd/package/provider G0 阻断；正式 open-compute 发布仍是单个 `ocd` |
 
 P6 本地核心已经归档：见 [Cloudflare v4 API 与固定客户端兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 和[完成记录](implemented/p6-cloudflare-v4-wrangler-compatibility-results.md)；仍需外部账号的托管端资格单独保留在

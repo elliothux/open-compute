@@ -600,23 +600,27 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
         DocumentParserConfig::default(),
         executable,
     );
-    let ConversionResponse::Success {
-        format: OutputFormat::Markdown,
-        data,
-        tokens,
-        ..
-    } = service
+    // Keep deadlines well above a local fork/exec of the fixture helper so the
+    // Gate's parallel host load cannot turn a success-path unit into a timeout.
+    let deadline = || Instant::now() + Duration::from_secs(30);
+    let markdown = service
         .convert_one(
             authority,
             "note.txt".to_string(),
             "text/plain".to_string(),
             b"ignored".to_vec(),
             &ConversionOptions::default(),
-            Instant::now() + Duration::from_secs(1),
+            deadline(),
         )
-        .await
+        .await;
+    let ConversionResponse::Success {
+        format: OutputFormat::Markdown,
+        data,
+        tokens,
+        ..
+    } = markdown
     else {
-        panic!("valid child output was not returned");
+        panic!("valid child output was not returned: {markdown:?}");
     };
     assert_eq!(data, text_success.markdown);
     assert!(tokens > 0);
@@ -625,22 +629,23 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
         "output": {"format": "text"}
     }))
     .unwrap();
-    let ConversionResponse::Success {
-        format: OutputFormat::Text,
-        data,
-        ..
-    } = service
+    let text = service
         .convert_one(
             authority,
             "note.txt".to_string(),
             "text/plain".to_string(),
             b"ignored".to_vec(),
             &options,
-            Instant::now() + Duration::from_secs(1),
+            deadline(),
         )
-        .await
+        .await;
+    let ConversionResponse::Success {
+        format: OutputFormat::Text,
+        data,
+        ..
+    } = text
     else {
-        panic!("text output was not returned");
+        panic!("text output was not returned: {text:?}");
     };
     assert_eq!(data, "Heading\nitem");
     assert_eq!(
@@ -675,7 +680,7 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
             "application/pdf".to_string(),
             b"ignored".to_vec(),
             &ConversionOptions::default(),
-            Instant::now() + Duration::from_secs(1),
+            deadline(),
         )
         .await
     else {
@@ -699,7 +704,7 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
             "application/pdf".to_string(),
             b"ignored".to_vec(),
             &ConversionOptions::default(),
-            Instant::now() + Duration::from_secs(1),
+            deadline(),
         )
         .await
     else {
@@ -727,7 +732,7 @@ async fn valid_child_frames_drive_markdown_text_pdf_and_ai_search_success_paths(
             "text/plain".to_string(),
             b"ignored".to_vec(),
             &ConversionOptions::default(),
-            Instant::now() + Duration::from_secs(1),
+            deadline(),
         )
         .await
     else {

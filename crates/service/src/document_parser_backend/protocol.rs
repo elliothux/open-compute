@@ -104,7 +104,7 @@ pub(super) struct SupportedResponse {
     pub(super) mime_type: &'static str,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub(super) enum ConversionResponse {
     Success {
@@ -126,7 +126,7 @@ pub(super) enum ConversionResponse {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(super) enum ErrorFormat {
     Error,
