@@ -590,26 +590,12 @@ async fn wait_ready(
 }
 
 fn append_resource_config(config: &Path, root: &Path, embedding_base_url: &str) {
-    let deployer = root.join("deployer.token");
-    let read_only = root.join("read-only.token");
-    write_token(&deployer, TOKEN);
-    write_token(&read_only, READ_ONLY_TOKEN);
+    // platform_process::config already declares the three auth tables; only replace
+    // the secret file contents so this Gate can assert its own token values.
+    write_token(&root.join("deployer.token"), TOKEN);
+    write_token(&root.join("read-only.token"), READ_ONLY_TOKEN);
     let mut file = fs::OpenOptions::new().append(true).open(config).unwrap();
-    writeln!(
-        file,
-        r#"
-[server.deployer_auth]
-file = "{}"
-
-[server.read_only_auth]
-file = "{}"
-
-{}"#,
-        deployer.display(),
-        read_only.display(),
-        search::ai_config_toml(embedding_base_url),
-    )
-    .unwrap();
+    writeln!(file, "\n{}", search::ai_config_toml(embedding_base_url)).unwrap();
 }
 
 fn write_token(path: &Path, value: &str) {
