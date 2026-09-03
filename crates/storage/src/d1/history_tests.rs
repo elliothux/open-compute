@@ -285,8 +285,20 @@ fn transfer_session_survives_restart_and_enforces_capability_and_ingest_fences()
             .unwrap(),
         uploaded
     );
-    let ingesting = history.begin_ingest(account, &import_id, 40).unwrap();
+    let ingesting = history.begin_ingest(account, &import_id, 3, 40).unwrap();
     assert_eq!(ingesting.state, D1TransferState::Ingesting);
+    assert_eq!(ingesting.num_queries, Some(3));
+    assert_eq!(
+        history.begin_ingest(account, &import_id, 3, 45).unwrap(),
+        ingesting
+    );
+    assert_eq!(
+        history
+            .begin_ingest(account, &import_id, 4, 45)
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
     assert_eq!(
         history.transfer(account, &import_id).unwrap().state,
         D1TransferState::Ingesting

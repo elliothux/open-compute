@@ -508,11 +508,12 @@ impl<'a> D1SnapshotRepository<'a> {
         )
     }
 
-    /// Fence an uploaded import before applying its SQL transaction.
+    /// Fence an uploaded import and persist its statement count before SQL commit.
     pub fn begin_ingest(
         &self,
         account_id: AccountId,
         session_id: &str,
+        num_queries: u64,
         now_ms: i64,
     ) -> Result<D1TransferRecord, PlatformError> {
         self.db.with_immediate(|tx| {
@@ -521,15 +522,20 @@ impl<'a> D1SnapshotRepository<'a> {
                 return Err(invariant());
             }
             if current.state == D1TransferState::Ingesting {
-                return Ok(current);
+                return if current.num_queries == Some(num_queries) {
+                    Ok(current)
+                } else {
+                    Err(idempotency_conflict())
+                };
             }
             if current.state != D1TransferState::Uploaded || now_ms >= current.token_expires_at_ms {
                 return Err(invariant());
             }
             tx.execute(
-                "UPDATE d1_transfer_sessions SET state = 'ingesting', updated_at_ms = ?1
-                 WHERE id = ?2 AND state = 'uploaded'",
-                params![now_ms, session_id],
+                "UPDATE d1_transfer_sessions
+                 SET state = 'ingesting', num_queries = ?1, updated_at_ms = ?2
+                 WHERE id = ?3 AND state = 'uploaded'",
+                params![to_i64(num_queries)?, now_ms, session_id],
             )
             .map_err(|_| invariant())?;
             read_transfer(tx, account_id, session_id)
@@ -559,6 +565,7 @@ impl<'a> D1SnapshotRepository<'a> {
                 return Err(idempotency_conflict());
             }
             if current.state != D1TransferState::Ingesting
+                || current.num_queries != Some(num_queries)
                 || result_session_version
                     != current
                         .at_session_version
@@ -570,15 +577,10 @@ impl<'a> D1SnapshotRepository<'a> {
             let _ = read_snapshot(tx, current.resource_id, result_session_version)?;
             tx.execute(
                 "UPDATE d1_transfer_sessions
-                 SET state = 'complete', result_session_version = ?1, num_queries = ?2,
-                     updated_at_ms = ?3, completed_at_ms = ?3
-                 WHERE id = ?4 AND state = 'ingesting'",
-                params![
-                    to_i64(result_session_version)?,
-                    to_i64(num_queries)?,
-                    now_ms,
-                    session_id
-                ],
+                 SET state = 'complete', result_session_version = ?1,
+                     updated_at_ms = ?2, completed_at_ms = ?2
+                 WHERE id = ?3 AND state = 'ingesting'",
+                params![to_i64(result_session_version)?, now_ms, session_id],
             )
             .map_err(|_| invariant())?;
             read_transfer(tx, account_id, session_id)
