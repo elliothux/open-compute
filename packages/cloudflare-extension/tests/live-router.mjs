@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
+import { createOpenComputeExtension } from "../src/index.ts";
 
 const baseURL = process.env.OPEN_COMPUTE_V4_BASE_URL;
 const apiToken = process.env.OPEN_COMPUTE_V4_TOKEN;
@@ -11,7 +12,18 @@ assert.ok(accountID, "OPEN_COMPUTE_V4_ACCOUNT_ID is required");
 assert.ok(sdkEntry, "OPEN_COMPUTE_CLOUDFLARE_SDK_ENTRY is required");
 
 const { default: Cloudflare } = await import(pathToFileURL(sdkEntry).href);
-const client = new Cloudflare({ apiToken, baseURL, maxRetries: 0 });
+const requests = [];
+const tracedFetch = async (input, init) => {
+  const request = new Request(input, init);
+  requests.push({
+    method: request.method,
+    url: request.url,
+    contentType: request.headers.get("content-type") ?? "",
+    formData: init?.body instanceof FormData,
+  });
+  return fetch(request);
+};
+const client = new Cloudflare({ apiToken, baseURL, maxRetries: 0, fetch: tracedFetch });
 
 for (const [name, contract] of [
   ["identity", identityContract],
@@ -31,6 +43,14 @@ for (const [name, contract] of [
     throw error;
   }
 }
+assert.ok(requests.length > 0);
+assert.ok(requests.every(({ url }) => url.startsWith(`${baseURL}/`)));
+assert.ok(requests.some(({ method, url, contentType, formData }) =>
+  method === "PUT"
+  && url.endsWith(`/accounts/${accountID}/workers/scripts/sdk-uploaded-worker`)
+  && contentType === "application/javascript"
+  && formData
+), "typed Worker upload did not use the fixed official SDK FormData transport");
 
 async function identityContract() {
   const accounts = await client.accounts.list();
@@ -40,6 +60,18 @@ async function identityContract() {
   assert.equal((await client.accounts.get({ account_id: accountID })).id, accountID);
   assert.match((await client.user.get()).id, /^[0-9a-f]{32}$/);
   assert.equal((await client.user.tokens.verify()).status, "active");
+  const memberships = await client.memberships.list();
+  assert.equal(memberships.result.length, 1);
+  assert.equal(memberships.result[0].account.id, accountID);
+
+  const extension = createOpenComputeExtension(client);
+  const capabilities = await extension.capabilities.get();
+  assert.equal(capabilities.wrangler_version, "4.127.1");
+  assert.equal(capabilities.compatibility_date.minimum, "2026-08-30");
+  assert.equal(capabilities.compatibility_date.maximum, "2026-08-30");
+  assert.ok(Object.keys(capabilities.endpoints).length > 0);
+  const system = await extension.system.status();
+  assert.equal(system.state, "ready");
 }
 
 async function workersContract() {
@@ -68,22 +100,16 @@ async function workersContract() {
     account_id: accountID, script_name: workerName,
   })).name, "SDK_SECRET");
 
-  const upload = new FormData();
-  upload.append("metadata", JSON.stringify({
-    main_module: "index.js",
-    compatibility_date: "2026-08-30",
-  }));
-  upload.append("index.js", new File(
-    ["export default { fetch() { return new Response('sdk'); } };"],
-    "index.js",
-    { type: "application/javascript+module" },
-  ));
-  const uploadEnvelope = await client.put(
-    `/accounts/${accountID}/workers/scripts/${uploadedWorkerName}`,
-    { body: upload },
-  );
-  assert.equal(uploadEnvelope.success, true);
-  assert.match(uploadEnvelope.result.id, /^[0-9a-f-]{36}$/);
+  const upload = await client.workers.scripts.update(uploadedWorkerName, {
+    account_id: accountID,
+    metadata: { main_module: "index.js", compatibility_date: "2026-08-30" },
+    files: [new File(
+      ["export default { fetch() { return new Response('sdk'); } };"],
+      "index.js",
+      { type: "application/javascript+module" },
+    )],
+  });
+  assert.match(upload.id, /^[0-9a-f-]{36}$/);
   const uploadedVersions = await client.workers.scripts.versions.list(uploadedWorkerName, {
     account_id: accountID, page: 1, per_page: 10,
   });
@@ -115,15 +141,6 @@ async function workersContract() {
     account_id: accountID,
   })).result.length, 0);
 
-  await expectAPIError(() => client.workers.scripts.update(workerName, {
-    account_id: accountID,
-    metadata: { main_module: "index.js", compatibility_date: "2026-08-30" },
-    files: [new File(
-      ["export default { fetch() { return new Response('sdk'); } };"],
-      "index.js",
-      { type: "application/javascript+module" },
-    )],
-  }), [400]);
   await expectAPIError(() => client.workers.scripts.versions.get(
     "00000000-0000-7000-8000-000000000000",
     { account_id: accountID, script_name: workerName },

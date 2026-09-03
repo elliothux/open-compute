@@ -113,6 +113,15 @@ Day 1 只认证精确的 Wrangler 和 Cloudflare SDK 版本，不声明宽泛的
 名称。升级任一客户端必须先记录请求 trace、比较 config/schema 与 multipart metadata，再运行本文定义的兼容
 Gate。
 
+固定 `cloudflare@7.1.0` 的 `resources/workers/scripts/scripts` 与 `internal/uploads` 会在
+`workers.scripts.update()` 把 typed body 转为 `FormData` 后仍保留生成代码写入的
+`Content-Type: application/javascript`，并把最小 metadata 编码为 `metadata[main_module]`、
+`metadata[compatibility_date]`，模块编码为带 filename 的 `files[]`。生产上传边界仅对这个精确 pin 的真实 wire
+shape 从首个有界、合法 multipart delimiter 恢复 boundary，再进入同一个 multipart/Version authority；不增加第二
+transport、raw fetch 或旧协议。`workers_http::v4::multipart` 的 wire regression 与
+`p6-cloudflare-sdk` 的真实 `ocd`/stock workerd Gate 共同锁定这一例外；升级 SDK 时必须重新取 trace，若上游已修复
+header/field shape 就直接删除该归一化路径。
+
 ## 3. API 根、认证与 listener
 
 Wrangler 通过环境变量选择 open-compute：

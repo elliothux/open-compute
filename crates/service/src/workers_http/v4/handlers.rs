@@ -387,6 +387,10 @@ async fn upload(
     let Some(api) = state.worker_api().cloned() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
+    let request = match multipart::normalize_sdk_multipart_request(request).await {
+        Ok(value) => value,
+        Err(error) => return platform_error(context.request_id(), &error),
+    };
     let multipart = match Multipart::from_request(request, &state).await {
         Ok(value) => value,
         Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),

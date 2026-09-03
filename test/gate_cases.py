@@ -80,7 +80,7 @@ ONCE = {
     # Default Node builtins, process.env isolation, and fail-closed stubs.
     'p0-2': ('nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs',),
     'p6-wrangler-resources': ('fixed_wrangler_resource_commands_use_live_v4_authorities',),
-    'p6-cloudflare-sdk': ('official_cloudflare_sdk_matches_live_v4_router_contract',),
+    'p6-cloudflare-sdk': ('official_cloudflare_sdk_matches_live_ocd_contract',),
 }
 
 TIMING = {
