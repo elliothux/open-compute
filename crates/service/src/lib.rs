@@ -20,6 +20,7 @@ pub mod cli;
 mod cloudflare_v4;
 pub mod config_load;
 pub mod d1_backend;
+mod d1_coordinator;
 pub mod d1_http;
 mod d1_protocol;
 mod d1_session;

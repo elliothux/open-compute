@@ -1,12 +1,65 @@
 //! SQLite Online Backup and restore-as-new identity rewriting.
 
-use super::engine::{D1Engine, identity_error, map_open_error};
+use super::D1DatabaseRecord;
+use super::engine::{
+    D1_DATABASE_SCHEMA_VERSION, D1Engine, identity_error, map_open_error, read_session_version,
+};
 use crate::fs;
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
 use rusqlite::{Connection, MAIN_DB, OpenFlags, params};
 use std::path::Path;
 
 impl D1Engine {
+    /// Verify a completed snapshot without opening it for mutation or creating sidecars.
+    pub fn verify_completed_snapshot(
+        snapshot: &Path,
+        record: &D1DatabaseRecord,
+        session_version: u64,
+    ) -> Result<(), PlatformError> {
+        if record.schema_version != D1_DATABASE_SCHEMA_VERSION
+            || record.resource.driver_schema_version != D1_DATABASE_SCHEMA_VERSION
+            || !snapshot.is_file()
+        {
+            return Err(identity_error());
+        }
+        fs::validate_owned_file(snapshot, true).map_err(|_| identity_error())?;
+        let connection = Connection::open_with_flags(
+            snapshot,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|error| map_open_error(&error))?;
+        for (key, expected) in [
+            ("format", "open-compute-d1".to_owned()),
+            ("schema_version", D1_DATABASE_SCHEMA_VERSION.to_string()),
+            ("resource_id", record.resource.id.to_string()),
+            ("account_id", record.resource.account_id.to_string()),
+        ] {
+            let actual: Vec<u8> = connection
+                .query_row(
+                    "SELECT value FROM __open_compute_meta WHERE key = ?1",
+                    [key],
+                    |row| row.get(0),
+                )
+                .map_err(|_| identity_error())?;
+            if actual != expected.as_bytes() {
+                return Err(identity_error());
+            }
+        }
+        if read_session_version(&connection)? != session_version {
+            return Err(identity_error());
+        }
+        let check: String = connection
+            .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
+            .map_err(|error| map_open_error(&error))?;
+        if check != "ok" {
+            return Err(PlatformError::new(
+                ErrorCode::D1DatabaseCorrupt,
+                "D1 snapshot failed integrity validation",
+            ));
+        }
+        Ok(())
+    }
+
     /// Create a transactionally consistent standalone snapshot.
     pub fn online_backup(&self, destination: &Path) -> Result<(), PlatformError> {
         if destination.exists() || std::fs::symlink_metadata(destination).is_ok() {

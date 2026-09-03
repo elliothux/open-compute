@@ -455,7 +455,7 @@ fn batch_is_atomic_and_ordered() {
 }
 
 #[test]
-fn exec_uses_sqlite_tail_parser_and_preserves_committed_prefix() {
+fn exec_uses_sqlite_tail_parser_and_versions_a_committed_prefix() {
     let fixture = fixture();
     fixture
         .engine
@@ -573,6 +573,7 @@ fn migration_ledger_is_atomic_idempotent_and_detects_drift() {
         .apply_migrations(std::slice::from_ref(&migration), limits(), 101)
         .unwrap();
     assert_eq!(applied.len(), 1);
+    assert_eq!(fixture.engine.session_version().unwrap(), 1);
     assert_eq!(fixture.engine.user_version().unwrap(), 1);
     assert_eq!(
         fixture
@@ -581,6 +582,7 @@ fn migration_ledger_is_atomic_idempotent_and_detects_drift() {
             .unwrap(),
         applied
     );
+    assert_eq!(fixture.engine.session_version().unwrap(), 1);
     let mut drift = migration;
     drift.sql = "CREATE TABLE different(id INTEGER)".to_owned();
     drift.sha256 = Sha256::digest(drift.sql.as_bytes()).into();

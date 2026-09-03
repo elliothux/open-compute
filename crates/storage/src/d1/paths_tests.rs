@@ -1,4 +1,5 @@
 use super::*;
+use std::os::unix::fs::PermissionsExt as _;
 
 #[test]
 fn typed_paths_reject_wrong_parents_content_and_operation_symlinks() {
@@ -43,6 +44,36 @@ fn typed_paths_reject_wrong_parents_content_and_operation_symlinks() {
     std::fs::remove_file(staging.join("unexpected")).unwrap();
     std::fs::write(staging.join("data.sqlite"), b"x").unwrap();
     paths.publish_staging(&staging, account, resource).unwrap();
+    let snapshot_key = D1Paths::snapshot_key(account, resource, 0);
+    let snapshot_staging = paths.snapshot_staging_path(account, resource, 0).unwrap();
+    std::fs::write(&snapshot_staging, b"snapshot").unwrap();
+    std::fs::set_permissions(&snapshot_staging, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let snapshot = paths
+        .publish_snapshot(&snapshot_staging, account, resource, 0)
+        .unwrap();
+    assert_eq!(
+        paths
+            .resolve_snapshot_key(&snapshot_key, account, resource, 0)
+            .unwrap(),
+        snapshot
+    );
+    assert_eq!(
+        paths
+            .resolve_snapshot_key("v1/wrong", account, resource, 0)
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1IdentityMismatch
+    );
+    let wrong_snapshot = paths.database_dir(account, resource).join("wrong.sqlite");
+    std::fs::write(&wrong_snapshot, b"snapshot").unwrap();
+    assert_eq!(
+        paths
+            .publish_snapshot(&wrong_snapshot, account, resource, 1)
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1IdentityMismatch
+    );
+    std::fs::remove_file(wrong_snapshot).unwrap();
     let replacement = paths.create_database_staging(resource).unwrap();
     assert_eq!(
         paths

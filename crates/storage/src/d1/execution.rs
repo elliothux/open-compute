@@ -199,14 +199,29 @@ impl D1Engine {
         let connection = self.open()?;
         let started = Instant::now();
         let control = install_guard(&connection, limits, SqlAuthority::Tenant);
-        let result = execute_tail_batch(&connection, sql, D1_MAX_EXEC_STATEMENTS, &control);
+        let mut committed_write = false;
+        let result = execute_tail_batch_observed(
+            &connection,
+            sql,
+            D1_MAX_EXEC_STATEMENTS,
+            &control,
+            &mut committed_write,
+        );
         remove_guard(&connection);
-        let (count, any_write) = result?;
-        if any_write {
-            bump_session_version(&connection)?;
-        }
+        let (count, any_write) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if committed_write {
+                    bump_session_version(&connection).map_err(|_| result_unknown())?;
+                }
+                return Err(error);
+            }
+        };
         if count == 0 {
             return Err(sql_invalid());
+        }
+        if any_write {
+            bump_session_version(&connection).map_err(|_| result_unknown())?;
         }
         Ok(D1ExecResult {
             count: u32::try_from(count).map_err(|_| limit_error())?,
@@ -239,7 +254,7 @@ impl D1Engine {
             .collect()
     }
 
-    /// Apply ordered migrations, each atomically with its private ledger row.
+    /// Apply all pending ordered migrations in one transaction and history version.
     pub fn apply_migrations(
         &self,
         migrations: &[D1Migration],
@@ -266,6 +281,7 @@ impl D1Engine {
 
         let connection = self.open()?;
         let mut applied = read_migration_map(&connection)?;
+        let mut pending = Vec::new();
         for migration in migrations {
             if let Some(existing) = applied.get(&migration.id) {
                 if existing.name == migration.name
@@ -290,9 +306,24 @@ impl D1Engine {
             if migration.id != expected {
                 return Err(migration_drift());
             }
-            connection
-                .execute_batch("BEGIN IMMEDIATE")
-                .map_err(|_| migration_internal())?;
+            pending.push(migration);
+            applied.insert(
+                migration.id,
+                D1MigrationRecord {
+                    id: migration.id,
+                    name: migration.name.clone(),
+                    sha256: hex::encode(migration.sha256),
+                    applied_at_ms: now_ms,
+                },
+            );
+        }
+        if pending.is_empty() {
+            return Ok(applied.into_values().collect());
+        }
+        connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|_| migration_internal())?;
+        for migration in pending {
             let control = install_guard(&connection, limits, SqlAuthority::Migration);
             let execution = execute_tail_batch(
                 &connection,
@@ -326,22 +357,17 @@ impl D1Engine {
                 let _ = connection.execute_batch("ROLLBACK");
                 return Err(migration_internal());
             }
-            if connection.execute_batch("COMMIT").is_err() {
-                let _ = connection.execute_batch("ROLLBACK");
-                return Err(PlatformError::new(
-                    ErrorCode::D1ResultUnknown,
-                    "D1 migration commit result is unknown",
-                ));
-            }
-            applied.insert(
-                migration.id,
-                D1MigrationRecord {
-                    id: migration.id,
-                    name: migration.name.clone(),
-                    sha256: hex::encode(migration.sha256),
-                    applied_at_ms: now_ms,
-                },
-            );
+        }
+        if let Err(error) = bump_session_version(&connection) {
+            let _ = connection.execute_batch("ROLLBACK");
+            return Err(error);
+        }
+        if connection.execute_batch("COMMIT").is_err() {
+            let _ = connection.execute_batch("ROLLBACK");
+            return Err(PlatformError::new(
+                ErrorCode::D1ResultUnknown,
+                "D1 migration commit result is unknown",
+            ));
         }
         Ok(applied.into_values().collect())
     }
@@ -474,6 +500,17 @@ fn execute_tail_batch(
     maximum: usize,
     control: &ExecutionControl,
 ) -> Result<(usize, bool), PlatformError> {
+    let mut committed_write = false;
+    execute_tail_batch_observed(connection, sql, maximum, control, &mut committed_write)
+}
+
+fn execute_tail_batch_observed(
+    connection: &Connection,
+    sql: &str,
+    maximum: usize,
+    control: &ExecutionControl,
+    committed_write: &mut bool,
+) -> Result<(usize, bool), PlatformError> {
     let mut batch = Batch::new(connection, sql);
     let mut count = 0_usize;
     let mut any_write = false;
@@ -488,15 +525,24 @@ fn execute_tail_batch(
         if statement.parameter_count() != 0 {
             return Err(parameter_mismatch());
         }
-        any_write |= !statement.readonly();
+        let write = !statement.readonly();
+        any_write |= write;
         let mut rows = statement.raw_query();
         while rows
             .next()
             .map_err(|error| map_sqlite_error(&error, control))?
             .is_some()
         {}
+        *committed_write |= write;
     }
     Ok((count, any_write))
+}
+
+fn result_unknown() -> PlatformError {
+    PlatformError::new(
+        ErrorCode::D1ResultUnknown,
+        "D1 exec history version durability is unknown",
+    )
 }
 
 fn logical_size(connection: &Connection) -> Result<u64, PlatformError> {

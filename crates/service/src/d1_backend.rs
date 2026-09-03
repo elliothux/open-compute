@@ -1,5 +1,8 @@
 //! Authorized private data plane for the loaded-isolate D1 facade.
 
+use crate::d1_coordinator::D1Coordinator;
+#[cfg(test)]
+use crate::d1_coordinator::D1HandleManager;
 use crate::d1_protocol::{
     D1_FRAME_CONTENT_TYPE, D1_JSON_CONTENT_TYPE, D1_MAX_FRAME_BYTES, D1QueryMode, decode_exec,
     decode_query, encode_results,
@@ -11,17 +14,17 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header}
 use axum::response::{IntoResponse, Response};
 use open_compute_core::{
     AccountId, BindingId, BindingKind, D1Config, ErrorCode, OperationClass, PlatformError,
-    ResourceAvailability, ResourceId, VersionId,
+    ResourceId, VersionId,
 };
 use open_compute_storage::{
-    BindingRepository, D1DatabaseRepository, D1Engine, D1Migration, D1MigrationRecord, D1Paths,
-    D1QueryLimits, D1Statement, D1StatementResult, D1Value, PlatformStorage, ResourceRepository,
+    BindingRepository, D1Engine, D1Migration, D1MigrationRecord, D1QueryLimits, D1Statement,
+    D1StatementResult, D1Value, PlatformStorage,
 };
-use open_compute_workers::{ResourcePin, ResourcePins};
-use std::collections::HashMap;
+use open_compute_workers::ResourcePins;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(any(test, feature = "test-support"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const ERROR_HEADER: &str = "x-open-compute-error-code";
@@ -30,9 +33,8 @@ const ERROR_HEADER: &str = "x-open-compute-error-code";
 #[derive(Clone)]
 pub struct D1BindingService {
     storage: Arc<PlatformStorage>,
-    pins: ResourcePins,
     config: D1Config,
-    handles: D1HandleManager,
+    coordinator: Arc<D1Coordinator>,
     metrics: Option<Arc<MetricsRegistry>>,
     #[cfg(any(test, feature = "test-support"))]
     response_loss_once: Arc<AtomicBool>,
@@ -51,13 +53,8 @@ impl D1BindingService {
     #[must_use]
     pub fn new(storage: Arc<PlatformStorage>, pins: ResourcePins, config: D1Config) -> Self {
         Self {
+            coordinator: Arc::new(D1Coordinator::new(storage.clone(), pins, config.clone())),
             storage,
-            pins,
-            handles: D1HandleManager::new(
-                config.max_open_databases,
-                config.max_queued_operations_per_database,
-                Duration::from_millis(config.idle_handle_ttl_ms),
-            ),
             config,
             metrics: None,
             #[cfg(any(test, feature = "test-support"))]
@@ -82,7 +79,7 @@ impl D1BindingService {
     /// Attach the process fixed-series metrics registry.
     #[must_use]
     pub fn with_metrics(mut self, metrics: Arc<MetricsRegistry>) -> Self {
-        self.handles.set_metrics(metrics.clone());
+        self.coordinator.set_metrics(metrics.clone());
         self.metrics = Some(metrics);
         self
     }
@@ -220,16 +217,35 @@ impl D1BindingService {
                 "D1 SQL must not be empty",
             ));
         }
-        self.run_control(account_id, resource_id, false, move |engine, limits| {
-            engine.query(
-                &D1Statement {
+        let timeout = Duration::from_millis(self.config.batch_timeout_ms);
+        let metrics = self.metrics.clone();
+        self.coordinator
+            .execute(account_id, resource_id, timeout, false, move |context| {
+                let limits = D1QueryLimits::batch(context.config)?;
+                let statement = D1Statement {
                     sql,
                     params: vec![],
-                },
-                limits,
-            )
-        })
-        .await
+                };
+                let readonly = context
+                    .engine
+                    .statements_readonly(std::slice::from_ref(&statement), limits)?;
+                let _admission = if readonly {
+                    None
+                } else {
+                    context.mark_mutation();
+                    ensure_d1_storage_headroom(context.storage)?;
+                    let result = context.storage.reserve_mutation(64 * 1024);
+                    if let Some(metrics) = &metrics {
+                        metrics.observe_admission(
+                            OperationClass::D1,
+                            result.as_ref().err().map(PlatformError::code),
+                        );
+                    }
+                    Some(result?)
+                };
+                context.engine.query(&statement, limits)
+            })
+            .await
     }
 
     /// Execute one official D1 query or one atomic batch through the shared database lane.
@@ -284,26 +300,12 @@ impl D1BindingService {
         F: FnOnce(&D1Engine, D1QueryLimits) -> Result<T, PlatformError> + Send + 'static,
     {
         let timeout = Duration::from_millis(self.config.batch_timeout_ms);
-        let pin = self.pins.try_pin(resource_id)?;
-        let lane = self.handles.acquire(resource_id, timeout).await?;
-        let storage = self.storage.clone();
-        let config = self.config.clone();
         let metrics = self.metrics.clone();
-        let task = tokio::task::spawn_blocking(move || {
-            let _pin = pin;
-            let _lane = lane;
-            let catalog = D1DatabaseRepository::new(storage.db()).get(account_id, resource_id)?;
-            if catalog.resource.availability != ResourceAvailability::Healthy {
-                return Err(PlatformError::new(
-                    ErrorCode::ResourceUnavailable,
-                    "D1 database is quarantined",
-                ));
-            }
-            let result = (|| {
-                let paths = D1Paths::open(storage.data_dir().root())?;
-                let path =
-                    paths.resolve_storage_key(&catalog.storage_key, account_id, resource_id)?;
-                let engine = D1Engine::from_record(path, &catalog)?;
+        self.coordinator
+            .execute(account_id, resource_id, timeout, mutation, move |context| {
+                let engine = context.engine;
+                let storage = context.storage;
+                let config = context.config;
                 let _admission = if mutation {
                     let result =
                         storage.reserve_mutation(config.max_result_bytes.saturating_add(64 * 1024));
@@ -319,33 +321,12 @@ impl D1BindingService {
                 };
                 if mutation {
                     ensure_d1_storage_headroom(&storage)?;
+                    context.mark_mutation();
                 }
                 let result = operation(&engine, D1QueryLimits::batch(&config)?)?;
-                if mutation {
-                    engine.checkpoint(false)?;
-                }
-                if let Some(metrics) = &metrics
-                    && let Ok(bytes) = engine.wal_bytes()
-                {
-                    metrics.observe_d1_wal_bytes(bytes);
-                }
                 Ok(result)
-            })();
-            persist_d1_corruption(&storage, account_id, resource_id, &result);
-            result
-        });
-        match tokio::time::timeout(timeout.saturating_add(Duration::from_secs(1)), task).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(protocol_error()),
-            Err(_) if mutation => Err(PlatformError::new(
-                ErrorCode::D1ResultUnknown,
-                "D1 control mutation result is unknown after timeout",
-            )),
-            Err(_) => Err(PlatformError::new(
-                ErrorCode::D1Timeout,
-                "D1 control operation exceeded its wall deadline",
-            )),
-        }
+            })
+            .await
     }
 
     async fn handle_inner(
@@ -379,7 +360,6 @@ impl D1BindingService {
         if operation == Operation::Exec && !binding.binding.permissions.write {
             return Err(permission_denied());
         }
-        let pin = self.pins.try_pin(binding.resource.id)?;
         let body = to_bytes(request.into_body(), D1_MAX_FRAME_BYTES)
             .await
             .map_err(|_| limit_error())?;
@@ -393,51 +373,98 @@ impl D1BindingService {
             }
             _ => Duration::from_millis(self.config.query_timeout_ms),
         };
-        let lane = self.handles.acquire(binding.resource.id, timeout).await?;
-        let storage = self.storage.clone();
-        let config = self.config.clone();
         let metrics = self.metrics.clone();
-        let mutation_started = Arc::new(AtomicBool::new(false));
-        let mutation_for_task = mutation_started.clone();
-        let task = tokio::task::spawn_blocking(move || {
-            let _pin: ResourcePin = pin;
-            let _lane = lane;
-            let catalog = D1DatabaseRepository::new(storage.db())
-                .get(binding.account_id, binding.resource.id)?;
-            if catalog.resource.availability != ResourceAvailability::Healthy {
-                return Err(PlatformError::new(
-                    ErrorCode::ResourceUnavailable,
-                    "D1 database is quarantined",
-                ));
-            }
-            let result = (|| {
-                let paths = D1Paths::open(storage.data_dir().root())?;
-                let path = paths.resolve_storage_key(
-                    &catalog.storage_key,
-                    binding.account_id,
-                    binding.resource.id,
-                )?;
-                let engine = D1Engine::from_record(path, &catalog)?;
-                match command {
-                    Command::Query(query) => {
-                        let limits = if query.mode == D1QueryMode::Batch {
-                            D1QueryLimits::batch(&config)?
-                        } else {
-                            D1QueryLimits::query(&config)?
-                        };
-                        let readonly = engine.statements_readonly(&query.statements, limits)?;
-                        if readonly && !binding.binding.permissions.read
-                            || !readonly && !binding.binding.permissions.write
-                        {
-                            return Err(permission_denied());
+        let account_id = binding.account_id;
+        let resource_id = binding.resource.id;
+        let mutation_possible = matches!(command, Command::Exec(_));
+        let result = self
+            .coordinator
+            .execute(
+                account_id,
+                resource_id,
+                timeout,
+                mutation_possible,
+                move |context| {
+                    let engine = context.engine;
+                    let storage = context.storage;
+                    let config = context.config;
+                    match command {
+                        Command::Query(query) => {
+                            let limits = if query.mode == D1QueryMode::Batch {
+                                D1QueryLimits::batch(&config)?
+                            } else {
+                                D1QueryLimits::query(&config)?
+                            };
+                            let readonly = engine.statements_readonly(&query.statements, limits)?;
+                            if readonly && !binding.binding.permissions.read
+                                || !readonly && !binding.binding.permissions.write
+                            {
+                                return Err(permission_denied());
+                            }
+                            let _admission = if readonly {
+                                None
+                            } else {
+                                let result = storage.reserve_mutation(
+                                    config
+                                        .max_result_bytes
+                                        .saturating_add(D1_MAX_FRAME_BYTES as u64),
+                                );
+                                if let Some(metrics) = &metrics {
+                                    metrics.observe_admission(
+                                        OperationClass::D1,
+                                        result.as_ref().err().map(PlatformError::code),
+                                    );
+                                }
+                                Some(result?)
+                            };
+                            if !readonly {
+                                ensure_d1_storage_headroom(&storage)?;
+                                context.mark_mutation();
+                            }
+                            apply_session(
+                                storage.crypto(),
+                                binding.account_id,
+                                binding.resource.id,
+                                engine,
+                                &query.session,
+                            )?;
+                            let results = if query.mode == D1QueryMode::Batch {
+                                engine.batch(&query.statements, limits)?
+                            } else {
+                                vec![engine.query(&query.statements[0], limits)?]
+                            };
+                            let rows_output = results
+                                .iter()
+                                .map(|result| result.meta.rows_read)
+                                .fold(0_u64, u64::saturating_add);
+                            let rows_written = results
+                                .iter()
+                                .map(|result| result.meta.rows_written)
+                                .fold(0_u64, u64::saturating_add);
+                            let (bookmark, session_version) = issue_bookmark(
+                                storage.crypto(),
+                                binding.account_id,
+                                binding.resource.id,
+                                engine,
+                                &query.session,
+                            )?;
+                            encode_results(&results, bookmark.as_deref(), session_version).map(
+                                |bytes| CommandResult::Frame {
+                                    bytes,
+                                    operation: if query.mode == D1QueryMode::Batch {
+                                        D1MetricOperation::Batch
+                                    } else {
+                                        D1MetricOperation::Query
+                                    },
+                                    readonly,
+                                    rows_output,
+                                    rows_written,
+                                },
+                            )
                         }
-                        let _admission = if readonly {
-                            None
-                        } else {
+                        Command::Exec(sql) => {
                             let result = storage.reserve_mutation(
-                                config
-                                    .max_result_bytes
-                                    .saturating_add(D1_MAX_FRAME_BYTES as u64),
+                                config.max_result_bytes.saturating_add(sql.len() as u64),
                             );
                             if let Some(metrics) = &metrics {
                                 metrics.observe_admission(
@@ -445,111 +472,25 @@ impl D1BindingService {
                                     result.as_ref().err().map(PlatformError::code),
                                 );
                             }
-                            Some(result?)
-                        };
-                        if !readonly {
+                            let _admission = result?;
                             ensure_d1_storage_headroom(&storage)?;
+                            context.mark_mutation();
+                            let result = engine.exec(&sql, D1QueryLimits::query(&config)?)?;
+                            serde_json::to_vec(&result)
+                                .map(|bytes| CommandResult::Json { bytes })
+                                .map_err(|_| protocol_error())
                         }
-                        apply_session(
-                            storage.crypto(),
-                            binding.account_id,
-                            binding.resource.id,
-                            &engine,
-                            &query.session,
-                        )?;
-                        mutation_for_task.store(!readonly, Ordering::Release);
-                        let results = if query.mode == D1QueryMode::Batch {
-                            engine.batch(&query.statements, limits)?
-                        } else {
-                            vec![engine.query(&query.statements[0], limits)?]
-                        };
-                        if !readonly {
-                            engine.checkpoint(false)?;
-                        }
-                        if let Some(metrics) = &metrics
-                            && let Ok(bytes) = engine.wal_bytes()
-                        {
-                            metrics.observe_d1_wal_bytes(bytes);
-                        }
-                        let rows_output = results
-                            .iter()
-                            .map(|result| result.meta.rows_read)
-                            .fold(0_u64, u64::saturating_add);
-                        let rows_written = results
-                            .iter()
-                            .map(|result| result.meta.rows_written)
-                            .fold(0_u64, u64::saturating_add);
-                        let (bookmark, session_version) = issue_bookmark(
-                            storage.crypto(),
-                            binding.account_id,
-                            binding.resource.id,
-                            &engine,
-                            &query.session,
-                        )?;
-                        encode_results(&results, bookmark.as_deref(), session_version).map(
-                            |bytes| CommandResult::Frame {
-                                bytes,
-                                operation: if query.mode == D1QueryMode::Batch {
-                                    D1MetricOperation::Batch
-                                } else {
-                                    D1MetricOperation::Query
-                                },
-                                readonly,
-                                rows_output,
-                                rows_written,
-                            },
-                        )
                     }
-                    Command::Exec(sql) => {
-                        let result = storage.reserve_mutation(
-                            config.max_result_bytes.saturating_add(sql.len() as u64),
-                        );
-                        if let Some(metrics) = &metrics {
-                            metrics.observe_admission(
-                                OperationClass::D1,
-                                result.as_ref().err().map(PlatformError::code),
-                            );
-                        }
-                        let _admission = result?;
-                        ensure_d1_storage_headroom(&storage)?;
-                        mutation_for_task.store(true, Ordering::Release);
-                        let result = engine.exec(&sql, D1QueryLimits::query(&config)?)?;
-                        engine.checkpoint(false)?;
-                        if let Some(metrics) = &metrics
-                            && let Ok(bytes) = engine.wal_bytes()
-                        {
-                            metrics.observe_d1_wal_bytes(bytes);
-                        }
-                        serde_json::to_vec(&result)
-                            .map(|bytes| CommandResult::Json { bytes })
-                            .map_err(|_| protocol_error())
-                    }
-                }
-            })();
-            persist_d1_corruption(&storage, binding.account_id, binding.resource.id, &result);
-            result
-        });
-        let outer = timeout.saturating_add(Duration::from_secs(1));
-        let result = match tokio::time::timeout(outer, task).await {
-            Ok(Ok(result)) => result?,
-            Ok(Err(_)) => return Err(protocol_error()),
-            Err(_) if mutation_started.load(Ordering::Acquire) => {
-                return Err(PlatformError::new(
-                    ErrorCode::D1ResultUnknown,
-                    "D1 mutation result is unknown after transport timeout",
-                ));
-            }
-            Err(_) => {
-                return Err(PlatformError::new(
-                    ErrorCode::D1Timeout,
-                    "D1 query exceeded its wall deadline",
-                ));
-            }
+                },
+            )
+            .await?;
+        #[cfg(any(test, feature = "test-support"))]
+        let mutation_completed = match &result {
+            CommandResult::Frame { readonly, .. } => !readonly,
+            CommandResult::Json { .. } => true,
         };
         #[cfg(any(test, feature = "test-support"))]
-        if mutation_started.load(Ordering::Acquire)
-            && self.response_loss_once.swap(false, Ordering::AcqRel)
-        {
+        if mutation_completed && self.response_loss_once.swap(false, Ordering::AcqRel) {
             return Err(PlatformError::new(
                 ErrorCode::D1ResultUnknown,
                 "D1 mutation committed but its response was lost",
@@ -613,132 +554,6 @@ struct ExecutedResponse {
     rows_output: u64,
     rows_written: u64,
     result_bytes: u64,
-}
-
-#[derive(Clone)]
-struct D1HandleManager {
-    max_open: usize,
-    queue_limit: usize,
-    idle_ttl: Duration,
-    lanes: Arc<Mutex<HashMap<ResourceId, Arc<D1Lane>>>>,
-    metrics: Arc<Mutex<Option<Arc<MetricsRegistry>>>>,
-}
-
-impl D1HandleManager {
-    fn new(global: u32, queue_limit: u32, idle_ttl: Duration) -> Self {
-        Self {
-            max_open: global.max(1) as usize,
-            queue_limit: queue_limit.max(1) as usize,
-            idle_ttl,
-            lanes: Arc::new(Mutex::new(HashMap::new())),
-            metrics: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    fn set_metrics(&self, metrics: Arc<MetricsRegistry>) {
-        *self
-            .metrics
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(metrics);
-    }
-
-    async fn acquire(
-        &self,
-        resource: ResourceId,
-        timeout: Duration,
-    ) -> Result<D1LaneLease, PlatformError> {
-        let (lane, open_databases) = {
-            let mut lanes = self
-                .lanes
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(lane) = lanes.get(&resource) {
-                (lane.clone(), lanes.len())
-            } else {
-                let now = Instant::now();
-                lanes.retain(|_, lane| {
-                    lane.queued.load(Ordering::Acquire) > 0
-                        || lane.semaphore.available_permits() == 0
-                        || now.duration_since(lane.last_used()) < self.idle_ttl
-                });
-                if lanes.len() >= self.max_open {
-                    let candidate = lanes
-                        .iter()
-                        .filter(|(_, lane)| {
-                            lane.queued.load(Ordering::Acquire) == 0
-                                && lane.semaphore.available_permits() == 1
-                        })
-                        .min_by_key(|(_, lane)| lane.last_used())
-                        .map(|(id, _)| *id);
-                    let Some(candidate) = candidate else {
-                        return Err(overloaded());
-                    };
-                    lanes.remove(&candidate);
-                }
-                let lane = Arc::new(D1Lane {
-                    semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-                    queued: AtomicUsize::new(0),
-                    last_used: Mutex::new(now),
-                });
-                lanes.insert(resource, lane.clone());
-                (lane, lanes.len())
-            }
-        };
-        let prior = lane.queued.fetch_add(1, Ordering::AcqRel);
-        if let Some(metrics) = self
-            .metrics
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-        {
-            metrics.set_d1_open_databases(open_databases as u64);
-            metrics.observe_d1_queue_depth(prior.saturating_add(1) as u64);
-        }
-        if prior >= self.queue_limit {
-            lane.queued.fetch_sub(1, Ordering::AcqRel);
-            return Err(overloaded());
-        }
-        let resource_permit = tokio::time::timeout(timeout, lane.semaphore.clone().acquire_owned())
-            .await
-            .map_err(|_| overloaded())?
-            .map_err(|_| overloaded());
-        lane.queued.fetch_sub(1, Ordering::AcqRel);
-        let resource_permit = resource_permit?;
-        Ok(D1LaneLease {
-            _resource: resource_permit,
-            _lane: lane,
-        })
-    }
-}
-
-struct D1Lane {
-    semaphore: Arc<tokio::sync::Semaphore>,
-    queued: AtomicUsize,
-    last_used: Mutex<Instant>,
-}
-
-impl D1Lane {
-    fn last_used(&self) -> Instant {
-        *self
-            .last_used
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-struct D1LaneLease {
-    _resource: tokio::sync::OwnedSemaphorePermit,
-    _lane: Arc<D1Lane>,
-}
-
-impl Drop for D1LaneLease {
-    fn drop(&mut self) {
-        *self
-            ._lane
-            .last_used
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Instant::now();
-    }
 }
 
 fn parse_path(path: &str) -> Result<(BindingId, Operation), PlatformError> {
@@ -872,6 +687,7 @@ fn limit_error() -> PlatformError {
     )
 }
 
+#[cfg(test)]
 fn overloaded() -> PlatformError {
     PlatformError::new(ErrorCode::D1Overloaded, "D1 operation queue is saturated")
 }
@@ -900,33 +716,13 @@ pub(crate) fn ensure_d1_storage_headroom(storage: &PlatformStorage) -> Result<()
     Ok(())
 }
 
+#[cfg(test)]
 fn wall_now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| {
             i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
         })
-}
-
-fn persist_d1_corruption<T>(
-    storage: &PlatformStorage,
-    account_id: AccountId,
-    resource_id: ResourceId,
-    result: &Result<T, PlatformError>,
-) {
-    let Err(error) = result else { return };
-    let code = match error.code() {
-        ErrorCode::D1DatabaseCorrupt => "D1_DATABASE_CORRUPT",
-        ErrorCode::D1IdentityMismatch => "D1_IDENTITY_MISMATCH",
-        _ => return,
-    };
-    let _ = ResourceRepository::new(storage.db()).set_availability(
-        account_id,
-        resource_id,
-        ResourceAvailability::Unavailable,
-        Some(code),
-        wall_now_ms(),
-    );
 }
 
 #[cfg(test)]

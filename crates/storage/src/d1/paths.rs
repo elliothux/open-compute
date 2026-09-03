@@ -5,6 +5,7 @@ use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
 use std::path::{Path, PathBuf};
 
 const DATABASE_FILE: &str = "data.sqlite";
+const HISTORY_DIR: &str = "history";
 const STAGING_DIR: &str = ".staging";
 const TRASH_DIR: &str = ".trash";
 
@@ -74,12 +75,110 @@ impl D1Paths {
         self.database_dir(account, resource).join(DATABASE_FILE)
     }
 
+    /// Canonical private locator for one completed database snapshot.
+    #[must_use]
+    pub fn snapshot_key(account: AccountId, resource: ResourceId, session_version: u64) -> String {
+        format!("v1/{account}/{resource}/{HISTORY_DIR}/{session_version}.sqlite")
+    }
+
+    /// Resolve one exact completed snapshot locator without accepting aliases.
+    pub fn resolve_snapshot_key(
+        &self,
+        snapshot_key: &str,
+        account: AccountId,
+        resource: ResourceId,
+        session_version: u64,
+    ) -> Result<PathBuf, PlatformError> {
+        if snapshot_key != Self::snapshot_key(account, resource, session_version) {
+            return Err(identity_mismatch());
+        }
+        let path = self.snapshot_path(account, resource, session_version)?;
+        if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
+            fs::validate_contained(&self.root, &path)?;
+            fs::validate_owned_file(&path, true).map_err(|_| identity_mismatch())?;
+        }
+        Ok(path)
+    }
+
+    /// Create a unique unpublished snapshot path beside its final location.
+    pub fn snapshot_staging_path(
+        &self,
+        account: AccountId,
+        resource: ResourceId,
+        session_version: u64,
+    ) -> Result<PathBuf, PlatformError> {
+        let history = self.ensure_history_dir(account, resource)?;
+        Ok(history.join(format!(
+            ".{session_version}.{}.sqlite",
+            uuid::Uuid::now_v7().hyphenated()
+        )))
+    }
+
+    /// Atomically publish one verified snapshot and fsync its directory entry.
+    pub fn publish_snapshot(
+        &self,
+        staging: &Path,
+        account: AccountId,
+        resource: ResourceId,
+        session_version: u64,
+    ) -> Result<PathBuf, PlatformError> {
+        let history = self.ensure_history_dir(account, resource)?;
+        if staging.parent() != Some(history.as_path()) {
+            return Err(identity_mismatch());
+        }
+        fs::validate_owned_file(staging, true).map_err(|_| identity_mismatch())?;
+        let expected_prefix = format!(".{session_version}.");
+        let valid_name = staging
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .and_then(|name| name.strip_prefix(&expected_prefix))
+            .and_then(|tail| tail.strip_suffix(".sqlite"))
+            .is_some_and(|token| {
+                uuid::Uuid::parse_str(token).is_ok_and(|id| id.hyphenated().to_string() == token)
+            });
+        if !valid_name {
+            return Err(identity_mismatch());
+        }
+        let destination = history.join(format!("{session_version}.sqlite"));
+        if destination.exists() || std::fs::symlink_metadata(&destination).is_ok() {
+            return Err(identity_mismatch());
+        }
+        std::fs::rename(staging, &destination)
+            .map_err(|_| path_error("failed to publish D1 snapshot"))?;
+        fs::fsync_dir(&history)?;
+        Ok(destination)
+    }
+
     /// Create and validate an account directory.
     pub fn ensure_account_dir(&self, account: AccountId) -> Result<PathBuf, PlatformError> {
         let path = self.root.join(account.to_string());
         fs::create_dir_secure(&path)?;
         fs::validate_contained(&self.root, &path)?;
         Ok(path)
+    }
+
+    fn snapshot_path(
+        &self,
+        account: AccountId,
+        resource: ResourceId,
+        session_version: u64,
+    ) -> Result<PathBuf, PlatformError> {
+        Ok(self
+            .ensure_history_dir(account, resource)?
+            .join(format!("{session_version}.sqlite")))
+    }
+
+    fn ensure_history_dir(
+        &self,
+        account: AccountId,
+        resource: ResourceId,
+    ) -> Result<PathBuf, PlatformError> {
+        let database = self.database_dir(account, resource);
+        fs::validate_owned_dir(&database).map_err(|_| identity_mismatch())?;
+        let history = database.join(HISTORY_DIR);
+        fs::create_dir_secure(&history)?;
+        fs::validate_contained(&self.root, &history)?;
+        Ok(history)
     }
 
     /// Create a unique create/restore staging directory.
@@ -155,6 +254,10 @@ impl D1Paths {
         for entry in std::fs::read_dir(path).map_err(|_| identity_mismatch())? {
             let entry = entry.map_err(|_| identity_mismatch())?;
             let kind = entry.file_type().map_err(|_| identity_mismatch())?;
+            if entry.file_name() == HISTORY_DIR && kind.is_dir() && !kind.is_symlink() {
+                self.remove_history_dir(&entry.path())?;
+                continue;
+            }
             let allowed = entry.file_name().to_str().is_some_and(|name| {
                 matches!(name, DATABASE_FILE | "data.sqlite-wal" | "data.sqlite-shm")
             });
@@ -165,6 +268,21 @@ impl D1Paths {
         }
         std::fs::remove_dir(path).map_err(|_| identity_mismatch())?;
         fs::fsync_dir(parent)
+    }
+
+    fn remove_history_dir(&self, path: &Path) -> Result<(), PlatformError> {
+        fs::validate_owned_dir(path)?;
+        for entry in std::fs::read_dir(path).map_err(|_| identity_mismatch())? {
+            let entry = entry.map_err(|_| identity_mismatch())?;
+            let kind = entry.file_type().map_err(|_| identity_mismatch())?;
+            let valid_name = entry.file_name().to_str().is_some_and(snapshot_file_name);
+            if !valid_name || kind.is_symlink() || !kind.is_file() {
+                return Err(identity_mismatch());
+            }
+            std::fs::remove_file(entry.path()).map_err(|_| identity_mismatch())?;
+        }
+        std::fs::remove_dir(path).map_err(|_| identity_mismatch())?;
+        Ok(())
     }
 
     fn operation_candidates(
@@ -208,6 +326,23 @@ fn identity_mismatch() -> PlatformError {
 
 fn path_error(message: &'static str) -> PlatformError {
     PlatformError::new(ErrorCode::PathInvalid, message)
+}
+
+fn snapshot_file_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".sqlite") else {
+        return false;
+    };
+    if stem.parse::<u64>().is_ok() {
+        return true;
+    }
+    let Some(stem) = stem.strip_prefix('.') else {
+        return false;
+    };
+    let Some((version, token)) = stem.split_once('.') else {
+        return false;
+    };
+    version.parse::<u64>().is_ok()
+        && uuid::Uuid::parse_str(token).is_ok_and(|id| id.hyphenated().to_string() == token)
 }
 
 #[cfg(test)]
