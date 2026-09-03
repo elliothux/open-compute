@@ -1,5 +1,6 @@
 //! Official Cloudflare v4 R2 bucket and raw-object adapter.
 
+mod idempotency;
 mod objects;
 
 use super::storage::{
@@ -14,6 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine as _;
+use idempotency::{create_fingerprint, put_idempotency_key};
 use open_compute_core::{BindingKind, ErrorCode, RequestId, ResourceId, ResourceState};
 use open_compute_storage::{
     R2_SCHEMA_VERSION, R2BucketRecord, R2BucketRepository, ReserveResourceCreate,
@@ -180,54 +182,50 @@ async fn create(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
-    if put_by_name {
-        match reconcile_named_bucket(api, account_id, &name, now).await {
-            Ok(Some(record)) => return bucket_success(context, &record),
-            Ok(None) => {}
+    let fingerprint = match create_fingerprint(api, account_id, &name) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, request_id),
+    };
+    let idempotency_key = if put_by_name {
+        match put_idempotency_key(api, account_id, &name) {
+            Ok(value) => value,
             Err(error) => return error_response(error, request_id),
         }
-    }
-    let fingerprint_input = match serde_json::to_vec(&serde_json::json!({
-        "account": account_id,
-        "name": name,
-        "maxObjectBytes": api.config().max_object_bytes,
-    })) {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::Internal, request_id),
+    } else {
+        request_id.to_string()
     };
-    let fingerprint = api
-        .storage()
-        .crypto()
-        .fingerprint_request(&fingerprint_input);
-    let idempotency_key = request_id.to_string();
     let expires_at_ms = match now.checked_add(IDEMPOTENCY_TTL_MS) {
         Some(value) => value,
         None => return error_response(V4Error::Internal, request_id),
     };
-    let reservation = ResourceRepository::new(api.storage().db()).reserve_create(
-        &ReserveResourceCreate {
-            account_id,
-            kind: BindingKind::R2Bucket,
-            name: &name,
-            idempotency_key: &idempotency_key,
-            fingerprint_key_id: api.storage().crypto().fingerprint_key_id(),
-            request_fingerprint: &fingerprint,
-            resource_id: ResourceId::generate(),
-            driver_schema_version: R2_SCHEMA_VERSION,
-            request_id,
-            now_ms: now,
-            expires_at_ms,
-        },
-        api.storage().hardening().max_resources_per_kind_per_account,
-    );
+    let reservation_input = ReserveResourceCreate {
+        account_id,
+        kind: BindingKind::R2Bucket,
+        name: &name,
+        idempotency_key: &idempotency_key,
+        fingerprint_key_id: api.storage().crypto().fingerprint_key_id(),
+        request_fingerprint: &fingerprint,
+        resource_id: ResourceId::generate(),
+        driver_schema_version: R2_SCHEMA_VERSION,
+        request_id,
+        now_ms: now,
+        expires_at_ms,
+    };
+    let max_resources = api.storage().hardening().max_resources_per_kind_per_account;
+    let reservation = ResourceRepository::new(api.storage().db())
+        .reserve_create(&reservation_input, max_resources);
     let resource = match reservation {
         Ok(ResourceCreateReservation::Reserved(value))
         | Ok(ResourceCreateReservation::Continue(value)) => value,
         Ok(ResourceCreateReservation::Complete(response)) => {
-            return match serde_json::from_slice::<Bucket>(&response) {
-                Ok(bucket) => success_response(context, bucket),
-                Err(_) => error_response(V4Error::Internal, request_id),
-            };
+            if put_by_name {
+                return match reconcile_named_bucket(api, account_id, &name, now).await {
+                    Ok(Some(record)) => bucket_success(context, &record),
+                    Ok(None) => error_response(V4Error::Conflict, request_id),
+                    Err(error) => error_response(error, request_id),
+                };
+            }
+            return persisted_bucket_response(context, request_id, &response);
         }
         Ok(ResourceCreateReservation::Failed(_)) => {
             return error_response(V4Error::Conflict, request_id);
@@ -249,7 +247,10 @@ async fn create(
     if resource.state == ResourceState::Creating
         && let Err(error) = ResourceRepository::new(api.storage().db()).mark_ready(resource.id, now)
     {
-        return error_response(V4Error::from(&error), request_id);
+        let current = ResourceRepository::new(api.storage().db()).get(account_id, resource.id);
+        if !matches!(current, Ok(current) if current.state == ResourceState::Ready) {
+            return error_response(V4Error::from(&error), request_id);
+        }
     }
     let record =
         match R2BucketRepository::new(api.storage().db()).get(account_id, reconciled.resource.id) {
@@ -271,9 +272,30 @@ async fn create(
         record.resource.id,
         &persisted,
     ) {
-        return error_response(V4Error::from(&error), request_id);
+        if error.code() != ErrorCode::IdempotencyConflict {
+            return error_response(V4Error::from(&error), request_id);
+        }
+        return match ResourceRepository::new(api.storage().db())
+            .reserve_create(&reservation_input, max_resources)
+        {
+            Ok(ResourceCreateReservation::Complete(response)) => {
+                persisted_bucket_response(context, request_id, &response)
+            }
+            Ok(_) | Err(_) => error_response(V4Error::Conflict, request_id),
+        };
     }
     success_response(context, result)
+}
+
+fn persisted_bucket_response(
+    context: super::V4RequestContext,
+    request_id: RequestId,
+    response: &[u8],
+) -> Response {
+    match serde_json::from_slice::<Bucket>(response) {
+        Ok(bucket) => success_response(context, bucket),
+        Err(_) => error_response(V4Error::Internal, request_id),
+    }
 }
 
 async fn reconcile_named_bucket(
