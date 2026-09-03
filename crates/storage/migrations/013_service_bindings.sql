@@ -27,8 +27,8 @@ BEGIN
       AND target.deleted_at_ms IS NULL
       AND caller.account_id = target.account_id
   ) THEN RAISE(ABORT, 'service binding authority invariant') END;
-  SELECT CASE WHEN NEW.binding_name GLOB '*[^A-Za-z0-9_]*'
-    OR NEW.binding_name GLOB '[^A-Za-z_]*'
+  SELECT CASE WHEN NEW.binding_name GLOB '*[^A-Za-z0-9_$]*'
+    OR NEW.binding_name GLOB '[^A-Za-z_$]*'
     OR NEW.binding_name GLOB 'OPEN_COMPUTE_*'
     OR NEW.binding_name GLOB '__*'
   THEN RAISE(ABORT, 'service binding name invariant') END;

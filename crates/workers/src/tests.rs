@@ -729,7 +729,7 @@ fn vars_reject_reserved_names_and_prototype_keys() {
 
 #[test]
 fn descriptor_env_date_and_secret_validation_matrix() {
-    for valid in ["A", "_A", "VALUE_123"] {
+    for valid in ["A", "_A", "$SERVICE", "VALUE_123"] {
         validate_env_name(valid).unwrap();
     }
     for invalid in [

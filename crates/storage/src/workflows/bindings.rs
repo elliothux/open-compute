@@ -13,10 +13,10 @@ impl WorkflowBindingDescriptor {
             || name.len() > 64
             || self.name.starts_with("__")
             || self.name.starts_with("OPEN_COMPUTE_")
-            || name[0].is_ascii_digit()
+            || !(name[0].is_ascii_alphabetic() || matches!(name[0], b'_' | b'$'))
             || !name
                 .iter()
-                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
         {
             return Err(error(ErrorCode::WorkflowBindingStale));
         }

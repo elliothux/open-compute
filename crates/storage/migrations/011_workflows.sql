@@ -161,7 +161,7 @@ BEGIN SELECT RAISE(ABORT,'workflow binding is immutable'); END;
 
 CREATE TRIGGER workflow_binding_insert_guard BEFORE INSERT ON workflow_bindings
 BEGIN
-  SELECT CASE WHEN NEW.name GLOB '*[^A-Za-z0-9_]*' OR NEW.name GLOB '[0-9]*'
+  SELECT CASE WHEN NEW.name GLOB '*[^A-Za-z0-9_$]*' OR NEW.name GLOB '[0-9]*'
     OR NEW.name GLOB 'OPEN_COMPUTE_*' OR NEW.name GLOB '__*'
     THEN RAISE(ABORT,'workflow binding name') END;
   SELECT CASE WHEN NOT EXISTS (

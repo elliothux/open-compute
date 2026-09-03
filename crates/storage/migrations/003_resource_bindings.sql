@@ -121,8 +121,8 @@ BEGIN
       AND r.kind = NEW.kind
       AND r.spec_generation = NEW.resource_spec_generation
   ) THEN RAISE(ABORT, 'binding authority invariant') END;
-  SELECT CASE WHEN NEW.name GLOB '*[^A-Za-z0-9_]*'
-    OR NEW.name GLOB '[^A-Za-z_]*'
+  SELECT CASE WHEN NEW.name GLOB '*[^A-Za-z0-9_$]*'
+    OR NEW.name GLOB '[^A-Za-z_$]*'
     OR NEW.name GLOB 'OPEN_COMPUTE_*'
     OR NEW.name GLOB '__*'
   THEN RAISE(ABORT, 'binding name invariant') END;

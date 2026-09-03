@@ -170,7 +170,7 @@ BEFORE INSERT ON queue_producer_bindings
 BEGIN
   SELECT CASE WHEN NEW.capability_version != 1
     THEN RAISE(ABORT, 'queue capability unsupported') END;
-  SELECT CASE WHEN NEW.name GLOB '*[^A-Za-z0-9_]*' OR
+  SELECT CASE WHEN NEW.name GLOB '*[^A-Za-z0-9_$]*' OR
                    NEW.name GLOB '[0-9]*' OR NEW.name GLOB 'OPEN_COMPUTE_*' OR
                    NEW.name GLOB '__*'
     THEN RAISE(ABORT, 'queue binding name invalid') END;

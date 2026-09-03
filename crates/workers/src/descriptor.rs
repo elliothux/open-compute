@@ -723,8 +723,8 @@ pub fn validate_env_name(name: &str) -> Result<(), PlatformError> {
     let Some(first) = bytes.next() else {
         return Err(invalid_env());
     };
-    if !(first.is_ascii_alphabetic() || first == b'_')
-        || bytes.any(|b| !(b.is_ascii_alphanumeric() || b == b'_'))
+    if !(first.is_ascii_alphabetic() || matches!(first, b'_' | b'$'))
+        || bytes.any(|b| !(b.is_ascii_alphanumeric() || matches!(b, b'_' | b'$')))
         || name.starts_with("OPEN_COMPUTE_")
         || name.starts_with("__")
         || name.len() > 128

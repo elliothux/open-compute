@@ -320,8 +320,11 @@ fn validate_binding_name(name: &str) -> Result<(), PlatformError> {
         && name.len() <= 255
         && name
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-        && name.as_bytes().first().is_some_and(u8::is_ascii_alphabetic);
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
+        && name
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$'));
     if valid { Ok(()) } else { Err(invalid()) }
 }
 
@@ -589,6 +592,30 @@ mod tests {
             BundleLimits::default(),
         )
         .is_err());
+    }
+
+    #[test]
+    fn accepts_wrangler_javascript_identifier_binding_names() {
+        for name in ["_PRIVATE", "$service"] {
+            let metadata = format!(
+                r#"{{"main_module":"index.js","compatibility_date":"2026-08-30","bindings":[{{"name":"{name}","type":"plain_text","text":"ok"}}]}}"#
+            );
+            assert!(
+                parse_parts(
+                    vec![
+                        string_part("metadata", metadata.as_bytes()),
+                        part(
+                            "index.js",
+                            "application/javascript+module",
+                            b"export default {}",
+                        ),
+                    ],
+                    BundleLimits::default(),
+                )
+                .is_ok(),
+                "Wrangler binding name {name} must be accepted"
+            );
+        }
     }
 
     #[test]

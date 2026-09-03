@@ -54,8 +54,8 @@ BEGIN
     SELECT 1 FROM worker_versions
     WHERE id = NEW.version_id AND state = 'staging' AND content_kind = 'worker'
   ) THEN RAISE(ABORT, 'builtin binding authority invariant') END;
-  SELECT CASE WHEN NEW.binding_name GLOB '*[^A-Za-z0-9_]*'
-    OR NEW.binding_name GLOB '[^A-Za-z_]*'
+  SELECT CASE WHEN NEW.binding_name GLOB '*[^A-Za-z0-9_$]*'
+    OR NEW.binding_name GLOB '[^A-Za-z_$]*'
     OR NEW.binding_name GLOB 'OPEN_COMPUTE_*'
     OR NEW.binding_name GLOB '__*'
   THEN RAISE(ABORT, 'builtin binding name invariant') END;
