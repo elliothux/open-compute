@@ -215,6 +215,30 @@ BEGIN
   SELECT CASE WHEN changes()!=1 THEN RAISE(ABORT,'workflow reservation fence') END;
 END;
 
+CREATE TRIGGER workflow_reservation_release_rejected_worker AFTER UPDATE OF state ON worker_versions
+WHEN OLD.state IN ('staging','validating') AND NEW.state='rejected'
+BEGIN
+  UPDATE workflow_definitions
+     SET reserved_class_name=NULL,reservation_owner=NULL,reservation_state=NULL,
+         reservation_created_definition=NULL,
+         updated_at_ms=max(updated_at_ms,coalesce(NEW.rejected_at_ms,updated_at_ms))
+   WHERE state IN ('creating','ready') AND reservation_owner IS NOT NULL
+     AND EXISTS(SELECT 1 FROM workflow_bindings b
+       WHERE b.version_id=NEW.id AND b.definition_id=workflow_definitions.id
+         AND b.reservation_owner=workflow_definitions.reservation_owner
+         AND b.reservation_fence=workflow_definitions.reservation_fence)
+     AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN worker_versions v ON v.id=b.version_id
+       WHERE b.definition_id=workflow_definitions.id
+         AND b.reservation_owner=workflow_definitions.reservation_owner
+         AND b.reservation_fence=workflow_definitions.reservation_fence
+         AND v.state IN ('staging','validating','ready'))
+     AND NOT EXISTS(SELECT 1 FROM workflow_versions v
+       WHERE v.definition_id=workflow_definitions.id
+         AND v.reservation_owner=workflow_definitions.reservation_owner
+         AND v.reservation_fence=workflow_definitions.reservation_fence
+         AND v.state IN ('staging','validating','ready'));
+END;
+
 CREATE TRIGGER workflow_binding_remove_ref AFTER DELETE ON workflow_bindings
 BEGIN DELETE FROM workflow_referrers WHERE definition_id = OLD.definition_id AND referrer_kind = 'binding' AND referrer_id = OLD.id; END;
 

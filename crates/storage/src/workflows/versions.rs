@@ -229,6 +229,46 @@ impl WorkflowRepository<'_> {
             } else {
                 tx.execute("UPDATE workflow_versions SET state='rejected',rejected_at_ms=?2,rejection_code='WORKFLOW_VERSION_NOT_READY'
                     WHERE id=?1 AND state='validating'",params![id.to_string(),now_ms]).map_err(sql_error)?;
+                if let (Some(owner), Some(fence)) =
+                    (&version.reservation_owner, version.reservation_fence)
+                    && reservation_is_current
+                {
+                    let other_active = tx
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM workflow_versions
+                             WHERE definition_id=?1 AND reservation_owner=?2 AND reservation_fence=?3
+                               AND id!=?4 AND state IN ('staging','validating','ready'))",
+                            params![
+                                version.target.definition_id.to_string(),
+                                owner,
+                                fence,
+                                id.to_string()
+                            ],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .map_err(sql_error)?;
+                    if !other_active {
+                        let cleared = tx
+                            .execute(
+                                "UPDATE workflow_definitions SET reserved_class_name=NULL,
+                                 reservation_owner=NULL,reservation_state=NULL,
+                                 reservation_created_definition=NULL,updated_at_ms=?5
+                                 WHERE account_id=?1 AND id=?2 AND reservation_owner=?3
+                                   AND reservation_fence=?4 AND state IN ('creating','ready')",
+                                params![
+                                    account.to_string(),
+                                    version.target.definition_id.to_string(),
+                                    owner,
+                                    fence,
+                                    now_ms
+                                ],
+                            )
+                            .map_err(sql_error)?;
+                        if cleared != 1 {
+                            return Err(invariant());
+                        }
+                    }
+                }
             }
             tx.query_row(&format!("{VERSION_SELECT} WHERE v.id=?1"),[id.to_string()],version_row).map_err(sql_error)
         })

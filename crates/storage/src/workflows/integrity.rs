@@ -106,7 +106,9 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
         }
     }
     // The expected sets include timestamps. Moving tables must neither regenerate references
-    // nor silently adopt dangling/mismatched references as healthy persisted authority.
+    // nor silently adopt dangling/mismatched references as healthy persisted authority. A fenced
+    // retry can leave older immutable binding/version rows behind; only the definition's current
+    // owner/fence can publish, so those stale rows are evidence rather than live authority.
     let valid: bool = conn.query_row(
         "WITH expected_version(version_id,kind,ref_id,created_at_ms) AS (
             SELECT worker_version_id,'workflow_version',id,created_at_ms FROM workflow_versions
@@ -137,19 +139,25 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
              WHERE f.account_id!=w.account_id OR f.lifecycle_generation!=b.definition_lifecycle_generation
                OR f.state NOT IN ('creating','ready')
                OR (f.state='creating' AND NOT (f.current_version_id IS NULL
-                     AND b.reservation_owner IS NOT NULL AND b.reservation_fence IS NOT NULL
-                     AND f.reserved_class_name=b.class_name
-                     AND f.reservation_owner=b.reservation_owner
-                     AND f.reservation_fence=b.reservation_fence)))
+                     AND b.reservation_owner IS NOT NULL AND b.reservation_fence IS NOT NULL)))
            AND NOT EXISTS(SELECT 1 FROM workflow_versions v JOIN workflow_definitions f ON f.id=v.definition_id
              WHERE v.state IN ('staging','validating') AND v.reservation_owner IS NOT NULL
-               AND NOT (f.reserved_class_name=v.class_name AND f.reservation_owner=v.reservation_owner
-                 AND f.reservation_fence=v.reservation_fence))
+               AND f.reservation_owner=v.reservation_owner AND f.reservation_fence=v.reservation_fence
+               AND f.reserved_class_name!=v.class_name)
            AND NOT EXISTS(SELECT 1 FROM workflow_definitions f WHERE f.reservation_state='bound'
-             AND NOT EXISTS(SELECT 1 FROM workflow_bindings b WHERE b.definition_id=f.id
-               AND b.reservation_owner=f.reservation_owner AND b.reservation_fence=f.reservation_fence)
+             AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN worker_versions d ON d.id=b.version_id
+               WHERE b.definition_id=f.id AND b.reservation_owner=f.reservation_owner
+                 AND b.reservation_fence=f.reservation_fence AND d.state IN ('staging','validating','ready'))
              AND NOT EXISTS(SELECT 1 FROM workflow_versions v WHERE v.definition_id=f.id
-               AND v.reservation_owner=f.reservation_owner AND v.reservation_fence=f.reservation_fence))
+               AND v.reservation_owner=f.reservation_owner AND v.reservation_fence=f.reservation_fence
+               AND v.state IN ('staging','validating','ready')))
+           AND NOT EXISTS(SELECT 1 FROM workflow_definitions f WHERE f.reservation_state='reserved'
+             AND (EXISTS(SELECT 1 FROM workflow_bindings b JOIN worker_versions d ON d.id=b.version_id
+               WHERE b.definition_id=f.id AND b.reservation_owner=f.reservation_owner
+                 AND b.reservation_fence=f.reservation_fence AND d.state IN ('staging','validating','ready'))
+               OR EXISTS(SELECT 1 FROM workflow_versions v WHERE v.definition_id=f.id
+                 AND v.reservation_owner=f.reservation_owner AND v.reservation_fence=f.reservation_fence
+                 AND v.state IN ('staging','validating','ready'))))
            AND NOT EXISTS(SELECT 1 FROM workflow_instance_referrers r JOIN workflow_versions v ON v.id=r.workflow_version_id
              WHERE r.definition_id!=v.definition_id OR r.worker_version_id!=v.worker_version_id
                OR (r.state!='released' AND v.state!='ready'))",

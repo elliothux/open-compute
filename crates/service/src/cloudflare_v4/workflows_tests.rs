@@ -175,6 +175,26 @@ async fn official_reads_hide_reservations_and_put_can_create_the_definition() {
     assert_eq!(created[0].state, ResourceState::Creating);
 }
 
+#[tokio::test]
+async fn official_delete_reports_conflict_while_an_upload_reservation_is_pending() {
+    let f = fixture();
+    let repository = WorkflowRepository::new(f.storage.db());
+    let pending = repository
+        .reserve_definition(f.account, "orders", "Replacement", "pending-upload", 7)
+        .unwrap();
+    let conflict = f
+        .request("DELETE", &f.path("/orders"), Some("deployer-token"), None)
+        .await;
+    assert_eq!(conflict.0, StatusCode::CONFLICT);
+    repository
+        .release_definition_reservation(f.account, &pending, 8)
+        .unwrap();
+    let deleted = f
+        .request("DELETE", &f.path("/orders"), Some("deployer-token"), None)
+        .await;
+    assert_eq!(deleted.0, StatusCode::OK);
+}
+
 impl Fixture {
     fn path(&self, suffix: &str) -> String {
         format!("/accounts/{}/workflows{suffix}", self.public_account)

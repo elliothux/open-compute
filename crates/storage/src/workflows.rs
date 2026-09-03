@@ -191,24 +191,8 @@ impl<'a> WorkflowRepository<'a> {
             {
                 return Ok(false);
             }
-            let consumed = tx
-                .query_row(
-                    "SELECT EXISTS(
-                        SELECT 1 FROM workflow_bindings WHERE reservation_owner=?1 AND reservation_fence=?2
-                            AND definition_id=?3
-                        UNION ALL
-                        SELECT 1 FROM workflow_versions WHERE reservation_owner=?1 AND reservation_fence=?2
-                            AND definition_id=?3
-                    )",
-                    params![
-                        reservation.owner,
-                        reservation.fence,
-                        reservation.definition.id.to_string()
-                    ],
-                    |row| row.get::<_, bool>(0),
-                )
-                .map_err(sql_error)?;
-            if consumed {
+            let active_consumer = reservation_has_active_consumer(tx, &current)?;
+            if active_consumer {
                 return Ok(false);
             }
             if reservation.created_definition
@@ -258,13 +242,13 @@ impl<'a> WorkflowRepository<'a> {
                     .map_err(sql_error)?;
                 return Ok(tombstoned == 1);
             }
-            if current.state == ResourceState::Ready {
+            if matches!(current.state, ResourceState::Creating | ResourceState::Ready) {
                 let changed = tx
                     .execute(
                         "UPDATE workflow_definitions SET reserved_class_name=NULL,reservation_owner=NULL,
                          reservation_state=NULL,reservation_created_definition=NULL,updated_at_ms=?5
                          WHERE account_id=?1 AND id=?2 AND reservation_owner=?3 AND reservation_fence=?4
-                         AND state='ready'",
+                         AND state IN ('creating','ready')",
                         params![
                             account.to_string(),
                             current.id.to_string(),
@@ -407,6 +391,9 @@ impl<'a> WorkflowRepository<'a> {
             if definition.state == ResourceState::Tombstoned {
                 return Ok(definition);
             }
+            if definition.reservation_owner.is_some() {
+                return Err(error(ErrorCode::WorkflowReferenced));
+            }
             if tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_referrers WHERE definition_id=?1)
                 OR EXISTS(SELECT 1 FROM workflow_versions WHERE definition_id=?1 AND state IN ('staging','validating'))",
                 [id.to_string()],|row|row.get::<_,bool>(0)).map_err(sql_error)? {
@@ -465,4 +452,35 @@ fn reservation(
         owner,
         created_definition,
     })
+}
+
+fn reservation_has_active_consumer(
+    tx: &rusqlite::Transaction<'_>,
+    definition: &WorkflowDefinition,
+) -> Result<bool, PlatformError> {
+    let owner = definition
+        .reservation_owner
+        .as_deref()
+        .ok_or_else(invariant)?;
+    if definition.reservation_fence < 1 {
+        return Err(invariant());
+    }
+    tx.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM workflow_bindings b JOIN worker_versions v ON v.id=b.version_id
+              WHERE b.reservation_owner=?1 AND b.reservation_fence=?2
+                AND b.definition_id=?3 AND v.state IN ('staging','validating','ready')
+            UNION ALL
+            SELECT 1 FROM workflow_versions WHERE reservation_owner=?1
+              AND reservation_fence=?2 AND definition_id=?3
+              AND state IN ('staging','validating','ready')
+        )",
+        params![
+            owner,
+            definition.reservation_fence,
+            definition.id.to_string()
+        ],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(sql_error)
 }
