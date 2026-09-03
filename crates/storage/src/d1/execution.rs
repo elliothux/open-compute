@@ -193,6 +193,101 @@ impl D1Engine {
         Ok(results)
     }
 
+    /// Execute query objects, including semicolon-delimited SQL, in one transaction.
+    pub fn query_batch(
+        &self,
+        queries: &[D1Statement],
+        limits: D1QueryLimits,
+    ) -> Result<Vec<D1StatementResult>, PlatformError> {
+        if queries.is_empty() || queries.len() > D1_MAX_BATCH_STATEMENTS {
+            return Err(invalid_batch());
+        }
+        for query in queries {
+            validate_statement(query)?;
+        }
+        let connection = self.open()?;
+        let transaction_control = install_guard(&connection, limits, SqlAuthority::Tenant);
+        remove_guard(&connection);
+        connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|error| map_sqlite_error(&error, &transaction_control))?;
+        let control = install_guard(&connection, limits, SqlAuthority::Tenant);
+        let mut results = Vec::with_capacity(queries.len());
+        let mut statement_count = 0_usize;
+        let mut any_write = false;
+        let mut total_rows = 0_usize;
+        let mut total_bytes = 0_usize;
+        let execution = (|| {
+            for query in queries {
+                let mut params_used = 0_usize;
+                let mut batch = Batch::new(&connection, &query.sql);
+                while let Some(statement) = batch
+                    .next()
+                    .map_err(|error| map_sqlite_error(&error, &control))?
+                {
+                    statement_count = statement_count.checked_add(1).ok_or_else(limit_error)?;
+                    if statement_count > D1_MAX_BATCH_STATEMENTS {
+                        return Err(limit_error());
+                    }
+                    let next = params_used
+                        .checked_add(statement.parameter_count())
+                        .ok_or_else(limit_error)?;
+                    if next > query.params.len() {
+                        return Err(parameter_mismatch());
+                    }
+                    any_write |= !statement.readonly();
+                    let result = materialize_prepared(
+                        &connection,
+                        statement,
+                        &query.params[params_used..next],
+                        limits,
+                        &control,
+                    )?;
+                    params_used = next;
+                    total_rows = total_rows
+                        .checked_add(result.rows.len())
+                        .ok_or_else(limit_error)?;
+                    total_bytes = total_bytes
+                        .checked_add(result_size(&result))
+                        .ok_or_else(limit_error)?;
+                    if total_rows > limits.max_result_rows || total_bytes > limits.max_result_bytes
+                    {
+                        return Err(limit_error());
+                    }
+                    results.push(result);
+                }
+                if params_used != query.params.len() {
+                    return Err(parameter_mismatch());
+                }
+            }
+            if statement_count == 0 {
+                return Err(sql_invalid());
+            }
+            Ok(())
+        })();
+        remove_guard(&connection);
+        if let Err(error) = execution {
+            let _ = connection.execute_batch("ROLLBACK");
+            return Err(error);
+        }
+        if any_write && let Err(error) = bump_session_version(&connection) {
+            let _ = connection.execute_batch("ROLLBACK");
+            return Err(error);
+        }
+        if connection.execute_batch("COMMIT").is_err() {
+            let _ = connection.execute_batch("ROLLBACK");
+            return Err(PlatformError::new(
+                ErrorCode::D1ResultUnknown,
+                "D1 query batch commit result is unknown",
+            ));
+        }
+        let size = logical_size(&connection)?;
+        for result in &mut results {
+            result.meta.size_after = size;
+        }
+        Ok(results)
+    }
+
     /// Execute all statements in one bounded SQL input using SQLite's parser tail pointer.
     pub fn exec(&self, sql: &str, limits: D1QueryLimits) -> Result<D1ExecResult, PlatformError> {
         validate_sql(sql)?;
@@ -362,17 +457,27 @@ fn materialize(
     limits: D1QueryLimits,
     control: &Arc<ExecutionControl>,
 ) -> Result<D1StatementResult, PlatformError> {
-    let started = Instant::now();
-    let mut statement = connection
+    let statement = connection
         .prepare(&input.sql)
         .map_err(|error| map_sqlite_error(&error, control))?;
-    if statement.parameter_count() != input.params.len() {
+    materialize_prepared(connection, statement, &input.params, limits, control)
+}
+
+fn materialize_prepared(
+    connection: &Connection,
+    mut statement: Statement<'_>,
+    params: &[D1Value],
+    limits: D1QueryLimits,
+    control: &Arc<ExecutionControl>,
+) -> Result<D1StatementResult, PlatformError> {
+    let started = Instant::now();
+    if statement.parameter_count() != params.len() {
         return Err(parameter_mismatch());
     }
     if statement.column_count() > D1_MAX_COLUMNS {
         return Err(limit_error());
     }
-    bind(&mut statement, &input.params, control)?;
+    bind(&mut statement, params, control)?;
     let readonly = statement.readonly();
     let columns = statement
         .column_names()

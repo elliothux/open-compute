@@ -10,7 +10,7 @@ use super::{V4Error, V4Permission, error_response, success_response};
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderMap, HeaderValue};
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -78,7 +78,7 @@ impl Bucket {
 async fn create_bucket(
     State(state): State<HttpState>,
     Path(account_id): Path<String>,
-    request: Request,
+    mut request: Request,
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
@@ -88,6 +88,9 @@ async fn create_bucket(
         return error_response(error, context.request_id());
     }
     if let Err(error) = jurisdiction(request.headers()) {
+        return error_response(error, context.request_id());
+    }
+    if let Err(error) = normalize_bucket_create_content_type(&mut request) {
         return error_response(error, context.request_id());
     }
     let account_id = match account(&state, &account_id) {
@@ -595,6 +598,24 @@ fn jurisdiction(headers: &HeaderMap) -> Result<(), V4Error> {
         Some("eu" | "fedramp") => Err(V4Error::Unsupported),
         Some(_) => Err(V4Error::InvalidRequest),
     }
+}
+
+fn normalize_bucket_create_content_type(request: &mut Request) -> Result<(), V4Error> {
+    let mut values = request.headers().get_all(header::CONTENT_TYPE).iter();
+    let value = values.next();
+    if values.next().is_some() {
+        return Err(V4Error::InvalidRequest);
+    }
+    if value
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("text/plain;charset=UTF-8"))
+    {
+        request.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+    }
+    Ok(())
 }
 
 fn attach_request_id(response: &mut Response, request_id: RequestId) {

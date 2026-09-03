@@ -548,6 +548,11 @@ async fn list_versions(
                 per_page: take,
                 count,
                 total_count: total,
+                total_pages: if query.deployable {
+                    usize::from(total > 0)
+                } else {
+                    total.div_ceil(query.per_page)
+                },
             },
         ))
     })();

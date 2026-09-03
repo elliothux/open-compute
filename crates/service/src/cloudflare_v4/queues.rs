@@ -406,7 +406,9 @@ fn validate_json_headers(headers: &HeaderMap) -> Result<(), V4Error> {
     }
     let value = values[0].to_str().map_err(|_| V4Error::InvalidRequest)?;
     let media = value.split(';').next().unwrap_or("").trim();
-    if !media.eq_ignore_ascii_case("application/json") {
+    if !media.eq_ignore_ascii_case("application/json")
+        && !value.eq_ignore_ascii_case("text/plain;charset=UTF-8")
+    {
         return Err(V4Error::InvalidRequest);
     }
     Ok(())

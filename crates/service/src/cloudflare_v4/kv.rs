@@ -231,6 +231,7 @@ async fn list_namespaces(
             per_page: query.per_page,
             count,
             total_count: total,
+            total_pages: total.div_ceil(query.per_page),
         },
     )
 }

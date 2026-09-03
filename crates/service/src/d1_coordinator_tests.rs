@@ -63,7 +63,7 @@ fn fixture() -> (
 }
 
 #[tokio::test]
-async fn every_entry_snapshots_initial_mutation_and_lost_response_head() {
+async fn every_entry_snapshots_initial_mutation_and_preserves_failed_exec_error() {
     let (_temp, storage, account, resource, coordinator) = fixture();
     coordinator
         .execute(
@@ -115,7 +115,7 @@ async fn every_entry_snapshots_initial_mutation_and_lost_response_head() {
         })
         .await
         .unwrap_err();
-    assert_eq!(partial.code(), ErrorCode::D1ResultUnknown);
+    assert_eq!(partial.code(), ErrorCode::D1SqlInvalid);
     assert_eq!(
         history
             .latest_snapshot(account, resource)

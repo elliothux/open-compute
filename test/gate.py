@@ -65,6 +65,7 @@ CARGO_TARGETS = {
     'p3-services-recovery': ('open-compute-service', 'p3_services_recovery', False),
     'p3-cache-images': ('open-compute-service', 'p3_cache_images_gate', False),
     'p5-search': ('open-compute-service', 'p5_search_gate', False),
+    'p6-wrangler-resources': ('open-compute-service', 'p6_wrangler_resource_gate', False),
     # Finish independent work together before the remaining exclusive barriers.
     'workflow-product': ('open-compute-service', 'workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),

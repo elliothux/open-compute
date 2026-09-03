@@ -24,9 +24,15 @@ impl D1Engine {
             return Err(identity_error());
         }
         fs::validate_owned_file(snapshot, true).map_err(|_| identity_error())?;
+        let open_path =
+            crate::control_db::leaf_nofollow_path(snapshot).map_err(|_| identity_error())?;
+        let uri = crate::control_db::sqlite_readonly_uri(&open_path);
         let connection = Connection::open_with_flags(
-            snapshot,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            uri,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW
+                | OpenFlags::SQLITE_OPEN_URI,
         )
         .map_err(|error| map_open_error(&error))?;
         for (key, expected) in [
@@ -79,7 +85,9 @@ impl D1Engine {
             quota_bytes: self.quota_bytes,
         };
         snapshot.verify_identity()?;
-        snapshot.quick_check()
+        snapshot.quick_check()?;
+        remove_sidecars(destination)?;
+        sync_database(destination)
     }
 
     /// Restore a verified snapshot into a new unpublished resource identity.

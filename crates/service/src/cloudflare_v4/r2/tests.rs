@@ -1,12 +1,14 @@
 use super::{
-    IDEMPOTENCY_TTL_MS, create, create_fingerprint, current_named_resource, put_idempotency_key,
-    valid_bucket_name,
+    IDEMPOTENCY_TTL_MS, create, create_fingerprint, current_named_resource,
+    normalize_bucket_create_content_type, put_idempotency_key, valid_bucket_name,
 };
 use crate::cloudflare_v4::{V4RequestContext, V4Role};
 use crate::health::HealthCoordinator;
 use crate::http::HttpState;
 use crate::metrics::MetricsRegistry;
 use crate::r2_api::R2ApiState;
+use axum::body::Body;
+use axum::http::{HeaderValue, Request, header};
 use open_compute_artifacts::{
     MapEnv, MockS3, R2ObjectStore, S3ArtifactClient, resolve_s3_credentials_with,
 };
@@ -49,6 +51,26 @@ fn bucket_names_match_the_pinned_wrangler_contract() {
     assert!(!valid_bucket_name("Upper"));
     assert!(!valid_bucket_name("-leading"));
     assert!(!valid_bucket_name("trailing-"));
+}
+
+#[test]
+fn bucket_create_accepts_the_fetch_string_json_content_type() {
+    let mut request = Request::builder()
+        .header(header::CONTENT_TYPE, "text/plain;charset=UTF-8")
+        .body(Body::empty())
+        .unwrap();
+    normalize_bucket_create_content_type(&mut request).unwrap();
+    assert_eq!(
+        request.headers()[header::CONTENT_TYPE],
+        HeaderValue::from_static("application/json")
+    );
+
+    let mut duplicate = Request::builder()
+        .header(header::CONTENT_TYPE, "text/plain;charset=UTF-8")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::empty())
+        .unwrap();
+    assert!(normalize_bucket_create_content_type(&mut duplicate).is_err());
 }
 
 #[test]

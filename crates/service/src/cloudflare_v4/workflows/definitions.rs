@@ -56,6 +56,7 @@ pub(super) async fn list(
                     .saturating_sub((query.page - 1) * query.per_page)
                     .min(query.per_page),
                 total_count,
+                total_pages: total_count.div_ceil(query.per_page),
             },
         ),
         Ok(Err(error)) => error_response(error, request_id),
@@ -261,6 +262,7 @@ pub(super) async fn list_versions(
                     .saturating_sub((query.page - 1) * query.per_page)
                     .min(query.per_page),
                 total_count,
+                total_pages: total_count.div_ceil(query.per_page),
             },
         ),
         Ok(Err(error)) => error_response(error, request_id),

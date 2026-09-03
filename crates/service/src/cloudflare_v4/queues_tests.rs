@@ -1,4 +1,5 @@
 use super::*;
+use axum::http::HeaderValue;
 
 #[test]
 fn wrangler_queue_list_query_is_strict_and_bounded() {
@@ -22,6 +23,21 @@ fn queue_json_contract_rejects_unknown_fields() {
     assert!(
         serde_json::from_str::<CreateQueueBody>(r#"{"queue_name":"jobs","legacy":true}"#).is_err()
     );
+}
+
+#[test]
+fn queue_json_headers_accept_fetch_string_bodies_without_relaxing_duplicates() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain;charset=UTF-8"),
+    );
+    validate_json_headers(&headers).unwrap();
+    headers.append(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    assert!(validate_json_headers(&headers).is_err());
 }
 
 #[test]

@@ -267,12 +267,7 @@ impl D1BindingService {
             ));
         }
         self.run_control(account_id, resource_id, true, move |engine, limits| {
-            if statements.len() == 1 {
-                return engine
-                    .query(&statements[0], limits)
-                    .map(|result| vec![result]);
-            }
-            engine.batch(&statements, limits)
+            engine.query_batch(&statements, limits)
         })
         .await
     }

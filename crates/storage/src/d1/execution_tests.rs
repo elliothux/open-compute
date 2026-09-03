@@ -123,6 +123,52 @@ fn readonly_preflight_query_and_batch_reject_every_invalid_shape() {
 }
 
 #[test]
+fn query_batch_splits_query_objects_and_rolls_back_the_whole_sequence() {
+    let (_temp, engine) = engine();
+    let results = engine
+        .query_batch(
+            &[
+                statement(
+                    "CREATE TABLE items(id INTEGER PRIMARY KEY, value TEXT NOT NULL);\
+                     INSERT INTO items VALUES (1, ?1);\
+                     INSERT INTO items VALUES (2, ?1);",
+                    vec![D1Value::Text("alpha".into()), D1Value::Text("beta".into())],
+                ),
+                statement("SELECT value FROM items ORDER BY id", vec![]),
+            ],
+            limits(),
+        )
+        .unwrap();
+    assert_eq!(results.len(), 4);
+    assert_eq!(
+        results[3].rows,
+        vec![
+            vec![D1Value::Text("alpha".into())],
+            vec![D1Value::Text("beta".into())]
+        ]
+    );
+
+    assert_eq!(
+        engine
+            .query_batch(
+                &[statement(
+                    "INSERT INTO items VALUES (3, 'rolled back');\
+                     INSERT INTO items VALUES (1, 'duplicate');",
+                    vec![],
+                )],
+                limits(),
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::D1SqlInvalid
+    );
+    let count = engine
+        .query(&statement("SELECT count(*) FROM items", vec![]), limits())
+        .unwrap();
+    assert_eq!(count.rows, vec![vec![D1Value::Integer(2)]]);
+}
+
+#[test]
 fn exec_and_migration_validation_fail_closed_before_mutation() {
     let (_temp, engine) = engine();
     for sql in ["", " -- comment only", "SELECT ?1"] {

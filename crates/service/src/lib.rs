@@ -125,6 +125,7 @@ pub use health::{HealthCoordinator, map_supervisor};
 pub use kv_api::KvApiState;
 pub use kv_backend::{KvCommand, KvCommandResult, KvStreamPart, SqliteKvBindingExecutor};
 pub use metrics::MetricsRegistry;
+pub use queue_api::QueueApiState;
 pub use r2_api::R2ApiState;
 pub use r2_backend::R2BindingService;
 pub use run::run_platform;

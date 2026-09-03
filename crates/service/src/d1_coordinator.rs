@@ -212,11 +212,7 @@ where
     {
         metrics.observe_d1_wal_bytes(bytes);
     }
-    match result {
-        Ok(value) => Ok(value),
-        Err(_) if after != before => Err(result_unknown()),
-        Err(error) => Err(error),
-    }
+    result
 }
 
 fn reconcile_restore(

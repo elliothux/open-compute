@@ -48,6 +48,15 @@ fn backup_and_restore_staging_rejects_existing_missing_and_corrupt_files() {
 
     let snapshot = temp.path().join("snapshot.sqlite");
     engine.online_backup(&snapshot).unwrap();
+    D1Engine::verify_completed_snapshot(&snapshot, &record(account, resource), 0).unwrap();
+    for suffix in ["-wal", "-shm"] {
+        assert!(
+            !temp
+                .path()
+                .join(format!("snapshot.sqlite{suffix}"))
+                .exists()
+        );
+    }
     assert_eq!(
         D1Engine::restore_as_new(
             &snapshot,
