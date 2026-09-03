@@ -68,7 +68,10 @@ async fn admin_response(
 
 pub(crate) struct Process(pub(crate) Child, PathBuf, String);
 impl Process {
-    #[allow(dead_code, reason = "only process Gates that require graceful exit call this")]
+    #[allow(
+        dead_code,
+        reason = "only process Gates that require graceful exit call this"
+    )]
     pub(crate) async fn stop(&mut self) {
         let runtime_pid = lease_pid(&self.1);
         let pid = Pid::from_raw(self.0.id() as i32).expect("ocd PID must be positive");
