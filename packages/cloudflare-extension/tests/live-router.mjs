@@ -6,6 +6,8 @@ const baseURL = process.env.OPEN_COMPUTE_V4_BASE_URL;
 const apiToken = process.env.OPEN_COMPUTE_V4_TOKEN;
 const accountID = process.env.OPEN_COMPUTE_V4_ACCOUNT_ID;
 const sdkEntry = process.env.OPEN_COMPUTE_CLOUDFLARE_SDK_ENTRY;
+const typedWorkerSource = "export default { fetch() { return new Response('sdk'); } };";
+let typedD1ID;
 assert.ok(baseURL, "OPEN_COMPUTE_V4_BASE_URL is required");
 assert.ok(apiToken, "OPEN_COMPUTE_V4_TOKEN is required");
 assert.ok(accountID, "OPEN_COMPUTE_V4_ACCOUNT_ID is required");
@@ -15,13 +17,17 @@ const { default: Cloudflare } = await import(pathToFileURL(sdkEntry).href);
 const requests = [];
 const tracedFetch = async (input, init) => {
   const request = new Request(input, init);
-  requests.push({
+  const trace = {
     method: request.method,
     url: request.url,
     contentType: request.headers.get("content-type") ?? "",
     formData: init?.body instanceof FormData,
-  });
-  return fetch(request);
+    responseContentType: "",
+  };
+  requests.push(trace);
+  const response = await fetch(request);
+  trace.responseContentType = response.headers.get("content-type") ?? "";
+  return response;
 };
 const client = new Cloudflare({ apiToken, baseURL, maxRetries: 0, fetch: tracedFetch });
 
@@ -100,6 +106,10 @@ async function workersContract() {
     account_id: accountID, script_name: workerName,
   })).name, "SDK_SECRET");
 
+  const typedD1 = await client.d1.database.create({
+    account_id: accountID, name: "sdk-d1-upload-binding",
+  });
+  typedD1ID = typedD1.uuid;
   const upload = await client.workers.scripts.update(uploadedWorkerName, {
     account_id: accountID,
     metadata: {
@@ -107,10 +117,13 @@ async function workersContract() {
       compatibility_date: "2026-08-30",
       compatibility_flags: ["nodejs_compat"],
       annotations: { "workers/tag": "official-sdk-typed-upload" },
-      bindings: [{ name: "SDK_TYPED_MODE", type: "plain_text", text: "sdk" }],
+      bindings: [
+        { type: "plain_text", text: "", name: "SDK_TYPED_MODE" },
+        { database_id: typedD1ID, name: "SDK_TYPED_DB", type: "d1" },
+      ],
     },
     files: [new File(
-      ["export default { fetch() { return new Response('sdk'); } };"],
+      [typedWorkerSource],
       "index.js",
       { type: "application/javascript+module" },
     )],
@@ -128,7 +141,11 @@ async function workersContract() {
   assert.equal(uploadedVersion.annotations["workers/tag"], "official-sdk-typed-upload");
   assert.deepEqual(
     uploadedVersion.resources.bindings.find(({ name }) => name === "SDK_TYPED_MODE"),
-    { name: "SDK_TYPED_MODE", type: "plain_text", text: "sdk" },
+    { name: "SDK_TYPED_MODE", type: "plain_text", text: "" },
+  );
+  assert.deepEqual(
+    uploadedVersion.resources.bindings.find(({ name }) => name === "SDK_TYPED_DB"),
+    { name: "SDK_TYPED_DB", type: "d1", id: typedD1ID },
   );
   const uploadedDeployments = await client.workers.scripts.deployments.list(uploadedWorkerName, {
     account_id: accountID,
@@ -138,6 +155,16 @@ async function workersContract() {
     uploadedDeployments.deployments[0].versions[0].version_id,
     uploadedVersions.result.items[0].id,
   );
+  const downloaded = await client.workers.scripts.get(uploadedWorkerName, {
+    account_id: accountID,
+  });
+  assert.match(downloaded, /Content-Disposition: form-data; name="index\.js"; filename="index\.js"/);
+  assert.match(downloaded, /Content-Type: application\/javascript\+module/);
+  assert.ok(downloaded.includes(typedWorkerSource));
+  const downloadTrace = requests.find(({ method, url }) =>
+    method === "GET" && url.endsWith(`/accounts/${accountID}/workers/scripts/${uploadedWorkerName}`)
+  );
+  assert.match(downloadTrace?.responseContentType ?? "", /^multipart\/form-data; boundary=/);
   const mutatedSecret = await client.workers.scripts.secrets.update(uploadedWorkerName, {
     account_id: accountID,
     name: "SDK_MUTATED_SECRET",
@@ -188,7 +215,8 @@ async function kvContract() {
 }
 
 async function d1Contract() {
-  const first = await client.d1.database.create({ account_id: accountID, name: "sdk-d1-a" });
+  assert.ok(typedD1ID, "typed Worker upload must create its D1 resource first");
+  const first = await client.d1.database.get(typedD1ID, { account_id: accountID });
   await client.d1.database.create({ account_id: accountID, name: "sdk-d1-b" });
   const page = await client.d1.database.list({ account_id: accountID, page: 1, per_page: 1 });
   assert.equal(page.result.length, 1);

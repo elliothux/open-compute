@@ -10,12 +10,20 @@ use std::collections::BTreeSet;
 
 const METADATA_PART: &str = "metadata";
 pub(super) const MAX_METADATA_BYTES: usize = 1024 * 1024;
-const MULTIPART_OVERHEAD_BYTES: usize = 1024 * 1024;
-const MAX_SDK_METADATA_FIELDS: usize = 2_048;
+pub(super) const MAX_SDK_METADATA_FIELDS: usize = 2_048;
+pub(super) const MAX_SDK_FIELD_NAME_BYTES: usize = 4 * 1024;
+pub(super) const MAX_BOUNDARY_BYTES: usize = 70;
+const MAX_MODULE_PART_NAME_BYTES: usize = 1_024;
+const MAX_PART_FIXED_WIRE_BYTES: usize = 512;
+const MAX_UPLOAD_PARTS: usize = MAX_SDK_METADATA_FIELDS + BundleLimits::DEFAULT.max_modules;
+const MAX_MULTIPART_WIRE_OVERHEAD: usize = MAX_SDK_METADATA_FIELDS * MAX_SDK_FIELD_NAME_BYTES
+    + BundleLimits::DEFAULT.max_modules * MAX_MODULE_PART_NAME_BYTES * 2
+    + MAX_UPLOAD_PARTS * (MAX_PART_FIXED_WIRE_BYTES + MAX_BOUNDARY_BYTES)
+    + MAX_BOUNDARY_BYTES;
 
 /// Maximum complete Worker upload wire body accepted by the fixed P6 surface.
 pub(super) const MAX_BODY_BYTES: usize =
-    16 * 1024 * 1024 + MAX_METADATA_BYTES + MULTIPART_OVERHEAD_BYTES;
+    BundleLimits::DEFAULT.max_total_module_bytes + MAX_METADATA_BYTES + MAX_MULTIPART_WIRE_OVERHEAD;
 
 #[derive(Clone, Debug)]
 pub(super) struct RawPart {
@@ -62,6 +70,30 @@ pub(crate) async fn parse_worker_upload(
             validate_part_name(&name)?;
         }
         let file_name = field.file_name().map(ToOwned::to_owned);
+        if file_name.as_ref().is_some_and(|value| {
+            value.len() > MAX_MODULE_PART_NAME_BYTES || value.chars().any(char::is_control)
+        }) {
+            return Err(invalid());
+        }
+        let header_bytes = field
+            .headers()
+            .iter()
+            .try_fold(0_usize, |total, (name, value)| {
+                total
+                    .checked_add(name.as_str().len())
+                    .and_then(|total| total.checked_add(value.as_bytes().len()))
+                    .and_then(|total| total.checked_add(4))
+            });
+        let variable_header_bytes = if is_metadata {
+            MAX_SDK_FIELD_NAME_BYTES
+        } else {
+            MAX_MODULE_PART_NAME_BYTES * 2
+        };
+        if header_bytes
+            .is_none_or(|value| value > MAX_PART_FIXED_WIRE_BYTES + variable_header_bytes)
+        {
+            return Err(too_large());
+        }
         let content_type = field.content_type().map(ToOwned::to_owned);
         let mut bytes = Vec::new();
         while let Some(chunk) = field.chunk().await.map_err(|_| invalid())? {

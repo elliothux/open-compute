@@ -59,6 +59,15 @@ backend 和 workerd 内部 listener 仍仅监听 loopback。
 
 ## 关键实现说明
 
+### 固定客户端的 Worker upload wire
+
+固定 Wrangler 4.127.1 将 D1 配置的 `database_id` 投影为 Worker multipart binding 的 `id`；固定
+`cloudflare@7.1.0` 的 typed `workers.scripts.update()` 则以 bracket field 发送 `database_id`。生产边界只在
+该 SDK bracket wire、且 binding `type` 精确为 `d1` 时归一为内部唯一 `id`，同时出现两个字段、无法唯一分组
+或其它 binding 使用该字段都会失败。binding 分组不依赖 JavaScript object 属性顺序；只有 closed P6 schema
+存在唯一无损分区时才进入标准 Version authority。该客户端 wire 差异没有 tenant runtime 可观察语义，因此不
+登记 runtime deviation ID；固定 SDK 真实 `ocd` Gate 同时验证 D1 binding 的持久投影和上传源码下载。
+
 ### Durable Object nested facets
 
 pinned `workerd v1.20260830.1` 在 nested facet 上执行 clone/delete 会触发上游

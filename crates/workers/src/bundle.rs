@@ -32,14 +32,19 @@ pub struct BundleLimits {
 
 impl Default for BundleLimits {
     fn default() -> Self {
-        Self {
-            max_manifest_bytes: 256 * 1024,
-            max_modules: 128,
-            max_module_bytes: 4 * 1024 * 1024,
-            max_total_module_bytes: 16 * 1024 * 1024,
-            max_artifact_bytes: 17 * 1024 * 1024,
-        }
+        Self::DEFAULT
     }
+}
+
+impl BundleLimits {
+    /// Default structural limits shared by bundle admission and bounded upload wires.
+    pub const DEFAULT: Self = Self {
+        max_manifest_bytes: 256 * 1024,
+        max_modules: 128,
+        max_module_bytes: 4 * 1024 * 1024,
+        max_total_module_bytes: 16 * 1024 * 1024,
+        max_artifact_bytes: 17 * 1024 * 1024,
+    };
 }
 
 /// Supported module representation.

@@ -1,6 +1,10 @@
 //! Exact multipart normalization for the pinned `cloudflare@7.1.0` SDK.
 
-use super::multipart::{MAX_METADATA_BYTES, RawPart, invalid, too_large, validate_part_name};
+use super::model::WorkerUploadBinding;
+use super::multipart::{
+    MAX_BOUNDARY_BYTES, MAX_METADATA_BYTES, MAX_SDK_FIELD_NAME_BYTES, RawPart, invalid, too_large,
+    validate_part_name,
+};
 use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{HeaderValue, header};
@@ -9,18 +13,28 @@ use futures::{StreamExt as _, stream};
 use open_compute_core::PlatformError;
 use serde_json::{Map, Number, Value};
 
-const MAX_BOUNDARY_BYTES: usize = 70;
-const MAX_FIELD_NAME_BYTES: usize = 4 * 1024;
 const MAX_METADATA_DEPTH: usize = 32;
+const MAX_BINDINGS: usize = 128;
 
 /// Recover the boundary omitted by the pinned SDK's typed Worker upload.
 pub(super) async fn normalize_request(request: Request) -> Result<Request, PlatformError> {
-    let is_sdk_upload = request
-        .headers()
-        .get(header::CONTENT_TYPE)
+    let mut content_types = request.headers().get_all(header::CONTENT_TYPE).iter();
+    let content_type = content_types
+        .next()
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.eq_ignore_ascii_case("application/javascript"));
+        .ok_or_else(invalid)?;
+    if content_types.next().is_some() {
+        return Err(invalid());
+    }
+    let is_sdk_upload = content_type.eq_ignore_ascii_case("application/javascript");
     if !is_sdk_upload {
+        let boundary = multer::parse_boundary(content_type).map_err(|_| invalid())?;
+        if boundary.is_empty()
+            || boundary.len() > MAX_BOUNDARY_BYTES
+            || !boundary.bytes().all(valid_boundary_byte)
+        {
+            return Err(invalid());
+        }
         return Ok(request);
     }
 
@@ -78,7 +92,7 @@ pub(super) fn validate_metadata_field_name(name: &str) -> Result<(), PlatformErr
     if name == "metadata" {
         return Ok(());
     }
-    if name.len() > MAX_FIELD_NAME_BYTES
+    if name.len() > MAX_SDK_FIELD_NAME_BYTES
         || name.chars().any(char::is_control)
         || !name.starts_with("metadata[")
     {
@@ -108,7 +122,7 @@ pub(super) fn normalize_parts(parts: &mut Vec<RawPart>) -> Result<(), PlatformEr
             retained.push(part);
             continue;
         }
-        if part.content_type.is_some() || part.file_name.is_some() || part.bytes.is_empty() {
+        if part.content_type.is_some() || part.file_name.is_some() {
             return Err(invalid());
         }
         let path = metadata_path(&part.name)?;
@@ -162,8 +176,13 @@ fn metadata_path(name: &str) -> Result<Vec<String>, PlatformError> {
 #[derive(Default)]
 struct MetadataBuilder {
     root: Map<String, Value>,
-    bindings: Vec<Map<String, Value>>,
-    binding: Option<Map<String, Value>>,
+    binding_fields: Vec<BindingField>,
+}
+
+#[derive(Clone)]
+struct BindingField {
+    path: Vec<String>,
+    raw: String,
 }
 
 impl MetadataBuilder {
@@ -190,12 +209,20 @@ impl MetadataBuilder {
                 insert_object_value(&mut self.root, annotations, key, Value::String(raw))
             }
             [bindings, item, field] if bindings == "bindings" && item.is_empty() => {
-                self.insert_binding(field, &[], raw)
+                self.binding_fields.push(BindingField {
+                    path: vec![field.clone()],
+                    raw,
+                });
+                Ok(())
             }
             [bindings, item, field, tail @ ..]
                 if bindings == "bindings" && item.is_empty() && !tail.is_empty() =>
             {
-                self.insert_binding(field, tail, raw)
+                let mut path = Vec::with_capacity(tail.len() + 1);
+                path.push(field.clone());
+                path.extend_from_slice(tail);
+                self.binding_fields.push(BindingField { path, raw });
+                Ok(())
             }
             [assets, jwt] if assets == "assets" && jwt == "jwt" => {
                 insert_nested(&mut self.root, assets, &["jwt"], Value::String(raw))
@@ -287,74 +314,13 @@ impl MetadataBuilder {
         }
     }
 
-    fn insert_binding(
-        &mut self,
-        field: &str,
-        tail: &[String],
-        raw: String,
-    ) -> Result<(), PlatformError> {
-        if field == "name" {
-            if !tail.is_empty() {
-                return Err(invalid());
-            }
-            if let Some(binding) = self.binding.take() {
-                self.bindings.push(binding);
-            }
-            let mut binding = Map::new();
-            insert_unique(&mut binding, "name", Value::String(raw))?;
-            self.binding = Some(binding);
-            return Ok(());
-        }
-        let binding = self.binding.as_mut().ok_or_else(invalid)?;
-        if tail.is_empty()
-            && matches!(
-                field,
-                "type"
-                    | "text"
-                    | "namespace_id"
-                    | "bucket_name"
-                    | "jurisdiction"
-                    | "id"
-                    | "internalEnv"
-                    | "index_name"
-                    | "namespace"
-                    | "instance_name"
-                    | "class_name"
-                    | "script_name"
-                    | "environment"
-                    | "queue_name"
-                    | "workflow_name"
-                    | "service"
-                    | "entrypoint"
-                    | "cross_account_grant"
-                    | "part"
-            )
-        {
-            return insert_unique(binding, field, Value::String(raw));
-        }
-        if tail.is_empty() && matches!(field, "raw" | "staging") {
-            return insert_unique(binding, field, Value::Bool(parse_bool(&raw)?));
-        }
-        if tail.is_empty() && field == "delivery_delay" {
-            let number = raw.parse::<Number>().map_err(|_| invalid())?;
-            return insert_unique(binding, field, Value::Number(number));
-        }
-        if matches!(field, "json" | "props") {
-            let value = unambiguous_json_string(raw)?;
-            return insert_json_value(binding, field, tail, value);
-        }
-        Err(invalid())
-    }
-
     fn finish(mut self) -> Result<Option<Map<String, Value>>, PlatformError> {
-        if let Some(binding) = self.binding.take() {
-            self.bindings.push(binding);
-        }
-        if !self.bindings.is_empty() {
+        let bindings = partition_bindings(&self.binding_fields)?;
+        if !bindings.is_empty() {
             insert_unique(
                 &mut self.root,
                 "bindings",
-                Value::Array(self.bindings.into_iter().map(Value::Object).collect()),
+                Value::Array(bindings.into_iter().map(Value::Object).collect()),
             )?;
         }
         if self.root.is_empty() {
@@ -363,6 +329,171 @@ impl MetadataBuilder {
             Ok(Some(self.root))
         }
     }
+}
+
+fn partition_bindings(fields: &[BindingField]) -> Result<Vec<Map<String, Value>>, PlatformError> {
+    if fields.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = fields
+        .iter()
+        .filter(|field| binding_key(field, "name"))
+        .count();
+    let types = fields
+        .iter()
+        .filter(|field| binding_key(field, "type"))
+        .count();
+    if names == 0 || names != types || names > MAX_BINDINGS {
+        return Err(invalid());
+    }
+    let mut memo = vec![None; fields.len() + 1];
+    let solutions = binding_partitions_from(fields, 0, &mut memo)?;
+    if solutions.len() != 1 {
+        return Err(invalid());
+    }
+    solutions
+        .into_iter()
+        .next()
+        .ok_or_else(invalid)?
+        .into_iter()
+        .map(|(start, end)| build_binding(&fields[start..end]))
+        .collect()
+}
+
+type BindingRanges = Vec<(usize, usize)>;
+
+fn binding_partitions_from(
+    fields: &[BindingField],
+    start: usize,
+    memo: &mut [Option<Vec<BindingRanges>>],
+) -> Result<Vec<BindingRanges>, PlatformError> {
+    if start == fields.len() {
+        return Ok(vec![Vec::new()]);
+    }
+    if let Some(cached) = &memo[start] {
+        return Ok(cached.clone());
+    }
+    let mut remaining_names = fields[start..]
+        .iter()
+        .filter(|field| binding_key(field, "name"))
+        .count();
+    let mut remaining_types = fields[start..]
+        .iter()
+        .filter(|field| binding_key(field, "type"))
+        .count();
+    if remaining_names == 0 || remaining_names != remaining_types {
+        memo[start] = Some(Vec::new());
+        return Ok(Vec::new());
+    }
+    let mut object = Map::new();
+    let mut solutions = Vec::new();
+    for end in start..fields.len() {
+        if insert_binding_field(&mut object, &fields[end]).is_err() {
+            break;
+        }
+        if binding_key(&fields[end], "name") {
+            remaining_names -= 1;
+        }
+        if binding_key(&fields[end], "type") {
+            remaining_types -= 1;
+        }
+        if remaining_names != remaining_types || (remaining_names == 0 && end + 1 != fields.len()) {
+            continue;
+        }
+        if normalized_binding(object.clone()).is_err() {
+            continue;
+        }
+        for suffix in binding_partitions_from(fields, end + 1, memo)? {
+            let mut solution = Vec::with_capacity(suffix.len() + 1);
+            solution.push((start, end + 1));
+            solution.extend(suffix);
+            solutions.push(solution);
+            if solutions.len() == 2 {
+                memo[start] = Some(solutions.clone());
+                return Ok(solutions);
+            }
+        }
+    }
+    memo[start] = Some(solutions.clone());
+    Ok(solutions)
+}
+
+fn binding_key(field: &BindingField, key: &str) -> bool {
+    field.path.len() == 1 && field.path[0] == key
+}
+
+fn build_binding(fields: &[BindingField]) -> Result<Map<String, Value>, PlatformError> {
+    let mut object = Map::new();
+    for field in fields {
+        insert_binding_field(&mut object, field)?;
+    }
+    normalized_binding(object)
+}
+
+fn normalized_binding(
+    mut binding: Map<String, Value>,
+) -> Result<Map<String, Value>, PlatformError> {
+    if binding.get("type").and_then(Value::as_str) == Some("d1") {
+        if let Some(database_id) = binding.remove("database_id") {
+            if binding.insert("id".to_owned(), database_id).is_some() {
+                return Err(invalid());
+            }
+        }
+    } else if binding.contains_key("database_id") {
+        return Err(invalid());
+    }
+    serde_json::from_value::<WorkerUploadBinding>(Value::Object(binding.clone()))
+        .map_err(|_| invalid())?;
+    Ok(binding)
+}
+
+fn insert_binding_field(
+    binding: &mut Map<String, Value>,
+    field: &BindingField,
+) -> Result<(), PlatformError> {
+    let [name, tail @ ..] = field.path.as_slice() else {
+        return Err(invalid());
+    };
+    if tail.is_empty()
+        && matches!(
+            name.as_str(),
+            "name"
+                | "type"
+                | "text"
+                | "namespace_id"
+                | "bucket_name"
+                | "jurisdiction"
+                | "id"
+                | "database_id"
+                | "internalEnv"
+                | "index_name"
+                | "namespace"
+                | "instance_name"
+                | "class_name"
+                | "script_name"
+                | "environment"
+                | "queue_name"
+                | "workflow_name"
+                | "service"
+                | "entrypoint"
+                | "cross_account_grant"
+                | "part"
+        )
+    {
+        return insert_unique(binding, name, Value::String(field.raw.clone()));
+    }
+    if tail.is_empty() && matches!(name.as_str(), "raw" | "staging") {
+        return insert_unique(binding, name, Value::Bool(parse_bool(&field.raw)?));
+    }
+    if tail.is_empty() && name == "delivery_delay" {
+        let number = field.raw.parse::<Number>().map_err(|_| invalid())?;
+        return insert_unique(binding, name, Value::Number(number));
+    }
+    if matches!(name.as_str(), "json" | "props") {
+        let value = unambiguous_json_string(field.raw.clone())?;
+        return insert_json_value(binding, name, tail, value);
+    }
+    Err(invalid())
 }
 
 fn parse_bool(raw: &str) -> Result<bool, PlatformError> {
@@ -535,183 +666,5 @@ fn push_value_at(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workers_http::v4::multipart::{MAX_BODY_BYTES, parse_worker_upload};
-    use axum::Router;
-    use axum::extract::{DefaultBodyLimit, FromRequest as _, Multipart};
-    use axum::http::StatusCode;
-    use axum::routing::post;
-    use open_compute_workers::BundleLimits;
-    use tower::ServiceExt as _;
-
-    fn string_part(name: &str, bytes: &[u8]) -> RawPart {
-        RawPart {
-            name: name.to_owned(),
-            file_name: None,
-            content_type: None,
-            bytes: bytes.to_vec(),
-        }
-    }
-
-    #[test]
-    fn rebuilds_pinned_sdk_flags_annotations_and_binding() {
-        let mut parts = vec![
-            string_part("metadata[main_module]", b"index.js"),
-            string_part("metadata[compatibility_date]", b"2026-08-30"),
-            string_part("metadata[compatibility_flags][]", b"nodejs_compat"),
-            string_part("metadata[annotations][workers/tag]", b"sdk-typed"),
-            string_part("metadata[bindings][][name]", b"MODE"),
-            string_part("metadata[bindings][][type]", b"plain_text"),
-            string_part("metadata[bindings][][text]", b"sdk"),
-            RawPart {
-                name: "files[]".to_owned(),
-                file_name: Some("index.js".to_owned()),
-                content_type: Some("application/javascript+module".to_owned()),
-                bytes: b"export default {}".to_vec(),
-            },
-        ];
-        normalize_parts(&mut parts).unwrap();
-        let metadata = parts.iter().find(|part| part.name == "metadata").unwrap();
-        let value: Value = serde_json::from_slice(&metadata.bytes).unwrap();
-        assert_eq!(value["compatibility_flags"][0], "nodejs_compat");
-        assert_eq!(value["annotations"]["workers/tag"], "sdk-typed");
-        assert_eq!(value["bindings"][0]["name"], "MODE");
-        assert_eq!(
-            parts.iter().filter(|part| part.name == "index.js").count(),
-            1
-        );
-    }
-
-    #[test]
-    fn rejects_unknown_duplicate_and_ambiguous_sdk_fields() {
-        for fields in [
-            vec![("metadata[unknown]", "x")],
-            vec![
-                ("metadata[main_module]", "a"),
-                ("metadata[main_module]", "b"),
-            ],
-            vec![("metadata[bindings][][type]", "plain_text")],
-            vec![
-                ("metadata[bindings][][name]", "X"),
-                ("metadata[bindings][][json]", "true"),
-            ],
-            vec![("metadata[migrations][new_tag]", "v1")],
-        ] {
-            let mut parts = fields
-                .into_iter()
-                .map(|(name, value)| string_part(name, value.as_bytes()))
-                .collect();
-            assert!(normalize_parts(&mut parts).is_err());
-        }
-    }
-
-    #[tokio::test]
-    async fn recovers_boundary_split_across_chunks_without_losing_bytes() {
-        let boundary = "----open-compute-sdk-boundary";
-        let chunks = [
-            format!("--{}", &boundary[..8]).into_bytes(),
-            format!("{}\r", &boundary[8..]).into_bytes(),
-            b"\nContent-Disposition: form-data; name=\"metadata[main_module]\"\r\n\r\nindex.js\r\n"
-                .to_vec(),
-            format!("--{boundary}--\r\n").into_bytes(),
-        ];
-        let body = Body::from_stream(stream::iter(
-            chunks.into_iter().map(Ok::<_, std::io::Error>),
-        ));
-        let request = Request::builder()
-            .header(header::CONTENT_TYPE, "application/javascript")
-            .body(body)
-            .unwrap();
-        let request = normalize_request(request).await.unwrap();
-        assert_eq!(
-            request.headers()[header::CONTENT_TYPE],
-            format!("multipart/form-data; boundary={boundary}")
-        );
-        let mut multipart = Multipart::from_request(request, &()).await.unwrap();
-        let field = multipart.next_field().await.unwrap().unwrap();
-        assert_eq!(field.name(), Some("metadata[main_module]"));
-        assert_eq!(field.text().await.unwrap(), "index.js");
-    }
-
-    async fn bounded_upload(request: Request) -> StatusCode {
-        let request = match normalize_request(request).await {
-            Ok(request) => request,
-            Err(_) => return StatusCode::BAD_REQUEST,
-        };
-        let multipart = match Multipart::from_request(request, &()).await {
-            Ok(multipart) => multipart,
-            Err(_) => return StatusCode::BAD_REQUEST,
-        };
-        match parse_worker_upload(multipart, BundleLimits::default()).await {
-            Ok(_) => StatusCode::NO_CONTENT,
-            Err(_) => StatusCode::BAD_REQUEST,
-        }
-    }
-
-    fn multipart_body(boundary: &str, module: &[u8]) -> Vec<u8> {
-        let mut body = format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{{\"main_module\":\"index.js\",\"compatibility_date\":\"2026-08-30\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\n"
-        )
-        .into_bytes();
-        body.extend_from_slice(module);
-        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-        body
-    }
-
-    #[tokio::test]
-    async fn explicit_worker_limit_accepts_more_than_axum_default() {
-        let boundary = "open-compute-large-worker";
-        let mut module = vec![b' '; 2 * 1024 * 1024 + 1];
-        module.extend_from_slice(b"\nexport default {};");
-        let app = Router::new()
-            .route("/", post(bounded_upload))
-            .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/")
-                    .header(
-                        header::CONTENT_TYPE,
-                        format!("multipart/form-data; boundary={boundary}"),
-                    )
-                    .body(Body::from(multipart_body(boundary, &module)))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    }
-
-    #[tokio::test]
-    async fn explicit_worker_limit_rejects_chunked_wire_overhead() {
-        let boundary = "open-compute-over-limit";
-        let chunks = [
-            format!("--{boundary}\r\n").into_bytes(),
-            vec![b'x'; MAX_BODY_BYTES],
-            format!("\r\n--{boundary}--\r\n").into_bytes(),
-        ];
-        let body = Body::from_stream(stream::iter(
-            chunks.into_iter().map(Ok::<_, std::io::Error>),
-        ));
-        let app = Router::new()
-            .route("/", post(bounded_upload))
-            .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/")
-                    .header(
-                        header::CONTENT_TYPE,
-                        format!("multipart/form-data; boundary={boundary}"),
-                    )
-                    .body(body)
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-}
+#[path = "sdk_multipart_tests.rs"]
+mod tests;

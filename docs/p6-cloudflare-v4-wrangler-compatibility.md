@@ -123,6 +123,12 @@ authority；不增加第二 transport、raw fetch 或旧协议。`workers_http::
 `p6-cloudflare-sdk` 的真实 `ocd`/stock workerd Gate 共同锁定这一例外；升级 SDK 时必须重新取 trace，若上游已修复
 header/field shape 就直接删除该归一化路径。
 
+同一组固定客户端对 D1 binding 使用不同的官方 upload 字段：Wrangler 4.127.1 把配置里的 `database_id`
+转换为 multipart metadata 的 `id`，而 `cloudflare@7.1.0` typed `workers.scripts.update()` 直接发送
+`database_id`。SDK bracket adapter 只在 binding `type` 为 `d1` 时把后者归一为内部唯一的 `id`；二者并存、
+字段顺序无法唯一分组或任何其它 binding 携带 `database_id` 都失败。该规则是两个固定官方客户端的当前 wire
+合同，不是旧 open-compute alias，也不进入标准 JSON metadata path。
+
 ## 3. API 根、认证与 listener
 
 Wrangler 通过环境变量选择 open-compute：
