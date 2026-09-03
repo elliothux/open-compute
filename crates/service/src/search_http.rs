@@ -1,5 +1,6 @@
 //! Shared Vectorize and AI Search domain authority for the Cloudflare v4 adapters.
 
+use crate::ai_search_backend::AiSearchBindingService;
 use open_compute_storage::PlatformStorage;
 use open_compute_workers::ResourcePins;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ pub struct SearchApiState {
     pins: ResourcePins,
     busy_timeout_ms: u64,
     delete_drain_timeout: Duration,
+    ai_search: Option<Arc<AiSearchBindingService>>,
 }
 
 impl SearchApiState {
@@ -28,7 +30,15 @@ impl SearchApiState {
             pins,
             busy_timeout_ms,
             delete_drain_timeout,
+            ai_search: None,
         }
+    }
+
+    /// Attach the single AI Search execution authority used by v4 and bindings.
+    #[must_use]
+    pub(crate) fn with_ai_search(mut self, service: Arc<AiSearchBindingService>) -> Self {
+        self.ai_search = Some(service);
+        self
     }
 
     pub(crate) fn storage(&self) -> &Arc<PlatformStorage> {
@@ -45,5 +55,9 @@ impl SearchApiState {
 
     pub(crate) const fn delete_drain_timeout(&self) -> Duration {
         self.delete_drain_timeout
+    }
+
+    pub(crate) fn ai_search(&self) -> Option<&Arc<AiSearchBindingService>> {
+        self.ai_search.as_ref()
     }
 }

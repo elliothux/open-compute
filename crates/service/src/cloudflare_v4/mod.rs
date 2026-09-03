@@ -1,6 +1,7 @@
 //! Cloudflare v4-compatible control-plane boundary.
 
 pub(crate) mod accounts;
+mod ai_search;
 mod d1;
 mod kv;
 mod r2;
@@ -12,7 +13,7 @@ mod wire;
 pub(crate) use accounts::V4ResourceKind;
 pub(crate) use wire::{
     V4Error, V4OfficialError, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
-    paginated_response, request_context, success_response,
+    paginated_response, request_context, result_info_response, success_response,
 };
 /// Official Cloudflare storage routes implemented by the local product authorities.
 pub(crate) fn storage_router() -> Router<HttpState> {
@@ -20,6 +21,7 @@ pub(crate) fn storage_router() -> Router<HttpState> {
         .merge(d1::router())
         .merge(r2::router())
         .merge(vectorize::router())
+        .merge(ai_search::router())
 }
 
 use crate::http::HttpState;

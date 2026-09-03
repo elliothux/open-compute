@@ -43,22 +43,22 @@ impl AiSearchBindingService {
         upload: StagedUpload,
     ) -> Result<Response, PlatformError> {
         let path = upload.path.clone();
-        let result = self.upload_staged(authority, upload).await;
+        let result = self.upload_staged_value(&authority, upload).await;
         let cleanup = tokio::fs::remove_file(path).await;
         match result {
             Err(error) => Err(error),
-            Ok(response) => {
+            Ok(value) => {
                 cleanup.map_err(|_| unavailable())?;
-                Ok(response)
+                json_response(&json!({"schemaVersion": 1, "result": value}))
             }
         }
     }
 
-    async fn upload_staged(
+    async fn upload_staged_value(
         &self,
-        authority: Authority,
+        authority: &Authority,
         upload: StagedUpload,
-    ) -> Result<Response, PlatformError> {
+    ) -> Result<Value, PlatformError> {
         let StagedUpload {
             header,
             path: staging,
@@ -125,7 +125,110 @@ impl AiSearchBindingService {
             return Err(corrupt());
         }
         let result = item_info_value(&item)?;
-        json_response(&json!({"schemaVersion": 1, "result": result}))
+        Ok(result)
+    }
+
+    /// Persist one validated official multipart upload through the built-in authority.
+    pub(crate) async fn official_upload(
+        &self,
+        account_id: open_compute_core::AccountId,
+        namespace: &str,
+        instance: &str,
+        request_id: RequestId,
+        name: String,
+        content_type: String,
+        metadata: Map<String, Value>,
+        bytes: Bytes,
+        wait_for_completion: bool,
+    ) -> Result<Value, PlatformError> {
+        validate_source(
+            &name,
+            &content_type,
+            u64::try_from(bytes.len()).map_err(|_| limit())?,
+        )?;
+        let _admission = self.storage.reserve_mutation(MAX_UPLOAD_BYTES as u64)?;
+        let staging = self
+            .storage
+            .data_dir()
+            .version_staging_dir()
+            .join(format!("ai-search-upload-{}", Uuid::now_v7()));
+        let path = staging.clone();
+        let staged = async {
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&staging)
+                .map_err(|_| unavailable())?;
+            let mut file = tokio::fs::File::from_std(file);
+            file.write_all(&bytes).await.map_err(|_| unavailable())?;
+            file.sync_all().await.map_err(|_| unavailable())?;
+            drop(file);
+            let size = u64::try_from(bytes.len()).map_err(|_| limit())?;
+            let digest = Sha256::digest(&bytes).into();
+            Ok::<_, PlatformError>(StagedUpload {
+                header: UploadHeader {
+                    schema_version: 1,
+                    instance: Some(instance.to_owned()),
+                    name,
+                    content_type,
+                    options: UploadOptions { metadata },
+                },
+                path: staging,
+                digest,
+                size,
+            })
+        }
+        .await;
+        let result = async {
+            let upload = staged?;
+            let authority = self.official_authority(account_id, namespace, request_id)?;
+            let mut value = self.upload_staged_value(&authority, upload).await?;
+            if wait_for_completion {
+                let resolved = self.resolve_instance(&authority, Some(instance))?;
+                let (store, _) = self.open_store(&resolved.record)?;
+                self.run_coordinator(&resolved.record, &store).await?;
+                let item_id = value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(corrupt)?;
+                let item = store.get_item(item_id)?.ok_or_else(corrupt)?;
+                value = item_info_value(&item)?;
+            }
+            Ok(value)
+        }
+        .await;
+        let cleanup = tokio::fs::remove_file(path).await;
+        match result {
+            Err(error) => Err(error),
+            Ok(value) => {
+                cleanup.map_err(|_| unavailable())?;
+                Ok(value)
+            }
+        }
+    }
+
+    /// Stream one official item download while retaining lifecycle pins.
+    pub(crate) async fn official_download(
+        &self,
+        account_id: open_compute_core::AccountId,
+        namespace: &str,
+        instance: &str,
+        item_id: &str,
+        request_id: RequestId,
+    ) -> Result<Response, PlatformError> {
+        let authority = self.official_authority(account_id, namespace, request_id)?;
+        let mut response = self
+            .download(
+                authority,
+                ItemInput {
+                    instance: Some(instance.to_owned()),
+                    item_id: item_id.to_owned(),
+                },
+            )
+            .await?;
+        response.headers_mut().remove("x-open-compute-filename");
+        Ok(response)
     }
 
     pub(super) async fn item_sync(
@@ -238,11 +341,9 @@ impl AiSearchBindingService {
             .objects
             .download(&reference, &item.object.object_key)
             .await?;
-        let filename = axum::http::HeaderValue::from_str(&item.key).map_err(|_| corrupt())?;
-        let content_type =
-            axum::http::HeaderValue::from_str(&item.content_type).map_err(|_| corrupt())?;
-        let length =
-            axum::http::HeaderValue::from_str(&download.size.to_string()).map_err(|_| corrupt())?;
+        let filename = HeaderValue::from_str(&item.key).map_err(|_| corrupt())?;
+        let content_type = HeaderValue::from_str(&item.content_type).map_err(|_| corrupt())?;
+        let length = HeaderValue::from_str(&download.size.to_string()).map_err(|_| corrupt())?;
         let stream = futures::stream::unfold(
             (download.body, authority, child_pin),
             |(mut body, authority, child_pin)| async move {

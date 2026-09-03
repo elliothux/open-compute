@@ -23,7 +23,8 @@ impl AiSearchBindingService {
         let mut records = AiSearchCatalog::new(self.storage.db())
             .list_instances(authority.account_id, authority.resource.id)?;
         if let Some(search) = page.search {
-            records.retain(|record| record.instance_key.contains(&search));
+            let search = search.to_lowercase();
+            records.retain(|record| record.instance_key.to_lowercase().contains(&search));
         }
         records.sort_by(|left, right| {
             left.resource
@@ -193,6 +194,73 @@ impl AiSearchBindingService {
         Ok(Value::Object(value))
     }
 
+    pub(super) fn official_instance_info_value(
+        &self,
+        record: &AiSearchInstanceRecord,
+    ) -> Result<Value, PlatformError> {
+        let (_, inspection) = self.open_store(record)?;
+        let config: ResolvedAiSearchConfig =
+            serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
+        let namespace = ResourceRepository::new(self.storage.db())
+            .get(record.resource.account_id, record.namespace_resource_id)?;
+        let created_at = timestamp(record.resource.created_at_ms)?;
+        let modified_at = timestamp(record.resource.updated_at_ms)?;
+        let identity = json!({
+            "id": config.id,
+            "engine_version": 1,
+            "enable": true,
+            "type": Value::Null,
+            "source": Value::Null,
+            "source_params": Value::Null,
+            "ai_gateway_id": Value::Null,
+            "token_id": Value::Null,
+            "cache": false,
+            "cache_ttl": 172_800,
+        });
+        let behavior = json!({
+            "rewrite_query": config.rewrite_query,
+            "reranking": config.reranking,
+            "index_method": config.index_method,
+            "hybrid_search_enabled": config.index_method.vector && config.index_method.keyword,
+            "fusion_method": config.fusion_method,
+            "indexing_options": config.indexing_options,
+            "retrieval_options": config.retrieval_options,
+            "embedding_model": config.embedding_model,
+            "rewrite_model": config.rewrite_model,
+            "ai_search_model": config.ai_search_model,
+            "reranking_model": config.reranking_model,
+        });
+        let retrieval = json!({
+            "chunk_size": config.chunk_size,
+            "chunk_overlap": config.chunk_overlap,
+            "score_threshold": config.score_threshold,
+            "max_num_results": config.max_num_results,
+            "public_endpoint_id": Value::Null,
+            "public_endpoint_params": Value::Null,
+            "paused": false,
+            "status": "ready",
+        });
+        let lifecycle = json!({
+            "metadata": config.metadata,
+            "custom_metadata": config.custom_metadata,
+            "sync_interval": 21_600,
+            "created_at": created_at,
+            "created_by": Value::Null,
+            "modified_at": modified_at,
+            "modified_by": Value::Null,
+            "last_activity": modified_at,
+            "namespace": namespace.name,
+        });
+        let mut output = Map::new();
+        for section in [identity, behavior, retrieval, lifecycle] {
+            let Value::Object(section) = section else {
+                return Err(corrupt());
+            };
+            output.extend(section);
+        }
+        Ok(Value::Object(output))
+    }
+
     pub(super) fn instance_stats(
         &self,
         authority: &Authority,
@@ -258,6 +326,91 @@ impl AiSearchBindingService {
         }))
     }
 
+    pub(super) fn official_instance_stats(
+        &self,
+        authority: &Authority,
+        call: &JsonCall,
+    ) -> Result<Value, PlatformError> {
+        require_empty_object(&call.payload)?;
+        let instance = self.resolve_instance(authority, call.instance.as_deref())?;
+        let (store, inspection) = self.open_store(&instance.record)?;
+        let mut counts = BTreeMap::<String, u64>::new();
+        let mut payload_bytes = 0_u64;
+        let mut metadata_bytes = 0_u64;
+        let mut object_count = 0_u64;
+        let mut item_offset = 0_u64;
+        loop {
+            let (items, total) = store.list_items(item_offset, 100)?;
+            for item in &items {
+                *counts.entry(item.status.clone()).or_default() += 1;
+                payload_bytes = payload_bytes
+                    .checked_add(item.object.object_size)
+                    .ok_or_else(limit)?;
+                metadata_bytes = metadata_bytes
+                    .checked_add(u64::try_from(item.metadata_json.len()).map_err(|_| limit())?)
+                    .ok_or_else(limit)?;
+                object_count = object_count.checked_add(1).ok_or_else(limit)?;
+            }
+            item_offset = item_offset
+                .checked_add(u64::try_from(items.len()).map_err(|_| limit())?)
+                .ok_or_else(limit)?;
+            if item_offset >= total {
+                break;
+            }
+        }
+        let mut job_counts = [0_u64; 8];
+        let mut offset = 0_u64;
+        loop {
+            let (jobs, total) = store.list_jobs(offset, 100)?;
+            for job in &jobs {
+                let index = match job.state.as_str() {
+                    "queued" => 0,
+                    "claimed" => 1,
+                    "retry_wait" => 2,
+                    "completed" => 3,
+                    "error" => 4,
+                    "cancelling" => 5,
+                    "cancelled" => 6,
+                    "outdated" => 7,
+                    _ => return Err(corrupt()),
+                };
+                job_counts[index] = job_counts[index].saturating_add(1);
+            }
+            offset = offset
+                .checked_add(u64::try_from(jobs.len()).map_err(|_| limit())?)
+                .ok_or_else(limit)?;
+            if offset >= total {
+                break;
+            }
+        }
+        if let Some(metrics) = &self.metrics {
+            metrics.set_ai_search_jobs(job_counts);
+        }
+        Ok(json!({
+            "queued": counts.get("queued").copied().unwrap_or(0),
+            "running": counts.get("running").copied().unwrap_or(0),
+            "completed": counts.get("completed").copied().unwrap_or(0),
+            "error": counts.get("error").copied().unwrap_or(0),
+            "skipped": counts.get("skipped").copied().unwrap_or(0),
+            "outdated": counts.get("outdated").copied().unwrap_or(0),
+            "degraded": false,
+            "file_embed_errors": {},
+            "index_source_errors": {},
+            "last_activity": timestamp(instance.record.resource.updated_at_ms)?,
+            "engine": {
+                "r2": {
+                    "payloadSizeBytes": payload_bytes,
+                    "metadataSizeBytes": metadata_bytes,
+                    "objectCount": object_count,
+                },
+                "vectorize": {
+                    "vectorsCount": inspection.active_chunk_count,
+                    "dimensions": store.dimensions(),
+                },
+            },
+        }))
+    }
+
     pub(super) async fn instance_update(
         &self,
         authority: &Authority,
@@ -282,6 +435,18 @@ impl AiSearchBindingService {
             serde_json::from_slice(&inspection.public_config_json).map_err(|_| corrupt())?;
         for (key, value) in patch {
             merged.insert(key.clone(), value.clone());
+        }
+        if !patch.contains_key("fusion_method") {
+            let hybrid = merged
+                .get("index_method")
+                .and_then(Value::as_object)
+                .is_some_and(|index| {
+                    index.get("vector").and_then(Value::as_bool) == Some(true)
+                        && index.get("keyword").and_then(Value::as_bool) == Some(true)
+                });
+            if !hybrid {
+                merged.remove("fusion_method");
+            }
         }
         let input: AiSearchCreateInput =
             serde_json::from_value(Value::Object(merged)).map_err(|_| protocol())?;

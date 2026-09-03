@@ -201,11 +201,13 @@ impl From<&PlatformError> for V4Error {
             ErrorCode::BundleTooLarge
             | ErrorCode::AssetLimitExceeded
             | ErrorCode::KvValueTooLarge
+            | ErrorCode::BindingLimitExceeded
             | ErrorCode::R2ObjectTooLarge => Self::Official(V4OfficialError::RequestTooLarge),
             ErrorCode::QuotaExceeded
             | ErrorCode::AdmissionBusy
             | ErrorCode::KvBusy
             | ErrorCode::KvStorageFull
+            | ErrorCode::ResourceLimitExceeded
             | ErrorCode::R2Overloaded => Self::RateLimited,
             ErrorCode::AccountNotFound
             | ErrorCode::WorkerNotFound
@@ -228,11 +230,13 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::RouteConflict
             | ErrorCode::WorkerNameConflict
             | ErrorCode::ResourceNameConflict
+            | ErrorCode::ResourceReferenced
             | ErrorCode::R2BucketNotEmpty
             | ErrorCode::R2PreconditionFailed => Self::Conflict,
             ErrorCode::BindingCapabilityUnsupported | ErrorCode::CompatibilityUnsupported => {
                 Self::Unsupported
             }
+            ErrorCode::BindingPermissionDenied => Self::PermissionDenied,
             ErrorCode::ConfigInvalid
             | ErrorCode::PathInvalid
             | ErrorCode::LimitInvalid
@@ -253,7 +257,8 @@ impl From<&PlatformError> for V4Error {
             | ErrorCode::R2SsecInvalid
             | ErrorCode::R2MultipartInvalid
             | ErrorCode::R2MetadataTooLarge
-            | ErrorCode::R2CursorInvalid => Self::InvalidRequest,
+            | ErrorCode::R2CursorInvalid
+            | ErrorCode::BindingProtocolError => Self::InvalidRequest,
             _ => Self::Internal,
         }
     }
@@ -268,10 +273,10 @@ struct SuccessEnvelope<T> {
 }
 
 #[derive(Serialize)]
-struct PaginatedSuccessEnvelope<T> {
+struct ResultInfoSuccessEnvelope<T, I> {
     success: bool,
     result: T,
-    result_info: V4ResultInfo,
+    result_info: I,
     errors: [WireError; 0],
     messages: [WireMessage; 0],
 }
@@ -335,7 +340,16 @@ pub(crate) fn paginated_response<T: Serialize>(
     result: T,
     result_info: V4ResultInfo,
 ) -> Response {
-    let mut response = Json(PaginatedSuccessEnvelope {
+    result_info_response(context, result, result_info)
+}
+
+/// Wrap a result and endpoint-specific official collection metadata.
+pub(crate) fn result_info_response<T: Serialize, I: Serialize>(
+    context: V4RequestContext,
+    result: T,
+    result_info: I,
+) -> Response {
+    let mut response = Json(ResultInfoSuccessEnvelope {
         success: true,
         result,
         result_info,

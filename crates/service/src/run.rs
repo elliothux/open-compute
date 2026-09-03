@@ -552,6 +552,17 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         )
         .with_metrics(metrics.clone()),
     );
+    let binding_ai_search = Arc::new(
+        AiSearchBindingService::new(
+            storage.clone(),
+            resource_pins.clone(),
+            loaded.config.ai.clone(),
+            ai_search_objects,
+            snapshot_pins.clone(),
+            document_parser.clone(),
+        )?
+        .with_metrics(metrics.clone()),
+    );
     let worker_api = WorkerApiState::new(
         storage.clone(),
         store.clone(),
@@ -604,12 +615,15 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         snapshot_pins.clone(),
         metrics.clone(),
     ))
-    .with_search_api(SearchApiState::new(
-        storage.clone(),
-        resource_pins.clone(),
-        loaded.config.storage.sqlite_busy_timeout_ms,
-        Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
-    ));
+    .with_search_api(
+        SearchApiState::new(
+            storage.clone(),
+            resource_pins.clone(),
+            loaded.config.storage.sqlite_busy_timeout_ms,
+            Duration::from_millis(loaded.config.workers.delete_drain_timeout_ms),
+        )
+        .with_ai_search(binding_ai_search.clone()),
+    );
 
     #[cfg(feature = "test-support")]
     let state = state.with_test_runtime_restart({
@@ -776,17 +790,6 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let binding_images = images.clone();
     let binding_document_parser = document_parser.clone();
     let binding_health = health.clone();
-    let binding_ai_search = Arc::new(
-        AiSearchBindingService::new(
-            storage.clone(),
-            resource_pins.clone(),
-            loaded.config.ai.clone(),
-            ai_search_objects,
-            snapshot_pins.clone(),
-            document_parser.clone(),
-        )?
-        .with_metrics(metrics.clone()),
-    );
     let binding_backend_task = tokio::spawn(async move {
         serve_binding_backend_with_ai_search_and_snapshot_pins(
             binding_backend_listener,

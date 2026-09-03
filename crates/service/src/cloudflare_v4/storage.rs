@@ -7,8 +7,10 @@ use axum::body::to_bytes;
 use axum::extract::Request;
 use axum::response::Response;
 use open_compute_core::{AccountId, RequestId, ResourceId};
-use serde::de::DeserializeOwned;
-use std::collections::BTreeMap;
+use serde::de::{DeserializeOwned, Error as _, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 pub(super) const MAX_JSON_BODY: usize = 1024 * 1024;
 
@@ -74,7 +76,75 @@ pub(super) async fn json_with_limit<T: DeserializeOwned>(
     let bytes = to_bytes(request.into_body(), limit)
         .await
         .map_err(|_| error_response(V4Error::InvalidRequest, request_id))?;
+    serde_json::from_slice::<UniqueJson>(&bytes)
+        .map_err(|_| error_response(V4Error::InvalidRequest, request_id))?;
     serde_json::from_slice(&bytes).map_err(|_| error_response(V4Error::InvalidRequest, request_id))
+}
+
+struct UniqueJson;
+
+impl<'de> Deserialize<'de> for UniqueJson {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(UniqueJsonVisitor)
+    }
+}
+
+struct UniqueJsonVisitor;
+
+impl<'de> Visitor<'de> for UniqueJsonVisitor {
+    type Value = UniqueJson;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("JSON without duplicate object keys")
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
+        Ok(UniqueJson)
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
+        Ok(UniqueJson)
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
+        Ok(UniqueJson)
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
+        Ok(UniqueJson)
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
+        Ok(UniqueJson)
+    }
+
+    fn visit_string<E>(self, _: String) -> Result<Self::Value, E> {
+        Ok(UniqueJson)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(UniqueJson)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(UniqueJson)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut values: A) -> Result<Self::Value, A::Error> {
+        while values.next_element::<UniqueJson>()?.is_some() {}
+        Ok(UniqueJson)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut values: A) -> Result<Self::Value, A::Error> {
+        let mut keys = BTreeSet::new();
+        while let Some(key) = values.next_key::<String>()? {
+            if !keys.insert(key) {
+                return Err(A::Error::custom("duplicate JSON object key"));
+            }
+            values.next_value::<UniqueJson>()?;
+        }
+        Ok(UniqueJson)
+    }
 }
 
 fn json_content_type(value: &str) -> bool {
@@ -175,7 +245,7 @@ const fn hex_digit(byte: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::json_content_type;
+    use super::{UniqueJson, json_content_type};
 
     #[test]
     fn json_content_type_accepts_only_the_frozen_parameter_shape() {
@@ -186,5 +256,12 @@ mod tests {
         ));
         assert!(!json_content_type("application/json; profile=custom"));
         assert!(!json_content_type("application/json; charset=ascii"));
+    }
+
+    #[test]
+    fn json_rejects_duplicate_keys_at_every_depth() {
+        assert!(serde_json::from_slice::<UniqueJson>(br#"{"a":1,"b":[{"c":2}]}"#).is_ok());
+        assert!(serde_json::from_slice::<UniqueJson>(br#"{"a":1,"a":2}"#).is_err());
+        assert!(serde_json::from_slice::<UniqueJson>(br#"{"a":[{"b":1,"b":2}]}"#).is_err());
     }
 }

@@ -14,7 +14,7 @@ use crate::metrics::AiSearchOperation;
 use crate::snapshot_pins::SnapshotPins;
 use axum::body::{Body, to_bytes};
 use axum::extract::Request;
-use axum::http::{HeaderMap, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use http_body_util::BodyExt as _;
@@ -139,6 +139,152 @@ impl AiSearchBindingService {
     pub(crate) fn with_metrics(mut self, metrics: Arc<crate::metrics::MetricsRegistry>) -> Self {
         self.metrics = Some(metrics);
         self
+    }
+
+    /// Execute one official v4 operation through the existing AI Search domain authority.
+    pub(crate) async fn official_call(
+        &self,
+        account_id: open_compute_core::AccountId,
+        namespace: &str,
+        request_id: RequestId,
+        operation: &str,
+        instance: Option<&str>,
+        payload: Value,
+    ) -> Result<Value, PlatformError> {
+        let authority = self.official_authority(account_id, namespace, request_id)?;
+        let call = JsonCall {
+            operation: operation.to_owned(),
+            instance: instance.map(str::to_owned),
+            payload,
+        };
+        let operation_name = call.operation.clone();
+        let instance_name = call.instance.clone();
+        let query = matches!(
+            operation,
+            "namespace.search"
+                | "namespace.chatCompletions"
+                | "instance.search"
+                | "instance.chatCompletions"
+        );
+        let execution = async {
+            let _query_permit = if query {
+                Some(
+                    self.query_permits
+                        .acquire()
+                        .await
+                        .map_err(|_| unavailable())?,
+                )
+            } else {
+                None
+            };
+            self.execute_value(&authority, call).await
+        };
+        let result = if query {
+            tokio::time::timeout(Duration::from_millis(self.ai.query_timeout_ms), execution)
+                .await
+                .map_err(|_| query_timeout())?
+        } else {
+            execution.await
+        }?;
+        match operation_name.as_str() {
+            "namespace.list" => self.official_instance_list(&authority, result),
+            "namespace.create" | "instance.info" | "instance.update" => {
+                self.official_instance_value(&authority, instance_name.as_deref(), &result)
+            }
+            "instance.stats" => self.official_instance_stats(
+                &authority,
+                &JsonCall {
+                    operation: operation_name,
+                    instance: instance_name,
+                    payload: json!({}),
+                },
+            ),
+            _ => Ok(result),
+        }
+    }
+
+    fn official_instance_value(
+        &self,
+        authority: &Authority,
+        requested_instance: Option<&str>,
+        value: &Value,
+    ) -> Result<Value, PlatformError> {
+        let instance = requested_instance
+            .or_else(|| value.get("id").and_then(Value::as_str))
+            .ok_or_else(corrupt)?;
+        let resolved = self.resolve_instance(authority, Some(instance))?;
+        self.official_instance_info_value(&resolved.record)
+    }
+
+    fn official_instance_list(
+        &self,
+        authority: &Authority,
+        mut value: Value,
+    ) -> Result<Value, PlatformError> {
+        let result = value
+            .get_mut("result")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(corrupt)?;
+        for entry in result {
+            *entry = self.official_instance_value(authority, None, entry)?;
+        }
+        Ok(value)
+    }
+
+    /// Start one official v4 streaming chat through the same provider authority.
+    pub(crate) async fn official_stream(
+        &self,
+        account_id: open_compute_core::AccountId,
+        namespace: &str,
+        request_id: RequestId,
+        operation: &str,
+        instance: Option<&str>,
+        payload: Value,
+    ) -> Result<Response, PlatformError> {
+        let authority = self.official_authority(account_id, namespace, request_id)?;
+        let call = JsonCall {
+            operation: operation.to_owned(),
+            instance: instance.map(str::to_owned),
+            payload,
+        };
+        let execution = async {
+            let _query_permit = self
+                .query_permits
+                .acquire()
+                .await
+                .map_err(|_| unavailable())?;
+            self.execute_stream(authority, call).await
+        };
+        tokio::time::timeout(Duration::from_millis(self.ai.query_timeout_ms), execution)
+            .await
+            .map_err(|_| query_timeout())?
+    }
+
+    fn official_authority(
+        &self,
+        account_id: open_compute_core::AccountId,
+        namespace: &str,
+        request_id: RequestId,
+    ) -> Result<Authority, PlatformError> {
+        let resource = ResourceRepository::new(self.storage.db())
+            .list(account_id, Some(BindingKind::AiSearchNamespace))?
+            .into_iter()
+            .find(|resource| {
+                resource.name == namespace
+                    && resource.state == ResourceState::Ready
+                    && resource.availability == ResourceAvailability::Healthy
+            })
+            .ok_or_else(not_found)?;
+        let pin = self.pins.try_pin(resource.id)?;
+        Ok(Authority {
+            account_id,
+            kind: BindingKind::AiSearchNamespace,
+            resource,
+            read: true,
+            write: true,
+            request_id,
+            _bound_pin: pin,
+        })
     }
 
     #[cfg(any(test, feature = "test-support"))]

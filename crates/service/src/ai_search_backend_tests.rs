@@ -1,21 +1,32 @@
 use super::chat::chunks_sse_event;
 use super::ingest::materialize_upload_metadata;
 use super::*;
+use crate::cloudflare_v4::accounts::AccountAuthority;
+use crate::cloudflare_v4::{router as v4_router, storage_router};
+use crate::health::HealthCoordinator;
+use crate::http::{HttpState, REQUEST_ID_HEADER};
+use crate::metrics::MetricsRegistry;
 use crate::p3_3_test_support::RuntimeFeatureFixture;
+use crate::search_http::SearchApiState;
 use crate::snapshot_pins::SnapshotPins;
+use axum::body::to_bytes;
+use axum::http::{Request as HttpRequest, StatusCode};
 use futures::stream;
 use open_compute_artifacts::{
     AiSearchObjectStore, MapEnv, MockS3, S3ArtifactClient, resolve_s3_credentials_with,
 };
+use open_compute_core::config::MetricsConfig;
 use open_compute_core::{
     AiAuthConfig, AiEmbeddingMetric, AiEmbeddingModelConfig, AiProviderConfig, AiTokenizer,
-    AiTokenizerArtifactConfig, DocumentParserConfig, PlatformConfig,
+    AiTokenizerArtifactConfig, DocumentParserConfig, PlatformConfig, SecretString,
 };
 use open_compute_storage::AiSearchObjectReference;
 use open_compute_storage::{ResourceRecord, StagedAiSearchChunk};
 use open_compute_workers::{AiSearchNamespaceResourceDriver, CreateResourceOutcome, ResourcePins};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
+use std::time::Duration;
+use tower::ServiceExt as _;
 
 #[tokio::test]
 async fn upload_frame_is_streamed_to_private_exact_staging() {
@@ -243,7 +254,8 @@ fn protocol_validators_cover_boundaries_headers_pagination_and_status_mapping() 
 
     assert_eq!(page_bounds(None, None, 3).unwrap(), (1, 50, 0, 3));
     assert_eq!(page_bounds(Some(9), Some(10), 3).unwrap(), (9, 10, 3, 3));
-    for (page, per_page) in [(Some(0), Some(1)), (Some(1), Some(0)), (None, Some(101))] {
+    assert_eq!(page_bounds(Some(1), Some(0), 3).unwrap(), (1, 0, 0, 0));
+    for (page, per_page) in [(Some(0), Some(1)), (None, Some(101))] {
         assert_eq!(
             page_bounds(page, per_page, 3).unwrap_err().code(),
             ErrorCode::BindingProtocolError
@@ -426,9 +438,11 @@ fn operation_metrics_and_empty_payload_validation_cover_all_categories() {
     assert!(unix_ms().unwrap() > 0);
 }
 
+#[path = "ai_search_backend/official_v4_tests.rs"]
+mod official_v4_tests;
 struct SearchBehaviorFixture {
     _runtime: RuntimeFeatureFixture,
-    service: AiSearchBindingService,
+    service: Arc<AiSearchBindingService>,
     pins: ResourcePins,
     namespace: ResourceRecord,
 }
@@ -468,15 +482,17 @@ impl SearchBehaviorFixture {
             DocumentParserConfig::default(),
             PathBuf::from("/usr/bin/false"),
         ));
-        let service = AiSearchBindingService::new(
-            runtime.storage.clone(),
-            pins.clone(),
-            ai,
-            objects,
-            Arc::new(SnapshotPins::empty()),
-            parser,
-        )
-        .unwrap();
+        let service = Arc::new(
+            AiSearchBindingService::new(
+                runtime.storage.clone(),
+                pins.clone(),
+                ai,
+                objects,
+                Arc::new(SnapshotPins::empty()),
+                parser,
+            )
+            .unwrap(),
+        );
         Self {
             _runtime: runtime,
             service,

@@ -91,26 +91,32 @@ pub(super) fn item_info_value(item: &AiSearchItemRecord) -> Result<Value, Platfo
         "chunks_count": item.chunks_count,
         "file_size": item.object.object_size,
         "source_id": "builtin",
-        "created_at": item.created_at_ms.to_string(),
-        "last_seen_at": item.updated_at_ms.to_string(),
+        "created_at": timestamp(item.created_at_ms)?,
+        "last_seen_at": timestamp(item.updated_at_ms)?,
         "metadata": metadata,
     }))
 }
 
-pub(super) fn job_info_value(job: &AiSearchJobRecord) -> Value {
-    json!({
+pub(super) fn job_info_value(job: &AiSearchJobRecord) -> Result<Value, PlatformError> {
+    Ok(json!({
         "id": job.id,
         "source": job.source,
         "description": job.description,
-        "last_seen_at": job.updated_at_ms.to_string(),
-        "started_at": job.started_at_ms.map(|value| value.to_string()),
-        "ended_at": job.ended_at_ms.map(|value| value.to_string()),
+        "last_seen_at": timestamp(job.updated_at_ms)?,
+        "started_at": job.started_at_ms.map(timestamp).transpose()?,
+        "ended_at": job.ended_at_ms.map(timestamp).transpose()?,
         "end_reason": if matches!(job.state.as_str(), "completed" | "error" | "cancelled" | "outdated") {
             Some(job.state.as_str())
         } else {
             None
         },
-    })
+    }))
+}
+
+pub(super) fn timestamp(value: i64) -> Result<String, PlatformError> {
+    jiff::Timestamp::from_millisecond(value)
+        .map(|timestamp| timestamp.to_string())
+        .map_err(|_| corrupt())
 }
 
 pub(super) async fn stage_upload(
@@ -243,8 +249,11 @@ pub(super) fn page_bounds(
 ) -> Result<(u64, u32, usize, usize), PlatformError> {
     let page = page.unwrap_or(1);
     let per_page = per_page.unwrap_or(50);
-    if page == 0 || per_page == 0 || per_page > 100 {
+    if page == 0 || per_page > 100 {
         return Err(protocol());
+    }
+    if per_page == 0 {
+        return Ok((page, per_page, 0, 0));
     }
     let start = page
         .checked_sub(1)
@@ -255,7 +264,9 @@ pub(super) fn page_bounds(
         page,
         per_page,
         start.min(total),
-        start.saturating_add(per_page as usize).min(total),
+        start
+            .saturating_add(usize::try_from(per_page).map_err(|_| limit())?)
+            .min(total),
     ))
 }
 
@@ -332,18 +343,18 @@ pub(super) fn error_response(error: &PlatformError) -> Response {
         | ErrorCode::PlatformUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::BAD_REQUEST,
     };
-    (
+    let mut response = (
         status,
-        [
-            ("x-open-compute-error-code", error.code().as_str()),
-            (header::CONTENT_TYPE.as_str(), "application/json"),
-        ],
-        serde_json::to_vec(&json!({
+        axum::Json(json!({
             "error": {"code": error.code().as_str(), "message": error.message()}
-        }))
-        .unwrap_or_default(),
+        })),
     )
-        .into_response()
+        .into_response();
+    response.headers_mut().insert(
+        "x-open-compute-error-code",
+        HeaderValue::from_static(error.code().as_str()),
+    );
+    response
 }
 
 pub(super) fn unix_ms() -> Result<i64, PlatformError> {

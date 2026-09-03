@@ -101,7 +101,7 @@ impl AiSearchBindingService {
             serde_json::from_value(call.payload).map_err(|_| protocol())?;
         let instance = self.resolve_instance(authority, call.instance.as_deref())?;
         let (store, _) = self.open_store(&instance.record)?;
-        let limit = input.params.limit.unwrap_or(50);
+        let page_limit = input.params.limit.unwrap_or(50);
         let after = input
             .params
             .cursor
@@ -109,25 +109,35 @@ impl AiSearchBindingService {
             .unwrap_or("0")
             .parse::<u64>()
             .map_err(|_| protocol())?;
-        let logs = store.item_logs(&input.item_id, after, limit)?;
+        let item = store.get_item(&input.item_id)?.ok_or_else(not_found)?;
+        let fetch = page_limit.checked_add(1).ok_or_else(limit)?;
+        let mut logs = store.item_logs(&input.item_id, after, fetch)?;
+        let truncated = logs.len() > usize::try_from(page_limit).map_err(|_| limit())?;
+        if truncated {
+            logs.pop();
+        }
         let cursor = logs.last().map(|log| log.sequence.to_string());
         let result = logs
             .iter()
             .map(|log| {
-                json!({
-                    "timestamp": log.created_at_ms.to_string(),
+                Ok(json!({
+                    "timestamp": timestamp(log.created_at_ms)?,
                     "action": "index",
                     "message": log.message_code,
-                })
+                    "fileKey": item.key.as_str(),
+                    "chunkCount": item.chunks_count,
+                    "processingTimeMs": Value::Null,
+                    "errorType": Value::Null,
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, PlatformError>>()?;
         Ok(json!({
             "result": result,
             "result_info": {
                 "count": result.len(),
-                "per_page": limit,
+                "per_page": page_limit,
                 "cursor": cursor,
-                "truncated": result.len() == usize::try_from(limit).unwrap_or(usize::MAX),
+                "truncated": truncated,
             }
         }))
     }
@@ -181,8 +191,16 @@ impl AiSearchBindingService {
             .checked_sub(1)
             .and_then(|value| value.checked_mul(u64::from(per_page)))
             .ok_or_else(limit)?;
-        let (jobs, total) = store.list_jobs(offset, per_page)?;
-        let result = jobs.iter().map(job_info_value).collect::<Vec<_>>();
+        let (jobs, total) = if per_page == 0 {
+            let (_, total) = store.list_jobs(0, 1)?;
+            (Vec::new(), total)
+        } else {
+            store.list_jobs(offset, per_page)?
+        };
+        let result = jobs
+            .iter()
+            .map(job_info_value)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(json!({
             "result": result,
             "result_info": pagination(result.len(), page, per_page, usize::try_from(total).map_err(|_| limit())?),
@@ -227,7 +245,7 @@ impl AiSearchBindingService {
             store.create_completed_job(&id, input.description.as_deref(), now_ms)?;
         }
         let job = store.get_job(&id)?.ok_or_else(corrupt)?;
-        Ok(job_info_value(&job))
+        job_info_value(&job)
     }
 
     pub(super) fn job_info_call(
@@ -239,7 +257,7 @@ impl AiSearchBindingService {
         let instance = self.resolve_instance(authority, call.instance.as_deref())?;
         let (store, _) = self.open_store(&instance.record)?;
         let job = store.get_job(&input.job_id)?.ok_or_else(not_found)?;
-        Ok(job_info_value(&job))
+        job_info_value(&job)
     }
 
     pub(super) fn job_logs(
@@ -256,21 +274,39 @@ impl AiSearchBindingService {
             .checked_sub(1)
             .and_then(|value| value.checked_mul(u64::from(per_page)))
             .ok_or_else(limit)?;
-        let logs = store.job_logs(&input.job_id, offset, per_page)?;
+        let logs = if per_page == 0 {
+            Vec::new()
+        } else {
+            store.job_logs(&input.job_id, offset, per_page)?
+        };
+        let mut total = 0_u64;
+        loop {
+            let batch = store.job_logs(&input.job_id, total, 100)?;
+            let count = u64::try_from(batch.len()).map_err(|_| limit())?;
+            total = total.checked_add(count).ok_or_else(limit)?;
+            if count < 100 {
+                break;
+            }
+        }
         let result = logs
             .iter()
             .map(|log| {
-                json!({
+                Ok(json!({
                     "id": log.sequence,
                     "message": log.message_code,
                     "message_type": log.message_type,
                     "created_at": log.created_at_ms,
-                })
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, PlatformError>>()?;
         Ok(json!({
             "result": result,
-            "result_info": pagination(result.len(), page, per_page, offset as usize + result.len()),
+            "result_info": pagination(
+                result.len(),
+                page,
+                per_page,
+                usize::try_from(total).map_err(|_| limit())?,
+            ),
         }))
     }
 
@@ -287,6 +323,6 @@ impl AiSearchBindingService {
         }
         store.request_cancel(&input.job_id, unix_ms()?)?;
         let job = store.get_job(&input.job_id)?.ok_or_else(corrupt)?;
-        Ok(job_info_value(&job))
+        job_info_value(&job)
     }
 }
