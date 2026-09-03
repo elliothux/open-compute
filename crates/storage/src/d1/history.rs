@@ -553,7 +553,6 @@ impl<'a> D1SnapshotRepository<'a> {
             if current.state == D1TransferState::Complete {
                 if current.result_session_version == Some(result_session_version)
                     && current.num_queries == Some(num_queries)
-                    && current.completed_at_ms == Some(now_ms)
                 {
                     return Ok(current);
                 }
@@ -628,7 +627,7 @@ impl<'a> D1SnapshotRepository<'a> {
                 (record.kind, record.state, action),
                 (
                     D1TransferKind::Import,
-                    D1TransferState::Uploading,
+                    D1TransferState::Uploading | D1TransferState::Uploaded,
                     D1TransferAction::Upload
                 ) | (
                     D1TransferKind::Export,
@@ -694,7 +693,6 @@ impl<'a> D1SnapshotRepository<'a> {
                     && existing.source_session_version == source_session_version
                     && existing.previous_session_version == previous_session_version
                     && existing.request_fingerprint == *request_fingerprint
-                    && existing.created_at_ms == now_ms
                 {
                     return Ok(existing);
                 }

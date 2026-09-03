@@ -54,7 +54,6 @@ pub(super) fn transition_file(
                 && current.etag_md5.as_ref() == etag_md5
                 && current.sha256 == Some(*sha256)
                 && current.size_bytes == Some(size_bytes)
-                && current.completed_at_ms == (to == D1TransferState::Complete).then_some(now_ms)
             {
                 return Ok(current);
             }
@@ -101,9 +100,7 @@ pub(super) fn finish_transfer(
             D1TransferState::Expired
         };
         if current.state == target {
-            if current.completed_at_ms == Some(now_ms)
-                && current.error_code.as_deref() == failure.map(ErrorCode::as_str)
-            {
+            if current.error_code.as_deref() == failure.map(ErrorCode::as_str) {
                 return Ok(current);
             }
             return Err(idempotency_conflict());

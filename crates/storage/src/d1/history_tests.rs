@@ -242,7 +242,7 @@ fn transfer_session_survives_restart_and_enforces_capability_and_ingest_fences()
             .code(),
         ErrorCode::ResourceInvariantViolation
     );
-    history
+    let uploaded = history
         .complete_upload(
             account,
             &import_id,
@@ -253,12 +253,40 @@ fn transfer_session_survives_restart_and_enforces_capability_and_ingest_fences()
             30,
         )
         .unwrap();
-    let ingesting = history.begin_ingest(account, &import_id, 40).unwrap();
-    assert_eq!(ingesting.state, D1TransferState::Ingesting);
     drop(storage);
 
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
     let history = D1SnapshotRepository::new(storage.db());
+    assert_eq!(
+        history
+            .authorize_transfer_token(
+                account,
+                resource,
+                &import_id,
+                D1TransferAction::Upload,
+                &token,
+                34,
+            )
+            .unwrap()
+            .state,
+        D1TransferState::Uploaded
+    );
+    assert_eq!(
+        history
+            .complete_upload(
+                account,
+                &import_id,
+                "d1/transfers/import.sql",
+                &etag,
+                &[5; 32],
+                120,
+                35,
+            )
+            .unwrap(),
+        uploaded
+    );
+    let ingesting = history.begin_ingest(account, &import_id, 40).unwrap();
+    assert_eq!(ingesting.state, D1TransferState::Ingesting);
     assert_eq!(
         history.transfer(account, &import_id).unwrap().state,
         D1TransferState::Ingesting
@@ -294,6 +322,16 @@ fn transfer_session_survives_restart_and_enforces_capability_and_ingest_fences()
         .unwrap();
     assert_eq!(complete.state, D1TransferState::Complete);
     assert_eq!(complete.result_session_version, Some(1));
+    drop(storage);
+
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let history = D1SnapshotRepository::new(storage.db());
+    assert_eq!(
+        history
+            .complete_import(account, &import_id, 1, 3, 70)
+            .unwrap(),
+        complete
+    );
     assert!(
         history
             .active_transfer(account, resource)
@@ -353,15 +391,29 @@ fn uploaded_failure_retains_evidence_and_restore_intent_reconciles_after_restart
     assert_eq!(failed.sha256, Some([5; 32]));
     assert_eq!(failed.size_bytes, Some(120));
 
+    drop(storage);
+
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let history = D1SnapshotRepository::new(storage.db());
+    assert_eq!(
+        history
+            .fail_transfer(account, &import_id, ErrorCode::D1SqlInvalid, 45)
+            .unwrap(),
+        failed
+    );
     let restore_id = uuid::Uuid::now_v7().hyphenated().to_string();
     let fingerprint = [8; 32];
     let intent = history
         .prepare_restore(account, resource, &restore_id, 0, 0, &fingerprint, 50)
         .unwrap();
     assert_eq!(intent.result_session_version, 1);
+    drop(storage);
+
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let history = D1SnapshotRepository::new(storage.db());
     assert_eq!(
         history
-            .prepare_restore(account, resource, &restore_id, 0, 0, &fingerprint, 50)
+            .prepare_restore(account, resource, &restore_id, 0, 0, &fingerprint, 55)
             .unwrap(),
         intent
     );
@@ -374,16 +426,12 @@ fn uploaded_failure_retains_evidence_and_restore_intent_reconciles_after_restart
                 0,
                 0,
                 &fingerprint,
-                51,
+                56,
             )
             .unwrap_err()
             .code(),
         ErrorCode::IdempotencyConflict
     );
-    drop(storage);
-
-    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
-    let history = D1SnapshotRepository::new(storage.db());
     assert_eq!(
         history.pending_restore(account, resource).unwrap(),
         Some(intent)
@@ -414,6 +462,89 @@ fn uploaded_failure_retains_evidence_and_restore_intent_reconciles_after_restart
             .pending_restore(account, resource)
             .unwrap()
             .is_none()
+    );
+}
+
+#[test]
+fn terminal_transfer_replays_keep_original_times_after_restart() {
+    let (_temp, config, storage, account, resource) = fixture();
+    let history = D1SnapshotRepository::new(storage.db());
+    history
+        .record_completed_snapshot(
+            account,
+            resource,
+            0,
+            &snapshot_key(resource, 0),
+            &[1; 32],
+            100,
+            10,
+        )
+        .unwrap();
+
+    let export_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    history
+        .create_transfer(&NewD1Transfer {
+            id: &export_id,
+            account_id: account,
+            resource_id: resource,
+            kind: D1TransferKind::Export,
+            at_session_version: 0,
+            filename: "export-one.sql",
+            etag_md5: None,
+            token_fingerprint: &[2; 32],
+            token_action: D1TransferAction::Download,
+            token_expires_at_ms: 100,
+            now_ms: 20,
+        })
+        .unwrap();
+    let complete = history
+        .complete_export(
+            account,
+            &export_id,
+            "d1/transfers/export-one.sql",
+            &[3; 32],
+            200,
+            30,
+        )
+        .unwrap();
+
+    let expired_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    history
+        .create_transfer(&NewD1Transfer {
+            id: &expired_id,
+            account_id: account,
+            resource_id: resource,
+            kind: D1TransferKind::Import,
+            at_session_version: 0,
+            filename: "expired.sql",
+            etag_md5: Some(&[4; 16]),
+            token_fingerprint: &[5; 32],
+            token_action: D1TransferAction::Upload,
+            token_expires_at_ms: 50,
+            now_ms: 40,
+        })
+        .unwrap();
+    let expired = history.expire_transfer(account, &expired_id, 50).unwrap();
+    drop(storage);
+
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let history = D1SnapshotRepository::new(storage.db());
+    assert_eq!(
+        history
+            .complete_export(
+                account,
+                &export_id,
+                "d1/transfers/export-one.sql",
+                &[3; 32],
+                200,
+                60,
+            )
+            .unwrap(),
+        complete
+    );
+    assert_eq!(
+        history.expire_transfer(account, &expired_id, 70).unwrap(),
+        expired
     );
 }
 
