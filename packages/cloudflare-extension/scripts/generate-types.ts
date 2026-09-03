@@ -21,6 +21,7 @@ interface Contract {
 const root = resolve(import.meta.dir, "..");
 const schemaPath = resolve(root, "../../openapi/open-compute-extension.json");
 const outputPath = resolve(root, "src/generated.ts");
+const runtimeOutputPath = resolve(root, "src/generated.js");
 const bytes = await readFile(schemaPath);
 const contract = JSON.parse(bytes.toString("utf8")) as Contract;
 
@@ -60,10 +61,16 @@ const output = `// Generated from ../../openapi/open-compute-extension.json. Do 
   `export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = ${JSON.stringify(digest)};\n\n` +
   `export const OPEN_COMPUTE_EXTENSION_OPERATIONS = ${JSON.stringify(operations, null, 2)} as const;\n\n` +
   `${declarations}\n`;
+const runtimeOutput = `// Generated from ../../openapi/open-compute-extension.json. Do not edit.\n` +
+  `export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = ${JSON.stringify(digest)};\n\n` +
+  `export const OPEN_COMPUTE_EXTENSION_OPERATIONS = ${JSON.stringify(operations, null, 2)};\n`;
 
 if (process.argv.includes("--check")) {
   const current = await readFile(outputPath, "utf8").catch(() => "");
   if (current !== output) throw new Error("generated extension types are stale; run bun run generate");
+  const currentRuntime = await readFile(runtimeOutputPath, "utf8").catch(() => "");
+  if (currentRuntime !== runtimeOutput) throw new Error("generated extension runtime is stale; run bun run generate");
 } else {
   await writeFile(outputPath, output);
+  await writeFile(runtimeOutputPath, runtimeOutput);
 }

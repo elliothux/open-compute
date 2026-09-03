@@ -28,6 +28,18 @@ impl D1SnapshotRepository<'_> {
     }
 }
 
+impl D1SnapshotRepository<'_> {
+    /// Expire an active transfer after its capability deadline.
+    pub fn expire_transfer(
+        &self,
+        account_id: AccountId,
+        session_id: &str,
+        now_ms: i64,
+    ) -> Result<D1TransferRecord, PlatformError> {
+        finish_transfer(self.db, account_id, session_id, None, now_ms)
+    }
+}
+
 pub(super) fn transition_file(
     db: &ControlDb,
     account_id: AccountId,
@@ -209,7 +221,8 @@ pub(super) fn read_transfer(
         "SELECT s.id, s.resource_id, s.kind, s.state, s.at_session_version,
                 s.result_session_version, s.filename, s.file_key, s.etag_md5, s.sha256,
                 s.size_bytes, s.token_fingerprint, s.token_action, s.token_expires_at_ms,
-                s.num_queries, s.created_at_ms, s.updated_at_ms, s.completed_at_ms, s.error_code
+                s.num_queries, s.duration_ms, s.rows_read, s.rows_written, s.result_size_after,
+                s.created_at_ms, s.updated_at_ms, s.completed_at_ms, s.error_code
          FROM d1_transfer_sessions s JOIN resources r ON r.id = s.resource_id
          WHERE s.id = ?1 AND r.account_id = ?2",
         params![session_id, account_id.to_string()],
@@ -228,7 +241,8 @@ pub(super) fn read_active_transfer(
         "SELECT id, resource_id, kind, state, at_session_version,
                 result_session_version, filename, file_key, etag_md5, sha256,
                 size_bytes, token_fingerprint, token_action, token_expires_at_ms,
-                num_queries, created_at_ms, updated_at_ms, completed_at_ms, error_code
+                num_queries, duration_ms, rows_read, rows_written, result_size_after,
+                created_at_ms, updated_at_ms, completed_at_ms, error_code
          FROM d1_transfer_sessions WHERE resource_id = ?1
            AND state IN ('preparing', 'uploading', 'uploaded', 'ingesting')",
         [resource_id.to_string()],
@@ -250,6 +264,9 @@ pub(super) fn map_transfer(row: &rusqlite::Row<'_>) -> rusqlite::Result<D1Transf
     let token_fingerprint: Vec<u8> = row.get(11)?;
     let action: String = row.get(12)?;
     let num_queries: Option<i64> = row.get(14)?;
+    let rows_read: Option<i64> = row.get(16)?;
+    let rows_written: Option<i64> = row.get(17)?;
+    let result_size_after: Option<i64> = row.get(18)?;
     Ok(D1TransferRecord {
         id: row.get(0)?,
         resource_id: ResourceId::from_str(&resource).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -279,10 +296,20 @@ pub(super) fn map_transfer(row: &rusqlite::Row<'_>) -> rusqlite::Result<D1Transf
         num_queries: num_queries
             .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
-        created_at_ms: row.get(15)?,
-        updated_at_ms: row.get(16)?,
-        completed_at_ms: row.get(17)?,
-        error_code: row.get(18)?,
+        duration_ms: row.get(15)?,
+        rows_read: rows_read
+            .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
+            .transpose()?,
+        rows_written: rows_written
+            .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
+            .transpose()?,
+        result_size_after: result_size_after
+            .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
+            .transpose()?,
+        created_at_ms: row.get(19)?,
+        updated_at_ms: row.get(20)?,
+        completed_at_ms: row.get(21)?,
+        error_code: row.get(22)?,
     })
 }
 

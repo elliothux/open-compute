@@ -12,6 +12,8 @@ use std::time::Duration;
 pub const D1_DATABASE_SCHEMA_VERSION: u32 = 1;
 /// Maximum UTF-8 bytes in one prepared SQL string.
 pub const D1_MAX_SQL_BYTES: usize = 100_000;
+/// Maximum SQL transfer body generated or ingested by one D1 operation.
+pub const D1_MAX_TRANSFER_SQL_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum SQLite parameter slots.
 pub const D1_MAX_BOUND_PARAMS: usize = 100;
 /// Maximum result or schema columns.

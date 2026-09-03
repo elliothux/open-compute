@@ -1,7 +1,5 @@
 //! Official Cloudflare v4 D1 catalog and SQL adapter.
 
-mod sessions;
-
 use super::storage::{
     account, context, iso_timestamp, json, now_ms, require_no_query, resolve_resource_id,
     strict_query,
@@ -47,22 +45,6 @@ pub(super) fn router() -> Router<HttpState> {
         .route(
             "/accounts/{account_id}/d1/database/{database_id}/raw",
             post(raw_database),
-        )
-        .route(
-            "/accounts/{account_id}/d1/database/{database_id}/export",
-            post(sessions::export),
-        )
-        .route(
-            "/accounts/{account_id}/d1/database/{database_id}/import",
-            post(sessions::import),
-        )
-        .route(
-            "/accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark",
-            get(get_bookmark),
-        )
-        .route(
-            "/accounts/{account_id}/d1/database/{database_id}/time_travel/restore",
-            post(sessions::restore),
         )
 }
 
@@ -651,49 +633,6 @@ fn list_query(request: &Request) -> Result<ListQuery, V4Error> {
         per_page,
         name,
     })
-}
-
-fn bookmark_query(request: &Request) -> Result<BookmarkQuery, V4Error> {
-    let mut values = strict_query(request)?;
-    let timestamp = values.remove("timestamp");
-    if !values.is_empty() {
-        return Err(V4Error::InvalidRequest);
-    }
-    Ok(BookmarkQuery { timestamp })
-}
-
-struct BookmarkQuery {
-    timestamp: Option<String>,
-}
-
-async fn get_bookmark(
-    State(state): State<HttpState>,
-    Path((account_id, database_id)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    let (context, account_id, record) =
-        match database(&state, &request, &account_id, &database_id, false) {
-            Ok(value) => value,
-            Err(response) => return response,
-        };
-    let query = match bookmark_query(&request) {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
-    if query.timestamp.is_some() {
-        return error_response(V4Error::Unsupported, context.request_id());
-    }
-    let Some(api) = state.d1_api() else {
-        return error_response(V4Error::Unavailable, context.request_id());
-    };
-    match api
-        .backend()
-        .cloudflare_v4_bookmark(account_id, record.resource.id)
-        .await
-    {
-        Ok(bookmark) => success_response(context, serde_json::json!({ "bookmark": bookmark })),
-        Err(error) => error_response(V4Error::from(&error), context.request_id()),
-    }
 }
 
 pub(super) fn database(

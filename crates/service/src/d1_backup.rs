@@ -1,11 +1,22 @@
 //! Durable D1 backup and restore workflows shared by the active management API.
 
-use super::*;
+use crate::D1ApiState;
+use open_compute_core::{
+    AccountId, BindingKind, ErrorCode, PlatformError, RequestId, ResourceId, ResourceState,
+};
+use open_compute_storage::{
+    D1_DATABASE_SCHEMA_VERSION, D1BackupState, D1DatabaseRepository, D1Engine, D1Paths,
+    PlatformStorage, ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
+};
+use open_compute_workers::{CreateResourceOutcome, CreateResourceResult};
+use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
 use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt as _;
+use std::sync::Arc;
 
 const D1_BACKUP_MANIFEST_SCHEMA: u32 = 1;
+const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -495,4 +506,8 @@ fn hash_file(path: &std::path::Path) -> Result<([u8; 32], u64), PlatformError> {
         hasher.update(&buffer[..count]);
     }
     Ok((hasher.finalize().into(), total))
+}
+
+fn internal() -> PlatformError {
+    PlatformError::new(ErrorCode::Internal, "D1 backup operation failed")
 }

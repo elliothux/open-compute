@@ -3,6 +3,7 @@
 use super::D1DatabaseRecord;
 use super::engine::{
     D1_DATABASE_SCHEMA_VERSION, D1Engine, identity_error, map_open_error, read_session_version,
+    write_session_version,
 };
 use crate::fs;
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
@@ -160,6 +161,96 @@ impl D1Engine {
         engine.quick_check()?;
         Ok(engine)
     }
+
+    /// Atomically replace this database with one completed snapshot while retaining identity.
+    pub fn restore_in_place(
+        &self,
+        snapshot: &Path,
+        record: &D1DatabaseRecord,
+        source_session_version: u64,
+        result_session_version: u64,
+    ) -> Result<(), PlatformError> {
+        Self::verify_completed_snapshot(snapshot, record, source_session_version)?;
+        if record.resource.id != self.resource_id
+            || record.resource.account_id != self.account_id
+            || result_session_version <= source_session_version
+        {
+            return Err(identity_error());
+        }
+        self.checkpoint(true)?;
+        let parent = self.path.parent().ok_or_else(identity_error)?;
+        let staging = parent.join(format!(
+            ".restore.{}.sqlite",
+            uuid::Uuid::now_v7().hyphenated()
+        ));
+        let result = (|| {
+            let source = Connection::open_with_flags(
+                snapshot,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(|error| map_open_error(&error))?;
+            source
+                .backup(MAIN_DB, &staging, None)
+                .map_err(|error| map_open_error(&error))?;
+            drop(source);
+            fs::chmod(&staging, 0o600)?;
+            let connection = Connection::open_with_flags(
+                &staging,
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(|error| map_open_error(&error))?;
+            super::hardening::configure_connection(&connection, self.quota_bytes)?;
+            let transaction = connection
+                .unchecked_transaction()
+                .map_err(|error| map_open_error(&error))?;
+            write_session_version(&transaction, result_session_version)?;
+            transaction
+                .commit()
+                .map_err(|error| map_open_error(&error))?;
+            connection
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                .map_err(|error| map_open_error(&error))?;
+            drop(connection);
+            remove_sidecars(&staging)?;
+            sync_database(&staging)?;
+            let staged = Self {
+                path: staging.clone(),
+                account_id: self.account_id,
+                resource_id: self.resource_id,
+                quota_bytes: self.quota_bytes,
+            };
+            staged.verify_identity()?;
+            staged.quick_check()?;
+            if staged.session_version()? != result_session_version {
+                return Err(identity_error());
+            }
+            remove_sidecars(&self.path)?;
+            std::fs::rename(&staging, &self.path).map_err(|_| backup_error())?;
+            fs::fsync_dir(parent)?;
+            Self::verify_completed_snapshot(&self.path, record, result_session_version)
+        })();
+        if result.is_err() && (staging.exists() || std::fs::symlink_metadata(&staging).is_ok()) {
+            let _ = std::fs::remove_file(&staging);
+        }
+        result
+    }
+}
+
+fn remove_sidecars(database: &Path) -> Result<(), PlatformError> {
+    for suffix in ["-wal", "-shm"] {
+        let mut name = database.as_os_str().to_os_string();
+        name.push(suffix);
+        let path = std::path::PathBuf::from(name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => {
+                fs::validate_owned_file(&path, true).map_err(|_| identity_error())?;
+                std::fs::remove_file(&path).map_err(|_| backup_error())?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(backup_error()),
+        }
+    }
+    Ok(())
 }
 
 fn backup_error() -> PlatformError {

@@ -1,5 +1,5 @@
 // Generated from ../../openapi/open-compute-extension.json. Do not edit.
-export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = "e7dda295df288781b479277c7f3903062c3aecf2f2e616e7855f45f1c674b983";
+export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = "5e394ae27d3b743fa316444b48fc0cf8dd78619f398f5bf417d5bb43c2b87ee1";
 
 export const OPEN_COMPUTE_EXTENSION_OPERATIONS = [
   {
@@ -170,7 +170,18 @@ export type Backup = {
   readonly id: string;
   readonly created_on: string;
   readonly state: string;
-  readonly size: number;
+  readonly size?: number;
+};
+
+export type RestoreRequest = {
+  readonly name: string;
+};
+
+export type RestoredResource = {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: "kv_namespace" | "d1_database";
+  readonly created_on: string;
 };
 
 export type ErrorEnvelope = {
@@ -246,6 +257,13 @@ export type BackupResponse = {
 export type BackupsResponse = {
   readonly success: true;
   readonly result: readonly Backup[];
+  readonly errors: readonly Error[];
+  readonly messages: readonly Message[];
+};
+
+export type RestoredResourceResponse = {
+  readonly success: true;
+  readonly result: RestoredResource;
   readonly errors: readonly Error[];
   readonly messages: readonly Message[];
 };

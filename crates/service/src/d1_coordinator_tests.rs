@@ -2,9 +2,11 @@ use super::*;
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{BindingKind, RequestId, SystemClock};
 use open_compute_storage::{D1QueryLimits, D1Statement, D1Value};
+use open_compute_storage::{D1TransferAction, D1TransferKind, D1TransferState, NewD1Transfer};
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, D1ResourceDriver, ResourceController,
 };
+use sha2::Sha256;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const QUOTA: u64 = 256 * 1024 * 1024;
@@ -225,4 +227,188 @@ async fn cloned_coordinator_has_one_lane_for_control_and_runtime_entries() {
     first.await.unwrap().unwrap();
     second.await.unwrap().unwrap();
     assert!(second_entered.load(Ordering::Acquire));
+}
+
+#[tokio::test]
+async fn pending_restore_replays_publication_and_completes_history_after_restart() {
+    let (_temp, storage, account, resource, coordinator) = fixture();
+    coordinator
+        .execute(account, resource, Duration::from_secs(2), true, |context| {
+            context.mark_mutation();
+            context.engine.exec(
+                "CREATE TABLE discarded(value TEXT); INSERT INTO discarded VALUES ('new')",
+                D1QueryLimits::query(context.config)?,
+            )
+        })
+        .await
+        .unwrap();
+    let history = D1SnapshotRepository::new(storage.db());
+    let intent_id = uuid::Uuid::now_v7().hyphenated().to_string();
+    history
+        .prepare_restore(account, resource, &intent_id, 0, 1, &[9; 32], 20)
+        .unwrap();
+    drop(coordinator);
+
+    let restarted = D1Coordinator::new(storage.clone(), ResourcePins::new(), D1Config::default());
+    let version = restarted
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| context.engine.session_version(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(version, 2);
+    assert!(
+        history
+            .pending_restore(account, resource)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        history
+            .latest_snapshot(account, resource)
+            .unwrap()
+            .unwrap()
+            .session_version,
+        2
+    );
+    let missing = restarted
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| {
+                context.engine.query(
+                    &D1Statement {
+                        sql: "SELECT * FROM discarded".to_owned(),
+                        params: vec![],
+                    },
+                    D1QueryLimits::query(context.config)?,
+                )
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code(), ErrorCode::D1SqlInvalid);
+}
+
+#[tokio::test]
+async fn restart_replays_fenced_ingest_before_admitting_the_next_operation() {
+    let (_temp, storage, account, resource, coordinator) = fixture();
+    coordinator
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| context.engine.user_version(),
+        )
+        .await
+        .unwrap();
+    let bytes = b"CREATE TABLE resumed(value TEXT); INSERT INTO resumed VALUES ('ok')";
+    let etag: [u8; 16] = Md5::digest(bytes).into();
+    let sha256: [u8; 32] = Sha256::digest(bytes).into();
+    let session = uuid::Uuid::now_v7().hyphenated().to_string();
+    let filename = format!("import-{resource}-{}.sql", hex::encode(etag));
+    let history = D1SnapshotRepository::new(storage.db());
+    history
+        .create_transfer(&NewD1Transfer {
+            id: &session,
+            account_id: account,
+            resource_id: resource,
+            kind: D1TransferKind::Import,
+            at_session_version: 0,
+            filename: &filename,
+            etag_md5: Some(&etag),
+            token_fingerprint: &[7; 32],
+            token_action: D1TransferAction::Upload,
+            token_expires_at_ms: 10_000,
+            now_ms: 100,
+        })
+        .unwrap();
+    let paths = D1Paths::open(storage.data_dir().root()).unwrap();
+    let key = paths
+        .write_transfer(account, resource, &session, &filename, bytes)
+        .unwrap();
+    history
+        .complete_upload(
+            account,
+            &session,
+            &key,
+            &etag,
+            &sha256,
+            bytes.len() as u64,
+            110,
+        )
+        .unwrap();
+    let catalog = D1DatabaseRepository::new(storage.db())
+        .get(account, resource)
+        .unwrap();
+    let live = paths
+        .resolve_storage_key(&catalog.storage_key, account, resource)
+        .unwrap();
+    let engine = D1Engine::from_record(live, &catalog).unwrap();
+    let simulated_loss = engine
+        .import_sql(
+            std::str::from_utf8(bytes).unwrap(),
+            D1QueryLimits::batch(&D1Config::default()).unwrap(),
+            |result| {
+                history
+                    .begin_ingest(
+                        account,
+                        &session,
+                        result.num_queries,
+                        result.duration_ms,
+                        result.rows_read,
+                        result.rows_written,
+                        result.size_after,
+                        120,
+                    )
+                    .map(|_| ())?;
+                Err(PlatformError::new(
+                    ErrorCode::D1ResultUnknown,
+                    "simulated response loss before live commit",
+                ))
+            },
+        )
+        .unwrap_err();
+    assert_eq!(simulated_loss.code(), ErrorCode::D1ResultUnknown);
+    assert_eq!(engine.session_version().unwrap(), 0);
+    drop(coordinator);
+
+    let restarted = D1Coordinator::new(storage.clone(), ResourcePins::new(), D1Config::default());
+    let rows = restarted
+        .execute(
+            account,
+            resource,
+            Duration::from_secs(2),
+            false,
+            |context| {
+                context.engine.query(
+                    &D1Statement {
+                        sql: "SELECT value FROM resumed".to_owned(),
+                        params: vec![],
+                    },
+                    D1QueryLimits::query(context.config)?,
+                )
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.rows, vec![vec![D1Value::Text("ok".to_owned())]]);
+    let transfer = history.transfer(account, &session).unwrap();
+    assert_eq!(transfer.state, D1TransferState::Complete);
+    assert_eq!(transfer.result_session_version, Some(1));
+    assert_eq!(
+        history
+            .latest_snapshot(account, resource)
+            .unwrap()
+            .unwrap()
+            .session_version,
+        1
+    );
 }

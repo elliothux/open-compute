@@ -19,9 +19,10 @@ pub mod capabilities;
 pub mod cli;
 mod cloudflare_v4;
 pub mod config_load;
+mod d1_api;
 pub mod d1_backend;
+mod d1_backup;
 mod d1_coordinator;
-pub mod d1_http;
 mod d1_protocol;
 mod d1_session;
 pub mod dashboard;
@@ -89,8 +90,8 @@ pub use binding_backend::{
     serve_binding_backend_with_assets, serve_binding_backend_with_document_parser,
 };
 pub use cli::{Cli, Command, execute};
+pub use d1_api::D1ApiState;
 pub use d1_backend::D1BindingService;
-pub use d1_http::D1ApiState;
 pub use dashboard::{DashboardDispatch, bootstrap_dashboard};
 pub use do_lifecycle::DurableObjectLifecycleService;
 pub use embedded_dashboard::embedded_dashboard_files;

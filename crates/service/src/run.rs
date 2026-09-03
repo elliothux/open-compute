@@ -1,5 +1,6 @@
 //! Production `run` composition and shutdown.
 
+use crate::D1ApiState;
 use crate::ai_search_backend::AiSearchBindingService;
 use crate::asset_backend::AssetBindingService;
 use crate::binding_backend::{
@@ -10,7 +11,6 @@ use crate::cache_images_http::CacheImagesApiState;
 use crate::capabilities::{platform_capabilities, platform_release_metadata};
 use crate::config_load::LoadedConfig;
 use crate::d1_backend::D1BindingService;
-use crate::d1_http::D1ApiState;
 use crate::dashboard::bootstrap_dashboard;
 use crate::do_lifecycle::DurableObjectLifecycleService;
 use crate::document_parser_backend::DocumentParserBindingService;

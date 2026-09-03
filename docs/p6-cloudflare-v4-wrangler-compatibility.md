@@ -475,6 +475,15 @@ POST      /accounts/{account_id}/d1/database/{database_id}/time_travel/restore
 `/migrations/apply` 私有控制面路径不保留。export/import/time-travel 可以复用现有 snapshot/backup primitives，
 但 response、bookmark 和恢复原子性必须按官方端点重新建模并取得差分证据，不能只改 URL。
 
+当前实现证据（不代表 P6 整体完成）：固定 `cloudflare@7.1.0` 的
+`resources/d1/database/database.mjs` 与 `time-travel.mjs` 所列四个 endpoint 已接入 `/client/v4`；SQL
+export 支持 `dump_options`，import 使用只存 capability fingerprint 的持久 init/upload/ingest/poll session，
+导入提交在 durable snapshot/history 之前不会返回成功，重启会先 reconcile fenced ingest。time-travel 的
+bookmark/timestamp 只解析 completed snapshot，restore 保留 database identity 并产生单调递增的新
+session version。`openapi/p6-capability-source.json` 是这四项从 `planned` 提升为 `supported` 的状态
+authority；其它 D1 route 仍维持原状态，不能由本段推断为已实现。固定 Wrangler subprocess 与托管端
+differential 仍属于 P6 最终验收，尚未由这组 focused tests 替代。
+
 **R2。**
 
 Day 1 支持固定 Wrangler 的 bucket catalog 和 object 操作：

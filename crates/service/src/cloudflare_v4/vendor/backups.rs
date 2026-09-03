@@ -243,7 +243,7 @@ async fn create_d1_backup(
         Err(error) => return error_response(error, context.request_id()),
     };
     let metric = D1LifecycleGuard::new(state.metrics().clone(), D1Lifecycle::Backup);
-    match crate::d1_http::backup::create_backup(
+    match crate::d1_backup::create_backup(
         api,
         account,
         database,
@@ -284,7 +284,7 @@ async fn restore_d1_backup(
         Err(error) => return error_response(error, context.request_id()),
     };
     let metric = D1LifecycleGuard::new(state.metrics().clone(), D1Lifecycle::Restore);
-    match crate::d1_http::backup::restore_backup(
+    match crate::d1_backup::restore_backup(
         api,
         account,
         backup_id,

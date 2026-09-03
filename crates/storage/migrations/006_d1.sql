@@ -141,6 +141,10 @@ CREATE TABLE d1_transfer_sessions (
   token_action          TEXT NOT NULL CHECK(token_action IN ('upload', 'download')),
   token_expires_at_ms   INTEGER NOT NULL,
   num_queries           INTEGER CHECK(num_queries IS NULL OR num_queries >= 0),
+  duration_ms           REAL CHECK(duration_ms IS NULL OR duration_ms >= 0),
+  rows_read             INTEGER CHECK(rows_read IS NULL OR rows_read >= 0),
+  rows_written          INTEGER CHECK(rows_written IS NULL OR rows_written >= 0),
+  result_size_after     INTEGER CHECK(result_size_after IS NULL OR result_size_after >= 0),
   created_at_ms         INTEGER NOT NULL CHECK(created_at_ms >= 0),
   updated_at_ms         INTEGER NOT NULL CHECK(updated_at_ms >= created_at_ms),
   completed_at_ms       INTEGER,
@@ -161,9 +165,14 @@ CREATE TABLE d1_transfer_sessions (
         OR (file_key IS NULL AND sha256 IS NULL AND size_bytes IS NULL)),
   CHECK(state NOT IN ('uploaded', 'ingesting', 'complete')
         OR (file_key IS NOT NULL AND sha256 IS NOT NULL AND size_bytes IS NOT NULL)),
-  CHECK(kind != 'export' OR num_queries IS NULL),
-  CHECK(state NOT IN ('preparing', 'uploading', 'uploaded') OR num_queries IS NULL),
-  CHECK(state != 'ingesting' OR (kind = 'import' AND num_queries IS NOT NULL)),
+  CHECK(kind != 'export' OR (num_queries IS NULL AND duration_ms IS NULL AND rows_read IS NULL
+                             AND rows_written IS NULL AND result_size_after IS NULL)),
+  CHECK(state NOT IN ('preparing', 'uploading', 'uploaded')
+        OR (num_queries IS NULL AND duration_ms IS NULL
+            AND rows_written IS NULL AND result_size_after IS NULL)),
+  CHECK(kind != 'import' OR state NOT IN ('ingesting', 'complete')
+        OR (num_queries IS NOT NULL AND duration_ms IS NOT NULL AND rows_read IS NOT NULL
+            AND rows_written IS NOT NULL AND result_size_after IS NOT NULL)),
   CHECK((state = 'complete' AND kind = 'import') =
         (result_session_version IS NOT NULL AND num_queries IS NOT NULL)),
   CHECK((state IN ('complete', 'failed', 'expired')) = (completed_at_ms IS NOT NULL)),
@@ -210,15 +219,25 @@ BEGIN
 END;
 
 CREATE TRIGGER d1_transfer_result_guard
-BEFORE UPDATE OF result_session_version, num_queries ON d1_transfer_sessions
+BEFORE UPDATE OF result_session_version, num_queries, duration_ms, rows_read, rows_written,
+                 result_size_after
+ON d1_transfer_sessions
 WHEN NOT (
   (OLD.state = 'uploaded' AND NEW.state = 'ingesting'
    AND OLD.result_session_version IS NULL AND NEW.result_session_version IS NULL
-   AND OLD.num_queries IS NULL AND NEW.num_queries IS NOT NULL)
+   AND OLD.num_queries IS NULL AND NEW.num_queries IS NOT NULL
+   AND OLD.duration_ms IS NULL AND NEW.duration_ms IS NOT NULL
+   AND OLD.rows_read IS NULL AND NEW.rows_read IS NOT NULL
+   AND OLD.rows_written IS NULL AND NEW.rows_written IS NOT NULL
+   AND OLD.result_size_after IS NULL AND NEW.result_size_after IS NOT NULL)
   OR
   (OLD.state = 'ingesting' AND NEW.state = 'complete'
    AND OLD.result_session_version IS NULL AND NEW.result_session_version IS NOT NULL
-   AND OLD.num_queries IS NEW.num_queries)
+   AND OLD.num_queries IS NEW.num_queries
+   AND OLD.duration_ms IS NEW.duration_ms
+   AND OLD.rows_read IS NEW.rows_read
+   AND OLD.rows_written IS NEW.rows_written
+   AND OLD.result_size_after IS NEW.result_size_after)
 )
 BEGIN
   SELECT RAISE(ABORT, 'invalid d1 transfer result');

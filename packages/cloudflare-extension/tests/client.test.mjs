@@ -24,9 +24,11 @@ test("derives its contract digest and operation catalog from the root OpenAPI au
   assert.equal(declared.length, 18);
   for (const methods of Object.values(contract.paths)) {
     for (const [method, operation] of Object.entries(methods)) {
-      if (method === "post") {
+      if (method === "post" && operation["x-open-compute-request-body"] === "none") {
         assert.equal(operation.requestBody, undefined);
-        assert.equal(operation["x-open-compute-request-body"], "none");
+      } else if (method === "post") {
+        assert.equal(operation["x-open-compute-request-body"], "json");
+        assert.equal(operation.requestBody.required, true);
       }
     }
   }
@@ -71,6 +73,36 @@ test("keeps bodyless extension POSTs bodyless through the official transport", a
   assert.equal(requests[0].init.method, "POST");
   assert.equal(requests[0].init.body, undefined);
   assert.equal(new Headers(requests[0].init.headers).get("content-type"), null);
+});
+
+test("sends typed restore JSON and returns the restored resource identity", async () => {
+  const requests = [];
+  const client = new Cloudflare({
+    apiToken: "test-token",
+    baseURL: "https://compute.example/client/v4",
+    maxRetries: 0,
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({
+        success: true,
+        errors: [],
+        messages: [],
+        result: { id: "restored-id", name: "restored-db", kind: "d1_database", created_on: "2026-09-03T00:00:00Z" },
+      }), { headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const restored = await createOpenComputeExtension(client).backups.d1.restore(
+    "account",
+    "backup",
+    { name: "restored-db" },
+  );
+  assert.equal(restored.id, "restored-id");
+  assert.equal(restored.kind, "d1_database");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].init.method, "POST");
+  assert.equal(new Headers(requests[0].init.headers).get("content-type"), "application/json");
+  assert.equal(requests[0].init.body, JSON.stringify({ name: "restored-db" }));
 });
 
 test("preserves official APIError and retry behavior", async () => {

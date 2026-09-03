@@ -8,7 +8,9 @@ use crate::d1_protocol::{
     decode_query, encode_results,
 };
 use crate::d1_session::{apply_session, issue_bookmark};
-use crate::metrics::{D1Operation as D1MetricOperation, MetricsRegistry};
+use crate::metrics::{
+    D1Lifecycle, D1LifecycleGuard, D1Operation as D1MetricOperation, MetricsRegistry,
+};
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -28,6 +30,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const ERROR_HEADER: &str = "x-open-compute-error-code";
+#[path = "d1_backend_transfer.rs"]
+mod transfer;
+
+pub use transfer::{D1TimeTravelTarget, D1TransferGrant};
 
 /// Fully composed D1 executor with per-database serialized lanes.
 #[derive(Clone)]
@@ -144,10 +150,21 @@ impl D1BindingService {
         migrations: Vec<D1Migration>,
         now_ms: i64,
     ) -> Result<Vec<D1MigrationRecord>, PlatformError> {
-        self.run_control(account_id, resource_id, true, move |engine, limits| {
-            engine.apply_migrations(&migrations, limits, now_ms)
-        })
-        .await
+        let mut metric = self
+            .metrics
+            .as_ref()
+            .map(|metrics| D1LifecycleGuard::new(metrics.clone(), D1Lifecycle::Migration));
+        let result = self
+            .run_control(account_id, resource_id, true, move |engine, limits| {
+                engine.apply_migrations(&migrations, limits, now_ms)
+            })
+            .await;
+        if result.is_ok()
+            && let Some(metric) = metric.take()
+        {
+            metric.success();
+        }
+        result
     }
 
     /// Create a consistent local backup through the serialized database lane.
@@ -159,18 +176,6 @@ impl D1BindingService {
     ) -> Result<u32, PlatformError> {
         self.run_control(account_id, resource_id, false, move |engine, _| {
             engine.online_backup(&destination)?;
-            engine.user_version()
-        })
-        .await
-    }
-
-    /// Read the tenant `user_version` through the serialized database lane.
-    pub async fn user_version(
-        &self,
-        account_id: AccountId,
-        resource_id: ResourceId,
-    ) -> Result<u32, PlatformError> {
-        self.run_control(account_id, resource_id, false, |engine, _| {
             engine.user_version()
         })
         .await
@@ -268,22 +273,6 @@ impl D1BindingService {
                     .map(|result| vec![result]);
             }
             engine.batch(&statements, limits)
-        })
-        .await
-    }
-
-    /// Issue the current persisted database session bookmark for official time travel reads.
-    pub(crate) async fn cloudflare_v4_bookmark(
-        &self,
-        account_id: AccountId,
-        resource_id: ResourceId,
-    ) -> Result<String, PlatformError> {
-        let storage = self.storage.clone();
-        self.run_control(account_id, resource_id, false, move |engine, _| {
-            let version = engine.session_version()?;
-            storage
-                .crypto()
-                .seal_d1_bookmark(account_id, resource_id, version)
         })
         .await
     }

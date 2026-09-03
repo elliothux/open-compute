@@ -3,6 +3,7 @@
 pub(crate) mod accounts;
 mod ai_search;
 mod d1;
+mod d1_transfer;
 mod kv;
 mod r2;
 mod storage;
@@ -19,6 +20,7 @@ pub(crate) use wire::{
 pub(crate) fn storage_router() -> Router<HttpState> {
     kv::router()
         .merge(d1::router())
+        .merge(d1_transfer::router())
         .merge(r2::router())
         .merge(vectorize::router())
         .merge(ai_search::router())
@@ -33,7 +35,7 @@ pub(crate) fn router(
     auth_state: HttpState,
     additional_routes: Router<HttpState>,
 ) -> Router<HttpState> {
-    Router::new()
+    let authenticated = Router::new()
         .merge(accounts::router())
         .merge(vendor::router())
         .merge(additional_routes)
@@ -41,7 +43,10 @@ pub(crate) fn router(
         .layer(middleware::from_fn_with_state(
             auth_state,
             wire::authentication_boundary,
-        ))
+        ));
+    Router::new()
+        .merge(d1_transfer::signed_router())
+        .merge(authenticated)
 }
 
 #[cfg(test)]

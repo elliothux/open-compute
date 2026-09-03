@@ -76,11 +76,12 @@ pub use cron::{
 pub use crypto::{SecretCrypto, SecretEnvelope};
 pub use d1::{
     D1_DATABASE_SCHEMA_VERSION, D1_MAX_BATCH_STATEMENTS, D1_MAX_BOUND_PARAMS, D1_MAX_COLUMNS,
-    D1_MAX_EXEC_STATEMENTS, D1_MAX_SQL_BYTES, D1_MAX_VALUE_OR_ROW_BYTES, D1BackupRecord,
-    D1BackupState, D1DatabaseRecord, D1DatabaseRepository, D1Engine, D1ExecResult, D1Meta,
-    D1Migration, D1MigrationRecord, D1Paths, D1QueryLimits, D1QueryTimings, D1RestoreIntent,
-    D1SnapshotRecord, D1SnapshotRepository, D1Statement, D1StatementResult, D1TransferAction,
-    D1TransferKind, D1TransferRecord, D1TransferState, D1Value, NewD1Transfer,
+    D1_MAX_EXEC_STATEMENTS, D1_MAX_SQL_BYTES, D1_MAX_TRANSFER_SQL_BYTES, D1_MAX_VALUE_OR_ROW_BYTES,
+    D1BackupRecord, D1BackupState, D1DatabaseRecord, D1DatabaseRepository, D1Engine, D1ExecResult,
+    D1ExportOptions, D1ImportResult, D1Meta, D1Migration, D1MigrationRecord, D1Paths,
+    D1QueryLimits, D1QueryTimings, D1RestoreIntent, D1SnapshotRecord, D1SnapshotRepository,
+    D1Statement, D1StatementResult, D1TransferAction, D1TransferKind, D1TransferRecord,
+    D1TransferState, D1Value, NewD1Transfer,
 };
 pub use data_dir::{
     DURABLE_OBJECT_DATA_FORMAT_VERSION, DURABLE_OBJECT_UNIQUE_KEY, DataDir,

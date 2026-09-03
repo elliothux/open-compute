@@ -1,12 +1,13 @@
 //! Single serialized D1 execution and completed-snapshot authority.
 
 use crate::metrics::MetricsRegistry;
+use md5::Md5;
 use open_compute_core::{
     AccountId, D1Config, ErrorCode, PlatformError, ResourceAvailability, ResourceId,
 };
 use open_compute_storage::{
-    D1DatabaseRecord, D1DatabaseRepository, D1Engine, D1Paths, D1SnapshotRecord,
-    D1SnapshotRepository, PlatformStorage, ResourceRepository,
+    D1DatabaseRecord, D1DatabaseRepository, D1Engine, D1Paths, D1QueryLimits, D1SnapshotRecord,
+    D1SnapshotRepository, D1TransferState, PlatformStorage, ResourceRepository,
 };
 use open_compute_workers::{ResourcePin, ResourcePins};
 use sha2::{Digest as _, Sha256};
@@ -173,7 +174,11 @@ where
     let paths = D1Paths::open(storage.data_dir().root())?;
     let path = paths.resolve_storage_key(&catalog.storage_key, account_id, resource_id)?;
     let engine = D1Engine::from_record(path, &catalog)?;
+    reconcile_restore(&storage, &paths, &catalog, &engine)?;
     reconcile_head(&storage, &paths, &catalog, &engine)?;
+    reconcile_ingest(&storage, &paths, &catalog, &engine, &config)?;
+    reconcile_head(&storage, &paths, &catalog, &engine)?;
+    complete_ingest(&storage, &catalog, &engine)?;
     let before = engine.session_version()?;
     let result = operation(D1OperationContext {
         engine: &engine,
@@ -190,6 +195,17 @@ where
         engine.checkpoint(true).map_err(|_| result_unknown())?;
         persist_snapshot(&storage, &paths, &catalog, &engine, after)
             .map_err(|_| result_unknown())?;
+        if let Some(intent) =
+            D1SnapshotRepository::new(storage.db()).pending_restore(account_id, resource_id)?
+        {
+            if intent.result_session_version != after {
+                return Err(result_unknown());
+            }
+            D1SnapshotRepository::new(storage.db())
+                .complete_restore(account_id, resource_id, &intent.id)
+                .map_err(|_| result_unknown())?;
+        }
+        complete_ingest(&storage, &catalog, &engine).map_err(|_| result_unknown())?;
     }
     if let Some(metrics) = &metrics
         && let Ok(bytes) = engine.wal_bytes()
@@ -201,6 +217,166 @@ where
         Err(_) if after != before => Err(result_unknown()),
         Err(error) => Err(error),
     }
+}
+
+fn reconcile_restore(
+    storage: &PlatformStorage,
+    paths: &D1Paths,
+    catalog: &D1DatabaseRecord,
+    engine: &D1Engine,
+) -> Result<(), PlatformError> {
+    let account = catalog.resource.account_id;
+    let resource = catalog.resource.id;
+    let repository = D1SnapshotRepository::new(storage.db());
+    let Some(intent) = repository.pending_restore(account, resource)? else {
+        return Ok(());
+    };
+    let current = engine.session_version()?;
+    if current == intent.previous_session_version {
+        let source = repository.snapshot(account, resource, intent.source_session_version)?;
+        let source_path = paths.resolve_snapshot_key(
+            &source.snapshot_key,
+            account,
+            resource,
+            source.session_version,
+        )?;
+        validate_snapshot(paths, catalog, &source)?;
+        engine.restore_in_place(
+            &source_path,
+            catalog,
+            source.session_version,
+            intent.result_session_version,
+        )?;
+    } else if current != intent.result_session_version {
+        return Err(invariant());
+    }
+    let latest = repository
+        .latest_snapshot(account, resource)?
+        .ok_or_else(invariant)?;
+    if latest.session_version == intent.previous_session_version {
+        persist_snapshot(
+            storage,
+            paths,
+            catalog,
+            engine,
+            intent.result_session_version,
+        )?;
+    } else if latest.session_version == intent.result_session_version {
+        validate_snapshot(paths, catalog, &latest)?;
+    } else {
+        return Err(invariant());
+    }
+    repository.complete_restore(account, resource, &intent.id)
+}
+
+fn reconcile_ingest(
+    storage: &PlatformStorage,
+    paths: &D1Paths,
+    catalog: &D1DatabaseRecord,
+    engine: &D1Engine,
+    config: &D1Config,
+) -> Result<(), PlatformError> {
+    let account = catalog.resource.account_id;
+    let resource = catalog.resource.id;
+    let repository = D1SnapshotRepository::new(storage.db());
+    let Some(transfer) = repository.active_transfer(account, resource)? else {
+        return Ok(());
+    };
+    if transfer.state != D1TransferState::Ingesting {
+        return Ok(());
+    }
+    let current = engine.session_version()?;
+    if current
+        == transfer
+            .at_session_version
+            .checked_add(1)
+            .ok_or_else(invariant)?
+    {
+        return Ok(());
+    }
+    if current != transfer.at_session_version {
+        return Err(invariant());
+    }
+    let bytes = paths.read_transfer(
+        transfer.file_key.as_deref().ok_or_else(invariant)?,
+        account,
+        resource,
+        &transfer.id,
+        &transfer.filename,
+    )?;
+    verify_transfer_bytes(&transfer, &bytes)?;
+    let sql = std::str::from_utf8(&bytes).map_err(|_| invariant())?;
+    engine.import_sql(sql, D1QueryLimits::batch(config)?, |result| {
+        repository
+            .begin_ingest(
+                account,
+                &transfer.id,
+                result.num_queries,
+                result.duration_ms,
+                result.rows_read,
+                result.rows_written,
+                result.size_after,
+                checked_wall_now_ms()?,
+            )
+            .map(|_| ())
+    })?;
+    Ok(())
+}
+
+fn complete_ingest(
+    storage: &PlatformStorage,
+    catalog: &D1DatabaseRecord,
+    engine: &D1Engine,
+) -> Result<(), PlatformError> {
+    let account = catalog.resource.account_id;
+    let resource = catalog.resource.id;
+    let repository = D1SnapshotRepository::new(storage.db());
+    let Some(transfer) = repository.active_transfer(account, resource)? else {
+        return Ok(());
+    };
+    if transfer.state != D1TransferState::Ingesting {
+        return Ok(());
+    }
+    let version = engine.session_version()?;
+    if version
+        != transfer
+            .at_session_version
+            .checked_add(1)
+            .ok_or_else(invariant)?
+    {
+        return Err(invariant());
+    }
+    let latest = repository
+        .latest_snapshot(account, resource)?
+        .ok_or_else(invariant)?;
+    if latest.session_version != version {
+        return Err(invariant());
+    }
+    repository
+        .complete_import(
+            account,
+            &transfer.id,
+            version,
+            transfer.num_queries.ok_or_else(invariant)?,
+            checked_wall_now_ms()?,
+        )
+        .map(|_| ())
+}
+
+fn verify_transfer_bytes(
+    transfer: &open_compute_storage::D1TransferRecord,
+    bytes: &[u8],
+) -> Result<(), PlatformError> {
+    let size = u64::try_from(bytes.len()).map_err(|_| invariant())?;
+    let sha256: [u8; 32] = Sha256::digest(bytes).into();
+    let md5: [u8; 16] = Md5::digest(bytes).into();
+    if transfer.size_bytes != Some(size)
+        || transfer.sha256 != Some(sha256)
+        || transfer.etag_md5 != Some(md5)
+    {
+        return Err(invariant());
+    }
+    Ok(())
 }
 
 fn reconcile_head(

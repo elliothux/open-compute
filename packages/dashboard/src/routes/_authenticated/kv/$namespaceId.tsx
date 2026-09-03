@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Input } from "@cloudflare/kumo/components/input";
 import { ConfirmActionDialog } from "../../../components/ConfirmActionDialog";
+import { CreateResourceDialog } from "../../../components/CreateResourceDialog";
 import { DataTable, ErrorState, LoadingState, PageHeader, SectionHeader, StatusBadge } from "../../../components/PageLayout";
 import { useAuth } from "../../../features/auth/AuthProvider";
 import { useMutationFeedback } from "../../../features/toast/useMutationFeedback";
@@ -92,11 +93,13 @@ function KvDetailPage() {
     onError: error => feedback.failure(error, "Unable to create the KV backup."),
   });
   const restore = useMutation({
-    mutationFn: (backupID: string) => client!.openCompute.backups.kv.restore(accountId!, backupID),
-    onSuccess: async () => {
+    mutationFn: ({ backupID, name }: { backupID: string; name: string }) =>
+      client!.openCompute.backups.kv.restore(accountId!, backupID, { name }),
+    onSuccess: async restored => {
       setRestoreTarget(null);
-      await Promise.all([keys.refetch(), backups.refetch()]);
-      feedback.success("KV backup restored.");
+      setMutationError(null);
+      await backups.refetch();
+      feedback.success(`KV backup restored as ${restored.name}.`);
     },
     onError: error => {
       setMutationError(error instanceof Error ? error.message : "Unable to restore the KV backup.");
@@ -106,7 +109,7 @@ function KvDetailPage() {
   return <div>
     <PageHeader title="KV namespace" resourceId={namespaceId} actions={<Button variant="secondary" onClick={() => createBackup.mutate()} disabled={createBackup.isPending}>Create backup</Button>} />
     <ConfirmActionDialog title="Delete KV key" description="This permanently removes the selected key." resourceLabel="key" confirmValue={deleteKeyTarget ?? ""} submitLabel="Delete key" submitVariant="destructive" open={deleteKeyTarget !== null} errorMessage={deleteKeyTarget ? mutationError : null} isPending={remove.isPending} onClose={() => { setDeleteKeyTarget(null); setMutationError(null); }} onConfirm={() => { if (deleteKeyTarget) remove.mutate(deleteKeyTarget); }} />
-    <ConfirmActionDialog title="Restore KV backup" description="Restore the selected backup to this namespace." resourceLabel="backup ID" confirmValue={restoreTarget ?? ""} submitLabel="Restore backup" open={restoreTarget !== null} errorMessage={restoreTarget ? mutationError : null} isPending={restore.isPending} onClose={() => { setRestoreTarget(null); setMutationError(null); }} onConfirm={() => { if (restoreTarget) restore.mutate(restoreTarget); }} />
+    <CreateResourceDialog title="Restore KV backup" description="Create a new KV namespace from the selected backup." nameLabel="New namespace name" namePlaceholder="restored-namespace" submitLabel="Restore backup" open={restoreTarget !== null} errorMessage={restoreTarget ? mutationError : null} isPending={restore.isPending} onClose={() => { setRestoreTarget(null); setMutationError(null); }} onSubmit={name => { if (restoreTarget) restore.mutate({ backupID: restoreTarget, name }); }} />
     {keys.isLoading || backups.isLoading ? <LoadingState /> : keys.error || backups.error ? <ErrorState message="Unable to load KV namespace details." /> : <>
       <SectionHeader title="Keys" />
       <div className="grid gap-6 lg:grid-cols-2">
@@ -135,7 +138,7 @@ function KvDetailPage() {
         <DataTable columns={[{ key: "id", label: "Backup" }, { key: "state", label: "State" }, { key: "size", label: "Size" }, { key: "created", label: "Created" }, { key: "actions", label: "" }]} rows={(backups.data ?? []).map(backup => ({
           id: backup.id,
           state: <StatusBadge value={backup.state} />,
-          size: backup.size,
+          size: backup.size ?? "unknown",
           created: backup.created_on,
           actions: <Button variant="secondary" onClick={() => setRestoreTarget(backup.id)} disabled={restore.isPending}>Restore</Button>,
         }))} emptyLabel="No backups found." />

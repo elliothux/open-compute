@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@cloudflare/kumo/components/button";
-import { ConfirmActionDialog } from "../../../components/ConfirmActionDialog";
+import { CreateResourceDialog } from "../../../components/CreateResourceDialog";
 import { DataTable, ErrorState, LoadingState, PageHeader, SectionHeader, StatusBadge } from "../../../components/PageLayout";
 import { useAuth } from "../../../features/auth/AuthProvider";
 import { useMutationFeedback } from "../../../features/toast/useMutationFeedback";
@@ -37,12 +37,13 @@ function D1DetailPage() {
     onError: error => feedback.failure(error, "Unable to create the D1 backup."),
   });
   const restore = useMutation({
-    mutationFn: (backupID: string) => client!.openCompute.backups.d1.restore(accountId!, backupID),
-    onSuccess: async () => {
+    mutationFn: ({ backupID, name }: { backupID: string; name: string }) =>
+      client!.openCompute.backups.d1.restore(accountId!, backupID, { name }),
+    onSuccess: async restored => {
       setRestoreTarget(null);
       setMutationError(null);
-      await Promise.all([database.refetch(), backups.refetch()]);
-      feedback.success("D1 backup restored.");
+      await backups.refetch();
+      feedback.success(`D1 backup restored as ${restored.name}.`);
     },
     onError: error => {
       setMutationError(error instanceof Error ? error.message : "Unable to restore the D1 backup.");
@@ -51,7 +52,7 @@ function D1DetailPage() {
   });
   return <div>
     <PageHeader title={database.data?.name ?? "D1 database"} resourceId={databaseId} actions={<Button variant="secondary" onClick={() => createBackup.mutate()} disabled={createBackup.isPending}>Create backup</Button>} />
-    <ConfirmActionDialog title="Restore D1 backup" description="Restore the selected backup to this database." resourceLabel="backup ID" confirmValue={restoreTarget ?? ""} submitLabel="Restore backup" open={restoreTarget !== null} errorMessage={restoreTarget ? mutationError : null} isPending={restore.isPending} onClose={() => { setRestoreTarget(null); setMutationError(null); }} onConfirm={() => { if (restoreTarget) restore.mutate(restoreTarget); }} />
+    <CreateResourceDialog title="Restore D1 backup" description="Create a new D1 database from the selected backup." nameLabel="New database name" namePlaceholder="restored-database" submitLabel="Restore backup" open={restoreTarget !== null} errorMessage={restoreTarget ? mutationError : null} isPending={restore.isPending} onClose={() => { setRestoreTarget(null); setMutationError(null); }} onSubmit={name => { if (restoreTarget) restore.mutate({ backupID: restoreTarget, name }); }} />
     {database.isLoading || backups.isLoading ? <LoadingState /> : database.error || backups.error ? <ErrorState message="Unable to load D1 database details." /> : <>
       <DataTable columns={[{ key: "property", label: "Property" }, { key: "value", label: "Value" }]} rows={[
         { property: "Created", value: database.data?.created_at ?? "unknown" },
@@ -72,7 +73,7 @@ function D1DetailPage() {
         <DataTable columns={[{ key: "id", label: "Backup" }, { key: "state", label: "State" }, { key: "size", label: "Size" }, { key: "created", label: "Created" }, { key: "actions", label: "" }]} rows={(backups.data ?? []).map(backup => ({
           id: backup.id,
           state: <StatusBadge value={backup.state} />,
-          size: backup.size,
+          size: backup.size ?? "unknown",
           created: backup.created_on,
           actions: <Button variant="secondary" onClick={() => setRestoreTarget(backup.id)} disabled={restore.isPending}>Restore</Button>,
         }))} emptyLabel="No backups found." />

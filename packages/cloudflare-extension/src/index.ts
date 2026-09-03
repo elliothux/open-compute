@@ -7,6 +7,8 @@ import type {
   DurableObjectNamespace,
   DurableObjectRecord,
   ImageCapacity,
+  RestoreRequest,
+  RestoredResource,
   SchedulerStatus,
   SystemStatus,
   WorkerEndpoint,
@@ -29,6 +31,15 @@ function get<T>(client: BaseCloudflare, path: string, options?: RequestOptions) 
 
 function post<T>(client: BaseCloudflare, path: string, options?: RequestOptions) {
   return client.post<V4Envelope<T>>(path, options)._thenUnwrap(envelope => envelope.result);
+}
+
+function postJSON<T>(
+  client: BaseCloudflare,
+  path: string,
+  body: RestoreRequest,
+  options?: Omit<RequestOptions, "body" | "method" | "path">,
+) {
+  return client.post<V4Envelope<T>>(path, { ...options, body })._thenUnwrap(envelope => envelope.result);
 }
 
 function segment(value: string): string {
@@ -94,9 +105,10 @@ export function createOpenComputeExtension(client: BaseCloudflare) {
             `/accounts/${segment(accountID)}/open-compute/kv/namespaces/${segment(namespaceID)}/backups`,
             options,
           ),
-        restore: (accountID: string, backupID: string, options?: RequestOptions) =>
-          post<Backup>(client,
+        restore: (accountID: string, backupID: string, body: RestoreRequest, options?: Omit<RequestOptions, "body" | "method" | "path">) =>
+          postJSON<RestoredResource>(client,
             `/accounts/${segment(accountID)}/open-compute/kv/backups/${segment(backupID)}/restore`,
+            body,
             options,
           ),
       },
@@ -111,9 +123,10 @@ export function createOpenComputeExtension(client: BaseCloudflare) {
             `/accounts/${segment(accountID)}/open-compute/d1/databases/${segment(databaseID)}/backups`,
             options,
           ),
-        restore: (accountID: string, backupID: string, options?: RequestOptions) =>
-          post<Backup>(client,
+        restore: (accountID: string, backupID: string, body: RestoreRequest, options?: Omit<RequestOptions, "body" | "method" | "path">) =>
+          postJSON<RestoredResource>(client,
             `/accounts/${segment(accountID)}/open-compute/d1/backups/${segment(backupID)}/restore`,
+            body,
             options,
           ),
       },

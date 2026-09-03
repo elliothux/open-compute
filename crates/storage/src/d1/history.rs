@@ -166,7 +166,7 @@ pub struct NewD1Transfer<'a> {
 }
 
 /// One restart-safe SQL transfer session.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct D1TransferRecord {
     /// Session UUID.
     pub id: String,
@@ -198,6 +198,14 @@ pub struct D1TransferRecord {
     pub token_expires_at_ms: i64,
     /// Statements applied by a completed import.
     pub num_queries: Option<u64>,
+    /// SQL execution duration for the committed import attempt.
+    pub duration_ms: Option<f64>,
+    /// Rows returned and consumed by imported statements.
+    pub rows_read: Option<u64>,
+    /// SQLite changes recorded by the committed import attempt.
+    pub rows_written: Option<u64>,
+    /// Logical database size produced by the import.
+    pub result_size_after: Option<u64>,
     /// Reservation timestamp.
     pub created_at_ms: i64,
     /// Last transition timestamp.
@@ -397,7 +405,8 @@ impl<'a> D1SnapshotRepository<'a> {
                     "SELECT id, resource_id, kind, state, at_session_version,
                             result_session_version, filename, file_key, etag_md5, sha256,
                             size_bytes, token_fingerprint, token_action, token_expires_at_ms,
-                            num_queries, created_at_ms, updated_at_ms, completed_at_ms, error_code
+                            num_queries, duration_ms, rows_read, rows_written, result_size_after,
+                            created_at_ms, updated_at_ms, completed_at_ms, error_code
                      FROM d1_transfer_sessions
                      WHERE resource_id = ?1 AND kind = ?2 AND filename = ?3",
                     params![
@@ -431,10 +440,11 @@ impl<'a> D1SnapshotRepository<'a> {
                 "INSERT INTO d1_transfer_sessions
                  (id, resource_id, kind, state, at_session_version, result_session_version,
                   filename, file_key, etag_md5, sha256, size_bytes, token_fingerprint,
-                  token_action, token_expires_at_ms, num_queries, created_at_ms,
-                  updated_at_ms, completed_at_ms, error_code)
+                  token_action, token_expires_at_ms, num_queries, duration_ms, rows_read,
+                  rows_written, result_size_after, created_at_ms, updated_at_ms,
+                  completed_at_ms, error_code)
                  VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL, ?7, NULL, NULL, ?8,
-                         ?9, ?10, NULL, ?11, ?11, NULL, NULL)",
+                         ?9, ?10, NULL, NULL, NULL, NULL, NULL, ?11, ?11, NULL, NULL)",
                 params![
                     input.id,
                     input.resource_id.to_string(),
@@ -514,15 +524,27 @@ impl<'a> D1SnapshotRepository<'a> {
         account_id: AccountId,
         session_id: &str,
         num_queries: u64,
+        duration_ms: f64,
+        rows_read: u64,
+        rows_written: u64,
+        result_size_after: u64,
         now_ms: i64,
     ) -> Result<D1TransferRecord, PlatformError> {
         self.db.with_immediate(|tx| {
             let current = read_transfer(tx, account_id, session_id)?;
-            if current.kind != D1TransferKind::Import || now_ms < current.updated_at_ms {
+            if current.kind != D1TransferKind::Import
+                || !duration_ms.is_finite()
+                || duration_ms < 0.0
+                || now_ms < current.updated_at_ms
+            {
                 return Err(invariant());
             }
             if current.state == D1TransferState::Ingesting {
-                return if current.num_queries == Some(num_queries) {
+                return if current.num_queries == Some(num_queries)
+                    && current.rows_read == Some(rows_read)
+                    && current.rows_written == Some(rows_written)
+                    && current.result_size_after == Some(result_size_after)
+                {
                     Ok(current)
                 } else {
                     Err(idempotency_conflict())
@@ -533,9 +555,18 @@ impl<'a> D1SnapshotRepository<'a> {
             }
             tx.execute(
                 "UPDATE d1_transfer_sessions
-                 SET state = 'ingesting', num_queries = ?1, updated_at_ms = ?2
-                 WHERE id = ?3 AND state = 'uploaded'",
-                params![to_i64(num_queries)?, now_ms, session_id],
+                 SET state = 'ingesting', num_queries = ?1, duration_ms = ?2, rows_read = ?3,
+                     rows_written = ?4, result_size_after = ?5, updated_at_ms = ?6
+                 WHERE id = ?7 AND state = 'uploaded'",
+                params![
+                    to_i64(num_queries)?,
+                    duration_ms,
+                    to_i64(rows_read)?,
+                    to_i64(rows_written)?,
+                    to_i64(result_size_after)?,
+                    now_ms,
+                    session_id
+                ],
             )
             .map_err(|_| invariant())?;
             read_transfer(tx, account_id, session_id)
@@ -652,16 +683,6 @@ impl<'a> D1SnapshotRepository<'a> {
         now_ms: i64,
     ) -> Result<D1TransferRecord, PlatformError> {
         finish_transfer(self.db, account_id, session_id, Some(code), now_ms)
-    }
-
-    /// Expire an active transfer after its capability deadline.
-    pub fn expire_transfer(
-        &self,
-        account_id: AccountId,
-        session_id: &str,
-        now_ms: i64,
-    ) -> Result<D1TransferRecord, PlatformError> {
-        finish_transfer(self.db, account_id, session_id, None, now_ms)
     }
 
     /// Reserve the one identity-preserving restore allowed for a database.

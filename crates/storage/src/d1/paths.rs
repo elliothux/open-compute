@@ -2,12 +2,14 @@
 
 use crate::fs;
 use open_compute_core::{AccountId, ErrorCode, PlatformError, ResourceId};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 const DATABASE_FILE: &str = "data.sqlite";
 const HISTORY_DIR: &str = "history";
 const STAGING_DIR: &str = ".staging";
 const TRASH_DIR: &str = ".trash";
+const TRANSFERS_DIR: &str = ".transfers";
 
 /// Canonical D1 directories under the platform data root.
 #[derive(Clone, Debug)]
@@ -21,7 +23,7 @@ impl D1Paths {
         let root = data_root.join("d1");
         fs::create_dir_secure(&root)?;
         fs::validate_contained(data_root, &root)?;
-        for child in [STAGING_DIR, TRASH_DIR] {
+        for child in [STAGING_DIR, TRASH_DIR, TRANSFERS_DIR] {
             fs::create_dir_secure(&root.join(child))?;
             fs::validate_contained(data_root, &root.join(child))?;
         }
@@ -114,6 +116,133 @@ impl D1Paths {
         )))
     }
 
+    /// Canonical private locator for one durable SQL transfer file.
+    #[must_use]
+    pub fn transfer_key(
+        account: AccountId,
+        resource: ResourceId,
+        session_id: &str,
+        filename: &str,
+    ) -> String {
+        format!("v1/{account}/{resource}/transfers/{session_id}/{filename}")
+    }
+
+    /// Resolve an exact durable SQL transfer locator without accepting aliases.
+    pub fn resolve_transfer_key(
+        &self,
+        key: &str,
+        account: AccountId,
+        resource: ResourceId,
+        session_id: &str,
+        filename: &str,
+    ) -> Result<PathBuf, PlatformError> {
+        if !valid_transfer_filename(filename)
+            || key != Self::transfer_key(account, resource, session_id, filename)
+        {
+            return Err(identity_mismatch());
+        }
+        let path = self
+            .ensure_transfer_dir(account, resource, session_id)?
+            .join(filename);
+        if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
+            fs::validate_contained(&self.root, &path)?;
+            fs::validate_owned_file(&path, true).map_err(|_| identity_mismatch())?;
+        }
+        Ok(path)
+    }
+
+    /// Create one unique unpublished SQL transfer file path.
+    pub fn transfer_staging_path(
+        &self,
+        account: AccountId,
+        resource: ResourceId,
+        session_id: &str,
+        filename: &str,
+    ) -> Result<PathBuf, PlatformError> {
+        if !valid_transfer_filename(filename) {
+            return Err(identity_mismatch());
+        }
+        let directory = self.ensure_transfer_dir(account, resource, session_id)?;
+        Ok(directory.join(format!(".{filename}.{}", uuid::Uuid::now_v7().hyphenated())))
+    }
+
+    /// Atomically publish and fsync one verified SQL transfer file.
+    pub fn publish_transfer(
+        &self,
+        staging: &Path,
+        account: AccountId,
+        resource: ResourceId,
+        session_id: &str,
+        filename: &str,
+    ) -> Result<PathBuf, PlatformError> {
+        if !valid_transfer_filename(filename) {
+            return Err(identity_mismatch());
+        }
+        let directory = self.ensure_transfer_dir(account, resource, session_id)?;
+        if staging.parent() != Some(directory.as_path()) {
+            return Err(identity_mismatch());
+        }
+        fs::validate_owned_file(staging, true).map_err(|_| identity_mismatch())?;
+        let destination = directory.join(filename);
+        if destination.exists() || std::fs::symlink_metadata(&destination).is_ok() {
+            return Err(identity_mismatch());
+        }
+        std::fs::rename(staging, &destination)
+            .map_err(|_| path_error("failed to publish D1 transfer file"))?;
+        fs::fsync_dir(&directory)?;
+        Ok(destination)
+    }
+
+    /// Durably publish one bounded SQL transfer body without exposing staging paths.
+    pub fn write_transfer(
+        &self,
+        account: AccountId,
+        resource: ResourceId,
+        session_id: &str,
+        filename: &str,
+        bytes: &[u8],
+    ) -> Result<String, PlatformError> {
+        if bytes.is_empty() || bytes.len() > super::D1_MAX_TRANSFER_SQL_BYTES {
+            return Err(path_error("D1 transfer body is outside fixed bounds"));
+        }
+        let staging = self.transfer_staging_path(account, resource, session_id, filename)?;
+        let result = (|| {
+            fs::atomic_write(&staging, bytes)?;
+            self.publish_transfer(&staging, account, resource, session_id, filename)?;
+            Ok(Self::transfer_key(account, resource, session_id, filename))
+        })();
+        if result.is_err() && (staging.exists() || std::fs::symlink_metadata(&staging).is_ok()) {
+            let _ = std::fs::remove_file(staging);
+        }
+        result
+    }
+
+    /// Read and bound one exact durable SQL transfer body without following links.
+    pub fn read_transfer(
+        &self,
+        key: &str,
+        account: AccountId,
+        resource: ResourceId,
+        session_id: &str,
+        filename: &str,
+    ) -> Result<Vec<u8>, PlatformError> {
+        let path = self.resolve_transfer_key(key, account, resource, session_id, filename)?;
+        let mut file = fs::open_nofollow(&path, false, false)?;
+        fs::validate_authority_fd(&file)?;
+        let size = file.metadata().map_err(|_| identity_mismatch())?.len();
+        if size == 0 || size > super::D1_MAX_TRANSFER_SQL_BYTES as u64 {
+            return Err(path_error("D1 transfer body is outside fixed bounds"));
+        }
+        let capacity = usize::try_from(size).map_err(|_| identity_mismatch())?;
+        let mut bytes = Vec::with_capacity(capacity);
+        file.read_to_end(&mut bytes)
+            .map_err(|_| identity_mismatch())?;
+        if bytes.len() != capacity {
+            return Err(identity_mismatch());
+        }
+        Ok(bytes)
+    }
+
     /// Atomically publish one verified snapshot and fsync its directory entry.
     pub fn publish_snapshot(
         &self,
@@ -179,6 +308,31 @@ impl D1Paths {
         fs::create_dir_secure(&history)?;
         fs::validate_contained(&self.root, &history)?;
         Ok(history)
+    }
+
+    fn ensure_transfer_dir(
+        &self,
+        account: AccountId,
+        resource: ResourceId,
+        session_id: &str,
+    ) -> Result<PathBuf, PlatformError> {
+        if uuid::Uuid::parse_str(session_id)
+            .ok()
+            .is_none_or(|id| id.hyphenated().to_string() != session_id)
+        {
+            return Err(identity_mismatch());
+        }
+        let mut path = self.root.join(TRANSFERS_DIR);
+        for component in [
+            account.to_string(),
+            resource.to_string(),
+            session_id.to_owned(),
+        ] {
+            path.push(component);
+            fs::create_dir_secure(&path)?;
+            fs::validate_contained(&self.root, &path)?;
+        }
+        Ok(path)
     }
 
     /// Create a unique create/restore staging directory.
@@ -343,6 +497,14 @@ fn snapshot_file_name(name: &str) -> bool {
     };
     version.parse::<u64>().is_ok()
         && uuid::Uuid::parse_str(token).is_ok_and(|id| id.hyphenated().to_string() == token)
+}
+
+fn valid_transfer_filename(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value != "."
+        && value != ".."
+        && !value.bytes().any(|byte| byte == b'/' || byte == 0)
 }
 
 #[cfg(test)]

@@ -316,7 +316,7 @@ impl D1Engine {
             );
             remove_guard(&connection);
             match execution {
-                Ok((0, _)) => {
+                Ok((0, _, _)) => {
                     let _ = connection.execute_batch("ROLLBACK");
                     return Err(sql_invalid());
                 }
@@ -477,15 +477,16 @@ fn value_from_ref(value: ValueRef<'_>) -> Result<D1Value, PlatformError> {
     }
 }
 
-fn execute_tail_batch(
+pub(super) fn execute_tail_batch(
     connection: &Connection,
     sql: &str,
     maximum: usize,
     control: &ExecutionControl,
-) -> Result<(usize, bool), PlatformError> {
+) -> Result<(usize, bool, u64), PlatformError> {
     let mut batch = Batch::new(connection, sql);
     let mut count = 0_usize;
     let mut any_write = false;
+    let mut rows_read = 0_u64;
     while let Some(mut statement) = batch
         .next()
         .map_err(|error| map_sqlite_error(&error, control))?
@@ -504,9 +505,11 @@ fn execute_tail_batch(
             .next()
             .map_err(|error| map_sqlite_error(&error, control))?
             .is_some()
-        {}
+        {
+            rows_read = rows_read.checked_add(1).ok_or_else(limit_error)?;
+        }
     }
-    Ok((count, any_write))
+    Ok((count, any_write, rows_read))
 }
 
 fn execute_tail_batch_versioned(
@@ -562,7 +565,7 @@ fn result_unknown() -> PlatformError {
     )
 }
 
-fn logical_size(connection: &Connection) -> Result<u64, PlatformError> {
+pub(super) fn logical_size(connection: &Connection) -> Result<u64, PlatformError> {
     let pages: i64 = connection
         .query_row("PRAGMA page_count", [], |row| row.get(0))
         .map_err(|_| migration_internal())?;

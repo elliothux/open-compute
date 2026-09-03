@@ -1,9 +1,9 @@
 //! Fixed health/metrics HTTP surface.
 
+use crate::D1ApiState;
 use crate::auth::{bearer_matches, resolve_admin_auth, resolve_bearer_auth};
 use crate::cache_images_http::CacheImagesApiState;
 use crate::cloudflare_v4::accounts::AccountAuthority;
-use crate::d1_http::D1ApiState;
 use crate::dashboard::DashboardDispatch;
 use crate::health::HealthCoordinator;
 use crate::kv_api::KvApiState;
