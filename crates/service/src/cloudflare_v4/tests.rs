@@ -147,12 +147,21 @@ async fn vendor_capabilities_and_system_status_use_the_canonical_envelope() {
         .unwrap()
         .len();
     assert_eq!(endpoint_count, authority_count);
-    let deviations = capabilities["result"]["deviations"].as_array().unwrap();
+    let deviations = capabilities["result"]["deviations"]
+        .as_array()
+        .expect("deviations");
     assert_eq!(deviations[0], "OC-ACCOUNT-SUBDOMAIN-001");
     assert!(
         deviations
             .iter()
-            .any(|value| value == "OC-OBSERVABILITY-001")
+            .any(|value| value == "OC-OBSERVABILITY-001"),
+        "{deviations:?}"
+    );
+    assert!(
+        deviations
+            .iter()
+            .any(|value| value == "OC-MANAGEMENT-COMPATIBILITY-DATE-001"),
+        "{deviations:?}"
     );
 
     let status = app(state)

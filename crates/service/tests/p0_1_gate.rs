@@ -571,7 +571,7 @@ fn rapid_crash_budget(round: &mut Round, bin: &str, env_id: &str, env_secret: &s
     }
     assert!(
         failed,
-        "budget exhaustion must be FAILED/RUNTIME_INVALID ready=503 live=200; live={last_live:?} ready={last_ready:?} status={last_status:?} children={:?}",
+        "budget exhaustion must be RUNTIME_INVALID with failed runtime; ready=503 live=200; live={last_live:?} ready={last_ready:?} status={last_status:?} children={:?}",
         child_pids(pid)
     );
     assert_eq!(http_status(port, "/health/live"), Some(200));

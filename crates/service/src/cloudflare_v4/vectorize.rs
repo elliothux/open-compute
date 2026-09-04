@@ -111,7 +111,7 @@ async fn mutate(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match strict_query(&request) {
         Ok(value) => value,
@@ -211,7 +211,7 @@ async fn read_vectors(request: Request) -> Result<Bytes, V4Error> {
 }
 
 fn body_read_error(error: &axum::Error) -> V4Error {
-    if std::error::Error::source(&error)
+    if std::error::Error::source(error)
         .is_some_and(<dyn std::error::Error + 'static>::is::<LengthLimitError>)
     {
         request_too_large()
@@ -302,14 +302,14 @@ async fn query(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<Query>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (_, api, record) = match ready_index(&state, &account_id, &index_name) {
         Ok(value) => value,
@@ -380,14 +380,14 @@ async fn vector_ids(
     };
     let context = match context(&request, permission) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<Ids>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if body.ids.is_empty() {
         return error_response(V4Error::InvalidRequest, context.request_id());
@@ -445,7 +445,7 @@ async fn info(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -478,7 +478,7 @@ async fn list_vectors(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match strict_query(&request) {
         Ok(value) => value,
@@ -580,14 +580,14 @@ async fn create_metadata_index(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<CreateMetadata>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (_, api, record) = match ready_index(&state, &account_id, &index_name) {
         Ok(value) => value,
@@ -613,7 +613,7 @@ async fn list_metadata_indexes(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -639,14 +639,14 @@ async fn delete_metadata_index(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<DeleteMetadata>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (_, api, record) = match ready_index(&state, &account_id, &index_name) {
         Ok(value) => value,

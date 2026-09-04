@@ -1,7 +1,7 @@
 //! A real DO can inspect Workflow state, but cannot create an external durable effect.
 
 use super::*;
-use open_compute_core::WorkflowId;
+use open_compute_core::{BindingKind, CanonicalBindingConfig, WorkflowId};
 use open_compute_storage::{DO_NAMESPACE_SCHEMA_VERSION, WorkerRepository};
 use open_compute_workers::{
     CreateResourceOutcome, CreateResourceRequest, DurableObjectResourceDriver, ResourceController,
@@ -11,7 +11,13 @@ use serde_json::json;
 pub(super) async fn verify(harness: &Harness, definition: WorkflowId) {
     let account = harness.storage.identity().default_account_id;
     let worker = WorkerRepository::new(harness.storage.db())
-        .create_worker(account, "workflow-reader", RequestId::generate(), now(), 1_000_000)
+        .create_worker(
+            account,
+            "workflow-reader",
+            RequestId::generate(),
+            now(),
+            1_000_000,
+        )
         .unwrap()
         .0;
     let driver = DurableObjectResourceDriver::new(&harness.storage, worker.id, "Reader");

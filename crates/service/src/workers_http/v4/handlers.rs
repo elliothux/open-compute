@@ -2,8 +2,8 @@
 
 use super::{domain, multipart, query};
 use crate::cloudflare_v4::{
-    V4Error, V4Permission, V4RequestContext, V4ResultInfo, error_response, paginated_response,
-    request_context, success_response,
+    HttpError, V4Error, V4Permission, V4RequestContext, V4ResultInfo, error_response,
+    paginated_response, request_context, success_response,
 };
 use crate::http::HttpState;
 use axum::Router;
@@ -116,7 +116,7 @@ async fn get_service_metadata(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let account = domain::resolve_account(&state, &account)?;
@@ -315,7 +315,7 @@ async fn list_scripts(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let account = domain::resolve_account(&state, &account)?;
@@ -345,7 +345,7 @@ async fn get_script(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     super::download::download_script(state, account, script, request, context).await
 }
@@ -375,7 +375,7 @@ async fn upload(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match query::upload(request.uri().query(), deploy) {
         Ok(value) => value,
@@ -569,7 +569,7 @@ async fn list_versions(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let query = query::version_list(request.uri().query())?;
@@ -635,7 +635,7 @@ async fn get_version(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let account = domain::resolve_account(&state, &account)?;
@@ -659,7 +659,7 @@ async fn list_deployments(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let account = domain::resolve_account(&state, &account)?;
@@ -700,7 +700,7 @@ async fn create_deployment(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match query::deployment_force(request.uri().query()) {
         Ok(false) => {}
@@ -795,7 +795,7 @@ async fn get_deployment(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let account = domain::resolve_account(&state, &account)?;
@@ -818,7 +818,7 @@ async fn delete_deployment(
 ) -> axum::response::Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let account = domain::resolve_account(&state, &account)?;
@@ -837,7 +837,7 @@ async fn delete_deployment(
 pub(super) fn authorize(
     request: &Request,
     permission: V4Permission,
-) -> Result<V4RequestContext, axum::response::Response> {
+) -> Result<V4RequestContext, HttpError> {
     let context = request_context(request)?;
     context
         .require(permission)

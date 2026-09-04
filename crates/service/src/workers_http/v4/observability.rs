@@ -150,7 +150,7 @@ async fn list_tails(
 ) -> Response {
     let context = match handlers::authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let account_id = domain::resolve_account(&state, &account)?;
@@ -172,7 +172,7 @@ async fn create_tail(
 ) -> Response {
     let context = match handlers::authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let peer = request
         .extensions()
@@ -210,7 +210,7 @@ async fn delete_tail(
 ) -> Response {
     let context = match handlers::authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let account_id = domain::resolve_account(&state, &account)?;
@@ -403,7 +403,7 @@ async fn prepare_live_tail(
 ) -> Response {
     let context = match handlers::authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let body: LiveTailBody = match super::json::json_body(request).await {
         Ok(value) => value,
@@ -437,7 +437,7 @@ async fn live_tail_heartbeat(
 ) -> Response {
     let context = match handlers::authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let body: LiveTailHeartbeatBody = match super::json::json_body(request).await {
         Ok(value) => value,

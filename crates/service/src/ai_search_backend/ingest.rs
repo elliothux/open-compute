@@ -129,22 +129,21 @@ impl AiSearchBindingService {
     }
 
     /// Persist one validated official multipart upload through the built-in authority.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the upload command keeps authenticated scope and bounded payload metadata explicit"
-    )]
     pub(crate) async fn official_upload(
         &self,
         account_id: open_compute_core::AccountId,
         namespace: &str,
         instance: &str,
         request_id: RequestId,
-        name: String,
-        content_type: String,
-        metadata: Map<String, Value>,
-        bytes: Bytes,
-        wait_for_completion: bool,
+        upload: OfficialUpload,
     ) -> Result<Value, PlatformError> {
+        let OfficialUpload {
+            name,
+            content_type,
+            metadata,
+            bytes,
+            wait_for_completion,
+        } = upload;
         validate_source(
             &name,
             &content_type,

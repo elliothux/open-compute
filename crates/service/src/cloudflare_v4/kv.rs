@@ -7,7 +7,8 @@ use super::storage::{
     account, context, now_ms, require_no_query, resolve_resource_id, strict_query,
 };
 use super::{
-    V4Error, V4Permission, V4ResourceKind, error_response, paginated_response, success_response,
+    HttpError, V4Error, V4Permission, V4ResourceKind, error_response, paginated_response,
+    success_response,
 };
 use crate::binding_backend::KvBindingExecutor;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
@@ -110,7 +111,7 @@ async fn create_namespace(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -121,8 +122,10 @@ async fn create_namespace(
     };
     let body = match super::storage::json::<NamespaceBody>(request, context.request_id()).await {
         Ok(value) if valid_title(&value.title) => value,
-        Ok(_) => return error_response(V4Error::InvalidField("/title"), context.request_id()),
-        Err(response) => return response,
+        Ok(_) => {
+            return error_response(V4Error::InvalidField("/title"), context.request_id());
+        }
+        Err(response) => return response.into_response(),
     };
     let Some(api) = state.kv_api().cloned() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -169,7 +172,7 @@ async fn list_namespaces(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match namespace_list_query(&request) {
         Ok(value) => value,
@@ -244,7 +247,7 @@ async fn get_namespace(
     let (context, _, record) = match namespace(&state, &request, &account_id, &namespace_id, false)
     {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -263,15 +266,17 @@ async fn rename_namespace(
     let (context, account_id, record) =
         match namespace(&state, &request, &account_id, &namespace_id, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match super::storage::json::<NamespaceBody>(request, context.request_id()).await {
         Ok(value) if valid_title(&value.title) => value,
-        Ok(_) => return error_response(V4Error::InvalidField("/title"), context.request_id()),
-        Err(response) => return response,
+        Ok(_) => {
+            return error_response(V4Error::InvalidField("/title"), context.request_id());
+        }
+        Err(response) => return response.into_response(),
     };
     let Some(api) = state.kv_api().cloned() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -313,7 +318,7 @@ async fn delete_namespace(
     let (context, account_id, record) =
         match namespace(&state, &request, &account_id, &namespace_id, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -366,7 +371,7 @@ async fn list_keys(
     let (context, account_id, record) =
         match namespace(&state, &request, &account_id, &namespace_id, false) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let query = match key_list_query(&request) {
         Ok(value) => value,
@@ -439,7 +444,7 @@ fn namespace(
         open_compute_core::AccountId,
         KvNamespaceRecord,
     ),
-    Response,
+    HttpError,
 > {
     let context = context(
         request,

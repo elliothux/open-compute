@@ -1,8 +1,8 @@
 //! Cloudflare D1 export, import, and time-travel adapters.
 
 use super::{
-    V4Error, V4Permission, V4RequestContext, V4ResourceKind, error_response, request_context,
-    success_response,
+    HttpError, V4Error, V4Permission, V4RequestContext, V4ResourceKind, error_response,
+    request_context, success_response,
 };
 use crate::d1_backend::{D1TimeTravelTarget, D1TransferGrant};
 use crate::http::{HttpState, REQUEST_ID_HEADER};
@@ -89,7 +89,7 @@ async fn export_database(
 ) -> Response {
     let context = match authenticated_context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let host = match request_host(request.headers()) {
         Ok(value) => value,
@@ -97,7 +97,7 @@ async fn export_database(
     };
     let body = match json_body::<ExportRequest>(request, context).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let ExportFormat::Polling = body.output_format;
     let (account, database) = match resolve_database(&state, &account_id, &database_id) {
@@ -148,7 +148,7 @@ async fn import_database(
 ) -> Response {
     let context = match authenticated_context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let host = match request_host(request.headers()) {
         Ok(value) => value,
@@ -156,7 +156,7 @@ async fn import_database(
     };
     let body = match json_body::<ImportRequest>(request, context).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (account, database) = match resolve_database(&state, &account_id, &database_id) {
         Ok(value) => value,
@@ -262,7 +262,7 @@ async fn time_travel_bookmark(
 ) -> Response {
     let context = match authenticated_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let timestamp = match one_query(request.uri().query(), "timestamp", false) {
         Ok(value) => match value.as_deref().map(parse_timestamp_ms).transpose() {
@@ -295,14 +295,14 @@ async fn time_travel_restore(
 ) -> Response {
     let context = match authenticated_context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match restore_query(request.uri().query()) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (account, database) = match resolve_database(&state, &account_id, &database_id) {
         Ok(value) => value,
@@ -521,18 +521,18 @@ struct RestoreResponse {
 fn authenticated_context(
     request: &Request,
     permission: V4Permission,
-) -> Result<V4RequestContext, Response> {
+) -> Result<V4RequestContext, HttpError> {
     let context = request_context(request)?;
     context
         .require(permission)
-        .map_err(|error| error_response(error, context.request_id()))?;
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     Ok(context)
 }
 
 async fn json_body<T: for<'de> Deserialize<'de>>(
     request: Request,
     context: V4RequestContext,
-) -> Result<T, Response> {
+) -> Result<T, HttpError> {
     match one_header(request.headers(), header::CONTENT_TYPE.as_str(), true) {
         Ok(Some(value))
             if value
@@ -540,20 +540,29 @@ async fn json_body<T: for<'de> Deserialize<'de>>(
                 .next()
                 .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json")) => {}
         _ => {
-            return Err(error_response(
+            return Err(HttpError::from_response(error_response(
                 V4Error::InvalidRequest,
                 context.request_id(),
-            ));
+            )));
         }
     }
     let bytes = to_bytes(request.into_body(), MAX_JSON_BODY)
         .await
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))
+        .map_err(|_| {
+            HttpError::from_response(error_response(
+                V4Error::InvalidRequest,
+                context.request_id(),
+            ))
+        })?;
+    serde_json::from_slice(&bytes).map_err(|_| {
+        HttpError::from_response(error_response(
+            V4Error::InvalidRequest,
+            context.request_id(),
+        ))
+    })
 }
 
-async fn bodyless(request: Request, context: V4RequestContext) -> Result<(), Response> {
+async fn bodyless(request: Request, context: V4RequestContext) -> Result<(), HttpError> {
     if request
         .headers()
         .get_all(header::CONTENT_TYPE)
@@ -561,19 +570,22 @@ async fn bodyless(request: Request, context: V4RequestContext) -> Result<(), Res
         .count()
         != 0
     {
-        return Err(error_response(
+        return Err(HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        )));
     }
-    let bytes = to_bytes(request.into_body(), 1)
-        .await
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))?;
-    if !bytes.is_empty() {
-        return Err(error_response(
+    let bytes = to_bytes(request.into_body(), 1).await.map_err(|_| {
+        HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        ))
+    })?;
+    if !bytes.is_empty() {
+        return Err(HttpError::from_response(error_response(
+            V4Error::InvalidRequest,
+            context.request_id(),
+        )));
     }
     Ok(())
 }

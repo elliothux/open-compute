@@ -6,7 +6,7 @@ mod objects;
 use super::storage::{
     account, context, iso_timestamp, json, now_ms, require_no_query, strict_query,
 };
-use super::{V4Error, V4Permission, error_response, success_response};
+use super::{HttpError, V4Error, V4Permission, error_response, success_response};
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
@@ -82,7 +82,7 @@ async fn create_bucket(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -99,7 +99,7 @@ async fn create_bucket(
     };
     let body = match json::<CreateBucket>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_bucket_name(&body.name) {
         return error_response(V4Error::InvalidRequest, context.request_id());
@@ -128,7 +128,7 @@ async fn create_bucket_by_name(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -358,7 +358,7 @@ async fn list_buckets(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = jurisdiction(request.headers()) {
         return error_response(error, context.request_id());
@@ -379,7 +379,9 @@ async fn list_buckets(
         Err(error) => return error_response(V4Error::from(&error), context.request_id()),
     };
     let start_after = match (query.cursor.as_deref(), query.start_after.as_deref()) {
-        (Some(_), Some(_)) => return error_response(V4Error::InvalidRequest, context.request_id()),
+        (Some(_), Some(_)) => {
+            return error_response(V4Error::InvalidRequest, context.request_id());
+        }
         (Some(cursor), None) => match decode_cursor(api, account_id, &query, cursor) {
             Ok(value) => Some(value),
             Err(error) => return error_response(error, context.request_id()),
@@ -436,7 +438,7 @@ async fn get_bucket(
 ) -> Response {
     let (context, _, bucket) = match bucket(&state, &request, &account_id, &bucket_name, false) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -455,7 +457,7 @@ async fn delete_bucket(
     let (context, account_id, bucket) =
         match bucket(&state, &request, &account_id, &bucket_name, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -540,7 +542,7 @@ fn bucket(
         open_compute_core::AccountId,
         R2BucketRecord,
     ),
-    Response,
+    HttpError,
 > {
     let context = context(
         request,
@@ -551,22 +553,27 @@ fn bucket(
         },
     )?;
     if !valid_bucket_name(bucket_name) {
-        return Err(error_response(
+        return Err(HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        )));
     }
     if let Err(error) = jurisdiction(request.headers()) {
-        return Err(error_response(error, context.request_id()));
+        return Err(HttpError::from_response(error_response(
+            error,
+            context.request_id(),
+        )));
     }
-    let account_id =
-        account(state, account_id).map_err(|error| error_response(error, context.request_id()))?;
+    let account_id = account(state, account_id)
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     let api = state
         .r2_api()
         .ok_or_else(|| error_response(V4Error::Unavailable, context.request_id()))?;
     let record = R2BucketRepository::new(api.storage().db())
         .list(account_id)
-        .map_err(|error| error_response(V4Error::from(&error), context.request_id()))?
+        .map_err(|error| {
+            HttpError::from_response(error_response(V4Error::from(&error), context.request_id()))
+        })?
         .into_iter()
         .find(|record| {
             record.resource.name == bucket_name && record.resource.state == ResourceState::Ready

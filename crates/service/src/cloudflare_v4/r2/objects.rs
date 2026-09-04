@@ -15,7 +15,7 @@ use open_compute_artifacts::{R2HttpMetadata, R2PutOptions, R2StorageClass, UserO
 pub(super) async fn list(request: Request) -> Response {
     let context = match request_context(&request) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = context.require(V4Permission::Read) {
         return error_response(error, context.request_id());
@@ -37,7 +37,7 @@ pub(super) async fn get(
     let (context, account_id, bucket) =
         match bucket(&state, &request, &account_id, &bucket_name, false) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -124,7 +124,7 @@ pub(super) async fn put(
     let (context, account_id, bucket) =
         match bucket(&state, &request, &account_id, &bucket_name, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -187,7 +187,7 @@ pub(super) async fn delete(
     let (context, account_id, bucket) =
         match bucket(&state, &request, &account_id, &bucket_name, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());

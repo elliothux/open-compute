@@ -5,7 +5,8 @@ use super::storage::{
     strict_query,
 };
 use super::{
-    V4Error, V4Permission, V4ResourceKind, error_response, paginated_response, success_response,
+    HttpError, V4Error, V4Permission, V4ResourceKind, error_response, paginated_response,
+    success_response,
 };
 use crate::http::HttpState;
 use axum::Router;
@@ -101,7 +102,7 @@ async fn create_database(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -112,7 +113,7 @@ async fn create_database(
     };
     let body = match json::<CreateDatabase>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_database_name(&body.name) {
         return error_response(V4Error::InvalidField("/name"), context.request_id());
@@ -213,7 +214,7 @@ async fn list_databases(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match list_query(&request) {
         Ok(value) => value,
@@ -278,7 +279,7 @@ async fn get_database(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let fields = match database_fields(&request) {
         Ok(value) => value,
@@ -286,7 +287,7 @@ async fn get_database(
     };
     let (_, record) = match database_with_context(&state, context, &account_id, &database_id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(authority) = state.cloudflare_v4_account() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -314,14 +315,14 @@ async fn update_database(
     let require_replication = request.method() == axum::http::Method::PUT;
     let (context, _, record) = match database(&state, &request, &account_id, &database_id, true) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<UpdateDatabase>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if require_replication && body.read_replication.is_none() {
         return error_response(
@@ -363,7 +364,7 @@ async fn delete_database(
     let (context, account_id, record) =
         match database(&state, &request, &account_id, &database_id, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -455,14 +456,14 @@ async fn run_query(
     let (context, account_id, record) =
         match database(&state, &request, &account_id, &database_id, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let body = match json::<QueryBody>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(api) = state.d1_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -648,7 +649,7 @@ pub(super) fn database(
         open_compute_core::AccountId,
         D1DatabaseRecord,
     ),
-    Response,
+    HttpError,
 > {
     let context = context(
         request,
@@ -667,7 +668,7 @@ fn database_with_context(
     context: super::V4RequestContext,
     account_id: &str,
     database_id: &str,
-) -> Result<(open_compute_core::AccountId, D1DatabaseRecord), Response> {
+) -> Result<(open_compute_core::AccountId, D1DatabaseRecord), HttpError> {
     let account_id =
         account(state, account_id).map_err(|error| error_response(error, context.request_id()))?;
     let api = state

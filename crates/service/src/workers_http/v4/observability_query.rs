@@ -121,7 +121,7 @@ pub(super) async fn telemetry_keys(
 ) -> Response {
     let context = match handlers::authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let body: KeysBody = match super::super::json::json_body(request).await {
         Ok(value) => value,
@@ -190,7 +190,7 @@ pub(super) async fn telemetry_values(
 ) -> Response {
     let context = match handlers::authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let body: ValuesBody = match super::super::json::json_body(request).await {
         Ok(value) => value,
@@ -277,7 +277,7 @@ pub(super) async fn telemetry_query(
 ) -> Response {
     let context = match handlers::authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let body: QueryBody = match super::super::json::json_body(request).await {
         Ok(value) => value,

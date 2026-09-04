@@ -28,7 +28,7 @@ async fn get_account_subdomain(
 ) -> Response {
     let context = match authorize(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let result = (|| {
         let authority = state.cloudflare_v4_account().ok_or(V4Error::Unavailable)?;

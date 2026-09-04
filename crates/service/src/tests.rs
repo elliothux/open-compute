@@ -1985,7 +1985,7 @@ async fn p1_startup_receipts_health_and_inventory_metrics_cover_real_authority()
 async fn p1_capability_release_support_bundle_and_metrics_contract_is_bounded() {
     assert_eq!(
         crate::snapshot_pins::SnapshotPins::Unavailable
-            .ensure_unpinned("system/artifacts/v1/sha256/untrusted")
+            .contains_object_key("system/artifacts/v1/sha256/untrusted")
             .unwrap_err()
             .code(),
         ErrorCode::ResourceReferenced

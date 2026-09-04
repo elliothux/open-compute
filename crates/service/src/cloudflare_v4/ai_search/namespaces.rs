@@ -31,14 +31,14 @@ pub(super) async fn create(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
     let raw = match json::<Value>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if raw
         .as_object()
@@ -99,7 +99,7 @@ pub(super) async fn list(
     let (context, account_id, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let query = match query(&request, &["page", "per_page", "search"]) {
         Ok(value) => value,
@@ -182,7 +182,7 @@ pub(super) async fn update(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_namespace(&name) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -193,7 +193,7 @@ pub(super) async fn update(
     let raw = match json::<Value>(request, context.request_id()).await {
         Ok(Value::Object(object)) => object,
         Ok(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if raw
         .keys()
@@ -239,7 +239,7 @@ pub(super) async fn delete(
         &public_account,
     ) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -304,7 +304,7 @@ async fn query_call(
     let (context, account_id, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if !valid_namespace(&name) {
         return error_response(V4Error::NotFound, context.request_id());
@@ -314,7 +314,7 @@ async fn query_call(
     }
     let payload = match json::<Value>(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = reject_query_features(&payload) {
         return error_response(error, context.request_id());
@@ -362,7 +362,7 @@ async fn namespace_read(
     let (context, account_id, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());

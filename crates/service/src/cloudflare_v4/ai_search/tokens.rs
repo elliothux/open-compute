@@ -16,7 +16,7 @@ pub(super) async fn list(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &public_account) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if api.ai_search().is_none() {
         return error_response(V4Error::Unavailable, context.request_id());

@@ -178,8 +178,8 @@ impl D1Coordinator {
             execute_blocking(
                 &storage,
                 &config,
-                &pin,
-                &lane,
+                pin,
+                lane,
                 metrics.as_ref(),
                 account_id,
                 resource_id,
@@ -203,8 +203,8 @@ impl D1Coordinator {
 fn execute_blocking<T, F>(
     storage: &Arc<PlatformStorage>,
     config: &D1Config,
-    pin: &ResourcePin,
-    lane: &D1LaneLease,
+    pin: ResourcePin,
+    lane: D1LaneLease,
     metrics: Option<&Arc<MetricsRegistry>>,
     account_id: AccountId,
     resource_id: ResourceId,
@@ -233,8 +233,8 @@ where
 fn execute_blocking_inner<T, F>(
     storage: &Arc<PlatformStorage>,
     config: &D1Config,
-    pin: &ResourcePin,
-    lane: &D1LaneLease,
+    pin: ResourcePin,
+    lane: D1LaneLease,
     metrics: Option<&Arc<MetricsRegistry>>,
     account_id: AccountId,
     resource_id: ResourceId,

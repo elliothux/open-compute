@@ -106,7 +106,7 @@ async fn create_session(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
@@ -194,7 +194,7 @@ async fn upload_bulk(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_bulk_query(request.uri().query()) {
         return error_response(V4Error::InvalidRequest, context.request_id());
@@ -281,7 +281,7 @@ async fn upload_single(
 ) -> Response {
     let context = match authorize(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());

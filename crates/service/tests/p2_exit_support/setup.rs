@@ -7,7 +7,8 @@ use crate::p0_exit_support::{
 use crate::platform_process::Evidence;
 use open_compute_artifacts::MockS3;
 use open_compute_core::{
-    AccountId, BindingKind, QueueId, RequestId, ResourceId, SystemClock, VersionId, WorkflowId,
+    AccountId, BindingKind, CanonicalBindingConfig, QueueId, RequestId, ResourceId, SystemClock,
+    VersionId, WorkflowId,
 };
 use open_compute_service::workflow_http::WorkflowApiState;
 use open_compute_storage::{PlatformStorage, WorkerRepository, WorkflowRepository};
@@ -133,10 +134,15 @@ pub(super) async fn prepare() -> Fixture {
         if index == 1 {
             bound.insert(
                 "FLOW".into(),
-                binding(
-                    BindingKind::Workflow,
-                    ResourceId::from_uuid(definition.as_uuid()).unwrap(),
-                ),
+                VersionBindingInput {
+                    kind: BindingKind::Workflow,
+                    id: ResourceId::from_uuid(definition.as_uuid()).unwrap(),
+                    permissions: Default::default(),
+                    config: CanonicalBindingConfig {
+                        workflow_class_name: Some("Flow".into()),
+                        ..Default::default()
+                    },
+                },
             );
             bound.insert(
                 "QUEUE".into(),
@@ -300,9 +306,6 @@ fn binding(kind: BindingKind, id: ResourceId) -> VersionBindingInput {
         kind,
         id,
         permissions: Default::default(),
-        config: open_compute_core::CanonicalBindingConfig {
-            workflow_class_name: (kind == BindingKind::Workflow).then(|| "Flow".to_owned()),
-            ..Default::default()
-        },
+        config: Default::default(),
     }
 }

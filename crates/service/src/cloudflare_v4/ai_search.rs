@@ -9,7 +9,8 @@ mod tokens;
 
 use super::storage::{account, context, strict_query};
 use super::{
-    V4Error, V4Permission, V4RequestContext, error_response, result_info_response, success_response,
+    HttpError, V4Error, V4Permission, V4RequestContext, error_response, result_info_response,
+    success_response,
 };
 use crate::http::HttpState;
 use crate::search_api::SearchApiState;
@@ -113,7 +114,7 @@ fn authenticated(
     request: &Request,
     permission: V4Permission,
     public_account: &str,
-) -> Result<(V4RequestContext, AccountId, Arc<SearchApiState>), Response> {
+) -> Result<(V4RequestContext, AccountId, Arc<SearchApiState>), HttpError> {
     let context = context(request, permission)?;
     let account = account(state, public_account)
         .map_err(|error| error_response(error, context.request_id()))?;

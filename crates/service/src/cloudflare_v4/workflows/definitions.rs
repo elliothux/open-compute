@@ -24,7 +24,7 @@ pub(super) async fn list(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let query = match list_query(&request) {
         Ok(value) => value,
@@ -73,7 +73,7 @@ pub(super) async fn get(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -99,14 +99,14 @@ pub(super) async fn put(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::ProductWrite, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request).and_then(|()| valid_name(&workflow_name)) {
         return error_response(error, context.request_id());
     }
     let body: PutBody = match json(request, context.request_id()).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !valid_class(&body.class_name) {
         return error_response(V4Error::InvalidField("/class_name"), context.request_id());
@@ -196,7 +196,7 @@ pub(super) async fn delete(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::ProductWrite, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -251,7 +251,7 @@ pub(super) async fn list_versions(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let query = match page_query(&request, 50) {
         Ok(value) => value,
@@ -261,7 +261,7 @@ pub(super) async fn list_versions(
     let result = tokio::task::spawn_blocking(move || {
         let definition = definition(&api, account, &workflow_name)?;
         let mut versions = all_versions(&api, account, definition.id)?;
-        versions.sort_by_key(|version| std::cmp::Reverse(version.version_number));
+        versions.sort_by_key(|left| std::cmp::Reverse(left.version_number));
         let total_count = versions.len();
         let offset = (query.page - 1)
             .checked_mul(query.per_page)
@@ -302,7 +302,7 @@ pub(super) async fn get_version(
     let (context, account, api) =
         match authenticated(&state, &request, V4Permission::Read, &account_id) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());

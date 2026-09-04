@@ -3,13 +3,12 @@ use crate::{NewVersion, WorkerRepository};
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{ErrorCode, RequestId, SystemClock};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::Path;
 
-fn storage_config(root: PathBuf) -> StorageConfig {
-    let master_key_file = root.join("keys/master.key");
+fn storage_config(root: &Path) -> StorageConfig {
     StorageConfig {
-        data_dir: root,
-        master_key_file,
+        data_dir: root.to_path_buf(),
+        master_key_file: root.join("keys/master.key"),
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,
         free_space_soft_bytes: 1_073_741_824,
@@ -147,7 +146,7 @@ fn migration_plan_fingerprint_rejects_every_ambiguous_declaration() {
 fn worker_migrations_publish_rename_retire_and_rollback_namespaces() {
     let temp = tempfile::tempdir().unwrap();
     let storage =
-        PlatformStorage::bootstrap(&storage_config(temp.path().join("data")), &SystemClock)
+        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap();
     let account = storage.identity().default_account_id;
     let (worker, _) = WorkerRepository::new(storage.db())
@@ -294,7 +293,7 @@ fn worker_migrations_publish_rename_retire_and_rollback_namespaces() {
 fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("data");
-    let config = storage_config(root.clone());
+    let config = storage_config(&root);
     let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
     let account = storage.identity().default_account_id;
     let (worker, _) = WorkerRepository::new(storage.db())
@@ -346,7 +345,7 @@ fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
     );
     drop(storage);
 
-    let storage = PlatformStorage::bootstrap(&storage_config(root.clone()), &SystemClock).unwrap();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     assert_eq!(
         WorkerRepository::new(storage.db())
             .get_worker_version(account, worker.id, version)
@@ -378,7 +377,7 @@ fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
         .unwrap();
     drop(storage);
 
-    let storage = PlatformStorage::bootstrap(&storage_config(root), &SystemClock).unwrap();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
     let ready = WorkerRepository::new(storage.db())
         .get_worker_version(account, worker.id, version)
         .unwrap();

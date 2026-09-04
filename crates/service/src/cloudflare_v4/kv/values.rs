@@ -3,7 +3,7 @@
 use super::{MAX_VALUE_BODY, namespace};
 use crate::binding_backend::KvBindingExecutor;
 use crate::cloudflare_v4::storage::{context, require_no_query, strict_query};
-use crate::cloudflare_v4::{V4Error, V4Permission, error_response, success_response};
+use crate::cloudflare_v4::{HttpError, V4Error, V4Permission, error_response, success_response};
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use crate::kv_backend::{KvCommand, KvCommandResult};
 use crate::resource_binding::management_binding;
@@ -22,14 +22,14 @@ pub(super) async fn get(
 ) -> Response {
     let boundary = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, boundary.request_id());
     }
     let (context, entry) = match entry(&state, &request, &account_id, &namespace_id, &key_name) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(entry) = entry else {
         return error_response(V4Error::NotFound, context.request_id());
@@ -59,14 +59,14 @@ pub(super) async fn metadata(
 ) -> Response {
     let boundary = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, boundary.request_id());
     }
     let (context, entry) = match entry(&state, &request, &account_id, &namespace_id, &key_name) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(entry) = entry else {
         return error_response(V4Error::NotFound, context.request_id());
@@ -95,7 +95,7 @@ pub(super) async fn put(
     let (context, account_id, record) =
         match namespace(&state, &request, &account_id, &namespace_id, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     let query = match expiration_query(&request) {
         Ok(value) => value,
@@ -149,7 +149,7 @@ pub(super) async fn delete(
     let (context, account_id, record) =
         match namespace(&state, &request, &account_id, &namespace_id, true) {
             Ok(value) => value,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
@@ -174,7 +174,7 @@ fn entry(
         crate::cloudflare_v4::V4RequestContext,
         Option<open_compute_storage::KvEntry>,
     ),
-    Response,
+    HttpError,
 > {
     let (context, account_id, record) = namespace(state, request, account_id, namespace_id, false)?;
     let result = execute(
@@ -186,12 +186,15 @@ fn entry(
             cache_ttl: None,
         },
     )
-    .map_err(|error| error_response(error, context.request_id()))?;
+    .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     match result {
         KvCommandResult::Entries(mut entries) if entries.len() == 1 => {
             Ok((context, entries.pop().flatten()))
         }
-        _ => Err(error_response(V4Error::Internal, context.request_id())),
+        _ => Err(HttpError::from_response(error_response(
+            V4Error::Internal,
+            context.request_id(),
+        ))),
     }
 }
 

@@ -15,8 +15,8 @@ mod workflows;
 
 pub(crate) use accounts::V4ResourceKind;
 pub(crate) use wire::{
-    V4Error, V4OfficialError, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
-    paginated_response, request_context, result_info_response, success_response,
+    HttpError, V4Error, V4OfficialError, V4Permission, V4RequestContext, V4ResultInfo, V4Role,
+    error_response, paginated_response, request_context, result_info_response, success_response,
 };
 /// Official Cloudflare storage routes implemented by the local product authorities.
 pub(crate) fn storage_router() -> Router<HttpState> {

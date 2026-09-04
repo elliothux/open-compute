@@ -666,7 +666,11 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
         ])
         .await;
     assert_success(&info);
-    assert!(json_contains(&json_stdout(&info), "name", &D1_NAME.into()));
+    assert!(json_contains(
+        &json_stdout(&info),
+        "name",
+        &Value::from(D1_NAME)
+    ));
 
     let answer = command
         .run(&[
@@ -682,7 +686,11 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
         ])
         .await;
     assert_success(&answer);
-    assert!(json_contains(&json_stdout(&answer), "answer", &42.into()));
+    assert!(json_contains(
+        &json_stdout(&answer),
+        "answer",
+        &Value::from(42)
+    ));
 
     assert_success(
         &command
@@ -714,7 +722,7 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
     assert!(json_contains(
         &json_stdout(&migrated),
         "name",
-        &"items".into()
+        &Value::from("items")
     ));
     assert_success(
         &command
@@ -735,7 +743,7 @@ async fn exercise_d1(command: &WranglerCommand<'_>, project: &Path) {
     assert!(!json_contains(
         &json_stdout(&after_delete),
         "name",
-        &D1_NAME.into()
+        &Value::from(D1_NAME)
     ));
 }
 
@@ -1037,10 +1045,10 @@ fn append_resource_config(
     embedding_base_url: &str,
     admin_addr: SocketAddr,
 ) {
-    let deployer = root.join("deployer.token");
-    let read_only = root.join("read-only.token");
-    write_token(&deployer, TOKEN);
-    write_token(&read_only, READ_ONLY_TOKEN);
+    // platform_process::config already declares the three auth tables; only replace
+    // the secret file contents so this Gate can assert its own token values.
+    write_token(&root.join("deployer.token"), TOKEN);
+    write_token(&root.join("read-only.token"), READ_ONLY_TOKEN);
     let mut file = fs::OpenOptions::new().append(true).open(config).unwrap();
     writeln!(
         file,

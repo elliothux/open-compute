@@ -5,8 +5,8 @@ mod consumers;
 
 use super::wire::V4OfficialError;
 use super::{
-    V4Error, V4Permission, V4RequestContext, V4ResultInfo, error_response, paginated_response,
-    request_context, success_response,
+    HttpError, V4Error, V4Permission, V4RequestContext, V4ResultInfo, error_response,
+    paginated_response, request_context, success_response,
 };
 use crate::http::HttpState;
 use crate::queue_api::{QueueApiState, now_ms};
@@ -67,14 +67,14 @@ async fn list_queues(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match ListQuery::parse(request.uri().query()) {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, authority, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -130,14 +130,14 @@ async fn create_queue(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     let body = match json_body::<CreateQueueBody>(request, context).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (api, authority, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -188,13 +188,13 @@ async fn get_queue(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, authority, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -217,14 +217,14 @@ async fn update_queue(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     let body = match json_body::<UpdateQueueBody>(request, context).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (api, authority, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -276,13 +276,13 @@ async fn delete_queue(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, authority, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -340,39 +340,43 @@ pub(super) fn resolve_queue(
 pub(super) fn context(
     request: &Request,
     permission: V4Permission,
-) -> Result<V4RequestContext, Response> {
+) -> Result<V4RequestContext, HttpError> {
     let context = request_context(request)?;
     context
         .require(permission)
-        .map_err(|error| error_response(error, context.request_id()))?;
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     Ok(context)
 }
 
 pub(super) async fn json_body<T: DeserializeOwned>(
     request: Request,
     context: V4RequestContext,
-) -> Result<T, Response> {
+) -> Result<T, HttpError> {
     validate_json_headers(request.headers())
-        .map_err(|error| error_response(error, context.request_id()))?;
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     let bytes = to_bytes(request.into_body(), MAX_JSON_BODY)
         .await
         .map_err(|_| {
-            error_response(
+            HttpError::from_response(error_response(
                 V4Error::Official(V4OfficialError::RequestTooLarge),
                 context.request_id(),
-            )
+            ))
         })?;
     if bytes.is_empty() {
-        return Err(error_response(
+        return Err(HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        )));
     }
-    serde_json::from_slice(&bytes)
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))
+    serde_json::from_slice(&bytes).map_err(|_| {
+        HttpError::from_response(error_response(
+            V4Error::InvalidRequest,
+            context.request_id(),
+        ))
+    })
 }
 
-pub(super) async fn bodyless(request: Request, context: V4RequestContext) -> Result<(), Response> {
+pub(super) async fn bodyless(request: Request, context: V4RequestContext) -> Result<(), HttpError> {
     if request
         .headers()
         .get_all(header::CONTENT_TYPE)
@@ -380,19 +384,22 @@ pub(super) async fn bodyless(request: Request, context: V4RequestContext) -> Res
         .count()
         != 0
     {
-        return Err(error_response(
+        return Err(HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        )));
     }
-    let bytes = to_bytes(request.into_body(), 1)
-        .await
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))?;
-    if !bytes.is_empty() {
-        return Err(error_response(
+    let bytes = to_bytes(request.into_body(), 1).await.map_err(|_| {
+        HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        ))
+    })?;
+    if !bytes.is_empty() {
+        return Err(HttpError::from_response(error_response(
+            V4Error::InvalidRequest,
+            context.request_id(),
+        )));
     }
     Ok(())
 }

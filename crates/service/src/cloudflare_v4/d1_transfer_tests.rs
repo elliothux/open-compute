@@ -206,12 +206,16 @@ fn authentication_context_enforces_each_role() {
         if allowed {
             assert_eq!(result.unwrap().role(), role);
         } else {
-            assert_eq!(result.unwrap_err().status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                result.unwrap_err().into_response().status(),
+                StatusCode::FORBIDDEN
+            );
         }
     }
     assert_eq!(
         authenticated_context(&Request::new(Body::empty()), V4Permission::Read)
             .unwrap_err()
+            .into_response()
             .status(),
         StatusCode::UNAUTHORIZED
     );
@@ -246,6 +250,7 @@ async fn body_decoders_accept_only_canonical_shapes() {
             json_body::<serde_json::Value>(request, context)
                 .await
                 .unwrap_err()
+                .into_response()
                 .status(),
             StatusCode::BAD_REQUEST
         );
@@ -257,13 +262,18 @@ async fn body_decoders_accept_only_canonical_shapes() {
         .body(Body::empty())
         .unwrap();
     assert_eq!(
-        bodyless(with_type, context).await.unwrap_err().status(),
+        bodyless(with_type, context)
+            .await
+            .unwrap_err()
+            .into_response()
+            .status(),
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
         bodyless(Request::new(Body::from("x")), context)
             .await
             .unwrap_err()
+            .into_response()
             .status(),
         StatusCode::BAD_REQUEST
     );
@@ -271,6 +281,7 @@ async fn body_decoders_accept_only_canonical_shapes() {
         bodyless(Request::new(Body::from("xx")), context)
             .await
             .unwrap_err()
+            .into_response()
             .status(),
         StatusCode::BAD_REQUEST
     );

@@ -433,8 +433,33 @@ pub(crate) fn error_response(error: V4Error, request_id: RequestId) -> Response 
     response
 }
 
+/// Boxed HTTP error so `Result` happy paths stay small without changing wire bodies.
+pub(crate) struct HttpError(Box<Response>);
+
+impl std::fmt::Debug for HttpError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_tuple("HttpError").finish_non_exhaustive()
+    }
+}
+
+impl HttpError {
+    pub(crate) fn from_response(response: Response) -> Self {
+        Self(Box::new(response))
+    }
+
+    pub(crate) fn into_response(self) -> Response {
+        *self.0
+    }
+}
+
+impl From<Response> for HttpError {
+    fn from(response: Response) -> Self {
+        Self::from_response(response)
+    }
+}
+
 /// Read the trusted context installed by the authentication boundary.
-pub(crate) fn request_context(request: &Request) -> Result<V4RequestContext, Response> {
+pub(crate) fn request_context(request: &Request) -> Result<V4RequestContext, HttpError> {
     let request_id = request
         .extensions()
         .get::<RequestId>()
@@ -445,10 +470,10 @@ pub(crate) fn request_context(request: &Request) -> Result<V4RequestContext, Res
         .get::<V4RequestContext>()
         .copied()
         .ok_or_else(|| {
-            error_response(
+            HttpError::from_response(error_response(
                 V4Error::Official(V4OfficialError::Authentication),
                 request_id,
-            )
+            ))
         })
 }
 
@@ -527,6 +552,6 @@ fn attach_request_id(response: &mut Response, request_id: RequestId) {
 pub(super) async fn not_found(request: Request) -> Response {
     match request_context(&request) {
         Ok(context) => error_response(V4Error::NotFound, context.request_id),
-        Err(response) => response,
+        Err(response) => response.into_response(),
     }
 }

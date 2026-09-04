@@ -69,13 +69,13 @@ async fn list_consumers(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, account, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -127,14 +127,14 @@ async fn mutate_consumer(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     let body = match json_body::<ConsumerBody>(request, context).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if matches!(body.kind, ConsumerKind::HttpPull) {
         return error_response(V4Error::Unsupported, context.request_id());
@@ -195,13 +195,13 @@ async fn get_consumer(
 ) -> Response {
     let context = match context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, account, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,
@@ -225,13 +225,13 @@ async fn delete_consumer(
 ) -> Response {
     let context = match context(&request, V4Permission::ProductWrite) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if request.uri().query().is_some() {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
     if let Err(response) = bodyless(request, context).await {
-        return response;
+        return response.into_response();
     }
     let (api, account, account_id) = match authority(&state, &account_public) {
         Ok(value) => value,

@@ -170,6 +170,7 @@ impl ManagementApiCapabilitiesV1 {
         self.root == "/client/v4"
             && !self.routes.is_empty()
             && self.routes.iter().all(ManagementApiRouteV1::validate)
+            && unique_nonempty(&self.deviations)
             && self
                 .legacy_routes
                 .iter()

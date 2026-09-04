@@ -1,7 +1,7 @@
 //! Minimal fixed-installation Cloudflare account discovery surface.
 
 use super::{
-    V4Error, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
+    HttpError, V4Error, V4Permission, V4RequestContext, V4ResultInfo, V4Role, error_response,
     paginated_response, request_context, success_response,
 };
 use crate::http::HttpState;
@@ -156,7 +156,7 @@ pub(super) fn router() -> Router<HttpState> {
 async fn user(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(account) = state.cloudflare_v4_account() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -173,7 +173,7 @@ async fn user(State(state): State<HttpState>, request: Request) -> Response {
 async fn verify_token(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(account) = state.cloudflare_v4_account() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -190,7 +190,7 @@ async fn verify_token(State(state): State<HttpState>, request: Request) -> Respo
 async fn list_accounts(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match CollectionQuery::parse(request.uri().query(), CollectionKind::Accounts) {
         Ok(value) => value,
@@ -228,7 +228,7 @@ async fn get_account(
 ) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(authority) = state.cloudflare_v4_account() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -245,7 +245,7 @@ async fn get_account(
 async fn list_memberships(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let query = match CollectionQuery::parse(request.uri().query(), CollectionKind::Memberships) {
         Ok(value) => value,
@@ -283,11 +283,14 @@ async fn list_memberships(State(state): State<HttpState>, request: Request) -> R
     )
 }
 
-fn read_context(request: &Request, permission: V4Permission) -> Result<V4RequestContext, Response> {
+fn read_context(
+    request: &Request,
+    permission: V4Permission,
+) -> Result<V4RequestContext, HttpError> {
     let context = request_context(request)?;
     context
         .require(permission)
-        .map_err(|error| error_response(error, context.request_id()))?;
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     Ok(context)
 }
 
@@ -338,10 +341,10 @@ impl CollectionQuery {
                     }
                 }
                 "name" if matches!(kind, CollectionKind::Accounts) => {
-                    name = one(name.as_ref(), &value)?;
+                    name = one(name.is_some(), &value)?;
                 }
                 "account.name" | "name" if matches!(kind, CollectionKind::Memberships) => {
-                    name = one(name.as_ref(), &value)?;
+                    name = one(name.is_some(), &value)?;
                 }
                 "direction" if value == "asc" || value == "desc" => {}
                 "order"
@@ -361,8 +364,8 @@ impl CollectionQuery {
     }
 }
 
-fn one(existing: Option<&String>, value: &str) -> Result<Option<String>, V4Error> {
-    if existing.is_some() || value.is_empty() || value.len() > 100 {
+fn one(has_existing: bool, value: &str) -> Result<Option<String>, V4Error> {
+    if has_existing || value.is_empty() || value.len() > 100 {
         return Err(V4Error::InvalidRequest);
     }
     Ok(Some(value.to_owned()))

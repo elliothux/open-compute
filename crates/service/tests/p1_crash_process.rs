@@ -166,13 +166,15 @@ fn signal(child: &Child, name: &str) {
     assert!(status.success(), "signal {name} failed");
 }
 
-async fn wait_ready(address: SocketAddr, child: &mut Child) {
+async fn wait_ready(address: SocketAddr, child: &mut Child, log: &Path) {
     let deadline = Instant::now() + Duration::from_secs(40);
     loop {
-        assert!(
-            child.try_wait().expect("child state").is_none(),
-            "ocd exited"
-        );
+        if let Some(status) = child.try_wait().expect("child state") {
+            panic!(
+                "ocd exited ({status}): {}",
+                fs::read_to_string(log).unwrap_or_default()
+            );
+        }
         if let Ok(Ok(mut stream)) = tokio::time::timeout(
             Duration::from_millis(500),
             tokio::net::TcpStream::connect(address),
@@ -340,14 +342,14 @@ async fn p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly() {
     let resources = seed_resource_recovery(&loaded.config);
 
     let mut first = ChildGuard(spawn_ocd(&config, &process_log));
-    wait_ready(admin, first.child_mut()).await;
+    wait_ready(admin, first.child_mut(), &process_log).await;
     assert_recovered_resources(&data_dir, &resources);
     signal(first.child(), "-KILL");
     let first_status = wait_exit(first.child_mut(), Duration::from_secs(5)).await;
     assert!(!first_status.success());
 
     let mut second = ChildGuard(spawn_ocd(&config, &process_log));
-    wait_ready(admin, second.child_mut()).await;
+    wait_ready(admin, second.child_mut(), &process_log).await;
     assert_recovered_resources(&data_dir, &resources);
     signal(second.child(), "-TERM");
     let second_status = wait_exit(second.child_mut(), Duration::from_secs(20)).await;

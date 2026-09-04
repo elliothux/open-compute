@@ -1,8 +1,8 @@
 //! open-compute vendor extensions backed by existing domain authorities.
 
 use super::{
-    V4Error, V4Permission, V4RequestContext, V4ResourceKind, error_response, request_context,
-    success_response,
+    HttpError, V4Error, V4Permission, V4RequestContext, V4ResourceKind, error_response,
+    request_context, success_response,
 };
 use crate::http::HttpState;
 use axum::Router;
@@ -53,7 +53,7 @@ pub(super) fn router() -> Router<HttpState> {
 async fn capabilities(State(_state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let lock = match open_compute_runtime::embedded_runtime_lock() {
         Ok((value, _)) => value,
@@ -121,6 +121,7 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
         }
     }
     insert_deviations(&mut deviations, contract["managementApi"].get("deviations"));
+    deviations.insert("OC-MANAGEMENT-COMPATIBILITY-DATE-001".to_owned());
     success_response(
         context,
         Capabilities {
@@ -151,7 +152,7 @@ fn insert_deviations(output: &mut BTreeSet<String>, value: Option<&serde_json::V
 async fn system_status(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let snapshot = state.health().snapshot();
     let components = snapshot
@@ -201,7 +202,7 @@ async fn system_status(State(state): State<HttpState>, request: Request) -> Resp
 async fn scheduler_status(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     scheduler_response(&state, context)
 }
@@ -209,7 +210,7 @@ async fn scheduler_status(State(state): State<HttpState>, request: Request) -> R
 async fn scheduler_pause(State(state): State<HttpState>, request: Request) -> Response {
     let context = match bodyless_context(request, V4Permission::Maintenance).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(scheduler) = state.scheduler() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -221,7 +222,7 @@ async fn scheduler_pause(State(state): State<HttpState>, request: Request) -> Re
 async fn scheduler_resume(State(state): State<HttpState>, request: Request) -> Response {
     let context = match bodyless_context(request, V4Permission::Maintenance).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(scheduler) = state.scheduler() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -233,7 +234,7 @@ async fn scheduler_resume(State(state): State<HttpState>, request: Request) -> R
 async fn scheduler_repair(State(state): State<HttpState>, request: Request) -> Response {
     let context = match bodyless_context(request, V4Permission::Maintenance).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(scheduler) = state.scheduler() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -271,7 +272,7 @@ fn scheduler_response(state: &HttpState, context: V4RequestContext) -> Response 
 async fn cache_status(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     cache_response(&state, context)
 }
@@ -279,7 +280,7 @@ async fn cache_status(State(state): State<HttpState>, request: Request) -> Respo
 async fn cache_garbage_collection(State(state): State<HttpState>, request: Request) -> Response {
     let context = match bodyless_context(request, V4Permission::Maintenance).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(api) = state.cache_images_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -309,7 +310,7 @@ fn cache_response(state: &HttpState, context: V4RequestContext) -> Response {
 async fn image_capacity(State(state): State<HttpState>, request: Request) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(api) = state.cache_images_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
@@ -334,7 +335,7 @@ async fn worker_endpoints(
 ) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let account = match resolve_account(&state, &account) {
         Ok(value) => value,
@@ -383,7 +384,7 @@ async fn durable_object_namespaces(
 ) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let account = match resolve_account(&state, &account) {
         Ok(value) => value,
@@ -429,7 +430,7 @@ async fn durable_object_records(
 ) -> Response {
     let context = match read_context(&request, V4Permission::Read) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (account, namespace) = match resolve_resource(
         &state,
@@ -492,33 +493,39 @@ fn resolve_resource(
     Ok((account, resource))
 }
 
-fn read_context(request: &Request, permission: V4Permission) -> Result<V4RequestContext, Response> {
+fn read_context(
+    request: &Request,
+    permission: V4Permission,
+) -> Result<V4RequestContext, HttpError> {
     let context = request_context(request)?;
     if request.uri().query().is_some() {
-        return Err(error_response(
+        return Err(HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        )));
     }
     context
         .require(permission)
-        .map_err(|error| error_response(error, context.request_id()))?;
+        .map_err(|error| HttpError::from_response(error_response(error, context.request_id())))?;
     Ok(context)
 }
 
 async fn bodyless_context(
     request: Request,
     permission: V4Permission,
-) -> Result<V4RequestContext, Response> {
+) -> Result<V4RequestContext, HttpError> {
     let context = read_context(&request, permission)?;
-    let bytes = to_bytes(request.into_body(), 1)
-        .await
-        .map_err(|_| error_response(V4Error::InvalidRequest, context.request_id()))?;
-    if !bytes.is_empty() {
-        return Err(error_response(
+    let bytes = to_bytes(request.into_body(), 1).await.map_err(|_| {
+        HttpError::from_response(error_response(
             V4Error::InvalidRequest,
             context.request_id(),
-        ));
+        ))
+    })?;
+    if !bytes.is_empty() {
+        return Err(HttpError::from_response(error_response(
+            V4Error::InvalidRequest,
+            context.request_id(),
+        )));
     }
     Ok(context)
 }
