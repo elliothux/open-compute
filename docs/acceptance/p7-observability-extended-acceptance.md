@@ -4,7 +4,7 @@
 
 日期：2026-09-04
 
-[`P7 Workers Logs 与 realtime tail`](implemented/p7-workers-logs-realtime-tail.md) 已实现固定 Wrangler 4.127.1 Script
+[`P7 Workers Logs 与 realtime tail`](../implemented/p7-workers-logs-realtime-tail.md) 已实现固定 Wrangler 4.127.1 Script
 Tails、官方 Cloudflare SDK 7.1.0 Telemetry、真实 Dashboard Live Tail wire、独立有界日志存储、权限/审计、重启恢复
 与明确 unsupported 边界。本文只追踪没有被核心 capability 声明覆盖的扩展资格；未完成项不得被解释为相应能力已支持。
 

@@ -24,7 +24,7 @@
   <a href="https://open-compute.dev">官网</a>
   · <a href="docs/README.md">文档</a>
   · <a href="packages/docs">运维站点</a>
-  · <a href="docs/open-compute-workerd-platform.md">架构设计</a>
+  · <a href="docs/implemented/open-compute-workerd-platform.md">架构设计</a>
 </p>
 
 <p align="center">
@@ -99,7 +99,7 @@ open-compute **就是这一层**——而且只有**一个文件**。
 | Images | █████████░ 95% |
 | Version Metadata | ██████████ 100% |
 | WebSocket Hibernation | ██████████ 100% |
-| Cloudflare v4 · Wrangler · Dashboard | 实施中 |
+| Cloudflare v4 · Wrangler · Dashboard | 核心已实现；托管端资格单独跟踪 |
 
 剩下的 5% 是单节点的客观现实——全球边缘拓扑与托管 fleet 配额——不是缺方法。
 精确支持面：[兼容矩阵](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
@@ -181,8 +181,9 @@ readiness 探测、进程组、有界输出捕获、优雅与强制停止、回�
 
 | 目标 | 从这里开始 |
 | --- | --- |
-| 理解设计 | [架构设计](docs/open-compute-workerd-platform.md) |
+| 理解设计 | [架构设计](docs/implemented/open-compute-workerd-platform.md) |
 | 查看 API 支持 | [兼容矩阵](docs/references/cloudflare-compatibility.md) |
+| 跟踪剩余资格 | [待验收计划](docs/acceptance/README.md) |
 | 构建与部署 Worker | [工具链指南](packages/toolchain/README.md) |
 | 下载与发版 | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [发版流程](docs/references/releasing.md) |
 | 生产部署 | [单二进制指南](docs/references/single-binary.md) · [容器 / systemd / launchd](examples/) |

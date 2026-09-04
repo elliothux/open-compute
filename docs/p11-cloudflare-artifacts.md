@@ -1,15 +1,16 @@
-# P10：Cloudflare Artifacts 兼容设计
+# P11：Cloudflare Artifacts 兼容设计
 
 状态：Day 1 合同与架构设计完成；待 G0、实施与验收。
 
 本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 `artifacts` binding、Artifacts v4 API、Worker binding 和 Git Smart HTTP data plane。Workers Logs、limits 与
-Browser Run 分别见 [P7](p7-workers-logs-realtime-tail.md)、[P8](p8-workers-standard-limits.md)和
-[P11](p11-browser-run.md)。
+Browser Run 分别见 [P7](implemented/p7-workers-logs-realtime-tail.md)、[P9](p9-workers-standard-limits.md)和
+[P12](p12-browser-run.md)。平台内部 blob 的 Local / S3 持有方式见
+[P8 对象后端设计](p8-local-s3-object-backend.md)。
 
 ## 1. 范围与结论
 
-P10 的目标是让面向 Cloudflare Artifacts 编写的标准工具和 Worker 在 open-compute 上工作：
+P11 的目标是让面向 Cloudflare Artifacts 编写的标准工具和 Worker 在 open-compute 上工作：
 
 - `wrangler.jsonc` 中标准 `artifacts` binding；
 - 固定 Wrangler 生成的标准 multipart upload metadata；
@@ -21,7 +22,7 @@ P10 的目标是让面向 Cloudflare Artifacts 编写的标准工具和 Worker �
 Day 1 不把 Artifacts 做成 LynxOS 文件系统，也不把 Git repository 当作个人目录 ACL 的实现。Artifacts 是版本化、
 内容寻址、以 Git 语义读写的开发制品仓库；LynxOS 的团队目录、个人目录和 `private/` 目录仍属于上层文件服务。
 
-明确不在 P10 Day 1：ArtifactFS mount/API、Artifacts event subscriptions/Queues source、自动 build/deploy workflow、Git
+明确不在 P11 Day 1：ArtifactFS mount/API、Artifacts event subscriptions/Queues source、自动 build/deploy workflow、Git
 LFS、SSH、private remote import、repository mirror，以及无法真实执行的 `eu`/`us` data-localization placement。它们可以
 在后续专项中沿用同一 repo authority，但不能以 open-compute vendor field 提前出现。
 
@@ -31,8 +32,9 @@ LFS、SSH、private remote import、repository mirror，以及无法真实执行
 2. 正式 open-compute 发布物仍是单个原生 `ocd`，不能要求运行时搜索 `git`、自动下载 Git binary，或随包发布
    `artifactd` sidecar；
 3. repository object/ref/pack 的实现使用进程内 Git engine，物理 repository 位于 operator data directory；
-4. 现有 `crates/artifacts` 的 S3 immutable artifact store 与 Cloudflare Artifacts 是两个 domain，不能直接把前者公开成
-   v4 Artifacts；它可以在后续作为 snapshot/backup transport，但不是 live Git authority；
+4. `crates/artifacts` 的内部 immutable `ArtifactStore`（当前为 S3，P8 后由 Local / S3 `ObjectBackend` 持有）与
+   Cloudflare Artifacts 是两个 domain，不能直接把前者公开成 v4 Artifacts；它可以作为 snapshot/backup transport，
+   但不是 live Git authority；
 5. G0 必须先证明选定的进程内 engine 能完整且安全地支持目标 Git protocol。未通过前，`artifacts` upload 与所有
    Artifacts route 均 fail closed。
 
@@ -53,21 +55,21 @@ machine-readable conformance inventory 后才算平台承诺。Cloudflare 后续
 
 ## 3. 与现有内部 ArtifactStore 的边界
 
-仓库现有 `crates/artifacts` 提供的是平台内部 immutable blob authority：内容经 SHA-256 标识并存入 S3-compatible
-backend。Cloudflare Artifacts 则拥有 namespace、repository、Git ref、commit/tree/blob、repo token 和 Smart HTTP
-协议，两者不具备可互换的 wire contract。
+仓库的 `crates/artifacts` 提供平台内部 immutable blob authority：内容经 SHA-256 标识并由 P8 的 Local / S3
+`ObjectBackend` 持有。Cloudflare Artifacts 则拥有 namespace、repository、Git ref、commit/tree/blob、repo token
+和 Smart HTTP 协议，两者不具备可互换的 wire contract。
 
-| 能力 | 内部 ArtifactStore | P10 Cloudflare Artifacts |
+| 能力 | 内部 ArtifactStore | P11 Cloudflare Artifacts |
 | --- | --- | --- |
 | identity | SHA-256 `ArtifactRef` | account + namespace + repo；Git object ID/ref |
 | mutation | immutable blob put/get | commit/ref/pack 与 repo lifecycle |
-| transport | internal service/S3 | v4 API、Worker binding、Git Smart HTTP |
+| transport | internal service + Local/S3 ObjectBackend | v4 API、Worker binding、Git Smart HTTP |
 | auth | internal platform scope | account token、Version binding、repo token |
 | primary use | Worker/source/runtime artifacts | user-visible Git artifact repositories |
 
 实现时在 `crates/artifacts` 内增加明确的 `git_repo` domain 模块和独立 types；禁止给现有 `ArtifactRef`、bucket key
-或 S3 URL 增加公开含义。若后续把 Git repo snapshot 送入内部 store，restore 必须从完整、验证过的 snapshot 重建，不能
-在 live ref transaction 中跨 SQLite/S3 做伪原子提交。
+或 backend key/URL/path 增加公开含义。若后续把 Git repo snapshot 送入内部 store，restore 必须从完整、验证过的
+snapshot 重建，不能在 live ref transaction 中跨 SQLite/object backend 做伪原子提交。
 
 ## 4. Wrangler 与 Worker upload contract
 
@@ -117,8 +119,8 @@ Version state。Day 1 不增加 endpoint、token、provider、path、team 或 pr
 }
 ```
 
-P10 完成前，P6 decoder 识别该标准 binding 后返回标准 v4 failure；不能删除 binding 后创建一个功能不完整的
-Version。P10 完成后：
+P11 完成前，P6 decoder 识别该标准 binding 后返回标准 v4 failure；不能删除 binding 后创建一个功能不完整的
+Version。P11 完成后：
 
 - descriptor 是 immutable Version state；
 - upload 时解析 `(account_id, namespace)` authority，但 snapshot 不保存 provider credential 或 host path；
@@ -135,7 +137,7 @@ API base 固定为：
 
 ### 5.1 Route inventory
 
-下表是 P10 目标族；每个 route 的 verb、path、query、body、response、status 和 error code 以固定 OpenAPI/trace 为准，
+下表是 P11 目标族；每个 route 的 verb、path、query、body、response、status 和 error code 以固定 OpenAPI/trace 为准，
 不能从相邻 Cloudflare product 推断。
 
 | 能力 | 标准 route family | Day 1 |
@@ -174,7 +176,7 @@ CLI 覆盖面小于公开 REST/Worker binding，不能用“Wrangler command 通
 - 路由存在但媒体类型、query 或 object kind 不支持时返回固定错误，不回退为 JSON base64；
 - object/read endpoint 必须 bounded streaming，不能把未知大小的 pack/blob 全量读入内存。
 
-P6 的统一 v4 protocol core 负责 request ID、认证、envelope 和 error mapping；P10 的 raw/Git routes 明确注册为例外，
+P6 的统一 v4 protocol core 负责 request ID、认证、envelope 和 error mapping；P11 的 raw/Git routes 明确注册为例外，
 避免统一 response middleware 把 bytes 或 Git packet 改写成 JSON。
 
 ## 6. Worker binding contract
@@ -216,7 +218,7 @@ tenant Worker
 - facade 不接收 API token、repo root、provider URL 或 physical ID；
 - repository name 每次在绑定 namespace 内解析，删除/重建使用新的 opaque repo ID；
 - list/read/async iterator 和 error class 必须与固定 types/runtime behavior qualification；
-- method 计入 P8 subrequest/resource accounting；日志按 P7 做 redaction，不能记录 file/blob body 或 token plaintext。
+- method 计入 P9 subrequest/resource accounting；日志按 P7 做 redaction，不能记录 file/blob body 或 token plaintext。
 
 Miniflare 的 Artifacts plugin 目前是 remote proxy，只能作为 binding 注入/shape 的证据，不能作为本地 storage engine 或
 生产语义参考。
@@ -372,7 +374,7 @@ Artifacts 适合保存 agent 生成的应用源码、模板、构建输入和可
 
 ## 12. Limits、backpressure 与 availability
 
-Cloudflare 商业 plan 数值不复制成本地默认值。P10 提供 operator-owned capacity knobs：
+Cloudflare 商业 plan 数值不复制成本地默认值。P11 提供 operator-owned capacity knobs：
 
 - namespaces/repos/tokens per scope；
 - concurrent Git requests、pushes、fork/import jobs；
@@ -410,7 +412,7 @@ backend busy、timeout、corrupt repo 必须有稳定 error class 和 retryabili
 
 ## 15. Observability
 
-P7 为 P10 提供统一日志/trace sink。推荐稳定维度：
+P7 为 P11 提供统一日志/trace sink。推荐稳定维度：
 
 ```text
 account_id, namespace_id, repo_id, operation, protocol,
@@ -441,7 +443,7 @@ Exit：所有公开承诺都有固定 authority；unknown route/field/method 均
 - 不依赖 PATH Git、runtime download、私有 workerd fork或第二个 open-compute daemon；
 - license、unsafe、dependency boundary 与维护成本复审通过。
 
-Exit：若失败，P10 保持 unsupported；不能降级成仅 Wrangler CRUD 或自定义 zip store。
+Exit：若失败，P11 保持 unsupported；不能降级成仅 Wrangler CRUD 或自定义 zip store。
 
 ### AR1：metadata 与 lifecycle
 
@@ -466,7 +468,7 @@ Exit：若失败，P10 保持 unsupported；不能降级成仅 Wrangler CRUD 或
 - multipart decode/Version persistence/runtime snapshot；
 - typed JS facade + scoped transport；
 - fixed Workers types/API differential；
-- P8 subrequest accounting 与 P7 logging。
+- P9 subrequest accounting 与 P7 logging。
 
 ### AR5：durability
 
@@ -507,7 +509,7 @@ Exit：若失败，P10 保持 unsupported；不能降级成仅 Wrangler CRUD 或
 
 ## 18. Definition of Done
 
-P10 只有同时满足以下条件才可归档：
+P11 只有同时满足以下条件才可归档：
 
 - `wrangler@4.127.1` 精确 pin 的 Artifacts config、upload 与全部现有 commands 对真实 `ocd` 通过；
 - 标准 `/client/v4` Artifacts route、v4 envelope、pagination、raw bytes 与错误合同通过固定 trace；
@@ -516,7 +518,7 @@ P10 只有同时满足以下条件才可归档：
 - 单个 `ocd` 正式发布物不依赖 PATH Git、startup download 或 bundled/managed sidecar；
 - import/fork/delete/crash/restart/backup/restore/GC 和容量边界通过 security/failure tests；
 - 内部 ArtifactStore 与 Cloudflare Artifacts authority 没有 wire/type/identity 混用；
-- P7/P8 集成完成，或相应调用在 capability inventory 中保持明确 planned 且不会伪装完整支持；
+- P7/P9 集成完成，或相应调用在 capability inventory 中保持明确 planned 且不会伪装完整支持；
 - Cloudflare differential 完成，或剩余 credential 限制拆成独立 active acceptance；
 - P6、reference、capability manifest、examples、runbook 与 Dashboard 同步。
 

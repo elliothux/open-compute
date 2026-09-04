@@ -155,4 +155,4 @@ platformd 或测试进程残留；G0 报告摘要和旧有 878 个 profile 不�
 路径、状态和入站链接，不修改已验证的代码或生成资产。
 
 Linux 特权 egress、正式发行打包及其他宿主验证未在本机执行；
-这些事项见 [跨平台发行验收](../runtime-layout-release-acceptance.md)，不将本地验证写成发布资格通过。
+这些事项见 [跨平台发行验收](../acceptance/runtime-layout-release-acceptance.md)，不将本地验证写成发布资格通过。

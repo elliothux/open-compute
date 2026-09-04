@@ -1,7 +1,7 @@
 # P1：P0 平台加固详细设计
 
 > 状态：P1.0 至 P1.7 核心实现及本地验证已完成，按该范围归档；见 [P1 验证记录](./p1-results.md)。
-> 长时 soak 与发行演练独立列入 [剩余验收计划](../p1-release-acceptance.md)，不宣称总 Exit Gate 已通过。
+> 长时 soak 与发行演练独立列入 [剩余验收计划](../acceptance/p1-release-acceptance.md)，不宣称总 Exit Gate 已通过。
 > P1.8 调查已完成，结论仍为 No-Go；本文件保留阶段设计，不表示支持 WebSocket hibernation。
 >
 > 基线：P0.1 至 P0.8 以及 P0 aggregate Gate 已由用户确认在当前 checkout 跑通（2026-08-26）

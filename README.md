@@ -24,7 +24,7 @@
   <a href="https://open-compute.dev">Website</a>
   · <a href="docs/README.md">Docs</a>
   · <a href="packages/docs">Operator site</a>
-  · <a href="docs/open-compute-workerd-platform.md">Architecture</a>
+  · <a href="docs/implemented/open-compute-workerd-platform.md">Architecture</a>
 </p>
 
 <p align="center">
@@ -95,7 +95,7 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 | Images | █████████░ 95% |
 | Version Metadata | ██████████ 100% |
 | WebSocket Hibernation | ██████████ 100% |
-| Cloudflare v4 · Wrangler · Dashboard | In implementation |
+| Cloudflare v4 · Wrangler · Dashboard | Core implemented; hosted qualification tracked separately |
 
 The remaining 5% is single-node reality — global edge topology and hosted fleet quotas — not missing methods. Exact scope: [compatibility matrix](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
 
@@ -171,8 +171,9 @@ Honest boundaries beat surprises in production:
 
 | Goal | Start here |
 | --- | --- |
-| Understand the design | [Architecture & design](docs/open-compute-workerd-platform.md) |
+| Understand the design | [Architecture & design](docs/implemented/open-compute-workerd-platform.md) |
 | Check API support | [Compatibility matrix](docs/references/cloudflare-compatibility.md) |
+| Track remaining qualification | [Acceptance plans](docs/acceptance/README.md) |
 | Build and deploy Workers | [Toolchain guide](packages/toolchain/README.md) |
 | Download and release | [GitHub Releases](https://github.com/elliothux/open-compute/releases) · [Release process](docs/references/releasing.md) |
 | Run in production | [Single-binary guide](docs/references/single-binary.md) · [Container / systemd / launchd](examples/) |

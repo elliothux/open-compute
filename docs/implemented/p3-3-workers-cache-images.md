@@ -9,10 +9,10 @@ Worker 可以声明和使用的 Workers Cache、Cache API、Images binding 与 V
 binding；vinext 只是其中一组真实应用验收，不进入生产 schema、协议、缓存 key 或错误分支。
 该应用 qualification 可选，不是 P3.3 Platform Go 的前置条件。
 
-本文细化[总方案](../open-compute-workerd-platform.md)的 P3.3，依赖已经完成核心实现的
+本文细化[总方案](open-compute-workerd-platform.md)的 P3.3，依赖已经完成核心实现的
 [Static Assets](p3-1-static-assets.md)和
 [Service Binding](p3-2-service-bindings.md)。两项尚未完成的 direct Cloudflare qualification 由
-[独立验收计划](../p3-assets-service-bindings-acceptance.md)负责；应用 qualification 独立出结论，
+[独立验收计划](../acceptance/p3-assets-service-bindings-acceptance.md)负责；应用 qualification 独立出结论，
 不能用本阶段的框架 smoke 代替任何平台证据。
 
 ### 当前实施证据

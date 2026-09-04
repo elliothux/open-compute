@@ -1,7 +1,7 @@
 # P3.1：Static Assets 与框架产物导入
 
 状态（2026-09-01）：**Day1 核心实现与本地最终验收完成，设计已归档；Assets 直接 Cloudflare
-differential 由[独立验收计划](../p3-assets-service-bindings-acceptance.md)继续追踪**。
+differential 由[独立验收计划](../acceptance/p3-assets-service-bindings-acceptance.md)继续追踪**。
 当前维护 Gate 已覆盖声明的本地产品矩阵；Static Assets 已映射到 P3.4 固定 catalog、capability、
 deviation 和 contract report。共享 runner 已在真实 Cloudflare 上完成一项 Cache API fixture，但该
 结果不覆盖 Assets routing/binding，因此不能给扩展目标的 hosted verdict。后续固定 vinext workload
@@ -12,7 +12,7 @@ direct differential。
 资源 manifest、路由配置一起 ready、promote、rollback。请求仍由一个 `platformd` 和一个
 受监督的 stock workerd 处理；不增加静态服务器、Node SSR 进程、Redis 或第二套 S3 配置。
 
-本文细化[总方案](../open-compute-workerd-platform.md)的 P3.1，向
+本文细化[总方案](open-compute-workerd-platform.md)的 P3.1，向
 [Service Binding 方案](p3-2-service-bindings.md)提供统一的默认 HTTP 路由。P3.2 的 Node API
 适配、P3.3 的通用 Cache/Images 和 P3.4 的 Cloudflare conformance 仍是独立工作，不以本阶段通过代替。
 
@@ -523,7 +523,7 @@ deploy 协议，受信任默认 HTTP router 与显式 assets binding，以及 de
 SA-0/SA-5 的本地 conformance qualification 已完成：仓库已有 P3.4 固定 contract catalog、能力与
 deviation 双射，`assets.binding.routing` 在最终 contract report 中由真实 `p3-assets` 产品 Gate
 证明通过。共享 portable runner 已实现并取得 Cache API 对照证据，但尚无 Assets routing/binding
-直接对照；该缺口现由[独立验收计划](../p3-assets-service-bindings-acceptance.md)追踪，不再阻止核心设计
+直接对照；该缺口现由[独立验收计划](../acceptance/p3-assets-service-bindings-acceptance.md)追踪，不再阻止核心设计
 归档。截至 2026-08-29 当次实施记录，vinext/React/Vite/RSC/browser 输入元组尚不存在；后续 P4
 [Application Go](p4-nextjs-vinext-results.md)补充了固定应用和浏览器证据，但仍不能由应用结果推导为
 完整 Assets Cloudflare differential。

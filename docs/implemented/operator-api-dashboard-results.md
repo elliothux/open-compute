@@ -5,8 +5,7 @@
 ## 结论
 
 **Implementation GO。** [`operator-api-dashboard.md`](operator-api-dashboard.md) 声明的本地 Day1 Operator API、
-JavaScript SDK、可选 Dashboard、真实运行和浏览器验收范围已经实现。根目录 [`CR.md`](../../CR.md) 的复审没有
-遗留 P1/P2 finding。
+JavaScript SDK、可选 Dashboard、真实运行和浏览器验收范围已经实现。完成复审没有遗留 P1/P2 finding。
 
 本次结论来自当前 frozen source，而不是 2026-09-02 的旧报告：
 

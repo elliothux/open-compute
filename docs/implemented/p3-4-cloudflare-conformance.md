@@ -4,10 +4,10 @@
 Conditional Go**。固定 baseline/catalog、typed runner、portable fixtures、P3.1–P3.3 产品证据、隔离与
 crash/recovery 已进入当前实现，inventory 为 2,097 个成员、`blocked=0`。Workers、Cache API、KV、D1、
 R2、Durable Objects、Queues 的真实 Cloudflare differential 已通过并精确清理；Workflow 托管端运行因
-Wrangler OAuth `10000` 拆分到[剩余验收](../cloudflare-runtime-compatibility-acceptance.md)。最终 workspace
+Wrangler OAuth `10000` 拆分到[剩余验收](../acceptance/cloudflare-runtime-compatibility-acceptance.md)。最终 workspace
 运行一个完整 round，802/802 cases 通过。2026-09-03 起仓库最终 Gate 统一为一轮，因此该证据满足当前
 Gate 轮数政策；它不替代尚未执行的外部资格或正式发行操作。
-P1 长时 soak 与正式发行演练继续由独立的[P1 剩余验收计划](../p1-release-acceptance.md)跟踪。
+P1 长时 soak 与正式发行演练继续由独立的[P1 剩余验收计划](../acceptance/p1-release-acceptance.md)跟踪。
 
 P3.4 的目标不是实现 Next.js，也不是让某个 vinext revision 的全部 API 或测试无条件变绿；目标由
 [Cloudflare Worker Runtime 全量兼容目标](cloudflare-runtime-compatibility.md)定义：让 open-compute
@@ -19,7 +19,7 @@ vinext 是第三方应用检验手段之一。它能同时覆盖多环境构建�
 Binding、KV、Workers Cache、Version Metadata 和 Images，但它自己的 Next.js 兼容缺口不属于
 平台实现，vinext 未使用的 Cloudflare API 也不能因此从平台契约中消失。
 
-本文细化[总方案](../open-compute-workerd-platform.md)的 P3.4。进入最终验收前，P3.1、P3.2 与
+本文细化[总方案](open-compute-workerd-platform.md)的 P3.4。进入最终验收前，P3.1、P3.2 与
 [P3.3](p3-3-workers-cache-images.md)必须达到各自声明的 Go；它们的 Conditional Go/未运行项
 中属于平台 contract 的部分不能在本阶段改名为“上游限制”。未选择的应用 qualification 保持
 “未评估”，不混入 Platform verdict。

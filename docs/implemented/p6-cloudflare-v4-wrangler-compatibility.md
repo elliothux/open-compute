@@ -1,6 +1,7 @@
 # P6：Cloudflare v4 API 与 Wrangler 子集兼容设计
 
-状态：P6 本地核心实现完成，归档候选；托管端 differential 待验收
+状态：P6 本地核心实现完成并归档；托管端 differential 见
+[`docs/acceptance/`](../acceptance/p6-cloudflare-v4-differential-acceptance.md)
 
 日期：2026-09-03
 
@@ -33,20 +34,24 @@ domain/runtime authority，见[完成记录](p5-vectorize-ai-search-results.md)�
 `/client/v4` 路径，并移除旧 `/operator/api/v1` 与按内部 resource ID 的项目配置。
 
 Workers Logs、固定 Wrangler 的 realtime tail 和 Observability Telemetry 子集由
-[`P7 Workers Logs 与 realtime tail 兼容设计`](../p7-workers-logs-realtime-tail.md) 独立实施。P6 建立它复用的
+[`P7 Workers Logs 与 realtime tail 兼容设计`](p7-workers-logs-realtime-tail.md) 独立实施。P6 建立它复用的
 v4 protocol core；三个 Script Tails operation 在 P6 capability manifest 中保持 `planned`，相关 mutation 在
 P7 完成前 fail closed。P6 完成不冒充 P7 已完成；P7 也不另建 vendor logs API。
 
+Local / S3 对象后端互斥配置、统一 object operation facade 与开发期 rclone 移除由
+[`P8 Local / S3 对象后端设计`](../p8-local-s3-object-backend.md) 细化；P6 仍记录其实施时必须保持的 R2、
+snapshot、backup 与 immutable artifact 公开合同。
+
 Workers Standard 的 structural/runtime limits 由
-[`P8 Workers Standard limits 设计`](../p8-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
+[`P9 Workers Standard limits 设计`](../p9-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
 `WorkerLoader.load/get` 和 nested stock-workerd Gate 由
-[`P9 Dynamic Workers / Worker Loader 设计`](../p9-dynamic-workers-worker-loader.md) 细化。后者只覆盖
+[`P10 Dynamic Workers / Worker Loader 设计`](../p10-dynamic-workers-worker-loader.md) 细化。后者只覆盖
 Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。Cloudflare Artifacts 的 v4/Worker/Git
-contract 由 [`P10 Cloudflare Artifacts 兼容设计`](../p10-cloudflare-artifacts.md) 细化；Browser Run 的 binding、
+contract 由 [`P11 Cloudflare Artifacts 兼容设计`](../p11-cloudflare-artifacts.md) 细化；Browser Run 的 binding、
 Quick Actions、DevTools/CDP 与 operator-owned 外部 Browser Provider 由
-[`P11 Cloudflare Browser Run 兼容设计`](../p11-browser-run.md) 细化。P6 只记录固定 schema/multipart inventory 已出现的
+[`P12 Cloudflare Browser Run 兼容设计`](../p12-browser-run.md) 细化。P6 只记录固定 schema/multipart inventory 已出现的
 后续字段；固定输入中尚未登记的 binding 不因此成为 P6 支持项。在各专项通过前它们保持 fail closed，P6 与
-P7—P11 各自具有独立的 Definition of Done。
+P7—P12 各自具有独立的 Definition of Done。
 
 ## 1. 结论与边界
 
@@ -761,7 +766,7 @@ Wrangler schema validation
 
 ### 10.2 P6 支持字段与显式后续阶段
 
-下表未标阶段的行属于 P6 目标；标记 P7—P11 的行只冻结固定 Wrangler 语法和 fail-closed handoff，不能在
+下表未标阶段的行属于 P6 目标；标记 P7—P12 的行只冻结固定 Wrangler 语法和 fail-closed handoff，不能在
 对应阶段完成前出现在成功 upload/settings response 或 capabilities 的 `supported` 集合中。
 
 | 类别 | Day 1 字段 | 说明 |
@@ -790,11 +795,11 @@ Wrangler schema validation
 | Cache | `cache.enabled`, `cache.cross_version_cache` 和受支持的 Worker export cache override | 映射现有 Cache authority |
 | Images | `images.binding` | `remote` 只是 local dev 字段，不改变 server binding |
 | Version Metadata | `version_metadata.binding` | 不保留 `open-compute.json` 曾有的非标准 `tag` 字段 |
-| Standard limits（P8） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 P8 完成前同样 fail closed，见 [limits 专项](../p8-workers-standard-limits.md) |
-| Worker Loader（P9） | `worker_loaders[].binding` | P6 识别字段但 fail closed；P9 当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](../p9-dynamic-workers-worker-loader.md) |
+| Standard limits（P9） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 P9 完成前同样 fail closed，见 [limits 专项](../p9-workers-standard-limits.md) |
+| Worker Loader（P10） | `worker_loaders[].binding` | P6 识别字段但 fail closed；P10 当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](../p10-dynamic-workers-worker-loader.md) |
 | Observability logs（P7） | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | P6 只提供共用 v4 core；P7 完成前 settings mutation fail closed；`destinations` 只接受空数组 |
-| Cloudflare Artifacts（P10） | `artifacts[].binding`, `artifacts[].namespace` | 固定 config schema 已在 P6 inventory 标为 `unsupported`；Artifacts multipart binding 与 P10 v4/Worker/Git 合同由 [Artifacts 专项](../p10-cloudflare-artifacts.md) 一起实现，P10 前 fail closed；`remote` 仅 local dev |
-| Browser Run（P11） | `browser.binding` | P6 识别固定 config/multipart，但 P11 provider、binding、Quick Actions、DevTools/CDP 全部通过前 fail closed，见 [Browser Run 专项](../p11-browser-run.md)；`remote` 仅 local dev |
+| Cloudflare Artifacts（P11） | `artifacts[].binding`, `artifacts[].namespace` | 固定 config schema 已在 P6 inventory 标为 `unsupported`；Artifacts multipart binding 与 P11 v4/Worker/Git 合同由 [Artifacts 专项](../p11-cloudflare-artifacts.md) 一起实现，P11 前 fail closed；`remote` 仅 local dev |
+| Browser Run（P12） | `browser.binding` | P6 识别固定 config/multipart，但 P12 provider、binding、Quick Actions、DevTools/CDP 全部通过前 fail closed，见 [Browser Run 专项](../p12-browser-run.md)；`remote` 仅 local dev |
 | Secrets declaration | `secrets.required` | 只影响本地 type/dev validation；值由 `wrangler secret` 管理，不写入配置 |
 
 `wrangler dev` 的纯本地模式由上游 Wrangler/Miniflare 提供，不是 open-compute server conformance 的证据。
@@ -830,7 +835,7 @@ send_email
 unsafe
 ```
 
-`artifacts` 与 `browser` 不在以上永久 unsupported 列表中：它们分别属于 P10/P11 的后续范围，但 P6 machine
+`artifacts` 与 `browser` 不在以上永久 unsupported 列表中：它们分别属于 P11/P12 的后续范围，但 P6 machine
 inventory 中已出现的成员仍保持 `unsupported`，尚未登记的 multipart member 也不对外宣称存在。专项 DoD 完成前，
 行为始终 fail closed，而不是 P6 提前标记 supported。
 
@@ -1110,7 +1115,7 @@ package imports，并在同一变更删除旧 router、旧 SDK、`open-compute.j
 - 已把 `wrangler@4.127.1`、`cloudflare@7.1.0` 和对应 schema/OpenAPI 输入固定到 lock 与 SHA-256；
 - 已由同一个 conformance source 生成/校验 OpenAPI subset、capability manifest、route/field/binding/command
   inventory；management route 当前状态计数见第 2 节；
-- P7 的 Tail、Telemetry 与 WebSocket trace 未混入 P6，三个 Tail route 保持 `planned`；P10 Artifacts 与 P11
+- P7 的 Tail、Telemetry 与 WebSocket trace 未混入 P6，三个 Tail route 保持 `planned`；P11 Artifacts 与 P12
   Browser Run 的专项 trace 同样留给各自阶段，P6 只把固定输入中已出现的字段标为 `unsupported` 并 fail closed。
 
 **M1：v4 protocol core。**
@@ -1158,7 +1163,7 @@ package imports，并在同一变更删除旧 router、旧 SDK、`open-compute.j
   metrics label 和 mocks 已从 active surface 删除；保留前缀只产生中性 404，不进入 Dashboard SPA 或 tenant Worker；
 - dependency/source/route inventory 负责证明旧 package、symbol、path 不存在且新路径没有 duplicate handler；
 - 验收拆为三个边界：P6 focused validation 在 source freeze 后按第 15 节单轮执行；托管端 differential 因
-  credential 缺失拆到独立 active acceptance；完整 workspace Gate 与 coverage 按用户明确要求延后到 P9 source
+  credential 缺失拆到独立 active acceptance；完整 workspace Gate 与 coverage 按用户明确要求延后到 P10 source
   freeze 后统一执行。
 
 M0–M6 是已经落地的同一个 Day 1 implementation 分解，不是生产环境的分阶段兼容模式。当前实现不提供 legacy
@@ -1233,7 +1238,7 @@ response schema 和退出码；secret、token、signed upload token 和对象内
 - 没有 credential 或产品权限时记录未验收，不能用本地测试替代远端证据。
 
 当前机器没有 Cloudflare credential，因此 hosted differential 未执行，并由
-[`P6 Cloudflare v4 differential 验收`](../p6-cloudflare-v4-differential-acceptance.md) 继续跟踪。这个待验收项不改变
+[`P6 Cloudflare v4 differential 验收`](../acceptance/p6-cloudflare-v4-differential-acceptance.md) 继续跟踪。这个待验收项不改变
 P6 本地核心实现状态，也不能被记录为 hosted PASS。
 
 **Runtime、恢复与安全 Gate。**
@@ -1271,8 +1276,8 @@ Gate 明确失败并保留诊断，不在同一 frozen source 上自动重跑以
 bind、鉴权、唯一 owner 或 fail-closed 行为。
 
 文档变更本身只运行 `git diff --check` 和链接/命令核对。真正实施属于 protocol、persistence、security 和 runtime
-变更；P6 归档执行相关 focused/static/registered Gate。为避免在 P6–P9 连续实现中重复高成本全量执行，完整
-workspace Gate 与 coverage 按用户明确要求延后到 P9 最终 source freeze 后统一单轮执行，并在 P6 结果中如实标为
+变更；P6 归档执行相关 focused/static/registered Gate。为避免在 P6–P10 连续实现中重复高成本全量执行，完整
+workspace Gate 与 coverage 按用户明确要求延后到 P10 最终 source freeze 后统一单轮执行，并在 P6 结果中如实标为
 deferred，而不是 PASS。
 
 ## 16. 已接受的 Day 1 deviation
@@ -1311,13 +1316,13 @@ focused/static/registered Gate 和 `cf-compatibility-check` 结论，不得沿�
 - Worker compatibility date/flags 已成为 immutable Version authority；
 - Workflow owner/fence reservation 覆盖 upload-first、冲突、失败释放、retry 和 delete；Service `props` 作为
   canonical immutable JSON 进入 descriptor/digest 并投影到 `ctx.props`；
-- P7—P11 字段在对应阶段完成前由 route/field/binding inventory 明确标为 `planned` 或 `unsupported`，且 upload、
+- P7—P12 字段在对应阶段完成前由 route/field/binding inventory 明确标为 `planned` 或 `unsupported`，且 upload、
   settings mutation 和 command 均 fail closed；P6 不冒充后续阶段完成；
 - KV、D1、R2、Vectorize、AI Search、Queues、Workflows 和 Cron 的声明子集通过 API/runtime Gate；
 - Cloudflare differential 已完成，或剩余 credential 限制被拆成独立 active acceptance 文档；
 - `docs/references/cloudflare-compatibility.md` 和 machine-readable capability authority 已同步；
 - P6 的 focused/static/registered Gate 在 frozen source 上完成；完整 coverage 与单轮 workspace Gate 可按已明确的
-  P6–P9 顺序延后到 P9 最终 source freeze，但 P6 结果必须把它们标为 deferred，并由 P9 最终验收覆盖。
+  P6–P10 顺序延后到 P10 最终 source freeze，但 P6 结果必须把它们标为 deferred，并由 P10 最终验收覆盖。
 
 ## 18. 官方基线
 

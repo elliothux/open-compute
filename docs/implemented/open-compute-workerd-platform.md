@@ -3,12 +3,12 @@
 > 状态：核心 Day1 实现完成、外部资格 Conditional Go，2026-09-01。全量 inventory 的 2,097 个 stable
 > members 已有 evidence，`blocked=0`；Workers、Cache API、KV、D1、R2、Durable Objects、Queues 的
 > portable differential 已通过并精确清理。Workflow hosted differential 仍受 Wrangler OAuth `10000`
-> 阻塞；Assets/Service direct differential、正式发行与跨平台资格仍在各自 active acceptance 中，
+> 阻塞；Assets/Service direct differential、正式发行与跨平台资格集中在[待验收资格目录](../acceptance/README.md)，
 > 不能据此声明完整托管端/发行 Go。固定 vinext workload 已取得 Application Go，但不替代这些平台资格。
 >
 > 当前目标是让 open-compute 对齐最新 stable Cloudflare Worker runtime，以及 Workers、Durable
 > Objects、Queues、Workflows、R2、D1、KV 的完整 tenant Worker API；具体类型、单一 latest runtime
-> 语义、非目标和完成门槛由[已完成的全量兼容目标](implemented/cloudflare-runtime-compatibility.md)定义。第三方应用
+> 语义、非目标和完成门槛由[已完成的全量兼容目标](cloudflare-runtime-compatibility.md)定义。第三方应用
 > workload 独立取证。
 > vinext 是组合检验手段，不是平台规格；不要求补齐 vinext 或 Next.js 自身尚未实现的能力。
 > 本文只约束本仓库，不改变父项目边界；已有 P0–P2 记录不构成 P3 conformance 已通过的证据。
@@ -115,17 +115,17 @@ stock workerd 承担，不新增 Node SSR 服务，也不以 Miniflare 代替平
 | Cache 与 Images | Workers Cache、Cache API、Images、Version Metadata 的声明单节点支持面已实现；Cache API hosted differential 通过 | Images 等相邻 capability 的独立 hosted/application qualification 可选 |
 | 验收 | 193/193 JS、90.17% Rust 行覆盖率、单轮 workspace 802/802；七项 hosted differential 通过并清理；固定 vinext workload 为 Application Go | Workflow hosted、Assets/Service direct differential、跨平台 release qualification |
 
-实现依据包括 [工具链](../packages/toolchain/src/build-worker.ts)、
-[绑定类型](../crates/core/src/resource.rs)、[RuntimeSource](../crates/workers/src/runtime_source.rs)
-和[能力注册表](../crates/service/src/capabilities.rs)。本轮完成证据见
-[Cloudflare Runtime 结果](implemented/cloudflare-runtime-compatibility-results.md)；P3.3 的历史证据见
-[归档方案](implemented/p3-3-workers-cache-images.md)。
+实现依据包括 [工具链](../../packages/toolchain/src/build-worker.ts)、
+[绑定类型](../../crates/core/src/resource.rs)、[RuntimeSource](../../crates/workers/src/runtime_source.rs)
+和[能力注册表](../../crates/service/src/capabilities.rs)。本轮完成证据见
+[Cloudflare Runtime 结果](cloudflare-runtime-compatibility-results.md)；P3.3 的历史证据见
+[归档方案](p3-3-workers-cache-images.md)。
 
 ### 2.4 Day1 约束
 
-遵循 [AGENTS.md](../AGENTS.md)：直接调整当前部署、schema、配置和内部协议，不保留旧开发
+遵循 [AGENTS.md](../../AGENTS.md)：直接调整当前部署、schema、配置和内部协议，不保留旧开发
 版本的双读写、迁移回退或旧引擎。现有阶段编号、V1/V2 名称和历史验证记录不产生兼容义务；
-已识别的历史路径已按归档的 [Day1 架构清理](./implemented/day1-architecture-cleanup.md) 收敛。
+已识别的历史路径已按归档的 [Day1 架构清理](day1-architecture-cleanup.md) 收敛。
 
 只有目标范围内、Cloudflare 官方 API 在 pinned latest contract 中要求的行为可作为兼容例外，并需
 记录来源、唯一 effective date/required flags、workerd pin 和回归测试。tenant 不选择历史 date/flag，
@@ -148,7 +148,7 @@ ocd          唯一发行文件、Rust 主进程
 文档 parser child 只读取一个有界 OCDP frame，不打开 listener、不持有平台 authority，结束后立即回收；它隔离
 Xberg 的 panic/abort 和资源故障，但不虚构成不同 OS 用户或完整 kernel sandbox。
 外部只暴露 `ocd` 的 public/control 端口。具体发行、离线启动与资源校验契约见
-[单二进制分发与部署](./references/single-binary.md)；框架构建器和 Node/Bun 不进入生产请求路径。
+[单二进制分发与部署](../references/single-binary.md)；框架构建器和 Node/Bun 不进入生产请求路径。
 
 ```text
 Public HTTP / Control API
@@ -237,16 +237,16 @@ binding、直接 storage getter、remote dev proxy 和自动 config reload 不�
 
 - Cloudflare 官方 API/config 与正式 workerd 是平台契约基线；workers-sdk/Miniflare/WDL 是实现参考。
 - vinext 是固定 revision 的第三方 application workload，保留其 fixture/断言来源但不定义平台 API。
-- [官方 asset-worker](../references/workers-sdk/packages/workers-shared/asset-worker/src/handler.ts)
-  与 [router-worker](../references/workers-sdk/packages/workers-shared/router-worker/src/worker.ts)
+- [官方 asset-worker](../../references/workers-sdk/packages/workers-shared/asset-worker/src/handler.ts)
+  与 [router-worker](../../references/workers-sdk/packages/workers-shared/router-worker/src/worker.ts)
   提供资源响应和分流语义；参考其算法与测试，不引入 Cloudflare 内部遥测、实验分组或账单系统。
-- [官方 RPC proxy](../references/workers-sdk/packages/miniflare/src/workers/assets/rpc-proxy.worker.ts)
+- [官方 RPC proxy](../../references/workers-sdk/packages/miniflare/src/workers/assets/rpc-proxy.worker.ts)
   展示默认入口 fetch 经资源路由、RPC 直达用户 Worker 的组合方式。Miniflare 只作为参考和
   上游对照环境，不能成为 open-compute 的生产依赖或最终 Gate 替代物。
-- [WDL Service Binding](../references/wdl/runtime/bindings/service.js) 可参考原生 stub 的连接，
+- [WDL Service Binding](../../references/wdl/runtime/bindings/service.js) 可参考原生 stub 的连接，
   但不照搬部署时永久固定目标版本、禁止自绑定、透传调用方 secrets 等行为；其 `ASSETS.url()`
   也不能替代官方 `ASSETS.fetch()`。
-- [workerd WorkerLoader](../references/workerd/src/workerd/api/worker-loader.h) 是原生调用能力
+- [workerd WorkerLoader](../../references/workerd/src/workerd/api/worker-loader.h) 是原生调用能力
   的参考；最终以当前正式 pin 的真实执行结果为准。引用或复用第三方代码时固定来源并保留许可证。
 
 ## 5. Worker 加载与调度
@@ -454,7 +454,7 @@ WHERE state != 'tombstoned';
 ```
 
 这里仍是总览。实际列、trigger、referrer、descriptor canonicalization 和 lifecycle/availability
-边界以 [P0.3：Resource 与 Binding Framework 详细设计](./implemented/p0-3-resource-binding-framework.md)
+边界以 [P0.3：Resource 与 Binding Framework 详细设计](p0-3-resource-binding-framework.md)
 为准。
 
 产品表保存各自的物理信息：
@@ -616,7 +616,7 @@ namespace 后再引入固定数量的 KV shard files，不在 V1 提前设计。
 又增加动态 DDL、schema cache、迁移和 table-name 安全问题。
 
 API 兼容面、25 MiB stream、TTL/list cursor、connection manager、backup/restore、corruption
-隔离和完整 Gate 见 [P0.4：KV 详细设计](./implemented/p0-4-kv.md)。
+隔离和完整 Gate 见 [P0.4：KV 详细设计](p0-4-kv.md)。
 
 ## 9. D1
 
@@ -650,7 +650,7 @@ binding-scoped JSRPC transport 回到 `ocd`。transport 的 immutable props 固�
 deployment、database generation 和 permission，tenant code 不能选择其他文件。
 
 完整 facade Gate、SQLite authorizer/limits、batch/exec/migration、backup/restore、工作包和测试矩阵见
-[P0.6：D1 详细设计](./implemented/p0-6-d1.md)。
+[P0.6：D1 详细设计](p0-6-d1.md)。
 
 ### 9.3 SQL 安全边界
 
@@ -686,7 +686,7 @@ workerd 管理物理 SQLite。动态 class 通过 `workerLoader` 加载，再由
 是单进程单 workerd，P0.7 采用“一 tenant object 一 host actor”，让相同 object 使用 native actor
 ordering、不同 object 真正并行，也避免 namespace 级 supervisor 成为瓶颈。public ID、binding、
 generation fence、delete/recreate 与 workerd storage ownership 见
-[P0.7：Durable Objects 详细设计](./implemented/p0-7-durable-objects.md)。
+[P0.7：Durable Objects 详细设计](p0-7-durable-objects.md)。
 
 ### 10.2 Storage identity
 
@@ -728,7 +728,7 @@ Alarm delivery 是 at-least-once，handler 必须支持幂等。
 
 完整的 facet alarm Hard Gate、object-local shim table、`scheduler.sqlite` schema、claim lease、
 conditional completion、六次 retry、repair、shutdown 与 crash matrix 见
-[P0.8：Scheduler Kernel 与 DO Alarms 详细设计](./implemented/p0-8-scheduler-do-alarms.md)。
+[P0.8：Scheduler Kernel 与 DO Alarms 详细设计](p0-8-scheduler-do-alarms.md)。
 
 ## 11. R2、S3 与 Static Assets
 
@@ -775,7 +775,7 @@ S3 credential 只存在于 `ocd`。tenant Worker 获得的是 binding-scoped ada
 R2 返回对象带同步 `writeHttpMetadata()` 和本地 body helper，因此与 D1 一样使用 P0.5.0 的
 loaded-isolate facade；raw transport 只传 metadata DTO 和 byte stream。完整 key budget、metadata
 codec、conditional/range/list、provider preflight、bucket lifecycle、工作包和测试矩阵见
-[P0.5：R2 详细设计](./implemented/p0-5-r2.md)。
+[P0.5：R2 详细设计](p0-5-r2.md)。
 
 ### 11.3 Static Assets
 
@@ -1096,7 +1096,7 @@ prefix，但不保存 credential。
 
 ### 18.1 平台能力范围
 
-本节由[Cloudflare Worker Runtime 全量兼容目标](implemented/cloudflare-runtime-compatibility.md)细化。下表是目标，
+本节由[Cloudflare Worker Runtime 全量兼容目标](cloudflare-runtime-compatibility.md)细化。下表是目标，
 不是“全部已经实现”的声明。Platform 完成标准由 upstream stable types、固定 single-latest runtime
 contract、capability/deviation、stock-workerd/product Gate 和受控 Cloudflare differential 定义；
 应用 workload 只产生独立 qualification。
@@ -1200,8 +1200,8 @@ upstream-excluded、application-unsupported、blocked/not-run，以及每个 pro
 P4 已固定 vinext beta.8 application baseline、有限 Cloudflare-alignment matrix、root lock 与 Chromium，
 并按 Cloudflare Worker Version/Deployment 语义完成同一冻结 artifact 的真实 Cloudflare/open-compute
 differential：20/20 selected mandatory 通过，两端 runner 各 15/15，结果为
-[Application Go](./implemented/p4-nextjs-vinext-results.md)。两次独立 source build 的 inventory drift
-保留为[非阻断 toolchain 调查](./implemented/p4-nextjs-vinext-p4-0-results.md)，不再作为 Runtime Hard Gate。
+[Application Go](p4-nextjs-vinext-results.md)。两次独立 source build 的 inventory drift
+保留为[非阻断 toolchain 调查](p4-nextjs-vinext-p4-0-results.md)，不再作为 Runtime Hard Gate。
 不能引用 compatibility check、vinext 宣传比例或 Application Go 代替 Platform verdict。
 
 ## 19. 安全边界
@@ -1325,8 +1325,8 @@ cancellation，仍需使用 CPU、memory、subrequest 和 wall deadline 做资�
 任意 hard gate 回归失败都应先调整 runtime 架构，不能继续 P0 control plane 实现。
 
 详细的工作包、黑盒测试、故障注入与 Go/No-Go 标准见
-[G0：workerd 动态运行时可行性验证](./implemented/g0-workerd-runtime-validation.md)；实际 pin、三轮矩阵、
-已接受限制与最终 verdict 见 [G0 results](./implemented/g0-results.md)。
+[G0：workerd 动态运行时可行性验证](g0-workerd-runtime-validation.md)；实际 pin、三轮矩阵、
+已接受限制与最终 verdict 见 [G0 results](g0-results.md)。
 
 ### P0.1：Platform foundation
 
@@ -1344,7 +1344,7 @@ cancellation，仍需使用 CPU、memory、subrequest 和 wall deadline 做资�
 均有确定行为。
 
 详细的进程边界、数据目录、migration、master key、S3/artifact、supervisor、health、工作包与
-测试 Gate 见 [P0.1：Platform Foundation 详细设计](./implemented/p0-1-platform-foundation.md)。
+测试 Gate 见 [P0.1：Platform Foundation 详细设计](p0-1-platform-foundation.md)。
 
 ### P0.2：Workers runtime
 
@@ -1363,7 +1363,7 @@ deployment A -> B -> rollback A、process restart 和 invalid deploy 不影响 a
 
 详细的 schema、bundle 格式、部署状态机、RuntimeSource、loader callback、route/stream、
 public-only egress、promotion/delete、工作包与测试 Gate 见
-[P0.2：Workers Runtime 详细设计](./implemented/p0-2-workers-runtime.md)。
+[P0.2：Workers Runtime 详细设计](p0-2-workers-runtime.md)。
 
 ### P0.3：Resource 与 binding framework
 
@@ -1383,7 +1383,7 @@ public-only egress、promotion/delete、工作包与测试 Gate 见
 
 详细的 typed schema、descriptor、deploy integration、BindingBackend、resource lifecycle、
 work packages 与真实 workerd Gate 见
-[P0.3：Resource 与 Binding Framework 详细设计](./implemented/p0-3-resource-binding-framework.md)。
+[P0.3：Resource 与 Binding Framework 详细设计](p0-3-resource-binding-framework.md)。
 
 ### P0.4：KV
 
@@ -1399,7 +1399,7 @@ KV 是最简单的持久化 adapter，用来验证 resource、JSRPC 和动态 SQ
 隔离。
 
 详细的 Workers KV compatibility matrix、rowid/incremental BLOB schema、streaming、TTL、cursor、
-LRU/WAL、backup/restore、工作包与测试 Gate 见 [P0.4：KV 详细设计](./implemented/p0-4-kv.md)。
+LRU/WAL、backup/restore、工作包与测试 Gate 见 [P0.4：KV 详细设计](p0-4-kv.md)。
 
 ### P0.5：R2
 
@@ -1417,7 +1417,7 @@ S3 client 增加 tenant-facing virtual bucket：
 5xx。Multipart 不阻塞 P0。
 
 详细的 loaded-isolate facade、S3 typed store、provider capability preflight、control schema、object
-metadata/key budget、读写路径、工作包和测试 Gate 见 [P0.5：R2 详细设计](./implemented/p0-5-r2.md)。
+metadata/key budget、读写路径、工作包和测试 Gate 见 [P0.5：R2 详细设计](p0-5-r2.md)。
 
 ### P0.6：D1
 
@@ -1435,7 +1435,7 @@ D1 复用 resource lifecycle、SQLite manager 和 binding framework：
 rollback、WAL recovery 和 commit 后 response 丢失的 `result-unknown` 行为。
 
 详细的 facade architecture decision、SQLite schema/authorizer/limits、statement/batch/exec、migration、
-backup/restore、工作包和测试 Gate 见 [P0.6：D1 详细设计](./implemented/p0-6-d1.md)。
+backup/restore、工作包和测试 Gate 见 [P0.6：D1 详细设计](p0-6-d1.md)。
 
 ### P0.7：Durable Object core
 
@@ -1457,7 +1457,7 @@ delete/recreate。
 
 详细的 production native-facet Gate、一 object 一 host actor、64-hex ID、loaded-isolate facade、
 deployment generation fence、localDisk ownership、delete reconciliation、basic WebSocket 和测试矩阵见
-[P0.7：Durable Objects 详细设计](./implemented/p0-7-durable-objects.md)。
+[P0.7：Durable Objects 详细设计](p0-7-durable-objects.md)。
 
 ### P0.8：Scheduler kernel 与 DO alarms
 
@@ -1480,7 +1480,7 @@ primitive。
 
 详细的 facet alarm shim Gate、object SQLite authority、`scheduler.sqlite` due projection、claim
 lease、row/claim token、repair、at-least-once delivery、六次 retry 和 failure matrix 见
-[P0.8：Scheduler Kernel 与 DO Alarms 详细设计](./implemented/p0-8-scheduler-do-alarms.md)。
+[P0.8：Scheduler Kernel 与 DO Alarms 详细设计](p0-8-scheduler-do-alarms.md)。
 
 ### P0 Exit Gate
 
@@ -1533,7 +1533,7 @@ Cloudflare runtime 改造取代，现行 hibernation 支持面以 capability 和
 R2 point-in-time backup，R2 使用 restore 时外部 provider 中的当前状态。
 
 详细的离线 snapshot/restore format、当前 release 恢复边界、磁盘 admission、安全与长稳矩阵、运维合同、
-工作包和 Exit Gate 见 [P1：P0 平台加固详细设计](./implemented/p1-platform-hardening.md)。
+工作包和 Exit Gate 见 [P1：P0 平台加固详细设计](p1-platform-hardening.md)。
 
 ### P2.1：Scheduler hardening
 
@@ -1545,7 +1545,7 @@ clock、基础设施 backoff/jitter 和只存在于 test-support binary 的 cras
 
 详细的 workload contract、fairness、wake/lost-wake 协议、migration registry、故障隔离、工作包、
 测试矩阵与 Exit Gate 见
-[P2.1：Scheduler 多 Workload 内核详细设计](./implemented/p2-1-scheduler-hardening.md)。
+[P2.1：Scheduler 多 Workload 内核详细设计](p2-1-scheduler-hardening.md)。
 
 ### P2.2：Queue producer
 
@@ -1562,7 +1562,7 @@ Queue producer 稳定 fail closed，不能静默提早 enqueue。
 
 详细的 control/scheduler schema、跨库 lifecycle、facade/transport、serialization、durability、
 output-gate Hard Gate、工作包、测试矩阵与 Exit Gate 见
-[P2.2：Queue Producer 详细设计](./implemented/p2-2-queue-producer.md)。
+[P2.2：Queue Producer 详细设计](p2-2-queue-producer.md)。
 
 ### P2.3：Queue consumer 与 Cron
 
@@ -1578,7 +1578,7 @@ slot insert、promotion handoff 和 wall-clock jump。两者都承诺 at-least-o
 
 详细的 Hard Gate、API/config、control/scheduler schema、claim/completion transaction、DLQ backpressure、
 Cron parser/slot/misfire、reconciler、工作包、测试矩阵与 Exit Gate 见
-[P2.3：Queue Consumer 与 Cron 详细设计](./implemented/p2-3-queue-consumer-cron.md)。
+[P2.3：Queue Consumer 与 Cron 详细设计](p2-3-queue-consumer-cron.md)。
 
 ### P2.4：Workflow core
 
@@ -1596,7 +1596,7 @@ parallel step 和完整 RpcSerializable 明确留给后续阶段。
 
 详细的 Runtime/DO output-gate Hard Gate、schema、跨库 create saga、step identity/replay、JSON quota、
 terminal/referrer、crash matrix、工作包与 Exit Gate 见
-[P2.4：Workflow Core 详细设计](./implemented/p2-4-workflow-core.md)。
+[P2.4：Workflow Core 详细设计](p2-4-workflow-core.md)。
 
 ### P2.5：Workflow durable waiting
 
@@ -1624,10 +1624,10 @@ P2.4 已验证的 DO output-gate 限制继续保留：DO 内 Workflow mutation f
 
 详细的 capability/API、SQLite migration、wait/retry/event 状态机、restart/retention saga、parallel
 边界、工作包、crash matrix 与 Exit Gate 见
-[P2.5：Workflow Durable Waiting 详细设计](./implemented/p2-5-workflow-durable-waiting.md)。
+[P2.5：Workflow Durable Waiting 详细设计](p2-5-workflow-durable-waiting.md)。
 
 2026-08-28 已完成 P2.5 Conditional Go 与 P2 Exit 三轮验收；Rust 行覆盖率为 90.16%。
-实际支持面、逐轮结果和保留限制见 [P2.5 / P2 Exit 验证记录](./implemented/p2-5-gate-results.md)。
+实际支持面、逐轮结果和保留限制见 [P2.5 / P2 Exit 验证记录](p2-5-gate-results.md)。
 
 ### P2 Exit Gate
 
@@ -1661,7 +1661,7 @@ vinext 或 Next.js 上游缺口不加入平台需求，已声明 supported 的 C
 
 ### P3.1：框架构建产物与 Static Assets
 
-详细实施与 Gate 见 [P3.1：Static Assets 与框架产物导入](implemented/p3-1-static-assets.md)。
+详细实施与 Gate 见 [P3.1：Static Assets 与框架产物导入](p3-1-static-assets.md)。
 
 平台接受普通 Worker + Assets、Assets-only 与已构建的多环境 framework output，不用普通 Worker
 单入口打包替代框架自己的编译。TS7 检查本项目维护的 TypeScript；构建、模块/资源校验成功后才
@@ -1679,7 +1679,7 @@ vinext 或 Next.js 上游缺口不加入平台需求，已声明 supported 的 C
 ### P3.2：Service Binding、运行时 API 与流式执行
 
 Service Binding 的实施顺序、原生 RPC 与生命周期 Gate 见
-[P3.2：Service Binding 与原生 Worker 调用](implemented/p3-2-service-bindings.md)；该子方案不代替完整 Node API 验收。
+[P3.2：Service Binding 与原生 Worker 调用](p3-2-service-bindings.md)；该子方案不代替完整 Node API 验收。
 
 实现默认/具名入口、跨 Worker 和自绑定的原生 fetch/RPC，目标按 authority 解析并固定单次调用。
 与 assets 路由复用正确入口；不为 `WORKER_SELF_REFERENCE` 或特定框架名称写专用生产分支。
@@ -1696,7 +1696,7 @@ contract 失败；其他 vinext 失败按第 18.4 节分类。
 
 详细的通用 API、WorkerLoader Hard Gate、SQLite/S3 cache authority、version/entrypoint 隔离、
 purge/refresh 状态机、Images engine/session、安全预算、工作包和验收见
-[P3.3：Workers Cache、Cache API 与 Images Day1 方案](implemented/p3-3-workers-cache-images.md)。
+[P3.3：Workers Cache、Cache API 与 Images Day1 方案](p3-3-workers-cache-images.md)。
 
 P3.3 面向任意 Worker：实现 deployment-configured Workers Cache、显式 `caches.default/open`、
 `ctx.cache.purge()`、Images 与 Version Metadata。KV Data Cache 继续是普通 KV 用法。vinext 的三个
@@ -1708,7 +1708,7 @@ adapter 只验证组合，不能进入生产命名或逻辑；PPR/Cache Componen
 隔离、故障恢复、typed Gate runner、工作包和双 verdict 由 P3.4 Cloudflare conformance 阶段负责。
 全量 upstream surface、single-latest runtime contract、产品/恢复 Gate 与七项真实 Cloudflare
 differential 已完成；Workflow hosted fixture 因外部账号权限保留在
-[独立验收计划](cloudflare-runtime-compatibility-acceptance.md)。旧阶段 PASS 没有被迁移成新目标证据。
+[独立验收计划](../acceptance/cloudflare-runtime-compatibility-acceptance.md)。旧阶段 PASS 没有被迁移成新目标证据。
 
 平台先按 upstream stable types 补齐 Workers runtime 与七项目标产品的全部 tenant API，再用 vinext
 等第三方应用验证组合行为。vinext 全部上游 API/测试不再等同于 Platform Go；Cloudflare pass/
@@ -1717,13 +1717,13 @@ artifacts/service/runtime 的所有权组织，禁止框架分支、test-only �
 
 ### P3 Exit Gate
 
-按 [测试节奏](./references/testing.md)，开发期间和源码冻结后的最终验收都只跑相关目标一个完整 round。
+按 [测试节奏](../references/testing.md)，开发期间和源码冻结后的最终验收都只跑相关目标一个完整 round。
 固定平台基线、全量 contract/product 矩阵与相关真实运行时 Gate 均在该轮执行；场景内部定义的正常运行、
 重启、崩溃与恢复步骤不减少。P3.1 至 P3.3 的目标及其用例分类已经实现；P3.3 的最终本地验收见归档
 方案。P3.4 全量类型/runtime contract 与产品高风险矩阵已完成，其单轮 workspace 结果满足当前仓库政策。
 Workflow hosted differential 仍未完成；Static Assets / Service Binding 的 direct differential 由
-[独立验收计划](p3-assets-service-bindings-acceptance.md)追踪；固定 vinext workload 已取得
-[Application Go](implemented/p4-nextjs-vinext-results.md)，不再标为未评估，也不替代上述 platform fixture。
+[独立验收计划](../acceptance/p3-assets-service-bindings-acceptance.md)追踪；固定 vinext workload 已取得
+[Application Go](p4-nextjs-vinext-results.md)，不再标为未评估，也不替代上述 platform fixture。
 
 执行完整 Rust/TS 检查、依赖边界和既有 coverage 要求，Rust 行覆盖率不得低于 90.00%。相关
 G0/P0/P2 回归按影响范围执行，不在每个中间步骤递归重跑所有历史 aggregate。

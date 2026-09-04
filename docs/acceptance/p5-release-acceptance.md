@@ -2,9 +2,9 @@
 
 > 状态：**Active / release qualification pending**，2026-09-02。P5 本地核心实现与本机验收记录已经归档；
 > 本页只保留不能由本轮一台 macOS arm64 开发机和一轮 Gate 证明的发行资格。归档见
-> [Vectorize 与 AI Search](implemented/p5-vectorize-ai-search.md)、
-> [Xberg 文档解析](implemented/p5-7-xberg-document-parsing.md)和
-> [完成记录](implemented/p5-vectorize-ai-search-results.md)。本计划不创建旧实现兼容义务。
+> [Vectorize 与 AI Search](../implemented/p5-vectorize-ai-search.md)、
+> [Xberg 文档解析](../implemented/p5-7-xberg-document-parsing.md)和
+> [完成记录](../implemented/p5-vectorize-ai-search-results.md)。本计划不创建旧实现兼容义务。
 
 ## 1. 已完成前提
 

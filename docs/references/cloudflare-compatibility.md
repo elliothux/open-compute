@@ -8,8 +8,8 @@
 [P3.4 Cloudflare conformance](../implemented/p3-4-cloudflare-conformance.md)。P6 当前管理合同及本地证据见
 [归档设计](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)与
 [完成记录](../implemented/p6-cloudflare-v4-wrangler-compatibility-results.md)；尚待外部账号条件解除的 runtime
-Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](../cloudflare-runtime-compatibility-acceptance.md)
-和 [P6 远端差分验收](../p6-cloudflare-v4-differential-acceptance.md)。
+Workflow 与 P6 management qualification 分别只记录在[既有剩余验收](../acceptance/cloudflare-runtime-compatibility-acceptance.md)
+和 [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)。
 
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)。当前 formal pin 是
 `workerd v1.20260830.1`，revision `e9dda5963aba7ee4323960db795690ec78fec118`，唯一
@@ -160,7 +160,7 @@ API、KV、D1、R2、Durable Objects 和 Queues。公开 status/JSON 经合同�
 和消费响应。这批证据属于 portable runtime/product differential，不是新的 P6 management qualification；它
 没有证明 P6 `/client/v4` 资源命令、固定官方 SDK wire、multipart/Assets 上传或两个只读 prerequisite route
 已经与 Cloudflare 托管管理面实测一致。后者仅由独立的
-[P6 远端差分验收](../p6-cloudflare-v4-differential-acceptance.md)关闭。
+[P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)关闭。
 
 Workflow portable fixture 已实现并通过 open-compute 本地真实进程路径，但当前 Wrangler OAuth 对
 Cloudflare Workflow inventory API 返回 `Authentication error [code: 10000]`，在 preflight 阶段即停止，

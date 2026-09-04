@@ -39,7 +39,7 @@ P0.2–P0.8 等未分离的混合矩阵保守仍跑三次，不删除其时序�
 - [x] 记录实际结果与限制，将本计划及完成报告归档至 `docs/implemented/` 并更新索引。
 
 本范围不运行 runtime 下载、特权 Linux 网络夹具、发布打包或跨平台宿主；相关发行资格仍见
-[活动验收计划](../runtime-layout-release-acceptance.md)。现行操作规则见[测试节奏](../references/testing.md)。
+[活动验收计划](../acceptance/runtime-layout-release-acceptance.md)。现行操作规则见[测试节奏](../references/testing.md)。
 
 ## 静态检查与开发验证
 

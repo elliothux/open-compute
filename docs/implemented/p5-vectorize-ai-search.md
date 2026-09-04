@@ -3,7 +3,7 @@
 > 状态：**Core implementation archived / release acceptance active**，2026-09-02。本文记录已经落地的
 > Vectorize、AI Search 与 Markdown Conversion Day1 设计、实现边界和验收合同。本机验收数据见
 > [完成记录](p5-vectorize-ai-search-results.md)；跨平台发行、timing-three、完整 parser process matrix 与
-> 托管 rich-document differential 见仍在维护的[发行验收计划](../p5-release-acceptance.md)。
+> 托管 rich-document differential 见仍在维护的[发行验收计划](../acceptance/p5-release-acceptance.md)。
 >
 > PDF/Office 等 rich-format 解析的 Cloudflare API、Xberg 进程隔离、格式矩阵、固定公开 corpus 和实施 Gate 见
 > [P5.7 文档解析方案](p5-7-xberg-document-parsing.md)。P5.8 保留其他条件式扩展，当前不实现。

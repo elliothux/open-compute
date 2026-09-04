@@ -1,7 +1,6 @@
 # Operator API 与可选 Dashboard Day1 方案
 
-状态：**Implementation GO**。本文是已完成实现的权威需求基线；当前复审见根目录
-[`CR.md`](../../CR.md)，frozen-source 证据与接受边界见
+状态：**Implementation GO**。本文是已完成实现的权威需求基线；frozen-source 复审、证据与接受边界见
 [`operator-api-dashboard-results.md`](operator-api-dashboard-results.md)。
 
 日期：2026-09-01；2026-09-02 根据 Chrome 实测修订；2026-09-03 完成实现与验收
@@ -52,7 +51,8 @@ Operator API 是 open-compute 自有的单机管理协议，不模拟 Cloudflare
 ## 2. Cloudflare 对比与完整管理基线
 
 本节定义 Dashboard 的 UI/UX 与功能完整性目标。它不是视觉参考附录，而是与 Operator API、SDK contract、
-system ownership 同等级的实现和验收要求。代码审查结论见仓库根目录的 [`CR.md`](../../CR.md)。
+system ownership 同等级的实现和验收要求。代码审查结论已收敛到
+[`operator-api-dashboard-results.md`](operator-api-dashboard-results.md)。
 
 ### 2.1 2026-09-02 Chrome 实测基线（整改前）
 
@@ -531,8 +531,7 @@ URL、CDN origin、任意本地目录或开发代理配置。修改后通过受�
 **2026-09-03 验收状态：Implementation GO。** 真实 `./scripts/dev-test.sh run`、Chrome Cloudflare 对比、
 live contract **12/12**、Playwright e2e **31/31**、服务端 catalog/filter/sort/usage/metrics、90.14% Rust 行
 覆盖率和 frozen-source workspace Gate 均已完成。最终 Gate 运行一轮：**42/42 targets、835/835
-cases**，符合当前仓库最终验收政策。完整证据见
-[`CR.md`](../../CR.md) 与[完成记录](operator-api-dashboard-results.md)。
+cases**，符合当前仓库最终验收政策。完整证据见[完成记录](operator-api-dashboard-results.md)。
 
 格式、静态检查、coverage 与用户指定的最终单轮 Gate 已执行；命令、报告路径和 source identity 见完成记录。
 

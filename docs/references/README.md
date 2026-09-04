@@ -1,20 +1,21 @@
 # 参考文档
 
 这里保存持续维护的接口说明、测试规则和操作指南。文件在此目录不表示相关功能尚未实现；
-未完成的工作计划位于 `docs/`，已完成的阶段设计和结果位于 [implemented](../implemented/README.md)。
+待实现设计位于 `docs/` 根目录，已实现但待 qualification 的计划位于
+[acceptance](../acceptance/README.md)，已完成的阶段设计和结果位于 [implemented](../implemented/README.md)。
 
 仓库的产品目标是一个可单机部署的 Cloudflare Workers Platform 兼容基础设施。公开能力以
 capability、deviation、固定 Cloudflare contract 和真实产品 Gate 为准；vinext 等框架只提供应用
 qualification。目标产品、upstream types、single-latest runtime 和管理面边界见已完成的
 [Cloudflare Worker Runtime 全量兼容改造](../implemented/cloudflare-runtime-compatibility.md)；总体架构见
-[平台总方案](../open-compute-workerd-platform.md)，契约目录、portable differential 和双 verdict
+[平台总方案](../implemented/open-compute-workerd-platform.md)，契约目录、portable differential 和双 verdict
 规则见已完成的[P3.4 方案](../implemented/p3-4-cloudflare-conformance.md)。尚未完成的 Cloudflare
-Workflow 远端资格记录在[Workflow 验收计划](../cloudflare-runtime-compatibility-acceptance.md)，Assets
-与 Service Binding 的 direct differential 记录在[对应验收计划](../p3-assets-service-bindings-acceptance.md)。
+Workflow 远端资格记录在[Workflow 验收计划](../acceptance/cloudflare-runtime-compatibility-acceptance.md)，Assets
+与 Service Binding 的 direct differential 记录在[对应验收计划](../acceptance/p3-assets-service-bindings-acceptance.md)。
 P6 的当前 `/client/v4` 管理合同见归档的[设计](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)与
 [本地完成记录](../implemented/p6-cloudflare-v4-wrangler-compatibility-results.md)；缺少账号 credentials 的新一轮
-管理资源、官方 SDK 与 Assets 托管端资格继续由[远端差分验收](../p6-cloudflare-v4-differential-acceptance.md)追踪。
-所有 active 文档见 [docs 索引](../README.md)。
+管理资源、官方 SDK 与 Assets 托管端资格继续由[远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)追踪。
+待实现设计与 active qualification 分别见 [docs 索引](../README.md)和[验收索引](../acceptance/README.md)。
 
 ## 开发与接口
 
@@ -25,7 +26,7 @@ P6 的当前 `/client/v4` 管理合同见归档的[设计](../implemented/p6-clo
 | [能力偏差](p1-deviations.md) | 当前 capability deviation ID 与实际支持边界 |
 | [P6 v4 管理合同](../implemented/p6-cloudflare-v4-wrangler-compatibility.md) | 当前 `/client/v4`、固定 Wrangler、官方 SDK、multipart/Assets 与资源 API 声明子集 |
 | [P6 本地完成记录](../implemented/p6-cloudflare-v4-wrangler-compatibility-results.md) | 实际执行的 P6 本地检查、证据与明确未验收项 |
-| [P6 远端差分验收](../p6-cloudflare-v4-differential-acceptance.md) | 仍需 Cloudflare credentials 的管理资源、SDK、Assets 与 hosted cleanup 资格 |
+| [P6 远端差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md) | 仍需 Cloudflare credentials 的管理资源、SDK、Assets 与 hosted cleanup 资格 |
 | [Fuzz 所有权](p1-fuzz-ownership.md) | 各类输入的测试归属和回归要求 |
 | [单二进制分发与部署](single-binary.md) | 构建输入、离线启动、资源物化和发行契约 |
 | [版本与发布流程](releasing.md) | 稳定版本、tag 约束、CI/release workflow、四平台 assets、校验与失败处理 |

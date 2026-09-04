@@ -16,9 +16,9 @@ Vectorize、AI Search、Queues、Workflows、vendor extension 与原 Dashboard/�
 authority、SQLite、S3、immutable Version 和 stock workerd 仍是唯一数据与执行路径；v4 handler 只负责官方 wire
 validation 和 domain 调用。
 
-P6 没有提前实现后续阶段：P7 的 Workers Logs/realtime tail/Observability、P8 的 Workers Standard limits 和 P9 的
-public `worker_loaders`/Worker Loader 仍分别标为 `planned` 或 `unsupported`。相关 route、配置字段、binding 与命令在
-对应阶段完成前 fail closed。
+P6 没有提前实现后续阶段：P7 的 Workers Logs/realtime tail/Observability、P8 的 Local / S3 对象后端、P9 的
+Workers Standard limits 和 P10 的 public `worker_loaders`/Worker Loader 仍分别标为 `planned` 或 `unsupported`。
+相关 route、配置字段、binding 与命令在对应阶段完成前 fail closed。
 
 ## 2. 冻结输入
 
@@ -170,7 +170,7 @@ discovery 后暴露 Vectorize tombstone 使后续 ready index 404。各次均保
 | focused regressions | D1 history/transfer/restart、Workflow reservation/delete、Service props、Vectorize tombstone、official SDK typed live path 均通过对应 focused tests。 |
 | canonical Clippy | **FAIL，未声明 PASS**。完整 reachable run仍有 99 个 `service` lint diagnostics，主要为既有大函数/参数数、style 与 large error variant；继续批量机械改写的收益低于 P6 SMB 功能闭环，按复杂度预算保留为后续 debt。 |
 
-按用户约定，最终 workspace Gate 与 Rust coverage 统一延期到 P9 完成后的单次全局验收，P6 不重复执行，也不把延期
+按用户约定，最终 workspace Gate 与 Rust coverage 统一延期到 P10 完成后的单次全局验收，P6 不重复执行，也不把延期
 写成 P6 PASS。Clippy 失败同样是明确未闭环项，不被 scoped Gate 覆盖。
 
 ## 8. 托管 Cloudflare differential 与保留边界
@@ -179,6 +179,6 @@ discovery 后暴露 Vectorize tombstone 使后续 ready index 404。各次均保
 执行。独立 acceptance 文档规定了唯一资源前缀、inventory preflight、existing-resource collision、创建上限、
 best-effort cleanup、二次 inventory 和 retained failure evidence；取得凭据前不得声称 Cloudflare-hosted PASS。
 
-P7/P8/P9、remote dev/preview、`*.workers.dev`、Cloudflare billing/plan quota、multi-region placement/failover 和其它
+P7/P8/P9/P10、remote dev/preview、`*.workers.dev`、Cloudflare billing/plan quota、multi-region placement/failover 和其它
 未声明管理资源不属于 P6 完成范围。unsupported route/field/binding 保持中性 not-found 或 CF-style validation
 failure，不增加本地近似实现。

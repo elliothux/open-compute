@@ -13,7 +13,7 @@ SQLite、外接 S3、generation-authenticated private backend 和 pinned stock w
 
 归档设计分别见 [Vectorize 与 AI Search](p5-vectorize-ai-search.md)和
 [Xberg 文档解析](p5-7-xberg-document-parsing.md)。timing-three、四平台 release、完整 parser process matrix、
-托管 rich-document differential 与正式 package 仍由[发行验收计划](../p5-release-acceptance.md)追踪。
+托管 rich-document differential 与正式 package 仍由[发行验收计划](../acceptance/p5-release-acceptance.md)追踪。
 
 ## 2. 冻结输入
 

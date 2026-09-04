@@ -5,7 +5,7 @@
 本轮按 Day1 直接替换当前模型，没有保留旧 compatibility date/flags、旧自有 Cloudflare types、旧
 outbound gateway、旧 wire/schema 或子集 facade 的兼容路径。`cf-compatibility-check` 复核未发现阻塞性
 实现问题；唯一未完成项是 Cloudflare 托管端 Workflow differential，其账号权限条件由独立的
-[剩余验收计划](../cloudflare-runtime-compatibility-acceptance.md)跟踪。
+[剩余验收计划](../acceptance/cloudflare-runtime-compatibility-acceptance.md)跟踪。
 
 ## 冻结输入与能力结论
 

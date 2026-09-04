@@ -1272,4 +1272,4 @@ restore rebind 均有确定结果。
 - [SQLite datatype and BLOB ordering](https://www.sqlite.org/datatype3.html)
 - [SQLite WAL](https://www.sqlite.org/wal.html)
 - [SQLite Online Backup API](https://www.sqlite.org/backup.html)
-- [总体方案](../open-compute-workerd-platform.md)
+- [总体方案](open-compute-workerd-platform.md)

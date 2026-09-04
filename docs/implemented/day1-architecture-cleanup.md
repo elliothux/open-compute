@@ -153,7 +153,7 @@
 
 已于 2026-08-29 完成本机实现与验收，见 [Runtime 包与测试流程整理](runtime-and-test-layout.md)
 和[实测记录](runtime-and-test-layout-results.md)：workspace 690 个用例、90.16% 行覆盖率，
-最终 23 目标各三轮全部通过。跨平台与正式发行资格另见[活动验收计划](../runtime-layout-release-acceptance.md)。
+最终 23 目标各三轮全部通过。跨平台与正式发行资格另见[活动验收计划](../acceptance/runtime-layout-release-acceptance.md)。
 以上是当次运行记录；后续[按用例分轮改造](test-repetition.md)已完成本机验收，采用完整一轮、时序补两轮，
 现行验收规则以[测试节奏](../references/testing.md)为准，不改写上述历史结果。
 
@@ -187,8 +187,8 @@ Day1 当前要求，没有扩大产品能力。清理前检索记录继续作为
 仍转调 `reserve_create_with_limit(input, u32::MAX)`。普通
 [ResourceController 创建](../../crates/workers/src/resource_lifecycle.rs) 已传入
 `hardening.max_resources_per_kind_per_account`，但
-[KV restore](../../crates/service/src/kv_http.rs) 的 `restore_downloaded_namespace()` 与
-[D1 restore](../../crates/service/src/d1_http_backup.rs) 的 `restore_downloaded_database()`
+当时 KV restore 的 `restore_downloaded_namespace()` 与
+D1 restore 的 `restore_downloaded_database()`
 仍调用无限额入口。文件字节配额与磁盘 admission 不是资源数量配额，不能替代它。
 
 - [x] 当前资源预留入口必须显式接收并在同一事务中执行数量限制；删除无限额默认包装。
@@ -263,7 +263,7 @@ binding token，绕过上述检查。[旧测试](../../crates/runtime/src/tests.
 但 seed 只进入最终 JSON，没有传给负载或故障执行；当前调度实际固定。
 它们还硬编码 runtime cache 的 release 路径，并写固定的 `target/p1-results/...` 目录，
 下次启动会截断旧日志。审查时 soak 还调用 `p1_upgrade`，这一调用已随第 3 项移除；
-其余脚本缺口已在本阶段修复；长时 1h/24h 运行仍由 [P1 剩余验收](../p1-release-acceptance.md)
+其余脚本缺口已在本阶段修复；长时 1h/24h 运行仍由 [P1 剩余验收](../acceptance/p1-release-acceptance.md)
 单独追踪，不属于本阶段本机最终 Gate。
 
 - [x] 若保留固定负载，就移除无效 seed 参数并如实记录固定 schedule；如果约定需要不同 seed
@@ -347,7 +347,7 @@ stock-workerd Gate。原先仅列出这些字段/指标的阶段设计，不构�
 [Deployment pipeline](../../crates/workers/src/pipeline.rs) 也会保存 admission 或 deployment 配额失败；
 [parse_failure_code](../../crates/workers/src/pipeline/validation.rs) 同样缺少上述当前错误码。
 这不涉及旧数据兼容：同一二进制刚写入的合法失败记录，自己的读取路径就无法完整识别。
-[现有重放单测](../../crates/service/src/workers_http_tests.rs) 验证的是白名单内的 `WorkerNotFound`，
+当时的重放单测验证的是白名单内的 `WorkerNotFound`，
 没有覆盖这组后来接入的失败码。
 
 - [x] 让当前持久化失败码的写入与读取共享明确的类型/契约，移除分散且不完整的旧白名单；

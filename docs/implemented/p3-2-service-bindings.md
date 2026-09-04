@@ -1,7 +1,7 @@
 # P3.2：Service Binding 与原生 Worker 调用
 
 状态（2026-09-01）：**Day1 核心实现与本地最终验收完成，设计已归档；Service 直接 Cloudflare
-differential 由[独立验收计划](../p3-assets-service-bindings-acceptance.md)继续追踪**。
+differential 由[独立验收计划](../acceptance/p3-assets-service-bindings-acceptance.md)继续追踪**。
 SB-0 至 SB-5 的本地部分已落到当前 Day1 schema、工具链、stock workerd 原生 RPC、调用预算、
 deployment pin、generation 回收与有界指标；`p3-services-hard`、`p3-services-product`、
 `p3-services-events` 和 `p3-services-recovery` 均已通过。事件源矩阵实际覆盖 Queue、Cron、Durable
@@ -16,7 +16,7 @@ fetch 与原生 RPC。绑定冻结目标 Worker ID；每次新的 service 调用
 deployment，再固定这次调用。整个数据调用留在现有 stock workerd 中，不经公网路由，不
 引入 HTTP JSON RPC、注册中心、额外网关或新的数据库。
 
-本文细化[总方案](../open-compute-workerd-platform.md) P3.2 中的 Service Binding 部分。
+本文细化[总方案](open-compute-workerd-platform.md) P3.2 中的 Service Binding 部分。
 [Static Assets 方案](p3-1-static-assets.md)提供目标默认 HTTP 路由；P3.2 的完整 Node API
 清单和 P3.3 缓存/Images 仍需分别完成。Service Binding 通过不等于 P3 平台或应用验收完成。
 

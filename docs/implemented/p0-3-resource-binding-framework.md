@@ -810,4 +810,4 @@ P0.3 通过后，P0.4 只实现 `kv_namespace` 的产品 controller、driver、e
 - [Cloudflare Service bindings RPC](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/rpc/)
 - [Cloudflare Workers RPC lifecycle](https://developers.cloudflare.com/workers/runtime-apis/rpc/lifecycle/)
 - [workerd configuration schema](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp)
-- [总体方案](../open-compute-workerd-platform.md)
+- [总体方案](open-compute-workerd-platform.md)

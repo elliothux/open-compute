@@ -3,7 +3,7 @@
 状态：Completed，2026-09-01。本文定义的 Day1 runtime、binding、persistence、catalog 与本地验收实现
 已经完成；真实 Cloudflare 上的 Workers、Cache API、KV、D1、R2、Durable Objects、Queues portable
 fixtures 已通过。Workflow 托管端 differential 因 Wrangler OAuth `10000` 尚未 qualification，已从实现
-范围拆分到[剩余验收计划](../cloudflare-runtime-compatibility-acceptance.md)。当前状态以
+范围拆分到[剩余验收计划](../acceptance/cloudflare-runtime-compatibility-acceptance.md)。当前状态以
 [`references/cloudflare-compatibility.md`](../references/cloudflare-compatibility.md)、机器可读 capability、
 contract catalog 和[完成报告](cloudflare-runtime-compatibility-results.md)为准。
 

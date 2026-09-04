@@ -1378,7 +1378,7 @@ P0.3 不得：修改 ready deployment binding、把 display name当 physical ID�
 - [G0 loader host](runtime-and-test-layout.md#poc-删除与断言归属)
 - [G0 code assembly](runtime-and-test-layout.md#poc-删除与断言归属)
 - [G0 registry](runtime-and-test-layout.md#poc-删除与断言归属)
-- [总体方案](../open-compute-workerd-platform.md)
+- [总体方案](open-compute-workerd-platform.md)
 - [P0.1 Platform Foundation](./p0-1-platform-foundation.md)
 - [Cloudflare Dynamic Workers API](https://developers.cloudflare.com/dynamic-workers/api-reference/)
 - [Cloudflare Dynamic Worker bindings](https://developers.cloudflare.com/dynamic-workers/usage/bindings/)

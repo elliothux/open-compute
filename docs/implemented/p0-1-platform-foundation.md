@@ -923,7 +923,7 @@ interface，而不是读取文件或解析日志。
 - [G0 results](./g0-results.md)
 - [G0 POC README](runtime-and-test-layout.md#poc-删除与断言归属)
 - [G0 workerd lock](runtime-and-test-layout.md#poc-删除与断言归属)
-- [总体方案](../open-compute-workerd-platform.md)
+- [总体方案](open-compute-workerd-platform.md)
 - [workerd configuration schema](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp)
 - [workerd repository](https://github.com/cloudflare/workerd)
 - [Cloudflare Dynamic Workers API](https://developers.cloudflare.com/dynamic-workers/api-reference/)

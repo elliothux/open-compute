@@ -1,4 +1,4 @@
-# P8：Workers Standard limits 设计
+# P9：Workers Standard limits 设计
 
 状态：设计完成，待实施与验收。
 
@@ -41,7 +41,7 @@
 - Cloudflare [AI Search limits](https://developers.cloudflare.com/ai-search/platform/limits-pricing/)；
 - 已归档的 [P5 Vectorize 与 AI Search 实现合同](implemented/p5-vectorize-ai-search.md)及
   [完成记录](implemented/p5-vectorize-ai-search-results.md)；
-- [Workers Logs 与 realtime tail 专项设计](p7-workers-logs-realtime-tail.md)。
+- [Workers Logs 与 realtime tail 专项设计](implemented/p7-workers-logs-realtime-tail.md)。
 
 网页只用于发现最新合同。release qualification 使用固定的 schema、types、workerd source snapshot 和
 Cloudflare differential fixture；网页变化不能在未 review 时自动改变运行参数。
@@ -75,7 +75,7 @@ KV、D1、R2、Vectorize、AI Search、Workers AI Markdown Conversion、Queues�
 
 计数边界位于 tenant 可观察的 binding 调用，而不是产品内部 fan-out：一次 facade 到 authenticated binding backend
 的逻辑请求按一个 internal-service subrequest 资格化；redirect/retry/poll 等由调用方实际再次发起的请求分别计数。
-AI Search backend 内部的 embedding、rewrite、rerank、generation、S3 和 indexing coordinator 操作，以及 Vectorize
+AI Search backend 内部的 embedding、rewrite、rerank、generation、object backend 和 indexing coordinator 操作，以及 Vectorize
 异步 mutation coordinator，不额外消耗原 Worker invocation 的 subrequest budget。这个单位必须由固定 stock
 workerd/source fixture 和 Cloudflare differential 冻结；在证据完成前不能仅按方法名猜测 supported。
 
@@ -323,7 +323,7 @@ Worker 的多个并发 request 只计一个。Durable Object context 的 10 个�
 blocked，不得用平台全局并发阈值替代。
 
 详细 Worker Loader 合同、stock workerd nesting blocker 与 cache identity 见
-[Dynamic Workers / Worker Loader 专项设计](p9-dynamic-workers-worker-loader.md)。
+[Dynamic Workers / Worker Loader 专项设计](p10-dynamic-workers-worker-loader.md)。
 
 ## 8. Errors 与 observability
 
@@ -421,7 +421,7 @@ Exit：source inspection、fault injection、black-box case 与 Cloudflare diffe
 | `subrequests` 9,999 / 10,000 / explicit 10M / 10M+1 | 精确计数；越界配置失败 |
 | redirect chain | 每一跳计 subrequest |
 | Service Binding chain | 与 top-level request scope 共享连接计数；各 invocation CPU 独立 |
-| KV/D1/R2/Vectorize/AI Search/`env.AI` + global fetch 混合 | 每个 tenant-visible logical call 进入同一 subrequest budget，无漏计/双计；产品内部 provider/S3/coordinator fan-out 不重复计数 |
+| KV/D1/R2/Vectorize/AI Search/`env.AI` + global fetch 混合 | 每个 tenant-visible logical call 进入同一 subrequest budget，无漏计/双计；产品内部 provider/object-backend/coordinator fan-out 不重复计数 |
 | AI Search `uploadAndPoll()` | upload 和每次显式 poll 分别计数；后台 parse/embed/index 不继续占用原 invocation budget |
 | Vectorize async mutation | submit 调用计数；后台 durable apply 不产生伪 subrequest |
 | six pending headers + seventh | 第七个按 CF 行为排队，不提前发出 |
@@ -442,7 +442,7 @@ Exit：source inspection、fault injection、black-box case 与 Cloudflare diffe
 - 64 MB raw、10 MB gzip、variables、URL、headers、body、log 边界有真实实现和测试；
 - CPU、subrequest、memory、startup、connections 由固定 stock workerd 真实执行，不是 wrapper 或外层近似；
 - subrequest Gate 覆盖 KV、D1、R2、Vectorize、AI Search、`env.AI`、Service Binding 与 global `fetch()`，并证明
-  产品内部 provider/S3/coordinator fan-out 不被重复记到 tenant invocation；
+  产品内部 provider/object-backend/coordinator fan-out 不被重复记到 tenant invocation；
 - Dynamic Worker 的 inherited/code/entrypoint limits 和 distinct-in-flight limit 通过 Gate；
 - 所有运行时超限产生真实、可追溯的 outcome，并进入 Workers Logs/realtime tail；
 - capabilities 把 Standard contract、product limits 与 operator capacity 分开；

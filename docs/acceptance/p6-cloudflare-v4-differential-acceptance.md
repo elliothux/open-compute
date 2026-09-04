@@ -17,14 +17,14 @@ AI Search resource 的远端 mutation。缺少凭证是 qualification gap，不�
 ## 固定输入
 
 - Wrangler：`4.127.1`，完整性与 package/config/CLI SHA-256 见
-  [`cloudflare-openapi.lock.json`](../openapi/upstream/cloudflare-openapi.lock.json)；
+  [`cloudflare-openapi.lock.json`](../../openapi/upstream/cloudflare-openapi.lock.json)；
 - Cloudflare TypeScript SDK：`7.1.0`，revision 与哈希见同一 lock；
 - Cloudflare OpenAPI：revision `b8687f42e28fbfcb296a350f7dbf16349ea900af`，固定 snapshot SHA-256
   `2ffedbbf8b25361a3be2062b7793946e7b9efc0e48b462da68f3195f12ab052b`；
 - workerd：`v1.20260830.1`，revision `e9dda5963aba7ee4323960db795690ec78fec118`；
 - compatibility date：`2026-08-30`；
 - 已有 portable runtime/product fixture 与归一化规则：
-  [`test/conformance/differential.ts`](../test/conformance/differential.ts)。该 runner 的范围不自动扩成 P6
+  [`test/conformance/differential.ts`](../../test/conformance/differential.ts)。该 runner 的范围不自动扩成 P6
   management、SDK 或 Assets qualification。
 
 任一固定输入变化都需要先更新 pin、trace 与本地合同检查；不能把旧报告外推到新版本。
@@ -70,7 +70,7 @@ P6 仍需新增或扩展经过 safety review 的 hosted runner，覆盖：
 - 每个 runner 对自己创建的资源完成精确删除与 inventory absent 复查。
 
 Vectorize 或 AI Search 若因账号产品权限无法执行，必须逐产品记录权限错误和未运行范围；其它产品的通过结果不能
-替代它们。P7 realtime tail/Telemetry、P8 limits 与 P9 WorkerLoader 不属于本文。
+替代它们。P7 realtime tail/Telemetry、P8 Local / S3 对象后端、P9 limits 与 P10 WorkerLoader 不属于本文。
 
 ## 完成条件
 

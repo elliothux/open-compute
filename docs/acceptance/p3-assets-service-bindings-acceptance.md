@@ -2,8 +2,8 @@
 
 状态：Active，2026-09-01。本文只追踪 P3.1 Static Assets 与 P3.2 Service Binding 尚未完成的
 Cloudflare 托管端 direct differential。两项 Day1 核心实现和本地最终验收已经完成，对应设计与证据
-归档在 [P3.1](implemented/p3-1-static-assets.md)和
-[P3.2](implemented/p3-2-service-bindings.md)。
+归档在 [P3.1](../implemented/p3-1-static-assets.md)和
+[P3.2](../implemented/p3-2-service-bindings.md)。
 
 ## 已完成前提
 
@@ -14,7 +14,7 @@ Cloudflare 托管端 direct differential。两项 Day1 核心实现和本地最�
   generation 回收和 SIGKILL 恢复；本地最终验收共 834/834 case 通过，Rust 行覆盖率为 90.11%。
 - P3.4 已固定 contract catalog、capability/deviation 与本地产品证据；当前 stable tenant API inventory
   为 2,097 个成员、`blocked=0`。
-- 后续固定 vinext workload 已取得 [Application Go](implemented/p4-nextjs-vinext-results.md)，证明选定
+- 后续固定 vinext workload 已取得 [Application Go](../implemented/p4-nextjs-vinext-results.md)，证明选定
   应用的 Assets、SSR/RSC 和浏览器路径可在 Cloudflare 与 open-compute 运行。该应用结果没有覆盖完整
   Assets routing/binding contract，且明确排除了产品 Service Binding 组合，因此不替代本计划。
 
@@ -63,7 +63,7 @@ deployment pin 是 open-compute 的产品生命周期保证。若 Cloudflare 没
    新增的稳定 deviation。
 3. Cloudflare 资源精确清理并复查 absent；本地进程、listener、SQLite/S3 fixture 和临时文件有界回收。
 4. 结果写入独立完成报告，更新 capability/deviation、
-   [Cloudflare 兼容参考](references/cloudflare-compatibility.md)、总方案与归档索引。
+   [Cloudflare 兼容参考](../references/cloudflare-compatibility.md)、总方案与归档索引。
 5. 未运行、账号阻塞和没有托管端等价观察面的项目明确保留，不把本地 Gate 改写成 hosted PASS。
 
 本计划完成与否不改变已经归档的核心实现事实；它只决定能否扩大 Static Assets / Service Binding 的

@@ -4,7 +4,7 @@
 
 性质：架构 Gate / disposable spike  
 后续阶段：P0 Workers、binding framework、Durable Objects  
-关联方案：[SQLite + workerd 单体平台方案](../open-compute-workerd-platform.md)
+关联方案：[SQLite + workerd 单体平台方案](open-compute-workerd-platform.md)
 
 ## 1. 结论先行
 

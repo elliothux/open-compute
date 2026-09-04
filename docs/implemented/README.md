@@ -4,6 +4,9 @@
 不是待执行任务清单，也不表示本次重新运行了测试，或当前工作树的全部未提交修改已经验收。
 阶段范围和限制以各自的验证记录为准。
 
+当前单机平台的已实现总架构见[单机 Cloudflare Workers Platform 总方案](open-compute-workerd-platform.md)；
+尚未取得的外部、长时、跨平台和发行资格统一列在[待验收索引](../acceptance/README.md)。
+
 ## 归档索引
 
 | 阶段 | 设计 | 完成依据与限制 |
@@ -17,7 +20,7 @@
 | P0.6 | [D1](p0-6-d1.md) | 文内记录 D1 实现、三轮 Gate、相关回归和完整检查通过 |
 | P0.7 | [Durable Objects](p0-7-durable-objects.md) | 文内记录三轮 Gate 通过；不据此宣称支持 hibernatable WebSocket |
 | P0.8 | [Scheduler 与 DO Alarms](p0-8-scheduler-do-alarms.md) | 文内记录 alarm、恢复矩阵及 P0 回归通过 |
-| P1.0–P1.7 | [平台加固](p1-platform-hardening.md) | [本地结果](p1-results.md)：核心实现与本地回归完成；长时 soak/发行演练见独立的[剩余验收计划](../p1-release-acceptance.md) |
+| P1.0–P1.7 | [平台加固](p1-platform-hardening.md) | [本地结果](p1-results.md)：核心实现与本地回归完成；长时 soak/发行演练见独立的[剩余验收计划](../acceptance/p1-release-acceptance.md) |
 | P1.8 | [WebSocket hibernation 调查](p1-8-results.md) | 调查完成，结论 No-Go；不宣称 hibernation 功能已实现 |
 | P2.1 | [Scheduler 多 Workload 内核](p2-1-scheduler-hardening.md) | 文内记录 aggregate 与 coverage 通过；不扩大 P1.8 支持范围 |
 | P2.2 | [Queue Producer](p2-2-queue-producer.md) | [本地结果](p2-2-results.md)：Conditional Go，DO producer 按 output-gate 限制拒绝 |
@@ -44,30 +47,16 @@
 | 2026-09-01 | [Cloudflare Runtime 全量兼容改造](cloudflare-runtime-compatibility.md)、[P3.4 conformance](p3-4-cloudflare-conformance.md) | [完成报告](cloudflare-runtime-compatibility-results.md)：2,097 个 stable members、1,585 `supported`、512 `supported_with_deviation`、`blocked=0`；193/193 JS、802/802 单轮 workspace cases、90.17% Rust 行覆盖率；七项 hosted differential 已通过，Workflow hosted qualification 与正式发行/跨平台资格仍为明确限制 |
 | 2026-09-01 | [P4 Next.js/vinext 应用资格验证](p4-nextjs-vinext-qualification.md)、[P4.0 build reproducibility 调查](p4-nextjs-vinext-p4-0-results.md)、[结果](p4-nextjs-vinext-results.md) | 原跨 source-build Hard Gate 已按 Cloudflare Worker Version/Deployment 语义撤回；固定 artifact 的 Wrangler/importer inventory 79/79 对齐，20/20 selected mandatory 通过，Cloudflare/open-compute runner 各 15/15，双端精确清理完成；197/197 JS、90.17% Rust 行覆盖率、最终 894/894 case executions 通过；Application Go 不替代 Platform verdict |
 | 2026-09-01 | [`ocd` Day1 命名改造](ocd-day1-rename.md) | [完成记录](ocd-day1-rename-results.md)：唯一 production binary/CLI/daemon 为 `ocd`，project/docs origin 为 `https://open-compute.dev`，launchd identity 为 `dev.open-compute.ocd`；198/198 JS、90.18% Rust 行覆盖率、完整单轮 Gate 40/40 targets 与 802/802 cases 通过；追加时序轮按用户指定不作为完成条件，未执行正式发行或跨平台验证 |
-| 2026-09-03 | [Operator API 与可选 Dashboard](operator-api-dashboard.md) | **Implementation GO**（[`CR.md`](../../CR.md)）：真实 `dev-test.sh`/`ocd` 与 Cloudflare Dashboard 对比完成；服务端 catalog filter/sort、全产品管理闭环、Kumo/响应式、Playwright **31/31**、live SDK **12/12**、Rust 行覆盖率 **90.14%**；用户指定的最终单轮 Gate **42/42 targets、835/835 cases**，详见[完成记录](operator-api-dashboard-results.md) |
-| 2026-09-02 | [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md)、[P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md) | [完成记录](p5-vectorize-ai-search-results.md)：Vectorize、AI provider/tokenizer、AI Search、Markdown Conversion 与 13-format parser 已进入唯一 production path；90.0526% Rust 行覆盖率、最终 P5 单轮 1/1 与 Cloudflare contract 14/14 通过；跨平台、完整 parser process/release matrix 与托管 rich-document differential 见独立[验收计划](../p5-release-acceptance.md) |
-| 2026-09-03 | [P6 Cloudflare v4 API 与固定客户端兼容](p6-cloudflare-v4-wrangler-compatibility.md) | [完成记录](p6-cloudflare-v4-wrangler-compatibility-results.md)：唯一 `/client/v4` 管理面、固定 Wrangler/官方 SDK upload、资源命令、Service `props` 与既有产品 authority 已接入当前 Day1 production path；实际本地检查和限制以完成记录为准。托管端因无 credentials 保留在独立[差分验收](../p6-cloudflare-v4-differential-acceptance.md)，workspace/coverage 总验收按阶段约定延后到 P9，不在 P6 记录中虚构 PASS |
-| 2026-09-04 | [P7 Workers Logs 与 realtime tail](p7-workers-logs-realtime-tail.md) | **Implementation GO**：固定 Wrangler Script Tails、Cloudflare SDK Telemetry、Dashboard Live Tail、独立有界日志 authority、权限/审计与重启恢复进入唯一 Day1 production path；214/214 JS、14/14 conformance、canonical Clippy、106,499/118,313（90.0146%）Rust 行覆盖率及最终单轮 49/49 targets、1,107/1,107 cases 通过。`cf-compatibility-check` 无阻断项；hosted 长尾、性能和跨平台资格保留在独立[扩展验收](../p7-observability-extended-acceptance.md) |
+| 2026-09-03 | [Operator API 与可选 Dashboard](operator-api-dashboard.md) | **Implementation GO**：真实 `dev-test.sh`/`ocd` 与 Cloudflare Dashboard 对比完成；服务端 catalog filter/sort、全产品管理闭环、Kumo/响应式、Playwright **31/31**、live SDK **12/12**、Rust 行覆盖率 **90.14%**；用户指定的最终单轮 Gate **42/42 targets、835/835 cases**，详见[完成记录](operator-api-dashboard-results.md) |
+| 2026-09-02 | [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md)、[P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md) | [完成记录](p5-vectorize-ai-search-results.md)：Vectorize、AI provider/tokenizer、AI Search、Markdown Conversion 与 13-format parser 已进入唯一 production path；90.0526% Rust 行覆盖率、最终 P5 单轮 1/1 与 Cloudflare contract 14/14 通过；跨平台、完整 parser process/release matrix 与托管 rich-document differential 见独立[验收计划](../acceptance/p5-release-acceptance.md) |
+| 2026-09-03 | [P6 Cloudflare v4 API 与固定客户端兼容](p6-cloudflare-v4-wrangler-compatibility.md) | [完成记录](p6-cloudflare-v4-wrangler-compatibility-results.md)：唯一 `/client/v4` 管理面、固定 Wrangler/官方 SDK upload、资源命令、Service `props` 与既有产品 authority 已接入当前 Day1 production path；实际本地检查和限制以完成记录为准。托管端因无 credentials 保留在独立[差分验收](../acceptance/p6-cloudflare-v4-differential-acceptance.md)，workspace/coverage 总验收按阶段约定延后到 P10，不在 P6 记录中虚构 PASS |
+| 2026-09-04 | [P7 Workers Logs 与 realtime tail](p7-workers-logs-realtime-tail.md) | **Implementation GO**：固定 Wrangler Script Tails、Cloudflare SDK Telemetry、Dashboard Live Tail、独立有界日志 authority、权限/审计与重启恢复进入唯一 Day1 production path；214/214 JS、14/14 conformance、canonical Clippy、106,499/118,313（90.0146%）Rust 行覆盖率及最终单轮 49/49 targets、1,107/1,107 cases 通过。`cf-compatibility-check` 无阻断项；hosted 长尾、性能和跨平台资格保留在独立[扩展验收](../acceptance/p7-observability-extended-acceptance.md) |
 
-## 仍在维护或尚未完成
+## 关联的未完成工作
 
-- [P1 剩余验收](../p1-release-acceptance.md)：仅追踪尚无完成证据的长时 soak 与发行演练，
-  不把已完成的 P1 核心实现重新列为待实现。
-- [平台方案](../open-compute-workerd-platform.md)：核心 Day1 实现与 P3 本地 conformance 已完成；该文档
-  继续维护当前架构、能力边界和仍未结束的 hosted/release qualification，因此暂留 active 根目录。
-- [Static Assets / Service Binding 远端资格](../p3-assets-service-bindings-acceptance.md)：两项核心设计已
-  归档，只继续追踪尚未执行的 direct Cloudflare differential。
-- [Cloudflare Workflow 远端 differential](../cloudflare-runtime-compatibility-acceptance.md)：本地 Day1
-  runtime 与七项 hosted fixture 已完成，只追踪因 Wrangler OAuth `10000` 未运行的 Workflow 托管端资格。
-- [Runtime 跨平台发行验收](../runtime-layout-release-acceptance.md)：CI、特权 egress 和正式发行资格尚未执行，不回写为本机已通过。
-- [P5 剩余发行验收](../p5-release-acceptance.md)：只追踪可复现 benchmark report、timing-three、四平台、
-  完整 parser process matrix、托管 rich-document differential 与正式 package，不把 P5 core 重新列为待实现。
-- [P6 远端差分验收](../p6-cloudflare-v4-differential-acceptance.md)：P6 本地核心已经归档；当前没有
-  Cloudflare credentials，新管理资源、官方 SDK 与 Assets 的托管端证据仍未取得。
-- [P7 observability 扩展差分与发行验收](../p7-observability-extended-acceptance.md)：P7 固定客户端核心已归档；
-  repository acceptance 已完成，hosted TTL/error/topology 长尾、性能水位与跨平台发行资格尚未完成。
-- active 文档的完整分类见 [docs 索引](../README.md)。
-- 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
+本目录不保存活动任务清单。核心实现完成后仍缺的 qualification 统一见
+[待验收索引](../acceptance/README.md)；真正待实现的设计见 [docs 索引](../README.md)；测试、能力偏差、
+fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 
 ## 使用规则
 

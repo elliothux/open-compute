@@ -92,7 +92,7 @@ JSON parser 同时接受多个猜测版本。
 - Telemetry query 的 required/default/null/empty 字段以及 Workers Logs 对 `console.*` 参数的 `source` 映射。
 
 上述剩余托管端长尾不阻塞本文声明的固定客户端子集；它们由
-[`P7 observability 扩展差分与发行验收`](../p7-observability-extended-acceptance.md)继续跟踪，不能据此扩大 capability。
+[`P7 observability 扩展差分与发行验收`](../acceptance/p7-observability-extended-acceptance.md)继续跟踪，不能据此扩大 capability。
 
 上述待冻结项不允许用“近似兼容”补齐；未由当前 fixture 和固定客户端证明的字段、event type 或 error variant 保持
 `unsupported`，不扩大已声明的固定客户端子集。
@@ -799,7 +799,7 @@ field、endpoint、view、operator 和 CLI flag 各自有 `supported`、`support
 
 - restart、quota/retention、bounded queue、client admission/backpressure 和独立 DB failure isolation 进入本地 Gate；
 - 最大 7 天 synthetic retention、完整性能水位、更多 hosted error/expiry differential 与跨平台发行矩阵转入独立
-  [P7 扩展验收](../p7-observability-extended-acceptance.md)，不扩大当前 capability；
+  [P7 扩展验收](../acceptance/p7-observability-extended-acceptance.md)，不扩大当前 capability；
 - 更新 capabilities、OpenAPI、Dashboard、runbook、support bundle redaction 和 compatibility matrix；
 - 完成第 15 节 Gate 后，本文才可归档。
 
@@ -927,7 +927,7 @@ hosted 长尾、跨平台和性能资格由独立 active acceptance 跟踪，不
   `OC-OBSERVABILITY-001` 精确登记。
 
 仍未完成的 hosted Script Tail 长尾、nested Service/DO/Workflow/Queue 托管端 attribution differential、参数化性能水位和
-跨平台发行资格记录在 [`P7 observability 扩展差分与发行验收`](../p7-observability-extended-acceptance.md)。这些限制不撤销
+跨平台发行资格记录在 [`P7 observability 扩展差分与发行验收`](../acceptance/p7-observability-extended-acceptance.md)。这些限制不撤销
 本地 repository acceptance，也不允许把完整 hosted parity 或 release qualification 写成已通过。
 
 ## 18. 官方参考

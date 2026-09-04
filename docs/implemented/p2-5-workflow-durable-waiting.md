@@ -20,7 +20,7 @@
 - 保留 DO 内 Workflow mutation fail-closed，以及 G0 精确 `D-abort`（三轮 `abortEvents 0 -> 0`）
   限制；未扩大 allowlist。本文其余章节继续定义已验收的支持面与不支持 API。
 
-前置阅读：[总方案](../open-compute-workerd-platform.md)、[P2.4 设计](./p2-4-workflow-core.md)、
+前置阅读：[总方案](open-compute-workerd-platform.md)、[P2.4 设计](./p2-4-workflow-core.md)、
 [P2.3 Gate 结果](./p2-3-gate-results.md)、[P2.4 Gate 结果](./p2-4-gate-results.md)、
 [Gate 验证节奏](../references/testing.md)。
 

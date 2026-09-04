@@ -3,7 +3,7 @@
 > 状态：**Local core implementation archived / release acceptance active**，2026-09-02。本文记录
 > [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md) 已落地的文档解析阶段；本机验收数据见
 > [完成记录](p5-vectorize-ai-search-results.md)，四平台发行、timing-three、完整 parser process fault/soak 与
-> 托管 rich-document differential 见仍在维护的[发行验收计划](../p5-release-acceptance.md)。
+> 托管 rich-document differential 见仍在维护的[发行验收计划](../acceptance/p5-release-acceptance.md)。
 
 当前实现已经落地 `crates/document-parser`、`ocd __document-parser-v1` 隐藏 child、OCDP v1 frame、
 标准 `[ai]` builtin、`env.AI.toMarkdown()` direct/handle overload、13 种实际 admission、40-file 固定公开

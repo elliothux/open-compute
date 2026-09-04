@@ -3,7 +3,7 @@
 记录日期：2026-08-28。
 
 状态：2026-08-29 本机实现与验收完成；跨平台、特权 egress 和正式发行资格另由
-[发行验收计划](../runtime-layout-release-acceptance.md)跟踪。当前命令与并发规则见
+[发行验收计划](../acceptance/runtime-layout-release-acceptance.md)跟踪。当前命令与并发规则见
 [测试节奏](../references/testing.md)，实际测量、失败修正和三轮证据见[实测记录](runtime-and-test-layout-results.md)。
 
 ## 实现
