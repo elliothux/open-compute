@@ -28,9 +28,9 @@
     "workersScriptsResourceSha256": "1894b92c2188e6e14a793488621225be9ec4a8c7d28900b69f2460b841df8d3b"
   },
   "subsetPath": "openapi/cloudflare-v4-subset.json",
-  "subsetSha256": "486e41018352aa664ef1035c75e13b69ee3bbe17bf3cf9c1b5b1267e738484e3",
-  "subsetManifestSha256": "d6ac34bfa39a0b5c3da303f5a15d305f1440ff1a2ae297976b74b08e5ba88c4a",
-  "extensionSha256": "5e394ae27d3b743fa316444b48fc0cf8dd78619f398f5bf417d5bb43c2b87ee1",
-  "capabilitySha256": "ea4230ac2c065a0e17f433d7bf7ebcdcae0e9a1c2a3e0c51b21dc4b9d351948b",
+  "subsetSha256": "c3d36914cbcd959a12c3700c4abc9157c85ad573cb397e6c07780243c430483e",
+  "subsetManifestSha256": "756ad4a402cc10daf42bfe52c1593dd56d4199b3a8e57a3710cf6bb2e7096c61",
+  "extensionSha256": "09ec878f8739628cf3124334ccbfa05c989ad6594aa28b8e437994bf1ece744a",
+  "capabilitySha256": "0a08a709e14b5dbe5be8f942bdf282c71e63fd34dea64d84125b6cfd9477e649",
   "capabilitySchemaSha256": "26990e266bd32d357c97e5299c7e4a205d6042e3c21266c042bc193c80829bf6"
 }

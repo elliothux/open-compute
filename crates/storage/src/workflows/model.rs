@@ -91,6 +91,10 @@ impl std::str::FromStr for WorkflowReservationState {
     }
 }
 
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;
+
 /// Fenced ownership returned to the exact operation that reserved a Workflow definition/class.
 #[derive(Clone, Debug)]
 pub struct WorkflowDefinitionReservation {

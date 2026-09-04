@@ -39,9 +39,8 @@ pub(super) async fn upload(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let service = match api.ai_search() {
-        Some(value) => value,
-        None => return error_response(V4Error::Unavailable, context.request_id()),
+    let Some(service) = api.ai_search() else {
+        return error_response(V4Error::Unavailable, context.request_id());
     };
     match service
         .official_upload(
@@ -156,9 +155,8 @@ pub(super) async fn download(
     if let Err(error) = require_no_query(&request) {
         return error_response(error, context.request_id());
     }
-    let service = match api.ai_search() {
-        Some(value) => value,
-        None => return error_response(V4Error::Unavailable, context.request_id()),
+    let Some(service) = api.ai_search() else {
+        return error_response(V4Error::Unavailable, context.request_id());
     };
     let mut response = match service
         .official_download(
@@ -173,9 +171,8 @@ pub(super) async fn download(
         Ok(value) => value,
         Err(error) => return error_response(V4Error::from(&error), context.request_id()),
     };
-    let request_id = match HeaderValue::from_str(&context.request_id().to_string()) {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::Internal, context.request_id()),
+    let Ok(request_id) = HeaderValue::from_str(&context.request_id().to_string()) else {
+        return error_response(V4Error::Internal, context.request_id());
     };
     response.headers_mut().insert(REQUEST_ID_HEADER, request_id);
     response

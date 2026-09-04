@@ -1219,6 +1219,13 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
     assert!(format!("{:?}", snapshot.modules[0]).contains("RuntimeModule"));
     assert_eq!(snapshot.modules.len(), 1);
     assert_eq!(snapshot.vars["MODE"], "production");
+    let observability = snapshot.observability.as_ref().unwrap();
+    assert_eq!(observability.account_id, account.to_string());
+    assert_eq!(observability.worker_id, worker.id.to_string());
+    assert_eq!(observability.version_id, version_id.to_string());
+    assert_eq!(observability.script_name, worker.name);
+    assert_eq!(observability.observability_generation, 1);
+    assert!(observability.enabled && observability.logs_enabled && observability.persist);
     assert_eq!(snapshot.services.len(), 1);
     assert_eq!(snapshot.services[0].descriptor.name, "CATALOG");
     assert_eq!(snapshot.services[0].descriptor.target_worker_id, target.id);
@@ -1240,6 +1247,11 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         std::str::from_utf8(payload.expose())
             .unwrap()
             .contains("pipeline-secret-value")
+    );
+    assert!(
+        std::str::from_utf8(payload.expose())
+            .unwrap()
+            .contains("observabilityGeneration")
     );
     assert!(!format!("{payload:?}").contains("pipeline-secret-value"));
     assert_eq!(
@@ -1284,6 +1296,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         .await
         .unwrap();
     assert!(probe.secrets.is_empty());
+    assert!(probe.observability.is_none());
     assert_eq!(probe.modules, snapshot.modules);
     assert_eq!(
         source

@@ -19,6 +19,7 @@ import {
   tenantGlobalOutbound,
   tenantEnv,
 } from "../loader/host.js";
+import { collectableWorkerCode } from "../observability/collector.js";
 
 const INTERNAL = [
   "x-open-compute-binding-token",
@@ -371,6 +372,8 @@ export class DoHost extends DurableObject<DoHostEnv> {
     if (snapshot.routeGeneration !== authority.routeGeneration) {
       throw bindingError("DO_VERSION_STALE");
     }
+    const observabilityGeneration = snapshot.observability?.observabilityGeneration ?? 0;
+    envelope.runtimeKey += `/o/${observabilityGeneration}`;
     const built = modulesFor(snapshot, false, entrypoint, true);
     const code = {
       ...lockWorkerCode(this.env),
@@ -405,7 +408,8 @@ export class DoHost extends DurableObject<DoHostEnv> {
         enumerable: true,
       },
     });
-    const loaded = this.env.LOADER.get(envelope.runtimeKey, () => code);
+    const loaded = this.env.LOADER.get(envelope.runtimeKey, () =>
+      collectableWorkerCode(code, this.ctx, snapshot.observability));
     return loaded.getDurableObjectClass<LoadedDurableObject>(entrypoint);
   }
 

@@ -76,6 +76,7 @@ export interface CapabilityInventory {
   schema_version: 1;
   source: InventorySource;
   managementApi: Record<string, unknown>;
+  workersObservability: Record<string, unknown>;
   wrangler: Record<string, unknown>;
   products: Record<string, InventoryProduct>;
 }
@@ -329,6 +330,7 @@ export async function generateInventoryWithCoverage(): Promise<{ inventory: Capa
         ast_sha256: fingerprint.sha256,
       },
       managementApi: record(p6.managementApi, "P6 managementApi"),
+      workersObservability: record(p6.workersObservability, "P6 workersObservability"),
       wrangler: record(p6.wrangler, "P6 wrangler"),
       products,
     },

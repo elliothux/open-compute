@@ -47,6 +47,7 @@
 | 2026-09-03 | [Operator API 与可选 Dashboard](operator-api-dashboard.md) | **Implementation GO**（[`CR.md`](../../CR.md)）：真实 `dev-test.sh`/`ocd` 与 Cloudflare Dashboard 对比完成；服务端 catalog filter/sort、全产品管理闭环、Kumo/响应式、Playwright **31/31**、live SDK **12/12**、Rust 行覆盖率 **90.14%**；用户指定的最终单轮 Gate **42/42 targets、835/835 cases**，详见[完成记录](operator-api-dashboard-results.md) |
 | 2026-09-02 | [P5 Vectorize 与 AI Search](p5-vectorize-ai-search.md)、[P5.7 Xberg 文档解析](p5-7-xberg-document-parsing.md) | [完成记录](p5-vectorize-ai-search-results.md)：Vectorize、AI provider/tokenizer、AI Search、Markdown Conversion 与 13-format parser 已进入唯一 production path；90.0526% Rust 行覆盖率、最终 P5 单轮 1/1 与 Cloudflare contract 14/14 通过；跨平台、完整 parser process/release matrix 与托管 rich-document differential 见独立[验收计划](../p5-release-acceptance.md) |
 | 2026-09-03 | [P6 Cloudflare v4 API 与固定客户端兼容](p6-cloudflare-v4-wrangler-compatibility.md) | [完成记录](p6-cloudflare-v4-wrangler-compatibility-results.md)：唯一 `/client/v4` 管理面、固定 Wrangler/官方 SDK upload、资源命令、Service `props` 与既有产品 authority 已接入当前 Day1 production path；实际本地检查和限制以完成记录为准。托管端因无 credentials 保留在独立[差分验收](../p6-cloudflare-v4-differential-acceptance.md)，workspace/coverage 总验收按阶段约定延后到 P9，不在 P6 记录中虚构 PASS |
+| 2026-09-04 | [P7 Workers Logs 与 realtime tail](p7-workers-logs-realtime-tail.md) | **Implementation GO**：固定 Wrangler Script Tails、Cloudflare SDK Telemetry、Dashboard Live Tail、独立有界日志 authority、权限/审计与重启恢复进入唯一 Day1 production path；214/214 JS、14/14 conformance、canonical Clippy、106,499/118,313（90.0146%）Rust 行覆盖率及最终单轮 49/49 targets、1,107/1,107 cases 通过。`cf-compatibility-check` 无阻断项；hosted 长尾、性能和跨平台资格保留在独立[扩展验收](../p7-observability-extended-acceptance.md) |
 
 ## 仍在维护或尚未完成
 
@@ -63,6 +64,8 @@
   完整 parser process matrix、托管 rich-document differential 与正式 package，不把 P5 core 重新列为待实现。
 - [P6 远端差分验收](../p6-cloudflare-v4-differential-acceptance.md)：P6 本地核心已经归档；当前没有
   Cloudflare credentials，新管理资源、官方 SDK 与 Assets 的托管端证据仍未取得。
+- [P7 observability 扩展差分与发行验收](../p7-observability-extended-acceptance.md)：P7 固定客户端核心已归档；
+  repository acceptance 已完成，hosted TTL/error/topology 长尾、性能水位与跨平台发行资格尚未完成。
 - active 文档的完整分类见 [docs 索引](../README.md)。
 - 测试、能力偏差、fuzz 所有权、部署和运维手册统一放在 [docs/references](../references/README.md)。
 

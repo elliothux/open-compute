@@ -2,6 +2,7 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const internalToken :Text = "__OPEN_COMPUTE_INTERNAL_TOKEN__";
 const bindingToken :Text = "__OPEN_COMPUTE_BINDING_TOKEN__";
+const observabilityToken :Text = "__OPEN_COMPUTE_OBSERVABILITY_TOKEN__";
 const doMaxObjectNameBytes :Text = "__OPEN_COMPUTE_DO_MAX_OBJECT_NAME_BYTES__";
 const doMaxFetchBodyBytes :Text = "__OPEN_COMPUTE_DO_MAX_FETCH_BODY_BYTES__";
 const doDispatchTimeoutMs :Text = "__OPEN_COMPUTE_DO_DISPATCH_TIMEOUT_MS__";
@@ -22,6 +23,7 @@ const config :Workerd.Config = (
     # injects a generation-local loopback listener with --external-addr.
     (name = "runtime-source", external = (http = ())),
     (name = "binding-backend", external = (http = ())),
+    (name = "observability-backend", external = (http = ())),
     (name = "internet", network = (
       allow = ["public"],
       tlsOptions = (trustBrowserCas = true),
@@ -59,6 +61,7 @@ const loaderHostWorker :Workerd.Worker = (
     (name = "ai/host.js", esModule = embed "dist/ai/host.js"),
     (name = "vectorize/host.js", esModule = embed "dist/vectorize/host.js"),
     (name = "ai-search/host.js", esModule = embed "dist/ai-search/host.js"),
+    (name = "observability/collector.js", esModule = embed "dist/observability/collector.js"),
     (name = "services/transport.js", esModule = embed "dist/services/transport.js"),
     (name = "assets/router.js", esModule = embed "dist/assets/router.js"),
     (name = "workflows/host.js", esModule = embed "dist/workflows/host.js"),
@@ -112,6 +115,8 @@ const loaderHostWorker :Workerd.Worker = (
     (name = "RUNTIME_SOURCE", service = "runtime-source"),
     (name = "BINDING_BACKEND", service = "binding-backend"),
     (name = "BINDING_BACKEND_TOKEN", text = .bindingToken),
+    (name = "OBSERVABILITY_BACKEND", service = "observability-backend"),
+    (name = "OBSERVABILITY_BACKEND_TOKEN", text = .observabilityToken),
     (name = "INTERNAL_TOKEN", text = .internalToken),
     (name = "DO_ROUTER", service = "do-router"),
     (name = "PUBLIC_NETWORK", service = "internet"),
@@ -139,6 +144,7 @@ const doHostWorker :Workerd.Worker = (
     (name = "ai/host.js", esModule = embed "dist/ai/host.js"),
     (name = "vectorize/host.js", esModule = embed "dist/vectorize/host.js"),
     (name = "ai-search/host.js", esModule = embed "dist/ai-search/host.js"),
+    (name = "observability/collector.js", esModule = embed "dist/observability/collector.js"),
     (name = "services/transport.js", esModule = embed "dist/services/transport.js"),
     (name = "assets/router.js", esModule = embed "dist/assets/router.js"),
     (name = "workflows/host.js", esModule = embed "dist/workflows/host.js"),
@@ -192,6 +198,8 @@ const doHostWorker :Workerd.Worker = (
     (name = "RUNTIME_SOURCE", service = "runtime-source"),
     (name = "BINDING_BACKEND", service = "binding-backend"),
     (name = "BINDING_BACKEND_TOKEN", text = .bindingToken),
+    (name = "OBSERVABILITY_BACKEND", service = "observability-backend"),
+    (name = "OBSERVABILITY_BACKEND_TOKEN", text = .observabilityToken),
     (name = "INTERNAL_TOKEN", text = .internalToken),
     (name = "DO_ROUTER", service = "do-router"),
     (name = "DO_HOST", durableObjectNamespace = "DoHost"),

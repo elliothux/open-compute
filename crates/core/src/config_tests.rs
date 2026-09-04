@@ -40,6 +40,15 @@ fn documented_defaults_validate() {
 }
 
 #[test]
+fn checked_in_default_config_matches_the_current_schema() {
+    let source = include_str!("../../../share/default-config.toml");
+    let config: PlatformConfig = toml::from_str(source).expect("checked-in default config");
+    config
+        .validate()
+        .expect("checked-in default config validates");
+}
+
+#[test]
 fn unknown_fields_are_rejected() {
     let err = parse_err("[server]\nunknown = true\n");
     assert_eq!(err.code(), ErrorCode::ConfigParseFailed);

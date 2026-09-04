@@ -4,6 +4,7 @@ import type { BindingEnv, ServiceBindingProps } from "../bindings/protocol.js";
 import { tenantEnv } from "../loader/bindings.js";
 import { modulesFor } from "../loader/modules.js";
 import type { LoaderEnv, RuntimeSnapshot } from "../loader/protocol.js";
+import { collectableWorkerCode } from "../observability/collector.js";
 import {
   inboundSocketTargetAddress,
   tunnelSockets,
@@ -401,21 +402,25 @@ async function loadedServiceTarget(
   }
   if (snapshot.contentKind !== "worker") throw bindingError("SERVICE_ENTRYPOINT_NOT_FOUND");
   const entrypoint = admission.target.entrypoint;
-  const runtimeKey = `service/${admission.target.loaderKey}/${admission.target.workerCodeSha256}/g/${admission.target.routeGeneration}/${entrypoint || "default"}`;
-  const code = await assembleOnce(runtimeKey, async () => {
-    const built = modulesFor(snapshot, false, entrypoint);
-    const versionId = admission.target.loaderKey.split("/")[2]!;
-    return {
-      ...lockWorkerCode(env),
-      mainModule: built.mainModule,
-      modules: built.modules,
-      env: tenantEnv(
-        snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
-      ),
-      globalOutbound: tenantGlobalOutbound(env, false),
-    };
+  const observabilityGeneration = snapshot.observability?.observabilityGeneration ?? 0;
+  const runtimeKey = `service/${admission.target.loaderKey}/${admission.target.workerCodeSha256}`
+    + `/g/${admission.target.routeGeneration}/o/${observabilityGeneration}/${entrypoint || "default"}`;
+  const stub = env.LOADER.get(runtimeKey, async () => {
+    const code = await assembleOnce(runtimeKey, async () => {
+      const built = modulesFor(snapshot, false, entrypoint);
+      const versionId = admission.target.loaderKey.split("/")[2]!;
+      return {
+        ...lockWorkerCode(env),
+        mainModule: built.mainModule,
+        modules: built.modules,
+        env: tenantEnv(
+          snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+        ),
+        globalOutbound: tenantGlobalOutbound(env, false),
+      };
+    });
+    return collectableWorkerCode(code, ctx, snapshot.observability);
   });
-  const stub = env.LOADER.get(runtimeKey, () => code);
   const runtimeEntrypoint = entrypoint ?? "__OpenComputeDefaultService";
   return {
     snapshot,

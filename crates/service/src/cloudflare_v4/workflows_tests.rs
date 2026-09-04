@@ -474,6 +474,83 @@ async fn instance_create_batch_list_detail_status_and_event_share_authority() {
         .await;
     assert_eq!(event.0, StatusCode::OK);
     assert_eq!(event.1["result"]["instanceId"], "official-one");
+    let resumed = f
+        .request(
+            "PATCH",
+            &f.path("/orders/instances/official-one/status"),
+            Some("deployer-token"),
+            Some(serde_json::json!({"status":"resume"})),
+        )
+        .await;
+    assert_eq!(resumed.0, StatusCode::OK);
+    let simple = f
+        .request(
+            "GET",
+            &f.path("/orders/instances/official-one?simple=true&order=desc"),
+            Some("read-token"),
+            None,
+        )
+        .await;
+    assert_eq!(simple.0, StatusCode::OK);
+    assert_eq!(simple.1["result"]["steps"], serde_json::json!([]));
+
+    for id in ["rollback-one", "restart-one", "terminate-one"] {
+        assert_eq!(
+            f.request(
+                "POST",
+                &f.path("/orders/instances"),
+                Some("deployer-token"),
+                Some(serde_json::json!({"instance_id":id})),
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+    assert_eq!(
+        f.request(
+            "PATCH",
+            &f.path("/orders/instances/rollback-one/status"),
+            Some("deployer-token"),
+            Some(serde_json::json!({"status":"terminate","rollback":true})),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.request(
+            "PATCH",
+            &f.path("/orders/instances/restart-one/status"),
+            Some("deployer-token"),
+            Some(serde_json::json!({"status":"restart"})),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.request(
+            "PATCH",
+            &f.path("/orders/instances/terminate-one/status"),
+            Some("deployer-token"),
+            Some(serde_json::json!({"status":"terminate"})),
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.request(
+            "GET",
+            &f.path("/orders/instances?status=terminated&date_start=1970-01-01T00%3A00%3A00Z&date_end=2100-01-01T00%3A00%3A00Z"),
+            Some("read-token"),
+            None,
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
     assert_eq!(
         f.request(
             "PATCH",
@@ -521,4 +598,176 @@ async fn content_type_query_and_delete_boundaries_are_strict() {
         .await;
     assert_eq!(deleted.0, StatusCode::OK);
     assert_eq!(deleted.1["result"]["status"], "ok");
+}
+
+#[tokio::test]
+async fn instance_routes_reject_unsupported_and_malformed_variants_before_mutation() {
+    let f = fixture();
+    let instances = f.path("/orders/instances");
+    for (path, body, expected) in [
+        (
+            format!("{instances}?unexpected=true"),
+            serde_json::json!({"instance_id":"query"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            instances.clone(),
+            serde_json::json!({"instance_id":"located","location_hint":"wnam"}),
+            StatusCode::NOT_IMPLEMENTED,
+        ),
+        (
+            instances.clone(),
+            serde_json::json!({"instance_id":format!("cf_{}", "a".repeat(64))}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            instances.clone(),
+            serde_json::json!({
+                "instance_id":"retention",
+                "instance_retention":{"success_retention":"not-a-duration"}
+            }),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        assert_eq!(
+            f.request("POST", &path, Some("deployer-token"), Some(body))
+                .await
+                .0,
+            expected
+        );
+    }
+    assert_eq!(
+        f.request(
+            "POST",
+            &format!("{instances}/batch"),
+            Some("deployer-token"),
+            Some(serde_json::json!([])),
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        f.request(
+            "POST",
+            &format!("{instances}/batch"),
+            Some("deployer-token"),
+            Some(serde_json::json!([{"location_hint":"wnam"}])),
+        )
+        .await
+        .0,
+        StatusCode::NOT_IMPLEMENTED
+    );
+    assert_eq!(
+        f.request(
+            "POST",
+            &instances,
+            None,
+            Some(serde_json::json!({"instance_id":"unauthorized"})),
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    for id in ["page-one", "page-two", "page-three"] {
+        assert_eq!(
+            f.request(
+                "POST",
+                &instances,
+                Some("deployer-token"),
+                Some(serde_json::json!({"instance_id":id})),
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+    let first = f
+        .request(
+            "GET",
+            &format!("{instances}?per_page=1&direction=desc"),
+            Some("read-token"),
+            None,
+        )
+        .await;
+    assert_eq!(first.0, StatusCode::OK);
+    let cursor = first.1["result_info"]["cursor"].as_str().unwrap();
+    assert_eq!(
+        f.request(
+            "GET",
+            &format!("{instances}?per_page=1&direction=desc&cursor={cursor}"),
+            Some("read-token"),
+            None,
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.request(
+            "GET",
+            &format!("{instances}?page=2&per_page=1&direction=asc"),
+            Some("read-token"),
+            None,
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.request(
+            "GET",
+            &format!("{instances}/page-one?simple=invalid"),
+            Some("read-token"),
+            None,
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        f.request(
+            "PATCH",
+            &format!("{instances}/page-one/status?unexpected=true"),
+            Some("deployer-token"),
+            Some(serde_json::json!({"status":"pause"})),
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        f.request(
+            "PATCH",
+            &format!("{instances}/page-one/status"),
+            Some("deployer-token"),
+            Some(serde_json::json!({"status":"invalid"})),
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        f.request(
+            "POST",
+            &format!("{instances}/page-one/events/bad%20event"),
+            Some("deployer-token"),
+            Some(serde_json::json!({})),
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        f.request(
+            "POST",
+            &format!("{instances}/page-one/events/event"),
+            Some("deployer-token"),
+            Some(serde_json::json!(true)),
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
 }

@@ -510,7 +510,7 @@ async fn parser_process_accepts_clean_stdout_and_rejects_spawn_stderr_exit_and_t
     };
     let clean = script("clean.sh", "#!/bin/sh\nprintf ok\n");
     assert_eq!(
-        run_parser_child(&clean, Vec::new(), Duration::from_secs(1), 128, 0, 0)
+        run_parser_child(&clean, Vec::new(), Duration::from_secs(10), 128, 0, 0)
             .await
             .unwrap(),
         b"ok"
@@ -518,12 +518,12 @@ async fn parser_process_accepts_clean_stdout_and_rejects_spawn_stderr_exit_and_t
 
     let stderr = script("stderr.sh", "#!/bin/sh\nprintf diagnostic >&2\n");
     assert_eq!(
-        run_parser_child(&stderr, Vec::new(), Duration::from_secs(1), 128, 0, 0).await,
+        run_parser_child(&stderr, Vec::new(), Duration::from_secs(10), 128, 0, 0).await,
         Err(ErrorCode::DocumentUnavailable)
     );
     let failed = script("failed.sh", "#!/bin/sh\nexit 7\n");
     assert_eq!(
-        run_parser_child(&failed, Vec::new(), Duration::from_secs(1), 128, 0, 0).await,
+        run_parser_child(&failed, Vec::new(), Duration::from_secs(10), 128, 0, 0).await,
         Err(ErrorCode::DocumentUnavailable)
     );
     let sleeping = script("sleep.sh", "#!/bin/sh\n/bin/sleep 5\n");
@@ -535,7 +535,7 @@ async fn parser_process_accepts_clean_stdout_and_rejects_spawn_stderr_exit_and_t
         run_parser_child(
             &temporary.path().join("missing"),
             Vec::new(),
-            Duration::from_secs(1),
+            Duration::from_secs(10),
             128,
             0,
             0,

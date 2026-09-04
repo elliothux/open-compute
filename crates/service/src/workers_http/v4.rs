@@ -28,6 +28,8 @@ pub(crate) mod model;
 pub(crate) mod multipart;
 #[path = "v4/mutations.rs"]
 mod mutations;
+#[path = "v4/observability.rs"]
+mod observability;
 #[path = "v4/projection.rs"]
 mod projection;
 #[path = "v4/query.rs"]
@@ -36,3 +38,4 @@ mod query;
 mod sdk_multipart;
 
 pub(crate) use handlers::router;
+pub(crate) use observability::signed_router;

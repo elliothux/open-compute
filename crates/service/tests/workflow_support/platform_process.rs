@@ -157,6 +157,8 @@ pub(crate) fn address() -> SocketAddr {
         .unwrap()
 }
 
+// This shared test-support module is compiled into gates that need only one listener.
+#[allow(dead_code)]
 pub(crate) fn distinct_addresses() -> (SocketAddr, SocketAddr) {
     let public = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let admin = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -239,8 +241,14 @@ pub(crate) fn config(
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
     let admin_token = root.join("admin.token");
+    let deployer_token = root.join("deployer.token");
+    let read_only_token = root.join("read-only.token");
     fs::write(&admin_token, b"workflow-admin\n").unwrap();
+    fs::write(&deployer_token, b"workflow-deployer\n").unwrap();
+    fs::write(&read_only_token, b"workflow-read-only\n").unwrap();
     fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&deployer_token, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&read_only_token, fs::Permissions::from_mode(0o600)).unwrap();
     let config = root.join("process.toml");
     fs::write(
         &config,
@@ -252,6 +260,12 @@ admin_bind = "{admin}"
 
 [server.admin_auth]
 file = "{admin_token}"
+
+[server.deployer_auth]
+file = "{deployer_token}"
+
+[server.read_only_auth]
+file = "{read_only_token}"
 
 [storage]
 data_dir = "{data_dir}"
@@ -277,6 +291,8 @@ recovery_backoff_ms = 100
             public = public,
             admin = admin,
             admin_token = admin_token.display(),
+            deployer_token = deployer_token.display(),
+            read_only_token = read_only_token.display(),
             data_dir = data.display(),
             master_key_file = data.join("keys/master.key").display(),
             endpoint = endpoint,

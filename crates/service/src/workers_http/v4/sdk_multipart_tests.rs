@@ -111,6 +111,84 @@ fn rejects_unknown_duplicate_and_ambiguous_sdk_fields() {
     }
 }
 
+#[test]
+fn rebuilds_nested_sdk_metadata_and_typed_binding_fields() {
+    let fields = [
+        ("metadata[main_module]", "index.js"),
+        ("metadata[body_part]", "body"),
+        ("metadata[keep_bindings][]", "plain_text"),
+        ("metadata[assets][jwt]", "token"),
+        (
+            "metadata[assets][config][html_handling]",
+            "auto-trailing-slash",
+        ),
+        ("metadata[assets][config][not_found_handling]", "404-page"),
+        ("metadata[assets][config][_redirects]", "redirects"),
+        ("metadata[assets][config][_headers]", "headers"),
+        ("metadata[assets][config][run_worker_first][]", "/api/*"),
+        ("metadata[assets][config][run_worker_first][]", "/admin/*"),
+        ("metadata[observability][enabled]", "true"),
+        ("metadata[cache_options][enabled]", "true"),
+        ("metadata[cache_options][cross_version_cache]", "false"),
+        ("metadata[exports][Counter][type]", "DurableObject"),
+        ("metadata[exports][Counter][state]", "active"),
+        ("metadata[exports][Counter][cache][enabled]", "true"),
+        ("metadata[bindings][][name]", "JSON"),
+        ("metadata[bindings][][type]", "json"),
+        ("metadata[bindings][][json][nested][enabled]", "yes"),
+        ("metadata[bindings][][json][items][]", "first"),
+        ("metadata[bindings][][json][items][]", "second"),
+        ("metadata[bindings][][name]", "SERVICE"),
+        ("metadata[bindings][][type]", "service"),
+        ("metadata[bindings][][service]", "target"),
+        ("metadata[bindings][][entrypoint]", "Handler"),
+        ("metadata[bindings][][props][region]", "local"),
+    ];
+    let mut parts = fields
+        .into_iter()
+        .map(|(name, value)| string_part(name, value.as_bytes()))
+        .collect::<Vec<_>>();
+    normalize_parts(&mut parts).unwrap();
+    let metadata: Value = serde_json::from_slice(
+        &parts
+            .iter()
+            .find(|part| part.name == "metadata")
+            .unwrap()
+            .bytes,
+    )
+    .unwrap();
+    assert_eq!(
+        metadata["assets"]["config"]["run_worker_first"][1],
+        "/admin/*"
+    );
+    assert_eq!(metadata["observability"]["enabled"], true);
+    assert_eq!(metadata["exports"]["Counter"]["cache"]["enabled"], true);
+    assert_eq!(metadata["bindings"][0]["json"]["items"][1], "second");
+    assert_eq!(metadata["bindings"][1]["props"]["region"], "local");
+
+    for fields in [
+        vec![("metadata[assets][config][run_worker_first]", "maybe")],
+        vec![("metadata[exports][][type]", "DurableObject")],
+        vec![("metadata[exports][Counter][cache][enabled]", "maybe")],
+        vec![
+            ("metadata[bindings][][name]", "X"),
+            ("metadata[bindings][][type]", "json"),
+            ("metadata[bindings][][json]", "true"),
+        ],
+        vec![
+            ("metadata[bindings][][name]", "X"),
+            ("metadata[bindings][][type]", "plain_text"),
+            ("metadata[bindings][][raw]", "maybe"),
+        ],
+    ] {
+        let mut parts = fields
+            .into_iter()
+            .map(|(name, value)| string_part(name, value.as_bytes()))
+            .collect();
+        assert!(normalize_parts(&mut parts).is_err());
+    }
+}
+
 #[tokio::test]
 async fn recovers_boundary_split_across_chunks_without_losing_bytes() {
     let boundary = "----open-compute-sdk-boundary";
@@ -175,13 +253,11 @@ async fn bounds_standard_boundaries_and_rejects_duplicate_content_types() {
 }
 
 async fn bounded_upload(request: Request) -> StatusCode {
-    let request = match normalize_request(request).await {
-        Ok(request) => request,
-        Err(_) => return StatusCode::BAD_REQUEST,
+    let Ok(request) = normalize_request(request).await else {
+        return StatusCode::BAD_REQUEST;
     };
-    let multipart = match Multipart::from_request(request, &()).await {
-        Ok(multipart) => multipart,
-        Err(_) => return StatusCode::BAD_REQUEST,
+    let Ok(multipart) = Multipart::from_request(request, &()).await else {
+        return StatusCode::BAD_REQUEST;
     };
     match parse_worker_upload(multipart, BundleLimits::default()).await {
         Ok(_) => StatusCode::NO_CONTENT,

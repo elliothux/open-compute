@@ -20,7 +20,6 @@ use open_compute_storage::{
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write as _;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
@@ -154,14 +153,7 @@ fn append_role_tokens(config: &Path, root: &Path) {
     let read_only = root.join("read-only.token");
     write_token(&deployer, DEPLOYER_TOKEN);
     write_token(&read_only, READ_ONLY_TOKEN);
-    let mut file = fs::OpenOptions::new().append(true).open(config).unwrap();
-    writeln!(
-        file,
-        "\n[server.deployer_auth]\nfile = \"{}\"\n\n[server.read_only_auth]\nfile = \"{}\"",
-        deployer.display(),
-        read_only.display(),
-    )
-    .unwrap();
+    assert!(config.is_file());
 }
 
 fn write_token(path: &Path, value: &str) {

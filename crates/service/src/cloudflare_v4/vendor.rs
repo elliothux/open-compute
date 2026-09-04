@@ -57,7 +57,7 @@ async fn capabilities(State(_state): State<HttpState>, request: Request) -> Resp
     };
     let lock = match open_compute_runtime::embedded_runtime_lock() {
         Ok((value, _)) => value,
-        Err(error) => return platform_error(error, context),
+        Err(error) => return platform_error(&error, context),
     };
     if lock.effective_compatibility_date != open_compute_workers::WORKER_COMPATIBILITY_DATE {
         return error_response(V4Error::Internal, context.request_id());
@@ -160,15 +160,40 @@ async fn system_status(State(state): State<HttpState>, request: Request) -> Resp
         .map(|component| StatusComponent {
             name: component.name.as_str(),
             state: component.state.as_str(),
-            message: component.reason.map(|reason| reason.as_str()),
+            message: component
+                .reason
+                .map(open_compute_core::ReadinessReason::as_str),
         })
         .collect();
+    let observability = state
+        .worker_api()
+        .and_then(|api| api.observability().ok())
+        .map(|service| {
+            let dropped = service.tail_drop_counts();
+            ObservabilityStatus {
+                state: if service.store().is_some() {
+                    "healthy"
+                } else {
+                    "degraded"
+                },
+                retention_ms: service.config().retention_ms,
+                max_database_bytes: service.config().max_database_bytes,
+                query_max_timeframe_ms: service.config().query_max_timeframe_ms,
+                oldest_event_ms: service
+                    .store()
+                    .and_then(|store| store.oldest_event_ms().ok().flatten()),
+                tail_sessions: service.session_count(),
+                closed_client_drops: dropped[0],
+                overload_drops: dropped[1],
+            }
+        });
     success_response(
         context,
         SystemStatus {
             state: snapshot.readiness.as_str(),
             version: env!("CARGO_PKG_VERSION"),
             components,
+            observability,
         },
     )
 }
@@ -214,10 +239,10 @@ async fn scheduler_repair(State(state): State<HttpState>, request: Request) -> R
         return error_response(V4Error::Unavailable, context.request_id());
     };
     if let Err(error) = scheduler.repair_and_probe().await {
-        return platform_error(error, context);
+        return platform_error(&error, context);
     }
     if let Err(error) = scheduler.repair_products(1_000) {
-        return platform_error(error, context);
+        return platform_error(&error, context);
     }
     scheduler_response(&state, context)
 }
@@ -239,7 +264,7 @@ fn scheduler_response(state: &HttpState, context: V4RequestContext) -> Response 
                 running: value.global.in_flight,
             },
         ),
-        Err(error) => platform_error(error, context),
+        Err(error) => platform_error(&error, context),
     }
 }
 
@@ -260,7 +285,7 @@ async fn cache_garbage_collection(State(state): State<HttpState>, request: Reque
         return error_response(V4Error::Unavailable, context.request_id());
     };
     if let Err(error) = api.garbage_collect().await {
-        return platform_error(error, context);
+        return platform_error(&error, context);
     }
     cache_response(&state, context)
 }
@@ -277,7 +302,7 @@ fn cache_response(state: &HttpState, context: V4RequestContext) -> Response {
                 bytes: stats.body_bytes.saturating_add(stats.metadata_bytes),
             },
         ),
-        Err(error) => platform_error(error, context),
+        Err(error) => platform_error(&error, context),
     }
 }
 
@@ -298,7 +323,7 @@ async fn image_capacity(State(state): State<HttpState>, request: Request) -> Res
                 capacity: value.max_concurrency,
             },
         ),
-        Err(error) => platform_error(error, context),
+        Err(error) => platform_error(&error, context),
     }
 }
 
@@ -328,7 +353,7 @@ async fn worker_endpoints(
             .ok_or_else(|| PlatformError::new(ErrorCode::WorkerNotFound, "Worker not found"))
     }) {
         Ok(value) => value,
-        Err(error) => return platform_error(error, context),
+        Err(error) => return platform_error(&error, context),
     };
     match workers.list_routes(account, worker.id) {
         Ok(routes) => {
@@ -347,7 +372,7 @@ async fn worker_endpoints(
                 Err(error) => error_response(error, context.request_id()),
             }
         }
-        Err(error) => platform_error(error, context),
+        Err(error) => platform_error(&error, context),
     }
 }
 
@@ -390,10 +415,10 @@ async fn durable_object_namespaces(
                 .collect::<Result<Vec<_>, _>>();
             match result {
                 Ok(result) => success_response(context, result),
-                Err(error) => platform_error(error, context),
+                Err(error) => platform_error(&error, context),
             }
         }
-        Err(error) => platform_error(error, context),
+        Err(error) => platform_error(&error, context),
     }
 }
 
@@ -436,7 +461,7 @@ async fn durable_object_records(
                 Err(error) => error_response(error, context.request_id()),
             }
         }
-        Err(error) => platform_error(error, context),
+        Err(error) => platform_error(&error, context),
     }
 }
 
@@ -498,8 +523,8 @@ async fn bodyless_context(
     Ok(context)
 }
 
-fn platform_error(error: PlatformError, context: V4RequestContext) -> Response {
-    error_response(V4Error::from(&error), context.request_id())
+fn platform_error(error: &PlatformError, context: V4RequestContext) -> Response {
+    error_response(V4Error::from(error), context.request_id())
 }
 
 fn timestamp(value: i64) -> Result<String, V4Error> {
@@ -529,6 +554,21 @@ struct SystemStatus {
     state: &'static str,
     version: &'static str,
     components: Vec<StatusComponent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observability: Option<ObservabilityStatus>,
+}
+
+#[derive(Serialize)]
+struct ObservabilityStatus {
+    state: &'static str,
+    retention_ms: u64,
+    max_database_bytes: u64,
+    query_max_timeframe_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oldest_event_ms: Option<i64>,
+    tail_sessions: usize,
+    closed_client_drops: u64,
+    overload_drops: u64,
 }
 
 #[derive(Serialize)]
@@ -579,3 +619,7 @@ struct DurableObjectRecord {
     namespace_id: String,
     created_on: String,
 }
+
+#[cfg(test)]
+#[path = "vendor_tests.rs"]
+mod tests;

@@ -40,13 +40,11 @@ pub(super) async fn get(
         HeaderValue::from_static("application/octet-stream"),
     );
     if let Some(expiration) = entry.expires_at_ms {
-        let expiration = match u64::try_from(expiration / 1000) {
-            Ok(value) => value,
-            Err(_) => return error_response(V4Error::Internal, context.request_id()),
+        let Ok(expiration) = u64::try_from(expiration / 1000) else {
+            return error_response(V4Error::Internal, context.request_id());
         };
-        let value = match HeaderValue::from_str(&expiration.to_string()) {
-            Ok(value) => value,
-            Err(_) => return error_response(V4Error::Internal, context.request_id()),
+        let Ok(value) = HeaderValue::from_str(&expiration.to_string()) else {
+            return error_response(V4Error::Internal, context.request_id());
         };
         response.headers_mut().insert("expiration", value);
     }

@@ -53,6 +53,7 @@ struct UpdateQueueBody {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 struct QueueSettingsBody {
     delivery_delay: Option<u32>,
     delivery_paused: Option<bool>,
@@ -447,7 +448,7 @@ fn queue_response(
     let consumers = QueueConsumerRepository::new(storage.db())
         .live_for_queue(queue.id)?
         .into_iter()
-        .map(|record| consumers::consumer_response(authority, storage, &queue, record))
+        .map(|record| consumers::consumer_response(authority, storage, &queue, &record))
         .collect::<Result<Vec<_>, _>>()?;
     let producers = QueueRepository::new(storage.db())
         .active_producer_names(queue.account_id, queue.id)?
@@ -544,16 +545,6 @@ impl ListQuery {
             }
         }
         Ok(result)
-    }
-}
-
-impl Default for QueueSettingsBody {
-    fn default() -> Self {
-        Self {
-            delivery_delay: None,
-            delivery_paused: None,
-            message_retention_period: None,
-        }
     }
 }
 

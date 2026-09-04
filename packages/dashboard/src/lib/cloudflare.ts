@@ -15,6 +15,7 @@ import { BaseInstances } from "cloudflare/resources/workflows/instances/instance
 import { BaseEvents } from "cloudflare/resources/workflows/instances/events";
 import { BaseStatus } from "cloudflare/resources/workflows/instances/status";
 import { BaseVersions as BaseWorkflowVersions } from "cloudflare/resources/workflows/versions";
+import { BaseTelemetry } from "cloudflare/resources/workers/observability/telemetry";
 import { createOpenComputeExtension } from "@open-compute/cloudflare-extension";
 
 const resources = [
@@ -34,6 +35,7 @@ const resources = [
   BaseEvents,
   BaseStatus,
   BaseWorkflowVersions,
+  BaseTelemetry,
 ] as const;
 
 /** Create the browser management client with the official Cloudflare transport. */

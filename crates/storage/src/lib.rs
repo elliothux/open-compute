@@ -21,6 +21,10 @@ pub mod kv;
 pub mod lock;
 pub mod master_key;
 pub mod migrations;
+pub mod observability;
+#[cfg(test)]
+#[path = "observability_tests.rs"]
+mod observability_tests;
 pub mod platform_restore;
 pub mod platform_snapshot;
 pub mod queue_consumers;
@@ -118,6 +122,11 @@ pub use master_key::MasterKey;
 pub use master_key::{clear_test_env, set_test_env};
 #[cfg(any(test, feature = "test-support"))]
 pub use migrations::MigrationFault;
+pub use observability::{
+    NewObservabilityEvent, NewObservabilityInvocation, ObservabilityEventCursor,
+    ObservabilityField, ObservabilityFieldKey, ObservabilityFieldValue, ObservabilityStore,
+    StoredObservabilityEvent,
+};
 pub use platform_restore::RestoreTarget;
 pub use platform_snapshot::{
     PreparePlatformSnapshotRequest, PreparedPlatformSnapshot, PreparedSnapshotFile,
@@ -182,10 +191,11 @@ pub use vectorize::{
 };
 pub use workers::{
     DeploymentRecord, DeploymentSource, IdempotencyReservation, LOADER_SCHEMA_VERSION, NewVersion,
-    NewVersionProducts, RetentionCandidate, RouteKind, RouteRecord, RouteSnapshot,
-    SYSTEM_DASHBOARD_WORKER_NAME, StoredVersionSecret, SystemOwnedVersionKind,
-    SystemOwnedVersionRecord, VersionContentKind, VersionRecord, VersionReferrer, VersionSnapshot,
-    VersionState, WorkerOwnership, WorkerRecord, WorkerRepository,
+    NewVersionProducts, ObservabilityAudit, RetentionCandidate, RouteKind, RouteRecord,
+    RouteSnapshot, SYSTEM_DASHBOARD_WORKER_NAME, StoredVersionSecret, SystemOwnedVersionKind,
+    SystemOwnedVersionRecord, UpdateWorkerObservabilitySettings, VersionContentKind, VersionRecord,
+    VersionReferrer, VersionSnapshot, VersionState, WorkerObservabilitySettings, WorkerOwnership,
+    WorkerRecord, WorkerRepository,
 };
 pub use workflows::{
     WorkflowAppliedOperation, WorkflowBindingDescriptor, WorkflowBindingRecord, WorkflowDefinition,

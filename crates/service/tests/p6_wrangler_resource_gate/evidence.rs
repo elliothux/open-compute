@@ -1,4 +1,4 @@
-use super::{ADMIN_TOKEN, READ_ONLY_TOKEN, S3_ACCESS_KEY, S3_SECRET_KEY, TOKEN};
+use super::{ADMIN_TOKEN, READ_ONLY_TOKEN, S3_ACCESS_KEY, S3_SECRET_KEY, TAIL_SECRET, TOKEN};
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
@@ -98,12 +98,13 @@ fn redact_bytes(haystack: &mut [u8], needle: &[u8]) -> bool {
     changed
 }
 
-pub(super) fn known_secrets() -> [&'static str; 5] {
+pub(super) fn known_secrets() -> [&'static str; 6] {
     [
         ADMIN_TOKEN,
         TOKEN,
         READ_ONLY_TOKEN,
         S3_ACCESS_KEY,
         S3_SECRET_KEY,
+        TAIL_SECRET,
     ]
 }

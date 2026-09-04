@@ -325,9 +325,8 @@ pub(super) async fn item_logs(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let limit = match parse_u32(&query, "limit", 50) {
-        Ok(value @ 1..=100) => value,
-        _ => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(limit @ 1..=100) = parse_u32(&query, "limit", 50) else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let now = match now_ms() {
         Ok(value) => value,
@@ -369,9 +368,8 @@ pub(super) async fn item_logs(
         .and_then(|info| info.remove("cursor"));
     let sealed = match raw_cursor {
         Some(Value::String(after)) => {
-            let expires = match now.checked_add(CURSOR_LIFETIME_MS) {
-                Some(value) => value,
-                None => return error_response(V4Error::Internal, context.request_id()),
+            let Some(expires) = now.checked_add(CURSOR_LIFETIME_MS) else {
+                return error_response(V4Error::Internal, context.request_id());
             };
             match cursor::seal(
                 api.storage(),
@@ -413,9 +411,8 @@ pub(super) async fn item_chunks(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let limit = match parse_u32(&query, "limit", 20) {
-        Ok(value @ 1..=100) => value,
-        _ => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(limit @ 1..=100) = parse_u32(&query, "limit", 20) else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let offset = match parse_u64(&query, "offset", 0) {
         Ok(value) => value,

@@ -1,0 +1,3 @@
+# Axum responses are intentionally returned as sanitized boundary errors. Boxing
+# them would add allocation and extraction noise without reducing retained state.
+large-error-threshold = 256

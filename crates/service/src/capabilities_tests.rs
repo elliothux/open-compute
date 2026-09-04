@@ -51,10 +51,13 @@ fn workflow_capabilities_report_current_model_and_operator_limits() {
         assert!(product.validate(), "invalid product: {name}");
     }
     assert!(inventory.validate());
-    let (source, products, management_api, wrangler) = product_registry().unwrap();
+    let (source, products, management_api, workers_observability, wrangler) =
+        product_registry().unwrap();
     assert!(!source.workers_types_version.is_empty());
     assert_eq!(source.ast_sha256.len(), 64);
     assert!(management_api.validate());
+    assert!(workers_observability.validate());
+    assert_eq!(workers_observability.script_tail_protocol, "trace-v1");
     assert!(wrangler.validate());
     for product in products.values() {
         if matches!(

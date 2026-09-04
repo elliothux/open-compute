@@ -226,3 +226,393 @@ fn caller_declaration_uses_one_current_capability_and_rejects_selectors() {
         assert!(serde_json::from_value::<VersionBindingInput>(invalid).is_err());
     }
 }
+
+#[test]
+fn descriptor_subtypes_enforce_their_single_day1_wire_shape() {
+    let valid_cache = CachePolicyDescriptorV1 {
+        enabled: true,
+        cross_version_cache: false,
+        entrypoints: BTreeMap::from([(
+            "Named_1".to_owned(),
+            CacheEntrypointPolicyV1 {
+                enabled: true,
+                cross_version_cache: true,
+            },
+        )]),
+    };
+    valid_cache.validate().unwrap();
+    for name in [
+        "default".to_owned(),
+        "1bad".to_owned(),
+        "bad-name".to_owned(),
+        "x".repeat(129),
+    ] {
+        let mut invalid = valid_cache.clone();
+        invalid.entrypoints = BTreeMap::from([(
+            name,
+            CacheEntrypointPolicyV1 {
+                enabled: true,
+                cross_version_cache: false,
+            },
+        )]);
+        assert_eq!(
+            invalid.validate().unwrap_err().code(),
+            ErrorCode::EntrypointNotFound
+        );
+    }
+
+    for kind in [
+        BuiltinBindingDescriptorKindV1::VersionMetadata,
+        BuiltinBindingDescriptorKindV1::WasmModule,
+        BuiltinBindingDescriptorKindV1::TextBlob,
+        BuiltinBindingDescriptorKindV1::DataBlob,
+    ] {
+        let descriptor =
+            BuiltinBindingDescriptorV1::new("BUILTIN".to_owned(), kind, Some("tag".to_owned()))
+                .unwrap();
+        descriptor.sha256().unwrap();
+    }
+    for (kind, tag) in [
+        (BuiltinBindingDescriptorKindV1::Ai, Some("tag".to_owned())),
+        (
+            BuiltinBindingDescriptorKindV1::Images,
+            Some("tag".to_owned()),
+        ),
+        (
+            BuiltinBindingDescriptorKindV1::VersionMetadata,
+            Some(String::new()),
+        ),
+        (
+            BuiltinBindingDescriptorKindV1::VersionMetadata,
+            Some("bad\nvalue".to_owned()),
+        ),
+        (
+            BuiltinBindingDescriptorKindV1::VersionMetadata,
+            Some("x".repeat(1_025)),
+        ),
+    ] {
+        assert!(BuiltinBindingDescriptorV1::new("BUILTIN".to_owned(), kind, tag).is_err());
+    }
+    let mut builtin =
+        BuiltinBindingDescriptorV1::new("AI".to_owned(), BuiltinBindingDescriptorKindV1::Ai, None)
+            .unwrap();
+    builtin.schema_version = 2;
+    assert_eq!(
+        builtin.canonical_bytes().unwrap_err().code(),
+        ErrorCode::VersionInvariantViolation
+    );
+
+    let target = WorkerId::generate();
+    for entrypoint in [
+        "".to_owned(),
+        "1bad".to_owned(),
+        "bad-name".to_owned(),
+        "x".repeat(129),
+    ] {
+        assert_eq!(
+            ServiceDescriptorV1::new("SERVICE".to_owned(), target, Some(entrypoint), None,)
+                .unwrap_err()
+                .code(),
+            ErrorCode::ServiceEntrypointNotFound
+        );
+    }
+    assert!(ServiceDescriptorV1::new("SERVICE".to_owned(), target, None, Some(json!([]))).is_err());
+    assert!(ServiceDescriptorV1::new("S".repeat(65), target, None, None).is_err());
+    let mut service = ServiceDescriptorV1::new(
+        "SERVICE".to_owned(),
+        target,
+        Some("Named".to_owned()),
+        Some(json!({"nested":{"value":true}})),
+    )
+    .unwrap();
+    service.schema_version = 2;
+    assert!(service.canonical_bytes().is_err());
+    service.schema_version = 1;
+    service.policy_version = 2;
+    assert!(service.canonical_bytes().is_err());
+
+    let binding = BindingDescriptorV1::new(
+        BindingId::generate(),
+        "KV".to_owned(),
+        BindingKind::KvNamespace,
+        ResourceId::generate(),
+        1,
+        1,
+        CanonicalPermissions::default(),
+        CanonicalBindingConfig::default(),
+    )
+    .unwrap();
+    binding.sha256().unwrap();
+    for (kind, generation, capability) in [
+        (BindingKind::KvNamespace, 0, 1),
+        (BindingKind::QueueProducer, 1, 1),
+        (BindingKind::Workflow, 1, 1),
+        (BindingKind::KvNamespace, 1, 2),
+    ] {
+        assert!(
+            BindingDescriptorV1::new(
+                BindingId::generate(),
+                "KV".to_owned(),
+                kind,
+                ResourceId::generate(),
+                generation,
+                capability,
+                CanonicalPermissions::default(),
+                CanonicalBindingConfig::default(),
+            )
+            .is_err()
+        );
+    }
+    let mut corrupted_binding = binding.clone();
+    corrupted_binding.schema_version = 2;
+    assert!(corrupted_binding.canonical_bytes().is_err());
+
+    let queue = QueueProducerBindingDescriptorV1::new(
+        BindingId::generate(),
+        "QUEUE".to_owned(),
+        open_compute_core::QueueId::generate(),
+        1,
+        1,
+    )
+    .unwrap();
+    queue.sha256().unwrap();
+    assert!(
+        QueueProducerBindingDescriptorV1::new(
+            BindingId::generate(),
+            "QUEUE".to_owned(),
+            open_compute_core::QueueId::generate(),
+            0,
+            1,
+        )
+        .is_err()
+    );
+    assert!(
+        QueueProducerBindingDescriptorV1::new(
+            BindingId::generate(),
+            "QUEUE".to_owned(),
+            open_compute_core::QueueId::generate(),
+            1,
+            2,
+        )
+        .is_err()
+    );
+    for corrupt in 0..4 {
+        let mut descriptor = queue.clone();
+        match corrupt {
+            0 => descriptor.schema_version = 2,
+            1 => descriptor.kind = BindingKind::KvNamespace,
+            2 => descriptor.capability_version = 2,
+            _ => descriptor.queue_lifecycle_generation = 0,
+        }
+        assert!(descriptor.canonical_bytes().is_err());
+    }
+}
+
+#[test]
+fn worker_descriptor_rejects_invalid_or_conflicting_environment_authority() {
+    let account = AccountId::generate();
+    let worker = WorkerId::generate();
+    let version = VersionId::generate();
+    let bundle = crate::CanonicalBundle::build(
+        "index.js",
+        vec![crate::ModuleInput {
+            name: "index.js".into(),
+            module_type: crate::ModuleType::EsModule,
+            bytes: b"export default {}".to_vec(),
+        }],
+        crate::BundleLimits::default(),
+    )
+    .unwrap();
+    let build = |vars: BTreeMap<String, serde_json::Value>,
+                 bindings: Vec<BindingDescriptorV1>,
+                 queues: Vec<QueueProducerBindingDescriptorV1>,
+                 services: Vec<ServiceDescriptorV1>,
+                 cache: CachePolicyDescriptorV1,
+                 builtins: Vec<BuiltinBindingDescriptorV1>| {
+        WorkerCodeDescriptorV1::new(
+            account,
+            worker,
+            version,
+            0,
+            "2026-08-30".into(),
+            Vec::new(),
+            Some((bundle.sha256(), bundle.manifest())),
+            None,
+            vars,
+            Vec::new(),
+            bindings,
+            queues,
+            Vec::new(),
+            services,
+            cache,
+            builtins,
+            1,
+        )
+    };
+    assert!(
+        WorkerCodeDescriptorV1::new(
+            account,
+            worker,
+            version,
+            0,
+            "2026-08-30".into(),
+            Vec::new(),
+            None,
+            None,
+            BTreeMap::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            CachePolicyDescriptorV1::default(),
+            Vec::new(),
+            1,
+        )
+        .is_err()
+    );
+    assert!(
+        WorkerCodeDescriptorV1::new(
+            account,
+            worker,
+            version,
+            -1,
+            "2026-08-30".into(),
+            Vec::new(),
+            Some((bundle.sha256(), bundle.manifest())),
+            None,
+            BTreeMap::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            CachePolicyDescriptorV1::default(),
+            Vec::new(),
+            1,
+        )
+        .is_err()
+    );
+
+    let binding = BindingDescriptorV1::new(
+        BindingId::generate(),
+        "DUPLICATE".to_owned(),
+        BindingKind::KvNamespace,
+        ResourceId::generate(),
+        1,
+        1,
+        CanonicalPermissions::default(),
+        CanonicalBindingConfig::default(),
+    )
+    .unwrap();
+    let mut corrupted_binding = binding.clone();
+    corrupted_binding.schema_version = 2;
+    assert!(
+        build(
+            BTreeMap::new(),
+            vec![corrupted_binding],
+            Vec::new(),
+            Vec::new(),
+            CachePolicyDescriptorV1::default(),
+            Vec::new(),
+        )
+        .is_err()
+    );
+    let mut duplicate_binding = binding.clone();
+    duplicate_binding.binding_id = BindingId::generate();
+    duplicate_binding.resource_id = ResourceId::generate();
+    assert_eq!(
+        build(
+            BTreeMap::new(),
+            vec![binding.clone(), duplicate_binding],
+            Vec::new(),
+            Vec::new(),
+            CachePolicyDescriptorV1::default(),
+            Vec::new(),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::BindingTypeMismatch
+    );
+
+    let queue = QueueProducerBindingDescriptorV1::new(
+        BindingId::generate(),
+        "DUPLICATE".to_owned(),
+        open_compute_core::QueueId::generate(),
+        1,
+        1,
+    )
+    .unwrap();
+    assert_eq!(
+        build(
+            BTreeMap::new(),
+            vec![binding],
+            vec![queue],
+            Vec::new(),
+            CachePolicyDescriptorV1::default(),
+            Vec::new(),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::BindingTypeMismatch
+    );
+    let service =
+        ServiceDescriptorV1::new("CONFLICT".to_owned(), target_worker(), None, None).unwrap();
+    assert_eq!(
+        build(
+            BTreeMap::from([("CONFLICT".to_owned(), json!(true))]),
+            Vec::new(),
+            Vec::new(),
+            vec![service],
+            CachePolicyDescriptorV1::default(),
+            Vec::new(),
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::BindingTypeMismatch
+    );
+    let builtin = BuiltinBindingDescriptorV1::new(
+        "CONFLICT".to_owned(),
+        BuiltinBindingDescriptorKindV1::Ai,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        build(
+            BTreeMap::from([("CONFLICT".to_owned(), json!(true))]),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            CachePolicyDescriptorV1::default(),
+            vec![builtin],
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::BindingTypeMismatch
+    );
+    let invalid_cache = CachePolicyDescriptorV1 {
+        entrypoints: BTreeMap::from([(
+            "default".to_owned(),
+            CacheEntrypointPolicyV1 {
+                enabled: true,
+                cross_version_cache: false,
+            },
+        )]),
+        ..Default::default()
+    };
+    assert!(
+        build(
+            BTreeMap::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            invalid_cache,
+            Vec::new(),
+        )
+        .is_err()
+    );
+}
+
+fn target_worker() -> WorkerId {
+    WorkerId::generate()
+}

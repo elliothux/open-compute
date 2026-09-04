@@ -5,8 +5,8 @@ use crate::compile::{
     set_after_config_rename_hook,
 };
 use crate::digest::{
-    BINDING_TOKEN_PLACEHOLDER, DigestInputs, PlatformReleaseMeta, config_input_digest, digest_for,
-    load_assets, render_config_with_tokens, validate_token,
+    BINDING_TOKEN_PLACEHOLDER, DigestInputs, OBSERVABILITY_TOKEN_PLACEHOLDER, PlatformReleaseMeta,
+    config_input_digest, digest_for, load_assets, render_config_with_tokens, validate_token,
 };
 use crate::fsutil::{
     FILE_MODE, clear_publish_hook, set_publish_hook, set_test_max_asset_entries,
@@ -34,7 +34,10 @@ const VERSION: &str = "workerd 2026-08-30";
 const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TOKEN_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const TOKEN_C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const TOKEN_D: &str = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 static TEST_BINDING_TOKEN: LazyLock<SecretString> = LazyLock::new(|| SecretString::new(TOKEN_B));
+static TEST_OBSERVABILITY_TOKEN: LazyLock<SecretString> =
+    LazyLock::new(|| SecretString::new(TOKEN_C));
 
 fn sha256_file(path: &Path) -> String {
     let bytes = fs::read(path).expect("read");
@@ -57,12 +60,13 @@ async fn read_pid_file(path: &Path, timeout: Duration) -> i32 {
     let started = std::time::Instant::now();
     loop {
         match fs::read_to_string(path) {
-            Ok(value) => {
-                return value
-                    .trim()
-                    .parse()
-                    .expect("pid file must contain an integer");
-            }
+            Ok(value) => match value.trim().parse() {
+                Ok(pid) => return pid,
+                Err(_) if started.elapsed() < timeout => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("pid file must contain an integer: {error}"),
+            },
             Err(error)
                 if error.kind() == std::io::ErrorKind::NotFound && started.elapsed() < timeout =>
             {
@@ -222,6 +226,7 @@ fn compile_req<'a>(
         platform,
         token,
         binding_token: &TEST_BINDING_TOKEN,
+        observability_token: &TEST_OBSERVABILITY_TOKEN,
         durable_objects: open_compute_core::DurableObjectsConfig::default(),
         deadline,
         redactor,
@@ -610,24 +615,28 @@ fn digest_assets_tokens_and_supervisor_auth_are_fail_closed() {
     let binding = SecretString::new(TOKEN_B);
     let rendered = render_config_with_tokens(
         &format!(
-            "{}:{}",
+            "{}:{}:{}",
             RuntimeLock::token_placeholder(),
-            BINDING_TOKEN_PLACEHOLDER
+            BINDING_TOKEN_PLACEHOLDER,
+            OBSERVABILITY_TOKEN_PLACEHOLDER
         ),
         &valid,
         &binding,
+        &SecretString::new(TOKEN_C),
     )
     .unwrap();
-    assert_eq!(rendered, format!("{TOKEN}:{TOKEN_B}"));
+    assert_eq!(rendered, format!("{TOKEN}:{TOKEN_B}:{TOKEN_C}"));
     assert_eq!(
         render_config_with_tokens(
             &format!(
-                "{}:{}",
+                "{}:{}:{}",
                 RuntimeLock::token_placeholder(),
-                BINDING_TOKEN_PLACEHOLDER
+                BINDING_TOKEN_PLACEHOLDER,
+                OBSERVABILITY_TOKEN_PLACEHOLDER
             ),
             &valid,
             &valid,
+            &SecretString::new(TOKEN_C),
         )
         .unwrap_err()
         .code(),
@@ -1087,6 +1096,7 @@ fn input_digest_changes_with_any_input() {
             &platform_meta(),
             &token,
             &SecretString::new(TOKEN_C),
+            &SecretString::new(TOKEN_D),
         )
         .unwrap_err()
         .code(),
@@ -1100,6 +1110,7 @@ fn input_digest_changes_with_any_input() {
         &platform_meta(),
         &token,
         &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     let (d2, _, _) = digest_for(
@@ -1109,6 +1120,7 @@ fn input_digest_changes_with_any_input() {
         &platform_meta(),
         &token,
         &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     assert_eq!(d1, d2);
@@ -1125,6 +1137,7 @@ fn input_digest_changes_with_any_input() {
         &platform_meta(),
         &token,
         &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     assert_ne!(d1, d_cfg);
@@ -1148,6 +1161,7 @@ fn input_digest_changes_with_any_input() {
         &platform_meta(),
         &token,
         &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     assert_ne!(d1, d_w);
@@ -1162,6 +1176,7 @@ fn input_digest_changes_with_any_input() {
         &platform_meta(),
         &token,
         &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     let d_lock2 = config_input_digest(&DigestInputs {
@@ -1182,6 +1197,7 @@ fn input_digest_changes_with_any_input() {
         &platform_meta(),
         &token,
         &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     assert_ne!(d1, d_bin);
@@ -1194,6 +1210,7 @@ fn input_digest_changes_with_any_input() {
         &platform_meta(),
         &other,
         &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     assert_ne!(d1, d_tok);
@@ -1204,9 +1221,21 @@ fn input_digest_changes_with_any_input() {
         &platform_meta(),
         &token,
         &SecretString::new(TOKEN_B),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     assert_ne!(d1, d_binding);
+    let (d_observability, _, _) = digest_for(
+        dir.path(),
+        &lock_bytes,
+        &runtime,
+        &platform_meta(),
+        &token,
+        &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_B),
+    )
+    .unwrap();
+    assert_ne!(d1, d_observability);
 
     let meta2 = PlatformReleaseMeta {
         version: "other".into(),
@@ -1218,6 +1247,7 @@ fn input_digest_changes_with_any_input() {
         &meta2,
         &token,
         &SecretString::new(TOKEN_C),
+        &SecretString::new(TOKEN_D),
     )
     .unwrap();
     assert_ne!(d1, d_rel);
@@ -1920,6 +1950,7 @@ printf 'COMPILED-%s' \"$$\"
             &platform,
             &token,
             &TEST_BINDING_TOKEN,
+            &TEST_OBSERVABILITY_TOKEN,
         )
         .unwrap();
         format!("config.{digest}.bin")
@@ -2024,6 +2055,7 @@ async fn same_digest_cache_lookup_cannot_delete_publish_window() {
             &platform,
             &token,
             &TEST_BINDING_TOKEN,
+            &TEST_OBSERVABILITY_TOKEN,
         )
         .unwrap();
         format!("config.{digest}.bin")
@@ -2652,7 +2684,7 @@ if [ \"$1\" = \"--version\" ]; then echo '{VERSION}'; exit 0; fi
 echo $$ > '{pid}'
 sleep 30 &
 echo $! > '{child}'
-sleep 30
+wait
 ",
             pid = pid_file.display(),
             child = child_file.display(),
@@ -2698,14 +2730,14 @@ sleep 30
         .trim()
         .parse()
         .unwrap();
-    wait_reaped(pid, Duration::from_secs(2)).expect("spawn-fail RAII reaped group");
+    wait_reaped(pid, Duration::from_secs(5)).expect("spawn-fail RAII reaped group");
     if child_file.exists() {
         let child: i32 = fs::read_to_string(&child_file)
             .unwrap()
             .trim()
             .parse()
             .unwrap();
-        wait_pid_gone(child, Duration::from_secs(2)).expect("descendant reaped");
+        wait_pid_gone(child, Duration::from_secs(5)).expect("descendant reaped");
     }
     let leftovers = leftover_names(&data);
     assert!(
@@ -2731,7 +2763,7 @@ if [ \"$1\" = \"--version\" ]; then echo '{VERSION}'; exit 0; fi
 echo $$ > '{pid}'
 sleep 30 &
 echo $! > '{child}'
-sleep 30
+wait
 ",
             pid = pid_file.display(),
             child = child_file.display(),

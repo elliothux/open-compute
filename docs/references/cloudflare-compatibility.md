@@ -47,6 +47,15 @@ authority 差异；它不代表缺方法、占位返回或半截实现。
 | Vectorize | `supported_with_deviation` | 27 | stable post-beta `Vectorize` 的 7 个方法、异步持久 mutation、三种公开 score/order、namespace、indexed metadata filter/projection、restart recovery 与全 stable response surface 均闭环；beta `VectorizeIndex` 不在当前 Day1 合同 | `OC-VECTORIZE-001` |
 | Workers AI / Markdown Conversion / AI Search | `supported_with_deviation` | 54 | 标准 `[ai]` 注入 `env.AI.aiGatewayLogId`/`toMarkdown`；AI Search namespace/instance/items/jobs、durable async 上传索引、keyword/vector/hybrid retrieval、chat/SSE 与配置内 OpenAI-compatible provider 闭环；完整 Workers AI inference 与 AutoRAG 不在声明范围 | `OC-AI-MARKDOWN-001`、`OC-AI-SEARCH-001` |
 
+Workers observability 是管理面与平台 collector 能力，不计入 stable runtime-member denominator。当前
+[`workersObservability`](../../share/cloudflare-capabilities.json) authority 明确支持固定 Wrangler 4.127.1 Script
+Tails（`trace-v1`）、Workers Logs persistence、Telemetry keys/values、events/invocations query，以及 2026-09-03
+真实 Cloudflare Dashboard wire 冻结的 Live Tail/heartbeat。日志由单机有界 `observability.sqlite` 保存，实时 session
+在进程内且不 replay；每个执行 target 独立归属，caller tail 不聚合 nested target；不承诺全球顺序、hosted
+retention/region metadata 或 exactly-once。Tail Workers、Streaming Tail
+Workers、traces、非空 destinations、Logpush、calculations 和 saved queries 明确 unsupported，详见
+[`OC-OBSERVABILITY-001`](p1-deviations.md)和[P7 完成设计](../implemented/p7-workers-logs-realtime-tail.md)。
+
 Deployments、Static Assets、Service Binding、Workers Cache 与 Images 是平台配套能力，没有进入上述
 stable-member denominator。Service Binding 的固定 P6 upload 已支持可选、受界、canonical JSON object
 `props`；它是 immutable Version identity 的一部分，并只向目标 entrypoint 投影为 `ctx.props`。`remote` 仍不在

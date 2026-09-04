@@ -3,12 +3,13 @@
   "managementApi": {
     "authority": "openapi/p6-capability.json",
     "status": "planned",
-    "routeCount": 155,
+    "routeCount": 160,
     "legacyRouteCount": 4,
     "deviations": [
       "OC-ACCOUNT-SUBDOMAIN-001",
       "OC-D1-001",
-      "OC-AI-SEARCH-TOKEN-001"
+      "OC-AI-SEARCH-TOKEN-001",
+      "OC-OBSERVABILITY-001"
     ]
   },
   "wrangler": {

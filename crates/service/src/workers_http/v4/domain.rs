@@ -27,6 +27,10 @@ pub(super) use super::authority::{ensure_worker, resolve_account, worker_by_name
 pub(super) use super::cloning::clone_active;
 use super::errors::{invalid, invariant, unsupported};
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the immutable Version creation boundary keeps authority and audit inputs explicit"
+)]
 pub(super) async fn create_from_upload(
     api: &WorkerApiState,
     account_authority: &AccountAuthority,
@@ -83,7 +87,7 @@ async fn create_from_prepared_upload(
     now_ms: i64,
     migration: Option<&super::do_lifecycle::PreparedDoMigration>,
 ) -> Result<CreateVersionOutcome, PlatformError> {
-    let mut input = UploadInput::new(upload.metadata)?;
+    let mut input = UploadInput::new(upload.metadata);
     let previous = worker
         .active_version_id
         .map(|version| {
@@ -192,7 +196,7 @@ pub(super) async fn validate_new_upload(
     strict_inheritance: bool,
     now_ms: i64,
 ) -> Result<(), PlatformError> {
-    let mut input = UploadInput::new(upload.metadata.clone())?;
+    let mut input = UploadInput::new(upload.metadata.clone());
     input.apply_inheritance(api, None, strict_inheritance)?;
     input.apply_explicit_bindings(
         api,
@@ -230,7 +234,7 @@ pub(super) struct UploadInput {
 }
 
 impl UploadInput {
-    pub(super) fn new(metadata: WorkerUploadMetadata) -> Result<Self, PlatformError> {
+    pub(super) fn new(metadata: WorkerUploadMetadata) -> Self {
         let mut runtime_features = VersionRuntimeFeatures {
             compatibility_date: metadata.compatibility_date.clone(),
             compatibility_flags: metadata.compatibility_flags.clone(),
@@ -262,7 +266,7 @@ impl UploadInput {
                 }
             }
         }
-        Ok(Self {
+        Self {
             runtime_features,
             metadata,
             vars: BTreeMap::new(),
@@ -271,7 +275,7 @@ impl UploadInput {
             services: BTreeMap::new(),
             crons: Vec::new(),
             workflow_reservations: Vec::new(),
-        })
+        }
     }
 
     pub(super) fn apply_inheritance(
@@ -513,6 +517,10 @@ impl UploadInput {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "binding validation keeps each authority and reservation control explicit"
+    )]
     fn apply_explicit_bindings(
         &mut self,
         api: &WorkerApiState,

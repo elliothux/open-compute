@@ -65,7 +65,7 @@ impl AiSearchBindingService {
             digest,
             size,
         } = upload;
-        let instance = self.resolve_instance(&authority, header.instance.as_deref())?;
+        let instance = self.resolve_instance(authority, header.instance.as_deref())?;
         validate_source(&header.name, &header.content_type, size)?;
         let (store, inspection) = self.open_store(&instance.record)?;
         let config: ResolvedAiSearchConfig =
@@ -129,6 +129,10 @@ impl AiSearchBindingService {
     }
 
     /// Persist one validated official multipart upload through the built-in authority.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the upload command keeps authenticated scope and bounded payload metadata explicit"
+    )]
     pub(crate) async fn official_upload(
         &self,
         account_id: open_compute_core::AccountId,

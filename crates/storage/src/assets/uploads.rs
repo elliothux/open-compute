@@ -792,6 +792,10 @@ fn invariant() -> PlatformError {
     )
 }
 
+#[cfg(test)]
+#[path = "uploads_tests.rs"]
+mod validation_tests;
+
 fn db_error() -> PlatformError {
     PlatformError::new(
         ErrorCode::Internal,

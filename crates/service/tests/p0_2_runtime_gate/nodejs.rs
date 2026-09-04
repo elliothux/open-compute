@@ -115,6 +115,7 @@ async fn p0_2_nodejs_default_surface_isolation_and_unsupported_stubs() {
         vec![
             ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
             ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
         vec![auth.clone(), binding_auth.clone()],

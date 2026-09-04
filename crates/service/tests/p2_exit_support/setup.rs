@@ -300,6 +300,9 @@ fn binding(kind: BindingKind, id: ResourceId) -> VersionBindingInput {
         kind,
         id,
         permissions: Default::default(),
-        config: Default::default(),
+        config: open_compute_core::CanonicalBindingConfig {
+            workflow_class_name: (kind == BindingKind::Workflow).then(|| "Flow".to_owned()),
+            ..Default::default()
+        },
     }
 }

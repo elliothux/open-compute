@@ -6,9 +6,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 fn storage_config(root: PathBuf) -> StorageConfig {
+    let master_key_file = root.join("keys/master.key");
     StorageConfig {
-        data_dir: root.clone(),
-        master_key_file: root.join("keys/master.key"),
+        data_dir: root,
+        master_key_file,
         master_key_env: None,
         sqlite_busy_timeout_ms: 5_000,
         free_space_soft_bytes: 1_073_741_824,
@@ -59,6 +60,86 @@ fn create_plan() -> DurableObjectMigrationPlan {
         new_sqlite_classes: vec!["Counter".to_owned()],
         renamed_classes: Vec::new(),
         deleted_classes: Vec::new(),
+    }
+}
+
+#[test]
+fn migration_plan_fingerprint_rejects_every_ambiguous_declaration() {
+    let valid = create_plan();
+    assert_eq!(valid.fingerprint().unwrap(), valid.fingerprint().unwrap());
+    let mut changed = valid.clone();
+    changed.declarative = true;
+    assert_ne!(valid.fingerprint().unwrap(), changed.fingerprint().unwrap());
+
+    let invalid_plans = [
+        DurableObjectMigrationPlan {
+            new_tag: String::new(),
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            new_tag: "x".repeat(129),
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            old_tag: Some(String::new()),
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            old_tag: Some("x".repeat(129)),
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            new_sqlite_classes: vec!["Class".to_owned(); 65],
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            renamed_classes: vec![
+                DurableObjectClassRename {
+                    from: "Before".to_owned(),
+                    to: "After".to_owned(),
+                };
+                65
+            ],
+            new_sqlite_classes: Vec::new(),
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            deleted_classes: vec!["Class".to_owned(); 65],
+            new_sqlite_classes: Vec::new(),
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            new_sqlite_classes: vec!["bad-name".to_owned()],
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            new_sqlite_classes: vec!["Duplicate".to_owned(), "Duplicate".to_owned()],
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            new_sqlite_classes: Vec::new(),
+            renamed_classes: vec![DurableObjectClassRename {
+                from: "Same".to_owned(),
+                to: "Same".to_owned(),
+            }],
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            new_sqlite_classes: vec!["Target".to_owned()],
+            renamed_classes: vec![DurableObjectClassRename {
+                from: "Source".to_owned(),
+                to: "Target".to_owned(),
+            }],
+            ..valid.clone()
+        },
+        DurableObjectMigrationPlan {
+            new_sqlite_classes: Vec::new(),
+            deleted_classes: vec!["Deleted".to_owned(), "Deleted".to_owned()],
+            ..valid
+        },
+    ];
+    for plan in invalid_plans {
+        assert!(plan.fingerprint().is_err());
     }
 }
 

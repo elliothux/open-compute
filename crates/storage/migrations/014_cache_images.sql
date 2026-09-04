@@ -10,15 +10,23 @@ CREATE TABLE version_cache_policies (
 CREATE TABLE version_builtin_bindings (
   version_id TEXT NOT NULL REFERENCES worker_versions(id),
   binding_name TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('ai', 'images', 'version_metadata')),
+  kind TEXT NOT NULL CHECK(kind IN (
+    'ai', 'images', 'version_metadata', 'wasm_module', 'text_blob', 'data_blob'
+  )),
   tag TEXT,
   descriptor_sha256 BLOB NOT NULL CHECK(length(descriptor_sha256) = 32),
   PRIMARY KEY(version_id, binding_name),
-  UNIQUE(version_id, kind),
   CHECK(length(binding_name) BETWEEN 1 AND 64),
-  CHECK(tag IS NULL OR length(tag) BETWEEN 1 AND 128),
-  CHECK((kind IN ('ai', 'images') AND tag IS NULL) OR kind = 'version_metadata')
+  CHECK(tag IS NULL OR length(tag) BETWEEN 1 AND 1024),
+  CHECK(
+    (kind IN ('ai', 'images') AND tag IS NULL)
+    OR (kind IN ('version_metadata', 'wasm_module', 'text_blob', 'data_blob') AND tag IS NOT NULL)
+  )
 ) WITHOUT ROWID, STRICT;
+
+CREATE UNIQUE INDEX version_builtin_bindings_singleton_kind
+ON version_builtin_bindings(version_id, kind)
+WHERE kind IN ('ai', 'images', 'version_metadata');
 
 CREATE TRIGGER version_cache_policies_insert_guard
 BEFORE INSERT ON version_cache_policies

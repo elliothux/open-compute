@@ -9,7 +9,10 @@ use crate::http::HttpState;
 use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::response::Response;
 use open_compute_core::{ErrorCode, PlatformError, SecretString};
-use open_compute_storage::{CronRepository, VersionSnapshot, WorkerRecord, WorkerRepository};
+use open_compute_storage::{
+    CronRepository, UpdateWorkerObservabilitySettings, VersionSnapshot, WorkerRecord,
+    WorkerRepository,
+};
 use open_compute_workers::CreateVersionOutcome;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -77,6 +80,9 @@ pub(super) async fn delete_script(
         }
         return platform_error(context.request_id(), &error);
     }
+    if let Ok(observability) = api.observability() {
+        observability.revoke_worker_tails(account, worker.id);
+    }
     api.traffic.remove(worker.id);
     for version in versions {
         api.pins.retire_fence(version);
@@ -87,16 +93,31 @@ pub(super) async fn delete_script(
 #[derive(Serialize)]
 struct ScriptSettings {
     logpush: bool,
-    observability: DisabledObservability,
+    observability: ObservabilitySettings,
     tags: Vec<String>,
     tail_consumers: Vec<()>,
 }
 
 impl ScriptSettings {
-    const fn disabled() -> Self {
+    fn from_persisted(value: &open_compute_storage::WorkerObservabilitySettings) -> Self {
         Self {
             logpush: false,
-            observability: DisabledObservability { enabled: false },
+            observability: ObservabilitySettings {
+                enabled: value.enabled,
+                head_sampling_rate: value.head_sampling_rate,
+                logs: ObservabilityLogsSettings {
+                    enabled: value.logs_enabled,
+                    head_sampling_rate: value.logs_head_sampling_rate,
+                    invocation_logs: value.invocation_logs,
+                    persist: value.persist,
+                    destinations: Vec::new(),
+                },
+                traces: ObservabilityTracesSettings {
+                    enabled: false,
+                    persist: false,
+                    destinations: Vec::new(),
+                },
+            },
             tags: Vec::new(),
             tail_consumers: Vec::new(),
         }
@@ -104,17 +125,66 @@ impl ScriptSettings {
 }
 
 #[derive(Serialize)]
-struct DisabledObservability {
+struct ObservabilitySettings {
     enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    head_sampling_rate: Option<f64>,
+    logs: ObservabilityLogsSettings,
+    traces: ObservabilityTracesSettings,
+}
+
+#[derive(Serialize)]
+struct ObservabilityLogsSettings {
+    enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    head_sampling_rate: Option<f64>,
+    invocation_logs: bool,
+    persist: bool,
+    destinations: Vec<()>,
+}
+
+#[derive(Serialize)]
+struct ObservabilityTracesSettings {
+    enabled: bool,
+    persist: bool,
+    destinations: Vec<()>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ScriptSettingsPatch {
     logpush: Option<bool>,
-    observability: Option<serde_json::Value>,
+    observability: Option<ObservabilityPatch>,
     tags: Option<Vec<String>>,
     tail_consumers: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservabilityPatch {
+    enabled: Option<bool>,
+    head_sampling_rate: Option<f64>,
+    logs: Option<ObservabilityLogsPatch>,
+    traces: Option<ObservabilityTracesPatch>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservabilityLogsPatch {
+    enabled: Option<bool>,
+    head_sampling_rate: Option<f64>,
+    invocation_logs: Option<bool>,
+    persist: Option<bool>,
+    destinations: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservabilityTracesPatch {
+    enabled: Option<bool>,
+    persist: Option<bool>,
+    head_sampling_rate: Option<f64>,
+    destinations: Option<Vec<serde_json::Value>>,
 }
 
 pub(super) async fn get_script_settings(
@@ -122,10 +192,19 @@ pub(super) async fn get_script_settings(
     Path(path): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    settings_read_context(&state, &path, &request, V4Permission::Read).map_or_else(
-        |response| response,
-        |context| success_response(context, ScriptSettings::disabled()),
-    )
+    let (context, worker) = match settings_context(&state, &path, &request, V4Permission::Read) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let Some(api) = state.worker_api() else {
+        return error_response(V4Error::Unavailable, context.request_id());
+    };
+    match WorkerRepository::new(api.storage.db())
+        .get_observability_settings(worker.account_id, worker.id)
+    {
+        Ok(value) => success_response(context, ScriptSettings::from_persisted(&value)),
+        Err(error) => platform_error(context.request_id(), &error),
+    }
 }
 
 pub(super) async fn patch_script_settings(
@@ -133,19 +212,16 @@ pub(super) async fn patch_script_settings(
     Path(path): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    let context = match settings_read_context(&state, &path, &request, V4Permission::ProductWrite) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
+    let (context, worker) =
+        match settings_context(&state, &path, &request, V4Permission::ProductWrite) {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
     let patch = match json_body::<ScriptSettingsPatch>(request).await {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
     if patch.logpush.is_some_and(|value| value)
-        || patch
-            .observability
-            .as_ref()
-            .is_some_and(|value| !disabled_observability(value))
         || patch.tags.as_ref().is_some_and(|value| !value.is_empty())
         || patch
             .tail_consumers
@@ -154,14 +230,108 @@ pub(super) async fn patch_script_settings(
     {
         return error_response(V4Error::Unsupported, context.request_id());
     }
-    success_response(context, ScriptSettings::disabled())
+    let Some(api) = state.worker_api() else {
+        return error_response(V4Error::Unavailable, context.request_id());
+    };
+    let repo = WorkerRepository::new(api.storage.db());
+    let current = match repo.get_observability_settings(worker.account_id, worker.id) {
+        Ok(value) => value,
+        Err(error) => return platform_error(context.request_id(), &error),
+    };
+    let replacement = match merge_observability(&current, patch.observability) {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
+    };
+    let now = match now_ms() {
+        Ok(value) => value,
+        Err(error) => return error_response(error, context.request_id()),
+    };
+    if current.enabled == replacement.enabled
+        && current.head_sampling_rate == replacement.head_sampling_rate
+        && current.logs_enabled == replacement.logs_enabled
+        && current.logs_head_sampling_rate == replacement.logs_head_sampling_rate
+        && current.invocation_logs == replacement.invocation_logs
+        && current.persist == replacement.persist
+    {
+        return success_response(context, ScriptSettings::from_persisted(&current));
+    }
+    match repo.update_observability_settings(
+        worker.account_id,
+        worker.id,
+        &replacement,
+        context.request_id(),
+        now,
+    ) {
+        Ok(value) => success_response(context, ScriptSettings::from_persisted(&value)),
+        Err(error) => platform_error(context.request_id(), &error),
+    }
 }
 
-fn disabled_observability(value: &serde_json::Value) -> bool {
-    let Some(object) = value.as_object() else {
-        return false;
+fn merge_observability(
+    current: &open_compute_storage::WorkerObservabilitySettings,
+    patch: Option<ObservabilityPatch>,
+) -> Result<UpdateWorkerObservabilitySettings, V4Error> {
+    let Some(patch) = patch else {
+        return Ok(UpdateWorkerObservabilitySettings {
+            enabled: current.enabled,
+            head_sampling_rate: current.head_sampling_rate,
+            logs_enabled: current.logs_enabled,
+            logs_head_sampling_rate: current.logs_head_sampling_rate,
+            invocation_logs: current.invocation_logs,
+            persist: current.persist,
+        });
     };
-    object.len() == 1 && object.get("enabled") == Some(&serde_json::Value::Bool(false))
+    validate_rate(
+        patch.head_sampling_rate,
+        "/observability/head_sampling_rate",
+    )?;
+    if let Some(traces) = &patch.traces
+        && (traces.enabled.is_some_and(|value| value)
+            || traces.persist.is_some_and(|value| value)
+            || traces.head_sampling_rate.is_some()
+            || traces
+                .destinations
+                .as_ref()
+                .is_some_and(|values| !values.is_empty()))
+    {
+        return Err(V4Error::Unsupported);
+    }
+    if patch
+        .logs
+        .as_ref()
+        .and_then(|logs| logs.destinations.as_ref())
+        .is_some_and(|values| !values.is_empty())
+    {
+        return Err(V4Error::Unsupported);
+    }
+    let logs = patch.logs;
+    let logs_rate = logs.as_ref().and_then(|value| value.head_sampling_rate);
+    validate_rate(logs_rate, "/observability/logs/head_sampling_rate")?;
+    Ok(UpdateWorkerObservabilitySettings {
+        enabled: patch.enabled.unwrap_or(current.enabled),
+        head_sampling_rate: patch.head_sampling_rate.or(current.head_sampling_rate),
+        logs_enabled: logs
+            .as_ref()
+            .and_then(|value| value.enabled)
+            .unwrap_or(current.logs_enabled),
+        logs_head_sampling_rate: logs_rate.or(current.logs_head_sampling_rate),
+        invocation_logs: logs
+            .as_ref()
+            .and_then(|value| value.invocation_logs)
+            .unwrap_or(current.invocation_logs),
+        persist: logs
+            .as_ref()
+            .and_then(|value| value.persist)
+            .unwrap_or(current.persist),
+    })
+}
+
+fn validate_rate(value: Option<f64>, pointer: &'static str) -> Result<(), V4Error> {
+    if value.is_none_or(|rate| rate.is_finite() && (0.0..=1.0).contains(&rate)) {
+        Ok(())
+    } else {
+        Err(V4Error::InvalidField(pointer))
+    }
 }
 
 #[derive(Serialize)]
@@ -229,9 +399,8 @@ pub(super) async fn patch_settings(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let multipart = match Multipart::from_request(request, &state).await {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(multipart) = Multipart::from_request(request, &state).await else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let patch = match read_settings_part(multipart).await {
         Ok(value) => value,
@@ -694,17 +863,26 @@ pub(super) async fn delete_subdomain(
 
 fn settings_read_context(
     state: &HttpState,
-    (account, script): &(String, String),
+    path: &(String, String),
     request: &Request,
     permission: V4Permission,
 ) -> Result<crate::cloudflare_v4::V4RequestContext, Response> {
+    settings_context(state, path, request, permission).map(|(context, _)| context)
+}
+
+fn settings_context(
+    state: &HttpState,
+    (account, script): &(String, String),
+    request: &Request,
+    permission: V4Permission,
+) -> Result<(crate::cloudflare_v4::V4RequestContext, WorkerRecord), Response> {
     let context = authorize(request, permission)?;
     let account = domain::resolve_account(state, account)
         .map_err(|error| error_response(error, context.request_id()))?;
     let api = worker_api(state).map_err(|error| error_response(error, context.request_id()))?;
-    domain::worker_by_name(api, account, script)
+    let worker = domain::worker_by_name(api, account, script)
         .map_err(|error| platform_error(context.request_id(), &error))?;
-    Ok(context)
+    Ok((context, worker))
 }
 
 fn active_snapshot(
@@ -788,3 +966,7 @@ fn delete_force_query(query: Option<&str>) -> Result<bool, V4Error> {
         _ => Err(V4Error::InvalidRequest),
     }
 }
+
+#[cfg(test)]
+#[path = "mutations_tests.rs"]
+mod tests;

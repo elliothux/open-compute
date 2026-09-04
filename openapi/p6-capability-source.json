@@ -5,7 +5,8 @@
     "deviations": [
       "OC-ACCOUNT-SUBDOMAIN-001",
       "OC-D1-001",
-      "OC-AI-SEARCH-TOKEN-001"
+      "OC-AI-SEARCH-TOKEN-001",
+      "OC-OBSERVABILITY-001"
     ],
     "vendorRoutes": [
       "GET /open-compute/capabilities",
@@ -34,6 +35,73 @@
       "/v1/scheduler/**"
     ]
   },
+  "workersObservability": {
+    "settingsFields": [
+      {"id": "observability.enabled", "status": "supported", "source": "wrangler-config-schema"},
+      {"id": "observability.head_sampling_rate", "status": "supported", "source": "wrangler-config-schema"},
+      {"id": "observability.logs.enabled", "status": "supported", "source": "wrangler-config-schema"},
+      {"id": "observability.logs.head_sampling_rate", "status": "supported", "source": "wrangler-config-schema"},
+      {"id": "observability.logs.invocation_logs", "status": "supported", "source": "wrangler-config-schema"},
+      {"id": "observability.logs.persist", "status": "supported", "source": "wrangler-config-schema"},
+      {"id": "observability.logs.destinations", "status": "supported_with_deviation", "source": "wrangler-config-schema", "constraint": "Only omitted or empty destinations are accepted; external export is unsupported", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "observability.traces.enabled", "status": "unsupported", "source": "wrangler-config-schema", "constraint": "Only omitted or false is accepted"},
+      {"id": "observability.traces.persist", "status": "unsupported", "source": "wrangler-config-schema", "constraint": "Only omitted or false is accepted"},
+      {"id": "observability.traces.destinations", "status": "unsupported", "source": "wrangler-config-schema", "constraint": "Only omitted or empty is accepted"}
+    ],
+    "features": [
+      {"id": "workers.observability.logs.persistence", "status": "supported_with_deviation", "source": "open-compute-day1", "constraint": "Bounded single-machine SQLite retention and best-effort delivery", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "workers.observability.telemetry.keys", "status": "supported_with_deviation", "source": "cloudflare-openapi", "constraint": "Bounded local retention index with target-only attribution", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "workers.observability.telemetry.values", "status": "supported_with_deviation", "source": "cloudflare-openapi", "constraint": "Bounded local retention index with target-only attribution", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "workers.observability.telemetry.query", "status": "supported_with_deviation", "source": "cloudflare-openapi", "constraint": "Events and invocations views over a bounded local index", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "workers.observability.telemetry.liveTail", "status": "supported_with_deviation", "source": "cloudflare-dashboard-wire-2026-09-03", "constraint": "Process-local selected-Script stream with target-only attribution", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "workers.observability.telemetry.liveTailAccountWide", "status": "unsupported", "source": "p7-scope", "constraint": "scriptId is required by the Day 1 local authority"},
+      {"id": "workers.scripts.tails", "status": "supported_with_deviation", "source": "cloudflare-openapi+wrangler-4.127.1", "constraint": "Process-local selected-Script stream with target-only attribution", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "workers.scripts.tailDebug", "status": "unsupported", "source": "p7-scope", "constraint": "Only the fixed Wrangler debug=false client flow is supported"},
+      {"id": "workers.tailConsumers", "status": "unsupported", "source": "p7-scope"},
+      {"id": "workers.streamingTailConsumers", "status": "unsupported", "source": "p7-scope"},
+      {"id": "workers.logpush", "status": "unsupported", "source": "p7-scope"},
+      {"id": "workers.traces", "status": "unsupported", "source": "p7-scope"},
+      {"id": "workers.observability.telemetry.calculations", "status": "unsupported", "source": "p7-scope"},
+      {"id": "workers.observability.telemetry.savedQueries", "status": "unsupported", "source": "p7-scope"}
+    ],
+    "queryViews": [
+      {"id": "events", "status": "supported_with_deviation", "source": "cloudflare-openapi", "constraint": "Bounded local retention index omits unavailable hosted metadata", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "invocations", "status": "supported_with_deviation", "source": "cloudflare-openapi", "constraint": "Local invocation groups omit unavailable hosted metadata", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "calculations", "status": "unsupported", "source": "p7-scope"},
+      {"id": "traces", "status": "unsupported", "source": "p7-scope"},
+      {"id": "agents", "status": "unsupported", "source": "p7-scope"},
+      {"id": "requests", "status": "unsupported", "source": "p7-scope"}
+    ],
+    "queryOperators": [
+      {"id": "includes", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "not_includes", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "starts_with", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "ends_with", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "regex", "status": "supported_with_deviation", "source": "cloudflare-openapi", "constraint": "Linear-time RE2-compatible subset with bounded patterns", "deviations": ["OC-OBSERVABILITY-001"]},
+      {"id": "exists", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "is_null", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "in", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "not_in", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "eq", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "neq", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "gt", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "gte", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "lt", "status": "supported", "source": "cloudflare-openapi"},
+      {"id": "lte", "status": "supported", "source": "cloudflare-openapi"}
+    ],
+    "scriptTailProtocol": "trace-v1",
+    "limits": [
+      "observability.retention_ms",
+      "observability.max_database_bytes",
+      "observability.max_invocation_log_bytes",
+      "observability.max_tail_sessions_per_script",
+      "observability.query_max_events",
+      "observability.query_max_timeframe_ms",
+      "observability.ingest_queue_capacity",
+      "observability.tail_client_queue_bytes"
+    ],
+    "deviations": ["OC-OBSERVABILITY-001"]
+  },
   "wrangler": {
     "supportedFields": [
       "$schema", "env", "name", "account_id", "compatibility_date", "compatibility_flags", "main",
@@ -42,11 +110,9 @@
       "keep_names", "upload_source_maps", "assets", "cache", "define", "vars", "secrets", "durable_objects",
       "workflows", "kv_namespaces", "queues", "r2_buckets", "d1_databases", "vectorize",
       "ai_search_namespaces", "ai_search", "services", "ai", "images", "version_metadata", "send_metrics",
-      "dependencies_instrumentation", "dev", "keep_vars"
+      "dependencies_instrumentation", "dev", "keep_vars", "observability"
     ],
-    "deferredFields": {
-      "observability": "P7"
-    },
+    "deferredFields": {},
     "unsupportedDeferredFields": {
       "limits": "P8",
       "worker_loaders": "P9"
@@ -73,11 +139,9 @@
       "ai-search namespace list", "ai-search namespace get", "ai-search namespace update",
       "ai-search namespace delete", "ai-search create", "ai-search list", "ai-search get", "ai-search update",
       "ai-search delete", "ai-search stats", "ai-search search", "ai-search jobs", "queues create",
-      "queues list", "queues delete", "workflows"
+      "queues list", "queues delete", "workflows", "tail"
     ],
-    "deferredCommands": {
-      "tail": "P7"
-    },
+    "deferredCommands": {},
     "unsupportedCommands": [
       "dev --remote"
     ]

@@ -91,14 +91,14 @@ impl QueueApiState {
                         record.id,
                         record.consumer_generation,
                         request_id,
-                    )?
+                    )?;
                 }
                 (false, QueueConsumerState::Paused) => {
                     self.scheduler.resume_queue_consumer_operator(
                         record.id,
                         record.consumer_generation,
                         request_id,
-                    )?
+                    )?;
                 }
                 _ => {}
             }
@@ -323,3 +323,7 @@ pub(crate) fn now_ms() -> Result<i64, PlatformError> {
 fn internal() -> PlatformError {
     PlatformError::new(ErrorCode::Internal, "Queue lifecycle operation failed")
 }
+
+#[cfg(test)]
+#[path = "queue_api_tests.rs"]
+mod tests;

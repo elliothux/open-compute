@@ -704,3 +704,7 @@ fn multipart_invalid() -> PlatformError {
         "R2 multipart upload is invalid",
     )
 }
+
+#[cfg(test)]
+#[path = "r2_backend_multipart_tests.rs"]
+mod validation_tests;

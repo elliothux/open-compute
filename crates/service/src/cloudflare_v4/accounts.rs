@@ -215,7 +215,7 @@ async fn list_accounts(State(state): State<HttpState>, request: Request) -> Resp
             .filter(|_| query.page == 1)
             .into_iter()
             .collect(),
-        query,
+        &query,
         visible,
         usize::from(matches),
     )
@@ -277,7 +277,7 @@ async fn list_memberships(State(state): State<HttpState>, request: Request) -> R
             .filter(|_| query.page == 1)
             .into_iter()
             .collect(),
-        query,
+        &query,
         visible,
         usize::from(matches),
     )
@@ -294,7 +294,7 @@ fn read_context(request: &Request, permission: V4Permission) -> Result<V4Request
 fn success_collection<T: Serialize>(
     context: V4RequestContext,
     result: Vec<T>,
-    query: CollectionQuery,
+    query: &CollectionQuery,
     count: usize,
     total_count: usize,
 ) -> Response {
@@ -337,9 +337,11 @@ impl CollectionQuery {
                         return Err(V4Error::InvalidField("/per_page"));
                     }
                 }
-                "name" if matches!(kind, CollectionKind::Accounts) => name = one(name, &value)?,
+                "name" if matches!(kind, CollectionKind::Accounts) => {
+                    name = one(name.as_ref(), &value)?;
+                }
                 "account.name" | "name" if matches!(kind, CollectionKind::Memberships) => {
-                    name = one(name, &value)?;
+                    name = one(name.as_ref(), &value)?;
                 }
                 "direction" if value == "asc" || value == "desc" => {}
                 "order"
@@ -359,7 +361,7 @@ impl CollectionQuery {
     }
 }
 
-fn one(existing: Option<String>, value: &str) -> Result<Option<String>, V4Error> {
+fn one(existing: Option<&String>, value: &str) -> Result<Option<String>, V4Error> {
     if existing.is_some() || value.is_empty() || value.len() > 100 {
         return Err(V4Error::InvalidRequest);
     }

@@ -189,6 +189,14 @@ pub(super) async fn run_full_extras(
                 return;
             }
         };
+    let observability_external =
+        match ExternalServiceAddress::loopback("observability-backend", binding_backend_addr) {
+            Ok(external) => external,
+            Err(err) => {
+                checks.push(failed("runtime_cycle", err.code(), err.message(), None));
+                return;
+            }
+        };
     let Some(platform_id) = platform_id else {
         checks.push(skipped(
             "runtime_cycle",
@@ -224,7 +232,7 @@ pub(super) async fn run_full_extras(
             redactor: Redactor::new(),
             lease_path: Some(lease_path),
         },
-        vec![runtime_external, binding_external],
+        vec![runtime_external, binding_external, observability_external],
         vec![directory],
         Vec::new(),
     );

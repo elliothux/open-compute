@@ -28,6 +28,7 @@ pub struct WorkerApiState {
     delete_drain_timeout: Duration,
     max_queue_consumer_concurrency: u32,
     product_promoter: Option<Arc<dyn ProductPromotionCoordinator>>,
+    observability: Option<Arc<crate::observability::ObservabilityService>>,
     traffic: Arc<WorkerTrafficRegistry>,
     upload_serial: Arc<tokio::sync::Mutex<()>>,
 }
@@ -63,6 +64,7 @@ impl WorkerApiState {
             delete_drain_timeout,
             max_queue_consumer_concurrency: 32,
             product_promoter: None,
+            observability: None,
             traffic: Arc::new(WorkerTrafficRegistry::default()),
             upload_serial: Arc::new(tokio::sync::Mutex::new(())),
         }
@@ -90,6 +92,28 @@ impl WorkerApiState {
     pub fn with_product_promoter(mut self, promoter: Arc<dyn ProductPromotionCoordinator>) -> Self {
         self.product_promoter = Some(promoter);
         self
+    }
+
+    /// Attach the Workers Logs and realtime-tail authority.
+    #[must_use]
+    pub(crate) fn with_observability(
+        mut self,
+        observability: Arc<crate::observability::ObservabilityService>,
+    ) -> Self {
+        self.observability = Some(observability);
+        self
+    }
+
+    /// Borrow the Workers Logs and realtime-tail authority.
+    pub(crate) fn observability(
+        &self,
+    ) -> Result<&Arc<crate::observability::ObservabilityService>, PlatformError> {
+        self.observability.as_ref().ok_or_else(|| {
+            PlatformError::new(
+                ErrorCode::PlatformUnavailable,
+                "observability service is unavailable",
+            )
+        })
     }
 
     /// Process-local dispatch/deletion pin registry.
@@ -137,11 +161,19 @@ impl WorkerTrafficRegistry {
 }
 
 /// Resolve a persisted route, freeze its active Deployment, and dispatch through workerd.
-pub async fn public_ingress(State(state): State<HttpState>, request: Request) -> Response {
+pub async fn public_ingress(State(state): State<HttpState>, mut request: Request) -> Response {
     let request_id = request_id(&request);
     let Some(api) = state.worker_api() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    if let Some(peer) = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|value| value.0.ip().to_string())
+        && let Ok(value) = axum::http::HeaderValue::from_str(&peer)
+    {
+        request.headers_mut().insert("cf-connecting-ip", value);
+    }
     let hostname = match request
         .headers()
         .get(header::HOST)
@@ -167,17 +199,14 @@ pub async fn public_ingress(State(state): State<HttpState>, request: Request) ->
         Ok(pin) => pin,
         Err(error) => return crate::http::platform_error_response(&error, request_id),
     };
-    let route_generation = match i64::try_from(snapshot.worker.route_generation) {
-        Ok(value) => value,
-        Err(_) => {
-            return crate::http::platform_error_response(
-                &PlatformError::new(
-                    ErrorCode::VersionInvariantViolation,
-                    "route generation exceeds the runtime protocol",
-                ),
-                request_id,
-            );
-        }
+    let Ok(route_generation) = i64::try_from(snapshot.worker.route_generation) else {
+        return crate::http::platform_error_response(
+            &PlatformError::new(
+                ErrorCode::VersionInvariantViolation,
+                "route generation exceeds the runtime protocol",
+            ),
+            request_id,
+        );
     };
     let target = DispatchTarget {
         account_id: snapshot.route.account_id,

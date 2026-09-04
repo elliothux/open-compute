@@ -304,10 +304,10 @@ impl D1BindingService {
                     None
                 };
                 if mutation {
-                    ensure_d1_storage_headroom(&storage)?;
+                    ensure_d1_storage_headroom(storage)?;
                     context.mark_mutation();
                 }
-                let result = operation(&engine, D1QueryLimits::batch(&config)?)?;
+                let result = operation(engine, D1QueryLimits::batch(config)?)?;
                 Ok(result)
             })
             .await
@@ -375,9 +375,9 @@ impl D1BindingService {
                     match command {
                         Command::Query(query) => {
                             let limits = if query.mode == D1QueryMode::Batch {
-                                D1QueryLimits::batch(&config)?
+                                D1QueryLimits::batch(config)?
                             } else {
-                                D1QueryLimits::query(&config)?
+                                D1QueryLimits::query(config)?
                             };
                             let readonly = engine.statements_readonly(&query.statements, limits)?;
                             if readonly && !binding.binding.permissions.read
@@ -402,7 +402,7 @@ impl D1BindingService {
                                 Some(result?)
                             };
                             if !readonly {
-                                ensure_d1_storage_headroom(&storage)?;
+                                ensure_d1_storage_headroom(storage)?;
                                 context.mark_mutation();
                             }
                             apply_session(
@@ -457,9 +457,9 @@ impl D1BindingService {
                                 );
                             }
                             let _admission = result?;
-                            ensure_d1_storage_headroom(&storage)?;
+                            ensure_d1_storage_headroom(storage)?;
                             context.mark_mutation();
-                            let result = engine.exec(&sql, D1QueryLimits::query(&config)?)?;
+                            let result = engine.exec(&sql, D1QueryLimits::query(config)?)?;
                             serde_json::to_vec(&result)
                                 .map(|bytes| CommandResult::Json { bytes })
                                 .map_err(|_| protocol_error())

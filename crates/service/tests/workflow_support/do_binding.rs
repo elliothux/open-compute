@@ -40,13 +40,21 @@ pub(super) async fn verify(harness: &Harness, definition: WorkflowId) {
     ]
     .into_iter()
     .map(|(name, kind, id)| {
+        let config = if kind == BindingKind::Workflow {
+            CanonicalBindingConfig {
+                workflow_class_name: Some("Flow".into()),
+                ..Default::default()
+            }
+        } else {
+            CanonicalBindingConfig::default()
+        };
         (
             name.into(),
             VersionBindingInput {
                 kind,
                 id,
                 permissions: Default::default(),
-                config: Default::default(),
+                config,
             },
         )
     })

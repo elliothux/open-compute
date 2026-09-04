@@ -39,6 +39,8 @@ pub struct CompileRequest<'a> {
     pub token: &'a SecretString,
     /// Distinct fresh token scoped only to the private binding backend.
     pub binding_token: &'a SecretString,
+    /// Distinct fresh token scoped only to the observability ingestion backend.
+    pub observability_token: &'a SecretString,
     /// Validated Durable Object policy rendered into private system-Worker bindings.
     pub durable_objects: DurableObjectsConfig,
     /// Compile deadline.
@@ -159,6 +161,7 @@ pub async fn compile_static_config(
         request.platform,
         request.token,
         request.binding_token,
+        request.observability_token,
         &request.durable_objects,
     )?;
 

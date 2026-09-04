@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    NewVersion, NewVersionBinding, ReserveResourceCreate, ResourceCreateReservation,
-    WorkerRepository,
+    CatalogDirection, CatalogSort, NewVersion, NewVersionBinding, ReserveResourceCreate,
+    ResourceCreateReservation, WorkerRepository, decode_catalog_cursor,
 };
 use open_compute_core::config::StorageConfig;
 use open_compute_core::{
@@ -722,6 +722,112 @@ fn object_list_page_is_bounded_and_cursor_is_stable() {
         decode_object_list_cursor(&format!("{}:0", public_id(fixture.namespace, 7)))
             .unwrap_err()
             .code(),
+        ErrorCode::ConfigInvalid
+    );
+}
+
+#[test]
+fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
+    let (_temp, storage) = storage();
+    let fixture = ready_fixture(&storage);
+    let resources = ResourceRepository::new(storage.db());
+    let repo = DurableObjectRepository::new(&storage);
+    for (index, (name, class_name)) in [
+        ("ALPHA_COUNTERS", "AlphaCounter"),
+        ("BETA_COUNTERS", "BetaCounter"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let resource = reserve_resource(
+            &storage,
+            fixture.account,
+            BindingKind::DoNamespace,
+            name,
+            100 + index as i64,
+        );
+        repo.ensure_namespace(&resource, fixture.worker, class_name)
+            .unwrap();
+        resources
+            .mark_ready(resource.id, 110 + index as i64)
+            .unwrap();
+    }
+
+    for (sort, direction) in [
+        (CatalogSort::Name, CatalogDirection::Asc),
+        (CatalogSort::Name, CatalogDirection::Desc),
+        (CatalogSort::CreatedAt, CatalogDirection::Asc),
+        (CatalogSort::UpdatedAt, CatalogDirection::Desc),
+    ] {
+        let first = repo
+            .list_namespaces_page(fixture.account, None, None, sort, direction, None, 1)
+            .unwrap();
+        assert_eq!(first.items.len(), 1);
+        let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
+        let rest = repo
+            .list_namespaces_page(
+                fixture.account,
+                None,
+                Some(ResourceState::Ready),
+                sort,
+                direction,
+                Some(cursor),
+                10,
+            )
+            .unwrap();
+        assert_eq!(rest.items.len(), 2);
+        assert!(rest.next_cursor.is_none());
+    }
+
+    let by_name = repo
+        .list_namespaces_page(
+            fixture.account,
+            Some("beta"),
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            10,
+        )
+        .unwrap();
+    assert_eq!(by_name.items[0].resource.name, "BETA_COUNTERS");
+    let by_id = repo
+        .list_namespaces_page(
+            fixture.account,
+            Some(&fixture.namespace.to_string()),
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            10,
+        )
+        .unwrap();
+    assert_eq!(by_id.items[0].resource.id, fixture.namespace);
+
+    let first = repo
+        .list_namespaces_page(
+            fixture.account,
+            None,
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            1,
+        )
+        .unwrap();
+    let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        repo.list_namespaces_page(
+            fixture.account,
+            None,
+            None,
+            CatalogSort::UpdatedAt,
+            CatalogDirection::Asc,
+            Some(cursor),
+            10,
+        )
+        .unwrap_err()
+        .code(),
         ErrorCode::ConfigInvalid
     );
 }

@@ -52,6 +52,7 @@ async fn materialization_is_reused_verified_and_never_repairs_corruption() {
     std::fs::write(&asset, b"corrupt").unwrap();
     let token = open_compute_core::SecretString::new("a".repeat(64));
     let binding_token = open_compute_core::SecretString::new("b".repeat(64));
+    let observability_token = open_compute_core::SecretString::new("c".repeat(64));
     let compile_error = crate::compile_static_config(crate::CompileRequest {
         runtime: &runtime,
         lock_path: &package.lock_path(),
@@ -62,6 +63,7 @@ async fn materialization_is_reused_verified_and_never_repairs_corruption() {
         },
         token: &token,
         binding_token: &binding_token,
+        observability_token: &observability_token,
         durable_objects: open_compute_core::DurableObjectsConfig::default(),
         deadline: Duration::from_secs(20),
         redactor: &Redactor::new(),

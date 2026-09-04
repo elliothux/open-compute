@@ -49,6 +49,7 @@ pub(crate) fn router(
             wire::authentication_boundary,
         ));
     Router::new()
+        .merge(crate::workers_http::v4::signed_router())
         .merge(d1_transfer::signed_router())
         .merge(authenticated)
 }

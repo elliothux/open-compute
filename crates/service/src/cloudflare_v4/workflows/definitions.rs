@@ -182,7 +182,7 @@ pub(super) async fn put(
             return error_response(V4Error::from(&error), request_id);
         }
     };
-    match update_result(&api, prepared.definition, &version, &prepared.script_name) {
+    match update_result(&api, &prepared.definition, &version, &prepared.script_name) {
         Ok(result) => success_response(context, result),
         Err(error) => error_response(error, request_id),
     }
@@ -261,7 +261,7 @@ pub(super) async fn list_versions(
     let result = tokio::task::spawn_blocking(move || {
         let definition = definition(&api, account, &workflow_name)?;
         let mut versions = all_versions(&api, account, definition.id)?;
-        versions.sort_by(|left, right| right.version_number.cmp(&left.version_number));
+        versions.sort_by_key(|version| std::cmp::Reverse(version.version_number));
         let total_count = versions.len();
         let offset = (query.page - 1)
             .checked_mul(query.per_page)
@@ -564,7 +564,7 @@ fn current_or_latest(
 
 fn update_result(
     api: &WorkflowApiState,
-    definition: WorkflowDefinition,
+    definition: &WorkflowDefinition,
     version: &WorkflowVersion,
     script_name: &str,
 ) -> Result<UpdateResult, V4Error> {

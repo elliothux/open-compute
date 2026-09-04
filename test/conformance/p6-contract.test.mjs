@@ -62,8 +62,8 @@ test("vendor extension operations have stable typed envelopes and exact request 
 test("settings surfaces, asset upload variants, and old routes are classified exactly", () => {
   const routes = new Map(capability.managementApi.routes.map(item => [item.id, item]));
   assert.equal(capability.managementApi.routes.filter(item => item.status === "supported").length, 147);
-  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported_with_deviation").length, 4);
-  assert.equal(capability.managementApi.routes.filter(item => item.status === "planned").length, 3);
+  assert.equal(capability.managementApi.routes.filter(item => item.status === "supported_with_deviation").length, 12);
+  assert.equal(capability.managementApi.routes.filter(item => item.status === "planned").length, 0);
   assert.equal(capability.managementApi.routes.filter(item => item.status === "unsupported").length, 1);
   assert.equal(routes.get("PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings")?.requestMediaType, "multipart");
   assert.equal(routes.get("PATCH /accounts/{account_id}/workers/scripts/{script_name}/script-settings")?.requestMediaType, "json");
@@ -87,6 +87,18 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
       routes.get("GET /accounts/{account_id}/ai-search/tokens")?.deviations],
     ["supported_with_deviation", ["OC-AI-SEARCH-TOKEN-001"]],
   );
+  for (const id of [
+    "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
+    "POST /accounts/{account_id}/workers/observability/telemetry/keys",
+    "POST /accounts/{account_id}/workers/observability/telemetry/values",
+    "POST /accounts/{account_id}/workers/observability/telemetry/query",
+    "POST /accounts/{account_id}/workers/observability/telemetry/live-tail",
+  ]) {
+    assert.deepEqual(
+      [routes.get(id)?.status, routes.get(id)?.deviations],
+      ["supported_with_deviation", ["OC-OBSERVABILITY-001"]],
+    );
+  }
   assert.deepEqual(
     [routes.get("GET /accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark")?.status,
       routes.get("POST /accounts/{account_id}/d1/database/{database_id}/time_travel/restore")?.status],
@@ -101,7 +113,7 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
     /not automatically retained restore points/,
   );
   assert.deepEqual(capability.managementApi.deviations,
-    ["OC-ACCOUNT-SUBDOMAIN-001", "OC-D1-001", "OC-AI-SEARCH-TOKEN-001"]);
+    ["OC-ACCOUNT-SUBDOMAIN-001", "OC-D1-001", "OC-AI-SEARCH-TOKEN-001", "OC-OBSERVABILITY-001"]);
   assert.deepEqual(
     [routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.status,
       routes.get("POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}")?.source],
@@ -111,16 +123,18 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
   assert.ok(capability.managementApi.legacyRoutes.every(item => item.status === "unsupported"));
 });
 
-test("P7, P8, and P9 fields remain explicit handoffs without support claims", () => {
+test("implemented P7 fields and later handoffs remain explicit", () => {
   const fields = new Map(capability.wrangler.fields.map(item => [item.id, item]));
   const bindings = new Map(capability.wrangler.bindings.map(item => [item.id, item]));
   const commands = new Map(capability.wrangler.commands.map(item => [item.id, item]));
-  assert.deepEqual([fields.get("observability")?.status, fields.get("observability")?.stage], ["planned", "P7"]);
+  assert.deepEqual([fields.get("observability")?.status, fields.get("observability")?.source],
+    ["supported", "wrangler-config-schema"]);
   assert.deepEqual([fields.get("limits.cpu_ms")?.status, fields.get("limits.cpu_ms")?.stage], ["unsupported", "P8"]);
   assert.deepEqual([fields.get("limits.subrequests")?.status, fields.get("limits.subrequests")?.stage], ["unsupported", "P8"]);
   assert.deepEqual([fields.get("worker_loaders[].binding")?.status, fields.get("worker_loaders[].binding")?.stage], ["unsupported", "P9"]);
   assert.deepEqual([bindings.get("worker_loader")?.status, bindings.get("worker_loader")?.stage], ["unsupported", "P9"]);
-  assert.deepEqual([commands.get("tail")?.status, commands.get("tail")?.stage], ["planned", "P7"]);
+  assert.deepEqual([commands.get("tail")?.status, commands.get("tail")?.source],
+    ["supported", "wrangler-cli"]);
   assert.equal(fields.get("usage_model")?.source, "pinned-schema-absence");
 });
 

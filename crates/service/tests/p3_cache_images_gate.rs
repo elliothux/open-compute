@@ -271,6 +271,7 @@ async fn p3_cache_images_real_runtime_semantics_and_lifecycle_matrix() {
         vec![
             ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
             ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
         vec![source_auth.clone(), binding_auth.clone()],

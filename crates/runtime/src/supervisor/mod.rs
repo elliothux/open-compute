@@ -172,6 +172,7 @@ pub struct StaticConfigCompiler {
     redactor: Redactor,
     generation_auth: Option<GenerationAuthRegistry>,
     binding_generation_auth: Option<GenerationAuthRegistry>,
+    observability_generation_auth: Option<GenerationAuthRegistry>,
     durable_objects: DurableObjectsConfig,
 }
 
@@ -206,6 +207,7 @@ impl StaticConfigCompiler {
             redactor,
             generation_auth: None,
             binding_generation_auth: None,
+            observability_generation_auth: None,
             durable_objects: DurableObjectsConfig::default(),
         }
     }
@@ -221,6 +223,13 @@ impl StaticConfigCompiler {
     #[must_use]
     pub fn with_binding_generation_auth(mut self, auth: GenerationAuthRegistry) -> Self {
         self.binding_generation_auth = Some(auth);
+        self
+    }
+
+    /// Activate a distinct generation credential for Workers Logs ingestion.
+    #[must_use]
+    pub fn with_observability_generation_auth(mut self, auth: GenerationAuthRegistry) -> Self {
+        self.observability_generation_auth = Some(auth);
         self
     }
 
@@ -240,9 +249,11 @@ impl ConfigCompiler for StaticConfigCompiler {
     ) -> Pin<Box<dyn Future<Output = Result<CompiledConfig, PlatformError>> + Send + '_>> {
         Box::pin(async move {
             let binding_token = generate_internal_token()?;
+            let observability_token = generate_internal_token()?;
             let mut redactor = self.redactor.clone();
             redactor.register_secret_string(&token);
             redactor.register_secret_string(&binding_token);
+            redactor.register_secret_string(&observability_token);
             let compiled = compile_static_config(CompileRequest {
                 runtime: &self.runtime,
                 lock_path: &self.lock_path,
@@ -251,6 +262,7 @@ impl ConfigCompiler for StaticConfigCompiler {
                 platform: &self.platform,
                 token: &token,
                 binding_token: &binding_token,
+                observability_token: &observability_token,
                 durable_objects: self.durable_objects.clone(),
                 deadline: self.deadline,
                 redactor: &redactor,
@@ -265,6 +277,11 @@ impl ConfigCompiler for StaticConfigCompiler {
                 && let Some(auth) = &self.binding_generation_auth
             {
                 auth.activate(binding_token);
+            }
+            if compiled.is_ok()
+                && let Some(auth) = &self.observability_generation_auth
+            {
+                auth.activate(observability_token);
             }
             compiled
         })

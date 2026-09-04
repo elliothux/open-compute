@@ -15,6 +15,20 @@ CREATE UNIQUE INDEX workers_live_name
 ON workers(account_id, name)
 WHERE deleted_at_ms IS NULL;
 
+CREATE TABLE worker_observability_settings (
+  worker_id TEXT PRIMARY KEY REFERENCES workers(id) ON DELETE CASCADE,
+  generation INTEGER NOT NULL CHECK(generation > 0),
+  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+  head_sampling_rate REAL CHECK(head_sampling_rate IS NULL OR
+    (head_sampling_rate >= 0.0 AND head_sampling_rate <= 1.0)),
+  logs_enabled INTEGER NOT NULL CHECK(logs_enabled IN (0, 1)),
+  logs_head_sampling_rate REAL CHECK(logs_head_sampling_rate IS NULL OR
+    (logs_head_sampling_rate >= 0.0 AND logs_head_sampling_rate <= 1.0)),
+  invocation_logs INTEGER NOT NULL CHECK(invocation_logs IN (0, 1)),
+  persist INTEGER NOT NULL CHECK(persist IN (0, 1)),
+  updated_at_ms INTEGER NOT NULL
+) STRICT;
+
 CREATE TABLE worker_versions (
   id TEXT PRIMARY KEY,
   worker_id TEXT NOT NULL REFERENCES workers(id),

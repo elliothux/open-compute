@@ -56,8 +56,20 @@ fn write_platform_config(input: &PlatformConfigInput<'_>) -> PathBuf {
         .temp
         .path()
         .join(format!("{}-admin.token", input.name));
+    let deployer_token = input
+        .temp
+        .path()
+        .join(format!("{}-deployer.token", input.name));
+    let read_only_token = input
+        .temp
+        .path()
+        .join(format!("{}-read-only.token", input.name));
     fs::write(&admin_token, b"p0-exit-admin\n").unwrap();
+    fs::write(&deployer_token, b"p0-exit-deployer\n").unwrap();
+    fs::write(&read_only_token, b"p0-exit-read-only\n").unwrap();
     fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&deployer_token, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&read_only_token, fs::Permissions::from_mode(0o600)).unwrap();
     let path = input.temp.path().join(format!("{}.toml", input.name));
     fs::write(
         &path,
@@ -69,6 +81,12 @@ admin_bind = "127.0.0.1:0"
 
 [server.admin_auth]
 file = "{admin_token}"
+
+[server.deployer_auth]
+file = "{deployer_token}"
+
+[server.read_only_auth]
+file = "{read_only_token}"
 
 [storage]
 data_dir = "{data_dir}"
@@ -107,6 +125,8 @@ max_series = 1024
             access_key = access_key.display(),
             secret_key = secret_key.display(),
             admin_token = admin_token.display(),
+            deployer_token = deployer_token.display(),
+            read_only_token = read_only_token.display(),
         ),
     )
     .unwrap();
@@ -169,7 +189,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         storage.clone(),
         artifacts.clone(),
         objects.clone(),
-        pins.clone(),
+        &pins,
         &stack,
     );
     let (bindings, do_plan) =
@@ -479,7 +499,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         storage.clone(),
         artifacts.clone(),
         objects.clone(),
-        pins.clone(),
+        &pins,
         &stack,
     );
     let persisted_worker = WorkerRepository::new(storage.db())
@@ -567,7 +587,7 @@ async fn p0_real_combined_exit_matrix_inner() {
         "p0-exit-owner",
     )
     .await;
-    let router = admin_router(storage.clone(), artifacts, objects, pins.clone(), &stack);
+    let router = admin_router(storage.clone(), artifacts, objects, &pins, &stack);
     let restored_worker = WorkerRepository::new(storage.db())
         .get_worker(account, worker.id)
         .unwrap();

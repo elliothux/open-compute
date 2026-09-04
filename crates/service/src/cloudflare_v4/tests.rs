@@ -4,7 +4,7 @@ use crate::health::HealthCoordinator;
 use crate::http::{HttpState, REQUEST_ID_HEADER};
 use crate::metrics::MetricsRegistry;
 use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
+use axum::http::{Method, Request, StatusCode, header};
 use open_compute_core::config::MetricsConfig;
 use open_compute_core::{AccountId, PlatformId, SecretString};
 use std::sync::Arc;
@@ -32,6 +32,10 @@ fn state() -> (HttpState, AccountAuthority) {
 
 fn app(state: HttpState) -> Router {
     router(state.clone(), storage_router()).with_state(state)
+}
+
+fn full_app(state: HttpState) -> Router {
+    router(state.clone(), crate::workers_http::v4::router()).with_state(state)
 }
 
 async fn json(response: axum::response::Response) -> serde_json::Value {
@@ -143,9 +147,12 @@ async fn vendor_capabilities_and_system_status_use_the_canonical_envelope() {
         .unwrap()
         .len();
     assert_eq!(endpoint_count, authority_count);
-    assert_eq!(
-        capabilities["result"]["deviations"][0],
-        "OC-MANAGEMENT-COMPATIBILITY-DATE-001"
+    let deviations = capabilities["result"]["deviations"].as_array().unwrap();
+    assert_eq!(deviations[0], "OC-ACCOUNT-SUBDOMAIN-001");
+    assert!(
+        deviations
+            .iter()
+            .any(|value| value == "OC-OBSERVABILITY-001")
     );
 
     let status = app(state)
@@ -465,6 +472,561 @@ async fn d1_transfer_scope_media_and_query_contracts_fail_closed_before_authorit
         .await
         .unwrap();
     assert_eq!(ambiguous_restore.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn authenticated_surface_fails_closed_without_product_authorities() {
+    struct Case {
+        method: Method,
+        path: String,
+        content_type: Option<&'static str>,
+        body: &'static str,
+    }
+
+    let (state, authority) = state();
+    let account = authority.public_id();
+    let resource = "00000000000000000000000000000000";
+    let cases = [
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/storage/kv/namespaces"),
+            content_type: Some("application/json"),
+            body: r#"{"title":"coverage-kv"}"#,
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/storage/kv/namespaces"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}"),
+            content_type: Some("application/json"),
+            body: r#"{"title":"coverage-renamed"}"#,
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}/keys"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}/values/key"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}/values/key"),
+            content_type: Some("application/octet-stream"),
+            body: "value",
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}/values/key"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}/metadata/key"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}/bulk"),
+            content_type: Some("application/json"),
+            body: "[]",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}/bulk/get"),
+            content_type: Some("application/json"),
+            body: "[]",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/storage/kv/namespaces/{resource}/bulk/delete"),
+            content_type: Some("application/json"),
+            body: "[]",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/d1/database"),
+            content_type: Some("application/json"),
+            body: r#"{"name":"coverage-db"}"#,
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/d1/database"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/d1/database/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/d1/database/{resource}"),
+            content_type: Some("application/json"),
+            body: r#"{"name":"coverage-db"}"#,
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/d1/database/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/d1/database/{resource}/query"),
+            content_type: Some("application/json"),
+            body: r#"{"sql":"SELECT 1"}"#,
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/d1/database/{resource}/raw"),
+            content_type: Some("application/json"),
+            body: r#"{"sql":"SELECT 1"}"#,
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/d1/database/{resource}/export"),
+            content_type: Some("application/json"),
+            body: r#"{"output_format":"polling"}"#,
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/d1/database/{resource}/import"),
+            content_type: Some("application/json"),
+            body: r#"{"action":"init","etag":"00"}"#,
+        },
+        Case {
+            method: Method::GET,
+            path: format!(
+                "/accounts/{account}/d1/database/{resource}/time_travel/bookmark?timestamp=2026-01-01T00%3A00%3A00Z"
+            ),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: format!(
+                "/accounts/{account}/d1/database/{resource}/time_travel/restore?bookmark=opaque"
+            ),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/queues"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/queues"),
+            content_type: Some("application/json"),
+            body: r#"{"queue_name":"coverage-queue"}"#,
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/queues/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/queues/{resource}"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/queues/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/queues/{resource}/consumers"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/queues/{resource}/consumers"),
+            content_type: Some("application/json"),
+            body: r#"{"type":"worker","script_name":"worker"}"#,
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/queues/{resource}/consumers/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/queues/{resource}/consumers/{resource}"),
+            content_type: Some("application/json"),
+            body: r#"{"type":"worker","script_name":"worker"}"#,
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/queues/{resource}/consumers/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/r2/buckets"),
+            content_type: Some("application/json"),
+            body: r#"{"name":"coverage-bucket"}"#,
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/r2/buckets"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/r2/buckets/coverage-bucket"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/r2/buckets/coverage-bucket"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/r2/buckets/coverage-bucket"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/r2/buckets/coverage-bucket/objects"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/r2/buckets/coverage-bucket/objects/key"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/r2/buckets/coverage-bucket/objects/key"),
+            content_type: Some("application/octet-stream"),
+            body: "value",
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/r2/buckets/coverage-bucket/objects/key"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workflows"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workflows/workflow"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PUT,
+            path: format!("/accounts/{account}/workflows/workflow"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/workflows/workflow"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workflows/workflow/versions"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workflows/workflow/versions/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workflows/workflow/instances"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/workflows/workflow/instances"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/workflows/workflow/instances/batch"),
+            content_type: Some("application/json"),
+            body: "[]",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workflows/workflow/instances/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PATCH,
+            path: format!("/accounts/{account}/workflows/workflow/instances/{resource}/status"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::POST,
+            path: format!(
+                "/accounts/{account}/workflows/workflow/instances/{resource}/events/event"
+            ),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::DELETE,
+            path: format!("/accounts/{account}/workers/scripts/worker"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/versions"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/versions/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/deployments"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/deployments/{resource}"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/script-settings"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::PATCH,
+            path: format!("/accounts/{account}/workers/scripts/worker/script-settings"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/settings"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/secrets"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/schedules"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/subdomain"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/workers/scripts/worker/tails"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/workers/observability/telemetry/keys"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/workers/observability/telemetry/values"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/workers/observability/telemetry/query"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::POST,
+            path: format!("/accounts/{account}/workers/observability/telemetry/live-tail"),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::POST,
+            path: format!(
+                "/accounts/{account}/workers/observability/telemetry/live-tail/heartbeat"
+            ),
+            content_type: Some("application/json"),
+            body: "{}",
+        },
+        Case {
+            method: Method::GET,
+            path: "/open-compute/scheduler".to_owned(),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: "/open-compute/scheduler/resume".to_owned(),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: "/open-compute/scheduler/repair".to_owned(),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: "/open-compute/cache".to_owned(),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::POST,
+            path: "/open-compute/cache/garbage-collection".to_owned(),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: "/open-compute/images/capacity".to_owned(),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/open-compute/workers/worker/endpoints"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/open-compute/durable-objects"),
+            content_type: None,
+            body: "",
+        },
+        Case {
+            method: Method::GET,
+            path: format!("/accounts/{account}/open-compute/durable-objects/{resource}/objects"),
+            content_type: None,
+            body: "",
+        },
+    ];
+
+    for case in cases {
+        let mut builder = Request::builder()
+            .method(case.method.clone())
+            .uri(&case.path)
+            .header(header::AUTHORIZATION, "Bearer admin-token")
+            .header(header::HOST, "127.0.0.1:8787");
+        if let Some(content_type) = case.content_type {
+            builder = builder.header(header::CONTENT_TYPE, content_type);
+        }
+        let response = full_app(state.clone())
+            .oneshot(builder.body(Body::from(case.body)).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                response.status(),
+                StatusCode::BAD_REQUEST
+                    | StatusCode::FORBIDDEN
+                    | StatusCode::NOT_FOUND
+                    | StatusCode::NOT_IMPLEMENTED
+                    | StatusCode::CONFLICT
+                    | StatusCode::SERVICE_UNAVAILABLE
+            ),
+            "unexpected status for {}: {}",
+            case.path,
+            response.status()
+        );
+        assert!(response.headers().contains_key(REQUEST_ID_HEADER));
+        let body = json(response).await;
+        assert_eq!(body["success"], false, "unexpected body for {}", case.path);
+        assert!(body["errors"][0]["code"].is_number());
+    }
 }
 
 #[test]

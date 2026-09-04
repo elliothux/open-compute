@@ -273,13 +273,27 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
     let admin_token = root.path().join("admin.token");
+    let deployer_token = root.path().join("deployer.token");
+    let read_only_token = root.path().join("read-only.token");
     fs::write(&admin_token, b"single-binary-admin\n").unwrap();
+    fs::write(&deployer_token, b"single-binary-deployer\n").unwrap();
+    fs::write(&read_only_token, b"single-binary-read-only\n").unwrap();
     fs::set_permissions(&admin_token, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&deployer_token, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::set_permissions(&read_only_token, fs::Permissions::from_mode(0o600)).unwrap();
     let mut config = PlatformConfig::default();
     config.server.public_bind = address.to_string();
     config.server.admin_auth = SecretReference {
         env: None,
         file: Some(admin_token),
+    };
+    config.server.deployer_auth = SecretReference {
+        env: None,
+        file: Some(deployer_token),
+    };
+    config.server.read_only_auth = SecretReference {
+        env: None,
+        file: Some(read_only_token),
     };
     config.storage.data_dir = data.clone();
     config.storage.master_key_file = data.join("keys/master.key");

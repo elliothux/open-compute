@@ -16,3 +16,7 @@ pub(super) fn invariant() -> PlatformError {
         "persisted Version authority is inconsistent",
     )
 }
+
+#[cfg(test)]
+#[path = "errors_tests.rs"]
+mod tests;

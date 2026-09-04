@@ -43,7 +43,10 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
                     kind: BindingKind::Workflow,
                     id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                     permissions: CanonicalPermissions::default(),
-                    config: CanonicalBindingConfig::default(),
+                    config: CanonicalBindingConfig {
+                        workflow_class_name: Some("Flow".into()),
+                        ..Default::default()
+                    },
                 },
             )]),
         )

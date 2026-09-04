@@ -39,6 +39,9 @@ pub mod images_backend;
 pub mod kv_api;
 pub mod kv_backend;
 pub mod metrics;
+mod observability;
+mod observability_backend;
+mod observability_filter;
 mod p2_3_promotion;
 #[cfg(test)]
 mod p3_3_test_support;

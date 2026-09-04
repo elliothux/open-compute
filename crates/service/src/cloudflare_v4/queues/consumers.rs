@@ -88,7 +88,7 @@ async fn list_consumers(
         QueueConsumerRepository::new(storage.db())
             .live_for_queue(queue.id)?
             .into_iter()
-            .map(|record| consumer_response(&account, &storage, &queue, record))
+            .map(|record| consumer_response(&account, &storage, &queue, &record))
             .collect::<Result<Vec<_>, _>>()
     })
     .await;
@@ -182,7 +182,7 @@ async fn mutate_consumer(
             dead_letter_queue,
             now_ms()?,
         )?;
-        consumer_response(&account, api.storage(), &queue, record)
+        consumer_response(&account, api.storage(), &queue, &record)
     })
     .await;
     respond_consumer(result, context)
@@ -212,7 +212,7 @@ async fn get_consumer(
     let result = tokio::task::spawn_blocking(move || {
         let queue = resolve_queue(&account, &storage, account_id, &queue_public)?;
         let record = resolve_consumer(&account, &storage, account_id, queue.id, &consumer_public)?;
-        consumer_response(&account, &storage, &queue, record)
+        consumer_response(&account, &storage, &queue, &record)
     })
     .await;
     respond_consumer(result, context)
@@ -325,7 +325,7 @@ pub(super) fn consumer_response(
     authority: &crate::cloudflare_v4::accounts::AccountAuthority,
     storage: &PlatformStorage,
     queue: &QueueRecord,
-    record: QueueConsumerRecord,
+    record: &QueueConsumerRecord,
 ) -> Result<ConsumerResponse, PlatformError> {
     let declaration =
         QueueConsumerRepository::new(storage.db()).declaration(record.declaration_id)?;
@@ -418,3 +418,7 @@ struct ConsumerSettings {
 struct DeleteResponse {
     success: bool,
 }
+
+#[cfg(test)]
+#[path = "consumers_tests.rs"]
+mod tests;

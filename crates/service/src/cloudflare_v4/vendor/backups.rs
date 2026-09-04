@@ -78,7 +78,7 @@ async fn kv_backups(
                 .map(Backup::try_from)
                 .collect(),
         ),
-        Ok(Err(error)) => backup_platform_error(error, context),
+        Ok(Err(error)) => backup_platform_error(&error, context),
         Err(_) => error_response(V4Error::Internal, context.request_id()),
     }
 }
@@ -126,7 +126,7 @@ async fn create_kv_backup(
             }
             Err(error) => error_response(error, context.request_id()),
         },
-        Err(error) => backup_platform_error(error, context),
+        Err(error) => backup_platform_error(&error, context),
     }
 }
 
@@ -176,7 +176,7 @@ async fn restore_kv_backup(
             }
             Err(error) => error_response(error, context.request_id()),
         },
-        Err(error) => backup_platform_error(error, context),
+        Err(error) => backup_platform_error(&error, context),
     }
 }
 
@@ -211,7 +211,7 @@ async fn d1_backups(
         Ok(Ok(backups)) => {
             backup_list_response(context, backups.into_iter().map(Backup::try_from).collect())
         }
-        Ok(Err(error)) => backup_platform_error(error, context),
+        Ok(Err(error)) => backup_platform_error(&error, context),
         Err(_) => error_response(V4Error::Internal, context.request_id()),
     }
 }
@@ -259,7 +259,7 @@ async fn create_d1_backup(
             }
             Err(error) => error_response(error, context.request_id()),
         },
-        Err(error) => backup_platform_error(error, context),
+        Err(error) => backup_platform_error(&error, context),
     }
 }
 
@@ -308,7 +308,7 @@ async fn restore_d1_backup(
             }
             Err(error) => error_response(error, context.request_id()),
         },
-        Err(error) => backup_platform_error(error, context),
+        Err(error) => backup_platform_error(&error, context),
     }
 }
 
@@ -332,11 +332,11 @@ fn restored_resource(
     })
 }
 
-fn backup_platform_error(error: PlatformError, context: V4RequestContext) -> Response {
+fn backup_platform_error(error: &PlatformError, context: V4RequestContext) -> Response {
     let wire = match error.code() {
         ErrorCode::ArtifactIntegrityError => V4Error::IntegrityFailure,
         ErrorCode::ArtifactUnavailable | ErrorCode::S3Unavailable => V4Error::Unavailable,
-        _ => V4Error::from(&error),
+        _ => V4Error::from(error),
     };
     error_response(wire, context.request_id())
 }

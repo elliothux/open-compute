@@ -173,6 +173,88 @@ fn upload_sessions_are_scoped_idempotent_bounded_and_transactional() {
         replay.upload.finalize_response_json.unwrap(),
         br#"{"ok":true}"#
     );
+
+    let failed_input = new_upload(account, worker.id, "failed", [5; 32], &objects, 30);
+    let failed = repo.create_or_get(&failed_input, 2, 4).unwrap();
+    assert_eq!(
+        repo.object_for_upload(account, worker.id, failed.id, &[9; 32], 31)
+            .unwrap_err()
+            .code(),
+        ErrorCode::VersionNotFound
+    );
+    assert_eq!(
+        repo.mark_object_verified(account, worker.id, failed.id, &[2; 32], 8, 31)
+            .unwrap_err()
+            .code(),
+        ErrorCode::AssetUploadConflict
+    );
+    for (digest, size) in [([1; 32], 2), ([2; 32], 7)] {
+        repo.mark_object_verified(account, worker.id, failed.id, &digest, size, 32)
+            .unwrap();
+    }
+    let failed_version = VersionId::generate();
+    let failed_begin = BeginVersionUploadFinalize {
+        account_id: account,
+        worker_id: worker.id,
+        upload_id: failed.id,
+        version_id: failed_version,
+        finalize_fingerprint: [6; 32],
+        owner_startup_id: storage.data_dir().startup_id(),
+        now_ms: 33,
+    };
+    repo.begin_finalize(failed_begin).unwrap();
+    assert_eq!(
+        repo.begin_finalize(BeginVersionUploadFinalize {
+            now_ms: 34,
+            ..failed_begin
+        })
+        .unwrap()
+        .disposition,
+        VersionUploadFinalizeDisposition::Recover
+    );
+    let terminal = repo
+        .mark_finalize_failed(
+            account,
+            worker.id,
+            failed.id,
+            failed_version,
+            ErrorCode::BundleInvalid,
+            35,
+        )
+        .unwrap();
+    assert_eq!(terminal.status, VersionUploadStatus::Committed);
+    assert_eq!(
+        terminal.finalize_error_code.as_deref(),
+        Some(ErrorCode::BundleInvalid.as_str())
+    );
+    assert_eq!(
+        repo.mark_finalize_failed(
+            account,
+            worker.id,
+            failed.id,
+            failed_version,
+            ErrorCode::Internal,
+            36,
+        )
+        .unwrap_err()
+        .code(),
+        ErrorCode::AssetUploadConflict
+    );
+
+    let aborted_input = new_upload(account, worker.id, "aborted", [7; 32], &objects, 40);
+    let aborted = repo.create_or_get(&aborted_input, 2, 4).unwrap();
+    assert_eq!(
+        repo.abort(account, worker.id, aborted.id, 41)
+            .unwrap()
+            .status,
+        VersionUploadStatus::Aborted
+    );
+    assert_eq!(
+        repo.abort(account, worker.id, aborted.id, 42)
+            .unwrap()
+            .status,
+        VersionUploadStatus::Aborted
+    );
 }
 
 #[test]

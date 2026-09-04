@@ -1,14 +1,49 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "@cloudflare/kumo/components/button";
 import { ConfirmActionDialog } from "../../../components/ConfirmActionDialog";
 import { ConfirmDeleteResourceDialog } from "../../../components/ConfirmDeleteResourceDialog";
-import { DataTable, ErrorState, LoadingState, PageHeader, SectionHeader } from "../../../components/PageLayout";
+import { DataTable, ErrorState, LoadingState, PageHeader, SectionHeader, StatusBadge } from "../../../components/PageLayout";
 import { useAuth } from "../../../features/auth/AuthProvider";
 import { useMutationFeedback } from "../../../features/toast/useMutationFeedback";
 
 export const Route = createFileRoute("/_authenticated/workers/$workerId")({ component: WorkerDetailPage });
+
+interface LiveLogRow extends Record<string, string> {
+  id: string;
+  timestamp: string;
+  level: string;
+  source: string;
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function displaySource(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value) ?? "null";
+  } catch {
+    return "[unavailable]";
+  }
+}
+
+function liveLog(raw: unknown, fallbackID: string): LiveLogRow | undefined {
+  if (!record(raw) || typeof raw.timestamp !== "number" || !Number.isFinite(raw.timestamp)) return undefined;
+  const metadata = record(raw.$metadata) ? raw.$metadata : {};
+  const id = typeof metadata.id === "string" ? metadata.id : fallbackID;
+  const level = typeof metadata.level === "string"
+    ? metadata.level
+    : typeof metadata.type === "string" ? metadata.type : "event";
+  return {
+    id,
+    timestamp: new Date(raw.timestamp).toISOString(),
+    level,
+    source: displaySource(raw.source),
+  };
+}
 
 function WorkerDetailPage() {
   const { workerId } = Route.useParams();
@@ -20,6 +55,10 @@ function WorkerDetailPage() {
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<string | null>(null);
   const [deleteWorkerOpen, setDeleteWorkerOpen] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [liveEnabled, setLiveEnabled] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<"idle" | "connecting" | "live" | "error">("idle");
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveRows, setLiveRows] = useState<LiveLogRow[]>([]);
   const deployments = useQuery({
     queryKey: ["cloudflare-v4", "workers", workerId, "deployments"],
     queryFn: ({ signal }) => client!.cloudflare.workers.scripts.deployments.list(workerId, { account_id: accountId! }, { signal }),
@@ -35,6 +74,117 @@ function WorkerDetailPage() {
     queryFn: ({ signal }) => client!.openCompute.workers.endpoints(accountId!, workerId, { signal }),
     enabled,
   });
+  const systemStatus = useQuery({
+    queryKey: ["cloudflare-v4", "open-compute", "system-status"],
+    queryFn: ({ signal }) => client!.openCompute.system.status({ signal }),
+    enabled,
+  });
+  const logs = useQuery({
+    queryKey: ["cloudflare-v4", "workers", workerId, "logs"],
+    queryFn: ({ signal }) => {
+      const to = Date.now();
+      const observability = systemStatus.data?.observability;
+      const timeframe = Math.max(1, Math.floor(0.9 * Math.min(
+        60 * 60 * 1_000,
+        observability?.retention_ms ?? 60 * 60 * 1_000,
+        observability?.query_max_timeframe_ms ?? 60 * 60 * 1_000,
+      ) / 2));
+      return client!.cloudflare.workers.observability.telemetry.query({
+        account_id: accountId!,
+        queryId: `dashboard-worker-${workerId}`,
+        timeframe: { from: to - timeframe, to },
+        view: "events",
+        limit: 100,
+        parameters: {
+          datasets: ["cloudflare-workers"],
+          filters: [{
+            kind: "filter",
+            key: "$workers.scriptName",
+            operation: "eq",
+            type: "string",
+            value: workerId,
+          }],
+        },
+      }, { signal });
+    },
+    enabled: enabled && systemStatus.data !== undefined,
+    refetchInterval: 10_000,
+  });
+  useEffect(() => {
+    if (!enabled || !liveEnabled || client === null || accountId === null) return;
+    const abort = new AbortController();
+    let disposed = false;
+    let failed = false;
+    let socket: WebSocket | undefined;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    const stopWithError = (message: string) => {
+      if (disposed || failed) return;
+      failed = true;
+      setLiveError(message);
+      setLiveStatus("error");
+      setLiveEnabled(false);
+      socket?.close(1011, "Live Tail stopped");
+    };
+    const sendHeartbeat = async () => {
+      try {
+        await client.cloudflare.workers.observability.telemetry.liveTailHeartbeat({
+          account_id: accountId,
+          scriptId: workerId,
+        }, { signal: abort.signal });
+      } catch {
+        stopWithError("Live Tail eligibility heartbeat failed.");
+      }
+    };
+    const connect = async () => {
+      setLiveError(null);
+      setLiveStatus("connecting");
+      try {
+        const prepared = await client.cloudflare.workers.observability.telemetry.liveTail({
+          account_id: accountId,
+          scriptId: workerId,
+          filterCombination: "and",
+          filters: [{
+            key: "$workers.preview.slug",
+            operation: "is_null",
+            type: "string",
+          }],
+        }, { signal: abort.signal });
+        if (disposed) return;
+        socket = new WebSocket(prepared.wsUrl);
+        socket.addEventListener("open", () => {
+          if (disposed) return;
+          setLiveStatus("live");
+          void sendHeartbeat();
+          heartbeat = setInterval(() => void sendHeartbeat(), 15_000);
+        });
+        socket.addEventListener("message", event => {
+          try {
+            const row = liveLog(JSON.parse(String(event.data)), crypto.randomUUID());
+            if (row !== undefined) setLiveRows(current => [row, ...current].slice(0, 100));
+          } catch {
+            stopWithError("Live Tail returned an invalid event.");
+          }
+        });
+        socket.addEventListener("error", () => stopWithError("Live Tail connection failed."));
+        socket.addEventListener("close", event => {
+          if (!disposed && !failed) {
+            stopWithError(event.code === 1013
+              ? "Live Tail stopped because this browser was too slow."
+              : "Live Tail connection closed.");
+          }
+        });
+      } catch {
+        stopWithError("Unable to start Live Tail.");
+      }
+    };
+    void connect();
+    return () => {
+      disposed = true;
+      abort.abort();
+      if (heartbeat !== undefined) clearInterval(heartbeat);
+      socket?.close(1000, "Live Tail stopped");
+    };
+  }, [accountId, client, enabled, liveEnabled, workerId]);
   const activateMutation = useMutation({
     mutationFn: (deploymentID: string) => {
       const deployment = deployments.data?.deployments.find(item => item.id === deploymentID);
@@ -129,6 +279,41 @@ function WorkerDetailPage() {
       onConfirm={() => deleteWorkerMutation.mutate()}
     />
     {deployments.isLoading || versions.isLoading || endpoints.isLoading ? <LoadingState /> : deployments.error || versions.error || endpoints.error ? <ErrorState message="Unable to load Worker details." /> : <>
+      <div className="mb-6">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <SectionHeader title="Live Tail" description="Stream new events for this Worker through the official Telemetry Live Tail API. The stream is process-local and is not replayed." />
+            <StatusBadge value={liveStatus} />
+          </div>
+          <Button
+            variant={liveEnabled ? "secondary" : "primary"}
+            onClick={() => {
+              if (!liveEnabled) {
+                setLiveRows([]);
+                setLiveError(null);
+              }
+              setLiveEnabled(value => !value);
+              if (liveEnabled) setLiveStatus("idle");
+            }}
+          >{liveEnabled ? "Stop Live Tail" : "Start Live Tail"}</Button>
+        </div>
+        {liveError ? <ErrorState message={liveError} /> : <DataTable columns={[
+          { key: "timestamp", label: "Timestamp" },
+          { key: "level", label: "Level" },
+          { key: "source", label: "Event" },
+        ]} rows={liveRows} emptyLabel="Start Live Tail to stream new events." />}
+      </div>
+      <SectionHeader title="Workers Logs" description="The latest 100 persisted events from the configured recent query window. Logs can contain application data; do not log secrets." />
+      {systemStatus.isLoading || logs.isLoading ? <LoadingState label="Loading Workers Logs…" /> : systemStatus.error || logs.error ? <ErrorState message="Persisted Workers Logs are unavailable." /> : <DataTable columns={[
+        { key: "timestamp", label: "Timestamp" },
+        { key: "level", label: "Level" },
+        { key: "source", label: "Event" },
+      ]} rows={(logs.data?.events?.events ?? []).map((event, index) => ({
+        id: event.$metadata.id ?? `${event.timestamp}-${index}`,
+        timestamp: new Date(event.timestamp).toISOString(),
+        level: event.$metadata.level ?? event.$metadata.type,
+        source: typeof event.source === "string" ? event.source : JSON.stringify(event.source),
+      }))} emptyLabel="No persisted events in the last hour." />}
       <SectionHeader title="Deployments" description="The first deployment is actively serving traffic." />
       <DataTable columns={[
         { key: "id", label: "Deployment" },

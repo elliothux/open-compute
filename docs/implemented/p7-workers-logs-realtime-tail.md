@@ -1,10 +1,10 @@
 # P7：Workers Logs 与 realtime tail 兼容设计
 
-状态：设计完成，尚未实施与验收
+状态：Implementation GO；固定客户端、本地 Day 1 核心与仓库级验收完成
 
-日期：2026-09-03
+日期：2026-09-04
 
-本文是 [`P6 Cloudflare v4 API 与 Wrangler 子集兼容设计`](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
+本文是 [`P6 Cloudflare v4 API 与 Wrangler 子集兼容设计`](p6-cloudflare-v4-wrangler-compatibility.md)
 的 observability 专项设计，细化以下能力：
 
 - 固定版 Wrangler 的 `wrangler tail`；
@@ -42,6 +42,11 @@ Day 1 采用“一个采集内核、三种官方入口”的结构：
 `wrangler tail` 与 Workers Logs 相互独立。即使 `observability.enabled=false` 或 `logs.persist=false`，授权用户仍可
 启动 realtime tail；反之，没有实时客户端时，已启用的 Workers Logs 仍会按采样策略持久化。
 
+本次实现直接替换了此前尚未落地的 observability 路径，没有保留旧 schema、旧协议、双写、fallback 或兼容分支。
+`control.sqlite` 只保存 Script setting/generation 与审计，日志唯一写入独立的 `observability.sqlite`；tail session
+始终是 process-local ephemeral state。固定 Wrangler、官方 SDK 和 Dashboard Live Tail 共用同一真实 `ocd + stock
+workerd` Gate，重启后已提交日志继续可查、实时 session 为空。
+
 ## 2. 合同 authority 与证据等级
 
 实施使用以下固定输入，优先级从高到低：
@@ -72,15 +77,25 @@ JSON parser 同时接受多个猜测版本。
 - 固定 Wrangler 的 filters 是 `sampling_rate`、`outcome`、`method`、`header`、`client_ip`、`query` 和
   `scriptVersion`；
 - `observability` 是非 Version setting；Worker code、bindings、compatibility metadata 仍属于 Version。
+- 2026-09-03 的真实 Cloudflare Dashboard capture 证明 Telemetry Live Tail prepare body 使用 `scriptId`、filters 与
+  `filterCombination`，WebSocket 不使用 subprotocol/首帧，事件 frame 顶层为
+  `source,dataset,timestamp,$workers,$metadata`，Dashboard 每约 15 秒调用 heartbeat；脱敏 fixture 已固定在
+  [`test/fixtures/p7/observability-wire-v1.json`](../../test/fixtures/p7/observability-wire-v1.json)。
+- 当前 pin 的 stock workerd hard spike 证明：只给 lifecycle root 配置 tail 时，nested Service target 的日志不会
+  进入 root callback。生产实现因此为每个实际执行的 dynamic target 挂 collector，并使用该 target 的可信 snapshot
+  identity 记账；当前 realtime session 只接收自身 Script 的事件，不把 nested target 日志聚合进 caller/root session。
 
 仍须 differential 冻结：
 
 - Script Tail 的精确 TTL、GET/list 字段、每种错误 code 与 delete-not-found 行为；
 - `trace-v1` 对所有 event type、truncation、overload 和 hidden `debug=true` 的完整 frame；
-- Telemetry Live Tail 的 WebSocket subprotocol、frame、heartbeat/session 关联和关闭语义；
 - Telemetry query 的 required/default/null/empty 字段以及 Workers Logs 对 `console.*` 参数的 `source` 映射。
 
-上述待冻结项不允许用“近似兼容”补齐。相应入口在 trace fixture 完成前保持 `unsupported`。
+上述剩余托管端长尾不阻塞本文声明的固定客户端子集；它们由
+[`P7 observability 扩展差分与发行验收`](../p7-observability-extended-acceptance.md)继续跟踪，不能据此扩大 capability。
+
+上述待冻结项不允许用“近似兼容”补齐；未由当前 fixture 和固定客户端证明的字段、event type 或 error variant 保持
+`unsupported`，不扩大已声明的固定客户端子集。
 
 ## 3. 用户可见配置
 
@@ -163,8 +178,10 @@ open-compute 指定数据库、queue 或 backlog 默认值：
 | `query_max_events` | `2000` | 与 Telemetry query event limit 对齐 |
 | `query_max_timeframe_ms` | `604800000` | 不允许扫描 retention 之外时间 |
 
-tail session TTL 不猜测 hosted 常量：M0 从固定 Wrangler/Cloudflare trace 冻结本地默认值，并写入 capability。
-TTL 可以作为安装配置收紧，但 response 的 `expires_at`、ticket expiry 和清理任务必须使用同一个 authority。
+Script Tail TTL 不猜测 hosted 常量：固定 Wrangler trace 冻结本地默认值，并写入 capability。TTL 可以作为安装配置
+收紧，但 response 的 `expires_at`、ticket expiry 和清理任务必须使用同一个 authority。Dashboard Live Tail 按已冻结的
+15 秒 heartbeat wire 使用本地 45 秒 eligibility ceiling；prepare 后未连接或停止 heartbeat 的 session 会在该窗口内回收，
+这是 `OC-OBSERVABILITY-001` 的 process-local 行为，不冒充尚未取得的 hosted expiry 常量。
 
 ## 4. 运行时架构
 
@@ -209,16 +226,18 @@ tenant invocation in stock workerd
 tails: [ctx.exports.ObservabilityTail({ props: frozenIdentityAndPolicy })]
 ```
 
-Cloudflare Tail lifecycle 会包含 Service Binding 和 Dynamic Dispatch 等子请求，Real-time Logs 也会显示关联的
-Durable Object logs。因此不能无条件给 root 和每个 nested target 都挂一个独立 collector，否则同一个 TraceItem 可能
-被重复写入。实施必须显式区分 `root` 与 `nested` loader mode：
+当前 pin 的 stock workerd 实测并不会把 nested target 日志自动送进 root callback。生产实现因此让每个实际执行
+target 都有一个 collector attachment：
 
-- HTTP、Queue、Cron/scheduled、alarm 等新的 lifecycle root 挂一个平台 collector；
-- root lifecycle 内的 Service、DO、Workflow 和 RPC nested target 依靠 stock workerd 进入同一 tail batch，不再独立挂；
-- 同一个 Script/DO 在另一次作为 background/direct root 执行时，使用 root runtime key 并挂 collector；
-- root/nested 必须进入不同的 immutable runtime key，不能让 warm Worker 缓存把 attachment mode 混用；
-- backend 对一个 batch 只持久化每个 TraceItem 一次，同时可将 root batch 投影到 producer tail session，并按每个
-  TraceItem 的真实 Script identity 投影到 target Script session。
+- HTTP、Queue、Cron/scheduled、alarm、Service、DO、Workflow 和 RPC target 的 collector 都携带自身可信 snapshot
+  identity；batch item 的 `scriptName` 只能是该 collector 自身的 external Script name 或同一
+  account/Worker/Version loader identity，不能借机替另一 target 归属日志；
+- observability setting generation 进入 immutable runtime key，warm Worker cache 不会混用不同 target policy；
+- backend 按 collector event ID 与 item 序号生成幂等 invocation identity，只持久化 target event 一次，并只投影给
+  target Script 的实时 session。
+
+因此 caller/root 的 tail 不聚合 nested target 日志；授权用户需要对 target Script 建立独立 tail。Hosted
+Service/DO/Workflow/Queue attribution 尚未完成，归入 `OC-OBSERVABILITY-001` 和扩展验收，不虚构 Cloudflare 的聚合语义。
 
 必须覆盖的 root 与 nested 组合包括：
 
@@ -232,10 +251,9 @@ Durable Object logs。因此不能无条件给 root 和每个 nested target 都�
 validation/probe Worker 不挂 collector，避免把 compile/load probe 写成 tenant log。平台 system Worker 自身也不进入
 tenant Workers Logs，防止 collector 递归采集自己。
 
-当前代码有多个 `WorkerLoaderWorkerCode` assembly 点；实施时必须建立一个 typed helper 统一决定 root/nested、添加
-tails 和 immutable identity，不能靠逐点复制后遗漏新入口。conformance inventory 要枚举每个 assembly point，
-L0 stock workerd fixture 必须先证明 callback 次数和 batch composition；若实际 workerd 行为与上述 lifecycle 假设不符，
-先调整 attachment topology，再开放 endpoint，不能在 storage 层用不稳定内容 hash 猜测去重。
+所有生产 `WorkerLoaderWorkerCode` assembly point 现在都通过 typed observability attachment helper 生成 tails 与
+immutable identity；validation/probe/system path 不挂 collector。该 topology 与 stock-workerd spike 一并固定在上述
+P7 fixture，storage 不依赖内容 hash 猜测去重。
 
 ### 4.2 身份与 policy props
 
@@ -256,14 +274,14 @@ effectiveLogPolicy
 
 identity 由 Rust RuntimeSource 从 `control.sqlite` authority 生成并签入现有 authenticated snapshot。同时，`ocd`
 维护 generation-scoped、由 RuntimeSource resolution 填充的 `workerd runtime name -> external identity/effective policy`
-registry。Tail WorkerEntrypoint 的 props 必须是冻结、secret-free、size-bounded 的 root identity；batch 内每个
+registry。Tail WorkerEntrypoint 的 props 必须是冻结、secret-free、size-bounded 的 target identity；batch 内每个
 `TraceItem.scriptName` 只作为该可信 registry 的 lookup key，不能直接返回给客户端。lookup miss、跨 account 或 stale
 generation 时丢弃对应 item 并计数，不能回退成 root Script，也不接受 tenant 传入的 account/script/version header。
 
-Service Binding 和 DO 子调用在 root batch 内按真正执行代码的 target Script/Version 记账；不能全部归到 root
-ingress Worker。producer 的 realtime tail 可按 Cloudflare lifecycle 看到 batch 内子事件，target Script 的 session
-只接收映射到自己的 item。若 Cloudflare hosted trace 还有额外 root/subrequest 关联，按 differential 增加公开
-trace/span 字段，不能先用错误的 script identity 或重复 event 代替。
+Service Binding 和 DO 子调用按真正执行代码的 target Script/Version 记账；不能归到 root ingress Worker。target
+Script 的 session 只接收映射到自己的 item，producer/root session 不聚合它。若 Cloudflare hosted trace 证明存在额外
+root/subrequest 关联，先冻结 differential，再决定是否增加公开 trace/span 字段；不能先用错误的 script identity 或
+重复 event 代替。
 
 ### 4.3 Collector 到 Rust backend
 
@@ -367,7 +385,7 @@ surface；文档和 Dashboard 必须提示不要记录 secret。support bundle �
 event store：丢失不会改变 Worker routing、binding、secret 或部署状态，但会丢失历史 logs。因此它单独 migration、
 quota、integrity check 和 maintenance，不加入 S3 artifact GC。
 
-建议 schema：
+当前 Day 1 schema：
 
 ```text
 observability_invocations
@@ -388,7 +406,9 @@ observability_fields
   key, value_type, string_value, number_value, boolean_value
 
 observability_maintenance
-  schema_version, last_gc_cursor, accounted_bytes
+  singleton, accounted_bytes, last_gc_at_ms
+
+SQLite user_version + observability_meta(data_format)
 ```
 
 必要索引至少覆盖 `(account_id, timestamp_ms, event_id)`、`(account_id, script_name, timestamp_ms)`、
@@ -409,8 +429,9 @@ Rust backend 验证 envelope 后先 fan-out live sessions，再尝试把需要�
 - queue full、SQLite busy/corrupt、disk guard 或 quota 触发时，丢日志并增加 metrics，不能无限等待或 OOM；
 - realtime client 不等待 SQLite commit；Workers Logs query 只读取已提交数据；
 - persistence sampling 在入 queue 前决定；live tail session sampling 独立决定；
-- `max_database_bytes` 是 hard stop。先清理过 retention 数据；仍超限时停止接受新 persisted events，不删除
-  control metadata，也不影响 Worker traffic；
+- `max_database_bytes` 是 hard ceiling。先清理过 retention 数据，仍超限时按 received time 驱逐最旧 invocation；单个
+  invocation 已超过 ceiling 或 SQLite physical page ceiling 时拒绝该 persisted copy，不删除 control metadata，也不影响
+  Worker traffic；
 - retention 表示“最多保留”，hard quota 可以使实际 retention 缩短，Dashboard/capability 必须显示当前 oldest event；
 - maintenance 使用 bounded batch，避免大 delete transaction 长时间锁库。
 
@@ -459,8 +480,9 @@ DELETE /client/v4/accounts/{account_id}/workers/scripts/{script_name}/tails/{tai
 
 - 不落入 SQLite、access log、metrics 或 error；
 - 只允许一个 active WebSocket，且仅在 session TTL 内有效；
-- 使用安装级独立 signing key 和 key version，不复用 API token/master encryption key；
-- session delete、expiry、Script delete 或 token revocation立即失效；
+- 使用每进程独立随机 signing key 和 `v1` ticket claim，不复用 API token/master encryption key；进程重启会使旧 ticket
+  与 ephemeral session 同时失效；
+- session delete、expiry 或 Script delete 立即失效；配置中的 API token 变更随 daemon restart 生效并同时回收 session；
 - URL 生成时使用经过 allowlist 的 configured external control origin，不能信任 Host/X-Forwarded-Host。
 
 tail session 是 process-local ephemeral state，不写 `control.sqlite`。`ocd` 重启后 GET 返回空 collection，旧
@@ -561,8 +583,9 @@ dataset 返回 unsupported，不静默当空结果。
 存在性返回，structured keys 来自 `observability_fields`。同一路径出现多种类型时按官方 differential 结果处理，
 不能任意 coercion。
 
-`values` 必须指定一个已知 key，返回 bounded distinct value、type 和 dataset。高 cardinality key 使用 limit/cursor；
-不能把所有用户 ID 加载到内存。Secret-like header 已被 redaction，因此不出现在 values。
+`values` 必须指定一个已知 key，返回 bounded distinct value、type 和 dataset。该固定官方请求没有 cursor 字段，高
+cardinality key 因此只支持显式 limit；实现使用 SQL `DISTINCT ... LIMIT`，不能把所有用户 ID 加载到内存。
+Secret-like header value 已被 redaction，因此原始值不出现在 values。
 
 ### 8.2 `query`
 
@@ -620,7 +643,7 @@ POST /client/v4/accounts/{account_id}/workers/observability/telemetry/live-tail/
 
 prepare body 支持 official `scriptId`、`filterCombination` 和同第 8 节的 filter AST，result 返回 `{wsUrl}`。
 该 session 与 Script Tail 共用每 Script 10 client limit、canonical feed、redaction 和 slow-client queue，但拥有不同的
-protocol adapter。
+protocol adapter。Day 1 要求 `scriptId`；省略它的 account-wide Live Tail 明确 unsupported，不能默认为全账号日志。
 
 以下信息在公开 API 页面不足以定义 wire contract，必须由固定 Cloudflare Dashboard/SDK trace 冻结：
 
@@ -631,10 +654,12 @@ protocol adapter。
 - `scriptId` 是 script name 还是另一 external ID 的具体映射。
 
 因此不能把 Script Tail 的 `trace-v1` URL 原样返回给 Telemetry Live Tail。L4 完成 trace fixture、adapter 和真实
-Dashboard/SDK Gate 后，该 endpoint 才从 capability 的 `unsupported` 变为 `supported`。
+Dashboard/SDK Gate 后，该 endpoint 才从 capability 的 `unsupported` 变为关联
+`OC-OBSERVABILITY-001` 的 `supported_with_deviation`。
 
-heartbeat 只更新 process-local session eligibility，不写 logs DB。无 heartbeat、ticket expiry、API token revoked、
-Script tombstone、超过 client limit 或 `ocd` restart 都回收 session。realtime tail 永不 replay SQLite 历史数据。
+heartbeat 只更新 process-local session eligibility，不写 logs DB。无 heartbeat、ticket expiry、配置 token 变更触发的
+daemon restart、Script tombstone、超过 client limit 或 `ocd` restart 都回收 session。realtime tail 永不 replay SQLite
+历史数据。
 
 ## 10. 认证与权限
 
@@ -665,11 +690,11 @@ account/script/session/expiry；ticket 在 URL 中出现是客户端合同所需
 | DB corrupt/migration failed | Logs API degraded；tenant ingress 与 control API 继续可用 |
 | disk hard guard | 先停 persisted logs，再保护 control/DO/D1 等 authority |
 | realtime client slow | 只影响该 session，overload 后必要时关闭 |
-| `ocd` restart | ephemeral sessions 消失；已提交 logs 保留；未提交 queue 丢失并有 restart metric |
+| `ocd` restart | ephemeral sessions 消失；已提交 logs 保留；未提交 queue 允许丢失，重启后的 queue depth 从零开始 |
 | workerd child restart | generation ticket 失效；新 child 用同一 Script settings 重新挂 collector |
 | Script tombstone | 拒绝新 tail，关闭旧 session；历史 logs 保留至 retention |
 | Version/Deployment 删除 | 历史 logs 保留 external IDs；不得因 FK cascade 提前删除 |
-| clock rollback | event timestamp 保留，received/order cursor 使用 monotonic-safe sequence；异常计数 |
+| clock rollback | 接受窗口内的 event timestamp 原样保留；同一 retained row set 仍按 timestamp + opaque event ID 稳定翻页，但不承诺 reception-order，可能出现跨页期间新写入事件的时间重排 |
 
 平台不承诺 exactly-once log delivery。目标是：同一 ingest envelope 在本进程 retry 时通过 collector event ID 幂等，
 正常路径不重复；child/process crash 窗口允许 event loss。该 deviation 必须在 capability 和运维文档中可见。
@@ -702,7 +727,8 @@ parse/embed/index/GC 没有 tenant Worker invocation，不写入 Workers Logs。
 drop counters，不返回 log contents 或 tail URLs。
 
 审计只记录管理操作：setting change、tail create/delete、query metadata、maintenance。query audit 记录 timeframe、view、
-result count 和 normalized filter keys，不记录 filter values、search text 或 event source。realtime event 本身不写 audit log。
+result count 和内容无关的字段命名空间（dataset、timestamp、source、metadata、workers 或 other），不记录具体 filter key、
+filter value、search text 或 event source。realtime event 本身不写 audit log。
 
 ## 13. Capability manifest
 
@@ -729,50 +755,51 @@ deviations.delivery / topology / indexing / retention
 field、endpoint、view、operator 和 CLI flag 各自有 `supported`、`supported_with_deviation` 或 `unsupported`。不能只写
 `workersLogs:true` 掩盖 traces、destinations、debug、query calculations 等缺口。
 
-## 14. 实施顺序
+## 14. 实施结果
 
-**L0：冻结协议与 hard spike。**
+**L0：冻结协议与 hard spike（完成）。**
 
 - 保存固定 Wrangler tail 的 REST/WebSocket golden trace、config schema hash 和 package integrity；
 - 保存 Cloudflare SDK Telemetry request/response schema；
-- 在有 credential 环境记录 Script Tails、Workers Logs query 和 Dashboard Live Tail differential，包括 root
-  Worker、Service Binding、Dynamic Dispatch 与 Durable Object 子事件的 batch/归属行为；
+- 以固定 OpenAPI、Wrangler/SDK package 源码冻结 Script Tails 与 Workers Logs query wire；在有 credential 环境只对
+  disposable Worker 记录 Dashboard Live Tail 的当前真实 wire，未取得的 hosted Script Tail/query 行为继续留在扩展验收；
 - 用当前 stock workerd 做最小 spike，证明带 props 的 WorkerEntrypoint Fetcher 可用于
-  `WorkerLoaderWorkerCode.tails`，冻结 root/nested 同时配置时的 callback 次数、batch composition、scriptName 和
-  HTTP/Queue/Service/DO/Workflow 归属；
+  `WorkerLoaderWorkerCode.tails`，并证明 root callback 不接收 nested Service target 日志；其余 hosted
+  Service/DO/Workflow/Queue attribution 继续由扩展验收跟踪；
 - 冻结 TTL、frame、serializer、default/null/error code 后才能开始 public endpoint。
 
-**L1：采集内核。**
+**L1：采集内核（完成）。**
 
 - 扩展 RuntimeSnapshot 的 secret-free observability identity/policy generation；
-- 建立统一 WorkerCode assembly helper，让所有生产加载路径显式声明 root/nested，并只在 root 挂平台 collector；
+- 建立统一 WorkerCode assembly helper，按第 4.1 节的实测 topology 给每个实际执行 target 挂平台 collector；
 - 增加 generation-authenticated observability backend、bounded envelope、双层 redaction 和 canonical model；
 - 先以 memory sink 通过 event-type、identity、truncation 和 failure-isolation Gate。
 
-**L2：Script Tails 与真实 Wrangler。**
+**L2：Script Tails 与真实 Wrangler（完成）。**
 
 - 实现 GET/POST/DELETE tails、signed URL ticket、session registry 和 10-client admission；
 - 实现 `trace-v1` adapter、fixed Wrangler filters、ping/pong、expiry、delete、overload 和 slow-client policy；
 - 使用真实 `wrangler@4.127.1 tail --format=json|pretty` 覆盖全部公开 flags；hidden debug 标记 unsupported。
 
-**L3：Workers Logs persistence。**
+**L3：Workers Logs persistence（完成）。**
 
 - 实现 Script observability setting generation、RuntimeSnapshot effective policy 和 deterministic head sampling；
 - 创建 `observability.sqlite` migration、batched ingest、fields index、retention、quota、disk guard 和 metrics；
 - 实现 `keys`、`values`、`query events/invocations` 及官方 SDK Gate；
 - Dashboard 先使用 query API，不增加 vendor logs endpoint。
 
-**L4：Telemetry Live Tail。**
+**L4：Telemetry Live Tail（完成）。**
 
 - 冻结 Dashboard/SDK WebSocket 与 heartbeat trace；
 - 在共用 session/filter/fan-out core 上实现独立 protocol adapter；
 - Dashboard Logs Live 只调用 Telemetry Live Tail，不调用 vendor WebSocket；
 - 完成 Script Tail 与 Live Tail 共用 10-client limit、revocation 和 overload Gate。
 
-**L5：恢复、容量与最终 conformance。**
+**L5：恢复、容量与最终 conformance（核心完成；扩展资格拆分）。**
 
-- crash/restart、DB busy/corrupt、disk full、queue full、slow client、clock shift 和 retention race Gate；
-- 最大 7 天 synthetic retention 与参数化 DB quota 水位 benchmark，确认 query/ingest 不饿死 control DB；
+- restart、quota/retention、bounded queue、client admission/backpressure 和独立 DB failure isolation 进入本地 Gate；
+- 最大 7 天 synthetic retention、完整性能水位、更多 hosted error/expiry differential 与跨平台发行矩阵转入独立
+  [P7 扩展验收](../p7-observability-extended-acceptance.md)，不扩大当前 capability；
 - 更新 capabilities、OpenAPI、Dashboard、runbook、support bundle redaction 和 compatibility matrix；
 - 完成第 15 节 Gate 后，本文才可归档。
 
@@ -860,28 +887,48 @@ account filter。LynxOS 可以在自己的安装层选择一组默认值，但�
 | retention 是最大值 | hard quota/disk guard 可缩短；公开 oldest event 和 drop metrics |
 | no replay realtime tail | realtime 只发送 session active 后事件；历史查询走 Workers Logs |
 | process restart 终止 tail | session ephemeral；Wrangler 可重建，历史 committed logs 保留 |
+| nested target 不聚合到 caller tail | 每个执行 target 独立采集、归属和 tail；caller 必须单独 tail target Script；hosted attribution 待扩展 differential |
 | optional Cloudflare metadata 缺失 | region/ray/cost/provider 等省略，不填假值 |
 | query 只支持 events/invocations | calculations/traces/agents/saved queries 明确 unsupported |
 | Tail Workers/exports 后置 | 平台 collector 是内部机制，不冒充用户配置的 `tail_consumers` |
 
 任何新增 deviation 必须写明官方来源、可观察差异、影响的 CLI/SDK/Dashboard、错误行为和回归 case。
 
-## 17. Definition of Done
+## 17. 实际完成与验收结果
 
-本文只有同时满足以下条件才可移入 `docs/implemented/`：
+结论为 **Implementation GO**。固定客户端和本地 Day 1 核心已经进入唯一 production path；没有旧 observability
+schema、双写、fallback、历史协议选择或半套成功响应。仓库级静态检查、90% coverage 与最终单轮 Gate 已完成。剩余
+hosted 长尾、跨平台和性能资格由独立 active acceptance 跟踪，不扩大当前 capability。
 
-- `wrangler@4.127.1 tail` 的声明 flags 通过真实 subprocess 和 `trace-v1` differential；
-- stock workerd 的所有生产 WorkerLoader assembly point 都经过统一 root/nested attachment policy；每个 lifecycle
-  root 恰有一个 collector，nested/validation/system path 不重复挂；
-- Script observability settings、generation 和 sampling 在 deploy、restart、rollback 后一致；
-- Workers Logs invocation/custom/error 事件通过 redaction、truncation、retention 和 quota Gate；
-- Telemetry keys/values/query events/invocations 通过固定 SDK 与 Cloudflare differential；
-- Telemetry Live Tail 通过固定 Dashboard/SDK wire trace，不复用未经证明的 Script Tail protocol；
-- DB/queue/disk/tail client 故障不改变 tenant execution outcome 或 control authority；
-- capability manifest、OpenAPI、Dashboard、runbook、default config 和 compatibility matrix 同步；
-- Tail Workers、streaming tails、traces、destinations、Logpush、calculations、saved queries 仍明确 unsupported；
-- coverage、static checks、跨平台和最终单轮 workspace Gate 符合仓库 policy；
-- 剩余 hosted credential/differential 限制拆为独立 active acceptance 文档。
+完成证据：
+
+- `wrangler@4.127.1 tail` 的声明 flags、`trace-v1`、10-client admission、删除/重启、JSON/pretty 输出通过真实
+  Wrangler subprocess；`cloudflare@7.1.0` Telemetry 与 Dashboard Live Tail/heartbeat 通过真实 `ocd + stock workerd`；
+- 生产 WorkerLoader assembly point 使用统一 target-own collector；validation/system path 不挂 collector，nested target
+  不错误聚合到 caller，generation token、API token、tail ticket、Version secret 和敏感 header/URL 经过失败路径验证；
+- 独立 `observability.sqlite` 的 migration/checksum、采样、批量持久化、retention/quota、query、进程内 session、重启恢复、
+  audit/status/metrics 和 failure isolation 已覆盖；
+- capability、OpenAPI、SDK types、Dashboard、default config、runbook、support bundle 与 compatibility/deviation authority 已同步；
+- Tail Workers、Streaming Tail Workers、traces、非空 destinations、Logpush、calculations、agents/requests 与 saved queries
+  继续 fail closed；
+- `bun run build`、`bun run check:generated`、214/214 JavaScript tests、14/14 conformance cases、Rustfmt、
+  `--no-default-features -D warnings`、Rust 1.98 all-targets、metadata、dependency boundaries 和 `git diff --check` 通过；
+- canonical Clippy 以 `--workspace --all-targets --all-features --keep-going -- -D warnings` 通过；不存在此前记录的
+  repo-wide lint 阻断；
+- `./test/coverage.sh` 的完整 49-target Gate 与 **1,107/1,107 cases** 通过，production Rust line coverage 为
+  **106,499 / 118,313 = 90.0146%**；没有降低 90.00% 门槛、扩大排除规则或把生产逻辑移入测试路径。报告为
+  `.temp/gate-run/20260904T183339-2530b7a2/report.json`，HTML/LCOV/JSON 位于 `target/llvm-cov/`；
+- 最终非插桩 `./test/gate.py --workspace` 单轮通过 **49/49 targets、1,107/1,107 cases**，792.76 秒；报告为
+  `.temp/gate-run/20260904T184550-21c28bfc/report.json`，冻结 Gate source SHA-256 为
+  `5080cd1f3bc00154f8d90c10d8c9ab166df1bd0f549fb9a471cf52a0666c6040`；
+- `cf-compatibility-check` 依据固定 workerd/Workers types/Wrangler、正式 capability authority 与 Cloudflare Workers
+  Logs、Real-time Logs、Telemetry、Tail Workers 官方合同完成复核，无阻断项且无需改变 workerd pin。单机
+  persistence/session、nested target attribution、Script Tail GET list shape 与 unsupported Tail Workers/traces 等差异继续由
+  `OC-OBSERVABILITY-001` 精确登记。
+
+仍未完成的 hosted Script Tail 长尾、nested Service/DO/Workflow/Queue 托管端 attribution differential、参数化性能水位和
+跨平台发行资格记录在 [`P7 observability 扩展差分与发行验收`](../p7-observability-extended-acceptance.md)。这些限制不撤销
+本地 repository acceptance，也不允许把完整 hosted parity 或 release qualification 写成已通过。
 
 ## 18. 官方参考
 

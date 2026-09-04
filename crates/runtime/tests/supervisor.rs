@@ -178,8 +178,16 @@ async fn wait_state(
     sup: &WorkerdSupervisor,
     want: SupervisorState,
 ) -> open_compute_runtime::SupervisorSnapshot {
+    wait_state_within(sup, want, Duration::from_secs(5)).await
+}
+
+async fn wait_state_within(
+    sup: &WorkerdSupervisor,
+    want: SupervisorState,
+    timeout: Duration,
+) -> open_compute_runtime::SupervisorSnapshot {
     let mut rx = sup.subscribe();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let snap = rx.borrow().clone();
         if snap.state == want {
@@ -704,6 +712,7 @@ async fn real_workerd_control_probe_term_kill() {
     cfg.shutdown_grace_ms = 1_000;
     cfg.kill_timeout_ms = 1_000;
     cfg.drain_timeout_ms = 10;
+    let running_timeout = Duration::from_millis(cfg.startup_timeout_ms) + Duration::from_secs(5);
     let runtime_source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let runtime_source_addr = runtime_source.local_addr().unwrap();
     let binding_backend = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -721,12 +730,14 @@ async fn real_workerd_control_probe_term_kill() {
         vec![
             ExternalServiceAddress::loopback("runtime-source", runtime_source_addr).unwrap(),
             ExternalServiceAddress::loopback("binding-backend", binding_backend_addr).unwrap(),
+            ExternalServiceAddress::loopback("observability-backend", binding_backend_addr)
+                .unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
         Vec::new(),
     );
     sup.start();
-    let snap = wait_state(&sup, SupervisorState::Running).await;
+    let snap = wait_state_within(&sup, SupervisorState::Running, running_timeout).await;
     let port = snap.listen_port.expect("ephemeral port");
     let pid = snap.pid.unwrap();
     probe_ready_with_raw_token(port, "00".repeat(32).as_str(), Duration::from_secs(2))

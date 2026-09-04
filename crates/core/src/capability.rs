@@ -88,10 +88,10 @@ pub struct ManagementApiRouteV1 {
     pub status: InterfaceCapabilityStatus,
     /// Frozen authority that supplied this route.
     pub source: String,
-    /// Official Cloudflare `OpenAPI` operation identity when the route has one.
+    /// Official Cloudflare or local extension `OpenAPI` operation identity when present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
-    /// Digest of the canonical official `OpenAPI` operation when the route has one.
+    /// Digest of the canonical official Cloudflare operation when the route has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_sha256: Option<String>,
     /// Request body media family.
@@ -102,6 +102,9 @@ pub struct ManagementApiRouteV1 {
     /// Stable support-scope constraint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub constraint: Option<String>,
+    /// Stable deviation identifiers that qualify this route.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deviations: Vec<String>,
 }
 
 impl ManagementApiRouteV1 {
@@ -112,10 +115,16 @@ impl ManagementApiRouteV1 {
             && !self.source.is_empty()
             && optional_nonempty(&self.stage)
             && optional_nonempty(&self.constraint)
+            && unique_nonempty(&self.deviations)
+            && ((self.status == InterfaceCapabilityStatus::SupportedWithDeviation)
+                == !self.deviations.is_empty())
             && match (&self.operation_id, &self.operation_sha256) {
                 (Some(operation_id), Some(digest)) => !operation_id.is_empty() && is_sha256(digest),
+                (Some(operation_id), None) => {
+                    self.source == "open-compute-extension" && !operation_id.is_empty()
+                }
                 (None, None) => true,
-                _ => false,
+                (None, Some(_)) => false,
             }
     }
 }
@@ -150,6 +159,9 @@ pub struct ManagementApiCapabilitiesV1 {
     pub routes: Vec<ManagementApiRouteV1>,
     /// Retired route prefixes that must not be mounted.
     pub legacy_routes: Vec<LegacyManagementRouteV1>,
+    /// Complete deviation authority referenced by routes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deviations: Vec<String>,
 }
 
 impl ManagementApiCapabilitiesV1 {
@@ -169,6 +181,13 @@ impl ManagementApiCapabilitiesV1 {
                     .map(|route| route.id.clone())
                     .collect::<Vec<_>>(),
             )
+            && unique_nonempty(&self.deviations)
+            && self.routes.iter().all(|route| {
+                route
+                    .deviations
+                    .iter()
+                    .all(|deviation| self.deviations.contains(deviation))
+            })
             && unique_nonempty(
                 &self
                     .legacy_routes
@@ -230,6 +249,82 @@ impl WranglerCapabilitiesV1 {
             && validate_wrangler_items(&self.fields)
             && validate_wrangler_items(&self.bindings)
             && validate_wrangler_items(&self.commands)
+    }
+}
+
+/// One named Workers observability setting, feature, view, or filter operator.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ObservabilityCapabilityItemV1 {
+    /// Stable item identity.
+    pub id: String,
+    /// Implementation status.
+    pub status: InterfaceCapabilityStatus,
+    /// Frozen authority that supplied the item.
+    pub source: String,
+    /// Stable support-scope constraint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
+    /// Stable deviation identifiers that qualify the item.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deviations: Vec<String>,
+}
+
+impl ObservabilityCapabilityItemV1 {
+    fn validate(&self, declared_deviations: &[String]) -> bool {
+        !self.id.is_empty()
+            && !self.source.is_empty()
+            && optional_nonempty(&self.constraint)
+            && unique_nonempty(&self.deviations)
+            && ((self.status == InterfaceCapabilityStatus::SupportedWithDeviation)
+                == !self.deviations.is_empty())
+            && self
+                .deviations
+                .iter()
+                .all(|deviation| declared_deviations.contains(deviation))
+    }
+}
+
+/// Frozen Workers Logs and realtime-tail capability authority.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkersObservabilityCapabilitiesV1 {
+    /// Accepted Wrangler observability setting fields.
+    pub settings_fields: Vec<ObservabilityCapabilityItemV1>,
+    /// Logs, Telemetry, realtime-tail, and explicit unsupported feature inventory.
+    pub features: Vec<ObservabilityCapabilityItemV1>,
+    /// Telemetry query views.
+    pub query_views: Vec<ObservabilityCapabilityItemV1>,
+    /// Telemetry filter operators.
+    pub query_operators: Vec<ObservabilityCapabilityItemV1>,
+    /// Script Tail WebSocket subprotocol.
+    pub script_tail_protocol: String,
+    /// Dynamic limit keys published by the runtime capability response.
+    pub limits: Vec<String>,
+    /// Complete deviation authority referenced by observability items.
+    pub deviations: Vec<String>,
+}
+
+impl WorkersObservabilityCapabilitiesV1 {
+    /// Validate complete, unique observability inventories and deviation links.
+    pub fn validate(&self) -> bool {
+        self.script_tail_protocol == "trace-v1"
+            && unique_nonempty(&self.limits)
+            && unique_nonempty(&self.deviations)
+            && [
+                &self.settings_fields,
+                &self.features,
+                &self.query_views,
+                &self.query_operators,
+            ]
+            .into_iter()
+            .all(|items| {
+                !items.is_empty()
+                    && unique_nonempty(
+                        &items.iter().map(|item| item.id.clone()).collect::<Vec<_>>(),
+                    )
+                    && items.iter().all(|item| item.validate(&self.deviations))
+            })
     }
 }
 
@@ -440,6 +535,9 @@ pub struct CapabilityInventoryV1 {
     /// Frozen Cloudflare-compatible management API inventory.
     #[serde(rename = "managementApi")]
     pub management_api: ManagementApiCapabilitiesV1,
+    /// Frozen Workers Logs and realtime-tail capability inventory.
+    #[serde(rename = "workersObservability")]
+    pub workers_observability: WorkersObservabilityCapabilitiesV1,
     /// Frozen Wrangler CLI, configuration, and binding inventory.
     pub wrangler: WranglerCapabilitiesV1,
 }
@@ -453,6 +551,7 @@ impl CapabilityInventoryV1 {
             && self.products.values().all(ProductCapabilityV1::validate)
             && unique_member_ids(&self.products)
             && self.management_api.validate()
+            && self.workers_observability.validate()
             && self.wrangler.validate()
     }
 }
@@ -504,6 +603,9 @@ pub struct PlatformCapabilitiesV1 {
     /// Frozen Cloudflare-compatible management API inventory.
     #[serde(rename = "managementApi")]
     pub management_api: ManagementApiCapabilitiesV1,
+    /// Frozen Workers Logs and realtime-tail capability authority.
+    #[serde(rename = "workersObservability")]
+    pub workers_observability: WorkersObservabilityCapabilitiesV1,
     /// Frozen Wrangler CLI, configuration, and binding inventory.
     pub wrangler: WranglerCapabilitiesV1,
     /// Frozen configured limit names and values; never contains secret values.
@@ -520,6 +622,7 @@ impl PlatformCapabilitiesV1 {
             && self.products.values().all(ProductCapabilityV1::validate)
             && unique_member_ids(&self.products)
             && self.management_api.validate()
+            && self.workers_observability.validate()
             && self.wrangler.validate()
     }
 }

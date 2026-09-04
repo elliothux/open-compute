@@ -218,6 +218,118 @@
         "requestMediaType": "multipart"
       },
       {
+        "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/tails",
+        "method": "GET",
+        "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails",
+        "operationId": "worker-tail-logs-list-tails",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Script Tail sessions are process-local; GET returns the complete active-session array implied by List Tails instead of the pinned OpenAPI single-object type; sessions receive only the selected target Script and do not aggregate nested target logs",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ],
+        "operationSha256": "1e5d1751794ba3bd9ba76b3e18786e6b28e148ffe216daad3d573094f9360251",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
+        "method": "POST",
+        "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails",
+        "operationId": "worker-tail-logs-start-tail",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Script Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ],
+        "operationSha256": "c185835822b9a5706951ff06ac8cbb79751c91ccdf1277f034f6896556937945",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
+        "method": "DELETE",
+        "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
+        "operationId": "worker-tail-logs-delete-tail",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Script Tail sessions are process-local and disappear on daemon restart",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ],
+        "operationSha256": "858ea601951bf55e8e71a750b270562c9a92f70ac3f7cd5d47fccc555b3f5aaf",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "POST /accounts/{account_id}/workers/observability/telemetry/keys",
+        "method": "POST",
+        "path": "/accounts/{account_id}/workers/observability/telemetry/keys",
+        "operationId": "telemetry.keys.list",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Field discovery reads a bounded single-machine retention index containing target-attributed events only",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ],
+        "operationSha256": "8995c04966d27334de5bfce9caf57d1ef28011591d6bb338f654db03241182da",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/workers/observability/telemetry/values",
+        "method": "POST",
+        "path": "/accounts/{account_id}/workers/observability/telemetry/values",
+        "operationId": "telemetry.values.list",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Value discovery reads a bounded single-machine retention index containing target-attributed events only",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ],
+        "operationSha256": "dd6eecbf7196f7372e2b4186a38bad9a760283e84abea03777dbf09b00bc28ef",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/workers/observability/telemetry/query",
+        "method": "POST",
+        "path": "/accounts/{account_id}/workers/observability/telemetry/query",
+        "operationId": "telemetry.query",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Events and invocations views use a bounded local single-machine index and retention authority; calculations, traces, agents, requests, saved queries, global ordering, and hosted optional metadata are not provided",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ],
+        "operationSha256": "8edb90cc6d3f2c705a4195abf447c7a5dd4bc1d64d880a59a931e474298cead8",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail",
+        "method": "POST",
+        "path": "/accounts/{account_id}/workers/observability/telemetry/live-tail",
+        "operationId": "telemetry.live-tail.post",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Live Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ],
+        "operationSha256": "8febbb9abd577cdba4d4b267e45061807ca6acac2a4e4ba3dc6b3615550f0064",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat",
+        "method": "POST",
+        "path": "/accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat",
+        "operationId": "telemetry.live-tail.heartbeat.get",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Heartbeat extends process-local selected-Script sessions only",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ],
+        "operationSha256": "9da8354733fbf39ff839f27287c2c681aa03485a0a74a96b5a1fa82ac3584b35",
+        "requestMediaType": "json"
+      },
+      {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/secrets",
         "method": "GET",
         "path": "/accounts/{account_id}/workers/scripts/{script_name}/secrets",
@@ -1340,39 +1452,6 @@
         "requestMediaType": "json"
       },
       {
-        "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/tails",
-        "method": "GET",
-        "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails",
-        "operationId": "worker-tail-logs-list-tails",
-        "status": "planned",
-        "source": "cloudflare-openapi",
-        "stage": "P7",
-        "operationSha256": "1e5d1751794ba3bd9ba76b3e18786e6b28e148ffe216daad3d573094f9360251",
-        "requestMediaType": "none"
-      },
-      {
-        "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
-        "method": "POST",
-        "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails",
-        "operationId": "worker-tail-logs-start-tail",
-        "status": "planned",
-        "source": "cloudflare-openapi",
-        "stage": "P7",
-        "operationSha256": "c185835822b9a5706951ff06ac8cbb79751c91ccdf1277f034f6896556937945",
-        "requestMediaType": "none"
-      },
-      {
-        "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
-        "method": "DELETE",
-        "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
-        "operationId": "worker-tail-logs-delete-tail",
-        "status": "planned",
-        "source": "cloudflare-openapi",
-        "stage": "P7",
-        "operationSha256": "858ea601951bf55e8e71a750b270562c9a92f70ac3f7cd5d47fccc555b3f5aaf",
-        "requestMediaType": "none"
-      },
-      {
         "id": "GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects",
         "method": "GET",
         "path": "/accounts/{account_id}/r2/buckets/{bucket_name}/objects",
@@ -1556,7 +1635,8 @@
     "deviations": [
       "OC-ACCOUNT-SUBDOMAIN-001",
       "OC-D1-001",
-      "OC-AI-SEARCH-TOKEN-001"
+      "OC-AI-SEARCH-TOKEN-001",
+      "OC-OBSERVABILITY-001"
     ],
     "legacyRoutes": [
       {
@@ -1579,6 +1659,300 @@
         "status": "unsupported",
         "source": "day1-negative-route-inventory"
       }
+    ]
+  },
+  "workersObservability": {
+    "settingsFields": [
+      {
+        "id": "observability.enabled",
+        "status": "supported",
+        "source": "wrangler-config-schema"
+      },
+      {
+        "id": "observability.head_sampling_rate",
+        "status": "supported",
+        "source": "wrangler-config-schema"
+      },
+      {
+        "id": "observability.logs.enabled",
+        "status": "supported",
+        "source": "wrangler-config-schema"
+      },
+      {
+        "id": "observability.logs.head_sampling_rate",
+        "status": "supported",
+        "source": "wrangler-config-schema"
+      },
+      {
+        "id": "observability.logs.invocation_logs",
+        "status": "supported",
+        "source": "wrangler-config-schema"
+      },
+      {
+        "id": "observability.logs.persist",
+        "status": "supported",
+        "source": "wrangler-config-schema"
+      },
+      {
+        "id": "observability.logs.destinations",
+        "status": "supported_with_deviation",
+        "source": "wrangler-config-schema",
+        "constraint": "Only omitted or empty destinations are accepted; external export is unsupported",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "observability.traces.enabled",
+        "status": "unsupported",
+        "source": "wrangler-config-schema",
+        "constraint": "Only omitted or false is accepted"
+      },
+      {
+        "id": "observability.traces.persist",
+        "status": "unsupported",
+        "source": "wrangler-config-schema",
+        "constraint": "Only omitted or false is accepted"
+      },
+      {
+        "id": "observability.traces.destinations",
+        "status": "unsupported",
+        "source": "wrangler-config-schema",
+        "constraint": "Only omitted or empty is accepted"
+      }
+    ],
+    "features": [
+      {
+        "id": "workers.observability.logs.persistence",
+        "status": "supported_with_deviation",
+        "source": "open-compute-day1",
+        "constraint": "Bounded single-machine SQLite retention and best-effort delivery",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "workers.observability.telemetry.keys",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Bounded local retention index with target-only attribution",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "workers.observability.telemetry.values",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Bounded local retention index with target-only attribution",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "workers.observability.telemetry.query",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Events and invocations views over a bounded local index",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "workers.observability.telemetry.liveTail",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-dashboard-wire-2026-09-03",
+        "constraint": "Process-local selected-Script stream with target-only attribution",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "workers.observability.telemetry.liveTailAccountWide",
+        "status": "unsupported",
+        "source": "p7-scope",
+        "constraint": "scriptId is required by the Day 1 local authority"
+      },
+      {
+        "id": "workers.scripts.tails",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi+wrangler-4.127.1",
+        "constraint": "Process-local selected-Script stream with target-only attribution",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "workers.scripts.tailDebug",
+        "status": "unsupported",
+        "source": "p7-scope",
+        "constraint": "Only the fixed Wrangler debug=false client flow is supported"
+      },
+      {
+        "id": "workers.tailConsumers",
+        "status": "unsupported",
+        "source": "p7-scope"
+      },
+      {
+        "id": "workers.streamingTailConsumers",
+        "status": "unsupported",
+        "source": "p7-scope"
+      },
+      {
+        "id": "workers.logpush",
+        "status": "unsupported",
+        "source": "p7-scope"
+      },
+      {
+        "id": "workers.traces",
+        "status": "unsupported",
+        "source": "p7-scope"
+      },
+      {
+        "id": "workers.observability.telemetry.calculations",
+        "status": "unsupported",
+        "source": "p7-scope"
+      },
+      {
+        "id": "workers.observability.telemetry.savedQueries",
+        "status": "unsupported",
+        "source": "p7-scope"
+      }
+    ],
+    "queryViews": [
+      {
+        "id": "events",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Bounded local retention index omits unavailable hosted metadata",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "invocations",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Local invocation groups omit unavailable hosted metadata",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "calculations",
+        "status": "unsupported",
+        "source": "p7-scope"
+      },
+      {
+        "id": "traces",
+        "status": "unsupported",
+        "source": "p7-scope"
+      },
+      {
+        "id": "agents",
+        "status": "unsupported",
+        "source": "p7-scope"
+      },
+      {
+        "id": "requests",
+        "status": "unsupported",
+        "source": "p7-scope"
+      }
+    ],
+    "queryOperators": [
+      {
+        "id": "includes",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "not_includes",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "starts_with",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "ends_with",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "regex",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Linear-time RE2-compatible subset with bounded patterns",
+        "deviations": [
+          "OC-OBSERVABILITY-001"
+        ]
+      },
+      {
+        "id": "exists",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "is_null",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "in",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "not_in",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "eq",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "neq",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "gt",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "gte",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "lt",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      },
+      {
+        "id": "lte",
+        "status": "supported",
+        "source": "cloudflare-openapi"
+      }
+    ],
+    "scriptTailProtocol": "trace-v1",
+    "limits": [
+      "observability.retention_ms",
+      "observability.max_database_bytes",
+      "observability.max_invocation_log_bytes",
+      "observability.max_tail_sessions_per_script",
+      "observability.query_max_events",
+      "observability.query_max_timeframe_ms",
+      "observability.ingest_queue_capacity",
+      "observability.tail_client_queue_bytes"
+    ],
+    "deviations": [
+      "OC-OBSERVABILITY-001"
     ]
   },
   "wrangler": {
@@ -1748,9 +2122,8 @@
       },
       {
         "id": "observability",
-        "status": "planned",
-        "source": "wrangler-config-schema",
-        "stage": "P7"
+        "status": "supported",
+        "source": "wrangler-config-schema"
       },
       {
         "id": "access",
@@ -2040,9 +2413,8 @@
       },
       {
         "id": "observability.logs",
-        "status": "planned",
-        "source": "wrangler-config-schema",
-        "stage": "P7"
+        "status": "supported",
+        "source": "wrangler-config-schema"
       },
       {
         "id": "observability.traces",
@@ -2537,9 +2909,8 @@
       },
       {
         "id": "tail",
-        "status": "planned",
-        "source": "wrangler-cli",
-        "stage": "P7"
+        "status": "supported",
+        "source": "wrangler-cli"
       },
       {
         "id": "dev --remote",

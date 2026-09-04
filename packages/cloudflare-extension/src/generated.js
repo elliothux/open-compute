@@ -1,5 +1,5 @@
 // Generated from ../../openapi/open-compute-extension.json. Do not edit.
-export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = "5e394ae27d3b743fa316444b48fc0cf8dd78619f398f5bf417d5bb43c2b87ee1";
+export const OPEN_COMPUTE_EXTENSION_SCHEMA_SHA256 = "09ec878f8739628cf3124334ccbfa05c989ad6594aa28b8e437994bf1ece744a";
 
 export const OPEN_COMPUTE_EXTENSION_OPERATIONS = [
   {

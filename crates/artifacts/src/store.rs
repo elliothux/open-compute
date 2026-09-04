@@ -948,3 +948,7 @@ impl ArtifactStore {
         Ok(deleted)
     }
 }
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod tests;

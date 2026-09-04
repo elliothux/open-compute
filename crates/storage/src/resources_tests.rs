@@ -245,3 +245,99 @@ fn read_only_inspection_lists_only_secret_free_resource_health() {
         }]
     );
 }
+
+#[test]
+fn delete_reservations_replay_continue_complete_and_reject_conflicts() {
+    let (_temp, storage) = storage();
+    let account = storage.identity().default_account_id;
+    let repository = ResourceRepository::new(storage.db());
+    let resource_id = ResourceId::generate();
+    repository
+        .reserve_create(
+            &reserve(
+                account,
+                "delete-me",
+                "create-delete-me",
+                &[1; 32],
+                resource_id,
+            ),
+            100,
+        )
+        .unwrap();
+    repository.mark_ready(resource_id, 11).unwrap();
+    let fingerprint = [7; 32];
+    let input = ReserveResourceDelete {
+        account_id: account,
+        resource_id,
+        idempotency_key: "delete-resource",
+        fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+        request_fingerprint: &fingerprint,
+        now_ms: 12,
+        expires_at_ms: 100,
+    };
+    assert!(matches!(
+        repository.reserve_delete(&input).unwrap(),
+        ResourceDeleteReservation::Reserved(record) if record.id == resource_id
+    ));
+    assert!(matches!(
+        repository.reserve_delete(&input).unwrap(),
+        ResourceDeleteReservation::Continue(record) if record.id == resource_id
+    ));
+    assert_eq!(
+        repository
+            .reserve_delete(&ReserveResourceDelete {
+                request_fingerprint: &[8; 32],
+                ..input.clone()
+            })
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    repository
+        .complete_delete(
+            account,
+            input.idempotency_key,
+            &fingerprint,
+            resource_id,
+            b"deleted",
+        )
+        .unwrap();
+    assert!(matches!(
+        repository.reserve_delete(&input).unwrap(),
+        ResourceDeleteReservation::Complete(body) if body == b"deleted"
+    ));
+    assert_eq!(
+        repository
+            .complete_delete(
+                account,
+                input.idempotency_key,
+                &fingerprint,
+                resource_id,
+                b"again",
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    assert_eq!(
+        repository
+            .reserve_delete(&ReserveResourceDelete {
+                idempotency_key: "",
+                ..input.clone()
+            })
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
+    assert_eq!(
+        repository
+            .reserve_delete(&ReserveResourceDelete {
+                idempotency_key: "expired-delete",
+                expires_at_ms: input.now_ms,
+                ..input
+            })
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceInvariantViolation
+    );
+}

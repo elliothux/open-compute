@@ -71,9 +71,10 @@ pub use resource_lifecycle::{
 pub use resource_pins::{ResourcePin, ResourcePins};
 pub use runtime_source::{
     DurableObjectFacadeIdentity, RuntimeAiBinding, RuntimeAssetBinding, RuntimeAssets,
-    RuntimeBinding, RuntimeCachePolicy, RuntimeImagesBinding, RuntimeModule, RuntimePayload,
-    RuntimeQueueBinding, RuntimeScheduledTarget, RuntimeScope, RuntimeServiceBinding,
-    RuntimeSnapshot, RuntimeSource, RuntimeVersionMetadataBinding,
+    RuntimeBinding, RuntimeCachePolicy, RuntimeImagesBinding, RuntimeModule,
+    RuntimeObservabilityIdentity, RuntimePayload, RuntimeQueueBinding, RuntimeScheduledTarget,
+    RuntimeScope, RuntimeServiceBinding, RuntimeSnapshot, RuntimeSource,
+    RuntimeVersionMetadataBinding,
 };
 pub use vectorize::{VectorizeIndexSpec, VectorizeResourceDriver};
 

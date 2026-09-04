@@ -184,3 +184,7 @@ fn invariant() -> PlatformError {
         "persisted Version authority is inconsistent",
     )
 }
+
+#[cfg(test)]
+#[path = "projection_tests.rs"]
+mod tests;

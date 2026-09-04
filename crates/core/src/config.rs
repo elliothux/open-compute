@@ -52,6 +52,8 @@ pub struct PlatformConfig {
     pub ai: AiConfig,
     /// Bounded metrics export.
     pub metrics: MetricsConfig,
+    /// Workers Logs persistence, query, and realtime-tail capacity.
+    pub observability: ObservabilityConfig,
     /// P1 platform-wide admission, resource-count, snapshot, and recovery limits.
     pub hardening: HardeningConfig,
     /// Worker ingress, deletion, and artifact retention policy.
@@ -97,6 +99,7 @@ impl PlatformConfig {
         self.document_parser.validate()?;
         self.ai.validate()?;
         self.metrics.validate()?;
+        self.observability.validate()?;
         self.hardening.validate()?;
         if self.hardening.emergency_reserve_bytes >= self.storage.free_space_hard_bytes {
             return Err(PlatformError::new(
@@ -957,6 +960,108 @@ impl MetricsConfig {
     fn validate(&self) -> Result<(), PlatformError> {
         require_nonzero(self.max_label_value_bytes, "metrics.max_label_value_bytes")?;
         require_nonzero(self.max_series, "metrics.max_series")?;
+        Ok(())
+    }
+}
+
+/// Bounded single-machine Workers Logs and realtime-tail policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct ObservabilityConfig {
+    /// Maximum retained log age in milliseconds.
+    pub retention_ms: u64,
+    /// Hard byte ceiling for `observability.sqlite`.
+    pub max_database_bytes: u64,
+    /// Cloudflare-compatible maximum log bytes captured for one invocation.
+    pub max_invocation_log_bytes: u64,
+    /// Maximum invocation envelopes waiting for persistence.
+    pub ingest_queue_events: u32,
+    /// Maximum envelopes committed in one SQLite transaction.
+    pub ingest_batch_events: u32,
+    /// Maximum delay before a partial ingest batch is committed.
+    pub ingest_flush_ms: u64,
+    /// Maximum simultaneous realtime clients for one Script.
+    pub max_tail_sessions_per_script: u16,
+    /// Maximum queued frame bytes for one realtime client.
+    pub tail_client_queue_bytes: u64,
+    /// Maximum events returned by one telemetry query.
+    pub query_max_events: u32,
+    /// Maximum telemetry query timeframe in milliseconds.
+    pub query_max_timeframe_ms: u64,
+    /// Explicit externally reachable HTTP(S) origin used to build tail WebSocket URLs.
+    pub external_control_origin: String,
+    /// Lifetime of one process-local Script Tail session.
+    pub tail_session_ttl_ms: u64,
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            retention_ms: 7 * 24 * 60 * 60 * 1_000,
+            max_database_bytes: 1024 * 1024 * 1024,
+            max_invocation_log_bytes: 256 * 1024,
+            ingest_queue_events: 8_192,
+            ingest_batch_events: 256,
+            ingest_flush_ms: 100,
+            max_tail_sessions_per_script: 10,
+            tail_client_queue_bytes: 1024 * 1024,
+            query_max_events: 2_000,
+            query_max_timeframe_ms: 7 * 24 * 60 * 60 * 1_000,
+            external_control_origin: "http://127.0.0.1:8787".to_owned(),
+            tail_session_ttl_ms: 60 * 60 * 1_000,
+        }
+    }
+}
+
+impl ObservabilityConfig {
+    fn validate(&self) -> Result<(), PlatformError> {
+        const WEEK_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
+        if self.retention_ms == 0
+            || self.retention_ms > WEEK_MS
+            || self.max_database_bytes < 1024 * 1024
+            || self.max_database_bytes > 1024 * 1024 * 1024 * 1024
+            || self.max_invocation_log_bytes != 256 * 1024
+            || self.ingest_queue_events == 0
+            || self.ingest_queue_events > 1_000_000
+            || self.ingest_batch_events == 0
+            || self.ingest_batch_events > self.ingest_queue_events
+            || self.ingest_flush_ms == 0
+            || self.ingest_flush_ms > 60_000
+            || self.max_tail_sessions_per_script == 0
+            || self.max_tail_sessions_per_script > 10
+            || self.tail_client_queue_bytes < 4_096
+            || self.tail_client_queue_bytes > 64 * 1024 * 1024
+            || self.query_max_events == 0
+            || self.query_max_events > 2_000
+            || self.query_max_timeframe_ms == 0
+            || self.query_max_timeframe_ms > self.retention_ms
+            || self.tail_session_ttl_ms < 10_000
+            || self.tail_session_ttl_ms > 24 * 60 * 60 * 1_000
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "observability policy exceeds the bounded Day 1 contract",
+            ));
+        }
+        let origin = Url::parse(&self.external_control_origin).map_err(|_| {
+            PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "observability.external_control_origin must be an absolute HTTP(S) origin",
+            )
+        })?;
+        if !matches!(origin.scheme(), "http" | "https")
+            || origin.host_str().is_none()
+            || origin.username() != ""
+            || origin.password().is_some()
+            || origin.query().is_some()
+            || origin.fragment().is_some()
+            || origin.path() != "/"
+        {
+            return Err(PlatformError::new(
+                ErrorCode::ConfigInvalid,
+                "observability.external_control_origin must be an HTTP(S) origin without credentials or a path",
+            ));
+        }
         Ok(())
     }
 }

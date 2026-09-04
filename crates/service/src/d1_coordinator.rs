@@ -176,14 +176,14 @@ impl D1Coordinator {
         let mutation_for_task = mutation_started.clone();
         let task = tokio::task::spawn_blocking(move || {
             execute_blocking(
-                storage,
-                config,
-                pin,
-                lane,
-                metrics,
+                &storage,
+                &config,
+                &pin,
+                &lane,
+                metrics.as_ref(),
                 account_id,
                 resource_id,
-                mutation_for_task,
+                &mutation_for_task,
                 operation,
             )
         });
@@ -201,20 +201,19 @@ impl D1Coordinator {
 
 #[allow(clippy::too_many_arguments)]
 fn execute_blocking<T, F>(
-    storage: Arc<PlatformStorage>,
-    config: D1Config,
-    pin: ResourcePin,
-    lane: D1LaneLease,
-    metrics: Option<Arc<MetricsRegistry>>,
+    storage: &Arc<PlatformStorage>,
+    config: &D1Config,
+    pin: &ResourcePin,
+    lane: &D1LaneLease,
+    metrics: Option<&Arc<MetricsRegistry>>,
     account_id: AccountId,
     resource_id: ResourceId,
-    mutation_started: Arc<AtomicBool>,
+    mutation_started: &Arc<AtomicBool>,
     operation: F,
 ) -> Result<T, PlatformError>
 where
     F: FnOnce(D1OperationContext<'_>) -> Result<T, PlatformError>,
 {
-    let observed_storage = storage.clone();
     let result = execute_blocking_inner(
         storage,
         config,
@@ -226,20 +225,20 @@ where
         mutation_started,
         operation,
     );
-    persist_corruption(&observed_storage, account_id, resource_id, &result);
+    persist_corruption(storage, account_id, resource_id, &result);
     result
 }
 
 #[allow(clippy::too_many_arguments)]
 fn execute_blocking_inner<T, F>(
-    storage: Arc<PlatformStorage>,
-    config: D1Config,
-    pin: ResourcePin,
-    lane: D1LaneLease,
-    metrics: Option<Arc<MetricsRegistry>>,
+    storage: &Arc<PlatformStorage>,
+    config: &D1Config,
+    pin: &ResourcePin,
+    lane: &D1LaneLease,
+    metrics: Option<&Arc<MetricsRegistry>>,
     account_id: AccountId,
     resource_id: ResourceId,
-    mutation_started: Arc<AtomicBool>,
+    mutation_started: &Arc<AtomicBool>,
     operation: F,
 ) -> Result<T, PlatformError>
 where
@@ -257,18 +256,18 @@ where
     let paths = D1Paths::open(storage.data_dir().root())?;
     let path = paths.resolve_storage_key(&catalog.storage_key, account_id, resource_id)?;
     let engine = D1Engine::from_record(path, &catalog)?;
-    reconcile_restore(&storage, &paths, &catalog, &engine)?;
-    reconcile_ingest(&storage, &paths, &catalog, &engine, &config)?;
-    complete_ingest(&storage, &paths, &catalog, &engine)?;
+    reconcile_restore(storage, &paths, &catalog, &engine)?;
+    reconcile_ingest(storage, &paths, &catalog, &engine, config)?;
+    complete_ingest(storage, &paths, &catalog, &engine)?;
     let before = engine.session_version()?;
     let completed_history_required = AtomicBool::new(false);
     let result = operation(D1OperationContext {
         engine: &engine,
-        storage: &storage,
-        config: &config,
+        storage,
+        config,
         paths: &paths,
         catalog: &catalog,
-        mutation_started: &mutation_started,
+        mutation_started,
         completed_history_required: &completed_history_required,
     });
     let after = engine.session_version()?;
@@ -279,7 +278,7 @@ where
         }
         if completed_history_required.load(Ordering::Acquire) {
             engine.checkpoint(true).map_err(|_| result_unknown())?;
-            persist_snapshot(&storage, &paths, &catalog, &engine, after)
+            persist_snapshot(storage, &paths, &catalog, &engine, after)
                 .map_err(|_| result_unknown())?;
             if let Some(intent) =
                 D1SnapshotRepository::new(storage.db()).pending_restore(account_id, resource_id)?
@@ -291,17 +290,17 @@ where
                     .complete_restore(account_id, resource_id, &intent.id)
                     .map_err(|_| result_unknown())?;
                 prune_snapshot_history(
-                    &storage,
+                    storage,
                     &paths,
                     &catalog,
                     [Some(intent.previous_session_version), None],
                 )
                 .map_err(|_| result_unknown())?;
             }
-            complete_ingest(&storage, &paths, &catalog, &engine).map_err(|_| result_unknown())?;
+            complete_ingest(storage, &paths, &catalog, &engine).map_err(|_| result_unknown())?;
         }
     }
-    if let Some(metrics) = &metrics
+    if let Some(metrics) = metrics
         && let Ok(bytes) = engine.wal_bytes()
     {
         metrics.observe_d1_wal_bytes(bytes);

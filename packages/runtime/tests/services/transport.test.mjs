@@ -17,6 +17,7 @@ const inert = moduleUrl(`
   export const bindingError = code => new Error(code);
   export const BINDING_TOKEN_HEADER = "x-binding-token";
   export const currentStartupGeneration = () => "generation";
+  export const collectableWorkerCode = value => value;
   export const doPolicy = () => ({});
   export const INTERNAL_HEADERS = [];
   export const lockWorkerCode = () => ({});
@@ -31,6 +32,7 @@ const transportUrl = moduleUrl(await compileRuntime("services/transport.ts", {
   "../assets/router.js": inert,
   "../loader/bindings.js": inert,
   "../loader/modules.js": inert,
+  "../observability/collector.js": inert,
   "../sockets/tunnel.js": inert,
   "../loader/shared.js": inert,
 }));

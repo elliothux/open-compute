@@ -70,14 +70,10 @@ pub(super) async fn list(
     {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }
-    let order_by = query
-        .get("order_by")
-        .map(String::as_str)
-        .unwrap_or("created_at");
+    let order_by = query.get("order_by").map_or("created_at", String::as_str);
     let direction = query
         .get("order_by_direction")
-        .map(String::as_str)
-        .unwrap_or("desc");
+        .map_or("desc", String::as_str);
     if order_by != "created_at" || !matches!(direction, "asc" | "desc") {
         return error_response(V4Error::InvalidRequest, context.request_id());
     }

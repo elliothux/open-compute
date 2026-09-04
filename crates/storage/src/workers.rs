@@ -82,6 +82,83 @@ pub struct WorkerRecord {
     pub ownership: WorkerOwnership,
 }
 
+/// Mutable Script-level Workers Logs policy frozen into each runtime snapshot.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerObservabilitySettings {
+    /// Monotonic Script setting generation.
+    pub generation: u64,
+    /// Master observability persistence switch.
+    pub enabled: bool,
+    /// Optional top-level head sampling rate.
+    pub head_sampling_rate: Option<f64>,
+    /// Workers Logs collection switch.
+    pub logs_enabled: bool,
+    /// Optional logs-specific head sampling rate.
+    pub logs_head_sampling_rate: Option<f64>,
+    /// Whether invocation summary events are persisted.
+    pub invocation_logs: bool,
+    /// Whether sampled events are persisted locally.
+    pub persist: bool,
+    /// Last settings mutation time.
+    pub updated_at_ms: i64,
+}
+
+impl WorkerObservabilitySettings {
+    /// Effective deterministic head sampling rate.
+    #[must_use]
+    pub fn effective_head_sampling_rate(&self) -> f64 {
+        self.logs_head_sampling_rate
+            .or(self.head_sampling_rate)
+            .unwrap_or(1.0)
+    }
+}
+
+/// Complete replacement value for one Script observability policy.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpdateWorkerObservabilitySettings {
+    /// Master observability persistence switch.
+    pub enabled: bool,
+    /// Optional top-level head sampling rate.
+    pub head_sampling_rate: Option<f64>,
+    /// Workers Logs collection switch.
+    pub logs_enabled: bool,
+    /// Optional logs-specific head sampling rate.
+    pub logs_head_sampling_rate: Option<f64>,
+    /// Whether invocation summary events are persisted.
+    pub invocation_logs: bool,
+    /// Whether sampled events are persisted locally.
+    pub persist: bool,
+}
+
+/// Content-free management audit for Workers Logs and realtime tail operations.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ObservabilityAudit {
+    /// One process-local Script Tail was created.
+    TailCreate {
+        /// Script authority.
+        worker_id: WorkerId,
+    },
+    /// One process-local Script Tail was deleted or revoked.
+    TailDelete {
+        /// Script authority.
+        worker_id: WorkerId,
+    },
+    /// One bounded telemetry query completed.
+    Query {
+        /// `events` or `invocations`.
+        view: String,
+        /// Inclusive query start in Unix milliseconds.
+        from_ms: i64,
+        /// Exclusive query end in Unix milliseconds.
+        to_ms: i64,
+        /// Public result count.
+        result_count: usize,
+        /// Normalized filter keys only; values are deliberately absent.
+        filter_keys: Vec<String>,
+    },
+}
+
 /// Immutable single-Version traffic assignment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -570,6 +647,14 @@ impl<'a> WorkerRepository<'a> {
                 ));
             }
             tx.execute(
+                "INSERT INTO worker_observability_settings
+                 (worker_id, generation, enabled, head_sampling_rate, logs_enabled,
+                  logs_head_sampling_rate, invocation_logs, persist, updated_at_ms)
+                 VALUES (?1, 1, 1, NULL, 1, NULL, 1, 1, ?2)",
+                params![worker_id.to_string(), now_ms],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
                 "INSERT INTO worker_routes
                  (id, account_id, worker_id, kind, hostname_ascii, path_prefix,
                   entrypoint, state, generation, created_at_ms, updated_at_ms, deleted_at_ms)
@@ -855,6 +940,14 @@ impl<'a> WorkerRepository<'a> {
                 return Err(invariant());
             }
             tx.execute(
+                "INSERT INTO worker_observability_settings
+                 (worker_id, generation, enabled, head_sampling_rate, logs_enabled,
+                  logs_head_sampling_rate, invocation_logs, persist, updated_at_ms)
+                 VALUES (?1, 1, 0, NULL, 0, NULL, 0, 0, ?2)",
+                params![worker_id.to_string(), now_ms],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
                 "INSERT INTO system_owned_versions
                  (kind, account_id, worker_id, active_version_id, assets_sha256, updated_at_ms)
                  VALUES ('dashboard', ?1, ?2, NULL, zeroblob(32), ?3)",
@@ -906,6 +999,180 @@ impl<'a> WorkerRepository<'a> {
             .optional()
             .map_err(|_| db_error())?
             .ok_or_else(worker_not_found)
+        })
+    }
+
+    /// Read the current Script-level Workers Logs policy.
+    pub fn get_observability_settings(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+    ) -> Result<WorkerObservabilitySettings, PlatformError> {
+        self.get_worker(account_id, worker_id)?;
+        self.db.with_read(|conn| {
+            conn.query_row(
+                "SELECT generation, enabled, head_sampling_rate, logs_enabled,
+                        logs_head_sampling_rate, invocation_logs, persist, updated_at_ms
+                 FROM worker_observability_settings WHERE worker_id = ?1",
+                [worker_id.to_string()],
+                map_observability_settings,
+            )
+            .optional()
+            .map_err(|_| db_error())?
+            .ok_or_else(invariant)
+        })
+    }
+
+    /// Atomically replace one Script policy and invalidate every warm runtime key.
+    pub fn update_observability_settings(
+        &self,
+        account_id: AccountId,
+        worker_id: WorkerId,
+        settings: &UpdateWorkerObservabilitySettings,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<WorkerObservabilitySettings, PlatformError> {
+        validate_sampling_rate(settings.head_sampling_rate)?;
+        validate_sampling_rate(settings.logs_head_sampling_rate)?;
+        self.db.with_immediate(|tx| {
+            let worker = require_live_worker(tx, account_id, worker_id)?;
+            require_tenant_worker(&worker)?;
+            let current = tx
+                .query_row(
+                    "SELECT generation, enabled, head_sampling_rate, logs_enabled,
+                            logs_head_sampling_rate, invocation_logs, persist, updated_at_ms
+                     FROM worker_observability_settings WHERE worker_id = ?1",
+                    [worker_id.to_string()],
+                    map_observability_settings,
+                )
+                .optional()
+                .map_err(|_| db_error())?
+                .ok_or_else(invariant)?;
+            let generation = current.generation.checked_add(1).ok_or_else(invariant)?;
+            let route_generation = worker
+                .route_generation
+                .checked_add(1)
+                .ok_or_else(invariant)?;
+            let changed = tx
+                .execute(
+                    "UPDATE worker_observability_settings SET generation=?1, enabled=?2,
+                       head_sampling_rate=?3, logs_enabled=?4, logs_head_sampling_rate=?5,
+                       invocation_logs=?6, persist=?7, updated_at_ms=?8
+                     WHERE worker_id=?9 AND generation=?10",
+                    params![
+                        i64::try_from(generation).map_err(|_| invariant())?,
+                        settings.enabled,
+                        settings.head_sampling_rate,
+                        settings.logs_enabled,
+                        settings.logs_head_sampling_rate,
+                        settings.invocation_logs,
+                        settings.persist,
+                        now_ms,
+                        worker_id.to_string(),
+                        i64::try_from(current.generation).map_err(|_| invariant())?,
+                    ],
+                )
+                .map_err(|_| db_error())?;
+            if changed != 1 {
+                return Err(invariant());
+            }
+            tx.execute(
+                "UPDATE workers SET route_generation=?1, updated_at_ms=?2
+                 WHERE id=?3 AND route_generation=?4",
+                params![
+                    i64::try_from(route_generation).map_err(|_| invariant())?,
+                    now_ms,
+                    worker_id.to_string(),
+                    i64::try_from(worker.route_generation).map_err(|_| invariant())?,
+                ],
+            )
+            .map_err(|_| db_error())?;
+            audit(
+                tx,
+                account_id,
+                "worker.observability.update",
+                "worker",
+                &worker_id.to_string(),
+                request_id,
+                format!(r#"{{"generation":{generation}}}"#).as_bytes(),
+                now_ms,
+            )?;
+            Ok(WorkerObservabilitySettings {
+                generation,
+                enabled: settings.enabled,
+                head_sampling_rate: settings.head_sampling_rate,
+                logs_enabled: settings.logs_enabled,
+                logs_head_sampling_rate: settings.logs_head_sampling_rate,
+                invocation_logs: settings.invocation_logs,
+                persist: settings.persist,
+                updated_at_ms: now_ms,
+            })
+        })
+    }
+
+    /// Append one bounded, content-free observability management audit event.
+    pub fn audit_observability(
+        &self,
+        account_id: AccountId,
+        event: &ObservabilityAudit,
+        request_id: RequestId,
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        let (action, target_type, target_id, details) = match event {
+            ObservabilityAudit::TailCreate { worker_id } => (
+                "worker.tail.create",
+                "worker",
+                worker_id.to_string(),
+                serde_json::json!({}),
+            ),
+            ObservabilityAudit::TailDelete { worker_id } => (
+                "worker.tail.delete",
+                "worker",
+                worker_id.to_string(),
+                serde_json::json!({}),
+            ),
+            ObservabilityAudit::Query {
+                view,
+                from_ms,
+                to_ms,
+                result_count,
+                filter_keys,
+            } => {
+                if !matches!(view.as_str(), "events" | "invocations")
+                    || from_ms >= to_ms
+                    || filter_keys.len() > 32
+                    || filter_keys
+                        .iter()
+                        .any(|key| key.is_empty() || key.len() > 512)
+                {
+                    return Err(invariant());
+                }
+                (
+                    "worker.observability.query",
+                    "account",
+                    account_id.to_string(),
+                    serde_json::json!({
+                        "view": view,
+                        "fromMs": from_ms,
+                        "toMs": to_ms,
+                        "resultCount": result_count,
+                        "filterKeys": filter_keys,
+                    }),
+                )
+            }
+        };
+        let details = serde_json::to_vec(&details).map_err(|_| invariant())?;
+        self.db.with_immediate(|tx| {
+            audit(
+                tx,
+                account_id,
+                action,
+                target_type,
+                &target_id,
+                request_id,
+                &details,
+                now_ms,
+            )
         })
     }
 
@@ -2844,6 +3111,42 @@ fn map_worker(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkerRecord> {
         deleted_at_ms: row.get(8)?,
         ownership: WorkerOwnership::parse(&ownership).map_err(|_| rusqlite::Error::InvalidQuery)?,
     })
+}
+
+fn map_observability_settings(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<WorkerObservabilitySettings> {
+    let generation: i64 = row.get(0)?;
+    let head_sampling_rate: Option<f64> = row.get(2)?;
+    let logs_head_sampling_rate: Option<f64> = row.get(4)?;
+    if !valid_sampling_rate(head_sampling_rate) || !valid_sampling_rate(logs_head_sampling_rate) {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    Ok(WorkerObservabilitySettings {
+        generation: u64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        enabled: row.get(1)?,
+        head_sampling_rate,
+        logs_enabled: row.get(3)?,
+        logs_head_sampling_rate,
+        invocation_logs: row.get(5)?,
+        persist: row.get(6)?,
+        updated_at_ms: row.get(7)?,
+    })
+}
+
+fn valid_sampling_rate(value: Option<f64>) -> bool {
+    value.is_none_or(|rate| rate.is_finite() && (0.0..=1.0).contains(&rate))
+}
+
+fn validate_sampling_rate(value: Option<f64>) -> Result<(), PlatformError> {
+    if valid_sampling_rate(value) {
+        Ok(())
+    } else {
+        Err(PlatformError::new(
+            ErrorCode::LimitInvalid,
+            "observability head sampling rate must be between zero and one",
+        ))
+    }
 }
 
 fn map_system_owned_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<SystemOwnedVersionRecord> {

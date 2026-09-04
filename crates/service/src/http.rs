@@ -869,10 +869,13 @@ pub async fn serve_until(
     router: Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), PlatformError> {
-    axum::serve(listener, router.into_make_service())
-        .with_graceful_shutdown(shutdown)
-        .await
-        .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "health listener failed"))
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
+    .map_err(|_| PlatformError::new(ErrorCode::ConfigInvalid, "health listener failed"))
 }
 
 impl HttpState {

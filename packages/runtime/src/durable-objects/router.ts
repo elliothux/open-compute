@@ -1,6 +1,8 @@
 export { DoHost } from "./host.js";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { currentStartupGeneration, doPolicy, stableCode } from "../loader/host.js";
+import { collectObservabilityTail } from "../observability/collector.js";
+import type { RuntimeObservabilityIdentity } from "../loader/protocol.js";
 import {
   inboundSocketAddress,
   tunnelSockets,
@@ -24,6 +26,13 @@ export {
   ServiceTransport,
   WorkflowBindingTransport,
 } from "../loader/host.js";
+
+/** Direct main-module collector entrypoint for Durable Object execution roots. */
+export class ObservabilityTail extends WorkerEntrypoint<DoHostEnv, RuntimeObservabilityIdentity> {
+  async tail(events: TraceItem[]): Promise<void> {
+    await collectObservabilityTail(events, this.env, this.ctx.props);
+  }
+}
 
 const TOKEN_HEADER = "x-open-compute-binding-token";
 const ERROR_HEADER = "x-open-compute-error-code";

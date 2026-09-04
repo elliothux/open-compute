@@ -79,8 +79,12 @@ fn write_config(dir: &Path, extra: &str) -> PathBuf {
     let data = dir.join("data");
     let key = dir.join("master.key");
     let admin_auth = dir.join("admin-auth");
+    let deployer_auth = dir.join("deployer-auth");
+    let read_only_auth = dir.join("read-only-auth");
     fs::create_dir_all(&data).unwrap();
     write_mode(&admin_auth, "test-admin-secret", 0o600);
+    write_mode(&deployer_auth, "test-deployer-secret", 0o600);
+    write_mode(&read_only_auth, "test-read-only-secret", 0o600);
     let s3 = if extra.contains("[s3]") {
         String::new()
     } else {
@@ -102,6 +106,8 @@ prefix = "system/"
 public_bind = "127.0.0.1:0"
 admin_bind = "127.0.0.1:0"
 admin_auth = {{ file = "{admin_auth}" }}
+deployer_auth = {{ file = "{deployer_auth}" }}
+read_only_auth = {{ file = "{read_only_auth}" }}
 
 [storage]
 data_dir = "{data_dir}"
@@ -122,6 +128,8 @@ max_series = 1024
         data_dir = data.display(),
         master_key_file = key.display(),
         admin_auth = admin_auth.display(),
+        deployer_auth = deployer_auth.display(),
+        read_only_auth = read_only_auth.display(),
     );
     let path = dir.join("config.toml");
     fs::write(&path, toml).unwrap();
@@ -482,6 +490,13 @@ fn config_path_rejections_do_not_echo_secrets() {
     fs::write(&unknown, toml).unwrap();
     let err = load_platform_config(&unknown).unwrap_err();
     assert_eq!(err.code(), ErrorCode::ConfigParseFailed);
+
+    let unreadable = dir.path().join("unreadable.toml");
+    fs::write(&unreadable, "").unwrap();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+    let err = load_platform_config(&unreadable).unwrap_err();
+    assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o600)).unwrap();
     let _ = dotted;
 }
 
@@ -1648,6 +1663,15 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     reg.observe_alarm_delivery(AlarmOutcome::Retry, 2, Duration::from_millis(9));
     reg.inc_alarm_mutation(AlarmMutation::Set, true);
     reg.inc_alarm_repair(AlarmRepairSource::Scan, false);
+    reg.observe_observability_ingest(true);
+    reg.observe_observability_event(1, true);
+    reg.set_observability_ingest_queue_depth(3);
+    reg.set_observability_storage(42, Duration::from_secs(7));
+    reg.inc_observability_truncated(true);
+    reg.set_observability_tail_sessions(2);
+    reg.observe_observability_tail_event(true);
+    reg.inc_observability_tail_dropped(true);
+    reg.observe_observability_query(false, true, Duration::from_millis(9));
     {
         let _reader = KvGaugeGuard::new(&reg, KvGauge::ReaderConnection);
         let _writer = KvGaugeGuard::new(&reg, KvGauge::WriterConnection);
@@ -1748,6 +1772,15 @@ fn metrics_mutation_surfaces_and_label_bounds_are_complete() {
     );
     assert!(rendered.contains("oc_do_alarm_repair_total{source=\"scan\",outcome=\"failure\"} 1"));
     assert!(rendered.contains("oc_do_alarm_lag_seconds 3"));
+    assert!(rendered.contains("open_compute_observability_ingest_total{result=\"success\"} 1"));
+    assert!(rendered.contains("open_compute_observability_ingest_queue_depth 3"));
+    assert!(rendered.contains("open_compute_observability_db_bytes 42"));
+    assert!(rendered.contains("open_compute_observability_tail_sessions 2"));
+    assert!(
+        rendered.contains(
+            "open_compute_observability_query_total{view=\"events\",result=\"success\"} 1"
+        )
+    );
 }
 
 fn content_snapshot(root: &Path) -> Vec<(String, u64, Option<SystemTime>, String)> {
@@ -2275,6 +2308,7 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
     open_compute_artifacts::MockS3,
     HttpState,
     open_compute_core::AccountId,
+    Arc<open_compute_storage::PlatformStorage>,
 ) {
     let (dir, path, mock) = initialized_doctor_fixture().await;
     let loaded = load_fixture_platform_config(&path);
@@ -2295,14 +2329,30 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
     .unwrap();
     let transport =
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
+    let observability_store = Arc::new(
+        open_compute_storage::ObservabilityStore::open(
+            &storage.data_dir().ensure_observability_db().unwrap(),
+            loaded.config.storage.sqlite_busy_timeout_ms,
+            loaded.config.observability.retention_ms,
+            loaded.config.observability.max_database_bytes,
+        )
+        .unwrap(),
+    );
+    let observability = crate::observability::ObservabilityService::new(
+        storage.clone(),
+        Some(observability_store),
+        loaded.config.observability.clone(),
+        Arc::new(MetricsRegistry::new(&loaded.config.metrics, "test", "workerd").unwrap()),
+    );
     let api = WorkerApiState::new(
-        storage,
+        storage.clone(),
         open_compute_artifacts::ArtifactStore::new(client),
         transport,
         VersionPins::new(),
         BundleLimits::default(),
         Duration::from_millis(10),
-    );
+    )
+    .with_observability(observability);
     assert!(format!("{api:?}").contains("WorkerApiState"));
     assert_eq!(
         api.pins().count(open_compute_core::VersionId::generate()),
@@ -2313,12 +2363,13 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
         mock,
         test_state(HealthCoordinator::new(), Some("admin-token")).with_worker_api(api),
         account,
+        storage,
     )
 }
 
 #[tokio::test]
 async fn v4_account_subdomain_is_a_stable_read_only_unroutable_prerequisite() {
-    let (_dir, _mock, state, account) = initialized_worker_http_fixture().await;
+    let (_dir, _mock, state, account, _storage) = initialized_worker_http_fixture().await;
     let authority = crate::cloudflare_v4::accounts::AccountAuthority::new(
         open_compute_core::PlatformId::generate(),
         account,
@@ -2398,8 +2449,214 @@ async fn v4_account_subdomain_is_a_stable_read_only_unroutable_prerequisite() {
 }
 
 #[tokio::test]
+async fn p7_script_tails_and_empty_telemetry_follow_the_fixed_v4_contract() {
+    let (_dir, _mock, state, account, storage) = initialized_worker_http_fixture().await;
+    let repo = open_compute_storage::WorkerRepository::new(storage.db());
+    repo.create_worker(
+        account,
+        "tail-worker",
+        open_compute_core::RequestId::generate(),
+        1,
+        1_000_000,
+    )
+    .unwrap();
+    let authority = crate::cloudflare_v4::accounts::AccountAuthority::new(
+        open_compute_core::PlatformId::generate(),
+        account,
+        1_000,
+    );
+    let public_account = authority.public_id().to_owned();
+    let app = http::admin_router(
+        state
+            .with_v4_tokens(
+                SecretString::new("deployer-token"),
+                SecretString::new("read-token"),
+            )
+            .with_cloudflare_v4_account(authority),
+    );
+    let tails_path =
+        format!("/client/v4/accounts/{public_account}/workers/scripts/tail-worker/tails");
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&tails_path)
+                .header("authorization", "Bearer read-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"filters":[{"outcome":["ok"]},{"method":["get"]},{"query":"invoice"}]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::OK);
+    let created: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(created.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let tail_id = created["result"]["id"].as_str().unwrap().to_owned();
+    assert!(
+        created["result"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("ws://127.0.0.1:8787/client/v4/open-compute/tails/")
+    );
+    assert!(created["result"]["expires_at"].as_str().is_some());
+
+    let listed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&tails_path)
+                .header("authorization", "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let listed: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(listed.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(listed["result"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["result"][0]["id"], tail_id);
+
+    let deleted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("{tails_path}/{tail_id}"))
+                .header("authorization", "Bearer read-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::OK);
+
+    let live_tail = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/workers/observability/telemetry/live-tail"
+                ))
+                .header("authorization", "Bearer deployer-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"scriptId":"tail-worker","filterCombination":"and","filters":[{"key":"$workers.preview.slug","type":"string","operation":"is_null"}]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live_tail.status(), StatusCode::OK);
+    let live_tail: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(live_tail.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        live_tail["result"]["wsUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("ws://127.0.0.1:8787/client/v4/open-compute/live-tails/")
+    );
+    let heartbeat = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/workers/observability/telemetry/live-tail/heartbeat"
+                ))
+                .header("authorization", "Bearer deployer-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"scriptId":"tail-worker"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(heartbeat.status(), StatusCode::OK);
+    let heartbeat: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(heartbeat.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(heartbeat["result"], serde_json::json!({}));
+
+    for _ in 0..9 {
+        let admitted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/client/v4/accounts/{public_account}/workers/observability/telemetry/live-tail"
+                    ))
+                    .header("authorization", "Bearer deployer-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"scriptId":"tail-worker"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(admitted.status(), StatusCode::OK);
+    }
+    let saturated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/workers/observability/telemetry/live-tail"
+                ))
+                .header("authorization", "Bearer deployer-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"scriptId":"tail-worker"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(saturated.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    let keys = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/client/v4/accounts/{public_account}/workers/observability/telemetry/keys"
+                ))
+                .header("authorization", "Bearer read-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"datasets":["cloudflare-workers"]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(keys.status(), StatusCode::OK);
+    let keys: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(keys.into_body(), 64 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(keys["result"], serde_json::json!([]));
+}
+
+#[tokio::test]
 async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() {
-    let (_dir, mock, state, account) = initialized_worker_http_fixture().await;
+    let (_dir, mock, state, account, _storage) = initialized_worker_http_fixture().await;
     let authority = crate::cloudflare_v4::accounts::AccountAuthority::new(
         open_compute_core::PlatformId::generate(),
         account,
@@ -2581,8 +2838,7 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
         "assets": {"jwt": completion_token, "config": {}}
     });
     let body = format!(
-        "--fixed\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{}\r\n--fixed\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport default {{ fetch() {{ return new Response('ok'); }} }};\r\n--fixed--\r\n",
-        metadata
+        "--fixed\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n--fixed\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport default {{ fetch() {{ return new Response('ok'); }} }};\r\n--fixed--\r\n"
     );
     let upload_script = |name: &str, exclude_script: bool| {
         let query = if exclude_script {
@@ -4251,7 +4507,18 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
                         .unwrap();
                     let mut response = Vec::new();
                     stream.read_to_end(&mut response).await.unwrap();
-                    break response;
+                    if response
+                        .windows(b"\"name\":\"runtime\",\"state\":\"healthy\"".len())
+                        .any(|window| {
+                            window == b"\"name\":\"runtime\",\"state\":\"healthy\""
+                        })
+                    {
+                        break response;
+                    }
+                    if task.is_finished() {
+                        panic!("platform startup ended early: {:?}", (&mut task).await);
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
                 Err(_) => {
                     if task.is_finished() {
@@ -4274,7 +4541,10 @@ async fn run_real_workerd_on_merged_listener_serves_status_and_shuts_down() {
         .unwrap();
     let response = String::from_utf8(response).unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-    assert!(response.contains("\"supervisor\""), "{response}");
+    assert!(
+        response.contains("\"name\":\"runtime\",\"state\":\"healthy\""),
+        "{response}"
+    );
     assert_eq!(mock.object_count(), 0);
 }
 #[path = "p2_3_route_epoch_tests.rs"]

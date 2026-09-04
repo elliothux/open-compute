@@ -11,8 +11,8 @@ use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Path, Request, Sta
 use axum::routing::{get, patch};
 use open_compute_core::{DeploymentId, PlatformError, RequestId, VersionId};
 use open_compute_storage::{
-    DeploymentRecord, DeploymentSource, VersionRecord, VersionSnapshot, WorkerRecord,
-    WorkerRepository,
+    DeploymentRecord, DeploymentSource, UpdateWorkerObservabilitySettings, VersionRecord,
+    VersionSnapshot, WorkerRecord, WorkerRepository,
 };
 use open_compute_workers::{CreateVersionOutcome, ProductPromotionRequest};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ pub(super) use super::json::json_body;
 /// Compose the fixed Wrangler Worker-management subset.
 pub(crate) fn router() -> Router<HttpState> {
     Router::new()
+        .merge(super::observability::router())
         .merge(super::assets::router())
         .merge(super::account_subdomain::router())
         .route(
@@ -394,14 +395,14 @@ async fn upload(
         Ok(value) => value,
         Err(error) => return platform_error(context.request_id(), &error),
     };
-    let multipart = match Multipart::from_request(request, &state).await {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::InvalidRequest, context.request_id()),
+    let Ok(multipart) = Multipart::from_request(request, &state).await else {
+        return error_response(V4Error::InvalidRequest, context.request_id());
     };
     let upload = match multipart::parse_worker_upload(multipart, api.bundle_limits).await {
         Ok(value) => value,
         Err(error) => return platform_error(context.request_id(), &error),
     };
+    let upload_observability = upload.metadata.observability.clone();
     let now = match now_ms() {
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
@@ -463,14 +464,26 @@ async fn upload(
             return platform_error(context.request_id(), &cleanup);
         }
     }
+    if outcome.is_ok()
+        && let Some(observability) = &upload_observability
+    {
+        let repository = WorkerRepository::new(api.storage.db());
+        if let Err(error) = apply_upload_observability(
+            repository,
+            account,
+            worker.id,
+            observability,
+            context.request_id(),
+            now,
+        ) {
+            return platform_error(context.request_id(), &error);
+        }
+    }
     match outcome {
         Ok(CreateVersionOutcome::Applied(result)) => {
-            let snapshot = WorkerRepository::new(api.storage.db()).version_snapshot(
-                account,
-                worker.id,
-                result.version.id,
-                false,
-            );
+            let repository = WorkerRepository::new(api.storage.db());
+            let snapshot =
+                repository.version_snapshot(account, worker.id, result.version.id, false);
             match snapshot
                 .map_err(|error| V4Error::from(&error))
                 .and_then(|snapshot| {
@@ -502,6 +515,51 @@ async fn upload(
         }
         Err(error) => platform_error(context.request_id(), &error),
     }
+}
+
+fn apply_upload_observability(
+    repository: WorkerRepository<'_>,
+    account: open_compute_core::AccountId,
+    worker: open_compute_core::WorkerId,
+    value: &super::model::WorkerUploadObservability,
+    request_id: RequestId,
+    now_ms: i64,
+) -> Result<(), PlatformError> {
+    let current = repository.get_observability_settings(account, worker)?;
+    let logs = value.logs.as_ref();
+    let replacement = UpdateWorkerObservabilitySettings {
+        enabled: value.enabled,
+        head_sampling_rate: value.head_sampling_rate.or(current.head_sampling_rate),
+        logs_enabled: logs
+            .and_then(|settings| settings.enabled)
+            .unwrap_or(current.logs_enabled),
+        logs_head_sampling_rate: logs
+            .and_then(|settings| settings.head_sampling_rate)
+            .or(current.logs_head_sampling_rate),
+        invocation_logs: logs
+            .and_then(|settings| settings.invocation_logs)
+            .unwrap_or(current.invocation_logs),
+        persist: logs
+            .and_then(|settings| settings.persist)
+            .unwrap_or(current.persist),
+    };
+    if same_observability(&current, &replacement) {
+        return Ok(());
+    }
+    repository.update_observability_settings(account, worker, &replacement, request_id, now_ms)?;
+    Ok(())
+}
+
+fn same_observability(
+    current: &open_compute_storage::WorkerObservabilitySettings,
+    replacement: &UpdateWorkerObservabilitySettings,
+) -> bool {
+    current.enabled == replacement.enabled
+        && current.head_sampling_rate == replacement.head_sampling_rate
+        && current.logs_enabled == replacement.logs_enabled
+        && current.logs_head_sampling_rate == replacement.logs_head_sampling_rate
+        && current.invocation_logs == replacement.invocation_logs
+        && current.persist == replacement.persist
 }
 
 async fn list_versions(

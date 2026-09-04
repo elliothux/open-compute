@@ -1,11 +1,14 @@
 use super::*;
 use crate::{
-    PlatformStorage, R2MultipartPartRecord, R2MultipartRepository, R2MultipartState,
-    R2MultipartUploadRecord, R2ObjectListEntry, R2ObjectMutationKind, R2ObjectRecord,
-    R2ObjectRepository, ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
+    CatalogDirection, CatalogSort, PlatformStorage, R2MultipartPartRecord, R2MultipartRepository,
+    R2MultipartState, R2MultipartUploadRecord, R2ObjectListEntry, R2ObjectMutationKind,
+    R2ObjectRecord, R2ObjectRepository, ReserveResourceCreate, ResourceCreateReservation,
+    ResourceRepository, decode_catalog_cursor,
 };
 use open_compute_core::config::StorageConfig;
-use open_compute_core::{AccountId, BindingKind, ErrorCode, RequestId, ResourceId, SystemClock};
+use open_compute_core::{
+    AccountId, BindingKind, ErrorCode, RequestId, ResourceId, ResourceState, SystemClock,
+};
 
 fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
     let temp = tempfile::tempdir().unwrap();
@@ -46,6 +49,44 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
         unreachable!()
     };
     (temp, storage, resource)
+}
+
+fn ready_bucket(storage: &PlatformStorage, name: &str, now_ms: i64) -> ResourceRecord {
+    let account_id = storage.identity().default_account_id;
+    let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
+    let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id,
+                kind: BindingKind::R2Bucket,
+                name,
+                idempotency_key: name,
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: ResourceId::generate(),
+                driver_schema_version: R2_SCHEMA_VERSION,
+                request_id: RequestId::generate(),
+                now_ms,
+                expires_at_ms: now_ms + 1_000,
+            },
+            1_000_000,
+        )
+        .unwrap()
+    else {
+        unreachable!()
+    };
+    R2BucketRepository::new(storage.db())
+        .ensure_bucket(
+            &resource,
+            &format!("tenant/r2/v1/{}/", resource.id),
+            512 * 1024 * 1024,
+            &[1; 32],
+        )
+        .unwrap();
+    ResourceRepository::new(storage.db())
+        .mark_ready(resource.id, now_ms + 1)
+        .unwrap();
+    resource
 }
 
 #[test]
@@ -560,5 +601,113 @@ fn object_authority_rejects_invalid_records_and_stale_intents() {
             .unwrap_err()
             .code(),
         ErrorCode::ResourceInvariantViolation
+    );
+}
+
+#[test]
+fn bucket_catalog_pages_filter_sort_and_bind_cursors() {
+    let (_temp, storage, initial) = fixture();
+    let repository = R2BucketRepository::new(storage.db());
+    repository
+        .ensure_bucket(
+            &initial,
+            &format!("tenant/r2/v1/{}/", initial.id),
+            512 * 1024 * 1024,
+            &[1; 32],
+        )
+        .unwrap();
+    ResourceRepository::new(storage.db())
+        .mark_ready(initial.id, 11)
+        .unwrap();
+    ready_bucket(&storage, "alpha-images", 20);
+    ready_bucket(&storage, "beta-images", 30);
+
+    for (sort, direction) in [
+        (CatalogSort::Name, CatalogDirection::Asc),
+        (CatalogSort::Name, CatalogDirection::Desc),
+        (CatalogSort::CreatedAt, CatalogDirection::Asc),
+        (CatalogSort::UpdatedAt, CatalogDirection::Desc),
+    ] {
+        let first = repository
+            .list_page(initial.account_id, None, None, sort, direction, None, 1)
+            .unwrap();
+        assert_eq!(first.items.len(), 1);
+        let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
+        let rest = repository
+            .list_page(
+                initial.account_id,
+                None,
+                Some(ResourceState::Ready),
+                sort,
+                direction,
+                Some(cursor),
+                10,
+            )
+            .unwrap();
+        assert_eq!(rest.items.len(), 2);
+        assert!(rest.next_cursor.is_none());
+    }
+
+    assert_eq!(
+        repository
+            .list_page(
+                initial.account_id,
+                Some("BETA"),
+                None,
+                CatalogSort::Name,
+                CatalogDirection::Asc,
+                None,
+                10,
+            )
+            .unwrap()
+            .items[0]
+            .resource
+            .name,
+        "beta-images"
+    );
+    assert_eq!(
+        repository
+            .list_page(
+                initial.account_id,
+                Some(&initial.id.to_string()),
+                None,
+                CatalogSort::Name,
+                CatalogDirection::Asc,
+                None,
+                10,
+            )
+            .unwrap()
+            .items[0]
+            .resource
+            .id,
+        initial.id
+    );
+
+    let first = repository
+        .list_page(
+            initial.account_id,
+            None,
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            1,
+        )
+        .unwrap();
+    let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        repository
+            .list_page(
+                initial.account_id,
+                None,
+                None,
+                CatalogSort::UpdatedAt,
+                CatalogDirection::Asc,
+                Some(cursor),
+                10,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
     );
 }

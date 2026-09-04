@@ -204,6 +204,110 @@
       "operationSha256": "93f315e140ef6650089842d97fcae97f24666edb57f1775836b688aed7ab08b4"
     },
     {
+      "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/tails",
+      "method": "GET",
+      "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails",
+      "operationId": "worker-tail-logs-list-tails",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Script Tail sessions are process-local; GET returns the complete active-session array implied by List Tails instead of the pinned OpenAPI single-object type; sessions receive only the selected target Script and do not aggregate nested target logs",
+      "deviations": [
+        "OC-OBSERVABILITY-001"
+      ],
+      "operationSha256": "1e5d1751794ba3bd9ba76b3e18786e6b28e148ffe216daad3d573094f9360251"
+    },
+    {
+      "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
+      "method": "POST",
+      "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails",
+      "operationId": "worker-tail-logs-start-tail",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Script Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
+      "deviations": [
+        "OC-OBSERVABILITY-001"
+      ],
+      "operationSha256": "c185835822b9a5706951ff06ac8cbb79751c91ccdf1277f034f6896556937945"
+    },
+    {
+      "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
+      "method": "DELETE",
+      "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
+      "operationId": "worker-tail-logs-delete-tail",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Script Tail sessions are process-local and disappear on daemon restart",
+      "deviations": [
+        "OC-OBSERVABILITY-001"
+      ],
+      "operationSha256": "858ea601951bf55e8e71a750b270562c9a92f70ac3f7cd5d47fccc555b3f5aaf"
+    },
+    {
+      "id": "POST /accounts/{account_id}/workers/observability/telemetry/keys",
+      "method": "POST",
+      "path": "/accounts/{account_id}/workers/observability/telemetry/keys",
+      "operationId": "telemetry.keys.list",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Field discovery reads a bounded single-machine retention index containing target-attributed events only",
+      "deviations": [
+        "OC-OBSERVABILITY-001"
+      ],
+      "operationSha256": "8995c04966d27334de5bfce9caf57d1ef28011591d6bb338f654db03241182da"
+    },
+    {
+      "id": "POST /accounts/{account_id}/workers/observability/telemetry/values",
+      "method": "POST",
+      "path": "/accounts/{account_id}/workers/observability/telemetry/values",
+      "operationId": "telemetry.values.list",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Value discovery reads a bounded single-machine retention index containing target-attributed events only",
+      "deviations": [
+        "OC-OBSERVABILITY-001"
+      ],
+      "operationSha256": "dd6eecbf7196f7372e2b4186a38bad9a760283e84abea03777dbf09b00bc28ef"
+    },
+    {
+      "id": "POST /accounts/{account_id}/workers/observability/telemetry/query",
+      "method": "POST",
+      "path": "/accounts/{account_id}/workers/observability/telemetry/query",
+      "operationId": "telemetry.query",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Events and invocations views use a bounded local single-machine index and retention authority; calculations, traces, agents, requests, saved queries, global ordering, and hosted optional metadata are not provided",
+      "deviations": [
+        "OC-OBSERVABILITY-001"
+      ],
+      "operationSha256": "8edb90cc6d3f2c705a4195abf447c7a5dd4bc1d64d880a59a931e474298cead8"
+    },
+    {
+      "id": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail",
+      "method": "POST",
+      "path": "/accounts/{account_id}/workers/observability/telemetry/live-tail",
+      "operationId": "telemetry.live-tail.post",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Live Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
+      "deviations": [
+        "OC-OBSERVABILITY-001"
+      ],
+      "operationSha256": "8febbb9abd577cdba4d4b267e45061807ca6acac2a4e4ba3dc6b3615550f0064"
+    },
+    {
+      "id": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat",
+      "method": "POST",
+      "path": "/accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat",
+      "operationId": "telemetry.live-tail.heartbeat.get",
+      "status": "supported_with_deviation",
+      "source": "cloudflare-openapi",
+      "constraint": "Heartbeat extends process-local selected-Script sessions only",
+      "deviations": [
+        "OC-OBSERVABILITY-001"
+      ],
+      "operationSha256": "9da8354733fbf39ff839f27287c2c681aa03485a0a74a96b5a1fa82ac3584b35"
+    },
+    {
       "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/secrets",
       "method": "GET",
       "path": "/accounts/{account_id}/workers/scripts/{script_name}/secrets",
@@ -1213,36 +1317,6 @@
       "status": "supported",
       "source": "cloudflare-openapi",
       "operationSha256": "26afa53cf88d87e9ced524a2a018c150e1424b9b116472c8724a63fb22fb95a1"
-    },
-    {
-      "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/tails",
-      "method": "GET",
-      "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails",
-      "operationId": "worker-tail-logs-list-tails",
-      "status": "planned",
-      "source": "cloudflare-openapi",
-      "stage": "P7",
-      "operationSha256": "1e5d1751794ba3bd9ba76b3e18786e6b28e148ffe216daad3d573094f9360251"
-    },
-    {
-      "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
-      "method": "POST",
-      "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails",
-      "operationId": "worker-tail-logs-start-tail",
-      "status": "planned",
-      "source": "cloudflare-openapi",
-      "stage": "P7",
-      "operationSha256": "c185835822b9a5706951ff06ac8cbb79751c91ccdf1277f034f6896556937945"
-    },
-    {
-      "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
-      "method": "DELETE",
-      "path": "/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
-      "operationId": "worker-tail-logs-delete-tail",
-      "status": "planned",
-      "source": "cloudflare-openapi",
-      "stage": "P7",
-      "operationSha256": "858ea601951bf55e8e71a750b270562c9a92f70ac3f7cd5d47fccc555b3f5aaf"
     },
     {
       "id": "GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects",
@@ -3027,6 +3101,2910 @@
         "x-fern-availability": "generally-available",
         "x-fern-sdk-group-name": "workers.scripts.script-and-version-settings",
         "x-fern-sdk-method-name": "edit",
+        "x-forge-hidden": true
+      }
+    },
+    "/accounts/{account_id}/workers/scripts/{script_name}/tails": {
+      "get": {
+        "operationId": "worker-tail-logs-list-tails",
+        "summary": "List Tails",
+        "description": "Get list of tails currently deployed on a Worker.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_identifier"
+            }
+          },
+          {
+            "name": "script_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_script_name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List Tails response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/workers_api-response-common"
+                    },
+                    {
+                      "properties": {
+                        "result": {
+                          "$ref": "#/components/schemas/workers_tail"
+                        }
+                      },
+                      "required": [
+                        "result"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "List Tails response failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workers_api-response-common-failure"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_token": []
+          },
+          {
+            "api_email": [],
+            "api_key": []
+          }
+        ],
+        "tags": [
+          "Worker Tail Logs"
+        ],
+        "x-api-token-group": [
+          "Workers Tail Read",
+          "Workers Scripts Write"
+        ],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "workers.scripts.tail",
+        "x-fern-sdk-method-name": "get",
+        "x-forge-hidden": true
+      },
+      "post": {
+        "operationId": "worker-tail-logs-start-tail",
+        "summary": "Start Tail",
+        "description": "Starts a tail that receives logs and exception from a Worker.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_identifier"
+            }
+          },
+          {
+            "name": "script_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_script_name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Start Tail response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/workers_api-response-common"
+                    },
+                    {
+                      "properties": {
+                        "result": {
+                          "$ref": "#/components/schemas/workers_tail"
+                        }
+                      },
+                      "required": [
+                        "result"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Start Tail response failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workers_api-response-common-failure"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_token": []
+          },
+          {
+            "api_email": [],
+            "api_key": []
+          }
+        ],
+        "tags": [
+          "Worker Tail Logs"
+        ],
+        "x-api-token-group": [
+          "Workers Tail Read",
+          "Workers Scripts Write"
+        ],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "workers.scripts.tail",
+        "x-fern-sdk-method-name": "create",
+        "x-forge-hidden": true
+      }
+    },
+    "/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}": {
+      "delete": {
+        "operationId": "worker-tail-logs-delete-tail",
+        "summary": "Delete Tail",
+        "description": "Deletes a tail from a Worker.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_identifier"
+            }
+          },
+          {
+            "name": "script_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_script_name"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/workers_identifier"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete Tail response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workers_api-response-common"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Delete Tail response failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workers_api-response-common-failure"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_token": []
+          },
+          {
+            "api_email": [],
+            "api_key": []
+          }
+        ],
+        "tags": [
+          "Worker Tail Logs"
+        ],
+        "x-api-token-group": [
+          "Workers Tail Read",
+          "Workers Scripts Write"
+        ],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "workers.scripts.tail",
+        "x-fern-sdk-method-name": "delete",
+        "x-forge-hidden": true
+      }
+    },
+    "/accounts/{account_id}/workers/observability/telemetry/keys": {
+      "parameters": [
+        {
+          "name": "account_id",
+          "in": "path",
+          "description": "Your Cloudflare account ID.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "telemetry.keys.list",
+        "summary": "List keys",
+        "description": "List all the keys in your telemetry events.",
+        "requestBody": {
+          "description": "Find keys in your telemetry events matching a specific filter or needle.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "datasets": {
+                    "description": "Leave this empty to use the default datasets",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "filters": {
+                    "description": "Apply filters to narrow key discovery. Supports nested groups via kind: 'group'. Maximum nesting depth is 4.",
+                    "type": "array",
+                    "items": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/workers-observability_filter_node"
+                        },
+                        {
+                          "anyOf": [
+                            {
+                              "description": "A group node that nests child filters combined with a logical operator.",
+                              "properties": {
+                                "filterCombination": {
+                                  "description": "Logical operator for combining child filters: 'and' (all must match) or 'or' (any must match).",
+                                  "type": "string",
+                                  "enum": [
+                                    "and",
+                                    "or",
+                                    "AND",
+                                    "OR"
+                                  ]
+                                },
+                                "filters": {
+                                  "description": "Child filter nodes. Each can be a leaf filter or another nested group.",
+                                  "type": "array",
+                                  "items": {
+                                    "$ref": "#/components/schemas/workers-observability_filter_node"
+                                  },
+                                  "minItems": 1
+                                },
+                                "kind": {
+                                  "description": "Discriminator indicating this is a nested filter group.",
+                                  "type": "string",
+                                  "enum": [
+                                    "group"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "filterCombination",
+                                "filters"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "$ref": "#/components/schemas/workers-observability_filter_leaf"
+                            }
+                          ],
+                          "description": "Supports nested groups via kind: 'group'. Maximum nesting depth is 4."
+                        }
+                      ]
+                    },
+                    "default": []
+                  },
+                  "from": {
+                    "type": "number"
+                  },
+                  "keyNeedle": {
+                    "description": "If the user suggests a key, use this to narrow down the list of keys returned. Make sure matchCase is false to avoid case sensitivity issues.",
+                    "type": "object",
+                    "properties": {
+                      "isRegex": {
+                        "description": "When true, treats the value as a regular expression (RE2 syntax).",
+                        "type": "boolean"
+                      },
+                      "matchCase": {
+                        "description": "When true, performs a case-sensitive search. Defaults to case-insensitive.",
+                        "type": "boolean"
+                      },
+                      "value": {
+                        "description": "The text or pattern to search for.",
+                        "allOf": [
+                          {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          },
+                          {
+                            "maxLength": 1000,
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ]
+                  },
+                  "limit": {
+                    "description": "Advanced usage: set limit=1000+ to retrieve comprehensive key options without needing additional filtering.",
+                    "type": "number"
+                  },
+                  "needle": {
+                    "description": "Search for a specific substring in any of the events",
+                    "type": "object",
+                    "properties": {
+                      "isRegex": {
+                        "description": "When true, treats the value as a regular expression (RE2 syntax).",
+                        "type": "boolean"
+                      },
+                      "matchCase": {
+                        "description": "When true, performs a case-sensitive search. Defaults to case-insensitive.",
+                        "type": "boolean"
+                      },
+                      "value": {
+                        "description": "The text or pattern to search for.",
+                        "allOf": [
+                          {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          },
+                          {
+                            "maxLength": 1000,
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ]
+                  },
+                  "to": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Successful request"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "lastSeenAt": {
+                            "type": "number"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "string",
+                              "boolean",
+                              "number"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "type",
+                          "lastSeenAt"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "messages",
+                    "success",
+                    "errors",
+                    "result"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Bad Request"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Unauthorized"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Forbidden"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Too many requests"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Internal error"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Gateway timeout"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Keys"
+        ],
+        "x-api-token-group": [
+          "Workers Observability Write"
+        ],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "observability.telemetry",
+        "x-fern-sdk-method-name": "keys"
+      }
+    },
+    "/accounts/{account_id}/workers/observability/telemetry/values": {
+      "parameters": [
+        {
+          "name": "account_id",
+          "in": "path",
+          "description": "Your Cloudflare account ID.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "telemetry.values.list",
+        "summary": "List values",
+        "description": "List unique values found in your events.",
+        "requestBody": {
+          "description": "Retrieve values from your telemetry events.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "datasets": {
+                    "description": "Leave this empty to use the default datasets",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "filters": {
+                    "description": "Apply filters before listing values. Supports nested groups via kind: 'group'. Maximum nesting depth is 4.",
+                    "type": "array",
+                    "items": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/workers-observability_filter_node"
+                        },
+                        {
+                          "anyOf": [
+                            {
+                              "description": "A group node that nests child filters combined with a logical operator.",
+                              "properties": {
+                                "filterCombination": {
+                                  "description": "Logical operator for combining child filters: 'and' (all must match) or 'or' (any must match).",
+                                  "type": "string",
+                                  "enum": [
+                                    "and",
+                                    "or",
+                                    "AND",
+                                    "OR"
+                                  ]
+                                },
+                                "filters": {
+                                  "description": "Child filter nodes. Each can be a leaf filter or another nested group.",
+                                  "type": "array",
+                                  "items": {
+                                    "$ref": "#/components/schemas/workers-observability_filter_node"
+                                  },
+                                  "minItems": 1
+                                },
+                                "kind": {
+                                  "description": "Discriminator indicating this is a nested filter group.",
+                                  "type": "string",
+                                  "enum": [
+                                    "group"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "filterCombination",
+                                "filters"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "$ref": "#/components/schemas/workers-observability_filter_leaf"
+                            }
+                          ],
+                          "description": "Supports nested groups via kind: 'group'. Maximum nesting depth is 4."
+                        }
+                      ]
+                    },
+                    "default": []
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "default": 50
+                  },
+                  "needle": {
+                    "description": "Full-text search expression to match events containing the specified text or pattern.",
+                    "type": "object",
+                    "properties": {
+                      "isRegex": {
+                        "description": "When true, treats the value as a regular expression (RE2 syntax).",
+                        "type": "boolean"
+                      },
+                      "matchCase": {
+                        "description": "When true, performs a case-sensitive search. Defaults to case-insensitive.",
+                        "type": "boolean"
+                      },
+                      "value": {
+                        "description": "The text or pattern to search for.",
+                        "allOf": [
+                          {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          },
+                          {
+                            "maxLength": 1000,
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ]
+                  },
+                  "timeframe": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "number"
+                      },
+                      "to": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "to",
+                      "from"
+                    ]
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "boolean",
+                      "number"
+                    ]
+                  }
+                },
+                "required": [
+                  "timeframe",
+                  "key",
+                  "type",
+                  "datasets"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Successful request"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "dataset": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "string",
+                              "boolean",
+                              "number"
+                            ]
+                          },
+                          "value": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "type",
+                          "value",
+                          "dataset"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "messages",
+                    "success",
+                    "errors",
+                    "result"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Bad Request"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Unauthorized"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Forbidden"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Too many requests"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Internal error"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Gateway timeout"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Values"
+        ],
+        "x-api-token-group": [
+          "Workers Observability Write"
+        ],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "observability.telemetry",
+        "x-fern-sdk-method-name": "values"
+      }
+    },
+    "/accounts/{account_id}/workers/observability/telemetry/query": {
+      "parameters": [
+        {
+          "name": "account_id",
+          "in": "path",
+          "description": "Your Cloudflare account ID.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "telemetry.query",
+        "summary": "Run a query",
+        "description": "Run a temporary or saved query.",
+        "requestBody": {
+          "description": "Query your observability events, requests, and traces to build visualizations and identify insights.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chart": {
+                    "description": "When true, includes time-series data in the response.",
+                    "type": "boolean"
+                  },
+                  "chartType": {
+                    "description": "Controls the SQL shape and response payload for the 'calculations' view. Omitted or 'timeseries_and_aggregate': current behaviour — both the time-series and aggregate queries. 'timeseries': time-series only. 'aggregate': aggregate only. 'distribution': a bucketed 2D histogram (time × value buckets) returned in 'distribution' instead of 'calculations'. 'distribution' is not compatible with 'compare' — combining them returns a 400.",
+                    "type": "string",
+                    "enum": [
+                      "timeseries_and_aggregate",
+                      "timeseries",
+                      "aggregate",
+                      "distribution"
+                    ]
+                  },
+                  "compare": {
+                    "description": "When true, includes a comparison dataset from the previous time period of equal length.",
+                    "type": "boolean"
+                  },
+                  "distributionScale": {
+                    "description": "Value-axis bucketing for chartType 'distribution'. Omitted or 'log': geometric buckets, best for heavy-tailed latency. 'linear': fixed-width buckets, clearer for narrow or additive ranges. Ignored for other chartTypes. The response echoes the scheme used in distribution.bucketMode.",
+                    "type": "string",
+                    "enum": [
+                      "log",
+                      "linear"
+                    ]
+                  },
+                  "dry": {
+                    "description": "When true, executes the query without persisting the results. Useful for validation or previewing.",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "granularity": {
+                    "description": "Number of time-series buckets. Only used when view is 'calculations'. Omit to let the system auto-detect an appropriate granularity.",
+                    "type": "number"
+                  },
+                  "ignoreSeries": {
+                    "description": "When true, omits time-series data from the response and returns only aggregated values. Reduces response size when series are not needed.",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "limit": {
+                    "description": "Maximum number of events to return when view is 'events'. Also controls the number of group-by rows when view is 'calculations'.",
+                    "type": "number",
+                    "default": 50,
+                    "maximum": 2000
+                  },
+                  "offset": {
+                    "description": "Cursor for pagination in event, trace, invocation, and agent views. Pass the $metadata.id of the last event, the trace cursor, or AgentRun.id to fetch the next page.",
+                    "type": "string"
+                  },
+                  "offsetBy": {
+                    "description": "Numeric offset for paginating grouped/pattern results (top-N lists). Use together with limit. Not used by cursor-based pagination.",
+                    "type": "number"
+                  },
+                  "offsetDirection": {
+                    "description": "Pagination direction: 'next' for forward, 'prev' for backward.",
+                    "type": "string"
+                  },
+                  "parameters": {
+                    "description": "Query parameters defining what data to retrieve — filters, calculations, group-bys, and ordering. In practice this should always be provided for ad-hoc queries. Only omit when executing a previously saved query by queryId. Use the keys and values endpoints to discover available fields before building filters.",
+                    "properties": {
+                      "calculations": {
+                        "description": "Aggregation calculations to compute (e.g. count, avg, p99). Each calculation produces aggregate values and optional time-series data.",
+                        "type": "array",
+                        "items": {
+                          "discriminator": {
+                            "propertyName": "operator"
+                          },
+                          "oneOf": [
+                            {
+                              "properties": {
+                                "alias": {
+                                  "description": "Custom label for this calculation in the results. Useful for distinguishing multiple calculations.",
+                                  "type": "string"
+                                },
+                                "key": {
+                                  "description": "Field name to calculate over. Must exist in the data. Verify with the keys endpoint. Required for every operator except `count`, which aggregates whole rows and may omit it.",
+                                  "type": "string"
+                                },
+                                "keyType": {
+                                  "description": "Data type of the key. Required when key is provided to ensure correct aggregation.",
+                                  "type": "string",
+                                  "enum": [
+                                    "string",
+                                    "number",
+                                    "boolean"
+                                  ]
+                                },
+                                "operator": {
+                                  "description": "Aggregation operator to apply. Examples: count, avg, sum, min, max, median, p90, p95, p99, uniq, stddev, variance.",
+                                  "type": "string",
+                                  "enum": [
+                                    "count",
+                                    "COUNT"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "operator"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "properties": {
+                                "alias": {
+                                  "description": "Custom label for this calculation in the results. Useful for distinguishing multiple calculations.",
+                                  "type": "string"
+                                },
+                                "key": {
+                                  "description": "Field name to calculate over. Must exist in the data. Verify with the keys endpoint. Required for every operator except `count`, which aggregates whole rows and may omit it.",
+                                  "type": "string",
+                                  "pattern": "\\S"
+                                },
+                                "keyType": {
+                                  "description": "Data type of the key. Required when key is provided to ensure correct aggregation.",
+                                  "type": "string",
+                                  "enum": [
+                                    "string",
+                                    "number",
+                                    "boolean"
+                                  ]
+                                },
+                                "operator": {
+                                  "description": "Aggregation operator to apply. Examples: count, avg, sum, min, max, median, p90, p95, p99, uniq, stddev, variance.",
+                                  "type": "string",
+                                  "enum": [
+                                    "uniq",
+                                    "max",
+                                    "min",
+                                    "sum",
+                                    "avg",
+                                    "median",
+                                    "p001",
+                                    "p01",
+                                    "p05",
+                                    "p10",
+                                    "p25",
+                                    "p75",
+                                    "p90",
+                                    "p95",
+                                    "p99",
+                                    "p999",
+                                    "stddev",
+                                    "variance",
+                                    "COUNT_DISTINCT",
+                                    "MAX",
+                                    "MIN",
+                                    "SUM",
+                                    "AVG",
+                                    "MEDIAN",
+                                    "P001",
+                                    "P01",
+                                    "P05",
+                                    "P10",
+                                    "P25",
+                                    "P75",
+                                    "P90",
+                                    "P95",
+                                    "P99",
+                                    "P999",
+                                    "STDDEV",
+                                    "VARIANCE"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "operator"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        }
+                      },
+                      "datasets": {
+                        "description": "Datasets to query. Leave empty to query all available datasets.",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "example": []
+                      },
+                      "filterCombination": {
+                        "description": "Logical operator for combining top-level filters: 'and' (all must match) or 'or' (any must match). Defaults to 'and'.",
+                        "type": "string",
+                        "enum": [
+                          "and",
+                          "or",
+                          "AND",
+                          "OR"
+                        ]
+                      },
+                      "filters": {
+                        "description": "Filters to narrow query results. Use the keys and values endpoints to discover available fields before building filters. Supports nested groups via kind: 'group'. Maximum nesting depth is 4.",
+                        "type": "array",
+                        "items": {
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/workers-observability_filter_node"
+                            },
+                            {
+                              "anyOf": [
+                                {
+                                  "description": "A group node that nests child filters combined with a logical operator.",
+                                  "properties": {
+                                    "filterCombination": {
+                                      "description": "Logical operator for combining child filters: 'and' (all must match) or 'or' (any must match).",
+                                      "type": "string",
+                                      "enum": [
+                                        "and",
+                                        "or",
+                                        "AND",
+                                        "OR"
+                                      ]
+                                    },
+                                    "filters": {
+                                      "description": "Child filter nodes. Each can be a leaf filter or another nested group.",
+                                      "type": "array",
+                                      "items": {
+                                        "$ref": "#/components/schemas/workers-observability_filter_node"
+                                      },
+                                      "minItems": 1
+                                    },
+                                    "kind": {
+                                      "description": "Discriminator indicating this is a nested filter group.",
+                                      "type": "string",
+                                      "enum": [
+                                        "group"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "filterCombination",
+                                    "filters"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "$ref": "#/components/schemas/workers-observability_filter_leaf"
+                                }
+                              ],
+                              "description": "Supports nested groups via kind: 'group'. Maximum nesting depth is 4."
+                            }
+                          ]
+                        }
+                      },
+                      "groupBys": {
+                        "description": "Fields to group calculation results by. Only applicable when the query view is 'calculations'. Produces per-group aggregate values.",
+                        "type": "array",
+                        "items": {
+                          "properties": {
+                            "type": {
+                              "description": "Data type of the group-by field.",
+                              "type": "string",
+                              "enum": [
+                                "string",
+                                "number",
+                                "boolean"
+                              ]
+                            },
+                            "value": {
+                              "description": "Field name to group results by (e.g. $metadata.service, $metadata.statusCode).",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "value"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "havings": {
+                        "description": "Post-aggregation filters applied to calculation results. Use to filter groups after aggregation (e.g. only groups where count > 100).",
+                        "type": "array",
+                        "items": {
+                          "properties": {
+                            "key": {
+                              "description": "Calculation alias or operator to filter on after aggregation.",
+                              "type": "string"
+                            },
+                            "operation": {
+                              "description": "Numeric comparison operator: eq, neq, gt, gte, lt, lte.",
+                              "type": "string",
+                              "enum": [
+                                "eq",
+                                "neq",
+                                "gt",
+                                "gte",
+                                "lt",
+                                "lte"
+                              ]
+                            },
+                            "value": {
+                              "description": "Threshold value to compare the calculation result against.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "operation",
+                            "value"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "limit": {
+                        "description": "Maximum number of group-by rows to return in calculation results. A value of 10 is a sensible default for most use cases.",
+                        "type": "integer",
+                        "maximum": 2000,
+                        "minimum": 0
+                      },
+                      "needle": {
+                        "description": "Full-text search expression applied across all event fields. Matches events containing the specified text.",
+                        "type": "object",
+                        "properties": {
+                          "isRegex": {
+                            "description": "When true, treats the value as a regular expression (RE2 syntax).",
+                            "type": "boolean"
+                          },
+                          "matchCase": {
+                            "description": "When true, performs a case-sensitive search. Defaults to case-insensitive.",
+                            "type": "boolean"
+                          },
+                          "value": {
+                            "description": "The text or pattern to search for.",
+                            "allOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              },
+                              {
+                                "maxLength": 1000,
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ]
+                      },
+                      "orderBy": {
+                        "description": "Ordering for grouped calculation results. Only effective when a group-by is present.",
+                        "type": "object",
+                        "properties": {
+                          "order": {
+                            "description": "Sort direction: 'asc' for ascending, 'desc' for descending.",
+                            "type": "string",
+                            "enum": [
+                              "asc",
+                              "desc"
+                            ]
+                          },
+                          "value": {
+                            "description": "Alias of the calculation to order results by. Must match the alias (or operator) of a calculation in the query.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "queryId": {
+                    "description": "Identifier for the query. When parameters are omitted, this ID is used to load a previously saved query's parameters. When providing parameters inline, pass any identifier (e.g. an ad-hoc ID).",
+                    "type": "string"
+                  },
+                  "timeframe": {
+                    "description": "Timeframe for the query using Unix timestamps in milliseconds. 'from' must be earlier than 'to'. Narrower timeframes produce faster responses and more specific results.",
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "description": "Start timestamp for the query timeframe. Unix timestamp in milliseconds",
+                        "type": "integer",
+                        "maximum": 253402300799999,
+                        "minimum": 0
+                      },
+                      "to": {
+                        "description": "End timestamp for the query timeframe. Unix timestamp in milliseconds",
+                        "type": "integer",
+                        "maximum": 253402300799999,
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "to",
+                      "from"
+                    ]
+                  },
+                  "view": {
+                    "description": "Controls the shape of the response. 'events': individual log lines matching the query. 'calculations': aggregated metrics (count, avg, p99, etc.) with optional group-by breakdowns and time-series. 'invocations': events grouped by request ID. 'traces': distributed trace summaries. 'agents': agent-specific trace summaries.",
+                    "type": "string",
+                    "default": "calculations",
+                    "enum": [
+                      "traces",
+                      "events",
+                      "calculations",
+                      "invocations",
+                      "requests",
+                      "agents"
+                    ]
+                  }
+                },
+                "required": [
+                  "queryId",
+                  "timeframe"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Successful request"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/workers-observability_query_results"
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "messages",
+                    "success",
+                    "errors",
+                    "result"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Bad Request"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Unauthorized"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Forbidden"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Too many requests"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Internal error"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Gateway timeout"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Query run"
+        ],
+        "x-api-token-group": [
+          "Workers Observability Write"
+        ],
+        "x-fern-availability": "generally-available",
+        "x-fern-sdk-group-name": "observability.telemetry",
+        "x-fern-sdk-method-name": "query"
+      }
+    },
+    "/accounts/{account_id}/workers/observability/telemetry/live-tail": {
+      "parameters": [
+        {
+          "name": "account_id",
+          "in": "path",
+          "description": "Your Cloudflare account ID.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "telemetry.live-tail.post",
+        "summary": "Prepare live tail",
+        "description": "Prepare websocket server for live tail.",
+        "requestBody": {
+          "description": "Create websocket server for live tail.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filterCombination": {
+                    "description": "Set a flag to describe how to combine the filters on the query.",
+                    "type": "string",
+                    "default": "and",
+                    "enum": [
+                      "and",
+                      "or",
+                      "AND",
+                      "OR"
+                    ]
+                  },
+                  "filters": {
+                    "description": "Apply filters to the query. Supports nested groups via kind: 'group'.",
+                    "type": "array",
+                    "items": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/workers-observability_filter_node"
+                        },
+                        {
+                          "anyOf": [
+                            {
+                              "description": "A group node that nests child filters combined with a logical operator.",
+                              "properties": {
+                                "filterCombination": {
+                                  "description": "Logical operator for combining child filters: 'and' (all must match) or 'or' (any must match).",
+                                  "type": "string",
+                                  "enum": [
+                                    "and",
+                                    "or",
+                                    "AND",
+                                    "OR"
+                                  ]
+                                },
+                                "filters": {
+                                  "description": "Child filter nodes. Each can be a leaf filter or another nested group.",
+                                  "type": "array",
+                                  "items": {
+                                    "$ref": "#/components/schemas/workers-observability_filter_node"
+                                  },
+                                  "minItems": 1
+                                },
+                                "kind": {
+                                  "description": "Discriminator indicating this is a nested filter group.",
+                                  "type": "string",
+                                  "enum": [
+                                    "group"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "filterCombination",
+                                "filters"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "$ref": "#/components/schemas/workers-observability_filter_leaf"
+                            }
+                          ],
+                          "description": "Supports nested groups via kind: 'group'. Maximum nesting depth is 4."
+                        }
+                      ]
+                    },
+                    "default": []
+                  },
+                  "scriptId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Successful request"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "wsUrl": {
+                          "description": "WebSocket URL clients connect to in order to stream live tail events.",
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      },
+                      "required": [
+                        "wsUrl"
+                      ]
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "messages",
+                    "success",
+                    "errors",
+                    "result"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Unauthorized"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Forbidden"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Internal error"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Live Tail"
+        ],
+        "x-api-token-group": [
+          "Workers Observability Write"
+        ],
+        "x-fern-ignore": true,
+        "x-fern-sdk-group-name": "observability.telemetry",
+        "x-fern-sdk-method-name": "liveTail",
+        "x-forge-hidden": true
+      }
+    },
+    "/accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat": {
+      "parameters": [
+        {
+          "name": "account_id",
+          "in": "path",
+          "description": "Your Cloudflare account ID.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "telemetry.live-tail.heartbeat.get",
+        "summary": "Live tail heartbeat",
+        "description": "Notify live tail that user is still eligible to receive live events.",
+        "requestBody": {
+          "description": "Keep your live tail connection alive.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scriptId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Successful request"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "result": {
+                      "type": "object"
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "messages",
+                    "success",
+                    "errors",
+                    "result"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Unauthorized"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "enum": [
+                              "Internal error"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "message"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "errors",
+                    "success",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Live Tail"
+        ],
+        "x-api-token-group": [
+          "Workers Observability Write"
+        ],
+        "x-fern-ignore": true,
+        "x-fern-sdk-group-name": "observability.telemetry",
+        "x-fern-sdk-method-name": "heartbeat",
         "x-forge-hidden": true
       }
     },
@@ -30633,243 +33611,6 @@
         "x-fern-sdk-method-name": "send"
       }
     },
-    "/accounts/{account_id}/workers/scripts/{script_name}/tails": {
-      "get": {
-        "operationId": "worker-tail-logs-list-tails",
-        "summary": "List Tails",
-        "description": "Get list of tails currently deployed on a Worker.",
-        "parameters": [
-          {
-            "name": "account_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/workers_identifier"
-            }
-          },
-          {
-            "name": "script_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/workers_script_name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List Tails response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/workers_api-response-common"
-                    },
-                    {
-                      "properties": {
-                        "result": {
-                          "$ref": "#/components/schemas/workers_tail"
-                        }
-                      },
-                      "required": [
-                        "result"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "4XX": {
-            "description": "List Tails response failure.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/workers_api-response-common-failure"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "api_token": []
-          },
-          {
-            "api_email": [],
-            "api_key": []
-          }
-        ],
-        "tags": [
-          "Worker Tail Logs"
-        ],
-        "x-api-token-group": [
-          "Workers Tail Read",
-          "Workers Scripts Write"
-        ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.tail",
-        "x-fern-sdk-method-name": "get",
-        "x-forge-hidden": true
-      },
-      "post": {
-        "operationId": "worker-tail-logs-start-tail",
-        "summary": "Start Tail",
-        "description": "Starts a tail that receives logs and exception from a Worker.",
-        "parameters": [
-          {
-            "name": "account_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/workers_identifier"
-            }
-          },
-          {
-            "name": "script_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/workers_script_name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Start Tail response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/workers_api-response-common"
-                    },
-                    {
-                      "properties": {
-                        "result": {
-                          "$ref": "#/components/schemas/workers_tail"
-                        }
-                      },
-                      "required": [
-                        "result"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "4XX": {
-            "description": "Start Tail response failure.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/workers_api-response-common-failure"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "api_token": []
-          },
-          {
-            "api_email": [],
-            "api_key": []
-          }
-        ],
-        "tags": [
-          "Worker Tail Logs"
-        ],
-        "x-api-token-group": [
-          "Workers Tail Read",
-          "Workers Scripts Write"
-        ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.tail",
-        "x-fern-sdk-method-name": "create",
-        "x-forge-hidden": true
-      }
-    },
-    "/accounts/{account_id}/workers/scripts/{script_name}/tails/{id}": {
-      "delete": {
-        "operationId": "worker-tail-logs-delete-tail",
-        "summary": "Delete Tail",
-        "description": "Deletes a tail from a Worker.",
-        "parameters": [
-          {
-            "name": "account_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/workers_identifier"
-            }
-          },
-          {
-            "name": "script_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/workers_script_name"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/workers_identifier"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Delete Tail response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/workers_api-response-common"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "description": "Delete Tail response failure.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/workers_api-response-common-failure"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "api_token": []
-          },
-          {
-            "api_email": [],
-            "api_key": []
-          }
-        ],
-        "tags": [
-          "Worker Tail Logs"
-        ],
-        "x-api-token-group": [
-          "Workers Tail Read",
-          "Workers Scripts Write"
-        ],
-        "x-fern-availability": "generally-available",
-        "x-fern-sdk-group-name": "workers.scripts.tail",
-        "x-fern-sdk-method-name": "delete",
-        "x-forge-hidden": true
-      }
-    },
     "/accounts/{account_id}/r2/buckets/{bucket_name}/objects": {
       "get": {
         "operationId": "r2-list-objects",
@@ -31934,6 +34675,776 @@
             "$ref": "#/components/schemas/workers_usage_model"
           }
         }
+      },
+      "workers_tail": {
+        "type": "object",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "readOnly": true,
+            "x-auditable": true
+          },
+          "id": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/workers_identifier"
+              }
+            ],
+            "readOnly": true
+          },
+          "url": {
+            "type": "string",
+            "readOnly": true,
+            "x-auditable": true
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "expires_at"
+        ]
+      },
+      "workers-observability_filter_node": {
+        "description": "Supports nested groups via kind: 'group'.",
+        "type": "object",
+        "anyOf": [
+          {
+            "properties": {
+              "filterCombination": {
+                "type": "string",
+                "enum": [
+                  "and",
+                  "or",
+                  "AND",
+                  "OR"
+                ]
+              },
+              "filters": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/workers-observability_filter_node"
+                },
+                "minItems": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "group"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "filterCombination",
+              "filters"
+            ],
+            "type": "object"
+          },
+          {
+            "$ref": "#/components/schemas/workers-observability_filter_leaf"
+          }
+        ]
+      },
+      "workers-observability_filter_leaf": {
+        "description": "A filter condition applied to query results. Use the keys and values endpoints to discover available fields and their values before constructing filters.",
+        "type": "object",
+        "properties": {
+          "key": {
+            "description": "Filter field name. Use verified keys from previous query results or the keys endpoint. Common keys include $metadata.service, $metadata.origin, $metadata.trigger, $metadata.message, and $metadata.error.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Discriminator for leaf filter nodes. Always 'filter' when present; may be omitted.",
+            "type": "string",
+            "enum": [
+              "filter"
+            ]
+          },
+          "operation": {
+            "description": "Comparison operator. String operators: includes, not_includes, starts_with, ends_with, regex. Existence: exists, is_null. Set membership: in, not_in (comma-separated values). Numeric: eq, neq, gt, gte, lt, lte.",
+            "type": "string",
+            "enum": [
+              "includes",
+              "not_includes",
+              "starts_with",
+              "ends_with",
+              "regex",
+              "exists",
+              "is_null",
+              "in",
+              "not_in",
+              "eq",
+              "neq",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "=",
+              "!=",
+              ">",
+              ">=",
+              "<",
+              "<=",
+              "INCLUDES",
+              "DOES_NOT_INCLUDE",
+              "MATCH_REGEX",
+              "EXISTS",
+              "DOES_NOT_EXIST",
+              "IN",
+              "NOT_IN",
+              "STARTS_WITH",
+              "ENDS_WITH"
+            ]
+          },
+          "type": {
+            "description": "Data type of the filter field. Must match the actual type of the key being filtered.",
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "value": {
+            "description": "Comparison value. Must match actual values in your data — verify with the values endpoint. Ensure the value type (string/number/boolean) matches the field type. String comparisons are case-sensitive. Regex uses RE2 syntax (no lookaheads/lookbehinds).",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "operation",
+          "type"
+        ]
+      },
+      "workers-observability_query_results": {
+        "description": "Complete results of a query run. The populated fields depend on the requested view type (events, calculations, invocations, traces, or agents).",
+        "type": "object",
+        "properties": {
+          "agents": {
+            "description": "Agent run summaries. Present when the query view is 'agents'. Each entry represents one trace containing at least one agent invocation.",
+            "type": "array",
+            "items": {
+              "properties": {
+                "agentId": {
+                  "description": "ID from the earliest agent invocation that provides one.",
+                  "type": "string"
+                },
+                "agentName": {
+                  "description": "Name from the earliest agent invocation that provides one.",
+                  "type": "string"
+                },
+                "conversationId": {
+                  "description": "Conversation ID from the earliest invocation that provides one.",
+                  "type": "string"
+                },
+                "errors": {
+                  "description": "Distinct errors reported by spans in the run.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "id": {
+                  "description": "Stable pagination cursor for this agent run.",
+                  "type": "string"
+                },
+                "inputTokens": {
+                  "description": "Input tokens summed across chat spans in the run's trace; informational, not billing data.",
+                  "type": "number"
+                },
+                "models": {
+                  "description": "Distinct models reported by chat spans across the run's trace.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "outputTokens": {
+                  "description": "Output tokens summed across chat spans in the run's trace; informational, not billing data.",
+                  "type": "number"
+                },
+                "providers": {
+                  "description": "Distinct GenAI providers reported by chat spans in the run.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "services": {
+                  "description": "Worker services represented in the run's trace.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "spans": {
+                  "description": "Number of spans in the run's trace.",
+                  "type": "number"
+                },
+                "status": {
+                  "description": "Observed run status.",
+                  "type": "string",
+                  "enum": [
+                    "completed",
+                    "error"
+                  ]
+                },
+                "traceDurationMs": {
+                  "description": "Total trace duration in milliseconds.",
+                  "type": "number"
+                },
+                "traceEndMs": {
+                  "description": "End of the run's trace as a Unix epoch in milliseconds.",
+                  "type": "number"
+                },
+                "traceId": {
+                  "description": "Trace identifier for this agent run.",
+                  "type": "string"
+                },
+                "traceStartMs": {
+                  "description": "Start of the run's trace as a Unix epoch in milliseconds.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "traceId",
+                "traceStartMs",
+                "traceEndMs",
+                "traceDurationMs",
+                "spans",
+                "services",
+                "errors",
+                "status",
+                "models",
+                "providers"
+              ],
+              "type": "object"
+            }
+          },
+          "calculations": {
+            "description": "Aggregated calculation results. Present when the query view is 'calculations'. Contains computed metrics (count, avg, p99, etc.) with optional group-by breakdowns and time-series data.",
+            "type": "array",
+            "items": {
+              "properties": {
+                "aggregates": {
+                  "type": "array",
+                  "items": {
+                    "properties": {
+                      "count": {
+                        "type": "number"
+                      },
+                      "groups": {
+                        "type": "array",
+                        "items": {
+                          "properties": {
+                            "key": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "value"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "interval": {
+                        "type": "number"
+                      },
+                      "sampleInterval": {
+                        "type": "number"
+                      },
+                      "value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "count",
+                      "interval",
+                      "sampleInterval"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "alias": {
+                  "type": "string"
+                },
+                "calculation": {
+                  "type": "string"
+                },
+                "series": {
+                  "type": "array",
+                  "items": {
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "properties": {
+                            "count": {
+                              "type": "number"
+                            },
+                            "firstSeen": {
+                              "type": "string"
+                            },
+                            "groups": {
+                              "type": "array",
+                              "items": {
+                                "properties": {
+                                  "key": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "value"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "interval": {
+                              "type": "number"
+                            },
+                            "lastSeen": {
+                              "type": "string"
+                            },
+                            "sampleInterval": {
+                              "type": "number"
+                            },
+                            "value": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "count",
+                            "interval",
+                            "sampleInterval"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "time": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "time",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "calculation",
+                "aggregates",
+                "series"
+              ],
+              "type": "object"
+            }
+          },
+          "compare": {
+            "description": "Comparison calculation results from the previous time period. Present when the compare option is enabled. Same structure as calculations.",
+            "type": "array",
+            "items": {
+              "properties": {
+                "aggregates": {
+                  "type": "array",
+                  "items": {
+                    "properties": {
+                      "count": {
+                        "type": "number"
+                      },
+                      "groups": {
+                        "type": "array",
+                        "items": {
+                          "properties": {
+                            "key": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "value"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "interval": {
+                        "type": "number"
+                      },
+                      "sampleInterval": {
+                        "type": "number"
+                      },
+                      "value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "count",
+                      "interval",
+                      "sampleInterval"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "alias": {
+                  "type": "string"
+                },
+                "calculation": {
+                  "type": "string"
+                },
+                "series": {
+                  "type": "array",
+                  "items": {
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "properties": {
+                            "count": {
+                              "type": "number"
+                            },
+                            "firstSeen": {
+                              "type": "string"
+                            },
+                            "groups": {
+                              "type": "array",
+                              "items": {
+                                "properties": {
+                                  "key": {
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "value"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "interval": {
+                              "type": "number"
+                            },
+                            "lastSeen": {
+                              "type": "string"
+                            },
+                            "sampleInterval": {
+                              "type": "number"
+                            },
+                            "value": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "count",
+                            "interval",
+                            "sampleInterval"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "time": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "time",
+                      "data"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "calculation",
+                "aggregates",
+                "series"
+              ],
+              "type": "object"
+            }
+          },
+          "distribution": {
+            "$ref": "#/components/schemas/workers-observability_distribution_result"
+          },
+          "events": {
+            "description": "Individual event results. Present when the query view is 'events'. Contains the matching log lines and their metadata.",
+            "type": "object",
+            "properties": {
+              "count": {
+                "description": "Total number of events matching the query (may exceed the number returned due to limits).",
+                "type": "number"
+              },
+              "events": {
+                "description": "List of individual telemetry events matching the query.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/workers-observability_telemetry_event"
+                }
+              },
+              "fields": {
+                "description": "List of fields discovered in the matched events. Useful for building dynamic UIs.",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "key": {
+                      "description": "Field name present in the matched events.",
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Data type of the field (string, number, or boolean).",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              },
+              "series": {
+                "description": "Time-series data for the matched events, bucketed by the query granularity.",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "properties": {
+                          "aggregates": {
+                            "type": "object",
+                            "properties": {
+                              "_count": {
+                                "type": "integer",
+                                "deprecated": true,
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "_firstSeen": {
+                                "type": "string",
+                                "deprecated": true
+                              },
+                              "_interval": {
+                                "type": "number",
+                                "deprecated": true,
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "_lastSeen": {
+                                "type": "string",
+                                "deprecated": true
+                              },
+                              "bin": {
+                                "type": "object",
+                                "deprecated": true
+                              }
+                            },
+                            "required": [
+                              "_count",
+                              "_interval"
+                            ]
+                          },
+                          "count": {
+                            "type": "number"
+                          },
+                          "errors": {
+                            "type": "number"
+                          },
+                          "groups": {
+                            "description": "Groups in the query results.",
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            }
+                          },
+                          "interval": {
+                            "type": "number"
+                          },
+                          "sampleInterval": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "aggregates",
+                          "count",
+                          "interval",
+                          "sampleInterval"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "time": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "time",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "invocations": {
+            "description": "Events grouped by invocation (request ID). Present when the query view is 'invocations'. Each key is a request ID mapping to all events from that invocation.",
+            "type": "object",
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/workers-observability_telemetry_event"
+              },
+              "type": "array"
+            }
+          },
+          "run": {
+            "$ref": "#/components/schemas/workers-observability_query_run"
+          },
+          "statistics": {
+            "$ref": "#/components/schemas/workers-observability_performance_information"
+          },
+          "traces": {
+            "description": "Trace summaries matching the query. Present when the query view is 'traces'. Each entry represents a distributed trace with its spans, duration, and services involved.",
+            "type": "array",
+            "items": {
+              "properties": {
+                "errors": {
+                  "description": "Error messages encountered during the trace, if any.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "rootSpanName": {
+                  "description": "Name of the root span that initiated the trace.",
+                  "type": "string"
+                },
+                "rootTransactionName": {
+                  "description": "Logical transaction name for the root span.",
+                  "type": "string"
+                },
+                "service": {
+                  "description": "List of Worker services involved in the trace.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "spans": {
+                  "description": "Total number of spans in the trace.",
+                  "type": "number"
+                },
+                "traceDurationMs": {
+                  "description": "Total duration of the trace in milliseconds.",
+                  "type": "number"
+                },
+                "traceEndMs": {
+                  "description": "Trace end time as a Unix epoch in milliseconds.",
+                  "type": "number"
+                },
+                "traceId": {
+                  "description": "Unique identifier for the distributed trace.",
+                  "type": "string"
+                },
+                "traceStartMs": {
+                  "description": "Trace start time as a Unix epoch in milliseconds.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "traceId",
+                "spans",
+                "service",
+                "traceStartMs",
+                "traceEndMs",
+                "traceDurationMs",
+                "rootSpanName",
+                "rootTransactionName"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "run",
+          "statistics"
+        ]
       },
       "workers_secret": {
         "description": "A secret value accessible through a binding.",
@@ -33827,34 +37338,6 @@
           {
             "$ref": "#/components/schemas/mq_http-consumer-request"
           }
-        ]
-      },
-      "workers_tail": {
-        "type": "object",
-        "properties": {
-          "expires_at": {
-            "type": "string",
-            "readOnly": true,
-            "x-auditable": true
-          },
-          "id": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/workers_identifier"
-              }
-            ],
-            "readOnly": true
-          },
-          "url": {
-            "type": "string",
-            "readOnly": true,
-            "x-auditable": true
-          }
-        },
-        "required": [
-          "id",
-          "url",
-          "expires_at"
         ]
       },
       "r2_errors": {
@@ -35757,6 +39240,627 @@
         },
         "nullable": true,
         "x-stainless-collection-type": "set"
+      },
+      "workers-observability_distribution_result": {
+        "description": "Bucketed 2D histogram of a numeric field over time. Present when chartType is 'distribution'.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "description": "Time-bucket labels (ISO-8601 strings), one per matrix column.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bucketBoundaries": {
+            "description": "Raw bucket edges in the value's native unit, length buckets.length + 1. Used for the colour scale and percentile mapping.",
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "bucketMode": {
+            "description": "Bucketing scheme used to derive the boundaries. 'log' produces geometric edges; 'linear' produces fixed-width edges.",
+            "type": "string",
+            "enum": [
+              "log",
+              "linear"
+            ]
+          },
+          "buckets": {
+            "description": "Value-range labels, one per matrix row (e.g. '50–100ms').",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "matrix": {
+            "description": "Sampling-corrected counts. matrix[bucketIdx][binIdx] is the estimated number of events in value-bucket 'bucketIdx' during time-bin 'binIdx'.",
+            "type": "array",
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            }
+          }
+        },
+        "required": [
+          "bins",
+          "buckets",
+          "matrix",
+          "bucketBoundaries",
+          "bucketMode"
+        ]
+      },
+      "workers-observability_telemetry_event": {
+        "description": "A single telemetry event representing a log line, span, or metric data point emitted by a Worker.",
+        "type": "object",
+        "properties": {
+          "$containers": {
+            "description": "Cloudflare Containers event information that enriches your logs for identifying and debugging issues.",
+            "type": "object",
+            "additionalProperties": true
+          },
+          "$metadata": {
+            "description": "Structured metadata extracted from the event. These fields are indexed and available for filtering and aggregation.",
+            "type": "object",
+            "properties": {
+              "account": {
+                "description": "Cloudflare account identifier.",
+                "type": "string"
+              },
+              "cloudService": {
+                "description": "Cloudflare product that generated this event (e.g. workers, pages).",
+                "type": "string"
+              },
+              "coldStart": {
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0
+              },
+              "cost": {
+                "description": "Estimated cost units for this invocation.",
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0
+              },
+              "duration": {
+                "description": "Span duration in milliseconds.",
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0
+              },
+              "endTime": {
+                "description": "Span end time as a Unix epoch in milliseconds.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "error": {
+                "description": "Error message, present when the log represents an error.",
+                "type": "string"
+              },
+              "errorTemplate": {
+                "description": "Templatized version of the error message used for grouping similar errors.",
+                "type": "string"
+              },
+              "fingerprint": {
+                "description": "Content-based fingerprint used to group similar events.",
+                "type": "string"
+              },
+              "id": {
+                "description": "Unique event ID. Use as the cursor value for offset-based pagination.",
+                "type": "string"
+              },
+              "level": {
+                "description": "Log level (e.g. log, debug, info, warn, error).",
+                "type": "string"
+              },
+              "message": {
+                "description": "Log message text.",
+                "type": "string"
+              },
+              "messageTemplate": {
+                "description": "Templatized version of the log message used for grouping similar messages.",
+                "type": "string"
+              },
+              "metricName": {
+                "description": "Metric name when the event represents a metric data point.",
+                "type": "string"
+              },
+              "origin": {
+                "description": "Origin of the event (e.g. fetch, scheduled, queue).",
+                "type": "string"
+              },
+              "parentSpanId": {
+                "description": "Span ID of the parent span in the trace hierarchy.",
+                "type": "string"
+              },
+              "provider": {
+                "description": "Infrastructure provider identifier.",
+                "type": "string"
+              },
+              "rayId": {
+                "description": "Cloudflare Ray ID from the `cf-ray` header of the request that triggered the invocation.",
+                "type": "string"
+              },
+              "region": {
+                "description": "Cloudflare data center / region that handled the request.",
+                "type": "string"
+              },
+              "requestId": {
+                "description": "Cloudflare request ID that ties all logs from a single invocation together.",
+                "type": "string"
+              },
+              "service": {
+                "description": "Worker script name that produced this event.",
+                "type": "string"
+              },
+              "spanId": {
+                "description": "Span ID for this individual unit of work within a trace.",
+                "type": "string"
+              },
+              "spanName": {
+                "description": "Human-readable name for this span.",
+                "type": "string"
+              },
+              "stackId": {
+                "description": "Stack / deployment identifier.",
+                "type": "string"
+              },
+              "startTime": {
+                "description": "Span start time as a Unix epoch in milliseconds.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "statusCode": {
+                "description": "HTTP response status code returned by the Worker.",
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0
+              },
+              "traceDuration": {
+                "description": "Total duration of the entire trace in milliseconds.",
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0
+              },
+              "traceId": {
+                "description": "Distributed trace ID linking spans across services.",
+                "type": "string"
+              },
+              "transactionName": {
+                "description": "Logical transaction name for this request.",
+                "type": "string"
+              },
+              "trigger": {
+                "description": "What triggered the invocation (e.g. GET /users, POST /orders, queue message).",
+                "type": "string"
+              },
+              "type": {
+                "description": "Event type classifier (e.g. cf-worker-event, cf-worker-log).",
+                "type": "string"
+              },
+              "url": {
+                "description": "Request URL that triggered the Worker invocation.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "$workers": {
+            "description": "Cloudflare Workers event information that enriches your logs for identifying and debugging issues.",
+            "anyOf": [
+              {
+                "properties": {
+                  "durableObjectId": {
+                    "type": "string"
+                  },
+                  "entrypoint": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "fetch",
+                      "scheduled",
+                      "alarm",
+                      "cron",
+                      "queue",
+                      "email",
+                      "tail",
+                      "rpc",
+                      "jsrpc",
+                      "websocket",
+                      "workflow",
+                      "unknown"
+                    ]
+                  },
+                  "executionModel": {
+                    "type": "string",
+                    "enum": [
+                      "durableObject",
+                      "stateless"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "preview": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "slug": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "scriptName": {
+                    "type": "string"
+                  },
+                  "scriptVersion": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "tag": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "spanId": {
+                    "type": "string"
+                  },
+                  "traceId": {
+                    "type": "string"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "scriptName",
+                  "eventType",
+                  "requestId"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "cpuTimeMs": {
+                    "type": "number"
+                  },
+                  "diagnosticsChannelEvents": {
+                    "type": "array",
+                    "items": {
+                      "properties": {
+                        "channel": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "timestamp",
+                        "channel",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "dispatchNamespace": {
+                    "type": "string"
+                  },
+                  "durableObjectId": {
+                    "type": "string"
+                  },
+                  "entrypoint": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "fetch",
+                      "scheduled",
+                      "alarm",
+                      "cron",
+                      "queue",
+                      "email",
+                      "tail",
+                      "rpc",
+                      "jsrpc",
+                      "websocket",
+                      "workflow",
+                      "unknown"
+                    ]
+                  },
+                  "executionModel": {
+                    "type": "string",
+                    "enum": [
+                      "durableObject",
+                      "stateless"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "preview": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "slug": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "scriptName": {
+                    "type": "string"
+                  },
+                  "scriptVersion": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "tag": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "spanId": {
+                    "type": "string"
+                  },
+                  "traceId": {
+                    "type": "string"
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  },
+                  "wallTimeMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "scriptName",
+                  "outcome",
+                  "eventType",
+                  "wallTimeMs",
+                  "cpuTimeMs",
+                  "requestId"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "dataset": {
+            "description": "The dataset this event belongs to (e.g. cloudflare-workers).",
+            "type": "string"
+          },
+          "source": {
+            "description": "Raw log payload. May be a string or a structured object depending on how the log was emitted.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ]
+          },
+          "timestamp": {
+            "description": "Event timestamp as a Unix epoch in milliseconds.",
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset",
+          "timestamp",
+          "source",
+          "$metadata"
+        ]
+      },
+      "workers-observability_query_run": {
+        "description": "Represents a single execution of a query against Workers Observability data, including the query definition, execution status, and performance statistics.",
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "description": "Cloudflare account ID that owns this query run.",
+            "type": "string"
+          },
+          "created": {
+            "description": "ISO-8601 timestamp when the query run was created.",
+            "type": "string"
+          },
+          "dry": {
+            "description": "Whether this was a dry run (results not persisted).",
+            "type": "boolean"
+          },
+          "granularity": {
+            "description": "Number of time-series buckets used for the query. Higher values produce more detailed series data.",
+            "type": "number"
+          },
+          "id": {
+            "description": "Unique identifier for this query run.",
+            "type": "string"
+          },
+          "query": {
+            "description": "A saved query definition with its parameters, metadata, and ownership information.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/workers-observability_query"
+              },
+              {
+                "properties": {
+                  "created": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "format": "date-time",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "updated": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "format": "date-time",
+                        "type": "string"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "statistics": {
+            "description": "Query performance statistics from the database (does not include network latency).",
+            "type": "object",
+            "properties": {
+              "abr_level": {
+                "description": "The level of Adaptive Bit Rate (ABR) sampling used for the query. If empty the ABR level is 1",
+                "type": "number"
+              },
+              "bytes_read": {
+                "description": "Number of uncompressed bytes read from the table.",
+                "type": "number"
+              },
+              "elapsed": {
+                "description": "Time in seconds for the query to run.",
+                "type": "number"
+              },
+              "rows_read": {
+                "description": "Number of rows scanned from the table.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "elapsed",
+              "rows_read",
+              "bytes_read"
+            ]
+          },
+          "status": {
+            "description": "Current execution status of the query run.",
+            "type": "string",
+            "enum": [
+              "STARTED",
+              "COMPLETED"
+            ]
+          },
+          "timeframe": {
+            "description": "Time range for the query execution. 'from' must be earlier than 'to'. No fractional milliseconds.",
+            "type": "object",
+            "properties": {
+              "from": {
+                "description": "Start timestamp for the query timeframe. Unix timestamp in milliseconds",
+                "type": "integer",
+                "maximum": 253402300799999,
+                "minimum": 0
+              },
+              "to": {
+                "description": "End timestamp for the query timeframe. Unix timestamp in milliseconds",
+                "type": "integer",
+                "maximum": 253402300799999,
+                "minimum": 0
+              }
+            },
+            "required": [
+              "to",
+              "from"
+            ]
+          },
+          "updated": {
+            "description": "ISO-8601 timestamp when the query run was last updated.",
+            "type": "string"
+          },
+          "userId": {
+            "description": "ID of the user who initiated the query run.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "query",
+          "accountId",
+          "timeframe",
+          "userId",
+          "status",
+          "granularity",
+          "dry"
+        ]
+      },
+      "workers-observability_performance_information": {
+        "description": "Query performance statistics from the database. Includes execution time, rows scanned, and bytes read. Does not include network latency.",
+        "type": "object",
+        "properties": {
+          "abr_level": {
+            "description": "The level of Adaptive Bit Rate (ABR) sampling used for the query. If empty the ABR level is 1",
+            "type": "number"
+          },
+          "bytes_read": {
+            "description": "Number of uncompressed bytes read from the table.",
+            "type": "number"
+          },
+          "elapsed": {
+            "description": "Time in seconds for the query to run.",
+            "type": "number"
+          },
+          "rows_read": {
+            "description": "Number of rows scanned from the table.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "elapsed",
+          "rows_read",
+          "bytes_read"
+        ]
       },
       "workers_binding_kind_secret_text": {
         "type": "object",
@@ -38386,6 +42490,308 @@
             ],
             "type": "object"
           }
+        ]
+      },
+      "workers-observability_query": {
+        "type": "object",
+        "properties": {
+          "adhoc": {
+            "description": "If the query wasn't explcitly saved",
+            "type": "boolean"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "example": "Query description",
+            "maxLength": 1000,
+            "nullable": true
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Query name",
+            "type": "string",
+            "maxLength": 250,
+            "minLength": 1
+          },
+          "parameters": {
+            "properties": {
+              "calculations": {
+                "description": "Create Calculations to compute as part of the query.",
+                "type": "array",
+                "items": {
+                  "discriminator": {
+                    "propertyName": "operator"
+                  },
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "alias": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "keyType": {
+                          "type": "string",
+                          "enum": [
+                            "string",
+                            "number",
+                            "boolean"
+                          ]
+                        },
+                        "operator": {
+                          "type": "string",
+                          "enum": [
+                            "count",
+                            "COUNT"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "operator"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "alias": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string",
+                          "pattern": "\\S"
+                        },
+                        "keyType": {
+                          "type": "string",
+                          "enum": [
+                            "string",
+                            "number",
+                            "boolean"
+                          ]
+                        },
+                        "operator": {
+                          "type": "string",
+                          "enum": [
+                            "uniq",
+                            "max",
+                            "min",
+                            "sum",
+                            "avg",
+                            "median",
+                            "p001",
+                            "p01",
+                            "p05",
+                            "p10",
+                            "p25",
+                            "p75",
+                            "p90",
+                            "p95",
+                            "p99",
+                            "p999",
+                            "stddev",
+                            "variance",
+                            "COUNT_DISTINCT",
+                            "MAX",
+                            "MIN",
+                            "SUM",
+                            "AVG",
+                            "MEDIAN",
+                            "P001",
+                            "P01",
+                            "P05",
+                            "P10",
+                            "P25",
+                            "P75",
+                            "P90",
+                            "P95",
+                            "P99",
+                            "P999",
+                            "STDDEV",
+                            "VARIANCE"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "operator"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              },
+              "datasets": {
+                "description": "Set the Datasets to query. Leave it empty to query all the datasets.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "example": []
+              },
+              "filterCombination": {
+                "description": "Set a Flag to describe how to combine the filters on the query.",
+                "type": "string",
+                "enum": [
+                  "and",
+                  "or",
+                  "AND",
+                  "OR"
+                ]
+              },
+              "filters": {
+                "description": "Configure the Filters to apply to the query. Supports nested groups via kind: 'group'.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/workers-observability_filter_node"
+                }
+              },
+              "groupBys": {
+                "description": "Define how to group the results of the query.",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              },
+              "havings": {
+                "description": "Configure the Having clauses that filter on calculations in the query result.",
+                "type": "array",
+                "items": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "operation": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "neq",
+                        "gt",
+                        "gte",
+                        "lt",
+                        "lte"
+                      ]
+                    },
+                    "value": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "operation",
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              },
+              "limit": {
+                "description": "Set a limit on the number of results / records returned by the query",
+                "type": "integer",
+                "maximum": 100,
+                "minimum": 0
+              },
+              "needle": {
+                "description": "Define an expression to search using full-text search.",
+                "type": "object",
+                "properties": {
+                  "isRegex": {
+                    "type": "boolean"
+                  },
+                  "matchCase": {
+                    "type": "boolean"
+                  },
+                  "value": {
+                    "allOf": [
+                      {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          }
+                        ]
+                      },
+                      {
+                        "maxLength": 1000,
+                        "type": "string"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "value"
+                ]
+              },
+              "orderBy": {
+                "description": "Configure the order of the results returned by the query.",
+                "type": "object",
+                "properties": {
+                  "order": {
+                    "description": "Set the order of the results",
+                    "type": "string",
+                    "enum": [
+                      "asc",
+                      "desc"
+                    ]
+                  },
+                  "value": {
+                    "description": "Configure which Calculation to order the results by.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "updated": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "adhoc",
+          "parameters",
+          "created",
+          "createdBy",
+          "updated",
+          "updatedBy"
         ]
       },
       "workers_binding_name": {

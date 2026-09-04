@@ -105,7 +105,7 @@ pub(super) async fn clone_active(
         cache_options: None,
         exports: None,
         migrations: None,
-    })?;
+    });
     input.apply_inheritance(api, Some(&snapshot), true)?;
     for (name, value) in secret_updates {
         match value {

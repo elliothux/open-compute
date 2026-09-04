@@ -65,6 +65,8 @@ fn write_config(
     let access_key = root.join("access-key");
     let secret_key = root.join("secret-key");
     let admin_token = root.join("admin-token");
+    let deployer_token = root.join("deployer-token");
+    let read_only_token = root.join("read-only-token");
     write_mode(&access_key, b"AKIAP1CRASHPROCESS1", 0o600);
     write_mode(
         &secret_key,
@@ -72,6 +74,8 @@ fn write_config(
         0o600,
     );
     write_mode(&admin_token, b"p1-crash-admin\n", 0o600);
+    write_mode(&deployer_token, b"p1-crash-deployer\n", 0o600);
+    write_mode(&read_only_token, b"p1-crash-read-only\n", 0o600);
     let config = root.join("platform.toml");
     fs::write(
         &config,
@@ -83,6 +87,12 @@ admin_bind = "{admin}"
 
 [server.admin_auth]
 file = "{admin_token}"
+
+[server.deployer_auth]
+file = "{deployer_token}"
+
+[server.read_only_auth]
+file = "{read_only_token}"
 
 [storage]
 data_dir = "{data_dir}"
@@ -122,6 +132,8 @@ max_series = 1024
             access_key = access_key.display(),
             secret_key = secret_key.display(),
             admin_token = admin_token.display(),
+            deployer_token = deployer_token.display(),
+            read_only_token = read_only_token.display(),
         ),
     )
     .expect("config");

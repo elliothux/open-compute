@@ -90,3 +90,7 @@ fn now_ms() -> i64 {
     )
     .unwrap_or(i64::MAX)
 }
+
+#[cfg(test)]
+#[path = "cache_images_http_tests.rs"]
+mod tests;

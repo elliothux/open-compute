@@ -119,9 +119,8 @@ fn multipart_response(
             )
             .as_bytes(),
         );
-        let bytes = match bundle.and_then(|value| value.module_bytes(module).ok()) {
-            Some(value) => value,
-            None => return error_response(V4Error::Internal, context.request_id()),
+        let Some(bytes) = bundle.and_then(|value| value.module_bytes(module).ok()) else {
+            return error_response(V4Error::Internal, context.request_id());
         };
         body.extend_from_slice(bytes);
         body.extend_from_slice(b"\r\n");
@@ -308,7 +307,8 @@ mod tests {
 
     #[tokio::test]
     async fn reconstructs_service_worker_modules_etag_and_assets_only_downloads() {
-        let (_dir, _mock, state, account) = crate::tests::initialized_worker_http_fixture().await;
+        let (_dir, _mock, state, account, _storage) =
+            crate::tests::initialized_worker_http_fixture().await;
         let api = state.worker_api().unwrap().clone();
         seed_worker(
             &api,

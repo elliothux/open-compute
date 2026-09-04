@@ -265,17 +265,38 @@ fn validate_metadata(metadata: &WorkerUploadMetadata) -> Result<(), PlatformErro
         }
         validate_assets_config(&assets.config)?;
     }
-    if metadata
-        .observability
-        .as_ref()
-        .is_some_and(|observability| observability.enabled)
-    {
-        return Err(PlatformError::new(
-            ErrorCode::BindingCapabilityUnsupported,
-            "Cloudflare-hosted Worker observability is unsupported",
-        ));
+    if let Some(observability) = &metadata.observability {
+        validate_sampling_rate(observability.head_sampling_rate)?;
+        if let Some(logs) = &observability.logs {
+            validate_sampling_rate(logs.head_sampling_rate)?;
+            if !logs.destinations.is_empty() {
+                return Err(PlatformError::new(
+                    ErrorCode::BindingCapabilityUnsupported,
+                    "Workers Logs destinations are unsupported",
+                ));
+            }
+        }
+        if let Some(traces) = &observability.traces
+            && (traces.enabled.is_some_and(|value| value)
+                || traces.persist.is_some_and(|value| value)
+                || traces.head_sampling_rate.is_some()
+                || !traces.destinations.is_empty())
+        {
+            return Err(PlatformError::new(
+                ErrorCode::BindingCapabilityUnsupported,
+                "Workers trace persistence is unsupported",
+            ));
+        }
     }
     Ok(())
+}
+
+fn validate_sampling_rate(value: Option<f64>) -> Result<(), PlatformError> {
+    if value.is_none_or(|rate| rate.is_finite() && (0.0..=1.0).contains(&rate)) {
+        Ok(())
+    } else {
+        Err(invalid())
+    }
 }
 
 fn validate_assets_config(

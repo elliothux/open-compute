@@ -286,6 +286,7 @@ impl GateStack {
             vec![
                 ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
                 ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
+                ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
             ],
             vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
             vec![source_auth, binding_auth],
@@ -339,7 +340,7 @@ pub(super) fn admin_router(
     storage: Arc<PlatformStorage>,
     artifacts: ArtifactStore,
     objects: R2ObjectStore,
-    pins: ResourcePins,
+    pins: &ResourcePins,
     stack: &GateStack,
 ) -> Router {
     let metrics = Arc::new(

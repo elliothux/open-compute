@@ -22,6 +22,8 @@ use crate::kv_backend::SqliteKvBindingExecutor;
 use crate::metrics::{
     DoFacetReloadReason, KvMaintenance, MetricsRegistry, SqliteOp, StartResult, StartStage,
 };
+use crate::observability::ObservabilityService;
+use crate::observability_backend::{bind_observability_backend, serve_observability_backend};
 use crate::p2_3_promotion::P23PromotionCoordinator;
 use crate::queue_api::QueueApiState;
 use crate::r2_api::R2ApiState;
@@ -53,7 +55,7 @@ use open_compute_runtime::{
     WorkerdSupervisorOptions,
 };
 use open_compute_storage::{
-    CacheManager, DurableObjectRepository, PlatformStorage, WorkerRepository,
+    CacheManager, DurableObjectRepository, ObservabilityStore, PlatformStorage, WorkerRepository,
 };
 use open_compute_workers::{BundleLimits, ResourcePins, RuntimeSource, VersionPins};
 use p1::{
@@ -179,6 +181,32 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
             ));
         }
     };
+    let observability_store = match storage
+        .data_dir()
+        .ensure_observability_db()
+        .and_then(|path| {
+            ObservabilityStore::open(
+                &path,
+                loaded.config.storage.sqlite_busy_timeout_ms,
+                loaded.config.observability.retention_ms,
+                loaded.config.observability.max_database_bytes,
+            )
+        }) {
+        Ok(store) => Some(Arc::new(store)),
+        Err(error) => {
+            tracing::warn!(
+                code = error.code().as_str(),
+                "Workers Logs database is unavailable; tenant execution remains available"
+            );
+            None
+        }
+    };
+    let observability = ObservabilityService::new(
+        storage.clone(),
+        observability_store,
+        loaded.config.observability.clone(),
+        metrics.clone(),
+    );
     refresh_p1_metrics(
         &storage,
         &metrics,
@@ -414,6 +442,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
 
     let generation_auth = GenerationAuthRegistry::new();
     let binding_generation_auth = GenerationAuthRegistry::new();
+    let observability_generation_auth = GenerationAuthRegistry::new();
     let runtime_source_listener = bind_runtime_source().await?;
     let runtime_source_addr = runtime_source_listener.local_addr().map_err(|_| {
         PlatformError::new(
@@ -426,6 +455,13 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         PlatformError::new(
             ErrorCode::RuntimeUnavailable,
             "failed to inspect private binding backend listener",
+        )
+    })?;
+    let observability_backend_listener = bind_observability_backend().await?;
+    let observability_backend_addr = observability_backend_listener.local_addr().map_err(|_| {
+        PlatformError::new(
+            ErrorCode::RuntimeUnavailable,
+            "failed to inspect private observability backend listener",
         )
     })?;
     let compiler = StaticConfigCompiler::new(
@@ -441,6 +477,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     )
     .with_generation_auth(generation_auth.clone())
     .with_binding_generation_auth(binding_generation_auth.clone())
+    .with_observability_generation_auth(observability_generation_auth.clone())
     .with_durable_objects_config(loaded.config.durable_objects.clone());
     record(&opts, "compile");
     if let Err(err) = fail_after(
@@ -581,7 +618,8 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         storage.clone(),
         scheduler_store.clone(),
         Duration::from_millis(loaded.config.scheduler.shutdown_drain_ms),
-    )));
+    )))
+    .with_observability(observability.clone());
     let dashboard_dispatch = Arc::new(RwLock::new(None));
     let state = HttpState::new(
         health.clone(),
@@ -821,6 +859,20 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         )
         .await
     });
+    let mut shutdown_observability = shutdown_rx.clone();
+    let observability_backend_service = observability.clone();
+    let observability_backend_auth = observability_generation_auth.clone();
+    let observability_backend_task = tokio::spawn(async move {
+        serve_observability_backend(
+            observability_backend_listener,
+            observability_backend_service,
+            observability_backend_auth,
+            async move {
+                let _ = shutdown_observability.changed().await;
+            },
+        )
+        .await
+    });
     let public_router = if merged {
         http::merged_router(state.clone())
     } else {
@@ -859,12 +911,17 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         vec![
             ExternalServiceAddress::loopback("runtime-source", runtime_source_addr)?,
             ExternalServiceAddress::loopback("binding-backend", binding_backend_addr)?,
+            ExternalServiceAddress::loopback("observability-backend", observability_backend_addr)?,
         ],
         vec![DirectoryServicePath::local(
             "do-storage",
             &durable_object_storage,
         )?],
-        vec![generation_auth, binding_generation_auth],
+        vec![
+            generation_auth,
+            binding_generation_auth,
+            observability_generation_auth,
+        ],
     ));
     *supervisor_handle
         .lock()
@@ -961,6 +1018,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
         admin_task,
         runtime_source_task,
         binding_backend_task,
+        observability_backend_task,
         maintenance_task,
         scheduler_task,
     )
@@ -1013,6 +1071,7 @@ async fn wait_signals_and_servers(
     admin_task: Option<tokio::task::JoinHandle<Result<(), PlatformError>>>,
     runtime_source_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     binding_backend_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
+    observability_backend_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     maintenance_task: tokio::task::JoinHandle<Result<(), PlatformError>>,
     scheduler_task: Option<tokio::task::JoinHandle<Result<(), PlatformError>>>,
 ) -> Option<PlatformError> {
@@ -1022,6 +1081,7 @@ async fn wait_signals_and_servers(
     let mut admin_task = admin_task;
     let mut runtime_source_task = runtime_source_task;
     let mut binding_backend_task = binding_backend_task;
+    let mut observability_backend_task = observability_backend_task;
     let mut maintenance_task = maintenance_task;
     let mut scheduler_task = scheduler_task;
     let mut listener_error = None;
@@ -1061,6 +1121,10 @@ async fn wait_signals_and_servers(
                 break 'wait;
             }
             res = &mut binding_backend_task => {
+                listener_error = Some(join_runtime_source(res));
+                break 'wait;
+            }
+            res = &mut observability_backend_task => {
                 listener_error = Some(join_runtime_source(res));
                 break 'wait;
             }
@@ -1108,6 +1172,9 @@ async fn wait_signals_and_servers(
     }
     if !binding_backend_task.is_finished() {
         let _ = binding_backend_task.await;
+    }
+    if !observability_backend_task.is_finished() {
+        let _ = observability_backend_task.await;
     }
     if !maintenance_task.is_finished() {
         let _ = maintenance_task.await;

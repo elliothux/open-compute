@@ -159,6 +159,7 @@ async fn p0_2_real_worker_create_validate_dispatch_promote_rollback_restart() {
         vec![
             ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
             ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
         vec![auth.clone(), binding_auth.clone()],

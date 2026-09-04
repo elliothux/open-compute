@@ -4,6 +4,10 @@ import { bytes, modulesFor } from "./modules.js";
 export { modulesFor } from "./modules.js";
 import { handleWorkflow } from "../workflows/host.js";
 import { tenantEnv } from "./bindings.js";
+import {
+  collectableWorkerCode,
+  collectObservabilityTail,
+} from "../observability/collector.js";
 import { routeDefaultHttp } from "../assets/router.js";
 export { tenantEnv } from "./bindings.js";
 export { WorkflowBindingTransport } from "../workflows/binding.js";
@@ -20,7 +24,9 @@ import type {
 } from "../bindings/protocol.js";
 import type { QueueBindingProps } from "../queues/protocol.js";
 import type { AlarmIdentity, AlarmProjection } from "../durable-objects/protocol.js";
-import type { DispatchEnvelope, LoaderEnv, RuntimeModule } from "./protocol.js";
+import type {
+  DispatchEnvelope, LoaderEnv, RuntimeModule, RuntimeObservabilityIdentity,
+} from "./protocol.js";
 import {
   assembleOnce, bindingError, BINDING_TOKEN_HEADER, currentStartupGeneration,
   doPolicy, INTERNAL_HEADERS, lockWorkerCode, resolveSnapshot, snapshotWorkerCode,
@@ -38,6 +44,12 @@ export { ImageTransport } from "../images/host.js";
 export { AiTransport } from "../ai/host.js";
 export { VectorizeTransport } from "../vectorize/host.js";
 export { AiSearchTransport } from "../ai-search/host.js";
+/** Direct main-module entrypoint used by Worker Loader tail service stubs. */
+export class ObservabilityTail extends WorkerEntrypoint<LoaderEnv, RuntimeObservabilityIdentity> {
+  async tail(events: TraceItem[]): Promise<void> {
+    await collectObservabilityTail(events, this.env, this.ctx.props);
+  }
+}
 
 const MAX_QUEUE_MESSAGES = 100;
 const MAX_QUEUE_BODY_BYTES = 128 * 1024;
@@ -560,6 +572,10 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
     const internalToken = request.headers.get(TOKEN_HEADER) || "";
     // Resolve and verify on every path, including a warm WorkerLoader key.
     const snapshot = await resolveSnapshot(env, envelope, validation, Boolean(entrypoint), internalToken);
+    const deploymentRuntimeKey = snapshot.observability === undefined
+      ? envelope.runtimeKey
+      : `${envelope.runtimeKey}/o/${snapshot.observability.observabilityGeneration}`;
+    const runtimeKey = validation ? `${deploymentRuntimeKey}/validation` : deploymentRuntimeKey;
     const versionId = envelope.loaderKey.split("/")[2]!;
     const tenant = validation ? undefined : tenantRequest(request);
     if (!validation && !entrypoint && tenant && routeDefaultHttp(snapshot, tenant) === "asset") {
@@ -585,27 +601,27 @@ async function handle(request: Request, env: LoaderEnv, ctx: ExecutionContext, v
       return forwarded;
     }
     if (snapshot.contentKind !== "worker") throw bindingError("VERSION_INVARIANT_VIOLATION");
-    const prior = seenHashes.get(envelope.runtimeKey);
+    const prior = seenHashes.get(runtimeKey);
     if (prior && prior !== snapshot.workerCodeSha256) {
       throw bindingError("VERSION_INVARIANT_VIOLATION");
     }
-    seenHashes.set(envelope.runtimeKey, snapshot.workerCodeSha256);
-    const code = await assembleOnce(envelope.runtimeKey, async () => {
-      const built = modulesFor(snapshot, validation, entrypoint);
-      return {
-        ...snapshotWorkerCode(snapshot),
-        mainModule: built.mainModule,
-        modules: built.modules,
-        env: validation ? {} : tenantEnv(
-          snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
-        ),
-        globalOutbound: tenantGlobalOutbound(env, validation),
-      };
-    });
+    seenHashes.set(runtimeKey, snapshot.workerCodeSha256);
     let cold = false;
-    const stub = env.LOADER.get(envelope.runtimeKey, async () => {
+    const stub = env.LOADER.get(runtimeKey, async () => {
       cold = true;
-      return code;
+      const code = await assembleOnce(runtimeKey, async () => {
+        const built = modulesFor(snapshot, validation, entrypoint);
+        return {
+          ...snapshotWorkerCode(snapshot),
+          mainModule: built.mainModule,
+          modules: built.modules,
+          env: validation ? {} : tenantEnv(
+            snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+          ),
+          globalOutbound: tenantGlobalOutbound(env, validation),
+        };
+      });
+      return validation ? code : collectableWorkerCode(code, ctx, snapshot.observability);
     });
     const target = stub.getEntrypoint(validation ? undefined : entrypoint);
     executionStarted = !validation;
@@ -715,28 +731,31 @@ async function customEventTarget(request: Request, env: LoaderEnv, ctx: Executio
   const envelope = assertEnvelope(request, false, entrypoint);
   const internalToken = request.headers.get(TOKEN_HEADER) || "";
   const snapshot = await resolveSnapshot(env, envelope, false, Boolean(entrypoint), internalToken);
-  const prior = seenHashes.get(envelope.runtimeKey);
+  const runtimeKey = snapshot.observability === undefined
+    ? envelope.runtimeKey
+    : `${envelope.runtimeKey}/o/${snapshot.observability.observabilityGeneration}`;
+  const prior = seenHashes.get(runtimeKey);
   if (prior && prior !== snapshot.workerCodeSha256) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
-  seenHashes.set(envelope.runtimeKey, snapshot.workerCodeSha256);
-  const code = await assembleOnce(envelope.runtimeKey, async () => {
-    const built = modulesFor(snapshot, false, entrypoint);
-    const versionId = envelope.loaderKey.split("/")[2]!;
-    return {
-      ...snapshotWorkerCode(snapshot),
-      mainModule: built.mainModule,
-      modules: built.modules,
-      env: tenantEnv(
-        snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
-      ),
-      globalOutbound: tenantGlobalOutbound(env, false),
-    };
-  });
+  seenHashes.set(runtimeKey, snapshot.workerCodeSha256);
   let cold = false;
-  const stub = env.LOADER.get(envelope.runtimeKey, async () => {
+  const stub = env.LOADER.get(runtimeKey, async () => {
     cold = true;
-    return code;
+    return assembleOnce(runtimeKey, async () => {
+      const built = modulesFor(snapshot, false, entrypoint);
+      const versionId = envelope.loaderKey.split("/")[2]!;
+      const code = {
+        ...snapshotWorkerCode(snapshot),
+        mainModule: built.mainModule,
+        modules: built.modules,
+        env: tenantEnv(
+          snapshot, ctx, versionId, doPolicy(env), false, true, entrypoint ?? "default",
+        ),
+        globalOutbound: tenantGlobalOutbound(env, false),
+      };
+      return collectableWorkerCode(code, ctx, snapshot.observability);
+    });
   });
   return {
     target: stub.getEntrypoint(entrypoint),

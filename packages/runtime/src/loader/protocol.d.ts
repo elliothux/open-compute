@@ -9,6 +9,24 @@ export interface LoaderEnv extends BindingEnv, DoPolicyEnv {
   PUBLIC_NETWORK: Fetcher;
   COMPATIBILITY_DATE: string;
   REQUIRED_COMPATIBILITY_FLAGS: string[];
+  OBSERVABILITY_BACKEND: Fetcher;
+  OBSERVABILITY_BACKEND_TOKEN: string;
+}
+
+export interface RuntimeObservabilityIdentity {
+  schemaVersion: 1;
+  accountId: string;
+  workerId: string;
+  scriptName: string;
+  versionId: string;
+  deploymentId?: string;
+  routeGeneration: number;
+  observabilityGeneration: number;
+  enabled: boolean;
+  logsEnabled: boolean;
+  headSamplingRate: number;
+  invocationLogs: boolean;
+  persist: boolean;
 }
 interface RuntimeBindingBase {
   name: string;
@@ -65,6 +83,7 @@ export interface RuntimeSnapshot {
   loaderKey: string;
   workerCodeSha256: string;
   routeGeneration: number;
+  observability?: RuntimeObservabilityIdentity;
   compatibilityDate: string;
   compatibilityFlags: string[];
   contentKind: "worker" | "assets_only";

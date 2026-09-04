@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 const DIGEST_TAG: &[u8] = b"open-compute-static-config-v1\0";
 pub(crate) const TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_INTERNAL_TOKEN__";
 pub(crate) const BINDING_TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_BINDING_TOKEN__";
+pub(crate) const OBSERVABILITY_TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_OBSERVABILITY_TOKEN__";
 pub(crate) const COMPATIBILITY_DATE_PLACEHOLDER: &str = "__OPEN_COMPUTE_COMPATIBILITY_DATE__";
 pub(crate) const SYSTEM_COMPATIBILITY_FLAGS_PLACEHOLDER: &str =
     "__OPEN_COMPUTE_SYSTEM_COMPATIBILITY_FLAGS__";
@@ -161,10 +162,15 @@ pub(crate) fn render_config_with_tokens(
     template: &str,
     token: &SecretString,
     binding_token: &SecretString,
+    observability_token: &SecretString,
 ) -> Result<String, PlatformError> {
     validate_token(token)?;
     validate_token(binding_token)?;
-    if token.expose() == binding_token.expose() {
+    validate_token(observability_token)?;
+    if token.expose() == binding_token.expose()
+        || token.expose() == observability_token.expose()
+        || binding_token.expose() == observability_token.expose()
+    {
         return Err(PlatformError::new(
             ErrorCode::RuntimeInvalid,
             "internal service tokens must be distinct",
@@ -172,6 +178,7 @@ pub(crate) fn render_config_with_tokens(
     }
     if template.matches(TOKEN_PLACEHOLDER).count() != 1
         || template.matches(BINDING_TOKEN_PLACEHOLDER).count() != 1
+        || template.matches(OBSERVABILITY_TOKEN_PLACEHOLDER).count() != 1
     {
         return Err(PlatformError::new(
             ErrorCode::ConfigCompileFailed,
@@ -180,7 +187,11 @@ pub(crate) fn render_config_with_tokens(
     }
     Ok(template
         .replace(TOKEN_PLACEHOLDER, token.expose())
-        .replace(BINDING_TOKEN_PLACEHOLDER, binding_token.expose()))
+        .replace(BINDING_TOKEN_PLACEHOLDER, binding_token.expose())
+        .replace(
+            OBSERVABILITY_TOKEN_PLACEHOLDER,
+            observability_token.expose(),
+        ))
 }
 
 pub(crate) fn validate_token(token: &SecretString) -> Result<(), PlatformError> {
@@ -208,6 +219,7 @@ pub(crate) fn digest_for(
     platform: &PlatformReleaseMeta,
     token: &SecretString,
     binding_token: &SecretString,
+    observability_token: &SecretString,
 ) -> Result<(String, String, WorkerFiles), PlatformError> {
     digest_for_with_tokens_and_policy(
         assets_dir,
@@ -216,6 +228,7 @@ pub(crate) fn digest_for(
         platform,
         token,
         binding_token,
+        observability_token,
         &DurableObjectsConfig::default(),
     )
 }
@@ -228,6 +241,7 @@ pub(crate) fn digest_for_with_tokens_and_policy(
     platform: &PlatformReleaseMeta,
     token: &SecretString,
     binding_token: &SecretString,
+    observability_token: &SecretString,
     durable_objects: &DurableObjectsConfig,
 ) -> Result<(String, String, WorkerFiles), PlatformError> {
     let (template, workers, _) = load_assets(assets_dir)?;
@@ -245,7 +259,8 @@ pub(crate) fn digest_for_with_tokens_and_policy(
             "config template is not UTF-8",
         )
     })?;
-    let rendered = render_config_with_tokens(template_str, token, binding_token)?;
+    let rendered =
+        render_config_with_tokens(template_str, token, binding_token, observability_token)?;
     let rendered = render_do_policy(rendered, durable_objects)?;
     let rendered = render_lock_compatibility(rendered, runtime.lock())?;
     let digest = config_input_digest(&DigestInputs {

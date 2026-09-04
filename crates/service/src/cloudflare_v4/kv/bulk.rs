@@ -51,9 +51,8 @@ pub(super) async fn update(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let minimum_expiration = match now_seconds.checked_add(60) {
-        Some(value) => value,
-        None => return error_response(V4Error::Internal, context.request_id()),
+    let Some(minimum_expiration) = now_seconds.checked_add(60) else {
+        return error_response(V4Error::Internal, context.request_id());
     };
     let mut commands = Vec::with_capacity(values.len());
     for value in values {
@@ -271,3 +270,7 @@ struct BulkMutationResult {
     successful_key_count: usize,
     unsuccessful_keys: Vec<String>,
 }
+
+#[cfg(test)]
+#[path = "bulk_tests.rs"]
+mod tests;

@@ -1,9 +1,10 @@
 use super::*;
 use crate::{
-    KvPaths, PlatformStorage, ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
+    CatalogDirection, CatalogSort, KvPaths, PlatformStorage, ReserveResourceCreate,
+    ResourceCreateReservation, ResourceRepository, decode_catalog_cursor,
 };
 use open_compute_core::config::StorageConfig;
-use open_compute_core::{BindingKind, RequestId, SystemClock};
+use open_compute_core::{BindingKind, RequestId, ResourceState, SystemClock};
 
 fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
     let temp = tempfile::tempdir().unwrap();
@@ -45,6 +46,44 @@ fn fixture() -> (tempfile::TempDir, PlatformStorage, ResourceRecord) {
         unreachable!()
     };
     (temp, storage, resource)
+}
+
+fn ready_namespace(storage: &PlatformStorage, name: &str, now_ms: i64) -> ResourceRecord {
+    let account_id = storage.identity().default_account_id;
+    let fingerprint = storage.crypto().fingerprint_request(name.as_bytes());
+    let ResourceCreateReservation::Reserved(resource) = ResourceRepository::new(storage.db())
+        .reserve_create(
+            &ReserveResourceCreate {
+                account_id,
+                kind: BindingKind::KvNamespace,
+                name,
+                idempotency_key: name,
+                fingerprint_key_id: storage.crypto().fingerprint_key_id(),
+                request_fingerprint: &fingerprint,
+                resource_id: ResourceId::generate(),
+                driver_schema_version: 1,
+                request_id: RequestId::generate(),
+                now_ms,
+                expires_at_ms: now_ms + 1_000,
+            },
+            1_000_000,
+        )
+        .unwrap()
+    else {
+        unreachable!()
+    };
+    KvNamespaceRepository::new(storage.db())
+        .ensure_namespace(
+            &resource,
+            &KvPaths::storage_key(account_id, resource.id),
+            1,
+            256 * 1024 * 1024,
+        )
+        .unwrap();
+    ResourceRepository::new(storage.db())
+        .mark_ready(resource.id, now_ms + 1)
+        .unwrap();
+    resource
 }
 
 #[test]
@@ -210,5 +249,103 @@ fn backup_catalog_enforces_state_scope_and_immutable_fields() {
             .unwrap_err()
             .code(),
         ErrorCode::ResourceNotFound
+    );
+}
+
+#[test]
+fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
+    let (_temp, storage, initial) = fixture();
+    let repository = KvNamespaceRepository::new(storage.db());
+    repository
+        .ensure_namespace(
+            &initial,
+            &KvPaths::storage_key(initial.account_id, initial.id),
+            1,
+            256 * 1024 * 1024,
+        )
+        .unwrap();
+    ResourceRepository::new(storage.db())
+        .mark_ready(initial.id, 11)
+        .unwrap();
+    ready_namespace(&storage, "alpha-cache", 20);
+    ready_namespace(&storage, "beta-cache", 30);
+
+    for (sort, direction) in [
+        (CatalogSort::Name, CatalogDirection::Asc),
+        (CatalogSort::Name, CatalogDirection::Desc),
+        (CatalogSort::CreatedAt, CatalogDirection::Asc),
+        (CatalogSort::UpdatedAt, CatalogDirection::Desc),
+    ] {
+        let first = repository
+            .list_page(initial.account_id, None, None, sort, direction, None, 1)
+            .unwrap();
+        assert_eq!(first.items.len(), 1);
+        let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
+        let rest = repository
+            .list_page(
+                initial.account_id,
+                None,
+                Some(ResourceState::Ready),
+                sort,
+                direction,
+                Some(cursor),
+                10,
+            )
+            .unwrap();
+        assert_eq!(rest.items.len(), 2);
+        assert!(rest.next_cursor.is_none());
+    }
+
+    let by_name = repository
+        .list_page(
+            initial.account_id,
+            Some("BETA"),
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            10,
+        )
+        .unwrap();
+    assert_eq!(by_name.items[0].resource.name, "beta-cache");
+    let by_id = repository
+        .list_page(
+            initial.account_id,
+            Some(&initial.id.to_string()),
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            10,
+        )
+        .unwrap();
+    assert_eq!(by_id.items[0].resource.id, initial.id);
+
+    let first = repository
+        .list_page(
+            initial.account_id,
+            None,
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            1,
+        )
+        .unwrap();
+    let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        repository
+            .list_page(
+                initial.account_id,
+                None,
+                None,
+                CatalogSort::UpdatedAt,
+                CatalogDirection::Asc,
+                Some(cursor),
+                10,
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
     );
 }

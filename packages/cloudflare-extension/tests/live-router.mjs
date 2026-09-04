@@ -33,6 +33,7 @@ const client = new Cloudflare({ apiToken, baseURL, maxRetries: 0, fetch: tracedF
 for (const [name, contract] of [
   ["identity", identityContract],
   ["workers", workersContract],
+  ["observability", observabilityContract],
   ["kv", kvContract],
   ["d1", d1Contract],
   ["r2", r2Contract],
@@ -193,6 +194,64 @@ async function workersContract() {
     "00000000-0000-7000-8000-000000000000",
     { account_id: accountID, script_name: workerName },
   ), [404]);
+}
+
+async function observabilityContract() {
+  const now = Date.now();
+  const tail = await client.workers.scripts.tail.create("sdk-worker", {
+    account_id: accountID,
+    body: { filters: [] },
+  });
+  assert.match(tail.id, /^[0-9a-f]{32}$/);
+  assert.match(tail.url, /^ws:\/\//);
+  assert.ok(Array.isArray(await client.workers.scripts.tail.get("sdk-worker", {
+    account_id: accountID,
+  })));
+  await client.workers.scripts.tail.delete(tail.id, {
+    account_id: accountID,
+    script_name: "sdk-worker",
+  });
+
+  const liveTail = await client.workers.observability.telemetry.liveTail({
+    account_id: accountID,
+    scriptId: "sdk-worker",
+    filterCombination: "and",
+    filters: [{
+      key: "$workers.preview.slug",
+      type: "string",
+      operation: "is_null",
+    }],
+  });
+  assert.match(liveTail.wsUrl, /^ws:\/\//);
+  assert.deepEqual(await client.workers.observability.telemetry.liveTailHeartbeat({
+    account_id: accountID,
+    scriptId: "sdk-worker",
+  }), {});
+
+  const keys = await client.workers.observability.telemetry.keys({
+    account_id: accountID,
+    datasets: ["cloudflare-workers"],
+    from: now - 60_000,
+    to: now,
+  });
+  assert.deepEqual(keys.result, []);
+  const values = await client.workers.observability.telemetry.values({
+    account_id: accountID,
+    datasets: ["cloudflare-workers"],
+    key: "$metadata.service",
+    timeframe: { from: now - 60_000, to: now },
+    type: "string",
+  });
+  assert.deepEqual(values.result, []);
+  const query = await client.workers.observability.telemetry.query({
+    account_id: accountID,
+    queryId: "sdk-observability-gate",
+    timeframe: { from: now - 60_000, to: now },
+    parameters: { datasets: ["cloudflare-workers"], filters: [] },
+    view: "events",
+  });
+  assert.equal(query.events.count, 0);
+  assert.deepEqual(query.events.events, []);
 }
 
 async function kvContract() {

@@ -165,7 +165,8 @@ async fn import_database(
     let Some(api) = state.d1_api() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
-    let outcome = match body {
+
+    match body {
         ImportRequest::Init { etag } => {
             let etag = match parse_md5(&etag) {
                 Ok(value) => value,
@@ -251,8 +252,7 @@ async fn import_database(
             )
             .await
         }
-    };
-    outcome
+    }
 }
 
 async fn time_travel_bookmark(
@@ -645,12 +645,10 @@ fn parse_query(query: Option<&str>) -> Result<BTreeMap<String, String>, V4Error>
 }
 
 fn parse_timestamp_ms(value: &str) -> Result<i64, V4Error> {
-    value
+    Ok(value
         .parse::<jiff::Timestamp>()
         .map_err(|_| V4Error::InvalidRequest)?
-        .as_millisecond()
-        .try_into()
-        .map_err(|_| V4Error::InvalidRequest)
+        .as_millisecond())
 }
 
 fn validate_tables(tables: Vec<String>) -> Result<BTreeSet<String>, V4Error> {
@@ -764,3 +762,7 @@ fn attach_request_id(response: &mut Response, request_id: RequestId) {
         response.headers_mut().insert(REQUEST_ID_HEADER, value);
     }
 }
+
+#[cfg(test)]
+#[path = "d1_transfer_tests.rs"]
+mod tests;

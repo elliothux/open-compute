@@ -63,7 +63,7 @@ use service::{service_operation_index, write_service_metrics};
 pub(crate) use workflow::WorkflowOutcome;
 
 /// Compile-time series required by the platform, product bindings, and P1 hardening surface.
-pub const REQUIRED_SERIES: u64 = 722;
+pub const REQUIRED_SERIES: u64 = 747;
 /// Longest compile-time label value (enum tokens). Runtime version strings must fit too.
 pub const MIN_LABEL_VALUE_BYTES: u64 = 64;
 
@@ -304,6 +304,17 @@ struct Inner {
     workflow: workflow::WorkflowMetrics,
     cache_images: cache_images::CacheImagesMetrics,
     search: SearchMetrics,
+    observability_ingest: [u64; 2],
+    observability_events: [u64; 6],
+    observability_ingest_queue_depth: u64,
+    observability_db_bytes: u64,
+    observability_oldest_event_age_seconds: f64,
+    observability_truncated: [u64; 2],
+    observability_tail_sessions: u64,
+    observability_tail_events: [u64; 2],
+    observability_tail_dropped: [u64; 2],
+    observability_query: [u64; 4],
+    observability_query_duration_seconds: f64,
     last_supervisor: Option<SupervisorState>,
     last_attempt: Option<u32>,
     runtime_start: Option<Instant>,
@@ -424,6 +435,17 @@ impl MetricsRegistry {
                 workflow: workflow::WorkflowMetrics::default(),
                 cache_images: cache_images::CacheImagesMetrics::default(),
                 search: SearchMetrics::default(),
+                observability_ingest: [0; 2],
+                observability_events: [0; 6],
+                observability_ingest_queue_depth: 0,
+                observability_db_bytes: 0,
+                observability_oldest_event_age_seconds: 0.0,
+                observability_truncated: [0; 2],
+                observability_tail_sessions: 0,
+                observability_tail_events: [0; 2],
+                observability_tail_dropped: [0; 2],
+                observability_query: [0; 4],
+                observability_query_duration_seconds: 0.0,
                 last_supervisor: None,
                 last_attempt: None,
                 runtime_start: None,
@@ -762,6 +784,76 @@ impl MetricsRegistry {
         guard.kv_corruption[index] = guard.kv_corruption[index].saturating_add(1);
     }
 
+    /// Record one generation-authenticated observability ingest request.
+    pub(crate) fn observe_observability_ingest(&self, success: bool) {
+        let mut guard = self.lock();
+        guard.observability_ingest[usize::from(success)] =
+            guard.observability_ingest[usize::from(success)].saturating_add(1);
+    }
+
+    /// Record one canonical observability event (`0=invocation`, `1=log`, `2=exception`).
+    pub(crate) fn observe_observability_event(&self, kind: usize, success: bool) {
+        let index = kind.min(2) * 2 + usize::from(success);
+        let mut guard = self.lock();
+        guard.observability_events[index] = guard.observability_events[index].saturating_add(1);
+    }
+
+    /// Publish the current bounded observability ingest queue depth.
+    pub(crate) fn set_observability_ingest_queue_depth(&self, depth: usize) {
+        self.lock().observability_ingest_queue_depth = u64::try_from(depth).unwrap_or(u64::MAX);
+    }
+
+    /// Publish independent observability storage gauges.
+    pub(crate) fn set_observability_storage(&self, bytes: u64, oldest_age: Duration) {
+        let mut guard = self.lock();
+        guard.observability_db_bytes = bytes;
+        guard.observability_oldest_event_age_seconds = oldest_age.as_secs_f64();
+    }
+
+    /// Record one collector or canonical truncation.
+    pub(crate) fn inc_observability_truncated(&self, canonical: bool) {
+        let mut guard = self.lock();
+        guard.observability_truncated[usize::from(canonical)] =
+            guard.observability_truncated[usize::from(canonical)].saturating_add(1);
+    }
+
+    /// Publish the current process-local Script Tail session count.
+    pub(crate) fn set_observability_tail_sessions(&self, sessions: usize) {
+        self.lock().observability_tail_sessions = u64::try_from(sessions).unwrap_or(u64::MAX);
+    }
+
+    /// Record one filtered or delivered realtime event.
+    pub(crate) fn observe_observability_tail_event(&self, delivered: bool) {
+        let mut guard = self.lock();
+        guard.observability_tail_events[usize::from(delivered)] =
+            guard.observability_tail_events[usize::from(delivered)].saturating_add(1);
+    }
+
+    /// Record one closed-client or overload realtime drop.
+    pub(crate) fn inc_observability_tail_dropped(&self, overload: bool) {
+        let mut guard = self.lock();
+        guard.observability_tail_dropped[usize::from(overload)] =
+            guard.observability_tail_dropped[usize::from(overload)].saturating_add(1);
+    }
+
+    /// Snapshot content-free realtime drop counters for operator status.
+    pub(crate) fn observability_tail_dropped(&self) -> [u64; 2] {
+        self.lock().observability_tail_dropped
+    }
+
+    /// Record one bounded telemetry query and its last duration.
+    pub(crate) fn observe_observability_query(
+        &self,
+        invocations: bool,
+        success: bool,
+        duration: Duration,
+    ) {
+        let index = usize::from(invocations) * 2 + usize::from(success);
+        let mut guard = self.lock();
+        guard.observability_query[index] = guard.observability_query[index].saturating_add(1);
+        guard.observability_query_duration_seconds = duration.as_secs_f64();
+    }
+
     /// Prometheus text exposition, deterministically ordered.
     pub fn render(&self, status: &PlatformStatus) -> String {
         let g = self.lock();
@@ -940,6 +1032,7 @@ impl MetricsRegistry {
         write_queue_metrics(&mut out, &g);
         workflow::write_workflow_metrics(&mut out, &g);
         write_cache_images_metrics(&mut out, &g);
+        write_observability_metrics(&mut out, &g);
         let _ = self.max_label;
         out
     }
@@ -949,6 +1042,157 @@ impl MetricsRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+fn write_observability_metrics(out: &mut String, value: &Inner) {
+    write_help(
+        out,
+        "open_compute_observability_ingest_total",
+        "counter",
+        "Collector ingest outcomes",
+    );
+    for (index, result) in ["failure", "success"].into_iter().enumerate() {
+        writeln!(
+            out,
+            "open_compute_observability_ingest_total{{result=\"{result}\"}} {}",
+            value.observability_ingest[index]
+        )
+        .ok();
+    }
+    write_help(
+        out,
+        "open_compute_observability_events_total",
+        "counter",
+        "Canonical event outcomes",
+    );
+    for (kind_index, kind) in ["invocation", "log", "exception"].into_iter().enumerate() {
+        for (result_index, result) in ["dropped", "accepted"].into_iter().enumerate() {
+            writeln!(
+                out,
+                "open_compute_observability_events_total{{kind=\"{kind}\",result=\"{result}\"}} {}",
+                value.observability_events[kind_index * 2 + result_index]
+            )
+            .ok();
+        }
+    }
+    write_help(
+        out,
+        "open_compute_observability_ingest_queue_depth",
+        "gauge",
+        "Invocation envelopes awaiting persistence",
+    );
+    writeln!(
+        out,
+        "open_compute_observability_ingest_queue_depth {}",
+        value.observability_ingest_queue_depth
+    )
+    .ok();
+    write_help(
+        out,
+        "open_compute_observability_db_bytes",
+        "gauge",
+        "Accounted observability database bytes",
+    );
+    writeln!(
+        out,
+        "open_compute_observability_db_bytes {}",
+        value.observability_db_bytes
+    )
+    .ok();
+    write_help(
+        out,
+        "open_compute_observability_oldest_event_age_seconds",
+        "gauge",
+        "Age of the oldest committed event",
+    );
+    writeln!(
+        out,
+        "open_compute_observability_oldest_event_age_seconds {}",
+        value.observability_oldest_event_age_seconds
+    )
+    .ok();
+    write_help(
+        out,
+        "open_compute_observability_truncated_total",
+        "counter",
+        "Observability projection truncations",
+    );
+    for (index, stage) in ["collector", "canonical"].into_iter().enumerate() {
+        writeln!(
+            out,
+            "open_compute_observability_truncated_total{{stage=\"{stage}\"}} {}",
+            value.observability_truncated[index]
+        )
+        .ok();
+    }
+    write_help(
+        out,
+        "open_compute_observability_tail_sessions",
+        "gauge",
+        "Current process-local Script Tail sessions",
+    );
+    writeln!(
+        out,
+        "open_compute_observability_tail_sessions {}",
+        value.observability_tail_sessions
+    )
+    .ok();
+    write_help(
+        out,
+        "open_compute_observability_tail_events_total",
+        "counter",
+        "Realtime event fan-out outcomes",
+    );
+    for (index, result) in ["filtered", "delivered"].into_iter().enumerate() {
+        writeln!(
+            out,
+            "open_compute_observability_tail_events_total{{result=\"{result}\"}} {}",
+            value.observability_tail_events[index]
+        )
+        .ok();
+    }
+    write_help(
+        out,
+        "open_compute_observability_tail_dropped_total",
+        "counter",
+        "Realtime event drop reasons",
+    );
+    for (index, reason) in ["closed", "overload"].into_iter().enumerate() {
+        writeln!(
+            out,
+            "open_compute_observability_tail_dropped_total{{reason=\"{reason}\"}} {}",
+            value.observability_tail_dropped[index]
+        )
+        .ok();
+    }
+    write_help(
+        out,
+        "open_compute_observability_query_total",
+        "counter",
+        "Telemetry query outcomes",
+    );
+    for (view_index, view) in ["events", "invocations"].into_iter().enumerate() {
+        for (result_index, result) in ["failure", "success"].into_iter().enumerate() {
+            writeln!(
+                out,
+                "open_compute_observability_query_total{{view=\"{view}\",result=\"{result}\"}} {}",
+                value.observability_query[view_index * 2 + result_index]
+            )
+            .ok();
+        }
+    }
+    write_help(
+        out,
+        "open_compute_observability_query_duration_seconds",
+        "gauge",
+        "Last telemetry query duration",
+    );
+    writeln!(
+        out,
+        "open_compute_observability_query_duration_seconds {}",
+        value.observability_query_duration_seconds
+    )
+    .ok();
 }
 
 fn write_help(out: &mut String, name: &str, ty: &str, help: &str) {

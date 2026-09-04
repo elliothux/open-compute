@@ -5,11 +5,12 @@ use crate::fs as sfs;
 use crate::master_key;
 use crate::migrations::MigrationFault;
 use crate::{
-    DataDir, IdempotencyReservation, NewQueueConsumerDeclaration, NewVersion, PlatformStorage,
-    QueueConsumerConfig, QueueConsumerRepository, ReserveResourceCreate, ResourceCreateReservation,
-    ResourceRepository, SYSTEM_DASHBOARD_WORKER_NAME, SecretCrypto, StoredVersionSecret,
-    SystemOwnedVersionKind, VersionState, WorkerRepository, atomic_write,
-    inspect_durable_object_storage,
+    CatalogDirection, CatalogSort, DataDir, IdempotencyReservation, NewQueueConsumerDeclaration,
+    NewVersion, PlatformStorage, QueueConsumerConfig, QueueConsumerRepository,
+    ReserveResourceCreate, ResourceCreateReservation, ResourceRepository,
+    SYSTEM_DASHBOARD_WORKER_NAME, SecretCrypto, StoredVersionSecret, SystemOwnedVersionKind,
+    UpdateWorkerObservabilitySettings, VersionState, WorkerRepository, atomic_write,
+    decode_catalog_cursor, inspect_durable_object_storage,
 };
 use open_compute_core::clock::{DeterministicClock, SystemClock};
 use open_compute_core::config::StorageConfig;
@@ -38,6 +39,107 @@ fn storage_config(root: &Path) -> StorageConfig {
         free_space_soft_bytes: 1_073_741_824,
         free_space_hard_bytes: 268_435_456,
     }
+}
+
+#[test]
+fn worker_catalog_pages_cover_filters_sorts_cursors_and_deployment_state() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let repository = WorkerRepository::new(storage.db());
+    let request = open_compute_core::RequestId::generate();
+    let mut workers = Vec::new();
+    for (index, name) in ["alpha-worker", "beta-worker", "gamma-worker"]
+        .into_iter()
+        .enumerate()
+    {
+        workers.push(
+            repository
+                .create_worker(account, name, request, index as i64 + 1, 100)
+                .unwrap()
+                .0,
+        );
+    }
+    let version = insert_ready(&repository, account, workers[0].id, [9; 32], request, 10);
+    repository
+        .promote(account, workers[0].id, version, None, request, 12)
+        .unwrap();
+
+    for (sort, direction) in [
+        (CatalogSort::Name, CatalogDirection::Asc),
+        (CatalogSort::Name, CatalogDirection::Desc),
+        (CatalogSort::CreatedAt, CatalogDirection::Asc),
+        (CatalogSort::UpdatedAt, CatalogDirection::Desc),
+    ] {
+        let first = repository
+            .list_workers_page(account, None, None, sort, direction, None, 1)
+            .unwrap();
+        assert_eq!(first.items.len(), 1);
+        let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
+        let second = repository
+            .list_workers_page(account, None, None, sort, direction, Some(cursor), 10)
+            .unwrap();
+        assert_eq!(second.items.len(), 2);
+        assert!(second.next_cursor.is_none());
+    }
+    assert_eq!(
+        repository
+            .list_workers_page(
+                account,
+                Some("BETA"),
+                Some(false),
+                CatalogSort::Name,
+                CatalogDirection::Asc,
+                None,
+                10,
+            )
+            .unwrap()
+            .items[0]
+            .name,
+        "beta-worker"
+    );
+    let worker_id_search = workers[0].id.to_string();
+    assert_eq!(
+        repository
+            .list_workers_page(
+                account,
+                Some(&worker_id_search),
+                Some(true),
+                CatalogSort::Name,
+                CatalogDirection::Asc,
+                None,
+                10,
+            )
+            .unwrap()
+            .items[0]
+            .id,
+        workers[0].id
+    );
+    let first = repository
+        .list_workers_page(
+            account,
+            None,
+            None,
+            CatalogSort::Name,
+            CatalogDirection::Asc,
+            None,
+            1,
+        )
+        .unwrap();
+    let cursor = decode_catalog_cursor(first.next_cursor.as_deref().unwrap()).unwrap();
+    assert!(
+        repository
+            .list_workers_page(
+                account,
+                None,
+                None,
+                CatalogSort::UpdatedAt,
+                CatalogDirection::Asc,
+                Some(cursor),
+                10,
+            )
+            .is_err()
+    );
 }
 
 fn unique_root() -> (TempDir, PathBuf) {
@@ -3736,8 +3838,8 @@ fn p2_2_queue_catalog_idempotency_and_failure_boundaries_are_complete() {
                 account,
                 None,
                 None,
-                crate::CatalogSort::UpdatedAt,
-                crate::CatalogDirection::Desc,
+                CatalogSort::UpdatedAt,
+                CatalogDirection::Desc,
                 None,
                 0,
             )
@@ -4306,5 +4408,46 @@ fn system_dashboard_worker_is_excluded_from_tenant_catalog_and_mutations() {
             .expect_err("tenant version lookup")
             .code(),
         ErrorCode::WorkerNotFound
+    );
+}
+
+#[test]
+fn worker_observability_settings_are_day1_authority_and_invalidate_runtime_generation() {
+    let (_tmp, root) = unique_root();
+    let storage = PlatformStorage::bootstrap(&storage_config(&root), &SystemClock).unwrap();
+    let account = storage.identity().default_account_id;
+    let repo = WorkerRepository::new(storage.db());
+    let request = open_compute_core::RequestId::generate();
+    let (worker, _) = repo
+        .create_worker(account, "observability", request, 1, 10)
+        .unwrap();
+    let initial = repo.get_observability_settings(account, worker.id).unwrap();
+    assert!(initial.enabled && initial.logs_enabled && initial.invocation_logs && initial.persist);
+    assert_eq!(initial.generation, 1);
+
+    let updated = repo
+        .update_observability_settings(
+            account,
+            worker.id,
+            &UpdateWorkerObservabilitySettings {
+                enabled: true,
+                head_sampling_rate: Some(0.5),
+                logs_enabled: true,
+                logs_head_sampling_rate: Some(0.25),
+                invocation_logs: false,
+                persist: true,
+            },
+            open_compute_core::RequestId::generate(),
+            2,
+        )
+        .unwrap();
+    assert_eq!(updated.generation, 2);
+    assert_eq!(updated.effective_head_sampling_rate(), 0.25);
+    assert!(!updated.invocation_logs);
+    assert_eq!(
+        repo.get_worker(account, worker.id)
+            .unwrap()
+            .route_generation,
+        2
     );
 }

@@ -434,10 +434,10 @@ fn normalized_binding(
     mut binding: Map<String, Value>,
 ) -> Result<Map<String, Value>, PlatformError> {
     if binding.get("type").and_then(Value::as_str) == Some("d1") {
-        if let Some(database_id) = binding.remove("database_id") {
-            if binding.insert("id".to_owned(), database_id).is_some() {
-                return Err(invalid());
-            }
+        if let Some(database_id) = binding.remove("database_id")
+            && binding.insert("id".to_owned(), database_id).is_some()
+        {
+            return Err(invalid());
         }
     } else if binding.contains_key("database_id") {
         return Err(invalid());

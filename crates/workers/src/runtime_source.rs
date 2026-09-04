@@ -224,6 +224,39 @@ pub struct RuntimeAssets {
     pub routing: AssetRoutingConfigV1,
 }
 
+/// Secret-free Script identity and effective Workers Logs policy for the internal collector.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeObservabilityIdentity {
+    /// Private protocol version.
+    pub schema_version: u32,
+    /// Owning account identity.
+    pub account_id: String,
+    /// Internal Worker identity used only for authority verification.
+    pub worker_id: String,
+    /// External Cloudflare Script name.
+    pub script_name: String,
+    /// External immutable Version identity.
+    pub version_id: String,
+    /// Active Deployment identity, when this Version is currently deployed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_id: Option<String>,
+    /// Worker routing generation frozen for this assembly.
+    pub route_generation: u64,
+    /// Script observability setting generation.
+    pub observability_generation: u64,
+    /// Master persistence switch.
+    pub enabled: bool,
+    /// Logs collection switch.
+    pub logs_enabled: bool,
+    /// Deterministic invocation head-sampling rate.
+    pub head_sampling_rate: f64,
+    /// Whether invocation summaries are persisted.
+    pub invocation_logs: bool,
+    /// Whether selected logs are persisted.
+    pub persist: bool,
+}
+
 /// Fully verified immutable version assembly.
 #[derive(Clone)]
 pub struct RuntimeSnapshot {
@@ -233,6 +266,8 @@ pub struct RuntimeSnapshot {
     pub worker_code_sha256: String,
     /// Current Worker route generation used to fence Durable Object dispatch.
     pub route_generation: u64,
+    /// Internal collector identity; absent from validation and probe snapshots.
+    pub observability: Option<RuntimeObservabilityIdentity>,
     /// Immutable compatibility date for this Version.
     pub compatibility_date: String,
     /// Immutable compatibility flags for this Version.
@@ -278,6 +313,7 @@ impl std::fmt::Debug for RuntimeSnapshot {
         f.debug_struct("RuntimeSnapshot")
             .field("loader_key", &self.loader_key)
             .field("worker_code_sha256", &self.worker_code_sha256)
+            .field("observability", &self.observability)
             .field("main_module", &self.main_module)
             .field("module_count", &self.modules.len())
             .field("module_binding_count", &self.module_bindings.len())
@@ -400,6 +436,30 @@ impl RuntimeSource {
             version_id,
             matches!(scope, RuntimeScope::Validation | RuntimeScope::Probe),
         )?;
+        let observability = if scope == RuntimeScope::Runtime {
+            let settings = repo.get_observability_settings(account_id, worker_id)?;
+            Some(RuntimeObservabilityIdentity {
+                schema_version: 1,
+                account_id: account_id.to_string(),
+                worker_id: worker_id.to_string(),
+                script_name: snapshot.worker.name.clone(),
+                version_id: version_id.to_string(),
+                deployment_id: snapshot
+                    .worker
+                    .active_deployment_id
+                    .filter(|_| snapshot.worker.active_version_id == Some(version_id))
+                    .map(|value| value.to_string()),
+                route_generation: snapshot.worker.route_generation,
+                observability_generation: settings.generation,
+                enabled: settings.enabled,
+                logs_enabled: settings.logs_enabled,
+                head_sampling_rate: settings.effective_head_sampling_rate(),
+                invocation_logs: settings.invocation_logs,
+                persist: settings.persist,
+            })
+        } else {
+            None
+        };
         match scope {
             RuntimeScope::Runtime if snapshot.version.state != VersionState::Ready => {
                 return Err(not_ready());
@@ -808,6 +868,7 @@ impl RuntimeSource {
             loader_key: key.to_owned(),
             worker_code_sha256: hex::encode(actual_descriptor),
             route_generation: snapshot.worker.route_generation,
+            observability,
             compatibility_date: snapshot.version.compatibility_date,
             compatibility_flags: snapshot.version.compatibility_flags,
             content_kind: snapshot.version.content_kind,
@@ -854,6 +915,8 @@ impl RuntimeSource {
             loader_key: &'a str,
             worker_code_sha256: &'a str,
             route_generation: u64,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            observability: Option<&'a RuntimeObservabilityIdentity>,
             compatibility_date: &'a str,
             compatibility_flags: &'a [String],
             content_kind: VersionContentKind,
@@ -966,6 +1029,7 @@ impl RuntimeSource {
             loader_key: &snapshot.loader_key,
             worker_code_sha256: &snapshot.worker_code_sha256,
             route_generation: snapshot.route_generation,
+            observability: snapshot.observability.as_ref(),
             compatibility_date: &snapshot.compatibility_date,
             compatibility_flags: &snapshot.compatibility_flags,
             content_kind: snapshot.content_kind,

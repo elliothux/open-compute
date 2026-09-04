@@ -21,6 +21,7 @@ const SCHEDULER_RECOVERY: &str = "scheduler-recovery";
 const LOCK_NAME: &str = "platform.lock";
 const CONTROL_DB_NAME: &str = "control.sqlite";
 const SCHEDULER_DB_NAME: &str = "scheduler.sqlite";
+const OBSERVABILITY_DB_NAME: &str = "observability.sqlite";
 const DURABLE_OBJECTS: &str = "do";
 const DURABLE_OBJECT_WORKERD: &str = "workerd";
 const DURABLE_OBJECT_MARKER: &str = "format.json";
@@ -148,6 +149,12 @@ impl DataDir {
     #[must_use]
     pub fn scheduler_db_path(&self) -> PathBuf {
         self.root.join(SCHEDULER_DB_NAME)
+    }
+
+    /// Workers Logs database path: `<data_dir>/observability.sqlite`.
+    #[must_use]
+    pub fn observability_db_path(&self) -> PathBuf {
+        self.root.join(OBSERVABILITY_DB_NAME)
     }
 
     /// Keys directory.
@@ -297,6 +304,21 @@ impl DataDir {
             ));
         }
         let db_path = self.scheduler_db_path();
+        fs::validate_contained(&self.root, &db_path)?;
+        fs::ensure_file_secure(&db_path)?;
+        fs::validate_contained(&self.root, &db_path)?;
+        Ok(db_path)
+    }
+
+    /// Create `observability.sqlite` as a 0600 regular file under the owned data directory.
+    pub fn ensure_observability_db(&self) -> Result<PathBuf, PlatformError> {
+        if self.filesystem_durability() != FilesystemDurability::ApparentlyLocal {
+            return Err(PlatformError::new(
+                open_compute_core::ErrorCode::PlatformUnavailable,
+                "observability database requires a local filesystem",
+            ));
+        }
+        let db_path = self.observability_db_path();
         fs::validate_contained(&self.root, &db_path)?;
         fs::ensure_file_secure(&db_path)?;
         fs::validate_contained(&self.root, &db_path)?;

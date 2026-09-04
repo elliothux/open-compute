@@ -511,3 +511,7 @@ fn hash_file(path: &std::path::Path) -> Result<([u8; 32], u64), PlatformError> {
 fn internal() -> PlatformError {
     PlatformError::new(ErrorCode::Internal, "D1 backup operation failed")
 }
+
+#[cfg(test)]
+#[path = "d1_backup_tests.rs"]
+mod tests;

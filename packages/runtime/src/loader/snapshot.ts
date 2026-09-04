@@ -36,6 +36,24 @@ export function assertSnapshot(value: unknown): asserts value is RuntimeSnapshot
     if (!record(policy) || typeof policy.enabled !== "boolean"
         || typeof policy.crossVersionCache !== "boolean") invalid();
   }
+  if (value.observability !== undefined) {
+    const item = value.observability;
+    if (!record(item) || item.schemaVersion !== 1
+        || typeof item.accountId !== "string" || typeof item.workerId !== "string"
+        || typeof item.scriptName !== "string" || typeof item.versionId !== "string"
+        || (item.deploymentId !== undefined && typeof item.deploymentId !== "string")
+        || typeof item.routeGeneration !== "number"
+        || !Number.isSafeInteger(item.routeGeneration) || item.routeGeneration < 1
+        || typeof item.observabilityGeneration !== "number"
+        || !Number.isSafeInteger(item.observabilityGeneration) || item.observabilityGeneration < 1
+        || typeof item.enabled !== "boolean" || typeof item.logsEnabled !== "boolean"
+        || typeof item.headSamplingRate !== "number" || !Number.isFinite(item.headSamplingRate)
+        || item.headSamplingRate < 0 || item.headSamplingRate > 1
+        || typeof item.invocationLogs !== "boolean" || typeof item.persist !== "boolean"
+        || item.routeGeneration !== value.routeGeneration) {
+      invalid();
+    }
+  }
   if (value.imagesBinding !== undefined
       && (!record(value.imagesBinding) || typeof value.imagesBinding.name !== "string"
         || typeof value.imagesBinding.descriptorSha256 !== "string")) invalid();

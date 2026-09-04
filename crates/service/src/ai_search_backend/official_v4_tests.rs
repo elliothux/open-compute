@@ -64,6 +64,29 @@ async fn official_ai_json(response: Response) -> Value {
 }
 
 #[tokio::test]
+async fn isolated_search_composition_builds_the_same_authority() {
+    let fixture = SearchBehaviorFixture::create().await;
+    let parser = Arc::new(DocumentParserBindingService::with_executable(
+        fixture._runtime.storage.clone(),
+        DocumentParserConfig::default(),
+        PathBuf::from("/usr/bin/false"),
+    ));
+    let state = SearchApiState::new(
+        fixture._runtime.storage.clone(),
+        ResourcePins::new(),
+        5_000,
+        Duration::from_secs(1),
+    )
+    .with_ai_search_for_test(
+        keyword_ai_config(),
+        ai_search_objects(&fixture._runtime._mock),
+        parser,
+    )
+    .unwrap();
+    assert!(state.ai_search().is_some());
+}
+
+#[tokio::test]
 async fn official_ai_search_routes_cover_the_frozen_30_operation_surface() {
     let fixture = SearchBehaviorFixture::create().await;
     let (state, account) = official_ai_state(&fixture);

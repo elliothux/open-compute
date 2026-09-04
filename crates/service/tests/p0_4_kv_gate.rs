@@ -141,6 +141,7 @@ async fn p0_4_real_kv_matrix() {
         vec![
             ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
             ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
         vec![source_auth, binding_auth],

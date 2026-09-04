@@ -16,7 +16,7 @@ free_space_hard_bytes = 268435456
 [hardening]
 max_workers_per_account = 1000
 max_routes_per_account = 10000
-max_deployments_per_worker = 1000
+max_versions_per_worker = 1000
 max_resources_per_kind_per_account = 1000
 emergency_reserve_bytes = 67108864
 max_snapshot_files = 1000000
@@ -86,7 +86,7 @@ max_batch_files = 16
 max_output_bytes = 16777216
 max_concurrency = 4
 max_concurrency_per_account = 2
-max_concurrency_per_deployment = 1
+max_concurrency_per_version = 1
 request_timeout_ms = 30000
 max_address_space_bytes = 2147483648
 max_cpu_seconds = 30
@@ -105,6 +105,20 @@ enabled = true
 max_label_value_bytes = 64
 max_series = 1024
 
+[observability]
+retention_ms = 604800000
+max_database_bytes = 1073741824
+max_invocation_log_bytes = 262144
+ingest_queue_events = 8192
+ingest_batch_events = 256
+ingest_flush_ms = 100
+max_tail_sessions_per_script = 10
+tail_client_queue_bytes = 1048576
+query_max_events = 2000
+query_max_timeframe_ms = 604800000
+external_control_origin = "http://127.0.0.1:8787"
+tail_session_ttl_ms = 3600000
+
 [workers]
 max_bundle_bytes = 17825792
 max_request_body_bytes = 16777216
@@ -112,9 +126,9 @@ delete_drain_timeout_ms = 5000
 artifact_gc_grace_ms = 86400000
 artifact_gc_interval_ms = 60000
 delete_recovery_batch = 64
-retain_ready_deployments = 10
-retain_rejected_deployments = 10
-deployment_min_retention_ms = 86400000
+retain_ready_versions = 10
+retain_rejected_versions = 10
+version_min_retention_ms = 86400000
 
 [kv]
 namespace_quota_bytes = 1073741824

@@ -318,7 +318,7 @@ impl<'a> DurableObjectRepository<'a> {
             .collect()
     }
 
-    fn namespace_is_active(&self, resource_id: ResourceId) -> Result<bool, PlatformError> {
+    fn namespace_is_active(self, resource_id: ResourceId) -> Result<bool, PlatformError> {
         self.storage.db().with_read(|conn| {
             conn.query_row(
                 "SELECT lifecycle_state = 'active' FROM do_namespaces WHERE resource_id = ?1",

@@ -647,6 +647,11 @@ pub fn migration_registry() -> Vec<(i64, &'static str, [u8; 32])> {
         .collect()
 }
 
+/// Compiled SHA-256 for the independent Workers Logs schema.
+pub(crate) const fn observability_migration_checksum() -> &'static [u8; 32] {
+    &OBSERVABILITY_MIGRATION_001_SHA256
+}
+
 /// Read-only schema inspection used by doctor.
 pub fn inspect_schema(db: &ControlDb) -> Result<i64, PlatformError> {
     verify_schema_consistency(db)?;

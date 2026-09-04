@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-03",
+  "authorities": {
+    "wrangler": {
+      "version": "4.127.1",
+      "integrity": "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw==",
+      "configSchemaSha256": "e42dc556dcb039aa1103d4811b1f58497e2676aceee20488d9ceb1d8ab712018"
+    },
+    "cloudflareSdk": {
+      "version": "7.1.0",
+      "integrity": "sha512-eb6WtiAbhuqdWmBdVo6fuXQgEBkYjhOeujRDYLEUWEZIECuABvDLz2DUYTwpN/4KyFecM4JtMHgZn5prlFUjLg==",
+      "packageSha256": "c6660b3ccbf65cf168fc396ab19ae2c91aebbca8be5691b9f016471c028cd753"
+    },
+    "cloudflareOpenApi": {
+      "revision": "b8687f42e28fbfcb296a350f7dbf16349ea900af",
+      "sha256": "2ffedbbf8b25361a3be2062b7793946e7b9efc0e48b462da68f3195f12ab052b"
+    },
+    "workerd": {
+      "release": "v1.20260830.1",
+      "revision": "e9dda5963aba7ee4323960db795690ec78fec118",
+      "lockSha256": "4ccb7814a1ec72f50a3862cfac7475be6a4cade0ca646e8d16a2cb9aac42cb0f"
+    }
+  },
+  "scriptTail": {
+    "source": "fixed Wrangler source plus local real-process differential",
+    "create": {
+      "method": "POST",
+      "path": "/accounts/ACCOUNT/workers/scripts/SCRIPT/tails",
+      "requestShape": ["filters"],
+      "responseShape": ["expires_at", "id", "url"]
+    },
+    "webSocket": {
+      "subprotocol": "trace-v1",
+      "initialClientFrame": {"debug": false},
+      "eventFields": ["event", "eventTimestamp", "exceptions", "logs", "outcome", "scriptName"]
+    },
+    "heartbeatSeconds": 10,
+    "cleanup": "DELETE /accounts/ACCOUNT/workers/scripts/SCRIPT/tails/TAIL"
+  },
+  "dashboardLiveTail": {
+    "source": "authenticated Cloudflare Dashboard network differential against a disposable Worker",
+    "prepare": {
+      "method": "POST",
+      "path": "/accounts/ACCOUNT/workers/observability/telemetry/live-tail",
+      "body": {
+        "scriptId": "SCRIPT",
+        "filters": [
+          {"key": "$workers.preview.slug", "type": "string", "operation": "is_null"}
+        ],
+        "filterCombination": "and"
+      },
+      "responseShape": ["wsUrl"]
+    },
+    "webSocket": {
+      "subprotocol": null,
+      "queryKeys": ["token", "userId", "key", "accountTag"],
+      "serverEventFields": ["$metadata", "$workers", "dataset", "source", "timestamp"],
+      "eventPerFrame": true
+    },
+    "heartbeat": {
+      "intervalSeconds": 15,
+      "method": "POST",
+      "path": "/accounts/ACCOUNT/workers/observability/telemetry/live-tail/heartbeat",
+      "body": {"scriptId": "SCRIPT"},
+      "response": {}
+    }
+  },
+  "stockWorkerdTopology": {
+    "source": "local pinned-stock-workerd nested dynamic Worker spike",
+    "rootTailObserved": [{"scriptName": null, "logs": [["root-event"]]}],
+    "nestedTargetLogObservedByRootTail": false,
+    "decision": "attach one collector to each production target and attribute nested events using authenticated target props"
+  }
+}

@@ -2,7 +2,8 @@
 
 use super::{Harness, now};
 use open_compute_core::{
-    BindingKind, MetricsConfig, ResourceId, SchedulerConfig, WorkflowInstanceId, WorkflowsConfig,
+    BindingKind, CanonicalBindingConfig, MetricsConfig, ResourceId, SchedulerConfig,
+    WorkflowInstanceId, WorkflowsConfig,
 };
 use open_compute_service::{
     metrics::MetricsRegistry, scheduler::SchedulerService, workflow_http::WorkflowApiState,
@@ -57,7 +58,10 @@ async fn production_driver_replays_waits_retries_and_events_after_runtime_restar
                     kind: BindingKind::Workflow,
                     id: ResourceId::from_uuid(definition.id.as_uuid()).unwrap(),
                     permissions: Default::default(),
-                    config: Default::default(),
+                    config: CanonicalBindingConfig {
+                        workflow_class_name: Some("Flow".into()),
+                        ..Default::default()
+                    },
                 },
             )]),
         )

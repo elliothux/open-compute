@@ -23,6 +23,14 @@
     "PATCH /accounts/{account_id}/workers/scripts/{script_name}/script-settings",
     "GET /accounts/{account_id}/workers/scripts/{script_name}/settings",
     "PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings",
+    "GET /accounts/{account_id}/workers/scripts/{script_name}/tails",
+    "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
+    "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
+    "POST /accounts/{account_id}/workers/observability/telemetry/keys",
+    "POST /accounts/{account_id}/workers/observability/telemetry/values",
+    "POST /accounts/{account_id}/workers/observability/telemetry/query",
+    "POST /accounts/{account_id}/workers/observability/telemetry/live-tail",
+    "POST /accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat",
     "GET /accounts/{account_id}/workers/scripts/{script_name}/secrets",
     "PUT /accounts/{account_id}/workers/scripts/{script_name}/secrets",
     "GET /accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}",
@@ -135,11 +143,7 @@
     "PATCH /accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status",
     "POST /accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/events/{event_type}"
   ],
-  "deferredOperations": [
-    {"operation": "GET /accounts/{account_id}/workers/scripts/{script_name}/tails", "stage": "P7", "status": "planned"},
-    {"operation": "POST /accounts/{account_id}/workers/scripts/{script_name}/tails", "stage": "P7", "status": "planned"},
-    {"operation": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}", "stage": "P7", "status": "planned"}
-  ],
+  "deferredOperations": [],
   "unsupportedOperations": [
     {
       "operation": "GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects",
@@ -167,6 +171,46 @@
       "operation": "GET /accounts/{account_id}/ai-search/tokens",
       "deviations": ["OC-AI-SEARCH-TOKEN-001"],
       "reason": "Fixed Wrangler 4.127.1 requires account token metadata before AI Search creation; open-compute exposes one stable installation-managed metadata record without Cloudflare account credential storage or token mutation"
+    },
+    {
+      "operation": "GET /accounts/{account_id}/workers/scripts/{script_name}/tails",
+      "deviations": ["OC-OBSERVABILITY-001"],
+      "reason": "Script Tail sessions are process-local; GET returns the complete active-session array implied by List Tails instead of the pinned OpenAPI single-object type; sessions receive only the selected target Script and do not aggregate nested target logs"
+    },
+    {
+      "operation": "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
+      "deviations": ["OC-OBSERVABILITY-001"],
+      "reason": "Script Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs"
+    },
+    {
+      "operation": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
+      "deviations": ["OC-OBSERVABILITY-001"],
+      "reason": "Script Tail sessions are process-local and disappear on daemon restart"
+    },
+    {
+      "operation": "POST /accounts/{account_id}/workers/observability/telemetry/keys",
+      "deviations": ["OC-OBSERVABILITY-001"],
+      "reason": "Field discovery reads a bounded single-machine retention index containing target-attributed events only"
+    },
+    {
+      "operation": "POST /accounts/{account_id}/workers/observability/telemetry/values",
+      "deviations": ["OC-OBSERVABILITY-001"],
+      "reason": "Value discovery reads a bounded single-machine retention index containing target-attributed events only"
+    },
+    {
+      "operation": "POST /accounts/{account_id}/workers/observability/telemetry/query",
+      "deviations": ["OC-OBSERVABILITY-001"],
+      "reason": "Events and invocations views use a bounded local single-machine index and retention authority; calculations, traces, agents, requests, saved queries, global ordering, and hosted optional metadata are not provided"
+    },
+    {
+      "operation": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail",
+      "deviations": ["OC-OBSERVABILITY-001"],
+      "reason": "Live Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs"
+    },
+    {
+      "operation": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat",
+      "deviations": ["OC-OBSERVABILITY-001"],
+      "reason": "Heartbeat extends process-local selected-Script sessions only"
     }
   ],
   "wranglerObservedOperations": [
@@ -176,5 +220,6 @@
       "source": "wrangler-dist/cli.js:157069",
       "note": "Wrangler per-object asset upload; not present in the pinned official OpenAPI snapshot"
     }
-  ]
+  ],
+  "clientObservedOperations": []
 }

@@ -175,3 +175,7 @@ fn clock_error() -> PlatformError {
         "Durable Object lifecycle clock is unavailable",
     )
 }
+
+#[cfg(test)]
+#[path = "do_lifecycle_tests.rs"]
+mod tests;

@@ -78,12 +78,14 @@ fn management_api() -> ManagementApiCapabilitiesV1 {
             request_media_type: ManagementApiRequestMediaType::None,
             stage: None,
             constraint: None,
+            deviations: Vec::new(),
         }],
         legacy_routes: vec![LegacyManagementRouteV1 {
             id: "/operator/api/**".to_owned(),
             status: InterfaceCapabilityStatus::Unsupported,
             source: "day1-negative-route-inventory".to_owned(),
         }],
+        deviations: Vec::new(),
     }
 }
 
@@ -107,6 +109,34 @@ fn wrangler() -> WranglerCapabilitiesV1 {
             id: "deploy".to_owned(),
             ..item
         }],
+    }
+}
+
+fn workers_observability() -> WorkersObservabilityCapabilitiesV1 {
+    let item = ObservabilityCapabilityItemV1 {
+        id: "observability.enabled".to_owned(),
+        status: InterfaceCapabilityStatus::Supported,
+        source: "test-authority".to_owned(),
+        constraint: None,
+        deviations: Vec::new(),
+    };
+    WorkersObservabilityCapabilitiesV1 {
+        settings_fields: vec![item.clone()],
+        features: vec![ObservabilityCapabilityItemV1 {
+            id: "workers.scripts.tails".to_owned(),
+            ..item.clone()
+        }],
+        query_views: vec![ObservabilityCapabilityItemV1 {
+            id: "events".to_owned(),
+            ..item.clone()
+        }],
+        query_operators: vec![ObservabilityCapabilityItemV1 {
+            id: "eq".to_owned(),
+            ..item
+        }],
+        script_tail_protocol: "trace-v1".to_owned(),
+        limits: vec!["observability.retention_ms".to_owned()],
+        deviations: vec!["OC-OBSERVABILITY-001".to_owned()],
     }
 }
 
@@ -200,6 +230,7 @@ fn capability_status_serialization_and_contract_are_strict() {
         },
         products,
         management_api: management_api(),
+        workers_observability: workers_observability(),
         wrangler: wrangler(),
         limits: BTreeMap::new(),
     };

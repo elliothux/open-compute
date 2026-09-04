@@ -67,6 +67,21 @@ fn main() {
              pub const {constant}: [u8; 32] = [{literal}];\n"
         ));
     }
+    let observability_path = manifest_dir
+        .join("observability-migrations")
+        .join("001_observability.sql");
+    println!("cargo:rerun-if-changed={}", observability_path.display());
+    let observability_sql = fs::read(&observability_path).expect("read observability migration");
+    let digest = Sha256::digest(&observability_sql);
+    let literal = digest
+        .iter()
+        .map(|byte| format!("0x{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    generated.push_str(&format!(
+        "/// SHA-256 of `001_observability.sql` captured at build time.\n\
+         pub const OBSERVABILITY_MIGRATION_001_SHA256: [u8; 32] = [{literal}];\n"
+    ));
 
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("migration_hashes.rs");
     fs::write(out, generated).expect("write migration hashes");

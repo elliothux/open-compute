@@ -197,9 +197,8 @@ async fn create(
     } else {
         request_id.to_string()
     };
-    let expires_at_ms = match now.checked_add(IDEMPOTENCY_TTL_MS) {
-        Some(value) => value,
-        None => return error_response(V4Error::Internal, request_id),
+    let Some(expires_at_ms) = now.checked_add(IDEMPOTENCY_TTL_MS) else {
+        return error_response(V4Error::Internal, request_id);
     };
     let reservation_input = ReserveResourceCreate {
         account_id,
@@ -264,9 +263,8 @@ async fn create(
         Ok(value) => value,
         Err(error) => return error_response(error, request_id),
     };
-    let persisted = match serde_json::to_vec(&result) {
-        Ok(value) => value,
-        Err(_) => return error_response(V4Error::Internal, request_id),
+    let Ok(persisted) = serde_json::to_vec(&result) else {
+        return error_response(V4Error::Internal, request_id);
     };
     if let Err(error) = ResourceRepository::new(api.storage().db()).complete_create(
         account_id,
@@ -426,7 +424,7 @@ async fn list_buckets(
     };
     let buckets: Result<Vec<_>, _> = records.iter().map(Bucket::from_record).collect();
     match buckets {
-        Ok(buckets) => bucket_list_response(context.request_id(), buckets, cursor),
+        Ok(buckets) => bucket_list_response(context.request_id(), &buckets, cursor),
         Err(error) => error_response(error, context.request_id()),
     }
 }
@@ -765,7 +763,7 @@ struct BucketCursorInfo {
     cursor: String,
 }
 
-fn bucket_list_response(request_id: RequestId, buckets: Vec<Bucket>, cursor: String) -> Response {
+fn bucket_list_response(request_id: RequestId, buckets: &[Bucket], cursor: String) -> Response {
     let count = buckets.len();
     let mut response = Json(BucketListEnvelope {
         success: true,

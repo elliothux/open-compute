@@ -78,18 +78,40 @@ fn protocol_parsers_and_error_mapping_cover_every_stable_class() {
     for (code, status) in [
         (ErrorCode::BindingNotFound, StatusCode::NOT_FOUND),
         (ErrorCode::ResourceNotFound, StatusCode::NOT_FOUND),
+        (ErrorCode::ServiceEntrypointNotFound, StatusCode::NOT_FOUND),
+        (ErrorCode::DoNamespaceNotFound, StatusCode::NOT_FOUND),
         (ErrorCode::BindingPermissionDenied, StatusCode::FORBIDDEN),
+        (ErrorCode::ServiceBindingDenied, StatusCode::FORBIDDEN),
         (
             ErrorCode::BindingLimitExceeded,
             StatusCode::PAYLOAD_TOO_LARGE,
         ),
         (ErrorCode::ResourceNotReady, StatusCode::CONFLICT),
         (ErrorCode::ResourceReferenced, StatusCode::CONFLICT),
+        (ErrorCode::ServiceTargetNotReady, StatusCode::CONFLICT),
         (
             ErrorCode::ResourceUnavailable,
             StatusCode::SERVICE_UNAVAILABLE,
         ),
         (ErrorCode::KvResultUnknown, StatusCode::SERVICE_UNAVAILABLE),
+        (
+            ErrorCode::ServiceUnavailable,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (ErrorCode::ServiceTimeout, StatusCode::SERVICE_UNAVAILABLE),
+        (
+            ErrorCode::ServiceLimitExceeded,
+            StatusCode::TOO_MANY_REQUESTS,
+        ),
+        (
+            ErrorCode::SchedulerInternalProtocolError,
+            StatusCode::BAD_REQUEST,
+        ),
+        (ErrorCode::DoClassNotFound, StatusCode::UNPROCESSABLE_ENTITY),
+        (
+            ErrorCode::DoRuntimeException,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
         (
             ErrorCode::BindingTypeMismatch,
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -110,6 +132,10 @@ fn protocol_parsers_and_error_mapping_cover_every_stable_class() {
         assert_eq!(response.status(), status);
         assert_eq!(response.headers().get(ERROR_HEADER).unwrap(), code.as_str());
     }
+    assert_eq!(
+        alarm_protocol_error().code(),
+        ErrorCode::SchedulerInternalProtocolError
+    );
 }
 
 #[tokio::test]
@@ -249,6 +275,32 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
         StatusCode::UNSUPPORTED_MEDIA_TYPE
     );
 
+    for unavailable_product in [
+        "/internal/ai/to-markdown/v1/parse",
+        "/internal/ai-search/v1/call",
+        "/internal/services/v1/call",
+        "/internal/assets/v1/fetch",
+        "/internal/cache/v1/match",
+        "/internal/images/v1/info",
+        "/internal/workflows/runs/missing",
+        "/internal/bindings/v1/queue/missing/send",
+        "/internal/bindings/v1/r2/missing/get",
+        "/internal/bindings/v1/d1/missing/query",
+    ] {
+        let response = handle(
+            State(state.clone()),
+            base_request(Method::POST, unavailable_product, &token, "generation")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "{unavailable_product}"
+        );
+    }
+
     let missing_binding = handle(
         State(state),
         authorized_request(&path, &token, version)
@@ -259,6 +311,198 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
     )
     .await;
     assert_eq!(missing_binding.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
+    let (_temp, storage) = storage();
+    let auth = GenerationAuthRegistry::new();
+    let token = "ab".repeat(32);
+    auth.activate_for_test(SecretString::new(&token));
+    let state = BackendState {
+        storage,
+        auth,
+        pins: ResourcePins::new(),
+        executor: Arc::new(UnavailableKvBindingExecutor),
+        metrics: None,
+        stream_budget: StreamBudget::new(2, 1),
+        r2: None,
+        d1: None,
+        do_config: DurableObjectsConfig::default(),
+        scheduler: None,
+        queue: None,
+        workflow: None,
+        assets: None,
+        services: None,
+        cache: None,
+        images: None,
+        document_parser: None,
+        ai_search: None,
+    };
+    let binding_id = BindingId::generate();
+    let version = VersionId::generate();
+
+    let valid_request_id = "550e8400-e29b-41d4-a716-446655440000";
+    let alarm_request = |path: &str, body: Body| {
+        base_request(Method::POST, path, &token, "generation")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(REQUEST_HEADER, valid_request_id)
+            .body(body)
+            .unwrap()
+    };
+    for (request, status) in [
+        (
+            base_request(
+                Method::POST,
+                "/internal/alarms/v1/resolve",
+                &token,
+                "generation",
+            )
+            .body(Body::empty())
+            .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            alarm_request("/internal/alarms/v1/unknown", Body::empty()),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            alarm_request("/internal/alarms/v1/resolve", Body::from("{}")),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            alarm_request("/internal/alarms/v1/resolve", Body::from(vec![b'x'; 4097])),
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+    ] {
+        assert_eq!(handle(State(state.clone()), request).await.status(), status);
+    }
+
+    let ready_path = format!("/internal/bindings/v1/do/{binding_id}/ready");
+    let ready_request = |body: Body| {
+        authorized_request(&ready_path, &token, version)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(DESCRIPTOR_HEADER, "ab".repeat(32))
+            .body(body)
+            .unwrap()
+    };
+    for (request, status) in [
+        (
+            base_request(
+                Method::POST,
+                "/internal/bindings/v1/do/invalid/ready",
+                &token,
+                "generation",
+            )
+            .body(Body::empty())
+            .unwrap(),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            base_request(Method::POST, &ready_path, &token, "generation")
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            base_request(Method::POST, &ready_path, &token, "generation")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(REQUEST_HEADER, valid_request_id)
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            authorized_request(&ready_path, &token, version)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (ready_request(Body::from("{}")), StatusCode::BAD_REQUEST),
+        (
+            ready_request(Body::from(vec![b'x'; 4097])),
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+    ] {
+        assert_eq!(handle(State(state.clone()), request).await.status(), status);
+    }
+
+    let resolve_path = format!("/internal/bindings/v1/do/{binding_id}/resolve");
+    let resolve_request = |body: Body| {
+        authorized_request(&resolve_path, &token, version)
+            .header("x-open-compute-do-operation", "fetch")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(DESCRIPTOR_HEADER, "ab".repeat(32))
+            .header(ROUTE_GENERATION_HEADER, "1")
+            .body(body)
+            .unwrap()
+    };
+    for (request, status) in [
+        (
+            base_request(Method::POST, &resolve_path, &token, "generation")
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            base_request(
+                Method::POST,
+                "/internal/bindings/v1/do/invalid/resolve",
+                &token,
+                "generation",
+            )
+            .header("x-open-compute-do-operation", "fetch")
+            .body(Body::empty())
+            .unwrap(),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            base_request(Method::POST, &resolve_path, &token, "generation")
+                .header("x-open-compute-do-operation", "fetch")
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            authorized_request(&resolve_path, &token, version)
+                .header("x-open-compute-do-operation", "fetch")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            base_request(Method::POST, &resolve_path, &token, "generation")
+                .header("x-open-compute-do-operation", "fetch")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(REQUEST_HEADER, valid_request_id)
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            authorized_request(&resolve_path, &token, version)
+                .header("x-open-compute-do-operation", "fetch")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(DESCRIPTOR_HEADER, "ab".repeat(32))
+                .header(ROUTE_GENERATION_HEADER, "0")
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (resolve_request(Body::from("{}")), StatusCode::BAD_REQUEST),
+        (
+            resolve_request(Body::from(r#"{"objectId":"invalid"}"#)),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            resolve_request(Body::from(vec![b'x'; 4097])),
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+    ] {
+        assert_eq!(handle(State(state.clone()), request).await.status(), status);
+    }
 }
 
 #[tokio::test]
@@ -283,6 +527,125 @@ async fn listener_wrappers_bind_and_shutdown_cleanly() {
     )
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn document_parser_composition_wrapper_binds_every_owned_product_authority() {
+    let fixture = crate::p3_3_test_support::RuntimeFeatureFixture::create(Default::default()).await;
+    let pins = open_compute_workers::VersionPins::new();
+    let assets = Arc::new(crate::asset_backend::AssetBindingService::new(
+        fixture.storage.clone(),
+        fixture.artifacts.clone(),
+        fixture.artifact_cache.clone(),
+        pins.clone(),
+    ));
+    let services = Arc::new(crate::service_invocations::ServiceInvocationRegistry::new(
+        fixture.storage.clone(),
+        pins,
+    ));
+    let parser = Arc::new(
+        crate::document_parser_backend::DocumentParserBindingService::with_executable(
+            fixture.storage.clone(),
+            open_compute_core::DocumentParserConfig::default(),
+            std::env::current_exe().unwrap(),
+        ),
+    );
+    let listener = bind_binding_backend().await.unwrap();
+    serve_binding_backend_with_document_parser(
+        listener,
+        fixture.storage,
+        GenerationAuthRegistry::new(),
+        ResourcePins::new(),
+        Arc::new(UnavailableKvBindingExecutor),
+        None,
+        None,
+        None,
+        DurableObjectsConfig::default(),
+        QueuesConfig::default(),
+        open_compute_core::WorkflowsConfig::default(),
+        None,
+        assets,
+        services,
+        None,
+        None,
+        parser,
+        async {},
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn service_invocation_boundary_rejects_unknown_unauthorized_and_malformed_requests() {
+    let (_temp, storage) = storage();
+    let registry = crate::service_invocations::ServiceInvocationRegistry::new(
+        storage,
+        open_compute_workers::VersionPins::new(),
+    );
+    let auth = GenerationAuthRegistry::new();
+    let token = "ab".repeat(32);
+    auth.activate_for_test(SecretString::new(&token));
+    let metrics = MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap();
+
+    let unknown = handle_service_invocation(
+        &registry,
+        &auth,
+        &token,
+        "generation",
+        Some(&metrics),
+        base_request(
+            Method::POST,
+            "/internal/services/v1/unknown",
+            &token,
+            "generation",
+        )
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let unauthorized = handle_service_invocation(
+        &registry,
+        &auth,
+        "cdcd",
+        "generation",
+        Some(&metrics),
+        Request::builder()
+            .uri("/internal/services/v1/unknown")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(unauthorized.status(), StatusCode::NOT_FOUND);
+
+    let malformed = handle_service_invocation(
+        &registry,
+        &auth,
+        &token,
+        "generation",
+        Some(&metrics),
+        Request::builder()
+            .uri("/internal/services/v1/capabilities/begin")
+            .body(Body::from("{}"))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+
+    let oversized = handle_service_invocation(
+        &registry,
+        &auth,
+        &token,
+        "generation",
+        None,
+        Request::builder()
+            .uri("/internal/services/v1/resolve")
+            .body(Body::from(vec![b'x'; 16 * 1024 + 1]))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(oversized.status(), StatusCode::BAD_REQUEST);
 }
 
 fn base_request(

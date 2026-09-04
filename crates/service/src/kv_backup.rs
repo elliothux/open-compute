@@ -141,6 +141,10 @@ pub(crate) async fn create_backup(
 }
 
 /// Restore a ready KV backup as a new namespace and return its immutable ID.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the restore command keeps its authority, identity, and audit inputs explicit"
+)]
 pub(crate) async fn restore_backup(
     api: &KvApiState,
     metrics: &MetricsRegistry,
@@ -485,3 +489,7 @@ pub(super) fn hash_file(path: &std::path::Path) -> Result<([u8; 32], u64), Platf
     }
     Ok((hasher.finalize().into(), total))
 }
+
+#[cfg(test)]
+#[path = "kv_backup_tests.rs"]
+mod tests;

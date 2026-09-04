@@ -149,6 +149,11 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
     routes.push({ id: item.operation, method: method.toUpperCase(), path, status: item.status,
       source: item.source, constraint: item.note, requestMediaType: "multipart" });
   }
+  for (const item of manifest.clientObservedOperations ?? []) {
+    const [method, path] = operationKey(item.operation);
+    routes.push({ id: item.operation, method: method.toUpperCase(), path, status: item.status,
+      source: item.source, constraint: item.note, deviations: item.deviations ?? [], requestMediaType: "json" });
+  }
   for (const id of source.managementApi.vendorRoutes) {
     const [method, path] = operationKey(id);
     routes.push({ id, method: method.toUpperCase(), path,
@@ -190,7 +195,7 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
   for (const id of statusByField.keys()) if (!topFields.includes(id)) throw new Error(`unknown Wrangler top-level field: ${id}`);
   const fields = topFields.map(id => ({ id, ...statusByField.get(id) }));
   fields.push(
-    { id: "observability.logs", status: "planned", source: "wrangler-config-schema", stage: "P7" },
+    { id: "observability.logs", status: "supported", source: "wrangler-config-schema" },
     { id: "observability.traces", status: "unsupported", source: "wrangler-config-schema", stage: "P7" },
     { id: "limits.cpu_ms", status: "unsupported", source: "wrangler-config-schema", stage: "P8" },
     { id: "limits.subrequests", status: "unsupported", source: "wrangler-config-schema", stage: "P8" },
@@ -218,6 +223,7 @@ export function buildCapability(subset, manifest, source, configSchemaSha256, co
       legacyRoutes: source.managementApi.legacyRoutes.map(id =>
         ({ id, status: "unsupported", source: "day1-negative-route-inventory" })),
     },
+    workersObservability: source.workersObservability,
     wrangler: { version: "4.127.1", configSchemaSha256, fields, bindings, commands },
   };
 }
@@ -298,6 +304,20 @@ function extensionSchemas() {
       components: { type: "array", items: objectSchema(["name", "state"], {
         name: string, state: string, message: string,
       }) },
+      observability: objectSchema(
+        ["state", "retention_ms", "max_database_bytes", "query_max_timeframe_ms", "tail_sessions",
+          "closed_client_drops", "overload_drops"],
+        {
+          state: { type: "string", enum: ["healthy", "degraded"] },
+          retention_ms: nonNegativeInteger,
+          max_database_bytes: nonNegativeInteger,
+          query_max_timeframe_ms: nonNegativeInteger,
+          oldest_event_ms: nonNegativeInteger,
+          tail_sessions: nonNegativeInteger,
+          closed_client_drops: nonNegativeInteger,
+          overload_drops: nonNegativeInteger,
+        },
+      ),
     }),
     SchedulerStatus: objectSchema(["state", "pending", "running"], {
       state: string, pending: nonNegativeInteger, running: nonNegativeInteger,
@@ -490,6 +510,26 @@ export function validateCommitted({ openapiPath, wranglerRoot, sdkRoot } = {}) {
   for (const collection of [capability.wrangler.fields, capability.wrangler.bindings, capability.wrangler.commands]) {
     if (new Set(collection.map(item => item.id)).size !== collection.length) throw new Error("duplicate capability item");
     for (const item of collection) if (!lockStatus(item.status)) throw new Error(`invalid capability status: ${item.id}`);
+  }
+  const observability = capability.workersObservability;
+  for (const collection of [observability.settingsFields, observability.features,
+    observability.queryViews, observability.queryOperators]) {
+    if (new Set(collection.map(item => item.id)).size !== collection.length) {
+      throw new Error("duplicate Workers observability capability item");
+    }
+    for (const item of collection) {
+      if (!lockStatus(item.status)) throw new Error(`invalid Workers observability status: ${item.id}`);
+      const deviations = item.deviations ?? [];
+      if ((item.status === "supported_with_deviation") !== (deviations.length > 0)
+          || deviations.some(value => !observability.deviations.includes(value))) {
+        throw new Error(`invalid Workers observability deviation link: ${item.id}`);
+      }
+    }
+  }
+  if (observability.scriptTailProtocol !== "trace-v1"
+      || new Set(observability.limits).size !== observability.limits.length
+      || observability.limits.length === 0) {
+    throw new Error("Workers observability protocol or limit authority is invalid");
   }
   if (capability.wrangler.version !== lock.wrangler.version
       || capability.wrangler.configSchemaSha256 !== lock.wrangler.configSchemaSha256) {

@@ -2,12 +2,13 @@
 
 use crate::config_load::LoadedConfig;
 use crate::embedded_dashboard::embedded_dashboard_assets_sha256;
+use open_compute_core::config::ObservabilityConfig;
 use open_compute_core::{
     CacheConfig, CapabilityInventoryV1, D1Config, DurableObjectsConfig, ErrorCode, HardeningConfig,
     KvConfig, ManagementApiCapabilitiesV1, PlatformCapabilitiesV1, PlatformConfig, PlatformError,
     PlatformReleaseIdentityV1, PlatformReleaseMetadataV1, ProductCapabilityV1, R2Config,
     ReleaseSchemaDefinitionV1, RuntimeCapabilityV1, SchedulerConfig, TypeSourceIdentityV1,
-    WorkersConfig, WranglerCapabilitiesV1,
+    WorkersConfig, WorkersObservabilityCapabilitiesV1, WranglerCapabilitiesV1,
 };
 use open_compute_runtime::{embedded_runtime_assets_sha256, embedded_runtime_lock};
 use open_compute_storage::{
@@ -42,7 +43,16 @@ struct SnapshotPolicyV1<'a> {
     response_cache: &'a open_compute_core::ResponseCacheConfig,
     images: &'a open_compute_core::ImagesConfig,
     document_parser: &'a open_compute_core::DocumentParserConfig,
+    observability: &'a ObservabilityConfig,
 }
+
+type ProductRegistry = (
+    TypeSourceIdentityV1,
+    BTreeMap<String, ProductCapabilityV1>,
+    ManagementApiCapabilitiesV1,
+    WorkersObservabilityCapabilitiesV1,
+    WranglerCapabilitiesV1,
+);
 
 /// Build the complete production capability registry from embedded release inputs.
 pub fn platform_capabilities(
@@ -73,7 +83,8 @@ pub fn platform_capabilities(
         ai_search_schema_version: AI_SEARCH_SCHEMA_VERSION,
         snapshot_format_version: SNAPSHOT_FORMAT_VERSION,
     };
-    let (type_source, products, management_api, wrangler) = product_registry()?;
+    let (type_source, products, management_api, workers_observability, wrangler) =
+        product_registry()?;
     let limits = limit_registry(config);
     let capabilities = PlatformCapabilitiesV1 {
         schema_version: 1,
@@ -89,6 +100,7 @@ pub fn platform_capabilities(
         },
         products,
         management_api,
+        workers_observability,
         wrangler,
         limits,
     };
@@ -171,6 +183,7 @@ pub fn platform_config_policy_sha256(loaded: &LoadedConfig) -> Result<String, Pl
         response_cache: &config.response_cache,
         images: &config.images,
         document_parser: &config.document_parser,
+        observability: &config.observability,
     })
     .map_err(|_| capability_invalid())?;
     let mut digest = Sha256::new();
@@ -210,15 +223,7 @@ pub fn write_capabilities(
     Ok(())
 }
 
-fn product_registry() -> Result<
-    (
-        TypeSourceIdentityV1,
-        BTreeMap<String, ProductCapabilityV1>,
-        ManagementApiCapabilitiesV1,
-        WranglerCapabilitiesV1,
-    ),
-    PlatformError,
-> {
+fn product_registry() -> Result<ProductRegistry, PlatformError> {
     let inventory: CapabilityInventoryV1 = serde_json::from_slice(include_bytes!(
         "../../../share/cloudflare-capabilities.json"
     ))
@@ -230,6 +235,7 @@ fn product_registry() -> Result<
         inventory.source,
         inventory.products,
         inventory.management_api,
+        inventory.workers_observability,
         inventory.wrangler,
     ))
 }
@@ -330,6 +336,30 @@ fn limit_registry(config: &PlatformConfig) -> BTreeMap<String, u64> {
         (
             "workers.max_bundle_bytes".to_owned(),
             config.workers.max_bundle_bytes,
+        ),
+        (
+            "observability.retention_ms".to_owned(),
+            config.observability.retention_ms,
+        ),
+        (
+            "observability.max_database_bytes".to_owned(),
+            config.observability.max_database_bytes,
+        ),
+        (
+            "observability.max_invocation_log_bytes".to_owned(),
+            config.observability.max_invocation_log_bytes,
+        ),
+        (
+            "observability.max_tail_sessions_per_script".to_owned(),
+            u64::from(config.observability.max_tail_sessions_per_script),
+        ),
+        (
+            "observability.query_max_events".to_owned(),
+            u64::from(config.observability.query_max_events),
+        ),
+        (
+            "observability.query_max_timeframe_ms".to_owned(),
+            config.observability.query_max_timeframe_ms,
         ),
         (
             "kv.namespace_quota_bytes".to_owned(),

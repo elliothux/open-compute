@@ -1085,6 +1085,56 @@
                 }
               }
             }
+          },
+          "observability": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state",
+              "retention_ms",
+              "max_database_bytes",
+              "query_max_timeframe_ms",
+              "tail_sessions",
+              "closed_client_drops",
+              "overload_drops"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "healthy",
+                  "degraded"
+                ]
+              },
+              "retention_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_database_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "query_max_timeframe_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "oldest_event_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tail_sessions": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "closed_client_drops": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "overload_drops": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
           }
         }
       },

@@ -8,7 +8,6 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
-| [P7 Workers Logs 与 realtime tail](p7-workers-logs-realtime-tail.md) | 设计完成；stock workerd Tail 采集、`wrangler tail`、Workers Logs persistence/Telemetry query 与 Dashboard Live Tail 尚未实施 |
 | [P8 Workers Standard limits](p8-workers-standard-limits.md) | 设计完成；structural limits、Version settings 与 stock workerd runtime enforcer 尚未实施，CPU/subrequest/memory/startup/connection 当前受 `OC-WKR-LIMIT-001` 阻断 |
 | [P9 Dynamic Workers / Worker Loader](p9-dynamic-workers-worker-loader.md) | 合同与架构完成；`worker_loaders` v4/Version 支持受 upstream stock workerd nested-loader、limits 与 bounded-cache G0 阻断；Workers for Platforms 不在范围内 |
 | [P10 Cloudflare Artifacts](p10-cloudflare-artifacts.md) | Day 1 合同与架构完成；标准 v4/Worker binding/Git Smart HTTP 受进程内 Git engine G0 阻断；不把现有内部 ArtifactStore 或 LynxOS 文件夹伪装成 Cloudflare Artifacts |
@@ -26,6 +25,8 @@ P6 本地核心已经归档：见 [Cloudflare v4 API 与固定客户端兼容设
 [完成记录](implemented/ocd-day1-rename-results.md)。
 P5 核心实现见 [Vectorize 与 AI Search](implemented/p5-vectorize-ai-search.md)、
 [Xberg 文档解析](implemented/p5-7-xberg-document-parsing.md)及[完成记录](implemented/p5-vectorize-ai-search-results.md)。
+P7 核心实现见 [Workers Logs 与 realtime tail](implemented/p7-workers-logs-realtime-tail.md)：固定 Wrangler Script
+Tails、Workers Logs/Telemetry、Dashboard Live Tail、独立有界日志 authority 与重启恢复已进入 Day 1 production path。
 
 ## 待验收
 
@@ -37,6 +38,7 @@ P5 核心实现见 [Vectorize 与 AI Search](implemented/p5-vectorize-ai-search.
 | [Static Assets / Service Binding 远端资格](p3-assets-service-bindings-acceptance.md) | 两项核心实现已归档；直接 Cloudflare differential 尚未执行 |
 | [P5 剩余发行验收](p5-release-acceptance.md) | P5 本地核心已归档；可复现 benchmark report、四平台、完整 parser process matrix、托管 rich-document differential 与正式 package 尚待完成 |
 | [P6 Cloudflare v4 与固定客户端远端差分](p6-cloudflare-v4-differential-acceptance.md) | P6 本地核心已归档；当前环境没有 Cloudflare credentials，新 P6 管理资源、官方 SDK 与 Assets 托管端资格尚未执行；workspace/coverage 总验收按阶段约定延后到 P9 |
+| [P7 observability 扩展差分与发行验收](p7-observability-extended-acceptance.md) | P7 固定客户端核心及 repository acceptance 已完成；继续跟踪 hosted TTL/error/topology 长尾、参数化性能水位与跨平台发行资格，不扩大当前 capability |
 
 ## 跨阶段总方案
 

@@ -77,11 +77,10 @@ pub(super) async fn get(
         },
         None => None,
     };
-    let uploaded = match u64::try_from(metadata.uploaded).ok().and_then(|millis| {
+    let Some(uploaded) = u64::try_from(metadata.uploaded).ok().and_then(|millis| {
         std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_millis(millis))
-    }) {
-        Some(value) => value,
-        None => return error_response(V4Error::Internal, context.request_id()),
+    }) else {
+        return error_response(V4Error::Internal, context.request_id());
     };
     let not_modified = if_none_match
         .as_deref()
@@ -329,8 +328,11 @@ fn data_catalog_check(headers: &HeaderMap) -> Result<(), V4Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{data_catalog_check, etag_matches, put_options};
+    use super::{add_headers, data_catalog_check, etag_matches, put_options};
+    use axum::body::Body;
     use axum::http::{HeaderMap, HeaderValue};
+    use axum::response::Response;
+    use open_compute_artifacts::{R2Checksums, R2HttpMetadata, R2ObjectMetadata};
 
     #[test]
     fn pinned_wrangler_object_headers_are_preserved_and_validated() {
@@ -385,6 +387,28 @@ mod tests {
         headers.append("cf-r2-jurisdiction", HeaderValue::from_static("default"));
         headers.append("cf-r2-jurisdiction", HeaderValue::from_static("default"));
         assert!(put_options(&headers).is_err());
+
+        for (name, value) in [
+            ("expires", "not-a-date"),
+            ("content-length", "not-a-number"),
+            ("cf-r2-storage-class", "unsupported"),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(name, HeaderValue::from_static(value));
+            assert!(put_options(&headers).is_err(), "{name}");
+        }
+
+        let mut duplicate_catalog = HeaderMap::new();
+        duplicate_catalog.append("cf-r2-data-catalog-check", HeaderValue::from_static("true"));
+        duplicate_catalog.append(
+            "cf-r2-data-catalog-check",
+            HeaderValue::from_static("false"),
+        );
+        assert!(data_catalog_check(&duplicate_catalog).is_err());
+
+        let (options, length) = put_options(&HeaderMap::new()).unwrap();
+        assert_eq!(length, None);
+        assert_eq!(options.storage_class.as_str(), "Standard");
     }
 
     #[test]
@@ -393,5 +417,51 @@ mod tests {
         assert!(etag_matches("W/\"abc\"", "\"abc\""));
         assert!(etag_matches("\"other\", W/\"abc\"", "\"abc\""));
         assert!(!etag_matches("\"other\"", "\"abc\""));
+    }
+
+    #[test]
+    fn object_response_headers_cover_defaults_http_metadata_and_invalid_times() {
+        let metadata = R2ObjectMetadata {
+            key: "object".to_owned(),
+            version: "version".to_owned(),
+            size: 7,
+            etag: "etag".to_owned(),
+            http_etag: "\"etag\"".to_owned(),
+            uploaded: 1,
+            http_metadata: Some(R2HttpMetadata {
+                content_type: Some("text/plain".to_owned()),
+                content_language: Some("en".to_owned()),
+                content_disposition: Some("inline".to_owned()),
+                content_encoding: Some("gzip".to_owned()),
+                cache_control: Some("max-age=60".to_owned()),
+                cache_expiry: Some(1_000),
+            }),
+            custom_metadata: None,
+            range: None,
+            checksums: R2Checksums::default(),
+            storage_class: "Standard".to_owned(),
+            ssec_key_md5: None,
+        };
+        let mut response = Response::new(Body::empty());
+        add_headers(&mut response, &metadata).unwrap();
+        assert_eq!(response.headers()["content-type"], "text/plain");
+        assert_eq!(response.headers()["content-language"], "en");
+        assert_eq!(response.headers()["content-disposition"], "inline");
+        assert_eq!(response.headers()["content-encoding"], "gzip");
+        assert_eq!(response.headers()["cache-control"], "max-age=60");
+        assert!(response.headers().contains_key("expires"));
+
+        let mut defaults = metadata.clone();
+        defaults.http_metadata = None;
+        let mut response = Response::new(Body::empty());
+        add_headers(&mut response, &defaults).unwrap();
+        assert_eq!(
+            response.headers()["content-type"],
+            "application/octet-stream"
+        );
+
+        let mut invalid = metadata;
+        invalid.uploaded = -1;
+        assert!(add_headers(&mut Response::new(Body::empty()), &invalid).is_err());
     }
 }

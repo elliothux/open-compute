@@ -469,6 +469,10 @@ impl R2BindingService {
     }
 
     /// Replace one object from a bounded authenticated management request body.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the object mutation boundary keeps identity, preconditions, and body explicit"
+    )]
     pub(crate) async fn management_object_put(
         &self,
         account_id: AccountId,

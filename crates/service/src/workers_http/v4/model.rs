@@ -118,12 +118,41 @@ impl std::fmt::Debug for WorkerUploadMetadata {
     }
 }
 
-/// Upload metadata accepted for the Day 1 disabled-observability contract.
+/// Script-level Workers Logs policy emitted by the pinned Wrangler client.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkerUploadObservability {
-    /// Whether Cloudflare-hosted observability is enabled.
+    /// Master persistence switch.
     pub enabled: bool,
+    /// Optional default head-sampling rate.
+    pub head_sampling_rate: Option<f64>,
+    /// Workers Logs policy.
+    pub logs: Option<WorkerUploadObservabilityLogs>,
+    /// Unsupported trace persistence policy; disabled values are accepted explicitly.
+    pub traces: Option<WorkerUploadObservabilityTraces>,
+}
+
+/// Workers Logs fields supported by the local collector.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerUploadObservabilityLogs {
+    pub enabled: Option<bool>,
+    pub head_sampling_rate: Option<f64>,
+    pub invocation_logs: Option<bool>,
+    pub persist: Option<bool>,
+    #[serde(default)]
+    pub destinations: Vec<serde_json::Value>,
+}
+
+/// Explicitly disabled trace settings accepted without advertising trace support.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerUploadObservabilityTraces {
+    pub enabled: Option<bool>,
+    pub persist: Option<bool>,
+    pub head_sampling_rate: Option<f64>,
+    #[serde(default)]
+    pub destinations: Vec<serde_json::Value>,
 }
 
 /// Static Assets token and configuration carried by a Worker upload.
@@ -311,3 +340,7 @@ impl WorkerUploadBinding {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;

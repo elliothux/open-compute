@@ -89,3 +89,51 @@ fn ai_provider_readiness_is_local_and_requires_resolvable_credentials() {
         ErrorCode::SecretRefInvalid
     );
 }
+
+#[tokio::test]
+async fn full_runtime_checks_require_exclusive_authority_and_skip_missing_remotes() {
+    let temporary = tempfile::tempdir().unwrap();
+    let data_dir = temporary.path().join("data");
+    let mut config = open_compute_core::PlatformConfig::default();
+    config.storage.data_dir = data_dir.clone();
+    config.storage.master_key_file = data_dir.join("keys/master.key");
+    let storage = open_compute_storage::PlatformStorage::bootstrap(
+        &config.storage,
+        &open_compute_core::SystemClock,
+    )
+    .unwrap();
+    let loaded = LoadedConfig {
+        path: temporary.path().join("open-compute.toml"),
+        config,
+    };
+
+    let busy = inspect_data_root(&loaded.config.storage).unwrap();
+    assert!(!busy.holds_inspect_lock());
+    let mut checks = Vec::new();
+    runtime::run_full_extras(&mut checks, &loaded, &busy, None, None).await;
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0].status, CheckStatus::Failed);
+    assert_eq!(checks[0].code, Some(ErrorCode::DataDirInUse.as_str()));
+
+    drop(busy);
+    drop(storage);
+    let available = inspect_data_root(&loaded.config.storage).unwrap();
+    assert!(available.holds_inspect_lock());
+    checks.clear();
+    runtime::run_full_extras(&mut checks, &loaded, &available, None, None).await;
+    assert!(
+        checks
+            .iter()
+            .any(|check| { check.name == "s3_canary" && check.status == CheckStatus::Skipped })
+    );
+    assert!(
+        checks
+            .iter()
+            .any(|check| { check.name == "r2_canary" && check.status == CheckStatus::Skipped })
+    );
+    assert!(
+        checks
+            .iter()
+            .any(|check| { check.name == "runtime_cycle" && check.status == CheckStatus::Skipped })
+    );
+}
