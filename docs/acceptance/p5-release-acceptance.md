@@ -23,8 +23,10 @@
    p95、RSS 与 quota Go；没有留存报告时不把设计文档中的工程数字提升为 release SLA。
 2. Linux x64/arm64、macOS x64/arm64 的 Rust 1.98 release build、正式 package、单 binary size/hash 与隔离离线启动。
 3. parser child 的完整 panic/abort/OOM/signal/orphan cleanup/crash recovery/soak 矩阵，以及各平台实际 CPU、
-   address-space 与 process-group hard-limit 行为。Darwin 当前拒绝 `setrlimit(RLIMIT_AS)`；必须在 macOS 发行前
-   落实并验证等价 RSS hard limit，不能把 Linux 的 2 GiB `RLIMIT_AS` 结果外推到 macOS。
+   address-space 与 process-group hard-limit 行为。Darwin 当前拒绝 `setrlimit(RLIMIT_AS)`；
+   2026-09-05 明确接受 macOS 解析子进程无内存硬上限作为 0.1.0 的已知限制，保留完整格式支持。
+   RSS 硬限制移为[待实施 TODO](../macos-document-parser.md)，不再作为此次发行阻断条件。
+   其他现有 CPU、输入/输出、并发、超时和进程清理限制继续生效；Linux 结果不外推到 macOS。
 4. 使用专属临时资源对 Cloudflare 托管 Markdown Conversion rich-document output/error/limit 做 differential；
    不复用或修改账号既有 Worker、Vectorize index、AI Search instance、AI Gateway 或数据源。
 5. release artifact 的 license/NOTICE、签名、发布与受权限约束的外部资格。

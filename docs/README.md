@@ -10,6 +10,7 @@
 
 | 文档 | 当前状态 |
 | --- | --- |
+| [macOS 解析进程内存限制](macos-document-parser.md) | TODO：RSS 硬限制待实现；0.1.0 接受此限制并保留完整格式支持 |
 | [P10 Dynamic Workers / Worker Loader](p10-dynamic-workers-worker-loader.md) | 合同与架构完成；`worker_loaders` v4/Version 支持受 upstream stock workerd nested-loader、limits 与 bounded-cache G0 阻断；Workers for Platforms 不在范围内 |
 | [P11 Cloudflare Artifacts](p11-cloudflare-artifacts.md) | Day 1 合同与架构完成；标准 v4/Worker binding/Git Smart HTTP 受进程内 Git engine G0 阻断；不把现有内部 ArtifactStore 或 LynxOS 文件夹伪装成 Cloudflare Artifacts |
 | [P12 Cloudflare Browser Run](p12-browser-run.md) | Day 1 合同与架构完成；标准 binding/Quick Actions/DevTools/CDP 通过 operator-owned 外部 Browser Provider 执行，受真实 stock-workerd/package/provider G0 阻断；正式 open-compute 发布仍是单个 `ocd` |

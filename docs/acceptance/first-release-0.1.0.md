@@ -24,11 +24,16 @@
 下载和校验步骤见[发布参考](../references/releasing.md)，部署契约见
 [单二进制指南](../references/single-binary.md)。
 
-本次不改变 Cloudflare API 支持范围和 workerd pin。Workers Standard request/isolate 资源限制执行器
+本次保持 workerd pin 与完整的 13 种文档格式支持。macOS 解析子进程缺少内存硬上限，
+经明确决定接受为 0.1.0 限制；现有其他资源约束继续生效，见 [TODO](../macos-document-parser.md)。
+撤回此前本地禁用格式的修改，生产解析源码、测试与 parser contract 摘要恢复到原实现。Workers Standard request/isolate 资源限制执行器
 仍受 upstream 阻断，见 [P9 限制](../blocked/p9-workers-standard-limits.md)。长时 soak、签名/公证、
 托管端差分与第三方应用重验不能由本次原生发行替代，其他缺口见[验收索引](README.md)。
 完整 `bun run test:js` 的 vinext 冻结输入检查报告 `root lock digest drift`；215 个平台 JS 用例通过。
 release 与普通 CI 使用相同的 `test:js:ci` 平台集合，不重写历史应用报告或冻结摘要来制造通过结果。
+
+PR CI `33951624671` 的产品 Gates 通过，但 `p3-contract` 的 source baseline 摘要漂移导致整体失败；
+其余 13 项合同检查通过。当前实现变更完成后重新冻结源码摘要，不改写历史报告。
 
 ## 待收集的发行证据
 
