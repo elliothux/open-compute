@@ -129,7 +129,7 @@ flags 只允许启用该行为所需的平台内部项。基线变更必须重�
   "runtimeContract": "<baseline-digest>",
   "sources": [
     { "kind": "cloudflare-doc", "url": "https://...", "revision": "<commit>", "path": "<path>", "sha256": "<digest>" },
-    { "kind": "workerd-test", "path": "references/workerd/...", "revision": "<lock revision>" }
+    { "kind": "workerd-test", "path": "third_party/workerd/...", "revision": "<lock revision>" }
   ],
   "cases": ["cache-api/conditional/if-none-match"],
   "deviations": []
@@ -310,52 +310,10 @@ Cloudflare cleanup 按 Worker 名和两个 database ID
 Miniflare 只可用于 upstream 工具行为对照；它不证明 platformd 的 authority、SQLite/S3、进程监督
 或隔离。一个 browser E2E 成功也不能替代 Cache API、Queue replay 或删除 fence 的 product Gate。
 
-## 6. vinext 的正确角色
+## 6. 应用 qualification
 
-### 6.1 固定 workload，不是平台规格
-
-继续使用固定源码 revision
-[`5d0b53088c689b75d63672eab6ff66434afa5b3b`](https://github.com/cloudflare/vinext/tree/5d0b53088c689b75d63672eab6ff66434afa5b3b)，
-但用途改为组合验收。完整输入仍需固定 lock、React/Vite/RSC plugin、浏览器和构建工具。
-
-选取 workload 应覆盖：
-
-- App/Pages Router 的 production build、Static Assets、SSR/streaming、CSR hydration、RSC、Actions；
-- SSG/ISR 与应用自己的 KV Data Cache；
-- Workers Cache 的 response HIT/STALE/revalidation/tag purge 与 Version Metadata；
-- Images binding 的 width/format/quality 路径；
-- Service Binding/self binding、promotion/rollback、cold/warm/restart；
-- server-only secret 不进入 client asset，HTML/Flight/cache variant 不串。
-
-这些 workload 证明组合可用，但平台只实现它们映射到的 Cloudflare API。vinext 的
-`kvDataAdapter()` 值格式/tag 逻辑、CDN adapter 的 header 转换、Next.js cache key、PPR shell、
-Server Action 编码都留在 vinext，不下沉到 platformd。
-
-### 6.2 失败分类
-
-| 对照结果 | 分类与动作 |
-| --- | --- |
-| Cloudflare pass，open-compute fail，且映射到 supported contract | 平台回归，P3.4 No-Go |
-| 两边都 fail，vinext baseline 也 fail/标为 partial | vinext/upstream 限制；记录，不修平台 |
-| Cloudflare pass，open-compute fail，但能力明确 unsupported | application 不兼容；保持 unsupported 或另立范围决策 |
-| open-compute pass，Cloudflare fail | 可能是平台扩展/fixture 问题；不据此宣传更兼容，先调查 |
-| 原版 Next.js 要求，但固定 vinext 未实现 | 不属于 P3 平台 Gate |
-| vinext toolchain/dev/HMR 失败，production artifact 行为正常 | 工具集成结论；不冒充 runtime 失败或通过 |
-
-可以发现/运行完整 vinext suite 作为调查证据，但“全部上游启用测试通过”不再是 Platform Go 的
-定义。Gate 清单只包含已映射的目标 workload；每个 inclusion/exclusion 记录原因，不能临时删掉
-平台失败的 case。
-
-### 6.3 不允许的适配
-
-- 在 loader、cache、assets、services、images 中判断 vinext module/path/header 名；
-- importer 改写 framework 业务代码或删除 assertion；
-- 为 `VINEXT_KV_CACHE`、`IMAGES`、`CF_VERSION_METADATA` 建特殊物理资源；
-- 缺 binding 时回退内存、原图、Node server 或关闭 ISR/PPR；
-- 用普通 HTML 200 代替 hydration/RSC/stream/cache 行为。
-
-允许的只有宿主 adapter：固定构建命令、读取正式产物描述、创建通用资源、部署、设置 base URL、
-浏览器连接和结果收集。
+平台与应用分别判定。vinext 用固定 artifact、依赖和环境运行应用矩阵；应用通过不能代替平台 API／隔离／恢复验收。
+固定输入与实际结果见 [P4 qualification](p4-nextjs-vinext-qualification.md)。
 
 ## 7. 平台隔离矩阵
 
@@ -449,90 +407,12 @@ unit/toolchain tests 与平台 production workload 分列；Node/Miniflare PASS 
 pass denominator 后称 100%。记录所有原始 attempt；上游 runner 自带 retry 时保留每次结果，不能
 只展示最后一次绿灯。自动 retry-to-green 禁止。
 
-## 10. Gate 分组与重复策略
+## 10. Gate 调度
 
-建议最终目标，名称在实现前不视为已有命令：
+当前调度、case discovery、隔离、覆盖率和最终单轮验收统一见[测试手册](../references/testing.md)。
+历史实际结果见[完成报告](cloudflare-runtime-compatibility-results.md)。
 
-| target | 范围 |
-| --- | --- |
-| `p3-contract` | catalog/capability/types/config/source 完整性 |
-| `p3-assets` | 已有 P3.1 product matrix |
-| `p3-services` | 已有 P3.2 hard/product matrix及补齐事件源/crash 项 |
-| `p3-cache-images` | P3.3 hard/product matrix |
-| `p3-apps` | 显式选择的 third-party workload build/deploy/browser；不属于 Platform Go 默认集合 |
-| `p3-isolation` | 两账户/Worker/deployment/entrypoint/secret/cache 组合矩阵 |
-| `p3-recovery` | S3/SQLite/process/crash/reconcile/cleanup 矩阵 |
-| `p3-cf-diff` | 显式受控真实 Cloudflare differential；不属于默认 workspace |
-| `p3` | mandatory 平台本地目标并集，不包含 `p3-apps`/`p3-cf-diff`，不重复运行子目标 |
+## 12. 验收依据
 
-确定性 catalog、固定输入、协议拒绝和显式 fault marker case 登记为 ONCE。真实并发、stream cancel、
-进程退出、deadline、cache refresh race、browser timing 与清理登记为 TIMING。最终仍是完整确定性
-一轮、仅 TIMING fresh-process 补两轮；不把所有浏览器/上游测试机械跑三遍。
-
-case 分类只由 [`test/gate_cases.py`](../../test/gate_cases.py)拥有。新增 typed runner 后，registry 也必须
-覆盖非 Cargo case，新增/删除/重名未审查时在执行前失败。并行只用于已证明 data-dir/S3 prefix/
-port/browser profile 隔离的目标；resource-heavy browser/images/recovery 保守独占或固定小并发。
-
-## 11. 工作包
-
-| 包 | 内容 | 完成判据 |
-| --- | --- | --- |
-| P3.4-0 | 固定平台契约与工具链 baseline | tracked manifest、全部平台 digest、无浮动输入 |
-| P3.4-1 | upstream types、catalog、capability/config/deviation 审计 | L0 AST/compile 与双向完整性检查通过；目标缺口为 blocked，非目标 fail closed |
-| P3.4-2 | typed runner 与 portable fixture harness | offline list、两个 deploy adapter、结果/清理模型通过 |
-| P3.4-3 | 补齐 P3.1/P3.2/P3.3 残项 | 各阶段独立 Go，不靠应用 smoke |
-| P3.4-4 | 全量目标 contract/product 回归 | 全部目标 stable API 有真实 workerd/platform evidence，blocked 为零 |
-| P3.4-5 | vinext 等可选应用 qualification | 独立 application manifest；正常 build/deploy/browser；失败按 contract 分类 |
-| P3.4-6 | 两账户隔离与故障恢复 | L6 矩阵、resource/pin/process/temp cleanup 通过 |
-| P3.4-7 | Cloudflare differential qualification | 冻结 fixture、受控账号、无未解释差异/孤儿资源 |
-| P3.4-8 | P3 Exit 与报告/归档 | 静态检查、coverage、最终轮次、verdict 与限制完整 |
-
-P3.4-0/1/2/3/4/6/8 已按新的 upstream AST 和 single-latest contract 完成；P3.4-5 是可选应用
-qualification。P3.4-7 的七项 hosted fixture 已完成，Workflow hosted fixture 因外部 credential 条件单独
-保持 active，不重新打开已经完成的本地 contract/product 实现。
-
-## 12. P3 Exit
-
-### 12.1 Platform Go
-
-只有同时满足以下条件才能宣布“open-compute 在声明范围内贴近 Cloudflare Workers”：
-
-1. baseline/catalog 固定，upstream stable types 的目标 AST 与 workerd、唯一 effective date、内部 flags
-   均有 source、digest、case 和实际结果；
-2. upstream 类型、capability JSON、generated `Env`、配置 parser、descriptor、文档与测试支持面完全一致；
-3. 所有 `supported` case 通过；所有 deviation 有稳定 ID 和回归；unsupported 输入明确拒绝；blocked
-   为零；
-4. P3.1 Static Assets、P3.2 Service Binding、P3.3 Cache/Images 各自完成未决真实平台 Gate；
-5. P0–P2 相关产品回归、跨产品两账户隔离、secret/client boundary、immutable promotion/rollback、
-   crash/recovery/cleanup 全部通过；
-6. portable high-risk fixture 在真实 Cloudflare differential 中没有未解释的“CF pass / OC fail”；
-7. 完整 Rust/TS/static/dependency/MSRV/production 检查通过，Rust line coverage 不低于 90.00%；
-8. 正式 release qualification 按[测试规范](../references/testing.md)执行一个完整 round；本实现 goal 的
-   单轮报告保留原始结果且无 retry-to-green，符合当前 Gate 轮数政策；
-9. 没有遗留 workerd/platformd/browser、listener、Cloudflare fixture、S3 prefix、image session、temp
-   file 或未释放 pin；
-10. P1 的单文件/离线/跨目标 release qualification 仍按其 active 文档完成；P3 测试不能代替正式
-    发行包装证据。
-
-结论文字应类似：
-
-> open-compute 对 baseline/catalog `<digest>` 固定的 latest stable Workers runtime，以及 Durable
-> Objects、Queues、Workflows、R2、D1、KV tenant API 达到 Go；单节点差异见 `OC-*` 清单。结果不包含
-> Cloudflare 管理 API、其他产品或全球 edge 基础设施。
-
-### 12.2 Application Go
-
-vinext 的结论单独写：
-
-> 固定 vinext revision 的选定 Cloudflare workload 在 open-compute 正常 build/deploy/browser 路径
-> 通过；覆盖的 contract IDs 见 application report。vinext/Next.js 未实现功能和未选择的上游测试
-> 不构成平台能力声明。
-
-如果 vinext workload 未完成，Platform verdict 仍按契约证据判定，但不能声称该应用已兼容。如果
-Platform contract 未完成，即使 vinext workload 全绿也只能是应用 smoke，不能给 Platform Go。
-
-### 12.3 归档
-
-本方案已与[完成报告](cloudflare-runtime-compatibility-results.md)归档到 `docs/implemented/`。报告记录
-revision、dirty source digest、workerd lock、baseline/catalog、Cloudflare observation、工具链、
-target/case/round、coverage、清理与限制；本方案本身不作为完成证据。
+核心实现与本地／hosted 证据见[完成报告](cloudflare-runtime-compatibility-results.md)。
+未取得的 qualification 继续由[验收索引](../acceptance/README.md)追踪。

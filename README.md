@@ -61,7 +61,7 @@ open-compute *is* that layer — and it ships as **one file**.
 - **One binary, everything inside.** Runtime, control plane, scheduler, and every product binding. Copy it to a host, point it at a directory, and you are serving traffic.
 - **Fast because it's workerd.** Your code runs on stock workerd, Cloudflare's open-source V8 runtime. Isolates start in **milliseconds** and idle in **megabytes** — not containers, not gigabytes, not per-request process spawns.
 - **Nothing else to run.** SQLite owns platform metadata and direct Local storage owns object bytes by default. You can select one S3-compatible authority instead; neither mode needs a sidecar.
-- **Never forked.** Upstream workerd is pinned, verified, and used as-is — so upstream fixes and V8 upgrades arrive as a version bump, not a merge conflict.
+- **Pinned and verified.** The current release pin uses stock workerd. Native limits and Loader development uses the [`elliothux/workerd` submodule](docs/workerd/README.md) at `third_party/workerd`; adopting a fork binary requires a coordinated pin update and validation.
 - **Yours completely.** Your code, your data, your machines, fully offline. No account, no egress, no telemetry, no bill.
 
 ## Proof, not promises

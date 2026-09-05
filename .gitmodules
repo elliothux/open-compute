@@ -1,0 +1,3 @@
+[submodule "third_party/workerd"]
+	path = third_party/workerd
+	url = https://github.com/elliothux/workerd
