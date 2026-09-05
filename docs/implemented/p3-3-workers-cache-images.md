@@ -106,7 +106,7 @@ Cloudflare 文档会变化；某次网页勘察不能永久替代固定的 compa
 
 - 正式 runtime 仍是 `workerd v1.20260826.1`，来源由
   [`workerd.lock.json`](../../packages/runtime/workerd.lock.json)固定；
-- `references/workerd/src/workerd/server/workerd.capnp` 的静态 Worker 支持
+- `third_party/workerd/src/workerd/server/workerd.capnp` 的静态 Worker 支持
   `cacheApiOutbound`；
 - 同一 pin 的 `WorkerLoader::WorkerCode` 仍有 `TODO(someday): cache API outbound?`，没有可声明的
   cache channel；
@@ -115,7 +115,7 @@ Cloudflare 文档会变化；某次网页勘察不能永久替代固定的 compa
 - framework importer 会拒绝尚未支持的 `cache`、`images`、`version_metadata` 配置；已有 KV 可以
   承载任意应用的数据缓存，但“有 KV”不等于已有 Workers Cache。
 
-因此第一工作包必须验证 runtime 接入，不先建表再假定全局 `caches` 能被动态 Worker 使用。
+动态 Worker 的全局 `caches` 接入由真实 runtime 产品回归验证。
 
 ### 2.3 C0 Hard Gate
 
@@ -484,27 +484,6 @@ I0 是 No-Go；先调整明确的产品支持矩阵并登记 deviation，不能�
 如果 image engine 能保持低层 sibling 依赖，可新建小 crate；否则放入 `artifacts` 会混淆不可变对象与
 CPU transform 所有权，不建议。禁止把解析、SQLite 或 codec 逻辑堆进 loader host。
 
-## 9. 工作包与依赖顺序
-
-| 包 | 内容 | 退出条件 |
-| --- | --- | --- |
-| C0 | WorkerLoader Cache/ctx/dispatcher Hard Gate | stock workerd 通用路径 Go；否则停止 Cache 实现 |
-| C1 | 固定契约矩阵、deviation 与限额字段 | capability schema/文档/test IDs 一一对应 |
-| C2 | current descriptor/schema、per-Worker cache DB、S3 refs | clean init、损坏拒绝、删除/GC/重启 Gate |
-| C3 | Cache API facade 与 wire transport | 普通 Worker 的 default/named put/match/delete 全矩阵 |
-| C4 | automatic Workers Cache dispatcher | public/Service/ctx.exports、entrypoint override、version isolation |
-| C5 | SWR/SIE、Vary、conditional/range、tag/path purge | 并发 lease、purge fence、crash matrix 通过 |
-| I0 | Images engine/codec/limits spike | 单引擎、单文件、required matrix Go |
-| I1 | Images facade/session/engine | input/info/transform/draw/output 与安全负向矩阵 |
-| I2 | importer、Version Metadata、capabilities/operator metrics | 普通 Worker 配置 round-trip、rollback/restart 正确 |
-| C6 | 官方示例与 portable contract qualification | 普通 Worker 示例、Cloudflare differential、无未解释差异 |
-| A0 | 可选应用 qualification | 独立 application baseline；vinext 映射场景单独出结论；无专用生产分支 |
-| X | P3.3 Aggregate Gate 与结果文档 | 相关静态检查、coverage、单轮/三轮政策完成 |
-
-C0 与 I0 可以并行调查；C2 只能在 C0 结论确定后进入。Images 不依赖 Cache API；若执行 A0，
-其图片 response caching 场景依赖 C4/C5。Version Metadata 应在 C4 前完成 descriptor，避免后补
-版本身份。A0 不阻塞 P3.3 Platform Go。
-
 ## 10. 验收矩阵
 
 ### 10.1 Hard Gate
@@ -569,24 +548,7 @@ Images capacity；管理调用走现有 control auth。不能提供任意 S3 key
 文件浏览接口。Worker 删除 saga 先 fence 新调用、drain pins，再删除 cache DB 引用；物理 S3 bytes
 按 grace GC。失败清理保留脱敏 manifest 到 `.temp`，不删除已有 Gate 证据。
 
-## 12. P3.3 Exit Gate
+## 12. 验收依据
 
-只有同时满足以下条件才是 P3.3 Go：
-
-1. C0/I0 两个 Hard Gate 对正式 pin 和单文件发行模型都是 Go；
-2. 普通 Worker 的 Workers Cache、Cache API、Images、Version Metadata 公开矩阵全部通过；
-3. public/Service/ctx.exports 三条 fetch 路径的缓存行为相同，RPC/事件正确绕过；
-4. SQLite/S3 authority、tenant/version/entrypoint 隔离、purge fence、stream 生命周期和 crash recovery
-   有真实进程证据；
-5. Images required codec/operation/安全/资源矩阵通过，无原图 fallback、mock 或外部 sidecar；
-6. capabilities/limits/deviations 与类型声明只广告实际支持面；
-7. 官方普通 Worker 示例经正常 build/deploy/platformd/workerd 路径通过；portable Cloudflare
-   differential 作为 P3.4 的资格验收，不反向阻塞本阶段已经声明和验证的单节点产品支持面；
-8. 相关开发 Gate 单轮、源码冻结后的审查登记时序用例额外两轮，最终 workspace/coverage 按
-   [测试规范](../references/testing.md)完成；
-9. 报告保存输入摘要、正式 runtime 身份、逐 case/逐轮结果、故障点、资源清理和未通过项。
-
-任何 Cache API 接口因 WorkerLoader 缺口未执行、任何 automatic fetch 路径被跳过、任何 Images
-格式靠 passthrough，结论都是 No-Go 或明确缩小后的 Conditional Go，不能写“vinext 能跑所以
-Cloudflare Cache/Images 已支持”。vinext 未运行时 Application verdict 是“未评估”，不降低满足以上
-条件的 Platform verdict。
+本文开头保留当次 Platform Go 与实际验证记录。当前执行规则见[测试手册](../references/testing.md)，
+逐项 API 支持见[兼容矩阵](../references/cloudflare-compatibility.md)。

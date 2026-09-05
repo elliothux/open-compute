@@ -73,43 +73,11 @@ Rust build cache；未删除 `.data/`、失败证据或正式 pinned workerd 输
 7. P8 不支持在线迁移、镜像、tiering、双写或运行中切换后端。已初始化平台更换 backend 或 authority 时
    fail closed；未来若需要迁移，另行设计显式、可校验的 export/import 工作流。
 
-## 2. 当前事实与改造范围
+## 2. 对象存储所有权
 
-当前实现有以下直接耦合：
-
-- [`PlatformConfig.storage`](../../crates/core/src/config.rs) 当前表示本机 data-dir、master key 和 SQLite/磁盘策略，
-  `[storage]` 这个 wire name 没有表达“本机平台状态”语义；
-- [`PlatformConfig`](../../crates/core/src/config.rs) 固定包含 `[s3]`，即使只在本机开发也要解析 S3 endpoint 和
-  credentials；
-- [`run.rs`](../../crates/service/src/run.rs) 启动时固定解析 credentials、创建 `S3ArtifactClient`、执行 S3/R2
-  preflight，再把同一 client 分发给各 object store；
-- [`crates/artifacts`](../../crates/artifacts/src/lib.rs) 的 domain store 直接使用 AWS SDK request/response、
-  `ByteStream`、provider status 和 pagination token；
-- [`scripts/dev.sh`](../../scripts/dev.sh) 手动启动独立 rclone 进程，`ocd` 只把它当作外部 S3 endpoint；
-- [`scripts/dev-test.sh`](../../scripts/dev-test.sh) 已有 repository-owned SigV4 fixture，而 rclone 分支无法满足完整
-  R2 capability preflight。
-
-P8 的最终生产结构为：
-
-```text
-ArtifactStore ─┐
-R2ObjectStore ─┤
-SnapshotStore ─┼── ObjectBackend ── LocalObjectBackend ── secure filesystem
-AiSearchStore ─┤                  └─ S3ObjectBackend    ── AWS SDK / SigV4
-BackupStore ───┘
-```
-
-`ArtifactStore`、`R2ObjectStore` 等继续拥有领域 key、metadata、校验和、生命周期和公开错误语义；
-`ObjectBackend` 只拥有后端操作、并发条件和后端错误分类。SQLite 不移入 `crates/artifacts`，S3 细节也不能再泄漏到
-`service` 或 `workers`。
-
-不在 P8 范围内：
-
-- 把 SQLite、D1、Durable Objects 或 Vectorize index 改成对象存储；
-- 提供公开 S3 endpoint 或让 tenant 获得对象后端 credentials/path；
-- 让一个 account/bucket 选择不同 backend；
-- 用 FUSE、NFS、SMB、rclone mount 或 network filesystem 伪装本地目录；
-- 自动识别旧 rclone 目录、旧 `[s3]` 配置或历史开发数据。
+Artifact、R2、snapshot、backup 与 AI Search domain store 统一调用 `ObjectBackend`；
+它只负责后端操作、并发条件与错误分类，领域 key、metadata、完整性和生命周期仍由各 store 拥有。
+Local 与 S3 是启动时互斥选择，不能在单个 account／bucket 中切换；SQLite 与 workerd storage 保留原有 ownership。
 
 ## 3. 配置合同
 
@@ -613,63 +581,6 @@ scripts/config/
 
 删除 rclone 集成不意味着删除 S3 backend；它只删除“为了本地目录而额外启动一个 S3 协议转换进程”的开发路径。
 
-## 12. 实施顺序
-
-### P8.1 配置与 authority model
-
-- 把当前 `PlatformConfig.storage: StorageConfig` 直接改为 `PlatformConfig.data: DataConfig`，wire 从
-  `[storage].data_dir` 改为 `[data].path`；
-- 用内部字段 `PlatformConfig.object_storage: ObjectStorageConfig` tagged enum替换 `PlatformConfig.s3`，其 wire
-  section 固定为 `[storage]`；
-- `load_platform_config` 增加唯一的 config path resolver：相对 `--config` 锚定 startup CWD，TOML 内相对路径锚定
-  已安全打开配置文件的 canonical parent；parse 后统一产出 resolved absolute paths；
-- 增加 Local/S3 variant静态和动态校验；
-- 更新 default config、config tests、capabilities、support bundle和 secret resolution；
-- 直接更新当前 platform schema/fingerprint字段及所有 producer/consumer/fixture。
-
-Exit：相对/绝对路径在所有 config consumers 中得到唯一一致结果；配置只能选择一个 backend；Local 不读取 S3 secret；
-authority mismatch在 mutation前失败。
-
-### P8.2 Backend-neutral operation facade
-
-- 新增 `ObjectBackend`、ObjectKey/value/request/response/error类型；
-- 将现有 AWS SDK调用收口到 `S3ObjectBackend`；
-- domain stores和 service移除 AWS SDK类型；
-- 用现有 S3 fixture跑 shared backend contract，确保这一步不改变公开行为。
-
-Exit：除 S3 adapter和 test fixture外，生产代码无 AWS request builder/`ByteStream`/provider status依赖。
-
-### P8.3 Secure Local backend
-
-- 实现 root marker/lock、secure fd-relative traversal 和 versioned single-file envelope；
-- 实现 put/head/get/range/list/delete、metadata和条件原子性；
-- 实现 multipart、SSE-C分块 AEAD、bounded recovery和free-space admission；
-- 增加 corruption、symlink、hardlink、special-file、race和crash fault tests。
-
-Exit：Local shared contract全过，且攻击性 filesystem matrix证明不会读写 root外目标。
-
-### P8.4 Composition 与完整产品路径
-
-- `run`、doctor、backup/restore、snapshot pins、R2 maintenance、artifact cache、AI Search、Workers Cache全部接入一个
-  selected backend；
-- 重命名 S3-only health/metrics/errors/fingerprint；
-- 更新 snapshot include/exclude和 backend mismatch规则；
-- 删除 production/test helper中重复的 `S3ArtifactClient`构造。
-
-Exit：同一组 product tests分别在 Local和S3 fixture路径运行；两者公开 response/持久化不变量一致。
-
-### P8.5 开发与文档收尾
-
-- 新增受版本控制的 `scripts/config/dev.toml`、`dev-test.toml` 和只含 fixture token 的 `dev.env`；
-- 让 `dev.sh` 和 `dev-test.sh` 直接消费这些文件，删除 TOML 生成、rclone/Mock S3 sidecar 与 backend
-  selector；smoke 必须把 readiness 失败视为失败；
-- 更新安装、first-start、S3 outage、backup、disk pressure、single-binary和support-bundle runbook；
-- 明确 Local非异地备份、network filesystem unsupported和无自动 backend migration；
-- 清除旧 `[storage].data_dir`、`[s3]`、`[object_storage]` 示例、S3-only命名、dead constructors和兼容分支。
-
-Exit：fresh checkout的标准本地启动只需要 `ocd`及正式 pinned workerd输入，不需要 rclone或外部 object server；
-两个 checked-in TOML 均通过 production config loader/check，且 scripts 不再包含配置 schema 的重复副本。
-
 ## 13. 必测矩阵
 
 ### 13.1 配置路径解析
@@ -715,44 +626,7 @@ Exit：fresh checkout的标准本地启动只需要 `ocd`及正式 pinned worker
 - health/metrics/doctor/support bundle无secret、customer key、object key或path泄漏；
 - test结束后无workerd、fixture、rclone、listener、staging或multipart泄漏。
 
-## 14. 验收命令
+## 14. 验收依据
 
-实施完成并source freeze后，按仓库规则执行一次：
-
-```text
-bun run build
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
-RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
-cargo +1.98.0 check --workspace --all-targets
-cargo metadata --no-deps --format-version 1
-./test/check-boundaries.sh
-./test/coverage.sh
-./test/gate.py --workspace
-```
-
-Cargo命令继续要求显式、已存在且正式固定的 `OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE`；real-runtime Gate继续要求
-`OPEN_COMPUTE_TEST_WORKERD`。不得为P8验证隐式下载runtime，也不得重复完整workspace Gate。
-
-## 15. Definition of Done
-
-P8只有同时满足以下条件才可归档：
-
-- `[data].path` 明确本机平台状态 root；`[storage]` 以 tagged enum 强制 Local/S3互斥，旧
-  `[storage].data_dir`、`[s3]`、`[object_storage]` 和混合字段 fail closed；
-- 相对 `--config` 只锚定 startup CWD，配置内相对路径只锚定实际 config directory；所有下游只接收 resolved
-  absolute path，且相对路径支持不削弱 no-follow、permission、containment 和 authority校验；
-- Local标准启动不解析S3 credentials、不启动rclone、不监听额外S3端口；
-- 所有生产object消费者只依赖`ObjectBackend`和backend-neutral types；
-- AWS SDK类型仅留在S3 adapter/test fixture，filesystem path/fd仅留在Local adapter和受控staging边界；
-- Local no-follow/path-containment/permission/hardlink/special-file/atomicity/fsync/crash recovery全部有成功和失败覆盖；
-- Local与S3均通过shared operation contract和完整R2 product matrix；
-- SSE-C在Local磁盘上不保存plaintext或key，错误key/tamper/range/multipart行为通过Gate；
-- backend authority被marker、SQLite和snapshot一致绑定，运行中或重启时不会静默切换；
-- snapshot不递归包含Local object root，Local非off-host backup限制写入runbook；
-- rclone脚本、旧S3-only composition、dead helpers、兼容alias和重复实现同批删除；
-- 文档、配置、fixtures、capabilities、support bundle、metrics、doctor和runbook与最终实现一致；
-- coverage保持至少90.00%，相关focused/static checks及最终单轮workspace Gate全部成功并记录实际证据。
-
-以上 Definition of Done 已由第 0 节记录的冻结源码、兼容性审查、覆盖率与最终单轮 workspace Gate 满足，
-因此本文随实现一并归档；未执行的发行、部署或跨平台资格不被表述为 P8 已验证能力。
+冻结源码、实际检查命令、coverage 与最终单轮 Gate 结果保留在第 0 节。
+当前执行方式统一见[测试手册](../references/testing.md)。

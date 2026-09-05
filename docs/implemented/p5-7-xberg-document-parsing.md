@@ -82,9 +82,9 @@ P5.7 不设计新的文档解析产品 API。兼容分母固定为以下两个 W
 合同来源按以下顺序冻结：
 
 1. 本仓库 pinned workerd 的
-   [`ai-search.d.ts`](../../references/workerd/types/defines/ai-search.d.ts)、
-   [`to-markdown.d.ts`](../../references/workerd/types/defines/to-markdown.d.ts) 和
-   [`to-markdown-api.ts`](../../references/workerd/src/cloudflare/internal/to-markdown-api.ts) facade source；
+   [`ai-search.d.ts`](../../third_party/workerd/types/defines/ai-search.d.ts)、
+   [`to-markdown.d.ts`](../../third_party/workerd/types/defines/to-markdown.d.ts) 和
+   [`to-markdown-api.ts`](../../third_party/workerd/src/cloudflare/internal/to-markdown-api.ts) facade source；
 2. Cloudflare 当前的
    [AI Search Items Workers binding](https://developers.cloudflare.com/ai-search/api/items/workers-binding/) 与
    [Markdown Conversion Workers binding](https://developers.cloudflare.com/workers-ai/features/markdown-conversion/usage/binding/) 文档；
@@ -225,15 +225,9 @@ P5.7 的 compatibility verdict 是 tenant Worker API。Cloudflare 的
 为了 REST 再实现一套 parser。若以后纳入，必须作为 P5.8 的显式 data-plane adapter，复用同一 parser service，
 并单独解决 account-scoped auth、multipart limits、response envelope 和 public-listener Gate。
 
-## 3. 为什么选 Xberg
+## 3. Parser 依赖合同
 
-Kreuzberg v4 已明确进入 legacy/LTS，新的功能开发迁往 Xberg。Xberg 当前 workspace 使用 Rust 2024、
-声明 Rust 1.92 MSRV、MIT license，并将 `pdf-native`、`pdf-pdfium`、`office`、`excel`、`iwork`、OCR 和模型
-能力拆成 Cargo features；正式 pin 时已结合 crates.io source 与
-[workspace Cargo.toml](https://github.com/xberg-io/xberg/blob/main/Cargo.toml)、
-[xberg Cargo.toml](https://github.com/xberg-io/xberg/blob/main/crates/xberg/Cargo.toml) 交叉确认。
-
-P5.7.0 的 POC 候选原为 `=1.1.0`；crates.io 实际可审计并通过当前 corpus 的正式 Day1 pin 是：
+正式依赖与最小 feature：
 
 ```toml
 xberg = {
@@ -300,15 +294,10 @@ ocd
 这会增加一个瞬时 OS process，但不增加第二个服务或数据 owner。平台进程模型、health、metrics、doctor 与
 support bundle 已明确区分常驻 workerd child 和瞬时 parser child。
 
-### 4.2 为什么不能直接调用 library
+### 4.2 进程隔离
 
-当前 release profile 使用 `panic = "abort"`。主进程内的 parser panic 或 native abort 会终止整个平台；
-`catch_unwind` 不能接住 abort。文档解析又天然包含压缩包、字体、图片、XML、OLE 和损坏二进制等高风险输入。
-
-子进程隔离主要提供 crash 和资源故障边界，不虚构成完整 kernel sandbox。parser child 仍运行在同一 OS 用户下；
-P5.7 必须做到无网络代码路径、无 secret 输入、无数据目录路径和最小依赖面。Linux seccomp/Landlock、macOS
-sandbox 等额外 confinement 只有在四平台 Gate 证明稳定后才可启用；没有证据时文档和 capability 不能声称
-“内核级沙箱”。
+Parser 使用受监督 child，隔离 native abort、OOM 和不可安全中断的解析调用。父进程保持 timeout、
+资源预算、协议验证与回收责任；不得将不可信文档解析移入 `ocd` 请求线程。
 
 ### 4.3 并发与生命周期
 
@@ -799,48 +788,11 @@ deployment/generation/descriptor authorization and stale facade rejection
 TypeScript compile fixture 必须包含 Cloudflare 官方示例的调用形式。任何为了测试通过而要求 tenant 改成
 `env.XBERG`、`parseDocument()`、平台专用 header 或非 Cloudflare response field 的实现都判为 No-Go。
 
-## 11. 已完成实施阶段
+## 11. 实施与验收依据
 
-### P5.7.0：合同、dependency 与 corpus Gate（本地完成）
-
-1. 冻结 pinned `Ai`/`ToMarkdownService`/AI Search Items 逐成员 API、Cloudflare rich-format snapshot 和 deviation matrix；
-2. 对 crates.io `xberg = "=1.0.14"` 跑 feature/MSRV/license/offline 本机验证；four-target/size 留在 release acceptance；
-3. 验证每种 Xberg format 的 API、security limits 和 deterministic output；
-4. import、审计并提交至少 30 个公开 fixtures；当前实际提交 40 个；
-5. `.et`、XLSB、Numbers 写明 No-Go/deviation；
-6. 冻结 overload、response/error、options、limits 和格式 admission；托管 rich-document differential 留在 release acceptance；
-7. 输出本地核心 Go，No-Go 格式不进入 capability。
-
-### P5.7.1：parser child 与协议（完成）
-
-- 新建文档解析 owner module/crate，保持现有依赖方向；
-- 实现隐藏 child mode、binary frame、process supervision 和 limits；
-- 实现 normalization、stable errors、metrics 和 content-free diagnostics；
-- 完成 frame/hostile corpus 与 process ownership focused Gate；完整 abort/OOM/orphan/soak matrix 留在 release acceptance。
-
-### P5.7.2：格式 adapter（完成）
-
-- 按 PDF → DOCX/ODT → spreadsheet 的依赖顺序启用；
-- 每增加一种格式先过对应 fixture/hostile/process matrix，再进入 allowlist；
-- `.et`、XLSB 与 Numbers 维持明确 No-Go；
-- unsupported Xberg 格式继续在 public admission 层拒绝。
-
-### P5.7.3：Cloudflare API facade 与状态机集成（完成）
-
-- toolchain 接受标准 `[ai] binding = "AI"`，以 immutable builtin-binding descriptor 注入 `env.AI`；
-- loader facade 实现 `toMarkdown` direct/handle overload、`transform()`、`supported()` 和 pinned error mapping；
-- 未实现的 Workers AI 成员稳定 fail closed，并进入 capability/deviation，不伪装 full Workers AI；
-- 扩展 item generation parser contract 与 parse summary；
-- durable parse → staged chunk → embedding resume；
-- generation reindex、cancel、delete、snapshot/restore 和 GC；
-- stock-workerd Markdown Conversion + item/job/search 全链路与多语言 retrieval oracle。
-
-### P5.7.4：本机 hardening 完成；发行资格分离
-
-- 本轮完成全 corpus、hostile、focused recovery、coverage 与用户要求的一轮本机 Gate；
-- 四平台 release qualification、binary size、完整 crash/OOM/orphan/soak 留在 active release acceptance；
-- 更新 capabilities/deviations、operator metrics/runbook、single-binary、snapshot 和总架构文档；
-- 记录 exact Xberg pin、feature tree、fixture manifest digest、case count 和 Gate report。
+Parser child、格式 adapter、Workers binding 和 AI Search durable indexing 已接入生产路径。
+实际 fixture、验收与限制见 [P5 完成记录](p5-vectorize-ai-search-results.md)；
+完整 process／release matrix 与 hosted rich-document differential 见[独立验收计划](../acceptance/p5-release-acceptance.md)。
 
 ## 12. P5.8 边界
 

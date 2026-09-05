@@ -30,7 +30,7 @@
 本次保持 workerd pin 与完整的 13 种文档格式支持。macOS 解析子进程缺少内存硬上限，
 经明确决定接受为 0.1.0 限制；现有其他资源约束继续生效，见 [TODO](../macos-document-parser.md)。
 撤回此前本地禁用格式的修改，生产解析源码、测试与 parser contract 摘要恢复到原实现。Workers Standard request/isolate 资源限制执行器
-仍受 upstream 阻断，见 [P9 限制](../blocked/p9-workers-standard-limits.md)。长时 soak、签名/公证、
+在当前 pin 下仍未实现；后续已选择用户 fork 路线，见 [workerd P2 限制](../workerd/p2-workers-standard-limits.md)。长时 soak、签名/公证、
 托管端差分与第三方应用重验不能由本次原生发行替代，其他缺口见[验收索引](README.md)。
 完整 `bun run test:js` 的 vinext 冻结输入检查报告 `root lock digest drift`；215 个平台 JS 用例通过。
 release 与普通 CI 使用相同的 `test:js:ci` 平台集合，不重写历史应用报告或冻结摘要来制造通过结果。

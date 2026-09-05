@@ -1,11 +1,20 @@
-# P10：Dynamic Workers / Worker Loader 设计
+# P1：Dynamic Workers / Worker Loader 设计
 
-状态：合同与架构设计完成；存在 stock workerd G0 blocker，待 upstream 能力、实施与验收。
+状态：**原生 fork 路线待实施，未完成验收**。2026-09-05 用户确认在 `third_party/workerd/` 的用户 fork
+上实现并重新编译，见[原生方案](native-limits-loader.md)与[源码基线](README.md)。此前 stock pin 的 Loader
+转移失败、custom limits 不执行仍是有效历史证据，详见 [DW-G0 复核记录](../implemented/p10-worker-loader-feasibility.md)。
+DW1–DW5 未实施、未验收；选择 fork 不代表公开 binding 已可启用。
 
-本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
+本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 `worker_loaders` binding，以及 open-compute 已有的内部 WorkerLoader 调度。limits 的统一定义见
-[Workers Standard limits 专项设计](blocked/p9-workers-standard-limits.md)，日志与 tails 见
-[Workers Logs / realtime tail 专项设计](implemented/p7-workers-logs-realtime-tail.md)。
+[Workers Standard limits 专项设计](p2-workers-standard-limits.md)，日志与 tails 见
+[Workers Logs / realtime tail 专项设计](../implemented/p7-workers-logs-realtime-tail.md)。
+
+
+2026-09-06 调整交付顺序：先完成 P1 原生 Loader，再实现 P2 Standard limits。P1 的范围不包含默认
+CPU/内存/subrequest enforcement 或 custom limits；显式 limits 必须由原生 API 拒绝，不能静默忽略。
+P1 仍须完成 namespace/权限隔离、结构大小限制、in-flight 计数、缓存与生命周期及正式 pin 验收。
+该子集不宣称完整 Cloudflare 资源限制兼容，也不保证失控代码不会影响同进程邻居；P2 完成后消除此偏差。
 
 ## 1. 范围与结论
 
@@ -34,10 +43,10 @@ child isolate，不创建 Script、Version 或 Deployment 记录。
 2. open-compute tenant Worker 本身是 Dynamic Worker。固定 stock workerd 的 `DynamicWorkerSource.env` 只能转移
    structured-clone value 与 service/actor/RPC capability，不能转移另一个原生 WorkerLoader channel。因此原生
    **nested Worker Loader** 当前不可用。
-3. JavaScript/RPC facade 无法保持 `load()` / `get()` 同步返回 `WorkerStub` 的合同；把全部 Worker 变成 static
-   config 又会要求每次部署重启全 runtime。这两条都不作为兼容实现。
-4. 正式路径是把 nested WorkerLoader delegation/namespace capability 合入 upstream workerd，再 pin 官方 stock
-   release；open-compute 不维护私有 workerd fork。
+3. JavaScript facade 可以同步返回本地 handle，但这不等于原生 capability、facets、错误和生命周期全合同兼容。
+   本方案选择原生实现；不将普通 Worker 改成部署时需全 runtime restart 的 static config。
+4. 正式路径是在 `third_party/workerd/` 用户 fork 中实现 native delegation/namespace capability、in-flight 与生命周期，
+   完成验证并协调更新 formal pin；upstream 合并不再是本地实施前提。
 5. G0 未通过前，`worker_loaders` upload 必须 fail closed，capability 保持 unsupported。不能把内部 LOADER 暴露
    给 tenant，也不能让 `limits` 静默 no-op。
 
@@ -55,7 +64,7 @@ child isolate，不创建 Script、Version 或 Deployment 记录。
 - [Dynamic Workers platform limits](https://developers.cloudflare.com/dynamic-workers/platform/limits/)；
 - `wrangler@4.127.1/config-schema.json`；
 - `@cloudflare/workers-types@5.20260830.1`；
-- open-compute formal runtime pin `workerd v1.20260830.1` 与仓库 `references/workerd` source snapshot。
+- open-compute 当前 formal pin `workerd v1.20260830.1`；用户 fork checkout 的不同 revision 见[基线](README.md)。
 
 Wrangler、types 与 workerd source 是可复现 authority。Cloudflare 网页用于发现合同，必须转成固定 fixture 后才能
 进入 Gate。
@@ -123,6 +132,10 @@ v4 decoder 必须接受且只接受 `{name,type}`。Worker Loader 不指向外�
 - download/settings response round-trip 原样返回 `type: "worker_loader"`。
 
 G0 未通过时，包含该 binding 的 upload 使用标准 v4 failure envelope 拒绝；不得删除 binding 后继续部署。
+
+2026-09-05 源码复核：当前 `WorkerUploadBinding` 是 closed serde enum，没有 `worker_loader` variant；
+multipart 在进入 Version mutation 前解码失败。现有 system loader 属于普通 Worker 的生产执行路径，
+不是待删除的 public-loader 兼容实现。此次未加入 placeholder descriptor、namespace row 或半成品 tenant binding。
 
 ## 5. JavaScript API contract
 
@@ -192,6 +205,9 @@ interface WorkerStub {
 | `streamingTails` | 否 | experimental；Day 1 public subset 不开放 |
 | `limits` | 否 | `cpuMs` / `subRequests` lower limits；受 limits Gate 阻断 |
 
+WorkerCode dictionary 的未知字段沿用 native JSG 忽略语义（见[上游 #5681](../references/workerd-upstream.md)）；
+已知字段的类型、必需值与权限仍须验证。此规则不改变 upload metadata 的严格校验。
+
 ## 6. Module contract
 
 支持的值与固定 `workers-types` / workerd 一致：
@@ -213,7 +229,7 @@ type DynamicModule =
 
 - plain string 只根据 `.js` / `.py` suffix 解释；其他 plain-string name 拒绝，Python 特殊目录按固定 workerd
   行为 qualification；
-- object 恰好一个 type field；unknown/multiple fields 拒绝；
+- object 恰好包含一个已知 type field；零个或多个已知 type fields 拒绝，未知附加键按 native dictionary 语义忽略；
 - JSON 必须可序列化，不能把 capability 藏进 JSON；
 - module names 作为模块 specifier，不映射到 host filesystem；禁止 NUL、无界长度和重复 canonical name；
 - `mainModule` 必须存在，空 modules 拒绝；
@@ -303,8 +319,10 @@ Cloudflare 当前还限制每个 ordinary Worker request 同时最多 4 个 dist
 - standalone `LimitEnforcer` 的 CPU/subrequest 方法是 no-op；
 - 没有证据证明 4 distinct in-flight limit 被执行。
 
-因此 public Worker Loader 不能在这些行为仍静默失效时标记 supported。G0 必须同时解决 nested binding 与 limits
-执行/拒绝问题。
+P1 不等待 Standard limits 执行器。以上预算继承和 lower limits 是 P2 的目标合同，不是 P1 已支持行为。
+P1 必须原生拒绝 WorkerCode、entrypoint/actor-class options 中显式提供的 limits（含空对象），覆盖 load/get
+及 callback 路径；省略 limits 可使用已验收的 Loader 子集。未知字段仍遵循原生 dictionary 语义。
+P1 实现 distinct in-flight 计数，默认 CPU/内存/subrequest 缺口以明确 deviation 发布，不声明完整资源隔离。
 
 ## 9. 当前 open-compute 路径与 blocker
 
@@ -326,7 +344,7 @@ public request / scheduler event
 
 | 事实 | 固定 source |
 | --- | --- |
-| WorkerLoader 是 static workerd binding group | `references/workerd/src/workerd/server/workerd.capnp` |
+| WorkerLoader 是 static workerd binding group | `third_party/workerd/src/workerd/server/workerd.capnp` |
 | config 中同 ID bindings 共享 native namespace | `Server::workerLoaderNamespaces` |
 | Dynamic Worker env 只 rewrite subrequest/actor/RPC caps | `WorkerLoaderNamespace::WorkerStubImpl::start()` |
 | WorkerLoader JSG object 没有 transferable token/channel | `api/worker-loader.h` |
@@ -336,33 +354,42 @@ public request / scheduler event
 
 因此“把 system LOADER 塞进 `env`”不是少一行配置，而是 stock runtime 缺少一种 capability delegation。
 
+已有能力及其来源统一见[上游核验](../references/workerd-upstream.md)。#4834 的静态 ctx.exports 传递与
+#6822 的 persistent RpcStub env 支持均已存在；不能将 dynamic entrypoint 的 transfer 限制概括为所有 service binding
+不可传递，也不能由 RPC 支持推导 Loader 可传递。按对象来源、channel 类型和实际 date/flags 分别建立正反例。
+
 ### 9.3 不采用的方案
 
 | 方案 | 拒绝原因 |
 | --- | --- |
-| RPC/JS facade 模拟 `env.LOADER` | RPC 返回 Promise/remote stub，无法保持同步 `WorkerStub` API、错误与 identity 语义 |
+| RPC/JS facade 模拟 `env.LOADER` | 同步 handle 可模拟，但完整 capability/facets/limits/错误与生命周期需要额外适配，不作为当前原生路线 |
 | source rewrite 注入 facade | 改写 module/entrypoint/stack/source map，named export、RPC 与 DO 行为脆弱，形成私有 runtime |
 | 每个 Script 写入 static workerd config | deploy 需要全进程 restart，无法保持 Versions/Deployments 与在线请求语义 |
-| 多 workerd child / 每用户 child | 违反一个 stock workerd child 的 Day 1 部署约束，也不是 Dynamic Workers isolate 模型 |
-| open-compute 私有 workerd fork | 长期漂移，不能贴近 Cloudflare/upstream 标准 |
+| 多 workerd child / 每用户 child | 违反一个受监督 workerd child 的 Day 1 部署约束，也不是 Dynamic Workers isolate 模型 |
 | 暴露 system loader namespace | 可猜 key、跨 tenant cache collision、内部 capability 泄漏 |
 
-## 10. 选定的 upstream 方案
+## 10. 选定的 native fork 方案
 
-### 10.1 upstream primitive
+### 10.1 native primitive
 
-需要 upstream workerd 提供可转移但不可伪造的 `WorkerLoaderNamespaceChannel`（名称以最终 upstream 为准）：
+在用户 fork 中补齐可转移但不可伪造的 Loader namespace capability（接口名以实际实现和上游评审为准）：
 
 - static WorkerLoader binding 可 delegate 一个 loader capability 到 Dynamic Worker env；
 - capability 绑定一个 native namespace，不暴露 namespace ID；
 - receiving Dynamic Worker 看到原生 `WorkerLoader` JSG object，不是 RPC facade；
 - `load/get` 与 `WorkerStub` 保持同步 API；
 - channel 可配置是否允许再 delegate，Day 1 tenant capability 禁止无限递归转移但允许 tenant 自己 load child；
-- limits、tails、globalOutbound 与 abort lifecycle 沿用 native implementation；
+- tails、globalOutbound 与 abort lifecycle 沿用 native implementation；P1 为 limits 补明确拒绝，P2 接入执行器；
 - namespace 有 bounded eviction/cleanup hooks 与 observability，不要求调用者管理 native pointer。
 
-open-compute 先贡献 upstream tests，再 pin 包含该能力的正式 stock workerd release。G0 不接受本地 patch 只在
-`references/workerd` 存在。
+原生源码与 regression 统一修改 `third_party/workerd/`，具体分工见[原生方案](native-limits-loader.md)。
+向 upstream 提案与贡献不阻断本地交付；G0 仍要求执行真实 fork 二进制并完成正式 pin 接入，不能仅凭源码 patch 通过。
+
+接线顺序为：受信任 binding factory 创建 namespace capability → WorkerLoader JSG 序列化/反序列化 →
+Frankenvalue cap table 与 Loader channel 类型 → 动态 env rewrite / WorkerDef channel 注册 → 接收 isolate 构造原生对象。
+同进程优先复用现有引用与 cap table，不为传 env 另造持久化 token 协议。确需跨 RPC token 时复用现有完整性保护，
+绑定 capability 类型与进程生命周期；租户提供的 namespace 字符串永远不能生成授权。
+新增类型只开放 Loader 所需能力，不全局放宽 requireAllowsTransfer()。
 
 ### 10.2 namespace derivation
 
@@ -405,7 +432,7 @@ Deployment 只路由到 Version，不进入 code identity。compatibility、bind
 - workerd child graceful restart 会丢失全部 warm cache，但不丢 control-plane state；
 - operator cache/admission 阈值是 vendor capacity，不是 Cloudflare Worker limit。
 
-固定 OSS source 当前 named map 没有通用 eviction evidence。upstream G0 必须提供 bounded eviction，或提供可观测且
+固定 OSS source 当前 named map 没有通用 eviction evidence。native fork G0 必须提供 bounded eviction，或提供可观测且
 可安全触发的 namespace cleanup；不能靠无限 map 再用整进程 OOM 回收。
 
 `load()` unnamed isolate 需在 startup 期间由 namespace 持有额外 ref，完成后由 stub/in-flight request 管理 lifetime。
@@ -439,7 +466,7 @@ Deployment 只路由到 Version，不进入 code identity。compatibility、bind
 - callback reject 原样成为 child invocation failure，但经过平台 error redaction；
 - unknown entrypoint 明确失败；
 - `globalOutbound:null` 的 fetch/connect 明确抛网络权限错误；
-- custom limits 超限立即终止 child invocation；
+- P1 显式 custom limits 明确拒绝；P2 实现后按真实超限 outcome 终止 child invocation；
 - tail delivery failure 不改变已完成的 child response；
 - namespace tombstone / parent Version unavailable 不使用 stale authority。
 
@@ -456,16 +483,16 @@ Workers Logs outcome 必须来自真实 runtime event，不能根据 message reg
 
 Exit：公开 Dynamic Workers 与内部 system loader 不再混称。
 
-### DW-G0：upstream feasibility Gate
+### DW-G0：native fork capability Gate
 
-- upstream native loader capability delegation；
+- 用户 fork 的 native loader capability delegation；
 - nested Dynamic Worker 获得真实 `WorkerLoader` JSG object；
-- resource limits 被执行，或在不支持时由 native call 明确拒绝；
+- 所有显式 resource limits 由 native call 明确拒绝，省略时可加载；默认资源限制偏差可见；
 - 4 distinct Dynamic Workers per request 被执行；
 - named cache bounded eviction/abort cleanup；
-- upstream tests 在正式 release 通过，open-compute pin 该 release。
+- fork native regression 通过，open-compute 协调更新到同一正式固定的 fork artifact。
 
-Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
+Exit：正式固定的原生实现成立，不依赖 facade、source rewrite 或 deployment-triggered 全 runtime restart。
 
 若 G0 失败，Day 1 `worker_loaders` 保持 unsupported；这不会阻断普通 Scripts/Versions/Deployments，但本文不能归档。
 
@@ -479,7 +506,7 @@ Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
 ### DW2：runtime assembly
 
 - 从 Version binding 创建 public namespace capability；
-- 通过 upstream channel 放入 ordinary tenant Worker env；
+- 通过原生 Loader channel 放入 ordinary tenant Worker env；
 - namespace domain separation、tombstone 与 cleanup；
 - ordinary system runtime key 改为 Version authority，禁止 active/deployment alias 作为 code key。
 
@@ -493,7 +520,7 @@ Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
 
 ### DW4：limits 与 observability
 
-- parent/code/entrypoint limits `min()`；
+- 显式 limits 原生拒绝与默认资源限制 deviation；parent/code/entrypoint `min()` 执行归 P2；
 - distinct in-flight Dynamic Worker accounting；
 - system tail collector + user tails fan-out；
 - logs/realtime tail attribution、sampling、redaction、metrics。
@@ -517,7 +544,11 @@ Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
 | 同 ID 返回不同 code | caller 违规 fixture；平台不得暗换 ID |
 | cache eviction / process restart | callback 可重跑，功能不依赖 global state |
 | async callback reject then retry | 第一次 invocation 失败；后续不永久 poison |
-| JS handle GC during startup | startup/request 不 use-after-free 或取消错误 |
+| JS handle GC / chained temporary handle | 同步及异步 startup、actor class 等待、请求和流存续期间不 UAF；保留 #6553 强引用关系 |
+| WorkerCode 未知字段 / 已知字段非法值 | 前者忽略，后者按 native 校验失败；module 零个/多个已知类型拒绝 |
+| compiled WebAssembly.Module 两种输入 | 直接值与 wasm 字段均通过，复用编译结果；覆盖已有两种 module registry 回归 |
+| env capability 来源与类型 | 静态 entrypoint、persistent RpcStub、受限制动态 entrypoint 分别验证，不放宽全部 transfer |
+| Loader 委派越权 / 生命周期 | 跨 namespace、非法再委派与进程重启后的旧 capability 不可使用；有效在途引用保持安全 |
 | JS/CJS/Python/text/data/json/Wasm | 类型与 fixed workerd 一致 |
 | empty modules / missing main / unknown module object | startup fail closed |
 | 64 MiB boundary ±1 | boundary 通过，+1 native rejection |
@@ -530,8 +561,8 @@ Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
 | system namespace guessing | 永远不能命中/观察 system isolate |
 | user tail + system collector | 都收到一次；child response 不等待 tail |
 | streaming tails non-empty | Day 1 明确拒绝 |
-| parent/code/entrypoint limits | 每维取最小；真实 child outcome |
-| 4 distinct children + 第 5 个 | 第五个按官方行为失败；同一 child 并发只计一个 |
+| code/entrypoint/actor-class 显式 limits | P1 原生拒绝，包括空对象；省略时正常加载；P2 接管真实预算执行 |
+| Worker 4 / DO 10 distinct children | 第 5 / 11 个按官方行为失败；同一 child 并发只计一个，结束后释放名额 |
 | Script delete/recreate | 旧 namespace tombstone；新 script_id 不复用 |
 | Version rollback | parent code/bindings/limits 回滚；public namespace identity 保持 Script scope |
 | malicious ID/props/error | bounded、redacted，不泄漏 namespace/source/secret |
@@ -541,17 +572,17 @@ Exit：不需要 fork、facade、source rewrite 或全 runtime restart。
 本文只有同时满足以下条件才能归档：
 
 - fixed Wrangler `worker_loaders` config、multipart、download/settings round-trip 通过；
-- nested tenant Worker 获得 upstream stock workerd 原生 WorkerLoader，不是 facade；
+- nested tenant Worker 获得正式固定的 fork workerd 原生 WorkerLoader，不是 facade；
 - internal system loader 与 public loader namespace 有不可绕过的 domain separation；
-- `load/get/WorkerStub/WorkerCode` 全合同通过 black-box 与 source-backed Gate；
+- `load/get/WorkerStub/WorkerCode` 的 P1 声明子集通过 black-box 与 source-backed Gate；limits 偏差明确；
 - modules/env size、compat、bindings、egress、tails 与 errors 对齐固定 Cloudflare contract；
 - P5 的 Vectorize、AI Search 与 Markdown Conversion 只能通过 parent 显式传递的 scope-safe service capability
   到达 child，权限收窄、identity、redaction 与 negative reachability Gate 通过；
-- Dynamic Worker custom limits 与 4 distinct in-flight limit 真实执行；
+- Worker 4 / DO 10 distinct in-flight limit 真实执行；custom limits 原生拒绝，默认资源限制偏差已记录；
 - named cache 有 bounded eviction/cleanup，cold/warm/restart 不改变功能正确性；
 - Workers Logs/realtime tail 正确归属 ordinary parent 与 Dynamic child；
 - `dispatch_namespaces` 及全部 Workers for Platforms surface 仍明确 unsupported；
-- 不存在 open-compute workerd fork、source rewrite facade 或 deployment-triggered 全 runtime restart；
+- fork patch 范围可审查；不存在 source rewrite facade、双运行时 fallback 或 deployment-triggered 全 runtime restart；
 - Cloudflare differential 已完成，或 credential gap 被拆为 active acceptance；
 - compatibility matrix、deviation registry、capability manifest、docs links、focused tests、coverage 与最终单轮
   workspace Gate 全部同步通过。

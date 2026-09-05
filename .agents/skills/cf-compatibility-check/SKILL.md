@@ -12,7 +12,7 @@ Review only the changed implementation and the context needed to prove its behav
 Before judging code, read completely:
 
 1. the repository `AGENTS.md`;
-2. `docs/cloudflare-runtime-compatibility.md`;
+2. `docs/implemented/cloudflare-runtime-compatibility.md`;
 3. `docs/references/cloudflare-compatibility.md`;
 4. `docs/references/p1-deviations.md`;
 5. `packages/runtime/workerd.lock.json` and the root package manifest when runtime or public types changed.
@@ -50,8 +50,10 @@ For every changed Cloudflare-visible behavior, retrieve current evidence instead
 5. a portable real-Cloudflare differential only when the user explicitly authorizes its external writes and supplies
    the required account and credentials.
 
-Use `references/workerd/types/generated-snapshot/index.d.ts`, the workerd pin, and installed or locked npm artifacts
-before considering a network download. Browse only official Cloudflare documentation and primary upstream sources for
+Use the `third_party/workerd` submodule, the workerd pin, and installed or locked npm artifacts before considering a
+network download. The fork checkout may differ from the formal pin: read `types/generated-snapshot/index.d.ts` and
+runtime source from the matching revision with `git show`, and report missing objects instead of substituting HEAD.
+Browse only official Cloudflare documentation and primary upstream sources for
 technical claims. Treat workers-sdk, Wrangler, Miniflare, WDL, and other reference projects as integration evidence,
 not as authority over Cloudflare docs, stable types, or stock workerd behavior.
 
