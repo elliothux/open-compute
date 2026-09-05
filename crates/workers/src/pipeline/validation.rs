@@ -6,26 +6,17 @@ pub(crate) fn validate_secret_set(
     secrets: &BTreeMap<String, SecretString>,
     vars: &BTreeMap<String, serde_json::Value>,
 ) -> Result<(), PlatformError> {
-    if secrets.len() > MAX_SECRETS {
-        return Err(secret_invalid("version contains too many secrets"));
+    if secrets.len().saturating_add(vars.len()) > MAX_VARIABLES {
+        return Err(secret_invalid("version contains too many variables"));
     }
-    let mut total = 0_usize;
     for (name, value) in secrets {
         validate_env_name(name)?;
         if vars.contains_key(name) {
             return Err(secret_invalid("var and secret env names conflict"));
         }
         let size = value.expose().len();
-        if size == 0 || size > MAX_SECRET_BYTES {
+        if size == 0 || size > MAX_VARIABLE_BYTES {
             return Err(secret_invalid("secret value exceeds its configured size"));
-        }
-        total = total
-            .checked_add(size)
-            .ok_or_else(|| secret_invalid("version secrets exceed their configured total size"))?;
-        if total > MAX_SECRET_TOTAL_BYTES {
-            return Err(secret_invalid(
-                "version secrets exceed their configured total size",
-            ));
         }
     }
     Ok(())
@@ -36,7 +27,7 @@ pub(crate) fn validate_binding_set(
     vars: &BTreeMap<String, serde_json::Value>,
     secrets: &BTreeMap<String, SecretString>,
 ) -> Result<(), PlatformError> {
-    if bindings.len() > MAX_VARS {
+    if bindings.len() > MAX_BINDINGS {
         return Err(PlatformError::new(
             ErrorCode::ResourceLimitExceeded,
             "version contains too many bindings",
@@ -60,7 +51,7 @@ pub(crate) fn validate_service_set(
     secrets: &BTreeMap<String, SecretString>,
     bindings: &BTreeMap<String, VersionBindingInput>,
 ) -> Result<(), PlatformError> {
-    if services.len() > MAX_VARS {
+    if services.len() > MAX_BINDINGS {
         return Err(PlatformError::new(
             ErrorCode::ResourceLimitExceeded,
             "version contains too many Service bindings",

@@ -19,6 +19,9 @@ use std::fs;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+#[path = "environment_storage_tests.rs"]
+mod environment_storage_tests;
+
 struct AcceptAllValidator;
 
 impl RuntimeValidator for AcceptAllValidator {
@@ -680,7 +683,7 @@ fn descriptor_binds_every_runtime_effective_input() {
     .unwrap();
     let mut vars = BTreeMap::new();
     vars.insert("MODE".to_owned(), serde_json::json!({"b": 2, "a": 1}));
-    let (vars, _) = canonicalize_vars(vars, 16, 4096).unwrap();
+    let (vars, _) = canonicalize_vars(vars).unwrap();
     let descriptor = WorkerCodeDescriptorV1::new(
         account,
         worker,
@@ -718,13 +721,13 @@ fn descriptor_binds_every_runtime_effective_input() {
 fn vars_reject_reserved_names_and_prototype_keys() {
     let mut vars = BTreeMap::new();
     vars.insert("OPEN_COMPUTE_TOKEN".to_owned(), serde_json::json!(1));
-    assert!(canonicalize_vars(vars, 10, 1000).is_err());
+    assert!(canonicalize_vars(vars).is_err());
     let mut vars = BTreeMap::new();
     vars.insert(
         "SAFE".to_owned(),
         serde_json::json!({"__proto__": {"x": 1}}),
     );
-    assert!(canonicalize_vars(vars, 10, 1000).is_err());
+    assert!(canonicalize_vars(vars).is_err());
 }
 
 #[test]
@@ -746,44 +749,20 @@ fn descriptor_env_date_and_secret_validation_matrix() {
         );
     }
 
-    assert_eq!(
-        canonicalize_vars(
-            BTreeMap::from([("A".to_owned(), serde_json::json!(1))]),
-            0,
-            1024,
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::ResourceLimitExceeded
-    );
-    assert_eq!(
-        canonicalize_vars(
-            BTreeMap::from([("LONG".to_owned(), serde_json::json!("value"))]),
-            1,
-            1,
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::ResourceLimitExceeded
-    );
     let mut deep = serde_json::Value::Null;
     for _ in 0..34 {
         deep = serde_json::Value::Array(vec![deep]);
     }
     assert_eq!(
-        canonicalize_vars(BTreeMap::from([("DEEP".to_owned(), deep)]), 1, 4096)
+        canonicalize_vars(BTreeMap::from([("DEEP".to_owned(), deep)]))
             .unwrap_err()
             .code(),
         ErrorCode::ResourceLimitExceeded
     );
-    let (vars, encoded) = canonicalize_vars(
-        BTreeMap::from([(
-            "OBJECT".to_owned(),
-            serde_json::json!({"z": 1, "a": [true, null]}),
-        )]),
-        1,
-        4096,
-    )
+    let (vars, encoded) = canonicalize_vars(BTreeMap::from([(
+        "OBJECT".to_owned(),
+        serde_json::json!({"z": 1, "a": [true, null]}),
+    )]))
     .unwrap();
     assert_eq!(encoded["OBJECT"], br#"{"a":[true,null],"z":1}"#);
     assert_eq!(vars["OBJECT"]["z"], 1);
@@ -937,7 +916,7 @@ fn version_pipeline_helper_contracts_cover_failure_code_matrix() {
 
     let mut secrets = BTreeMap::new();
     assert!(validate_secret_set(&secrets, &BTreeMap::new()).is_ok());
-    for index in 0..65 {
+    for index in 0..129 {
         secrets.insert(format!("SECRET_{index}"), SecretString::new("x"));
     }
     assert_eq!(
@@ -949,7 +928,7 @@ fn version_pipeline_helper_contracts_cover_failure_code_matrix() {
     for (name, value) in [
         ("BAD-NAME", "x".to_owned()),
         ("EMPTY", String::new()),
-        ("LARGE", "x".repeat(16 * 1024 + 1)),
+        ("LARGE", "x".repeat(MAX_VARIABLE_BYTES + 1)),
     ] {
         let values = BTreeMap::from([(name.to_owned(), SecretString::new(value))]);
         assert!(validate_secret_set(&values, &BTreeMap::new()).is_err());
@@ -962,20 +941,6 @@ fn version_pipeline_helper_contracts_cover_failure_code_matrix() {
         )
         .unwrap_err()
         .code(),
-        ErrorCode::SecretInvalid
-    );
-    let total = (0..5)
-        .map(|index| {
-            (
-                format!("TOKEN_{index}"),
-                SecretString::new("x".repeat(15 * 1024)),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(
-        validate_secret_set(&total, &BTreeMap::new())
-            .unwrap_err()
-            .code(),
         ErrorCode::SecretInvalid
     );
 

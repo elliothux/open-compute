@@ -532,12 +532,7 @@ async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformE
     let version_pins = VersionPins::new();
     let supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>> = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(generation_auth.clone(), supervisor_handle.clone())
-        .with_version_pins(version_pins.clone())
-        .with_max_request_body(
-            usize::try_from(loaded.config.workers.max_request_body_bytes).map_err(|_| {
-                PlatformError::new(ErrorCode::LimitInvalid, "Worker body limit is invalid")
-            })?,
-        );
+        .with_version_pins(version_pins.clone());
     let scheduler_service = Arc::new(
         SchedulerService::new(
             scheduler_store.clone(),

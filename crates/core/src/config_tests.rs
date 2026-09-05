@@ -33,6 +33,10 @@ fn s3(config: &PlatformConfig) -> &S3Config {
 
 #[test]
 fn documented_defaults_validate() {
+    assert_eq!(
+        parse_err("[workers]\nmax_request_body_bytes = 16777216\n").code(),
+        ErrorCode::ConfigParseFailed
+    );
     let config = parse_ok("");
     assert_eq!(config.server.public_bind, "127.0.0.1:8787");
     assert!(config.server.admin_bind.is_none());
@@ -603,7 +607,6 @@ fn remaining_authority_and_worker_limit_boundaries_fail_closed() {
         "[runtime]\nrestart_backoff_initial_ms = 0\n",
         "[runtime]\nrestart_backoff_max_ms = 0\n",
         "[workers]\nmax_bundle_bytes = 0\n",
-        "[workers]\nmax_request_body_bytes = 0\n",
         "[workers]\ndelete_drain_timeout_ms = 0\n",
         "[workers]\nartifact_gc_grace_ms = 0\n",
         "[workers]\nartifact_gc_interval_ms = 0\n",

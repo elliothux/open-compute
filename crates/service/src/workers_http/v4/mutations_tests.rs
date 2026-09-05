@@ -599,6 +599,38 @@ async fn active_script_management_routes_project_and_mutate_day1_state() {
         .unwrap();
     assert_eq!(patched.status(), StatusCode::OK);
 
+    for limits in [
+        "null",
+        "{}",
+        r#"{"cpu_ms":1}"#,
+        r#"{"subrequests":1}"#,
+        r#"{"cpu_ms":30000,"subrequests":10000}"#,
+    ] {
+        let multipart = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"settings\"\r\nContent-Type: application/json\r\n\r\n{{\"limits\":{limits}}}\r\n--{boundary}--\r\n"
+        );
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PATCH)
+                    .uri(format!("{prefix}/settings"))
+                    .header(header::AUTHORIZATION, "Bearer deployer-token")
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(multipart))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let envelope = response_json(response).await;
+        assert_eq!(envelope["success"], false);
+        assert!(!envelope["errors"].as_array().unwrap().is_empty());
+    }
+
     for query in ["?force=true", "?force=invalid"] {
         let response = app
             .clone()

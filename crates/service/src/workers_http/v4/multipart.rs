@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 
 const METADATA_PART: &str = "metadata";
 pub(super) const MAX_METADATA_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_METADATA_BINDINGS: usize = 256;
 pub(super) const MAX_SDK_METADATA_FIELDS: usize = 2_048;
 pub(super) const MAX_SDK_FIELD_NAME_BYTES: usize = 4 * 1024;
 pub(super) const MAX_BOUNDARY_BYTES: usize = 70;
@@ -222,7 +223,7 @@ fn validate_metadata(metadata: &WorkerUploadMetadata) -> Result<(), PlatformErro
             "Worker compatibility metadata is unsupported by the pinned runtime",
         ));
     }
-    if metadata.bindings.len() > 128
+    if metadata.bindings.len() > MAX_METADATA_BINDINGS
         || metadata.keep_bindings.len() > 32
         || metadata.annotations.len() > 16
     {

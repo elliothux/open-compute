@@ -8,6 +8,7 @@ use crate::descriptor::{
     SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1, ciphertext_sha256,
     parse_loader_key,
 };
+use crate::environment::{MAX_VARIABLES, canonicalize_vars};
 use base64::Engine as _;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactCache, ArtifactRef, ArtifactStore};
 use open_compute_core::{BindingKind, ErrorCode, PlatformError, SecretString};
@@ -542,10 +543,17 @@ impl RuntimeSource {
             VersionContentKind::AssetsOnly => return Err(not_ready()),
         };
 
+        if snapshot.vars.len().saturating_add(snapshot.secrets.len()) > MAX_VARIABLES {
+            return Err(invariant());
+        }
         let mut vars = BTreeMap::new();
         for (name, raw) in &snapshot.vars {
             let value = serde_json::from_slice(raw).map_err(|_| invariant())?;
             vars.insert(name.clone(), value);
+        }
+        let (vars, encoded_vars) = canonicalize_vars(vars).map_err(|_| invariant())?;
+        if encoded_vars != snapshot.vars {
+            return Err(invariant());
         }
         let mut secret_descriptors = Vec::with_capacity(snapshot.secrets.len());
         for secret in snapshot.secrets.values() {
@@ -859,6 +867,7 @@ impl RuntimeSource {
                 })?;
                 secrets.insert(secret.name.clone(), SecretString::new(text));
             }
+            crate::pipeline::validate_secret_set(&secrets, &vars).map_err(|_| invariant())?;
         }
         let asset_binding = assets
             .as_ref()

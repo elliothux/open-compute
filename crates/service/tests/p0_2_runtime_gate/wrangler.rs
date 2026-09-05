@@ -169,7 +169,7 @@ async fn verify_project(
                 .await
                 .unwrap();
             if size > 32 * 1024 {
-                assert_eq!(response.status(), 503);
+                assert_eq!(response.status(), 413);
             } else {
                 assert_eq!(response.status(), 200);
                 assert_eq!(
@@ -359,6 +359,10 @@ async fn verify_project(
 }
 
 fn write_project(project: &Path, account_id: &str, wrangler: &Path) {
+    let mut vars = BTreeMap::from([("GREETING".to_owned(), "你好 🌍".to_owned())]);
+    for index in 0..126 {
+        vars.insert(format!("VALUE_{index}"), "x".repeat(5 * 1024));
+    }
     let schema = wrangler
         .parent()
         .unwrap()
@@ -386,7 +390,7 @@ fn write_project(project: &Path, account_id: &str, wrangler: &Path) {
                 "name": WORKFLOW_NAME,
                 "class_name": "Flow"
             }],
-            "vars": {"GREETING": "你好 🌍"}
+            "vars": vars
         }))
         .unwrap(),
     )
@@ -410,14 +414,16 @@ fn write_project(project: &Path, account_id: &str, wrangler: &Path) {
         project.join("index.ts"),
         r#"import { WorkflowEntrypoint } from 'cloudflare:workers';
 import { answer } from './value.js';
-interface Env { GREETING: string; TOKEN: string }
+interface Env { GREETING: string; TOKEN: string; VALUE_125: string }
 export class Flow extends WorkflowEntrypoint<Env, unknown> {
   async run(): Promise<unknown> { return {ok: true}; }
 }
 export default { async fetch(_request: Request, env: Env): Promise<Response> {
   if (_request.method === 'POST') return new Response(await _request.arrayBuffer());
   const { suffix } = await import('./lazy.js');
-  return Response.json({greeting: env.GREETING, answer, suffix, hasSecret: env.TOKEN.length > 0});
+  return Response.json({greeting: env.GREETING, answer, suffix, hasSecret: env.TOKEN.length > 0,
+    variableCount: Object.values(env).filter(value => typeof value === 'string').length,
+    variableBytes: new TextEncoder().encode(env.VALUE_125).byteLength});
 }};"#,
     )
     .unwrap();
@@ -541,7 +547,9 @@ async fn assert_worker_response(origin: &str, account: open_compute_core::Accoun
             "greeting": "你好 🌍",
             "answer": answer,
             "suffix": "!",
-            "hasSecret": true
+            "hasSecret": true,
+            "variableCount": 128,
+            "variableBytes": 5 * 1024
         })
     );
 }

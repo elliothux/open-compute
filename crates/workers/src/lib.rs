@@ -9,6 +9,7 @@ pub mod compatibility;
 pub mod d1;
 pub mod descriptor;
 pub mod durable_objects;
+pub mod environment;
 pub mod kv;
 pub mod pins;
 pub mod pipeline;
@@ -46,10 +47,10 @@ pub use descriptor::{
     AssetDescriptorV1, BindingDescriptorV1, BuiltinBindingDescriptorKindV1,
     BuiltinBindingDescriptorV1, CacheEntrypointPolicyV1, CachePolicyDescriptorV1,
     QueueProducerBindingDescriptorV1, SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptorV1,
-    WorkerCodeDescriptorV1, canonicalize_vars, ciphertext_sha256, loader_key, parse_loader_key,
-    validate_env_name,
+    WorkerCodeDescriptorV1, ciphertext_sha256, loader_key, parse_loader_key,
 };
 pub use durable_objects::DurableObjectResourceDriver;
+pub use environment::{MAX_VARIABLE_BYTES, MAX_VARIABLES, canonicalize_vars, validate_env_name};
 pub use kv::KvResourceDriver;
 pub use pins::{VersionPin, VersionPins};
 pub use pipeline::{

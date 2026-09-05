@@ -120,7 +120,6 @@ tail_session_ttl_ms = 3600000
 
 [workers]
 max_bundle_bytes = 17825792
-max_request_body_bytes = 16777216
 delete_drain_timeout_ms = 5000
 artifact_gc_grace_ms = 86400000
 artifact_gc_interval_ms = 60000

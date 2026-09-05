@@ -40,11 +40,13 @@ use tokio::net::TcpListener;
 mod workflow;
 pub use workflow::{WorkflowDispatchResult, WorkflowOutcome, WorkflowRunRequest};
 mod custom_events;
+mod dispatch;
 
 const SOURCE_PATH: &str = "/internal/runtime/v1/versions/resolve";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 const MAX_SOURCE_REQUEST: usize = 4096;
-const DEFAULT_MAX_TENANT_BODY: usize = 16 * 1024 * 1024;
+/// Fixed Standard ingress baseline in decimal bytes, independent of operator policy.
+pub const MAX_TENANT_BODY_BYTES: usize = 100_000_000;
 const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CUSTOM_EVENT_RESPONSE: usize = 64 * 1024;
 const MAX_QUEUE_CUSTOM_EVENT_REQUEST: usize = 18 * 1024 * 1024;
@@ -443,7 +445,7 @@ impl WorkerdTransport {
                 .build(connector),
             auth,
             supervisor,
-            max_request_body: DEFAULT_MAX_TENANT_BODY,
+            max_request_body: MAX_TENANT_BODY_BYTES,
             version_pins: None,
             workflow_quarantine: Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -458,10 +460,11 @@ impl WorkerdTransport {
         transport
     }
 
-    /// Apply the host-observed streaming request body ceiling.
+    /// Reduce the request body ceiling for bounded transport fault fixtures.
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
-    pub fn with_max_request_body(mut self, max_request_body: usize) -> Self {
-        self.max_request_body = max_request_body.max(1);
+    pub fn with_test_request_body_limit(mut self, max_request_body: usize) -> Self {
+        self.max_request_body = max_request_body.clamp(1, MAX_TENANT_BODY_BYTES);
         self
     }
 
@@ -690,136 +693,6 @@ impl WorkerdTransport {
             )),
             _ => Err(runtime_unavailable()),
         }
-    }
-
-    async fn send(
-        &self,
-        target: DispatchTarget,
-        request: Request,
-        validation: bool,
-        durable_object_class: bool,
-    ) -> Result<Response, PlatformError> {
-        let (port, credential) = self.endpoint()?;
-        let (parts, body) = request.into_parts();
-        // A tenant may return without consuming its streaming body. The pinned
-        // workerd can then close this HTTP/1 hop after the response, racing reuse.
-        // Pool only bodyless dispatches; never buffer input or retry a mutation.
-        let client = if body.is_end_stream() {
-            &self.client
-        } else {
-            &self.body_client
-        };
-        let original_method = parts.method.as_str().to_owned();
-        let original_url = if validation {
-            "https://validation.invalid/".to_owned()
-        } else {
-            original_url(&parts.headers, &parts.uri)?
-        };
-        let mut headers = sanitize_tenant_headers(parts.headers);
-        insert_header(&mut headers, TOKEN_HEADER, credential.expose())?;
-        insert_header(
-            &mut headers,
-            "x-open-compute-account-id",
-            &target.account_id.to_string(),
-        )?;
-        insert_header(
-            &mut headers,
-            "x-open-compute-worker-id",
-            &target.worker_id.to_string(),
-        )?;
-        insert_header(
-            &mut headers,
-            "x-open-compute-version-id",
-            &target.version_id.to_string(),
-        )?;
-        insert_header(
-            &mut headers,
-            "x-open-compute-loader-key",
-            &target.loader_key(),
-        )?;
-        insert_header(
-            &mut headers,
-            "x-open-compute-worker-code-sha256",
-            &target.worker_code_sha256,
-        )?;
-        insert_header(
-            &mut headers,
-            "x-open-compute-route-generation",
-            &target.route_generation.to_string(),
-        )?;
-        insert_header(
-            &mut headers,
-            "x-open-compute-request-id",
-            &target.request_id.to_string(),
-        )?;
-        insert_header(
-            &mut headers,
-            "x-open-compute-original-method",
-            &original_method,
-        )?;
-        insert_header(&mut headers, "x-open-compute-original-url", &original_url)?;
-        if let Some(entrypoint) = &target.entrypoint {
-            insert_header(&mut headers, "x-open-compute-entrypoint", entrypoint)?;
-        }
-        let uri: Uri = format!(
-            "http://127.0.0.1:{port}{}",
-            if durable_object_class {
-                "/internal/validate-do"
-            } else if validation {
-                "/internal/validate"
-            } else {
-                "/internal/dispatch"
-            }
-        )
-        .parse()
-        .map_err(|_| runtime_unavailable())?;
-        let mut internal =
-            hyper::Request::new(Body::new(Limited::new(body, self.max_request_body)));
-        *internal.method_mut() = Method::POST;
-        *internal.uri_mut() = uri;
-        *internal.headers_mut() = headers;
-        let response = tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, client.request(internal))
-            .await
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::ResourceLimitExceeded,
-                    "runtime response header deadline exceeded",
-                )
-            })?
-            .map_err(|_| runtime_unavailable())?;
-        let (mut parts, body) = response.into_parts();
-        let execution_started = parts
-            .headers
-            .get("x-open-compute-execution-started")
-            .is_some_and(|value| value == "1");
-        let loader_outcome = parts
-            .headers
-            .get("x-open-compute-loader-outcome")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| match value {
-                "cold" => Some(LoaderOutcome::Cold),
-                "warm" => Some(LoaderOutcome::Warm),
-                _ => None,
-            });
-        let asset_representation_length = if original_method == Method::HEAD.as_str() {
-            parts
-                .headers
-                .get("x-open-compute-asset-representation-length")
-                .cloned()
-        } else {
-            None
-        };
-        if execution_started && let Some(pins) = &self.version_pins {
-            pins.retain_until_restart(target.version_id)?;
-        }
-        sanitize_response_headers(&mut parts.headers);
-        if let Some(length) = asset_representation_length {
-            parts.headers.insert(header::CONTENT_LENGTH, length);
-        }
-        if let Some(outcome) = loader_outcome {
-            parts.extensions.insert(outcome);
-        }
-        Ok(Response::from_parts(parts, Body::new(body)))
     }
 
     fn endpoint(&self) -> Result<(u16, open_compute_runtime::GenerationCredential), PlatformError> {

@@ -120,7 +120,7 @@ async fn p0_4_real_kv_matrix() {
     .with_binding_generation_auth(binding_auth.clone());
     let supervisor_slot = Arc::new(Mutex::new(None));
     let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_max_request_body(32 * 1024 * 1024);
+        .with_test_request_body_limit(32 * 1024 * 1024);
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(

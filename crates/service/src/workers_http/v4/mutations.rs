@@ -355,7 +355,6 @@ struct VersionSettingsPatch {
     exports: Option<serde_json::Value>,
     migrations: Option<serde_json::Value>,
     annotations: Option<BTreeMap<String, String>>,
-    limits: Option<serde_json::Value>,
     logpush: Option<bool>,
     observability: Option<serde_json::Value>,
     placement: Option<serde_json::Value>,
@@ -423,7 +422,6 @@ pub(super) async fn patch_settings(
         && patch.exports.is_none()
         && patch.migrations.is_none()
         && patch.annotations.as_ref().is_none_or(BTreeMap::is_empty)
-        && patch.limits.is_none()
         && !patch.logpush.unwrap_or(false)
         && patch
             .observability

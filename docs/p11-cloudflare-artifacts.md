@@ -4,7 +4,7 @@
 
 本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 `artifacts` binding、Artifacts v4 API、Worker binding 和 Git Smart HTTP data plane。Workers Logs、limits 与
-Browser Run 分别见 [P7](implemented/p7-workers-logs-realtime-tail.md)、[P9](p9-workers-standard-limits.md)和
+Browser Run 分别见 [P7](implemented/p7-workers-logs-realtime-tail.md)、[P9](blocked/p9-workers-standard-limits.md)和
 [P12](p12-browser-run.md)。平台内部 blob 的 Local / S3 持有方式见
 [P8 对象后端设计](implemented/p8-local-s3-object-backend.md)。
 

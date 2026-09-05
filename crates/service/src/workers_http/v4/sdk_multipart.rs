@@ -2,8 +2,8 @@
 
 use super::model::WorkerUploadBinding;
 use super::multipart::{
-    MAX_BOUNDARY_BYTES, MAX_METADATA_BYTES, MAX_SDK_FIELD_NAME_BYTES, RawPart, invalid, too_large,
-    validate_part_name,
+    MAX_BOUNDARY_BYTES, MAX_METADATA_BINDINGS, MAX_METADATA_BYTES, MAX_SDK_FIELD_NAME_BYTES,
+    RawPart, invalid, too_large, validate_part_name,
 };
 use axum::body::Body;
 use axum::extract::Request;
@@ -14,7 +14,6 @@ use open_compute_core::PlatformError;
 use serde_json::{Map, Number, Value};
 
 const MAX_METADATA_DEPTH: usize = 32;
-const MAX_BINDINGS: usize = 128;
 
 /// Recover the boundary omitted by the pinned SDK's typed Worker upload.
 pub(super) async fn normalize_request(request: Request) -> Result<Request, PlatformError> {
@@ -343,7 +342,7 @@ fn partition_bindings(fields: &[BindingField]) -> Result<Vec<Map<String, Value>>
         .iter()
         .filter(|field| binding_key(field, "type"))
         .count();
-    if names == 0 || names != types || names > MAX_BINDINGS {
+    if names == 0 || names != types || names > MAX_METADATA_BINDINGS {
         return Err(invalid());
     }
     let mut memo = vec![None; fields.len() + 1];

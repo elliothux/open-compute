@@ -77,10 +77,13 @@ backend 和 workerd 内部 listener 仍仅监听 loopback。
 
 控制面已注册路由的 4 KiB（v4 为 64 MiB）声明长度检查不作用于 tenant ingress fallback，
 包括 `/__workers/` 和自定义域名路由。租户 body 始终由 `WorkerdTransport` 按
-`workers.max_request_body_bytes` 流式限额，声明长度与 chunked 请求都不能绕过；默认 16 MiB，
-配置最大 64 MiB。这是单机 operator budget，不声称匹配
-[Cloudflare account-plan 请求大小配额](https://developers.cloudflare.com/workers/platform/limits/#request-and-response-limits)。
-回归由 HTTP 路由单测与 P0.2 真实 workerd/Wrangler 场景中的上传边界共同覆盖。
+固定的 `100000000` bytes 流式限额，旧 `workers.max_request_body_bytes` 配置已删除。
+这个十进制 100 MB 值来自 [Cloudflare account-plan 请求大小最低 baseline](https://developers.cloudflare.com/workers/platform/limits/#request-and-response-limits)，
+不代表复刻商业 plan。声明长度与 chunked overflow 的 413 定向回归已在缩小预算下通过；生产 100 MB 边界、最终
+stock-workerd/Wrangler Gate 与 hosted differential 尚未通过，不能把配置值一致称为已完成兼容性验收。
+测试代码可通过仅在 `test-support` 暴露的 setter 缩小预算；生产不能通过该路径改变 Standard 值。
+现有 30 秒 host response-header deadline 仍是尚未资格化的本地 transport policy，其失败归类为
+runtime unavailable，不宣称执行 CPU limit 或产生 `exceededCpu`。P9 已暂停等待上游执行器支持，局部实施记录见 [P9](../blocked/p9-workers-standard-limits.md)。
 
 ### 固定客户端的 Worker upload wire
 

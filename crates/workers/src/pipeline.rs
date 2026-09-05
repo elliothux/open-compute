@@ -23,8 +23,9 @@ use crate::descriptor::{
     BindingDescriptorV1, BuiltinBindingDescriptorKindV1, BuiltinBindingDescriptorV1,
     CacheEntrypointPolicyV1, CachePolicyDescriptorV1, QueueProducerBindingDescriptorV1,
     SYSTEM_MODULE_PREFIX, SecretDescriptor, ServiceDescriptorV1, WorkerCodeDescriptorV1,
-    canonicalize_vars, ciphertext_sha256, validate_env_name,
+    ciphertext_sha256,
 };
+use crate::environment::{MAX_VARIABLE_BYTES, MAX_VARIABLES, canonicalize_vars, validate_env_name};
 use bytes::Bytes;
 use futures::stream;
 use open_compute_artifacts::ArtifactStore;
@@ -52,11 +53,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
-const MAX_VARS: usize = 64;
-const MAX_ENV_BYTES: usize = 64 * 1024;
-const MAX_SECRETS: usize = 64;
-const MAX_SECRET_BYTES: usize = 16 * 1024;
-const MAX_SECRET_TOTAL_BYTES: usize = 64 * 1024;
+const MAX_BINDINGS: usize = 64;
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_QUEUE_CONSUMER_CONCURRENCY: u32 = 32;
 const MAX_QUEUE_CONSUMERS_PER_VERSION: usize = 64;
@@ -630,8 +627,7 @@ impl<'a> VersionController<'a> {
     ) -> Result<CreateVersionOutcome, PlatformError> {
         validate_idempotency_key(&request.idempotency_key)?;
         let content = PreparedContent::prepare(&request.content, self.bundle_limits)?;
-        let (canonical_vars, stored_vars) =
-            canonicalize_vars(request.vars.clone(), MAX_VARS, MAX_ENV_BYTES)?;
+        let (canonical_vars, stored_vars) = canonicalize_vars(request.vars.clone())?;
         validate_secret_set(&request.secrets, &canonical_vars)?;
         validate_binding_set(&request.bindings, &canonical_vars, &request.secrets)?;
         validate_service_set(

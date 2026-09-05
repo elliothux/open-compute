@@ -1,6 +1,6 @@
 //! Canonical static-asset manifests and immutable routing configuration.
 
-use crate::descriptor::validate_env_name;
+use crate::environment::validate_env_name;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactRef};
 use open_compute_core::{ErrorCode, PlatformError};
 use serde::{Deserialize, Serialize};

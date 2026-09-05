@@ -1,6 +1,80 @@
 use super::*;
 
 #[tokio::test]
+async fn tenant_body_limits_reject_declared_and_streamed_overflow_as_413() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = Router::new().fallback(|request: Request| async move {
+        match to_bytes(request.into_body(), 1024).await {
+            Ok(bytes) => bytes.into_response(),
+            Err(_) => StatusCode::BAD_REQUEST.into_response(),
+        }
+    });
+    let (shutdown, receiver) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = receiver.await;
+            })
+            .await
+            .unwrap();
+    });
+    let auth = GenerationAuthRegistry::new();
+    auth.activate_for_test(open_compute_core::SecretString::new("aa".repeat(32)));
+    let transport = WorkerdTransport::for_test_endpoint(auth, port);
+    assert_eq!(transport.max_request_body, 100_000_000);
+    let transport = transport.with_test_request_body_limit(16);
+    let target = DispatchTarget {
+        account_id: AccountId::generate(),
+        worker_id: WorkerId::generate(),
+        version_id: VersionId::generate(),
+        worker_code_sha256: "11".repeat(32),
+        entrypoint: None,
+        route_generation: 1,
+        request_id: RequestId::generate(),
+    };
+    for declared in [true, false] {
+        for size in [15, 16, 17] {
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri("https://tenant.example/")
+                .header(header::HOST, "tenant.example");
+            if declared {
+                request = request.header(header::CONTENT_LENGTH, size);
+            }
+            let chunks = futures::stream::iter(
+                (0..size).map(|_| Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"x"))),
+            );
+            let response = tokio::time::timeout(
+                Duration::from_secs(2),
+                transport.dispatch(
+                    target.clone(),
+                    request.body(Body::from_stream(chunks)).unwrap(),
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            if size > 16 {
+                assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            } else {
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(
+                    to_bytes(response.into_body(), 32).await.unwrap().len(),
+                    size
+                );
+            }
+        }
+    }
+    assert!(!dispatch::request_body_limit_error(&std::io::Error::other(
+        "length limit exceeded"
+    )));
+    drop(transport);
+    shutdown.send(()).unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn body_dispatch_does_not_reuse_connections_or_buffer_input() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -302,7 +376,7 @@ fn queue_and_scheduled_custom_event_protocols_are_bounded_and_strict() {
 async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     let transport =
         WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)))
-            .with_max_request_body(0);
+            .with_test_request_body_limit(0);
     assert!(format!("{transport:?}").contains("WorkerdTransport"));
     let candidate = ValidationCandidate {
         account_id: AccountId::generate(),

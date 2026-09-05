@@ -303,6 +303,11 @@ export async function loadProject(path: string): Promise<WorkerProject> {
     && discoveredRaw.userConfigPath !== undefined
     && resolve(discoveredRaw.userConfigPath) === requestedPath;
   const raw = usesSelectedRedirect ? discoveredRaw : explicitRaw;
+  // Normalization can erase null, and framework output can omit a user limit.
+  // Neither may turn an explicit declaration into an unenforced deployment.
+  if ([explicitRaw.rawConfig, raw.rawConfig].some(value => record(value) && Object.hasOwn(value, "limits"))) {
+    throw new Error("Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)");
+  }
   const config = usesSelectedRedirect
     ? readWranglerConfig(
       { script: requestedPath },

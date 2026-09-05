@@ -43,7 +43,7 @@ Local / S3 对象后端互斥配置、统一 object operation facade 与开发�
 snapshot、backup 与 immutable artifact 公开合同。
 
 Workers Standard 的 structural/runtime limits 由
-[`P9 Workers Standard limits 设计`](../p9-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
+[`P9 Workers Standard limits 设计`](../blocked/p9-workers-standard-limits.md) 细化；公开的 `worker_loaders` binding、
 `WorkerLoader.load/get` 和 nested stock-workerd Gate 由
 [`P10 Dynamic Workers / Worker Loader 设计`](../p10-dynamic-workers-worker-loader.md) 细化。后者只覆盖
 Dynamic Workers，不包含 Workers for Platforms 或 dispatch namespaces。Cloudflare Artifacts 的 v4/Worker/Git
@@ -795,7 +795,7 @@ Wrangler schema validation
 | Cache | `cache.enabled`, `cache.cross_version_cache` 和受支持的 Worker export cache override | 映射现有 Cache authority |
 | Images | `images.binding` | `remote` 只是 local dev 字段，不改变 server binding |
 | Version Metadata | `version_metadata.binding` | 不保留 `open-compute.json` 曾有的非标准 `tag` 字段 |
-| Standard limits（P9） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 P9 完成前同样 fail closed，见 [limits 专项](../p9-workers-standard-limits.md) |
+| Standard limits（P9） | `limits.cpu_ms`, `limits.subrequests` | 固定 Wrangler 4.127.1 schema 不含 `usage_model` property；`usage_model` 因 pinned-schema absence 保持 `unsupported`，`limits` 字段在 P9 完成前同样 fail closed，见 [limits 专项](../blocked/p9-workers-standard-limits.md) |
 | Worker Loader（P10） | `worker_loaders[].binding` | P6 识别字段但 fail closed；P10 当前受 upstream stock workerd nested-loader/limits/cache G0 阻断，见 [Worker Loader 专项](../p10-dynamic-workers-worker-loader.md) |
 | Observability logs（P7） | `observability.enabled`, `head_sampling_rate`, `logs.enabled`, `logs.head_sampling_rate`, `logs.invocation_logs`, `logs.persist` | P6 只提供共用 v4 core；P7 完成前 settings mutation fail closed；`destinations` 只接受空数组 |
 | Cloudflare Artifacts（P11） | `artifacts[].binding`, `artifacts[].namespace` | 固定 config schema 已在 P6 inventory 标为 `unsupported`；Artifacts multipart binding 与 P11 v4/Worker/Git 合同由 [Artifacts 专项](../p11-cloudflare-artifacts.md) 一起实现，P11 前 fail closed；`remote` 仅 local dev |

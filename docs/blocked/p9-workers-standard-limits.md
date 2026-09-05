@@ -1,8 +1,20 @@
 # P9：Workers Standard limits 设计
 
-状态：设计完成，待实施与验收。
+状态：**blocked**（2026-09-05 用户确认）。等待 upstream stock workerd 支持所需的 request/isolate
+资源限制执行器后再恢复实施；本设计未完成，也未通过完整验收。
 
-本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](implemented/p6-cloudflare-v4-wrangler-compatibility.md)
+阻塞原因：固定 standalone workerd 提供执行器接口，但 CPU/subrequest/isolate-memory 等使用空实现；
+Cloudflare 托管运行时的执行能力不随该官方二进制提供。Miniflare/WDL 未补齐此能力，详见第 2.1 节。
+
+恢复条件：upstream 正式 release 的 standalone server 提供所需执行器，并有源码与上游测试证据；
+届时重新核验客户端合同、协调更新 formal pin，再继续剩余实施和第 11 节验收。上游 issue 尚无可承诺的
+交付日期；接口存在、类型声明或配置接受均不构成解除阻塞。继续遵守不维护私有 fork、不用 wrapper
+近似 CPU/heap 计量的约束。
+
+暂停时已有的局部改动和定向验证记录保留在第 2.2 节，不据此声明 P9 已完成。
+`OC-WKR-LIMIT-001` 保持开放，显式 `limits` 继续 fail closed。
+
+本文细化 [P6 Cloudflare v4 API 与 Wrangler 子集兼容设计](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)
 中的 limits 合同。它只定义 open-compute 平台本身，不包含 LynxOS 的团队规模、单机容量默认值、部署拓扑
 或运维策略。
 
@@ -39,12 +51,86 @@
 - Cloudflare [Dynamic Workers custom resource limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/)；
 - Cloudflare [Vectorize limits](https://developers.cloudflare.com/vectorize/platform/limits/)；
 - Cloudflare [AI Search limits](https://developers.cloudflare.com/ai-search/platform/limits-pricing/)；
-- 已归档的 [P5 Vectorize 与 AI Search 实现合同](implemented/p5-vectorize-ai-search.md)及
-  [完成记录](implemented/p5-vectorize-ai-search-results.md)；
-- [Workers Logs 与 realtime tail 专项设计](implemented/p7-workers-logs-realtime-tail.md)。
+- 已归档的 [P5 Vectorize 与 AI Search 实现合同](../implemented/p5-vectorize-ai-search.md)及
+  [完成记录](../implemented/p5-vectorize-ai-search-results.md)；
+- [Workers Logs 与 realtime tail 专项设计](../implemented/p7-workers-logs-realtime-tail.md)。
 
 网页只用于发现最新合同。release qualification 使用固定的 schema、types、workerd source snapshot 和
 Cloudflare differential fixture；网页变化不能在未 review 时自动改变运行参数。
+
+### 2.1 2026-09-05 实施前核验
+
+本次核验没有完成 L1–L4，也没有关闭 `OC-WKR-LIMIT-001`。第 11 节的完整 runtime DoD 指
+**每个 invocation/isolate 的真实执行和超限终止**：CPU、subrequest、128 MB isolate memory、startup、
+pending-header connections，以及 Dynamic Worker inherited/code/entrypoint limits 和 distinct-in-flight
+上限；还包括真实 outcome、清理、并发与重启恢复。配置解析、数据库持久化、进程 RSS 或外层 wall timeout
+均不足以满足它。当前指定的 stock workerd 无法完成这部分；不能通过修改文档状态把阻塞转成已支持。
+
+本地固定输入核验如下，SHA-256 均来自本次读取的实际文件：
+
+| 输入 | revision / SHA-256 |
+| --- | --- |
+| formal `workerd.lock.json` | `4ccb7814a1ec72f50a3862cfac7475be6a4cade0ca646e8d16a2cb9aac42cb0f` |
+| workerd source revision | `e9dda5963aba7ee4323960db795690ec78fec118` |
+| `server.c++` | `e344a9ee81daa5174269dabe94bb494e448fb10b5410374674c4c4ef72cd04be` |
+| `api/worker-loader.c++` | `aa9195e1f1bf767e92a6cc71982265a703e465a5e76b647d4613a59cabcb3b01` |
+| Wrangler 4.127.1 `config-schema.json` | `e42dc556dcb039aa1103d4811b1f58497e2676aceee20488d9ceb1d8ab712018` |
+| workers-types 5.20260830.1 stable `index.d.ts` / matching generated snapshot | `a00b4783854c9028158f776d605790d9a3e17e6a97f4d255beb70035c59c40dd` |
+| workers-sdk source revision | `f8085545bcaa2c639f171c25e4424685036a0e10` |
+| WDL source revision | `cf4e63e50d5f74ea0f75ed62dda21589cfc9be59` |
+
+已核验本地 Darwin ARM64 archive SHA-256 为
+`845ee71f74e821a6085ed506361dd57894f5a416af05396efdc9fd43bc8f69fc`，binary SHA-256 为
+`60f972c2b208ad6ab9db09f770396d6d9f38b663d91e62b9a1166e93b51d7675`，执行 `--version` 返回
+`workerd 2026-08-30`；三者与 formal pin 一致。这仅证明输入身份，不是 runtime limits 行为通过。
+
+| 实现参考 | 本次核验结果 | 对 P9 的意义 |
+| --- | --- | --- |
+| [stock workerd standalone](../../references/workerd/src/workerd/server/server.c++) | `NullIsolateLimitEnforcer` 不配置 isolate heap/startup limit；`enterJs()`、`newSubrequest()` 为 no-op；`getLimitsExceeded()` 返回 none；Dynamic Worker `getEntrypointResolved()` 不使用收到的 `ResourceLimits` | L3 的真实 CPU、内存、subrequest 与 Dynamic Worker limits 仍阻塞 |
+| [Miniflare runtime](../../references/workers-sdk/packages/miniflare/src/runtime/index.ts) | 当前快照 package 为 `5.20260828.0-alpha`，执行路径启动 `workerd serve`；[config schema](../../references/workers-sdk/packages/miniflare/src/config/schema.ts) 未提供 CPU/subrequest/isolate-memory enforcer，其中 Workflow `limits.steps` 是另一项产品合同 | 无可直接复用的 P9 runtime enforcer；不能将 Miniflare 2 的旧模拟计数器视为当前 stock-workerd 能力 |
+| [WDL Worker loading](../../references/wdl/runtime/load.js) / [compatibility matrix](../../references/wdl/docs/compatibility.md) | 使用 stock `env.LOADER.get()`；有 64 MiB WorkerCode 与序列化 env budget 校验；未发现 P9 所需的 request/isolate enforcer | 可参考 structural admission，不能证明 Standard runtime limits |
+| [WDL D1 边界](../../references/wdl/docs/modules/d1.md) | 明确声明容器 memory hard limit 不是 per-request SQL memory interrupt，同步 SQL 可在返回前继续消耗共享 isolate CPU | 容器和进程保护属于 `operator_capacity`，不能替代 CPU/isolate-memory 合同 |
+
+上游 [Miniflare subrequest issue #4359](https://github.com/cloudflare/workers-sdk/issues/4359) 在本次检索中
+为 `Closed as not planned`，仍带 `blocked` 标签；对应 [workerd #1291](https://github.com/cloudflare/workerd/issues/1291)
+为 Open；[workerd CPU/Memory #49](https://github.com/cloudflare/workerd/issues/49) 为
+`Closed as not planned`，不能将等待上游描述成已有交付计划。issue 状态仅作旁证，固定源码才决定本项目的可执行能力。线上检索的 workerd `main`
+同样仍包含 no-op enforcer，但它不是本次 pin，不能替代上述固定输入。
+
+另有一项必须先纠正的客户端前提：**固定 Wrangler 4.127.1 schema 的 `RawConfig` 没有 `usage_model`**。
+`UserLimits` 仅声明 `cpu_ms` / `subrequests` 为 number；第 5.1 节的 finite-integer/range 要求是待实施的
+server semantic validation，不能描述成该 schema 已执行的验证。现有
+[P6 field inventory producer](../../test/conformance/p6-contract.mjs) 已将 `usage_model` 标记为
+`pinned-schema-absence`。因此第 5.1 节配置示例和第 11 节 Wrangler `usage_model` round trip 是待修订目标，
+不是已被固定客户端支持的事实；官方 v4 wire 和 Wrangler 用户配置须分别资格化。
+
+上述实施前核验没有执行 Cloudflare differential、行为 Gate、coverage 或完整兼容性验收，当时没有修改
+production 实现。后续实现进展见下节；完整 L0 的 binding logical-request inventory 仍待完成。
+此核验不能作为 P9 归档完成的证据。
+
+### 2.2 暂停时的局部实施记录（未完成验收）
+
+- 本地工具链在 Wrangler normalization 前使用实际选中配置的 raw declaration 检查 `limits`，包含原始
+  用户配置和框架重定向配置；显式整数对象、空对象和 `null` 都不能被丢弃后部署。v4 settings 删除原先
+  接受 `null` 的 `Option<Value>` 字段，所有显式 limits 都在 closed decoder 失败。省略字段的既有路径保留。
+- [变量 authority](../../crates/workers/src/environment.rs) 固定 vars/JSON/secrets 合计 128 个、每值 5 KiB；
+  text/secret 按 UTF-8 原始值计量，JSON 按 canonical bytes 计量。删除旧 64 vars、64 secrets、16 KiB
+  secret 与 64 KiB aggregate policy；产品 bindings 的独立数量边界不再复用变量常量。
+- immutable Version 创建、secret clone 和 runtime snapshot 使用同一变量边界。重启读取拒绝非 canonical
+  persisted bytes，不通过 normalization 修复存储。multipart 的独立 metadata binding transport ceiling
+  为 256，允许 128 个变量之外仍有产品 binding；metadata 总 bytes 仍为 1 MiB。这不是 CF runtime quota。
+- tenant request body 的生产值固定为十进制 `100000000` bytes；删除
+  `workers.max_request_body_bytes` 配置。仅 `test-support` 可缩小测试预算。声明长度与实际 streaming
+  body 分别检查，超限返回 413；host response-header timeout 使用 runtime-unavailable 错误，不冒充 CPU。
+- 已运行：工具链 7 项测试及 build/typecheck；变量边界单测、Workers crate 单测的开发轮，以及新增
+  immutable environment admission/restart/corruption 回归；settings 路由回归。body transport 定向回归通过：
+  缩小测试预算后的边界减一、边界、边界加一，分别覆盖声明长度与 chunked body，超限均返回 413；
+  此证据未覆盖生产 100 MB 边界或 stock-workerd。固定 Wrangler/stock-workerd 场景已加入 128 variables、5 KiB 值、Version upload/promotion/rollback
+  断言，尚未执行该最终 Gate。以上均不是完整 P9 或 workspace acceptance。
+
+未完成：code gzip/raw 计量与旧 bundle policy 移除、URL/headers/log structural 边界、完整 Version limits
+authority、capabilities 分类、binding logical-request inventory、Cloudflare differential、L3 执行器、coverage
+与最终单轮 workspace Gate。本文保持 blocked，等待上游支持后恢复；未调整第 11 节 DoD，未关闭 `OC-WKR-LIMIT-001`。
 
 ## 3. limits 分类
 
@@ -91,7 +177,7 @@ indexing/parser child 并发和 child process restart 属于部署方容量保�
 
 ## 4. Day 1 标准矩阵
 
-当前 `WorkersConfig` 不能直接沿用为 v4/Standard authority：
+实施前的 `WorkersConfig` 不能直接沿用为 v4/Standard authority：
 
 - `max_bundle_bytes = 17 MiB` 限制旧 `WorkerBundleV1` 整体，不区分 Cloudflare 的 gzip code size、raw code、
   multipart metadata 与 Static Assets；
@@ -109,12 +195,12 @@ v4 replacement 实施时删除旧 bundle/body 值对公开合同的 authority，
 | --- | ---: | --- | --- |
 | Worker gzip 后代码 | 10 MB | 按固定 Wrangler/Cloudflare code-size 算法由 server 重算 | 待实施 |
 | Worker 未压缩代码 | 64 MB | module decoder 累加原始 module body | workerd Dynamic Worker 已有；普通 upload 待统一 |
-| text + secret variables | 128 / Worker | metadata canonicalization | 待实施 |
-| 单 variable 值 | 5 KB | metadata/secrets mutation | 待实施 |
+| text + secret variables | 128 / Worker | metadata canonicalization | 已实现共享计数；最终 Gate/differential 待验收 |
+| 单 variable 值 | 5 KB | metadata/secrets mutation | 已实现 5 KiB 值校验；最终 Gate/differential 待验收 |
 | URL | 16 KB | public ingress 解析前 | 待实施 |
 | request headers 总量 | 128 KB | public ingress | 待实施 |
 | response headers 总量 | 128 KB | tenant response 出口 | 待实施 |
-| request body | 100 MB baseline | public ingress 流式计数 | 当前值不合格，待迁移 |
+| request body | 100 MB baseline | public ingress 流式计数 | 已迁移固定值；缩小预算的 streaming 定向回归通过，生产边界与最终 Gate 待验收 |
 | response body | 无 Worker hard limit | 保持 streaming，不全量 buffer | 待审计 |
 | 每 request log data | 256 KB | Tail collector 在结构化编码前计量 | 见 Logs 专项 |
 | Static Asset 单文件 | 25 MiB | Assets upload session | 待 v4 Assets 实施 |
@@ -323,7 +409,7 @@ Worker 的多个并发 request 只计一个。Durable Object context 的 10 个�
 blocked，不得用平台全局并发阈值替代。
 
 详细 Worker Loader 合同、stock workerd nesting blocker 与 cache identity 见
-[Dynamic Workers / Worker Loader 专项设计](p10-dynamic-workers-worker-loader.md)。
+[Dynamic Workers / Worker Loader 专项设计](../p10-dynamic-workers-worker-loader.md)。
 
 ## 8. Errors 与 observability
 

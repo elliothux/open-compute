@@ -1313,8 +1313,6 @@ impl ObservabilityConfig {
 pub struct WorkersConfig {
     /// Maximum canonical `WorkerBundleV1` bytes accepted by Control API.
     pub max_bundle_bytes: u64,
-    /// Maximum request body bytes forwarded to a tenant Worker.
-    pub max_request_body_bytes: u64,
     /// Deadline for waiting on in-flight version pins during delete.
     pub delete_drain_timeout_ms: u64,
     /// Minimum remote artifact orphan age before deletion.
@@ -1335,7 +1333,6 @@ impl Default for WorkersConfig {
     fn default() -> Self {
         Self {
             max_bundle_bytes: 17 * 1024 * 1024,
-            max_request_body_bytes: 16 * 1024 * 1024,
             delete_drain_timeout_ms: 5_000,
             artifact_gc_grace_ms: 24 * 60 * 60 * 1_000,
             artifact_gc_interval_ms: 60_000,
@@ -1350,10 +1347,6 @@ impl Default for WorkersConfig {
 impl WorkersConfig {
     fn validate(&self) -> Result<(), PlatformError> {
         require_nonzero(self.max_bundle_bytes, "workers.max_bundle_bytes")?;
-        require_nonzero(
-            self.max_request_body_bytes,
-            "workers.max_request_body_bytes",
-        )?;
         require_nonzero(
             self.delete_drain_timeout_ms,
             "workers.delete_drain_timeout_ms",
@@ -1380,7 +1373,6 @@ impl WorkersConfig {
             "workers.version_min_retention_ms",
         )?;
         if self.max_bundle_bytes > 64 * 1024 * 1024
-            || self.max_request_body_bytes > 64 * 1024 * 1024
             || self.delete_recovery_batch > 10_000
             || self.retain_ready_versions > 10_000
             || self.retain_rejected_versions > 10_000

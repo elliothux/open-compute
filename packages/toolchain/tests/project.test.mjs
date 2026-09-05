@@ -119,6 +119,20 @@ test("rejects unsupported standard Wrangler bindings after normalization", async
   });
 });
 
+test("rejects explicit runtime limits instead of dropping them during project import", async t => {
+  for (const limits of [{ cpu_ms: 1 }, { subrequests: 1 }, { cpu_ms: 30000, subrequests: 10000 }, {}, null]) {
+    const { filename } = await fixture(t, {
+      name: "bounded-worker",
+      main: "src/index.ts",
+      compatibility_date: "2026-08-30",
+      limits,
+    });
+    await assert.rejects(loadProject(filename), {
+      message: "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
+    });
+  }
+});
+
 test("consumes the standard generated deployment redirect", async t => {
   const { directory } = await fixture(t, {}, "placeholder");
   await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({
@@ -139,4 +153,26 @@ test("consumes the standard generated deployment redirect", async t => {
   const project = await loadProject(join(directory, "wrangler.jsonc"));
   assert.equal(project.frameworkOutput, ".wrangler/deploy/config.json");
   assert.equal(project.main, undefined);
+  for (const limits of [{ cpu_ms: 1000 }, null]) {
+    await writeFile(join(directory, "dist", "server", "wrangler.json"), JSON.stringify({
+      name: "framework",
+      main: "index.js",
+      no_bundle: true,
+      compatibility_date: "2026-08-30",
+      limits,
+    }));
+    await assert.rejects(loadProject(join(directory, "wrangler.jsonc")), {
+      message: "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
+    });
+  }
+  await writeFile(join(directory, "dist", "server", "wrangler.json"), JSON.stringify({
+    name: "framework", main: "index.js", no_bundle: true, compatibility_date: "2026-08-30",
+  }));
+  await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({
+    name: "user-framework", main: "src/index.ts", compatibility_date: "2026-08-30",
+    limits: { subrequests: 1 },
+  }));
+  await assert.rejects(loadProject(join(directory, "wrangler.jsonc")), {
+    message: "Wrangler config declares unsupported limits (OC-WKR-LIMIT-001)",
+  });
 });
