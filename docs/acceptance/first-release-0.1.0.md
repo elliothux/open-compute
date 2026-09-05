@@ -5,7 +5,8 @@
 ## 固定输入与范围
 
 - 从 `main` 的 `62cb7a0c92059b9cc7a4c956915094d671d075b1` 创建 `codex/release-0.1.0`。
-  当前独立 R2 修复分支不在本次发布准备变更内；最终源码以合入 main 后的 annotated tag 为准。
+  最初未包含独立 R2 修复；2026-09-05 用户追加要求，将 issue #4 的本地提交
+  `970650a17bd1906f699921ef7c5b8d88c6f1bed8` 一起合入后再发布。最终源码以合入 main 后的 annotated tag 为准。
 - Cargo workspace 与 lockfile 已是 `0.1.0`，不制造无意义的版本或 lockfile 变动。
 - workerd 保持 `v1.20260830.1`，revision `e9dda5963aba7ee4323960db795690ec78fec118`，
   compatibility date `2026-08-30`；四平台摘要以正式 `packages/runtime/workerd.lock.json` 为准。
@@ -15,7 +16,9 @@
   并上传每个平台的 Gate 证据。
 - release 先完成静态检查与 90% coverage，再运行 Linux/macOS 各一轮完整 Gate；每个 job 显式构建
   runtime assets。四平台产物经只读聚合，再由 release environment 中唯一写权限 job 发布。
-- tag 必须对应已经通过 main push CI 的精确 commit；不修改已推送 tag，不覆盖既有 assets。
+- tag 必须对应已经通过 main push CI 的精确 commit，不覆盖既有 assets。用户明确授权本次
+  尚未公开发布的 `v0.1.0` 在修复验收后重建；随后又追加纳入 issue #4，故最终 tag 必须包含 R2 修复。
+  旧 tag object 与首次失败记录保留；不把这一例外扩展到已公开 Release。
 
 ## 发布内容与限制
 
@@ -75,3 +78,28 @@ PR CI `33951624671` 的产品 Gates 通过，但 `p3-contract` 的 source baseli
 - [ ] 正式 latest Release、逐目标文件大小/SHA-256、发布完成时间。
 
 未完成上述验证前保留本文于 acceptance；完成后将实际结果归档到 implemented 并更新索引。
+
+## Issue #4 纳入首次发行
+
+本地 R2 修复的原始实现、Adobe S3Mock debug/release 对比、90.044691% coverage 和 1,140-case
+最终 Gate 记录保持原样，见 [issue #4 完成记录](../implemented/github-issue-4-r2-upload.md)。
+本次集成基于已合入的进程夹具修复；只重新计算合并输入的 conformance source digest，未更改 R2
+生产实现。合并后的完整 CI、coverage、最终 Gate 和四平台 package 仍须以新源码实际执行，不能复用
+旧提交的通过状态作为新版本的发行资格。此前不包含 R2 的 tag 暂不重建，不发布部分源码。
+
+集成后的 macOS arm64 插桩 development Gate `p0-5` 两个注册用例通过，69.21 s；
+报告为 `.temp/gate-run/20260905T184154-f82ad9af/report.json`。同尺寸上传的分片阶段为 11,193 ms，
+最慢分片 517 ms；171 次轻量请求探测中最慢 141 ms，读回 SHA-256 与原记录一致。
+这是带 coverage 插桩的 debug 观察，不与原记录的非插桩 debug/release 时间混为同一性能基线。
+
+集成复核未发现新的 R2 兼容性问题：原始 R2 生产文件和回归与 `970650a17` 字节一致，
+公开类型及 formal workerd pin 未变；完整发行验收仍等待合入后的最终源码。
+
+| 集成检查面 | 结论 | 证据 |
+| --- | --- | --- |
+| multipart 返回值、ETag、SSE-C | aligned | pinned upstream declarations/source、合并后的真实 stock-workerd R2 Gate |
+| PUT checksum、取消及资源持有 | aligned | 原始成功/失败/取消回归和已保留的完整验收；有界 blocking task 的资源所有权复核 |
+| HTTP metadata 缺省和显式字段 | aligned | 原始 presence-mask 全组合及 Adobe 回读证据；官方 R2 metadata 合同 |
+| 托管 Cloudflare differential | unverified | 本次没有执行新的外部部署，不扩大已有资格声明 |
+
+全球复制/placement 仍是 `OC-R2-001` 的 excluded self-host scope，不构成本次新增差异。
