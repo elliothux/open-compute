@@ -42,8 +42,8 @@ pub use r2_model::{
     R2_MAX_MULTIPART_OBJECT_BYTES, R2_MAX_MULTIPART_PART_BYTES, R2_MAX_MULTIPART_PARTS,
     R2_MIN_MULTIPART_PART_BYTES, R2BucketIdentity, R2BucketLocator, R2ChecksumAlgorithm,
     R2Checksums, R2ComputedChecksums, R2Condition, R2Download, R2EtagMatch, R2GetResult,
-    R2HttpMetadata, R2MultipartCreateOptions, R2ObjectMetadata, R2PutOptions, R2Range, R2SsecKey,
-    R2StorageClass, R2UploadSource, R2UploadedPart, UserObjectKey,
+    R2HttpMetadata, R2MultipartCreateOptions, R2ObjectMetadata, R2PartSource, R2PutOptions,
+    R2Range, R2SsecKey, R2StorageClass, R2UploadSource, R2UploadedPart, UserObjectKey,
 };
 pub use r2_preflight::{R2PreflightOutcome, preflight_r2};
 pub use snapshot::{CommittedSnapshot, IncompleteSnapshotCleanup, SnapshotObjectStore};

@@ -2,6 +2,11 @@
 
 #![cfg(feature = "test-support")]
 
+#[path = "p0_5_r2_support/mod.rs"]
+mod support;
+#[path = "p0_5_r2_support/uploads.rs"]
+mod uploads;
+
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, header};
 use open_compute_artifacts::{
@@ -40,132 +45,25 @@ use std::time::{Duration, Instant};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p0_5_real_r2_facade_matrix() {
-    let workerd = std::env::var_os("OPEN_COMPUTE_TEST_WORKERD")
-        .map(PathBuf::from)
-        .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
-    let root = repo_root();
-    let lock = root.join("packages/runtime/workerd.lock.json");
-    let assets = root.join("packages/runtime");
-    let temp = tempfile::tempdir().unwrap();
-    let storage = Arc::new(
-        PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
-            .unwrap(),
-    );
-    let mock = MockS3::spawn("open-compute").await;
-    let (artifacts, objects) = stores(&mock);
-    let runtime = verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
-        .await
-        .expect("formal pinned runtime");
-
-    let source_auth = GenerationAuthRegistry::new();
-    let binding_auth = GenerationAuthRegistry::new();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let source_addr = source_listener.local_addr().unwrap();
-    let binding_listener = bind_binding_backend().await.unwrap();
-    let binding_addr = binding_listener.local_addr().unwrap();
-    let pins = ResourcePins::new();
     let r2_config = R2Config {
         max_object_bytes: 8 * 1024 * 1024,
         max_staging_bytes: 16 * 1024 * 1024,
         operation_timeout_ms: 5_000,
         ..R2Config::default()
     };
-    let r2_service = Arc::new(
-        R2BindingService::new(
-            storage.clone(),
-            pins.clone(),
-            objects.clone(),
-            r2_config.clone(),
-        )
-        .unwrap(),
-    );
-    let (shutdown_tx, mut source_shutdown) = tokio::sync::watch::channel(false);
-    let mut binding_shutdown = shutdown_tx.subscribe();
-    let source_task = tokio::spawn({
-        let source =
-            RuntimeSource::new(storage.clone(), artifacts.clone(), BundleLimits::default());
-        let auth = source_auth.clone();
-        async move {
-            serve_runtime_source(source_listener, source, auth, async move {
-                let _ = source_shutdown.changed().await;
-            })
-            .await
-        }
-    });
-    let binding_task = tokio::spawn({
-        let binding_storage = storage.clone();
-        let executor_storage = storage.clone();
-        let auth = binding_auth.clone();
-        let pins = pins.clone();
-        async move {
-            serve_binding_backend(
-                binding_listener,
-                binding_storage,
-                auth,
-                pins,
-                Arc::new(SqliteKvBindingExecutor::new(
-                    executor_storage,
-                    Arc::new(SystemClock),
-                )),
-                None,
-                Some(r2_service),
-                None,
-                open_compute_core::DurableObjectsConfig::default(),
-                open_compute_core::QueuesConfig::default(),
-                open_compute_core::WorkflowsConfig::default(),
-                None,
-                async move {
-                    let _ = binding_shutdown.changed().await;
-                },
-            )
-            .await
-        }
-    });
-
-    let compiler = StaticConfigCompiler::new(
-        runtime.clone(),
-        lock.clone(),
-        assets,
-        storage.data_dir().runtime_dir(),
-        PlatformReleaseMeta {
-            version: "p0.5-gate".to_owned(),
-        },
-        Duration::from_secs(20),
-        Redactor::new(),
-    )
-    .with_generation_auth(source_auth.clone())
-    .with_binding_generation_auth(binding_auth.clone());
-    let supervisor_slot = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_test_request_body_limit(32 * 1024 * 1024);
-    let do_storage = storage
-        .data_dir()
-        .prepare_durable_object_storage(
-            &storage.identity().platform_id.to_string(),
-            runtime.version_output(),
-        )
-        .unwrap();
-    let supervisor = Arc::new(WorkerdSupervisor::new(
-        WorkerdSupervisorOptions {
-            runtime,
-            compiler,
-            config: runtime_config(),
-            clock: Arc::new(SystemClock),
-            jitter: Arc::new(OsJitter),
-            redactor: Redactor::new(),
-            lease_path: Some(storage.data_dir().runtime_dir().join("p0-5-gate.lease")),
-        },
-        vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
-        ],
-        vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-        vec![source_auth, binding_auth],
-    ));
-    *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
-    supervisor.start();
-    wait_running(&supervisor, Duration::from_secs(30)).await;
+    let support::R2Gate {
+        _temp,
+        mock: _mock,
+        storage,
+        objects,
+        artifacts,
+        pins,
+        transport,
+        supervisor,
+        shutdown_tx,
+        source_task,
+        binding_task,
+    } = support::start(r2_config.clone(), None).await;
 
     let account = storage.identity().default_account_id;
     let resource = create_bucket(&storage, &objects, &r2_config, account).await;
@@ -735,7 +633,7 @@ async fn wait_pid_change(supervisor: &WorkerdSupervisor, old_pid: i32, timeout: 
     }
 }
 
-fn stores(mock: &MockS3) -> (ArtifactStore, R2ObjectStore) {
+fn stores(endpoint: &str) -> (ArtifactStore, R2ObjectStore) {
     let config = PlatformConfig::from_toml_str(&format!(
         r#"
 [data]
@@ -744,7 +642,7 @@ master_key_file = "/var/lib/open-compute/keys/master.key"
 
 [storage]
 backend = "s3"
-endpoint = "{}"
+endpoint = "{endpoint}"
 region = "us-east-1"
 bucket = "open-compute"
 force_path_style = true
@@ -756,8 +654,7 @@ max_retries = 1
 retry_backoff_ms = 10
 connect_timeout_ms = 500
 request_timeout_ms = 5000
-"#,
-        mock.endpoint
+"#
     ))
     .unwrap()
     .object_storage
@@ -771,7 +668,7 @@ request_timeout_ms = 5000
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         );
     let credentials = resolve_s3_credentials_with(&config, &env).unwrap();
-    let client = ObjectBackend::connect_s3(&config, &credentials, 64 * 1024 * 1024).unwrap();
+    let client = ObjectBackend::connect_s3(&config, &credentials, 256 * 1024 * 1024).unwrap();
     (
         ArtifactStore::new(client.clone()),
         R2ObjectStore::new(client),

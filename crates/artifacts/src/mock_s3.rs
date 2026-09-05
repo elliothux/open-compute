@@ -561,7 +561,7 @@ async fn handle_conn(
                 part_digests.extend_from_slice(&md5::Md5::digest(&part));
                 assembled.extend_from_slice(&part);
             }
-            let checksums = crate::hash_bytes(&assembled);
+            let sha256 = hex::encode(Sha256::digest(&assembled));
             let metadata = upload.metadata;
             let etag = format!(
                 "{}-{part_count}",
@@ -571,7 +571,7 @@ async fn handle_conn(
                 state.lock().expect("lock").objects.insert(
                     key.clone(),
                     StoredObject {
-                        sha256: hex::encode(checksums.sha256),
+                        sha256,
                         body: assembled,
                         etag: etag.clone(),
                         metadata: metadata.clone(),
@@ -587,7 +587,7 @@ async fn handle_conn(
             state.lock().expect("lock").objects.insert(
                 key.clone(),
                 StoredObject {
-                    sha256: hex::encode(checksums.sha256),
+                    sha256,
                     body: assembled,
                     etag: etag.clone(),
                     metadata,

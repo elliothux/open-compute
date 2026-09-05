@@ -90,7 +90,10 @@ TIMING = {
     'p0-2': ('p0_2_real_worker_create_validate_dispatch_promote_rollback_restart',),
     'p0-3': ('p0_3_real_binding_matrix',),
     'p0-4': ('p0_4_real_kv_matrix',),
-    'p0-5': ('p0_5_real_r2_facade_matrix',),
+    'p0-5': (
+        'p0_5_real_r2_facade_matrix',
+        'uploads::concurrent_large_upload_keeps_runtime_responsive',
+    ),
     'p0-6': ('p0_6_real_d1_facade_and_backend_matrix',),
     'p0-7': ('p0_7_real_durable_objects_matrix',),
     'p0-8': ('p0_8_real_scheduler_alarm_matrix',),

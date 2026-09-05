@@ -428,7 +428,16 @@ pub struct R2UploadedPart {
     pub etag: String,
 }
 
-/// Secure, replayable local file prepared before PUT or `UploadPart`.
+/// Secure, replayable local file prepared before `UploadPart`.
+#[derive(Debug)]
+pub struct R2PartSource {
+    /// Owned staging path opened and validated by the typed store.
+    pub path: PathBuf,
+    /// Exact byte length; the backend computes its required transfer checksum.
+    pub length: u64,
+}
+
+/// Secure, replayable local file and object metadata prepared before PUT.
 #[derive(Debug)]
 pub struct R2UploadSource {
     /// Owned staging path opened by the typed store.

@@ -9,6 +9,9 @@ use open_compute_core::PlatformId;
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt as _;
 
+#[path = "r2_tests/http_metadata.rs"]
+mod http_metadata;
+
 fn locator() -> R2BucketLocator {
     let resource_id = ResourceId::generate();
     let physical_prefix = format!("tenant/r2/v1/{resource_id}/");

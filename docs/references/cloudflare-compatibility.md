@@ -73,6 +73,22 @@ backend 和 workerd 内部 listener 仍仅监听 loopback。
 
 ## 关键实现说明
 
+### R2 上传调度与完整性
+
+`uploadPart` 的 staging source 只携带路径和精确长度，不计算不被后端消费的五种完整对象摘要。
+S3 adapter 仍计算并发送 `Content-MD5`，Local backend 仍执行自己的内容完整性校验；part ETag、
+complete ETag、SSE-C、分片大小校验和 SQLite multipart authority 不变。
+当前 Day1 对象 metadata 使用必需的 `oc-r2-http-fields` 六位 presence mask 记录 tenant 显式设置的
+HTTP 字段；S3 provider 自行补入的默认 header 不成为 R2 用户 metadata。显式字段在后端丢失仍拒绝，
+缺少/损坏该标记也拒绝，不对旧开发对象 backfill。这避免无 `httpMetadata` 的 multipart 在 Adobe S3Mock
+自动返回 `Content-Type: application/octet-stream` 时被误判为 complete 元数据损坏。
+普通 Worker/管理面 PUT 所需的 MD5、SHA-1/256/384/512 计算移入有界 blocking task，CPU 并发上限沿用
+`r2.max_concurrent_uploads`。任务持有临时文件、staging 字节配额及 CPU permit，直到计算真正结束；
+取消等待不把尚在执行的哈希误当成已经清理。body staging 继续流式写入并受总字节预算约束。
+成功响应仍等待后端保存及元数据提交，未改成后台接受任务；30 秒 runtime response-header deadline 未延长。
+这些实现调整不改变 [Cloudflare R2 Worker API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/)
+的 PUT checksum、multipart 返回字段及 complete 后可见性合同，也不新增 topology deviation。
+
 ### 租户请求体预算
 
 控制面已注册路由的 4 KiB（v4 为 64 MiB）声明长度检查不作用于 tenant ingress fallback，

@@ -149,13 +149,17 @@ async fn typed_store_round_trips_ssec_storage_class_and_multipart() {
     );
     let part_path = temp.path().join("part");
     std::fs::write(&part_path, b"part-body").unwrap();
+    std::fs::set_permissions(&part_path, std::fs::Permissions::from_mode(0o600)).unwrap();
     let part = store
         .upload_part(
             &locator,
             &mpu_key,
             &upload_id,
             1,
-            &upload_source(part_path, b"part-body"),
+            &crate::R2PartSource {
+                path: part_path,
+                length: 9,
+            },
             None,
         )
         .await

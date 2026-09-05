@@ -802,17 +802,15 @@ async fn local_typed_r2_round_trips_metadata_conditions_ssec_and_multipart() {
         .unwrap();
     let part_path = fixture.config.path.parent().unwrap().join("r2-part");
     write_private(&part_path, b"multipart-local");
-    let part_source = R2UploadSource {
+    let part_source = crate::R2PartSource {
         path: part_path,
         length: 15,
-        checksums: hash_bytes(b"multipart-local"),
-        version: version.clone(),
     };
     let part = store
         .upload_part(&locator, &multipart_key, &upload_id, 1, &part_source, None)
         .await
         .unwrap();
-    assert_eq!(part.etag, hex::encode(part_source.checksums.md5));
+    assert_eq!(part.etag, hex::encode(md5::Md5::digest(b"multipart-local")));
     let part_digest = hex::decode(&part.etag).unwrap();
     let expected_complete_etag = format!("{}-1", hex::encode(md5::Md5::digest(part_digest)));
     let completed = store

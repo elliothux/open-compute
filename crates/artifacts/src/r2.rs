@@ -5,9 +5,9 @@ use crate::backend::{
     ObjectRange, open_private_source,
 };
 use crate::r2_codec::{
-    META_CUSTOM, META_MD5, META_SCHEMA, META_SHA1, META_SHA256, META_SHA384, META_SHA512,
-    META_SSEC_MD5, META_STORAGE, META_VERSION, OBJECTS_SUFFIX, canonical_custom_metadata,
-    decode_metadata, encode_custom_metadata, integrity_error,
+    META_CUSTOM, META_HTTP_FIELDS, META_MD5, META_SCHEMA, META_SHA1, META_SHA256, META_SHA384,
+    META_SHA512, META_SSEC_MD5, META_STORAGE, META_VERSION, OBJECTS_SUFFIX,
+    canonical_custom_metadata, decode_metadata, encode_custom_metadata, integrity_error,
 };
 use crate::r2_model::{
     R2_MAX_DELETE_KEYS, R2_MAX_LIST_LIMIT, R2BucketIdentity, R2BucketLocator, R2ChecksumAlgorithm,
@@ -409,12 +409,27 @@ pub fn hash_bytes(bytes: &[u8]) -> R2ComputedChecksums {
 pub(crate) fn create_user_metadata(
     version: &str,
     custom_metadata: &BTreeMap<String, String>,
+    http_metadata: &crate::R2HttpMetadata,
     storage_class: R2StorageClass,
     ssec: Option<&R2SsecKey>,
 ) -> Result<BTreeMap<String, String>, PlatformError> {
     let mut metadata = BTreeMap::new();
     metadata.insert(META_SCHEMA.to_owned(), "1".to_owned());
     metadata.insert(META_VERSION.to_owned(), version.to_owned());
+    let fields = [
+        http_metadata.content_type.is_some(),
+        http_metadata.content_language.is_some(),
+        http_metadata.content_disposition.is_some(),
+        http_metadata.content_encoding.is_some(),
+        http_metadata.cache_control.is_some(),
+        http_metadata.cache_expiry.is_some(),
+    ]
+    .into_iter()
+    .enumerate()
+    .fold(0_u8, |mask, (bit, present)| {
+        mask | (u8::from(present) << bit)
+    });
+    metadata.insert(META_HTTP_FIELDS.to_owned(), fields.to_string());
     metadata.insert(
         META_CUSTOM.to_owned(),
         encode_custom_metadata(custom_metadata)?,
@@ -433,6 +448,7 @@ pub(crate) fn object_user_metadata(
     create_user_metadata(
         &source.version,
         &options.custom_metadata,
+        &options.http_metadata,
         options.storage_class,
         options.ssec.as_ref(),
     )

@@ -12,6 +12,10 @@
 2026-09-05 的 [GitHub Issues #1–#3 修复](github-issues-1-3.md)记录请求体限额、Assets bulk multipart
 与 Cron generation 的独立修复、1,131 用例最终单轮验收及 90.014165% Rust 行覆盖率；未新增远端差分资格。
 
+2026-09-05 的 [GitHub Issue #4：R2 上传优化](github-issue-4-r2-upload.md)记录冗余分片摘要删除、
+有界 PUT checksum 调度、provider 默认 HTTP metadata 修复、231 MiB debug/release 对比，
+以及 1,140 用例最终单轮验收和 90.044691% Rust 行覆盖率；旧开发对象不做兼容迁移。
+
 | 阶段 | 设计 | 完成依据与限制 |
 | --- | --- | --- |
 | G0 | [workerd 可行性验证](g0-workerd-runtime-validation.md) | [结果](g0-results.md)：Conditional Go，精确 `D-abort` 限制仍保留；一次性探测已完成 |
