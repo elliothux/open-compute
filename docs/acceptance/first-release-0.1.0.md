@@ -11,6 +11,8 @@
   compatibility date `2026-08-30`；四平台摘要以正式 `packages/runtime/workerd.lock.json` 为准。
 - 修复 Local artifacts 在 Linux 上的时间戳整数类型与条件 import 编译失败；保留已有
   stale partial grace-period、符号链接拒绝和 crash-recovery 测试。
+- 原生 package job 显式 `cargo fetch --locked`，通过统一 `single-binary` Gate 核对 discovery 与数量，
+  并上传每个平台的 Gate 证据。
 - release 先完成静态检查与 90% coverage，再运行 Linux/macOS 各一轮完整 Gate；每个 job 显式构建
   runtime assets。四平台产物经只读聚合，再由 release environment 中唯一写权限 job 发布。
 - tag 必须对应已经通过 main push CI 的精确 commit；不修改已推送 tag，不覆盖既有 assets。
@@ -35,10 +37,14 @@ release 与普通 CI 使用相同的 `test:js:ci` 平台集合，不重写历史
 - [ ] coverage 和最终单轮 workspace Gate。coverage 首次尝试在准备阶段因文档继续编辑触发
   `source or verified inputs changed during the Gate`，尚未执行产品用例；保留失败报告
   `.temp/gate-run/failed/20260905T144303-2687d286/report.json`。后续冻结全部源码和文档再执行。
+  冻结尝试 `20260905T144805-3eb77e36` 的 service 单元测试 369/370，通过前置检查后在 Unix socket
+  fixture 上遇到 macOS `SUN_LEN` 路径长度限制；两个 socket fixture 改用自动清理的短 OS 临时目录，
+  不修改 production 文件系统校验。对应失败报告继续保留，修复后重新验证。
 - [x] GitHub API 回读：main required `ci`（包含管理员，禁止 force push/delete）；release environment
   仅接受 `v*` tag；`Release tags` ruleset `22323316` 限制 tag 创建/更新/删除，只有 repository admin
   maintainer 可 bypass；默认 token read-only；immutable releases 已启用。
 - [ ] 发布 PR、main CI、annotated tag commit 和 release workflow URL。
+- GitHub 托管 runner 的特权 egress 操作已获用户明确授权；本机不运行 sudo。
 - [ ] Linux/macOS 单轮 Gate、90% coverage、Linux 特权 egress 及清理结果。
 - [ ] 四平台 package report、单文件隔离/首启/重启/损坏拒绝、六个 assets 的回读校验。
 - [ ] 正式 latest Release、逐目标文件大小/SHA-256、发布完成时间。

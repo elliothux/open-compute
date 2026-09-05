@@ -582,7 +582,8 @@ async fn listener_plan_and_task_join_errors_are_stable() {
 
 #[test]
 fn config_path_rejections_do_not_echo_secrets() {
-    let dir = TempDir::new().unwrap();
+    // Unix socket fixtures need a short path even under a deeply nested worktree.
+    let dir = TempDir::new_in("/tmp").unwrap();
     let rel = parse_from(["ocd", "run", "--config", "relative.toml"]).unwrap();
     let err = load_platform_config(rel.config.as_ref().unwrap()).unwrap_err();
     assert_eq!(err.code(), ErrorCode::ConfigPathInvalid);

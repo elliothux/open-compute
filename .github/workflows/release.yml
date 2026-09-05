@@ -201,6 +201,8 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           rust-cache-key: release-${{ matrix.target }}
+      - name: Fetch locked crates for offline packaged-binary tests
+        run: cargo fetch --locked
       - name: Package and verify the native single executable
         shell: bash
         env:
@@ -222,8 +224,7 @@ jobs:
             }
           '
           OPEN_COMPUTE_TEST_OCD="$destination" \
-            cargo test --locked --offline -p open-compute-service \
-              --test single_binary -- --test-threads=1
+            ./test/gate.py single-binary --jobs 1
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
@@ -233,6 +234,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: package-gate-${{ matrix.target }}
+          path: .temp/gate-run/
 
   assemble:
     needs: [validate, package]
