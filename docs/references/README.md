@@ -21,6 +21,7 @@ P6 的当前 `/client/v4` 管理合同见归档的[设计](../implemented/p6-clo
 
 | 文档 | 用途 |
 | --- | --- |
+| [CI 构建性能](ci-build-performance.md) | 轻量开发 CI、并行发行、缓存与失败构建保留，以及实际耗时研究 |
 | [测试节奏](testing.md) | 开发与最终验收均为完整一轮，用例清单校验、并行/独占与覆盖率；[原布局实测](../implemented/runtime-and-test-layout-results.md) |
 | [Cloudflare 兼容矩阵](cloudflare-compatibility.md) | 当前实现 capability、方法、目标缺口、非目标产品、deviation 与 conformance verdict |
 | [能力偏差](p1-deviations.md) | 当前 capability deviation ID 与实际支持边界 |

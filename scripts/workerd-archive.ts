@@ -76,8 +76,8 @@ export function command(program: string, args: string[], environment = process.e
   const result = spawnSync(program, args, {
     cwd: repository, env: environment, encoding: "utf8", maxBuffer: 4 * 1024 * 1024,
   });
+  process.stderr.write(result.stderr ?? "");
   if (result.error || result.status !== 0) {
-    process.stderr.write(result.stderr ?? "");
     throw new Error(`${program} failed`);
   }
   return result.stdout;

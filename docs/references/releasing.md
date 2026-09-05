@@ -25,24 +25,29 @@ GitHub Releases 是公开二进制的唯一权威来源。每个 release 固定�
 
 ## 两条工作流
 
-`.github/workflows/ci.yml` 在 main push 和 pull request 上运行。它负责 MSRV、TypeScript/生成资产、
-JS/Python 测试、format、Clippy、no-default-features、metadata、production hygiene、依赖边界，以及
-Ubuntu 上一个完整 workspace Gate round。普通 CI 不执行 release packaging，不创建 GitHub Release，
-也不上传公开二进制。功能分支通过 PR 验证，避免同一提交重复触发 push/PR Gate。各 PR 与 main 使用独立 concurrency group，取消过期运行；取消的 workflow 不执行失败汇总。分支保护只需要把汇总 job `ci` 设为 required check。
+`.github/workflows/ci.yml` 在 `main` / `release` push 和 pull request 上执行轻量检查：
+显式 runtime/tooling build 与 typecheck、快速 JS/Python 测试、format、Rust 1.98 workspace/all-targets
+check、metadata 和依赖边界。普通 CI 不执行完整 workspace Gate、coverage 或发行打包。
+各 PR 与分支使用独立 concurrency group，取消过期运行；汇总 job `ci` 是 `release` 分支的 required check。
+`main` 是无分支保护的开发分支，`release` 是受保护的版本发布分支；默认分支仍为 `main`。
 
 `.github/workflows/release.yml` 只由 `v*` tag push 触发；工作流首先拒绝不满足以下全部条件的 tag：
 
 1. tag 是严格的 `vX.Y.Z`，且没有前导零或预发布/构建后缀；
 2. tag 是 annotated tag；
 3. tag、checkout 和 `GITHUB_SHA` 指向同一个 commit；
-4. 该 commit 已经可从 `origin/main` 到达；
+4. 该 commit 已经可从 `origin/release` 到达；
 5. tag 版本等于根 `Cargo.toml` 的 `[workspace.package].version`；
 6. checkout 干净；
-7. 同一 commit 已通过 `main` push 的 `ci.yml` 工作流。
+7. 同一 commit 已通过 `release` push 的 `ci.yml` 工作流。
 
 校验通过后，release workflow 才执行 Linux/macOS 静态检查、90% Rust 行覆盖率、完整单轮
-最终 workspace Gate（coverage 成功后执行），以及 Linux 受控 egress fixture。所有资格校验成功后，四个原生 runner 分别使用正式
+最终 workspace Gate（coverage 成功后执行），以及 Linux 受控 egress fixture。四个原生 runner 在身份校验后立即并行使用正式
 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、首启、重启和损坏拒绝测试。
+
+打包可以与资格验证并行，但 `publish` 明确依赖全部静态检查、coverage、最终 Gate 和四平台 assemble；
+任何一项未通过均不得公开发布。失败构建保存缓存、编译耗时和标明未验收的二进制，不作为公开发行物。
+缓存和任务依赖设计见 [CI 构建性能](ci-build-performance.md)。
 
 只读 `assemble` job 只接受四个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
 lock SHA-256、文件大小与文件 SHA-256，然后生成 `release.json` 和 `SHA256SUMS`。工作流的默认权限
@@ -57,21 +62,21 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
 
 ## 发布一个版本
 
-先提交一个普通 version PR：
+先在 `main` 准备版本，再提交以 `release` 为目标的 version PR：
 
 1. 从最新 `main` 建分支，将根 `Cargo.toml` 的 workspace 版本改为新的 `X.Y.Z`；
 2. 让 Cargo 正常更新并提交 `Cargo.lock` 中所有 workspace package 的版本，不手改 lockfile；
 3. 确保 PR 描述完整列出用户可见变化、Cloudflare compatibility 变化、workerd pin 变化和已知限制；
-4. 等待 required `ci` 通过并完成 review，然后合并到 `main`。
+4. 等待 required `ci` 通过并完成 review，然后合并到 `release`。
 
 不要让 GitHub Actions 自动决定版本、修改文件、创建 tag 或把任意 branch HEAD 发布出去。版本是一次
-需要 review 的源码变更，tag 是 maintainer 对已经合入 `main` 的精确 commit 做出的发布决定。
+需要 review 的源码变更，tag 是 maintainer 对已经合入 `release` 的精确 commit 做出的发布决定。
 
-合并并确认 `main` CI 通过后，由 maintainer 在干净的最新 `main` 上创建 annotated tag：
+合并并确认 `release` CI 通过后，由 maintainer 在干净的最新 `release` 上创建 annotated tag：
 
 ```sh
-git switch main
-git pull --ff-only origin main
+git switch release
+git pull --ff-only origin release
 test -z "$(git status --porcelain --untracked-files=all)"
 git tag -a v0.1.0 -m "open-compute v0.1.0"
 git push origin v0.1.0
@@ -81,9 +86,9 @@ git push origin v0.1.0
 最终 Gate 不设置三轮诊断变量，遵循[单轮测试政策](testing.md)。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
-四目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对六个 assets。仓库已配置以下设置（2026-09-05 API 回读）：
+四目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对六个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
 
-- main 分支要求 PR、最新 required `ci` 成功和讨论解决，禁止强推/删除；管理员同样受检查约束；
+- main 分支不启用分支保护；release 分支要求 PR、最新 required `ci` 成功和讨论解决，禁止强推/删除；管理员同样受检查约束；
 - `Release tags` ruleset 限制 `v*` tag 创建/更新/删除，仅 repository admin maintainer 可 bypass；
 - `release` environment 仅允许 `v*` tag，发布入口由上述 maintainer tag 规则控制；
 - 启用 GitHub immutable releases，使已发布 tag 和 assets 不能被修改或删除；
