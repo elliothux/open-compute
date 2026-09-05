@@ -81,28 +81,56 @@ open-compute **就是这一层**——而且只有**一个文件**。
 
 ## 兼容性
 
-编写标准 module worker（`export default { fetch }`），使用你已熟悉的 binding：
+编写标准 module worker（`export default { fetch }`），使用你已熟悉的 binding。
 
-| 模块 | 进度 |
+### 运行时与 binding
+
+| 模块 | 状态 |
 | --- | --- |
-| Workers | █████████░ 95% |
-| KV | █████████░ 95% |
-| R2 | █████████░ 95% |
-| D1 | █████████░ 95% |
-| Durable Objects | █████████░ 95% |
-| Queues | █████████░ 95% |
-| Cron | █████████░ 95% |
-| Workflows | █████████░ 95% |
-| Static Assets | █████████░ 95% |
-| Service Bindings | █████████░ 95% |
-| Cache | █████████░ 95% |
-| Images | █████████░ 95% |
-| Version Metadata | ██████████ 100% |
-| WebSocket Hibernation | ██████████ 100% |
-| Cloudflare v4 · Wrangler · Dashboard | 核心已实现；托管端资格单独跟踪 |
+| Workers | ✅ 100% |
+| KV | ✅ 100% |
+| R2 | ✅ 100% |
+| D1 | ✅ 100% |
+| Durable Objects | ✅ 100% |
+| Queues | ✅ 100% |
+| Cron | ✅ 100% |
+| Workflows | ✅ 100% |
+| Static Assets | ✅ 100% |
+| Service Bindings | ✅ 100% |
+| Cache | ✅ 100% |
+| Images | ✅ 100% |
+| Version Metadata | ✅ 100% |
+| WebSocket Hibernation | ✅ 100% |
 
-剩下的 5% 是单节点的客观现实——全球边缘拓扑与托管 fleet 配额——不是缺方法。
-精确支持面：[兼容矩阵](docs/references/cloudflare-compatibility.md) · `ocd capabilities --json`
+### 管理面
+
+| 表面 | 状态 |
+| --- | --- |
+| Cloudflare v4 API | 本地 `/client/v4` 已实现（P6 Gate）。托管端差分资格可能仍缺凭证。 |
+| Wrangler | 4.127.1 — 资源/部署命令已对 live `ocd` 做 Gate |
+| Dashboard | 提供 operator / SDK 支撑的管理 UI——不是 Cloudflare Dashboard 克隆 |
+| Workers Logs / realtime tail | 本地已实现（P7 Script Tails + Telemetry events/invocations 子集；单机 `observability.sqlite`） |
+
+### 尚未支持 / 部分支持
+
+| 模块 | 状态 |
+| --- | --- |
+| Vectorize | 部分 — 稳定后 beta 的 `Vectorize` API；beta `VectorizeIndex` 不在范围 |
+| Workers AI / Markdown / AI Search | 部分 — 标准 `env.AI` 覆盖 Markdown Conversion 与 AI Search（operator 配置的 OpenAI-compatible provider）；**不提供完整 Workers AI 模型推理** |
+| Browser Run | 尚未（设计中；原 Browser Rendering） |
+| Artifacts | 尚未（设计中） |
+| Containers | 尚未 |
+| Hyperdrive | 尚未 |
+| Analytics Engine | 尚未 |
+| Workers for Platforms | 尚未 |
+| Dynamic Workers | 尚未 |
+| Pipelines | 尚未 |
+| Rate Limiting | 尚未 |
+| mTLS certificates | 尚未 |
+| 完整 Workers AI 推理 | 尚未 |
+| Tail Workers / traces export / Logpush | 尚未 |
+
+✅ 表示 Worker/产品方法无缺口；单机拓扑差异见[兼容矩阵](docs/references/cloudflare-compatibility.md)。运行中表面：`ocd capabilities --json`。
 
 ## 快速开始
 
