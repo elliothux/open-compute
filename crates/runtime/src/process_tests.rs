@@ -177,3 +177,41 @@ fn owner_wait_hard_deadline_reaps_without_waiting_for_the_soft_deadline() {
     assert!(output.timed_out);
     wait_reaped(pid, Duration::from_secs(2)).unwrap();
 }
+
+#[tokio::test]
+async fn exited_unreaped_child_keeps_status_and_output_when_pgid_read_fails() {
+    set_pgid_verify_fail_hook(|pid| {
+        let raw = Pid::from_raw(pid).unwrap();
+        // Wait for this child to exit without reaping it; kill(pid, 0) still succeeds.
+        rustix::process::waitid(
+            rustix::process::WaitId::Pid(raw),
+            rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOWAIT,
+        )
+        .unwrap();
+        assert!(test_kill_process(raw).is_ok());
+        #[cfg(target_os = "macos")]
+        assert_eq!(getpgid(Some(raw)), Err(rustix::io::Errno::SRCH));
+        true
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let executable = dir.path().join("completed-child");
+    fs::write(&executable, b"#!/bin/sh\nprintf 'completed\\n'\nexit 0\n").unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+    let file = File::open(&executable).unwrap();
+    let result = run_verified_fd(
+        &file,
+        &[],
+        Duration::from_secs(2),
+        1024,
+        &Redactor::new(),
+        None,
+    )
+    .await;
+    clear_pgid_verify_fail_hook();
+    let output = result.unwrap();
+    assert!(output.status.unwrap().success(), "{output:?}");
+    assert_eq!(output.stdout, b"completed\n");
+    assert!(output.stderr.is_empty());
+    assert!(!output.timed_out);
+    wait_reaped(output.pid.unwrap(), Duration::from_secs(2)).unwrap();
+}

@@ -2779,7 +2779,7 @@ wait
     set_pgid_verify_fail_hook({
         let pid_file = pid_file.clone();
         let child_file = child_file.clone();
-        move || {
+        move |_| {
             let started = std::time::Instant::now();
             while started.elapsed() < Duration::from_secs(2) {
                 if pid_file.exists() && child_file.exists() {

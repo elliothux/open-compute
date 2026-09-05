@@ -103,3 +103,30 @@ PR CI `33951624671` 的产品 Gates 通过，但 `p3-contract` 的 source baseli
 | 托管 Cloudflare differential | unverified | 本次没有执行新的外部部署，不扩大已有资格声明 |
 
 全球复制/placement 仍是 `OC-R2-001` 的 excluded self-host scope，不构成本次新增差异。
+
+## 第二次发行验证与短命子进程修复
+
+[Issue #4 集成 PR #7](https://github.com/elliothux/open-compute/pull/7) 已合入
+`5ed57bd9ec041cbdddb1aaa331b34fb7237c3fcb`，issue 已关闭。
+[PR CI](https://github.com/elliothux/open-compute/actions/runs/33962041707) 与
+[精确 main CI](https://github.com/elliothux/open-compute/actions/runs/33963262157) 通过；PR 的 Linux 单轮
+workspace 为 49 个测试进程、1,134/1,134 用例，1,085.58 s。macOS 与 Linux 的 cfg 用例数不同，
+不将 Linux 数量写成 macOS 的通过数量。
+
+获授权后重建的 annotated tag object 为 `381a015583d5ed11085133b0de2b29ba0625f248`。
+[第二次发行运行](https://github.com/elliothux/open-compute/actions/runs/33964367514) 的身份、MSRV 和
+Linux/macOS 静态检查通过；coverage 的 R2、P2 exit Gate 通过，但 `p3-services-events` 在
+`workerd --version` 验证阶段返回 `failed to read runtime process group`。coverage 未完成，最终 Gate、
+打包及公开发布均未执行。保留原始 tag object 与失败 artifact，报告为
+`.temp/gate-run/failed/20260905T115923-d2a36573/report.json`。
+
+短命子进程可以已经退出但尚未回收，此时 macOS `getpgid` 返回 ESRCH，而 `kill(pid, 0)` 仍成功。
+旧判断错误地把这种状态当作活进程校验失败。修复只在进程组读取失败时检查所拥有 `Child` 的真实
+退出状态；活进程、进程组 leader 不匹配及 wait 失败继续 fail closed，版本退出码和输出继续校验。
+删除旧的 PID 存在性辅助函数，不引入重试或跳过版本验证。
+
+确定性回归通过 `waitid(EXITED | NOWAIT)` 保留已退出子进程，并在 macOS 断言上述两个系统调用的
+结果；修复前同类回归失败，修复后成功并保留 stdout、成功退出码和回收保证。其余 89 个 runtime
+单元用例通过，日志保留在 `.temp/release-exit-fix/`。修复后的真实 stock-workerd 插桩
+`p3-services-events` 单轮通过，6.77 s；报告为
+`.temp/gate-run/20260905T201927-86cc29bf/report.json`。新源码的完整发行资格仍待托管验证。

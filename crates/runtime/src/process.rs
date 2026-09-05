@@ -493,11 +493,13 @@ async fn run_image(
     let pid = child.id() as i32;
     let mut owned = OwnedChild::new(child, pid);
     // `--version` can exit before getpgid. spawn already used process_group(0).
-    // Skip only the *read* failure when the pid is already gone; leader mismatch still fails.
+    // An exited, unreaped child can still pass kill(pid, 0). Use its owned wait status.
     match verify_self_pgid(pid) {
         Ok(()) => {}
         Err(err) => {
-            if err.message() != "failed to read runtime process group" || !pid_already_gone(pid) {
+            if err.message() != "failed to read runtime process group"
+                || owned.try_wait()?.is_none()
+            {
                 return Err(err);
             }
         }
@@ -565,7 +567,7 @@ async fn run_image(
 }
 
 pub(crate) fn verify_self_pgid(pid: i32) -> Result<(), PlatformError> {
-    if pgid_verify_should_fail() {
+    if pgid_verify_should_fail(pid) {
         return Err(PlatformError::new(
             ErrorCode::RuntimeInvalid,
             "failed to read runtime process group",
@@ -1212,13 +1214,6 @@ pub fn set_reap_probe_fail(fail: bool) {
     REAP_PROBE_FAIL.store(fail, Ordering::SeqCst);
 }
 
-fn pid_already_gone(pid: i32) -> bool {
-    let Some(raw) = Pid::from_raw(pid) else {
-        return true;
-    };
-    matches!(test_kill_process(raw), Err(err) if err == rustix::io::Errno::SRCH)
-}
-
 /// Wait until `pid` is gone or `deadline` elapses.
 pub fn wait_pid_gone(pid: i32, deadline: Duration) -> Result<(), PlatformError> {
     let started = std::time::Instant::now();
@@ -1285,7 +1280,10 @@ static STDOUT_FLUSH_FAIL: AtomicBool = AtomicBool::new(false);
 static STDOUT_SYNC_FAIL: AtomicBool = AtomicBool::new(false);
 
 #[cfg(test)]
-static PGID_VERIFY_HOOK: Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>> = Mutex::new(None);
+type PgidVerifyHook = Arc<dyn Fn(i32) -> bool + Send + Sync>;
+
+#[cfg(test)]
+static PGID_VERIFY_HOOK: Mutex<Option<PgidVerifyHook>> = Mutex::new(None);
 
 #[cfg(any(test, feature = "test-support"))]
 static REAP_PROBE_FAIL: AtomicBool = AtomicBool::new(false);
@@ -1400,7 +1398,7 @@ fn stdout_sync_should_fail() -> bool {
     false
 }
 
-fn pgid_verify_should_fail() -> bool {
+fn pgid_verify_should_fail(_pid: i32) -> bool {
     #[cfg(test)]
     {
         if let Some(hook) = PGID_VERIFY_HOOK
@@ -1408,7 +1406,7 @@ fn pgid_verify_should_fail() -> bool {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
         {
-            return hook();
+            return hook(_pid);
         }
         false
     }
@@ -1476,7 +1474,7 @@ pub(crate) fn set_stdout_write_fail(fail: bool) {
 }
 
 #[cfg(test)]
-pub(crate) fn set_pgid_verify_fail_hook(hook: impl Fn() -> bool + Send + Sync + 'static) {
+pub(crate) fn set_pgid_verify_fail_hook(hook: impl Fn(i32) -> bool + Send + Sync + 'static) {
     *PGID_VERIFY_HOOK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(hook));
