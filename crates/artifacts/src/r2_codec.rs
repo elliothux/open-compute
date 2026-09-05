@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 pub(crate) const META_SCHEMA: &str = "oc-r2-schema";
 pub(crate) const META_VERSION: &str = "oc-r2-version";
 pub(crate) const META_CUSTOM: &str = "oc-r2-custom";
+pub(crate) const META_HTTP_FIELDS: &str = "oc-r2-http-fields";
 pub(crate) const META_MD5: &str = "oc-r2-md5";
 pub(crate) const META_SHA1: &str = "oc-r2-sha1";
 pub(crate) const META_SHA256: &str = "oc-r2-sha256";
@@ -67,6 +68,11 @@ pub(crate) fn decode_metadata(
     if canonical_custom_metadata(&custom_metadata).map_err(|_| integrity_error())? != custom_bytes {
         return Err(integrity_error());
     }
+    let raw_fields = metadata.get(META_HTTP_FIELDS).ok_or_else(integrity_error)?;
+    let fields: u8 = raw_fields.parse().map_err(|_| integrity_error())?;
+    if fields > 63 || fields.to_string() != *raw_fields {
+        return Err(integrity_error());
+    }
     let checksums = R2Checksums {
         md5: hex_checksum(metadata.get(META_MD5), 32)?,
         sha1: hex_checksum(metadata.get(META_SHA1), 40)?,
@@ -103,12 +109,12 @@ pub(crate) fn decode_metadata(
         http_etag,
         uploaded: object.last_modified_ms,
         http_metadata: Some(R2HttpMetadata {
-            content_type: object.http.content_type.clone(),
-            content_language: object.http.content_language.clone(),
-            content_disposition: object.http.content_disposition.clone(),
-            content_encoding: object.http.content_encoding.clone(),
-            cache_control: object.http.cache_control.clone(),
-            cache_expiry: object.http.cache_expiry,
+            content_type: declared_http_field(fields, 1, &object.http.content_type)?,
+            content_language: declared_http_field(fields, 2, &object.http.content_language)?,
+            content_disposition: declared_http_field(fields, 4, &object.http.content_disposition)?,
+            content_encoding: declared_http_field(fields, 8, &object.http.content_encoding)?,
+            cache_control: declared_http_field(fields, 16, &object.http.cache_control)?,
+            cache_expiry: declared_http_field(fields, 32, &object.http.cache_expiry)?,
         }),
         custom_metadata: Some(custom_metadata),
         range,
@@ -116,6 +122,20 @@ pub(crate) fn decode_metadata(
         storage_class: storage_class.to_owned(),
         ssec_key_md5,
     })
+}
+
+// S3 providers may synthesize headers such as Content-Type. Only tenant-declared
+// fields belong to the R2 object; a missing declared field is still corruption.
+fn declared_http_field<T: Clone>(
+    fields: u8,
+    bit: u8,
+    value: &Option<T>,
+) -> Result<Option<T>, PlatformError> {
+    if fields & bit == 0 {
+        Ok(None)
+    } else {
+        value.clone().map(Some).ok_or_else(integrity_error)
+    }
 }
 
 fn hex_checksum(value: Option<&String>, len: usize) -> Result<Option<String>, PlatformError> {

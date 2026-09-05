@@ -85,6 +85,17 @@ Workflow；open-compute 只通过 `CLOUDFLARE_API_BASE_URL` 选择本地 v4 orig
 
 ## 单轮覆盖原则
 
+P0.5 的 `uploads::concurrent_large_upload_keeps_runtime_responsive` 使用真实 HTTP、stock workerd、
+SQLite/D1 和 SigV4 S3 fixture，上传 241,910,375 bytes（8 MiB 分片、4 并发），核对分片 authority、
+D1 记录、complete 前不可见、流式读回 SHA-256 和并发轻量请求延迟。它属于普通 Gate 的固定回归，
+不是吞吐 SLA 或重复压测。单元测试另覆盖 staging 取消/超时和 blocking checksum 的资源生命周期。
+
+需要与特定本机 S3 provider 对比时，可对同一 case 显式设置 `OPEN_COMPUTE_TEST_R2_S3_ENDPOINT`，
+仅接受 `http://127.0.0.1:<port>`。调用方必须先创建专用、可删除的 fixture 和 `open-compute` bucket；
+不可指向现有服务或业务 bucket。该环境变量不在普通 Gate 的传递白名单内，正常验收始终使用自有
+SigV4 fixture。分别用 Cargo debug/release 构建并执行一次该 exact case，记录 profile、provider pin、
+源码身份及实际输出；provider 初始化/清理属于这次独立 qualification，不增加普通 Gate 的 Docker 依赖。
+
 唯一 case inventory 是 [`test/gate_cases.py`](../../test/gate_cases.py)，按完整 Rust 测试名登记。
 调度器将 `--list` 的实际用例集合与该表逐项比对：新增、删除、改名、重复登记、空 Gate 或非预期
 discovery 都在业务用例启动前失败。每个选定 case 用 `--exact` 执行一次，并在所属宿主内串行运行。

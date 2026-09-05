@@ -896,3 +896,6 @@ async fn object_authority_reconciles_every_current_put_and_delete_observation() 
 
 #[path = "r2_backend_tests/multipart.rs"]
 mod multipart_tests;
+
+#[path = "r2_backend_tests/staging.rs"]
+mod staging_tests;

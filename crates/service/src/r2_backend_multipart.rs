@@ -220,11 +220,9 @@ impl R2BindingService {
                 "R2 SSE-C key is invalid or does not match the object",
             ));
         }
-        let source = R2UploadSource {
+        let source = open_compute_artifacts::R2PartSource {
             path: staged.guard.path.clone(),
             length: staged.length,
-            checksums: hash_file(&staged.guard.path, staged.length)?,
-            version: record.object_version.clone(),
         };
         let part = mutation_timeout_result(
             timeout,

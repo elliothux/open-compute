@@ -10,7 +10,7 @@ use crate::r2::{
 };
 use crate::r2_codec::integrity_error;
 use crate::r2_model::{
-    R2BucketLocator, R2MultipartCreateOptions, R2ObjectMetadata, R2SsecKey, R2UploadSource,
+    R2BucketLocator, R2MultipartCreateOptions, R2ObjectMetadata, R2PartSource, R2SsecKey,
     R2UploadedPart, UserObjectKey, invalid_options,
 };
 use open_compute_core::PlatformError;
@@ -39,6 +39,7 @@ impl R2ObjectStore {
         let user = create_user_metadata(
             version,
             &options.custom_metadata,
+            &options.http_metadata,
             options.storage_class,
             options.ssec.as_ref(),
         )?;
@@ -76,7 +77,7 @@ impl R2ObjectStore {
         key: &UserObjectKey,
         provider_upload_id: &str,
         part_number: i32,
-        source: &R2UploadSource,
+        source: &R2PartSource,
         ssec: Option<&R2SsecKey>,
     ) -> Result<R2UploadedPart, PlatformError> {
         if !(1..=crate::r2_model::R2_MAX_MULTIPART_PARTS).contains(&part_number)
