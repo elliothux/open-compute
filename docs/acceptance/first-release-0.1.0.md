@@ -39,11 +39,15 @@ release 与普通 CI 使用相同的 `test:js:ci` 平台集合，不重写历史
   `.temp/gate-run/failed/20260905T144303-2687d286/report.json`。后续冻结全部源码和文档再执行。
   冻结尝试 `20260905T144805-3eb77e36` 的 service 单元测试 369/370，通过前置检查后在 Unix socket
   fixture 上遇到 macOS `SUN_LEN` 路径长度限制；两个 socket fixture 改用自动清理的短 OS 临时目录，
-  不修改 production 文件系统校验。对应失败报告继续保留，修复后重新验证。
+  不修改 production 文件系统校验。对应失败报告继续保留；修复后 service 单元测试 370/370 通过。
+  本地缓存符号链接布局导致 profile 遍历不完整的尝试已中止并保留证据；修正布局后的
+  `20260905T150007-fefe2ae0` 在 P0.7/P0.8 返回 `DO_STORAGE_LIMIT`：本机磁盘使用率超过默认
+  95% DO 停写水位，剩余约 6 GiB。未降低水位、未删除旧缓存或失败证据；本地 coverage 和后续
+  最终 workspace Gate 未通过，发行所需完整证据改由 GitHub 托管 runner 收集。
 - [x] GitHub API 回读：main required `ci`（包含管理员，禁止 force push/delete）；release environment
   仅接受 `v*` tag；`Release tags` ruleset `22323316` 限制 tag 创建/更新/删除，只有 repository admin
   maintainer 可 bypass；默认 token read-only；immutable releases 已启用。
-- [ ] 发布 PR、main CI、annotated tag commit 和 release workflow URL。
+- [ ] [发布 PR #5](https://github.com/elliothux/open-compute/pull/5)、main CI、annotated tag commit 和 release workflow URL。
 - GitHub 托管 runner 的特权 egress 操作已获用户明确授权；本机不运行 sudo。
 - [ ] Linux/macOS 单轮 Gate、90% coverage、Linux 特权 egress 及清理结果。
 - [ ] 四平台 package report、单文件隔离/首启/重启/损坏拒绝、六个 assets 的回读校验。

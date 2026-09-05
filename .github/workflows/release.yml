@@ -300,7 +300,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --draft \
-            --latest \
             --generate-notes \
             --title "open-compute $RELEASE_VERSION"
           verify="$RUNNER_TEMP/release-download"
