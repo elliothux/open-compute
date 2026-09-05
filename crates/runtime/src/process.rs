@@ -1280,7 +1280,10 @@ static STDOUT_FLUSH_FAIL: AtomicBool = AtomicBool::new(false);
 static STDOUT_SYNC_FAIL: AtomicBool = AtomicBool::new(false);
 
 #[cfg(test)]
-static PGID_VERIFY_HOOK: Mutex<Option<Arc<dyn Fn(i32) -> bool + Send + Sync>>> = Mutex::new(None);
+type PgidVerifyHook = Arc<dyn Fn(i32) -> bool + Send + Sync>;
+
+#[cfg(test)]
+static PGID_VERIFY_HOOK: Mutex<Option<PgidVerifyHook>> = Mutex::new(None);
 
 #[cfg(any(test, feature = "test-support"))]
 static REAP_PROBE_FAIL: AtomicBool = AtomicBool::new(false);
